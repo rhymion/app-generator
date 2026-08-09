@@ -1039,7 +1039,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.url().should('include', '/{{ parent }}');
           cy.url().should('not.include', '/new');
 {% if after_create_id_is_expr %}
+{% if prim_is_server_value %}
+          cy.contains('.MuiDataGrid-cell', exactRe(setup.requestorUser.name)).find('a').first().click();
+{% else %}
           cy.contains('.MuiDataGrid-cell', exactRe(deps.{{ primary_dep_var_for_list }}.name)).find('a').first().click();
+{% endif %}
 {% else %}
           cy.contains('{{ after_create_id }}').click();
 {% endif %}
@@ -1064,7 +1068,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.url().should('include', '/{{ parent }}');
           cy.url().should('not.include', '/new');
 {% if after_create_id_is_expr %}
+{% if prim_is_server_value %}
+          cy.contains('.MuiDataGrid-cell', exactRe(setup.noRoleUser.name)).find('a').first().click();
+{% else %}
           cy.contains('.MuiDataGrid-cell', exactRe(deps.{{ primary_dep_var_for_list }}.name)).find('a').first().click();
+{% endif %}
 {% else %}
           cy.contains('{{ after_create_id }}').click();
 {% endif %}

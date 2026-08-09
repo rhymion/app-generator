@@ -356,23 +356,32 @@ def _seed_path_part(
     return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
 
 
-def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dict, is_self_ref: bool = False) -> list[dict]:
+def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dict) -> list[dict]:
     """Compute extra_required_fields for a dep record in populateDependencies.
 
     Uses title-based name (e.g. 'Test Parent', 'Test Assignee') and encodes
     user_account email/password so the template needs no user_account special-casing.
 
-    is_self_ref: True when this dep is another instance of the SAME entity being
-    generated (e.g. approval_flow's precededBy/followedBy). Self-ref dep records
-    exist only to be referenced by the primary create test, not to BE the record
-    under test — but the entity being generated is what the test's own "creates
-    with minimal/full data" flow also creates, using the first x-entity-select
-    option (see cypress_create_value). If a self-ref dep also picked that same
-    first option for an x-entity-select field, and that field participates in a
-    @@unique constraint alongside another dep FK the test also reuses directly
-    (e.g. approval_flow's @@unique([entity_name, approver_role_id])), the self-ref
-    dep's create() and the test's own create() collide with P2002. Self-ref deps
-    pick the second entity option instead so the two never share a unique key.
+    An x-entity-select field on a self-ref dep (e.g. approval_flow's
+    precededBy/followedBy) must use the SAME option the
+    primary create test uses (entity_options[0], see cypress_create_value's
+    'entity_select' branch) — not a different one. A hand-written business
+    filter can legitimately narrow candidates by that field to "same value as
+    the record being edited" (e.g. lib/approval_flow/autocomplete_filter.ts:
+    preceded_by/followed_by only make sense within one entity_name's approval
+    chain); a self-ref dep whose entity_name diverges from the primary record
+    becomes invisible to that filter, making its autocomplete candidate list
+    empty (approval_flow.cy.ts 3.1 regression, diagnosed file:line in
+    generator task history). This used to pick the SECOND entity option
+    instead, to dodge a same-record P2002 on a compound unique key shared with
+    another dep FK (e.g. a hypothetical approval_flow
+    @@unique([entity_name, approver_role_id])). That collision is avoided by a
+    different, already-general mechanism: helper_context()'s fk_deps
+    needs_second/'{var}2' split gives every self-ref dep instance sharing a
+    required FK its own distinct FK row (see the "2+ self-ref deps ... collide
+    on create()" comment below), so two self-ref deps — or a self-ref dep and
+    the primary record — never end up with identical (entity_name, fk) pairs
+    even when entity_name matches.
     """
     if target == 'user':
         return [
@@ -405,12 +414,11 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
     exclude = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | rel_props | oto_props | _inferred_internal
     _entity_opts = _get_entity_options(schema)
     _first_entity_val = f"'{_entity_opts[0]['value']}'" if _entity_opts else "''"
-    # Self-ref deps use the second entity option (see docstring) so they never
-    # share an x-entity-select value with the primary create test, which always
-    # uses the first option (see cypress_create_value's 'entity_select' branch).
-    _self_ref_entity_val = (
-        f"'{_entity_opts[1]['value']}'" if is_self_ref and len(_entity_opts) > 1 else _first_entity_val
-    )
+    # A self-ref dep's x-entity-select field must match the primary create
+    # test's value (see docstring) — the fk_deps needs_second split, not a
+    # divergent entity-option pick, is what keeps self-ref dep create() calls
+    # from colliding.
+    _self_ref_entity_val = _first_entity_val
     result = []
     for prop_name, prop in props.items():
         if prop_name not in required or prop_name in exclude:
@@ -1947,7 +1955,21 @@ def helper_context(
                 and r['prop_name'] not in ('creator_id', 'updater_id')):
             prop_stem = re.sub(r'_id$', '', r['prop_name'])
             var_name = to_camel_case(prop_stem)
-            deps.append({'target': 'user', 'var_name': var_name, 'title': to_title_case(prop_stem), 'fk_deps': []})
+            # x-server-value (source: actor — the only implemented source,
+            # enforced by validate.py) always overwrites this FK with the
+            # acting test user's id on create, no matter what a populate
+            # helper supplies. A dep record built the normal way (a fresh,
+            # unrelated user row) would never match what actually lands in
+            # the DB or what the UI displays — the assertion side (e.g.
+            # deps.user.name) would drift from the real row's owner. Resolve
+            # this dep to the actor itself instead of creating a decoy row,
+            # so every caller's deps.<var> reflects the value the server will
+            # actually write (leave_request.user_id; cmd_630).
+            is_actor_delegated = isinstance(properties.get(r['prop_name']), dict) and properties[r['prop_name']].get('x-server-value') is not None
+            deps.append({
+                'target': 'user', 'var_name': var_name, 'title': to_title_case(prop_stem), 'fk_deps': [],
+                'is_actor_delegated': is_actor_delegated,
+            })
             entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
             ua_dep_fields_full.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
             if r['prop_name'] in required_fields:
@@ -2029,7 +2051,7 @@ def helper_context(
         x_rels = dep_def.get('x-relationships', {})
         dep_label_info = dep_label_info_by_var.get(dep['var_name'])
         extra_required_fields = _get_dep_populate_fields(
-            dep['target'], dep['var_name'], title_str, schema, is_self_ref=(dep['target'] == model_name),
+            dep['target'], dep['var_name'], title_str, schema,
         )
         # Idempotency hook for `populateXxxDependencies`: when the dep record
         # can be found again by a deterministic key, the template uses
@@ -3316,6 +3338,14 @@ def spec_context(
         'flatten_test_rels': _compute_flatten_test_rels(parent, pascal, definition_key, schema),
         'seed_count': seed_count,
         'bridge_child_ir': get_new_form_bridge(_raw_def(model_name, schema)),
+        # The 7.1/7.2 Approval tests log in as setup.requestorUser/setup.noRoleUser
+        # (not the default actor) before creating the record — when the primary
+        # display FK is itself x-server-value:actor, the server overwrites it with
+        # WHICHEVER actor is logged in at create time, so the post-create list
+        # lookup must match that same switched-in actor's identity, not
+        # deps.<var>.name (which only reflects the default actor; see
+        # populateXxxDependencies' is_actor_delegated handling in helper_context above).
+        'prim_is_server_value': prim_is_server_value,
     }
 
 
