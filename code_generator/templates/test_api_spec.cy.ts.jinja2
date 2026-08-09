@@ -24,6 +24,9 @@ function _stripRoundTripUnimportableCsvColumns(csv: string): string {
 
 describe('API: {{ title }}', () => {
   beforeEach(() => {
+{% if primary_fk_dep and not primary_fk_dep.is_user_account and primary_fk_dep.extra_required_fields %}
+    cy.task('db:reset{{ pascal }}CallSeq');
+{% endif %}
     cy.task('db:reset');
     cy.task('db:seed');
     cy.task('db:grantAllPermissions');

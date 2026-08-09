@@ -24,6 +24,9 @@ async function getTestUser() {
 // same test/DB session, which is exactly the case find-or-create used to
 // (silently) collapse into a shared row.
 let _{{ pascal }}CallSeq = 0;
+export function _reset{{ pascal }}CallSeq(): void {
+  _{{ pascal }}CallSeq = 0;
+}
 {% endif %}
 {% if has_self_ref_deps %}
 async function _create{{ pascal }}BaseDeps() {

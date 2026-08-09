@@ -63,6 +63,11 @@ export function getGeneratedTasks() {
       const { populateApprovalFlowFullData } = require('./approval_flow/helper');
       return await populateApprovalFlowFullData(length);
     },
+    'db:resetApprovalFlowCallSeq'() {
+      const { _resetApprovalFlowCallSeq } = require('./approval_flow/helper');
+      _resetApprovalFlowCallSeq();
+      return null;
+    },
     async 'db:populateDashboardDependencies'() {
       const { populateDashboardDependencies } = require('./dashboard/helper');
       return await populateDashboardDependencies();

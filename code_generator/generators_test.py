@@ -3322,7 +3322,10 @@ def spec_context(
 def tasks_registry_context(entities: list, schema: dict) -> dict:
     """Build context for the generated-tasks.ts registry template.
 
-    `entities` is a list of dicts: {parent, model_name, children}.
+    `entities` is a list of dicts: {parent, model_name, children,
+    primary_fk_dep} — primary_fk_dep is threaded through from the same
+    entity's helper_context() result (cmd_625) so the reset-task guard here
+    matches the one that decided whether _reset{{ pascal }}CallSeq() exists.
     """
     enriched_entities = []
     # The fallback `db:populateUser` task at the bottom of the registry only
@@ -3368,6 +3371,7 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
             'pascal': pascal,
             'helper_path': f'./{parent}/helper',
             'reservation_helper_path': f'./{parent}/reservation_gen_helper',
+            'primary_fk_dep': entity.get('primary_fk_dep'),
             'datagrid_children': [
                 {'pascal': to_pascal_case(c['child']['name'])}
                 for c in datagrid_children
