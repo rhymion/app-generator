@@ -1,4 +1,4 @@
-from generators_test import api_spec_context, helper_context, spec_context
+from generators_test import api_spec_context, helper_context, spec_context, _seed_relation_label_value
 
 
 def _entity(model: str) -> dict:
@@ -482,3 +482,42 @@ def test_spec_context_non_server_value_primary_field_still_gets_edit_primary_cmd
     # cmd_618: base instance is now letter-indexed ('Test User A').
     assert ctx["edit_primary_cmd"] == "        cy.selectAutocomplete('User', 'Test User A');"
     assert ctx["populate_count_3_3"] == 2
+
+
+def test_seed_relation_label_value_is_user_account_excludes_callindex_prefix():
+    """cmd_625b/625g: is_user_account (target=='user') FK targets are excluded
+    from Phase2's callIndex namespace on the CREATION side --
+    test_helper.ts.jinja2's primary_fk_dep.is_user_account branch always
+    creates `Test User ${i}` (plain per-call loop index), never
+    `${callIndex}_${i}`. Before this fix, the ASSERTION side
+    (_seed_relation_label_value / _seed_path_part) didn't know this and
+    unconditionally applied the callIndex-prefixed `0_{unique_index}` format
+    to every primary FK, including is_user_account ones -- so every
+    populate{Pascal}Data/FullData-backed row's label assertion looked for
+    'Test User 0_1' against actual data 'Test User 1' and never found the
+    row (leave_request.cy.ts 1.2/1.3/3.1/3.2/3.3/4.3/6.1, cmd_625 B-system)."""
+    schema = _server_value_primary_shift_schema(None)
+    assert _seed_relation_label_value("user", "name", False, schema, unique_index=1) == "Test User 1"
+    assert _seed_relation_label_value("user", "name", False, schema, unique_index=2) == "Test User 2"
+    # No unique_index (letter-suffixed base instance) is unaffected either way.
+    assert _seed_relation_label_value("user", "name", False, schema) == "Test User A"
+
+
+def test_seed_relation_label_value_non_user_target_keeps_callindex_prefix():
+    """Sanity check (pre-fix baseline behavior, unaffected): a non-user FK
+    target keeps the callIndex-prefixed `0_{unique_index}` format."""
+    schema = _schema()
+    assert _seed_relation_label_value("patient", "name", False, schema, unique_index=1) == "Test Patient 0_1"
+
+
+def test_spec_context_is_user_account_primary_label_excludes_callindex_prefix():
+    """spec_context-level regression for the same fix: leave_request's exact
+    shape (primary FK to user) must compute list_id_1 / check_field_value_1
+    as 'Test User 1', not 'Test User 0_1' -- matching the actual seed data
+    test_helper.ts.jinja2 creates for is_user_account primary FKs."""
+    ctx = spec_context(
+        "shift", [], _server_value_primary_shift_schema(None), "shift", "shift_detail",
+        _entity("shift")["generate_config"],
+    )
+    assert ctx["list_id_1"] == "Test User 1"
+    assert ctx["check_field_value_1"] == "Test User 1"
