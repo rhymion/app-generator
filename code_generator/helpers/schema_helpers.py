@@ -124,6 +124,84 @@ def derive_searchable_relation_fields(properties: dict, schema: dict) -> list[di
     return result
 
 
+def derive_cross_entity_searchable_fields(entity_name: str, schema: dict) -> list[dict]:
+    """Additional `{relation, field}` entries for entity_name's own
+    searchXxxOptions(), sourced from OTHER entities' composite `labelField`
+    declarations that reference entity_name through one of entity_name's OWN
+    relations (cmd_627: e.g. goods_receipt_line.inventory_id declares
+    `labelField: [item.sku, location.code, ...]` — the `location.code`
+    segment is a dotted path relative to goods_receipt_line, but only ONE
+    hop relative to inventory itself, since `location` is one of inventory's
+    own FK relations).
+
+    `derive_searchable_relation_fields()` only looks at entity_name's OWN
+    `fields` block, so it never sees this: nothing on inventory itself
+    declares `location.code` anywhere — the declaration lives entirely on
+    the *referencing* entity (goods_receipt_line). Without this pass, the
+    Cypress test-fixture generator (`build_string_only_label_expression`,
+    used by generators_test.py to compute what a test TYPES into the
+    autocomplete) and the runtime search generator
+    (`derive_searchable_relation_fields`, used by build_context.py to
+    compute what searchXxxOptions() actually QUERIES) can silently
+    disagree — the exact drift `labelField`-sourcing (cmd_552) was meant to
+    make structurally impossible, just one hop further out than that fix
+    reached. See docs/knowledge/label-field-search-semantics.md, which
+    documented this exact case as "no schema case needs it today" — proj_g's
+    goods_receipt_line/approval_flow now do.
+
+    Purely additive: only ever widens the OR-list of a search's per-token
+    match — existing searchable fields and their behavior are unchanged.
+    """
+    own_props = get_entity_properties(entity_name, schema)
+    own_relations: dict[str, str] = {}
+    for prop_name, prop in own_props.items():
+        if not isinstance(prop, dict) or not prop_name.endswith('_id'):
+            continue
+        rel = prop.get('x-relationship') or {}
+        target = rel.get('target')
+        if not target:
+            continue
+        own_relations[prop_name.removesuffix('_id')] = target
+
+    result = []
+    seen = set()
+    for other_entity, other_def in schema.get('definitions', {}).items():
+        # NOTE: self-reference (other_entity == entity_name) is intentionally
+        # NOT skipped — a self-ref m2m (e.g. approval_flow.preceded_by
+        # targeting approval_flow itself) is exactly the case this exists
+        # for, and it's never covered by derive_searchable_relation_fields
+        # (which only looks at entity_name's OWN fields with a non-dotted
+        # labelField).
+        if not isinstance(other_def, dict):
+            continue
+        for prop_name, prop in (other_def.get('properties') or {}).items():
+            if not isinstance(prop, dict):
+                continue
+            rel = prop.get('x-relationship') or {}
+            if rel.get('target') != entity_name:
+                continue
+            for path in _label_field_paths(rel.get('labelField')):
+                if '.' not in path:
+                    continue
+                relation_name, _, final_field = path.partition('.')
+                if relation_name not in own_relations or (relation_name, final_field) in seen:
+                    continue
+                nested_target = own_relations[relation_name]
+                final_prop = get_entity_properties(nested_target, schema).get(final_field)
+                if not isinstance(final_prop, dict) or not is_string_prop(final_prop):
+                    continue
+                if isinstance(final_prop.get('enum'), list):
+                    continue
+                if final_prop.get('format') in ('date', 'date-time', 'time', 'uri'):
+                    continue
+                pattern = final_prop.get('pattern', '')
+                if pattern and re.search(r'\^c\[a-z0-9\]', pattern):
+                    continue
+                seen.add((relation_name, final_field))
+                result.append({'relation': relation_name, 'field': final_field})
+    return result
+
+
 def _get_entity_base_props(entity: str, schema: dict) -> dict:
     """Returns the base (raw-entity) properties for an entity, resolving allOf if needed.
 

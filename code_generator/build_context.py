@@ -16,6 +16,7 @@ from helpers.schema_helpers import (
     is_optional_fk_to_parent, get_parent_fk_props, get_one_to_one_rels,
     get_detail_ref_rels, get_flatten_rels, get_approval_lines_props,
     derive_text_fields, derive_searchable_relation_fields,
+    derive_cross_entity_searchable_fields,
     get_internal_bridge_fk_prop_names,
     get_entity_properties, get_self_only_flags,
 )
@@ -1782,6 +1783,15 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # shown on screen and as cmd_548's CSV-import full-match, so the search
     # target can never drift from the display (cmd_552).
     searchable_relation_fields = derive_searchable_relation_fields(filtered_props, schema)
+    # cmd_627: widen with fields other entities reference THROUGH one of
+    # this entity's own relations via a composite/dotted labelField (e.g.
+    # goods_receipt_line's inventory_id labelField includes `location.code`
+    # — a plain one-hop field from inventory's own perspective, even though
+    # it's a second hop relative to goods_receipt_line). See
+    # derive_cross_entity_searchable_fields()'s docstring.
+    for _rf in derive_cross_entity_searchable_fields(model, schema):
+        if _rf not in searchable_relation_fields:
+            searchable_relation_fields.append(_rf)
     searchable_fields_display = searchable_text_fields + [
         f"{rf['relation']}.{rf['field']}" for rf in searchable_relation_fields
     ]
