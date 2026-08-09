@@ -14,9 +14,14 @@ emitted or called, and cy.task('db:reset{{ pascal }}CallSeq') in a beforeEach
 would throw "task not registered" the moment it *was* emitted without a
 matching registry entry. This test locks in the wiring end-to-end so a future
 context-shape refactor can't silently drop it again.
+
+cmd_628 follow-up: test_api_spec.cy.ts.jinja2 (via api_spec_context()) was
+left out of the original cmd_625e diff — same missing-threading defect,
+same fix (generate.py injects helper_ctx['primary_fk_dep'] into api_ctx).
+Covered below by the test_api_spec_* tests.
 """
 from generate import _make_env
-from generators_test import helper_context, spec_context, tasks_registry_context
+from generators_test import api_spec_context, helper_context, spec_context, tasks_registry_context
 
 
 def _entity(model: str) -> dict:
@@ -200,3 +205,40 @@ def test_entity_without_extra_required_fk_gets_no_reset_plumbing():
     )
     registry_out = env.get_template("test_tasks_registry.ts.jinja2").render(**registry_ctx)
     assert "db:resetClinicCallSeq" not in registry_out
+
+    api_ctx = api_spec_context("clinic", [], schema, "clinic", "clinic_detail", {**entity_cfg, "api": True})
+    api_ctx["primary_fk_dep"] = helper_ctx["primary_fk_dep"]
+    api_out = env.get_template("test_api_spec.cy.ts.jinja2").render(**api_ctx)
+    assert "db:resetClinicCallSeq" not in api_out
+
+
+def test_api_spec_context_needs_primary_fk_dep_injected_by_generate_py():
+    # api_spec_context() itself does NOT compute primary_fk_dep either (same
+    # gap spec_context()/tasks_registry_context() had — cmd_628 finding) —
+    # generate.py must inject it from the sibling helper_ctx before render.
+    schema = _schema_with_extra_required_fk()
+    entity_cfg = {**_entity("checkup")["generate_config"], "api": True}
+    api_ctx = api_spec_context("checkup", [], schema, "checkup", "checkup_detail", entity_cfg)
+    assert "primary_fk_dep" not in api_ctx
+
+
+def test_api_spec_calls_reset_task_in_before_each():
+    schema = _schema_with_extra_required_fk()
+    entity_cfg = {**_entity("checkup")["generate_config"], "api": True}
+    helper_ctx = helper_context("checkup", [], schema, "checkup", "checkup_detail", entity_cfg)
+    api_ctx = api_spec_context("checkup", [], schema, "checkup", "checkup_detail", entity_cfg)
+    api_ctx["primary_fk_dep"] = helper_ctx["primary_fk_dep"]
+
+    out = _make_env().get_template("test_api_spec.cy.ts.jinja2").render(**api_ctx)
+
+    before_each, _, rest = out.partition("beforeEach(() => {")
+    assert rest, "api spec must have a beforeEach block"
+    body, _, _ = rest.partition("});")
+    reset_pos = body.find("cy.task('db:resetCheckupCallSeq');")
+    db_reset_pos = body.find("cy.task('db:reset');")
+    assert reset_pos != -1, "api spec beforeEach must call db:resetCheckupCallSeq"
+    assert db_reset_pos != -1
+    assert reset_pos < db_reset_pos, (
+        "api spec must reset the callIndex counter before db:reset, "
+        "so a fresh DB and a fresh counter start together"
+    )

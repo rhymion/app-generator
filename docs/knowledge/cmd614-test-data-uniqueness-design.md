@@ -382,8 +382,102 @@ independence violation the fix addresses.
 |---------|-------|-------|
 | Template files changed | 4 | `test_helper.ts.jinja2`, `test_tasks_registry.ts.jinja2`, `test_spec.cy.ts.jinja2`, `test_spec_mobile.cy.ts.jinja2` |
 | `generators_test.py` functions changed | 0 | Assertions already hardcoded to `callIndex=0`; no Python changes required |
-| proj_b helper files with callSeq | 0 | No entities in proj_b currently meet the `primary_fk_dep + extra_required_fields` condition |
+| proj_b helper files with callSeq | 1 | `approval_flow` — corrected post-implementation (this design estimate predated generate-code verification against proj_b's real schema; see cmd_625e's commit message and §6 below) |
 | proj_c helper files with callSeq | 4 | `inventory`, `room_reservation`, `receiving_receipt_line`, `purchase_per_item` (from §4.2) |
 | proj_g helper files with callSeq | 6 | From CI failure analysis; 11 specs confirmed failing pre-fix |
 | proj_c spec files affected (desktop + mobile) | up to 8 | 4 entities × up to 2 spec types |
 | proj_g spec files affected (desktop + mobile) | up to 12 | 6 entities × up to 2 spec types |
+
+## §6. Phase 3 follow-up (cmd_628): API spec coverage + hand-written spec rule
+
+PR #319's diff was reviewed before merging, raising two questions: whether
+`test_api_spec.cy.ts.jinja2`'s omission from the four-template diff was
+intentional, and whether hand-written specs needed anything. Both are
+answered here.
+
+### §6.1 test_api_spec.cy.ts.jinja2 had the same missing-threading defect
+
+`api_spec_context()` — like `spec_context()` and `tasks_registry_context()`
+before the cmd_625e fix — never computed `primary_fk_dep`. Unlike those two,
+it was never touched by the original four-template diff at all, so its
+`beforeEach` had no reset call and no guard to add one.
+
+This was safe **by accident, not by design**: a grep of
+`test_api_spec.cy.ts.jinja2` for `check_field`, `list_id`, and `'Test `
+literals returned zero hits — the API spec never asserts against the exact
+counter-suffixed value, so a stale (non-reset) counter couldn't yet break
+anything. But `test_api_spec.cy.ts.jinja2` *does* call
+`db:populate{{ pascal }}`/`{{ pascal }}Dependencies` (confirmed by grep —
+every `it()` block populates its own data), so it does advance the shared
+counter same as the desktop/mobile specs. Relying on "nobody currently
+asserts the literal" as the safety argument is fragile: the day someone
+adds a `check_field`/`list_id` assertion to this template without knowing
+the counter isn't reset here, it silently inherits the cross-`it()` leak
+Phase 3 was built to fix.
+
+Fixed with the same pattern as the other three templates: `generate.py`
+injects `helper_ctx['primary_fk_dep']` into `api_ctx` right after building
+it (mirroring the `spec_ctx['primary_fk_dep'] = ...` line already used for
+the desktop/mobile specs), and `test_api_spec.cy.ts.jinja2`'s `beforeEach`
+gained the same guarded `cy.task('db:reset{{ pascal }}CallSeq')` call
+before `db:reset`. `code_generator/tests/test_callindex_per_testcase_reset.py`
+gained matching coverage (`test_api_spec_context_needs_primary_fk_dep_injected_by_generate_py`,
+`test_api_spec_calls_reset_task_in_before_each`, and an extra assertion in
+`test_entity_without_extra_required_fk_gets_no_reset_plumbing`) — the same
+three-shape lock-in already used for the desktop/mobile spec templates.
+
+### §6.2 Rule: hand-written specs calling `db:populate<Entity>[Full]`
+
+A hand-written (non-generated) spec that calls
+`cy.task('db:populate<Entity>')` or `db:populate<Entity>Full` for an entity
+meeting the reset-guard condition (`primary_fk_dep` set, not a user-account
+FK, with `extra_required_fields`) advances that entity's shared,
+process-lifetime `_<Entity>CallSeq` counter exactly like a generated spec
+does. It is **not** automatically covered by the generated specs'
+`beforeEach` reset, because it's a separate `describe` block with its own
+`beforeEach`.
+
+Two independently-sufficient ways to stay safe, pick whichever fits the
+test's own intent better:
+
+- **(a) Never hardcode the counter-derived literal.** The
+  `` `Test {title} ${callIndex}_${i}` `` form (§4.3) is only a problem for
+  assertions that hardcode it. Round-trip the actual seeded value instead —
+  capture it from the populate task's return value or read it back from the
+  UI/API response, then assert against that captured value. This is
+  strictly safer than a reset, because it stays correct even if the spec
+  later gets called from a context where the counter *isn't* zero (a second
+  `it()` in the same spec, a future composite helper, etc.) — see
+  `fk_read_permission_graceful_degradation.cy.ts`'s cmd_620① fix, which is
+  the reference example: it replaced a hardcoded `'Test Approver Role 1'`
+  assertion with `cy.getFieldValue('Approver Role').then((label) => ...)`.
+- **(b) Add the same reset call the generated specs use.** If the spec
+  genuinely needs a hardcoded literal (e.g. it's asserting a value it seeds
+  itself and controls entirely), add
+  `cy.task('db:reset{{ pascal }}CallSeq')` to the spec's own `beforeEach`,
+  before `db:reset` — identical to the line `test_spec.cy.ts.jinja2` /
+  `test_api_spec.cy.ts.jinja2` emit. This only works if the entity actually
+  has the reset task registered (check `cypress/support/generated-tasks.ts`
+  for `db:reset<Entity>CallSeq` first).
+
+**Verified (cmd_628) against proj_b's only current callSeq entity,
+`approval_flow`.** Every hand-written spec calling `db:populate` for any
+entity was enumerated (`grep -rl 'db:populate' cypress/e2e --include='*.cy.ts'`,
+excluding files starting with the `AUTO-GENERATED` marker) and checked:
+
+- `approval_flow_same_entity_autocomplete_filter.cy.ts` calls only
+  `db:populateApprovalFlowDependencies`, which never touches
+  `_ApprovalFlowCallSeq` (only `populateApprovalFlowData`/`FullData` do) —
+  structurally unaffected, no change needed.
+- `fk_read_permission_graceful_degradation.cy.ts` calls
+  `db:populateApprovalFlow`/`db:populateApprovalFlowFull` (both advance the
+  counter) but already follows mitigation (a) end-to-end — no change needed.
+- No other hand-written spec calls `db:populate` for an entity that has the
+  callSeq mechanism at all (confirmed by cross-checking
+  `cypress/support/generated-tasks.ts` for `CallSeq` — only `approval_flow`
+  has it in proj_b's current default schema).
+
+If a future schema change gives a second proj_b entity the reset-guard
+condition, re-run this same enumeration against that entity's populate
+calls — do not assume "no hardcoded literal problems today" generalizes
+without re-checking.

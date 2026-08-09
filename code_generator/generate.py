@@ -1887,6 +1887,11 @@ def generate(schema_path: str, output_dir: str) -> None:
             # api spec (only if api: true)
             if gen_cfg.get('api'):
                 api_ctx = api_spec_context(parent, children, schema, model, def_key, gen_cfg, _test_entity_count)
+                # cmd_628 (Phase 3 follow-up): same primary_fk_dep threading as
+                # spec_ctx above — api_spec_context() never computes it either,
+                # so without this the reset guard in test_api_spec.cy.ts.jinja2
+                # would be permanently undefined/falsy.
+                api_ctx['primary_fk_dep'] = helper_ctx.get('primary_fk_dep')
                 _write(cypress_e2e / 'api' / f'{parent}.cy.ts',
                        _prefix_unused_then_callback_params(
                            _render(env, 'test_api_spec.cy.ts.jinja2', api_ctx)))

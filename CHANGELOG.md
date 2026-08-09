@@ -6,6 +6,28 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Generated Cypress test's per-entity `callIndex` counter (cmd_618/cmd_620's isolation counter,
+  `` `Test {Title} ${callIndex}_${i}` ``) persisted for the life of the Cypress plugin process, not
+  per test case** (cmd_625, "per-test-case callIndex reset"): a generated spec's own `it()` blocks
+  are hardcoded to expect `callIndex=0`, but two `it()` blocks in the same spec calling the same
+  `populate*Data`/`populate*FullData` helper gave the second block `callIndex=1`, failing its
+  assertions — and separately meant a single `it()` run in isolation could produce different
+  generated values than the same `it()` run as part of the full spec (order-dependence). Fixed by
+  adding a `_reset{Pascal}CallSeq()` export to the generated test helper, wiring it to a
+  `db:reset{Pascal}CallSeq` Cypress task, and calling that task at the top of every generated
+  spec's `beforeEach` — desktop, mobile, and API. (The API spec template was missed in the first
+  pass — `api_spec_context()` never computed `primary_fk_dep` either, the same gap the desktop/mobile
+  contexts had — and added in a follow-up once code review caught it before merge.) Guarded by the
+  same condition (`primary_fk_dep` with `extra_required_fields`, not a user-account FK) that decides
+  whether the counter exists at all, so entities that never needed the counter get none of the new
+  plumbing. Hand-written specs calling the same populate functions are not automatically covered by
+  this reset (each has its own `beforeEach`) — see the new rule and worked example in
+  `docs/knowledge/cmd614-test-data-uniqueness-design.md` §6.2 for how to keep such specs safe
+  (round-trip the actual seeded value, or add the same reset call). Verified end-to-end against
+  proj_b's `approval_flow` (its only entity meeting the guard condition): isolated single-`it()`
+  runs and full-suite runs produce identical generated values; full mandatory gate (lint / pytest /
+  vitest / mention-gate / e2e:build / check:generated / cy:api 236/236 / cy:ui 177/177 / npm audit /
+  pip-audit) green.
 - **`api_import_route.ts.jinja2`'s composite-labelField FK resolution referenced
   `formatLabelValue()` with no import once a labelField segment needed date/time formatting, breaking
   the TS build**: an earlier fix removed this import as unconditionally-dead lint debt — correct at
