@@ -37,8 +37,10 @@ Run in this order:
 6. `npm run check:generated`  — generated code matches templates/schema
 7. `npm run test:e2e:cy:api`  — API Cypress specs only
 8. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop + mobile)
-9. `npm audit --omit=dev --audit-level=high`
-10. `pip-audit -r requirements.txt`
+9. Rerun any spec(s) that failed in this branch's most recent CI run — see
+   `docs/knowledge/rerun-failed-ci-specs-gate.md` for why and how
+10. `npm audit --omit=dev --audit-level=high`
+11. `pip-audit -r requirements.txt`
 
 **Step 1 (`npm run lint`) must run on a checkout where `generate-code` has
 not yet run** — that is what CI's `Lint` job actually checks (`npm ci && npm

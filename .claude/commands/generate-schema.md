@@ -40,7 +40,9 @@ Run in this order:
 4. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
 5. `npm run check:generated` — generated code matches templates/schema
 6. `npm run test:e2e:cy:api` — API Cypress specs only
-7. `npm audit --omit=dev --audit-level=high`
+7. Rerun any spec(s) that failed in this branch's most recent CI run — see
+   `docs/knowledge/rerun-failed-ci-specs-gate.md` for why and how
+8. `npm audit --omit=dev --audit-level=high`
 
 **Step 1 (`npm run lint`) must run on a checkout where `generate-code` has
 not yet run** — that is what CI's `Lint` job actually checks (`npm ci && npm
