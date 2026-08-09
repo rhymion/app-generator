@@ -32,6 +32,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `test_bridge_create_eslint_disable_immediately_precedes_as_any` in `test_import_template_branches.py`.
   Full `code_generator` pytest suite: 1181 passed, 0 regressions. See
   `docs/knowledge/cmd607-generator-lint-debt-fix.md` (correction note under Root cause 2, item 1).
+- **Generated UI test scaffold no longer tries to fill an `x-server-value` field through the
+  form.** Two `spec_context()` code paths (create/fail-edit fill commands via
+  `req_ua_spec`/`all_ua_spec`, and the "edits with mixed changes" test's `edit_primary_cmd` when
+  the field is also the entity's `x-display.table` primary column) generated
+  `cy.selectAutocomplete()` against a field that's always excluded from every form input by
+  `x-server-value`'s design — the form never renders that autocomplete, so the generated test
+  failed outright (`Expected to find element: 'filter', but never found it`). Both paths now skip
+  such fields entirely. See `docs/knowledge/x-server-value-actor-delegation.md`.
 
 - **Generated test helper's find-or-create dep block gave `create()` an `include` for
   composite-labelField resolution but not the paired `findFirst()`, a latent TS2551/TS2339 type error
@@ -394,6 +402,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/notification-triggers.md`.
 
 ### Internal
+- **Generated test helper's primary-FK-dep and own-record find-or-create removed; each `populate*Data`/`populate*FullData` call now gets a fully isolated slice of the primary FK dep's namespace** (cmd_620, Option β / Phase 2): closes the collision cmd_618's Phase 1 letter-indexed fix (above) deliberately left open — `populate*Data(n)`/`populate*FullData(n)` called more than once in the same test (same DB session, no `db:reset` in between) could have their per-iteration primary-FK-dep row (`record_lookup_where`'s guard) and the primary FK dep's own row (`primary_fk_dep`'s `lookup_where_unique` guard) found-and-reused across calls, silently entangling two logically independent test scenarios into sharing one FK target row. Both find-or-creates in `test_helper.ts.jinja2` are now unconditional `create()`s. To keep the second call from tripping `@unique` on the primary FK dep's own required fields, a per-entity monotonic `callIndex` (module-scope counter shared by `populate*Data`/`populate*FullData`, persists for the life of the Cypress plugin process) is spliced into the loop value: `` `Test {Title} ${i}` `` → `` `Test {Title} ${callIndex}_${i}` ``. `callIndex` is always `0` for a generated spec's own calls (each `it()` calls a given populate helper at most once), so generated fixtures are unaffected in form beyond the literal string; the isolation matters for hand-written specs (or composite helpers) that call the same populate function more than once in one test. `record_lookup_where`'s own computation, and the now-fully-dead `lookup_where_unique`, are removed from `code_generator/generators_test.py`. D∩L=∅ (cmd_618 Phase 1) is preserved — callIndex-shifted loop values still start with a digit, still disjoint from the letter-suffixed shared dep values. See `docs/knowledge/cmd614-test-data-uniqueness-design.md` §4.4.
 - **Generated test helper dep records now use a letter-indexed name suffix(`'Test {Title} A'`/`'Test {Title} B'`) instead of `'Test {Title}'`/`'Test {Title} 2'`** (cmd_618, Phase 1): 
   the old dep naming collided byte-for-byte with `populate*Data(n)`'s loop rows (`` `Test {Title} ${i}` ``)
   once a loop reached `i=2`, causing find-or-create to resolve both to the same DB row. Letters and 

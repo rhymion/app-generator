@@ -141,6 +141,16 @@ Cypress.Commands.add('checkField', (label: string, expectedValue: string) => {
 });
 
 /**
+ * Read a labeled form field's current value (for round-trip assertions that
+ * compare a value across two points in a test instead of asserting a
+ * hardcoded literal — needed for any field whose seeded value is generated
+ * non-deterministically, e.g. a callIndex-suffixed test-data FK label).
+ */
+Cypress.Commands.add('getFieldValue', (label: string) => {
+  return getAnyLabel(label).parent().find('input, textarea').first().invoke('val');
+});
+
+/**
  * Clear and re-fill a labeled form field (for editing existing values)
  */
 Cypress.Commands.add('clearAndFillField', (label: string, value: string) => {
@@ -394,6 +404,7 @@ declare global {
       fillField(label: string, value: string): Chainable<void>;
       clickButton(text: string): Chainable<void>;
       checkField(label: string, expectedValue: string): Chainable<void>;
+      getFieldValue(label: string): Chainable<string>;
       clearAndFillField(label: string, value: string): Chainable<void>;
       clearField(label: string): Chainable<void>;
       selectAutocomplete(label: string, searchText: string, optionText?: string): Chainable<void>;

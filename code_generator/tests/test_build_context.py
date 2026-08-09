@@ -2198,3 +2198,130 @@ class TestOrgRelationshipOptionalRenderedTemplates:
         ctx = self._entity_ctx(organization_required=True)
         rendered = self._env().get_template('api_detail_route.ts.jinja2').render(**ctx)
         assert 'organization_id: null' not in rendered
+
+
+class TestOrgRelationshipOptionalAndScopingWithSelfOnly:
+    """The org-null OR clause must stay scoped INSIDE the org condition --
+    combined with a sibling creator_id/self-only restriction via AND, never
+    flattened so the OR swallows the whole where clause and silently
+    disables the creator/assignee scoping. Uses x-self-only (unconditional
+    creator_id restriction, no permission setting can widen it) as the
+    sharpest available probe: if the OR ever leaked out to cover the whole
+    where object, this is the combination most likely to visibly break
+    (every row would become reachable regardless of ownership)."""
+
+    @staticmethod
+    def _schema() -> dict:
+        return {
+            "definitions": {
+                "organization": {
+                    "type": "object",
+                    "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+                },
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "x-self-only": True,
+                    "x-import-key": ["name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "creator_id": {"type": "string"},
+                        "organization_id": _fk_field("organization", nullable=True),
+                    },
+                },
+            }
+        }
+
+    def _ctx(self):
+        return build_context(_entity("widget"), self._schema())
+
+    def _env(self):
+        from generate import _make_env
+        return _make_env()
+
+    def test_flags_combine_as_expected(self):
+        ctx = self._ctx()
+        assert ctx["should_filter_by_org"] is True
+        assert ctx["org_relationship_optional"] is True
+        assert ctx["is_self_only"] is True
+
+    def test_getters_detail_creator_id_is_sibling_not_inside_or_array(self):
+        """get{Parent}Detail's where object: `id`, `OR: [...]`, `creator_id`
+        as three sibling keys -- Prisma ANDs sibling where-keys together, so
+        this is the correct (safe) shape. The unsafe shape would be
+        `creator_id` appearing INSIDE the `OR: [...]` array instead."""
+        ctx = self._ctx()
+        rendered = self._env().get_template('getters.ts.jinja2').render(**ctx)
+        # Detail getter's where block: OR line followed later by creator_id
+        # as a sibling property (self_only, no admin_bypass -> unconditional).
+        assert 'OR: [{ organization_id: { in: associatedOrganizationIds } }, { organization_id: null }],' in rendered
+        assert '      creator_id: userId,' in rendered
+        # The unsafe shape: creator_id nested inside the OR array's brackets.
+        assert 'organization_id: null } }, { creator_id' not in rendered
+
+    def test_api_detail_route_put_creator_id_check_runs_after_org_scoped_fetch(self):
+        """PUT: existing row is fetched scoped by the org OR, THEN a
+        separate, unconditional creator_id check runs in application code
+        (not inside the same Prisma where) -- org-optional visibility never
+        substitutes for the ownership check."""
+        ctx = self._ctx()
+        rendered = self._env().get_template('api_detail_route.ts.jinja2').render(**ctx)
+        assert 'OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }] }' in rendered
+        assert 'if (existing.creator_id !== actorId) {' in rendered
+
+    def test_actions_delete_creator_id_filter_runs_after_org_scoped_fetch(self):
+        """Delete server action: rows are fetched scoped by the org OR
+        (Prisma where), then filtered to the caller's own rows in
+        application code (Array.filter) -- a completely separate step, not
+        combined into the same Prisma where clause at all."""
+        ctx = self._ctx()
+        rendered = self._env().get_template('actions.ts.jinja2').render(**ctx)
+        assert 'OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }] }' in rendered
+        assert 'filter(item => item.creator_id === userId)' in rendered
+
+    def test_api_import_route_matchwhere_creator_id_is_sibling_not_inside_or_array(self):
+        """CSV import's _matchWhere (self_only + should_filter_by_org
+        branch): `...keyWhere`, `OR: [...]`, `creator_id: actorId` as
+        sibling object properties -- same safe AND-of-siblings shape as the
+        detail getter, not creator_id folded into the OR array."""
+        ctx = self._ctx()
+        rendered = self._env().get_template('api_import_route.ts.jinja2').render(**ctx)
+        assert (
+            "OR: [{ organization_id: { in: _importOrgIds } }, { organization_id: null }], creator_id: actorId };"
+            in rendered
+        )
+        assert 'organization_id: null } }, { creator_id' not in rendered
+
+    def test_list_access_where_org_or_and_creator_assignee_or_are_separate_and_ed_array_elements(self):
+        """Non-self-only case: build{Parent}AccessWhere pushes the org-null
+        OR and a general/creator/assignee-restricted-permission OR as TWO
+        SEPARATE elements of the `and` array, and every caller spreads that
+        array into an explicit `AND: [...accessAnd, ...]` -- structurally
+        distinct from (but equally safe as) the sibling-key-in-one-object
+        shape the other templates use."""
+        schema = {
+            "definitions": {
+                "organization": {
+                    "type": "object",
+                    "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+                },
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "x-import-key": ["name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "organization_id": _fk_field("organization", nullable=True),
+                    },
+                },
+            }
+        }
+        ctx = build_context(_entity("widget"), schema)
+        from generators import service_context
+        full_ctx = {**ctx, **service_context(ctx, schema)}
+        rendered = self._env().get_template('getters.ts.jinja2').render(**full_ctx)
+        assert "and.push({ OR: [{ organization_id: { in: associatedOrganizationIds } }, { organization_id: null }] });" in rendered
+        assert "and.push({ OR: or });" in rendered
+        assert "AND: [\n      ...accessAnd," in rendered

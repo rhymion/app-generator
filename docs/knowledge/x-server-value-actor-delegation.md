@@ -119,6 +119,38 @@ consuming project's own `prj/code_generator/json_schema.yaml` is where it would 
 fixture (never a shipped schema entity), matching that doc's explicit allowance for domain names
 in unit test fixtures.
 
+## Generated UI test scaffold must not fill a field that isn't rendered
+
+The worked example above was carried through to a real consuming project's schema, which surfaced
+a gap this doc's original design didn't cover: `spec_context()` (drives the generated *UI* test —
+`test_spec.cy.ts.jinja2`, not the API test) had two code paths that were unaware of
+`x-server-value` and still generated a `cy.selectAutocomplete()` call against the field:
+
+1. `req_ua_spec`/`all_ua_spec` (create and fail-edit fill commands, and their matching
+   `cy.checkField()` assertions) — every FK targeting `user` (except `creator_id`/`updater_id`)
+   was included regardless of `x-server-value`.
+2. `edit_primary_cmd` (the 3.3 "edits with mixed changes" test) — when the field is *also* the
+   entity's `x-display.table` primary column (exactly `leave_request.user_id`'s shape), a separate
+   code path generated the same kind of command.
+
+Since `x-server-value` fields are always excluded from every form input (create and edit — see
+above), the form never renders an autocomplete for them, and the generated test failed outright:
+`Expected to find element: 'filter', but never found it` (`getAutocompleteInput()` can't locate a
+filter box for an input that doesn't exist). Both code paths now check a locally-computed
+`x-server-value` prop-name set and skip the field entirely — `req_ua_spec`/`all_ua_spec` omit it
+from their entries, and `edit_primary_cmd` becomes `None` (the 3.3 test still edits whatever other
+field it was already touching) with `populate_count_3_3` dropping back to `1` (the 2-row
+FK-switch setup that field's autocomplete would have needed is moot once it's never edited through
+the UI). The API-level test scaffold was never affected — it supplies the value directly as a
+request body field, a wholly separate code path from this UI form-fill generator.
+
+**Not yet resolved**: fixing these two paths surfaced (rather than caused) a handful of deeper,
+narrower UI-level issues in the same consuming project's generated spec — a "3.3 edits with mixed
+changes" test redirecting to an unrelated entity's view page after save, and two approval-flow
+tests asserting stale display-name content (`'Test User'`) that no longer matches once `user_id`
+is actor-attributed rather than a fixed dependency fixture. These are flagged as follow-up work,
+not yet root-caused.
+
 <a name="cmd-565-readonly-create-guard"></a>
 ## Related, but separate: the CREATE-time read-only guard
 
