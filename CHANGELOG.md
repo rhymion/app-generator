@@ -6,6 +6,32 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`api_import_route.ts.jinja2`'s composite-labelField FK resolution referenced
+  `formatLabelValue()` with no import once a labelField segment needed date/time formatting, breaking
+  the TS build**: an earlier fix removed this import as unconditionally-dead lint debt — correct at
+  the time (no entity's `import_label_expr` called it yet), but `import_label_expr` is a *string built
+  in `build_context.py`* and spliced in via `{{ }}`, so a static read of the `.jinja2` source can never
+  see whether it calls `formatLabelValue()`. A later labelField-composition change made composite
+  labelFields with date/time segments call it (real case: proj_g `goods_receipt_line`, labelField
+  `[product.code, lot_number, expiration_date]` — broke a downstream consumer's build with "Cannot find
+  name 'formatLabelValue'"). Fixed by gating the import on `import_uses_format_label_value` (`build_context.py`:
+  `any(s.get('has_format') for s in import_fk_specs)`, threaded from `build_label_expression()`'s own
+  `has_format` — the same mechanism 7 other templates already use for this same import). Both directions
+  verified: a composite labelField with a date segment gets the import (proj_g `goods_receipt_line`,
+  reproduced via a real `build_context()` call with a date-typed labelField segment — see
+  `TestCompositeLabelFieldImportUsesFormatLabelValue` in `test_build_context.py`), and one without still
+  omits it (no regression of the original lint-debt fix). Re-audited the same commit's other two
+  dead-binding fixes (`fkData`, `richPerms`) — neither shares this blind spot, both gate usage behind
+  the identical static `{% if %}` as their declaration. Also fixed, same file (code review finding on a
+  downstream consumer PR): an `eslint-disable-next-line` comment on the auto-create-OTO branch sat two
+  lines above the `as any` it was meant to suppress (directly above `await tx.{{ model }}.create({`
+  instead of the `data: { ...(action.data as any),` line), silently failing to suppress anything.
+  Regression tests (deviation-injection confirmed: revert either fix → new test fails at the same
+  spot): `test_format_label_value_imported_when_composite_spec_needs_it` /
+  `..._import_absent_when_flag_false_even_with_composite_spec` /
+  `test_bridge_create_eslint_disable_immediately_precedes_as_any` in `test_import_template_branches.py`.
+  Full `code_generator` pytest suite: 1181 passed, 0 regressions. See
+  `docs/knowledge/cmd607-generator-lint-debt-fix.md` (correction note under Root cause 2, item 1).
 - **Generated UI test scaffold no longer tries to fill an `x-server-value` field through the
   form.** Two `spec_context()` code paths (create/fail-edit fill commands via
   `req_ua_spec`/`all_ua_spec`, and the "edits with mixed changes" test's `edit_primary_cmd` when

@@ -51,6 +51,37 @@ the same bug wearing different clothes:
    this helper. Genuinely dead in all 5 entities that had an import route (confirmed: import count
    equals reference count, both 1, in every one). Removed the import line — no conditional needed,
    it was never used anywhere in the file.
+   >
+   > **Correction (cmd_621, 2026-08-09)**: this judgment was correct for the template snapshot at
+   > the time, but wrong in general — `import_label_expr` is a *string built in Python*
+   > (`build_context.py`, via `build_label_expression()`) and spliced into the template through
+   > `{{ spec.import_label_expr }}`. A static read of the `.jinja2` source can never see whether that
+   > string calls `formatLabelValue()`; it depends entirely on the target entity's labelField shape at
+   > generation time. cmd_613 (labelField composition, landed after this fix) made composite
+   > labelFields able to include date/time-formatted segments, and `import_label_expr` started
+   > calling `formatLabelValue()` for such entities (real case: proj_g `goods_receipt_line`,
+   > labelField `[product.code, lot_number, expiration_date]` — broke PR#16's TS build with "Cannot
+   > find name 'formatLabelValue'"). The unconditional removal above was itself the same class of
+   > "looks dead by static text, isn't dead once `{{ }}` is accounted for" mistake this doc is about —
+   > just on the *deleting* side rather than the *leaving-in* side. Fixed by restoring the import,
+   > gated the same way `column_def.tsx.jinja2` / `form_view.tsx.jinja2` / `form_upsert.tsx.jinja2` /
+   > `page_list.tsx.jinja2` / `getters.ts.jinja2` / `split_action_section.tsx.jinja2` /
+   > `test_helper.ts.jinja2` already gate this same import elsewhere: a boolean
+   > (`import_uses_format_label_value`) computed from `build_label_expression()`'s own `has_format`
+   > return value, not from any pattern-match over the rendered template text.
+   > `import_uses_format_label_value = any(s.get('has_format') for s in import_fk_specs)` in
+   > `build_context.py`; `has_format` threaded onto each composite `import_fk_specs` entry from the
+   > candidate-rooted `_xrl_import_built` label expression (the same helper call the export-side
+   > `export_uses_format_label_value` already used — see `x_relationships_list['import_has_format']`).
+   > Regression coverage: `test_format_label_value_imported_when_composite_spec_needs_it` /
+   > `..._import_absent_when_flag_false_even_with_composite_spec` in
+   > `test_import_template_branches.py` (template-level), and
+   > `TestCompositeLabelFieldImportUsesFormatLabelValue` in `test_build_context.py` (Python-level,
+   > exercises the real `build_context()` path end to end with a date-typed labelField segment).
+   > The other two dead-binding fixes in this section (`fkData`, `richPerms` below) were re-audited
+   > and are **not** vulnerable to this same blind spot — both gate their usage behind the identical
+   > static `{% if %}` condition as their declaration (`import_can_create`, `is_self_only`
+   > respectively), so declaration and usage can never desync the way a Python-computed string can.
 
 2. **`fkData` declared/written unconditionally, but only read by the CREATE branch** — same
    template's `const fkData: Record<string, unknown> = {}` and its two `fkData.<col> = _<col>;`
