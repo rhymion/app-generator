@@ -457,6 +457,18 @@ def test_spec_context_server_value_primary_field_skips_edit_primary_cmd():
     )
     assert ctx["edit_primary_cmd"] is None
     assert ctx["populate_count_3_3"] == 1
+    # cmd_625b: edit_primary_cmd being None means 3.3 never touches this
+    # field, so the post-save row lookup / checkField assertions must stay
+    # at the as-created value (list_id_1/check_field_value_1), not the
+    # "as-if-edited" letter-suffixed value (list_id_updated/check_field_updated
+    # would otherwise compute as if a selectAutocomplete had run). Before this
+    # fix, spec_context computed list_id_updated/check_field_updated
+    # unconditionally whenever prim_is_fk, regardless of edit_primary_cmd
+    # being None -- leave_request's generated 3.3 test asserted 'Test User A'
+    # after an edit that never changed the User field, which stayed
+    # 'Test User 0_1' (caught via PR#47 CI, cmd_625).
+    assert ctx["list_id_updated"] == ctx["list_id_1"]
+    assert ctx["check_field_updated"] == ctx["check_field_value_1"]
 
 
 def test_spec_context_non_server_value_primary_field_still_gets_edit_primary_cmd():
