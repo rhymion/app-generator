@@ -6,6 +6,27 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Generated "requestor can re-submit a rejected request" approval test used a page-wide,
+  unscoped `[aria-label="Re-submit"]` lookup** (cmd_641, real case: `purchase_per_item.cy.ts`
+  7.8, seen as `cy.click() can only be called on a single element. Your subject contained 2
+  elements.` in a full 150-spec CI run, passing in isolation): `ApprovalSection.tsx` renders one
+  Re-submit `IconButton` per `approval_request` row with `status === 'rejected'`, all sharing the
+  same static `aria-label="Re-submit"` — and an entity can legitimately have a second, "ungated"
+  `approval_flow` (`requestor_role_id: null`, applying to every requestor) alongside a role-gated
+  one (see the adjacent 7.1 test's own comment: "both flows apply → 2 approval_requests"), so once
+  more than one of an approvable's requests is rejected, more than one element matches. Two full
+  local reproductions matching the exact failing CI commit and exact preceding 23-spec order could
+  not force the second row, so the triggering condition from that CI run stays unconfirmed — but
+  the selector was unsafe by construction regardless, the same "only one graspable" assumption
+  already fixed for `parent1` (cmd_634), the self-referential decoy (cmd_590), and
+  `goods_receipt_line` candidate selection. Fixed by scoping the interaction to the specific
+  `approval_flow`'s own table row (via its approver-role-name `<td>`, exact-matched with the
+  existing `exactRe()` helper, then `.closest('tr')`) instead of a page-wide selector. The
+  sibling `[aria-label="Approve"]` / `[aria-label="Reject"]` lookups in the same describe block
+  (tests 7.4/7.5/7.6/7.7/7.9) carry the identical latent hazard and were left unscoped — noted for
+  a follow-up cmd, out of this task's scope. Verified: `purchase_per_item.cy.ts` 9/9 passing
+  individually against the regenerated app; `code_generator` pytest suite 1223 passed, 0 skipped
+  after `generate-code`.
 - **Generated 3.3 "edits with mixed changes" test for a `user`-FK primary field selected a
   `Test User A` row that was never seeded, failing the `cy.selectAutocomplete` assertion**
   (cmd_633, real case: `shift`/`shift_template`): `spec_context()`'s `is_user_account` primary-FK
