@@ -53,6 +53,16 @@ export function getDataGridCell(rowIndex: number, field: string, childTitle?: st
  * @param submit - Whether to press Enter after typing (default: false)
  * @param childTitle - Optional: scope to a specific embedded child DataGrid (see getDataGridRow).
  */
+// MUI DataGrid's built-in `type: 'dateTime'` column (no renderEditCell
+// override — see column_def codegen) edits through a native datetime-local
+// input. Cypress validates the *entire* string passed to .type() against a
+// strict ISO regex for these inputs before consuming any special key
+// sequence, so the `{selectall}` prefix used below for every other field
+// type makes even a correctly ISO-formatted value throw. .clear() is the
+// native-input-safe equivalent of `{selectall}` here (a no-op if the cell is
+// already empty).
+const ISO_DATETIME_LOCAL_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/;
+
 export function editDataGridCell(
   rowIndex: number,
   field: string,
@@ -62,7 +72,12 @@ export function editDataGridCell(
 ) {
   getDataGridCell(rowIndex, field, childTitle).scrollIntoView();
   getDataGridCell(rowIndex, field, childTitle).dblclick();
-  getDataGridCell(rowIndex, field, childTitle).find('input').should('be.visible').type('{selectall}' + String(value));
+  const input = getDataGridCell(rowIndex, field, childTitle).find('input').should('be.visible');
+  if (ISO_DATETIME_LOCAL_RE.test(String(value))) {
+    input.clear().type(String(value));
+  } else {
+    input.type('{selectall}' + String(value));
+  }
   if (submit) {
     cy.get('p').first().click(); // Click outside to commit the edit, as some cells may have async validation that prevents Enter key from working.
     // input.type('{enter}');
