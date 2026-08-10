@@ -1188,12 +1188,12 @@ describe('Testing {{ title }} pages and their behavior', () => {
           // requests is rejected a page-wide `[aria-label="Re-submit"]`
           // lookup matches more than one row. Grab the one this test means,
           // by the approver role name, not position.
-          cy.contains('tr', exactRe('Test {{ title }} Approver Role')).find('[aria-label="Re-submit"]').should('be.visible').click();
+          cy.contains('td', exactRe('Test {{ title }} Approver Role')).closest('tr').find('[aria-label="Re-submit"]').should('be.visible').click();
           cy.get('[role="dialog"]').find('button').contains('Re-submit').click();
           cy.contains('Pending').should('be.visible');
-          cy.contains('tr', exactRe('Test {{ title }} Approver Role')).find('[aria-label="Re-submit"]').should('not.exist');
+          cy.contains('td', exactRe('Test {{ title }} Approver Role')).closest('tr').find('[aria-label="Re-submit"]').should('not.exist');
           // History expand button should appear after re-submission
-          cy.contains('tr', exactRe('Test {{ title }} Approver Role')).find('[aria-label="Expand history"]').should('be.visible');
+          cy.contains('td', exactRe('Test {{ title }} Approver Role')).closest('tr').find('[aria-label="Expand history"]').should('be.visible');
         });
       });
     });
