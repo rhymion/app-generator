@@ -56,17 +56,41 @@ the `organization` relationship itself is not in the model's `required` list) ga
 | `actions.ts.jinja2` | Delete server action's existence/ownership check |
 | `api_detail_route.ts.jinja2` | PUT and DELETE REST routes' existence check |
 | `api_import_route.ts.jinja2` | CSV import's match-by-natural-key lookup |
+| `search_helpers.ts.jinja2` | Cross-entity global search's per-entity access clause, both the direct site and its `parent.`-qualified `no_page_children` sibling (cmd_640, see below) |
 
 A required-org model gets the plain `IN` filter unchanged — `organization_id` is never `NULL`
 there, so the `OR`-null branch would be dead code, and the flag is `false` specifically to avoid
 generating it.
 
-**Deliberately not touched**: the CSV-import FK-*lookup-target* org filters (whether a
-*referenced* entity like `role` is itself org-scoped — see
-[`csv-import-dotted-fk-org-filter.md`](csv-import-dotted-fk-org-filter.md)) and the cross-entity
-global search path (`search_helpers.ts.jinja2`, which builds its own independent SQL fragments and
-has the identical NULL-visibility gap but wasn't in scope for this pass — flagged as a follow-up,
-not yet fixed).
+### cmd_640: closing the search_helpers.ts.jinja2 gap
+
+`search_helpers.ts.jinja2` builds its own independent Prisma.sql fragments (a raw cross-entity
+`UNION` query, not the `and.push({...})` object-filter shape the other templates above use), so
+it needed its own `org_relationship_optional` wiring in `generate.py`'s search-entity context
+builder (mirroring `build_context.py`'s computation via
+`helpers.schema_helpers.get_parent_relationships`) rather than reusing the existing plumbing.
+Confirmed against a real Postgres DB via proj_c's `parent1` entity (org made optional by
+cmd_611/612): `api/parent1.cy.ts`'s N10 spec (global search coverage) failed with `expected false
+to equal true` before this fix, passed after. Unlike the object-filter templates, the
+`associatedOrgIds.length > 0` branch here is kept post-fix — but only as a SQL-construction
+necessity (`Prisma.join` over an empty array cannot form a valid `IN (...)` list), not as an
+access guard; both branches admit `IS NULL` rows unconditionally.
+
+**Still not touched (follow-up candidates, not yet fixed)**:
+
+- The CSV-import FK-*lookup-target* org filters (`lookup_entity_filter_by_org` — whether a
+  *referenced* entity like `role` is itself org-scoped — see
+  [`csv-import-dotted-fk-org-filter.md`](csv-import-dotted-fk-org-filter.md)) do not admit a
+  `NULL`-organization row on the lookup **target** side either: `api_import_route.ts.jinja2`
+  lines rendering `organization_id: { in: _importOrgIds }` for a dotted-FK/labelField lookup
+  (the simple dotted-key lookup, the non-key FK lookup, and the composite/dotted-label
+  candidate-map build) have no `OR ... IS NULL` branch, regardless of whether the *lookup
+  entity itself* has `organization` optional. If some other entity's CSV import resolves a
+  labelField FK into an org-optional entity (e.g. `parent1`), an org-less target row cannot be
+  resolved by natural key — a false `NOT_FOUND`/`MULTI_MATCH` on import. This is a distinct
+  computation (the target entity's own optionality, not the importing entity's) requiring new
+  plumbing in `build_context.py`'s `_lookup_entity_filter_by_org` logic — genuinely separate
+  scope from this pass, not fixed here.
 
 ## Open design question: how far should NULL-organization visibility extend?
 
@@ -84,4 +108,6 @@ different mechanism. Flagged for follow-up, not resolved here.
 `TestOrgRelationshipOptionalRenderedTemplates` (rendered-output assertions on `getters.ts.jinja2`
 and `api_detail_route.ts.jinja2`, deviation-injection verified — all assertions confirmed to fail
 against the pre-fix templates). `test_org_optional_create_guard.py` covers Gap 1 separately, also
-with deviation-injection proof.
+with deviation-injection proof. `test_search_org_null_row.py` (cmd_640) covers
+`search_helpers.ts.jinja2`'s independent context wiring, both the direct and `no_page_children`
+parent-qualified sites, also with deviation-injection proof.
