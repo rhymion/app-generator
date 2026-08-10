@@ -346,10 +346,18 @@ Cypress.Commands.add('clearDateTime', (label: string) => {
 
 /**
  * Select DataGrid rows by checkbox (0-based indices)
+ * @param indices - 0-based row indices to check
+ * @param childTitle - Optional (cmd_632): scope to the embedded child DataGrid
+ *   whose <h2> heading matches this title. A parent form can render more than
+ *   one embedded DataGrid at once, so an unscoped `data-rowindex` selector
+ *   matches every grid on the page and `.check()` throws on >1 match.
+ *   Omit for the top-level list page, which only ever has one grid.
  */
-Cypress.Commands.add('selectDataGridRows', (indices: number[]) => {
+Cypress.Commands.add('selectDataGridRows', (indices: number[], childTitle?: string) => {
   indices.forEach((i) => {
-    cy.get(`div[role="row"][data-rowindex="${i}"]`).find('input[type="checkbox"]').check();
+    const selector = `div[role="row"][data-rowindex="${i}"]`;
+    const row = childTitle ? cy.contains('h2', childTitle).parent().find(selector) : cy.get(selector);
+    row.find('input[type="checkbox"]').check();
   });
 });
 
@@ -414,7 +422,7 @@ declare global {
       fillDate(label: string, dateString: string): Chainable<void>;
       fillTime(label: string, dateString: string): Chainable<void>;
       clearDateTime(label: string): Chainable<void>;
-      selectDataGridRows(indices: number[]): Chainable<void>;
+      selectDataGridRows(indices: number[], childTitle?: string): Chainable<void>;
       openAccordion(label: string): Chainable<void>;
       withinAccordion(label: string, fn: () => void): Chainable<void>;
     }

@@ -25,6 +25,7 @@ from generators_test import (
     prisma_value,
     cypress_create_value,
     cypress_edit_value,
+    _child_scalar_entries,
     _get_dep_populate_fields,
     _get_dep_extra_required_fields,
     helper_context as _test_helper_context,
@@ -209,6 +210,52 @@ class TestCypressEditValueTimeFormat:
         """The datetime branch (no format key) is preserved."""
         field = {'category': 'datetime', 'prop_name': 'created_at'}
         assert cypress_edit_value(field, 'Thing') == '06/15/2025 02:00 PM'
+
+
+# ---------------------------------------------------------------------------
+# 2c-2. DataGrid-child date/date-time/time fields need ISO `YYYY-MM-DDThh:mm`
+# for cy.type(), not value_fn's human-readable top-level form format.
+#
+# generators.py's column_def codegen renders date/date-time/time fields as
+# MUI's built-in `type: 'dateTime'` DataGrid column with no renderEditCell
+# override (unlike the FK column, which does), so editing goes through the
+# browser's native datetime-local input. Cypress's cy.type() enforces the
+# ISO datetime-local format there — typing '01/16/2025' (the top-level
+# DateTimeWrapper's keyboard-sectioned format) throws
+# "Typing into a datetime input with `cy.type()` requires a valid datetime
+# with the format `YYYY-MM-DDThh:mm`..." (cmd_632/cmd_634's parent1.cy.ts
+# 2.1/2.2/3.1 failures — end_date is a DataGrid-child `format: date` field).
+# ---------------------------------------------------------------------------
+class TestChildDatetimeIsoValue:
+    def test_date_format_create_value_converted_to_iso(self):
+        field = {'category': 'datetime', 'prop_name': 'end_date', 'format': 'date'}
+        entries = _child_scalar_entries([field], 'Parent1 Child2', cypress_create_value)
+        assert entries == ["end_date: '2025-01-16T00:00'"]
+
+    def test_date_format_edit_value_converted_to_iso(self):
+        field = {'category': 'datetime', 'prop_name': 'start_date', 'format': 'date'}
+        entries = _child_scalar_entries([field], 'Parent1 Child2', cypress_edit_value)
+        assert entries == ["start_date: '2025-06-15T00:00'"]
+
+    def test_datetime_format_create_value_converted_to_iso(self):
+        field = {'category': 'datetime', 'prop_name': 'created_at'}
+        entries = _child_scalar_entries([field], 'Thing', cypress_create_value)
+        assert entries == ["created_at: '2025-01-15T09:00'"]
+
+    def test_time_format_create_value_converted_to_iso(self):
+        """Time-only fields have no date component in value_fn's output — the
+        grid's datetime-local input still requires one, so a fixed
+        placeholder date is paired with the parsed time."""
+        field = {'category': 'datetime', 'prop_name': 'blood_sampling_time', 'format': 'time'}
+        entries = _child_scalar_entries([field], 'Checkup', cypress_create_value)
+        assert entries == ["blood_sampling_time: '2025-01-15T09:00'"]
+
+    def test_non_datetime_scalar_fields_unaffected(self):
+        """text/number/boolean fields keep going through the unmodified else/
+        boolean-number branches — only `category == 'datetime'` reformats."""
+        text_field = {'category': 'text', 'prop_name': 'name'}
+        entries = _child_scalar_entries([text_field], 'Parent1 Child2', cypress_create_value)
+        assert entries == ["name: 'Test Parent1 Child2'"]
 
 
 # ---------------------------------------------------------------------------

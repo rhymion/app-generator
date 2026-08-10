@@ -96,13 +96,13 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}// Add required child: {{ child.title }}
 {{ I }}cy.clickButton('Add {{ child.title }}');
 {% for fk in child.fk_create_fields %}
-{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }});
+{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }}, undefined, '{{ child.title }}');
 {% endfor %}
 {% for line in child.native_enum_create_calls %}
 {{ I }}{{ line }}
 {% endfor %}
 {% if child.create_obj != '{}' %}
-{{ I }}fillDataGridRow(0, {{ child.create_obj }});
+{{ I }}fillDataGridRow(0, {{ child.create_obj }}, true, '{{ child.title }}');
 {% endif %}
 {% endif %}
 {% endfor %}
@@ -162,13 +162,13 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}// Add child: {{ child.title }}
 {{ I }}cy.clickButton('Add {{ child.title }}');
 {% for fk in child.fk_full_fields %}
-{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }});
+{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }}, undefined, '{{ child.title }}');
 {% endfor %}
 {% for line in child.native_enum_full_calls %}
 {{ I }}{{ line }}
 {% endfor %}
 {% if child.full_create_obj != '{}' %}
-{{ I }}fillDataGridRow(0, {{ child.full_create_obj }});
+{{ I }}fillDataGridRow(0, {{ child.full_create_obj }}, true, '{{ child.title }}');
 {% endif %}
 {% endfor %}
 {% for child in list_children_data %}
@@ -272,13 +272,13 @@ describe('Testing {{ title }} pages and their behavior', () => {
         // Add child: {{ child.title }}
         cy.clickButton('Add {{ child.title }}');
 {% for fk in child.fk_create_fields %}
-        selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }});
+        selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }}, undefined, '{{ child.title }}');
 {% endfor %}
 {% for line in child.native_enum_create_calls %}
         {{ line }}
 {% endfor %}
 {% if child.create_obj != '{}' %}
-        fillDataGridRow(0, {{ child.create_obj }});
+        fillDataGridRow(0, {{ child.create_obj }}, true, '{{ child.title }}');
 {% endif %}
 {% endfor %}
 {% for child in list_children_data %}
@@ -420,7 +420,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
 {% for child in datagrid_children_data %}
         // Delete child: {{ child.title }}
-        cy.selectDataGridRows([0]);
+        cy.selectDataGridRows([0], '{{ child.title }}');
         cy.contains('h2', '{{ child.title }}').parent().find('button[aria-label="Delete Selected"]').click();
         cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
 {% endfor %}
@@ -655,10 +655,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
 {{ I }}cy.clickButton('Add {{ fail_create_5_2_scalar.title }}');
 {% for fk in fail_create_5_2_scalar.fk_fields %}
-{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }});
+{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }}, undefined, '{{ fail_create_5_2_scalar.title }}');
 {% endfor %}
 {% if fail_create_5_2_scalar.partial_obj %}
-{{ I }}fillDataGridRow(0, {{ fail_create_5_2_scalar.partial_obj }});
+{{ I }}fillDataGridRow(0, {{ fail_create_5_2_scalar.partial_obj }}, true, '{{ fail_create_5_2_scalar.title }}');
 {% endif %}
 {{ I }}cy.clickButton('Save');
 {{ I }}cy.url().should('include', '/{{ parent }}/new');
@@ -679,7 +679,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
 {{ I }}cy.clickButton('Add {{ fail_create_5_2_fk.title }}');
 {% if fail_create_5_2_fk.partial_obj %}
-{{ I }}fillDataGridRow(0, {{ fail_create_5_2_fk.partial_obj }});
+{{ I }}fillDataGridRow(0, {{ fail_create_5_2_fk.partial_obj }}, true, '{{ fail_create_5_2_fk.title }}');
 {% endif %}
 {{ I }}cy.clickButton('Save');
 {{ I }}cy.url().should('include', '/{{ parent }}/new');
