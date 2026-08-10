@@ -6,6 +6,19 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Generated 3.3 "edits with mixed changes" test for a `user`-FK primary field selected a
+  `Test User A` row that was never seeded, failing the `cy.selectAutocomplete` assertion**
+  (cmd_633, real case: `shift`/`shift_template`): `spec_context()`'s `is_user_account` primary-FK
+  branch builds `edit_update_value` from the letter-suffixed dependency instance (`Test User A`,
+  from `_seed_relation_label_value`'s `unique_index=None` fallback) but only routed the edit
+  through `populate{Pascal}Dependencies()` (`use_deps_in_3_3`) for the `selectAutocomplete`
+  create/fail-edit paths — the `is_user_account` branch of `populate{Pascal}Data`'s own
+  per-iteration loop (`test_helper.ts.jinja2`) only ever creates `Test User ${i}`, never a
+  letter-suffixed row, so relying on `populate_count_3_3` alone left the target row absent from
+  the DB. Fixed by setting `use_deps_in_3_3 = has_deps` for this case too (`generators_test.py`),
+  so the 3.3 edit is routed through the dependency populator like the other `is_user_account`
+  paths already are. Verified: `shift.cy.ts`/`shift_template.cy.ts` (desktop + mobile) 40/40
+  passing in an isolated worktree; full `code_generator` pytest suite 1216 passed, 0 skipped.
 - **Generated Cypress test's per-entity `callIndex` counter (cmd_618/cmd_620's isolation counter,
   `` `Test {Title} ${callIndex}_${i}` ``) persisted for the life of the Cypress plugin process, not
   per test case** (cmd_625, "per-test-case callIndex reset"): a generated spec's own `it()` blocks
