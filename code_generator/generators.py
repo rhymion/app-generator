@@ -557,6 +557,7 @@ def actions_context(ctx: dict) -> dict:
     reservation_config = ctx.get('reservation_config')
     has_reservation = bool(reservation_config and reservation_config.get('mode') == 'count')
     should_filter_by_org = bool(ctx.get('should_filter_by_org'))
+    org_relationship_optional = bool(ctx.get('org_relationship_optional'))
 
     # cmd_565 乙: mirror the REST POST guard — a plain read-only field can never
     # be supplied by the client, even on create. x-server-value fields are
@@ -675,10 +676,53 @@ def actions_context(ctx: dict) -> dict:
         # the if/else this is nested in) — every should_filter_by_org call site
         # below declares it up front, precisely so it's still in scope for the
         # update/create calls later in the function body.
+        # cmd_632: honor org_relationship_optional (cmd_611/612) here the same
+        # way remove<Parent>() (actions.ts.jinja2), get<Parent>Detail()
+        # (getters.ts.jinja2), and the CSV import route (api_import_route.ts.
+        # jinja2) already do — unconditional OR-null, no actor-org-count
+        # guard. `organization_id: { in: [...] }` never matches NULL in SQL,
+        # so without the OR-null branch an org-less record — legitimately
+        # createable once organization stops being required — throws
+        # 'Not found' on every future update by its own creator, permanently.
+        # Harmless no-op when org is required: organization_id is never null
+        # there, so the extra OR branch never fires (matches the
+        # org_relationship_optional definition itself).
+        #
+        # cmd_632 first tried gating the OR-null branch on `_orgIds.length > 0`
+        # (mirroring search_helpers.ts.jinja2's `associatedOrgIds.length > 0`
+        # guard), reasoning that a completely org-less actor shouldn't be
+        # granted access to an org-less row either. That guard was WRONG for
+        # this call site: it broke the very case this fix targets (parent1's
+        # UI 3.3 test) — the default seeded test session-user has zero org
+        # memberships too (org membership is only established by tasks that
+        # explicitly create one, e.g. populate<Parent>Dependencies, which 3.3
+        # doesn't call for entities with no primary FK), so gating on
+        # `_orgIds.length > 0` denied the record's own creator, not just
+        # strangers. Empirically re-verified (cmd_632, actual re-run) against
+        # the codebase's own established convention: EVERY other
+        # org_relationship_optional call site except search_helpers.ts.jinja2
+        # already uses the unconditional OR-null with no such guard — search
+        # is the outlier (a bulk cross-entity listing surface with no
+        # per-record creator check to fall back on), not the model to copy
+        # here. Reverted to match the dominant, already-shipped shape.
+        #
+        # This means a general.update actor with literally zero org
+        # memberships (not the record's creator) CAN also reach an org-less
+        # record via this existence check — same pre-existing gap already
+        # present in api_detail_route.ts.jinja2 (parent1 api G3.4, reported
+        # separately, not fixed here — out of this cmd's scope). Fixing it
+        # here alone, while every sibling call site keeps the unconditional
+        # shape, would just create a new, undocumented inconsistency between
+        # otherwise-identical existence checks on the same model.
+        _org_where = (
+            "OR: [{ organization_id: { in: _orgIds } }, { organization_id: null }]"
+            if org_relationship_optional
+            else "organization_id: { in: _orgIds }"
+        )
         return (
             f"{indent}const _orgs = await getAssociatedOrganizations(actorId);\n"
             f"{indent}const _orgIds = _orgs.map((o) => o.id);\n"
-            f"{indent}const existing = await prisma.{model}.findFirst({{ where: {{ id, organization_id: {{ in: _orgIds }} }}, select: {item_context_select} }});\n"
+            f"{indent}const existing = await prisma.{model}.findFirst({{ where: {{ id, {_org_where} }}, select: {item_context_select} }});\n"
             f"{indent}if (!existing) throw new Error('Not found');\n"
         )
 
