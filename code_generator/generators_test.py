@@ -8,6 +8,7 @@ Builds Jinja2 template contexts for:
   - cypress/e2e/api/{entity}.cy.ts      (API test spec)
 """
 import re
+from datetime import datetime
 
 # Messages Fields namespace for enum label translation.
 # Populated by set_messages_fields() before generating test specs.
@@ -1449,6 +1450,33 @@ def gen_assert_commands(
 # Child DataGrid object helpers
 # ---------------------------------------------------------------------------
 
+def _child_datetime_iso_value(value: str, fmt: str | None) -> str:
+    """Convert a cypress_create_value/cypress_edit_value 'datetime' result
+    into the ISO `YYYY-MM-DDThh:mm` cy.type() requires for a native
+    `datetime-local` input.
+
+    DataGrid-child date/date-time/time columns (generators.py's column_def
+    codegen) all render as MUI's built-in `type: 'dateTime'` with no
+    renderEditCell override, so editing goes through the browser's native
+    datetime-local input — unlike the top-level form, whose DateTimeWrapper
+    accepts keyboard-sectioned typing (MM/DD/YYYY, "05:00 PM", ...) via
+    cy.fillDate/cy.fillTime. value_fn's human-readable format matches the
+    top-level convention; this reformats it for the DataGrid-child case
+    only, so the top-level format (and its is_range_end / keyword day-pick
+    logic) stays the single source of truth.
+    """
+    if fmt == 'time':
+        # No date component (e.g. '05:00 PM') — the grid's datetime-local
+        # input still requires one even though the field itself is
+        # time-only, so pair it with a fixed placeholder date.
+        dt = datetime.strptime(value, '%I:%M %p').replace(year=2025, month=1, day=15)
+    elif fmt == 'date':
+        dt = datetime.strptime(value, '%m/%d/%Y')
+    else:
+        dt = datetime.strptime(value, '%m/%d/%Y %I:%M %p')
+    return dt.strftime('%Y-%m-%dT%H:%M')
+
+
 def _child_scalar_entries(fields: list, title: str, value_fn) -> list[str]:
     """Return JS object entries for scalar (non-autocomplete) datagrid child fields."""
     entries = []
@@ -1458,6 +1486,9 @@ def _child_scalar_entries(fields: list, title: str, value_fn) -> list[str]:
         value = value_fn(field, title)
         if field['category'] in ('boolean', 'number'):
             entries.append(f"{field['prop_name']}: {value}")
+        elif field['category'] == 'datetime':
+            iso_value = _child_datetime_iso_value(value, field.get('format'))
+            entries.append(f"{field['prop_name']}: '{iso_value}'")
         else:
             entries.append(f"{field['prop_name']}: '{value}'")
     return entries
