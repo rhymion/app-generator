@@ -1471,6 +1471,11 @@ def _child_native_enum_singleselect_calls(fields: list, title: str, value_fn) ->
     each section only ever adds a single child row. selectDataGridSingleSelect
     is imported directly in the template (no `cy.` prefix), matching the
     existing fk.field / fk.label_code call sites.
+
+    The trailing `title` argument (cmd_632) scopes the call to this child's
+    own embedded DataGrid — a parent with 2+ datagrid children renders all
+    of them at once, so an unscoped call ambiguously matches every grid on
+    the page (see datagrid-helpers.ts's scopedGet doc for the full story).
     """
     calls = []
     for field in fields:
@@ -1483,7 +1488,7 @@ def _child_native_enum_singleselect_calls(fields: list, title: str, value_fn) ->
         label = value_fn(field, title)
         raw = _reverse_enum_label(field, label)
         calls.append(
-            f"selectDataGridSingleSelect(0, '{field['prop_name']}', '{label}', '{raw}');"
+            f"selectDataGridSingleSelect(0, '{field['prop_name']}', '{label}', '{raw}', '{title}');"
         )
     return calls
 
