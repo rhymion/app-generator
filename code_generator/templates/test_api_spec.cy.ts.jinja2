@@ -757,32 +757,64 @@ describe('API: {{ title }}', () => {
       });
     });
 
-    // cmd_576: a required organization_id FK is the org-isolation boundary
-    // itself, not an ordinary FK — it must never be given the FK read-
-    // permission graceful-degradation treatment (section above). An actor
-    // can hold full CRUD permission on {{ parent }} yet belong to zero
-    // organizations; cmd_515's existence lookup is scoped by actual
-    // membership (getAssociatedOrganizations), not by any RBAC permission
-    // row, so this actor must never reach an existing row at all.
-    it('G3.4 PUT by an actor with no organization membership returns 404 (existence hidden)', () => {
-      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
-        cy.task<string>('db:createApiUserWithPermission', {
-          entityName: '{{ parent }}',
-          flags: { create: true, read: true, update: true, delete: true },
-          label: 'org_isolation_no_membership',
-        }).then((restrictedKey) => {
-          cy.request({
-            method: 'PUT',
-            url: `${API_BASE}/${records[0].id}`,
-            headers: { 'X-API-Key': restrictedKey },
-            body: {},
-            failOnStatusCode: false,
-          }).then((res) => {
-            expect(res.status).to.eq(404);
+    // cmd_640: G3.4 previously sent an actor with zero organization
+    // memberships an EMPTY PUT body, which fails required-field validation
+    // before the org-isolation check ever runs — the resulting 500 was a
+    // fixture artifact (missing required fields), not evidence of an org
+    // boundary being crossed or not crossed. Replaced with a scenario that
+    // sends a fully valid body and attempts to reassign the entity into a
+    // foreign organization (orgB) the actor does not belong to — the PUT
+    // analogue of G3.1's POST-with-foreign-organization_id check. Expected
+    // response is unified to 404 (existence hidden), matching G3.1-G3.3's
+    // policy (cmd_520/PR#239): a foreign org_id must never be distinguishable
+    // from a not-found response.
+{% if primary_is_fk and not primary_fk_is_ua %}
+    it('G3.4 PUT setting organization_id to a foreign org returns 404 (existence hidden)', () => {
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+        cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+          cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}' }).then((scenario) => {
+            cy.request({
+              method: 'PUT',
+              url: `${API_BASE}/${records[0].id}`,
+              headers: { 'X-API-Key': TEST_API_KEY },
+              body: {
+{% for ln in org_cross_put_body_fk %}
+{{ ln }}
+{% endfor %}
+                organization_id: scenario.orgB.id,
+              },
+              failOnStatusCode: false,
+            }).then((res) => {
+              expect(res.status).to.eq(404);
+              expect(JSON.stringify(res.body)).to.not.match(/organization/i);
+            });
           });
         });
       });
     });
+{% else %}
+    it('G3.4 PUT setting organization_id to a foreign org returns 404 (existence hidden)', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}' }).then((scenario) => {
+          cy.request({
+            method: 'PUT',
+            url: `${API_BASE}/${records[0].id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: {
+{% for ln in org_cross_put_body %}
+{{ ln }}
+{% endfor %}
+              organization_id: scenario.orgB.id,
+            },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(404);
+            expect(JSON.stringify(res.body)).to.not.match(/organization/i);
+          });
+        });
+      });
+    });
+{% endif %}
 {% endif %}
   });
 {% endif %}

@@ -3915,9 +3915,11 @@ def api_spec_context(
             out.append(f"{indent}{c['child']['property_name']}: [],")
         return out
 
-    def _put_body_impl(indent: str) -> list[str]:
+    def _put_body_impl(indent: str, skip_field: str | None = None) -> list[str]:
         out = []
         for prop in put_body_props:
+            if prop == skip_field:
+                continue
             if primary_is_fk and not primary_fk_is_ua and prop == f'{primary_field_name}_id':
                 out.append(f"{indent}{prop}: deps.{primary_dep_var}2.id,")
             elif primary_fk_is_ua and ua_update_field and prop == ua_update_field['prop_name']:
@@ -4090,6 +4092,14 @@ def api_spec_context(
         # cmd_520 G3.1: same shape as i7_post_body, minus organization_id — the
         # G3.1 test injects its own (foreign) organization_id value after this.
         'org_cross_post_body': _post_body_impl('organization_id', f'{I}      '),
+        # cmd_640 G3.4: same shape as put_body_update/put_body_update_fk, minus
+        # organization_id — the G3.4 test injects its own (foreign)
+        # organization_id value after this. Indents are put_body_update's and
+        # put_body_update_fk's own indent plus one extra nesting level (the
+        # db:createCrossOrgScenario .then() wrapper G3.4 adds around the same
+        # populate steps 4.1 uses).
+        'org_cross_put_body': _put_body_impl('              ', skip_field='organization_id'),
+        'org_cross_put_body_fk': _put_body_impl('                ', skip_field='organization_id'),
         # Bulk test bodies — two extra spaces of indent (inside array item `{`)
         'bulk_post_body_valid':   _post_body_impl(None,               f'{I}      '),
         'bulk_post_body_invalid': _post_body_impl(field_to_skip_5_1, f'{I}      '),
