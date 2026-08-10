@@ -472,9 +472,8 @@ def test_spec_context_server_value_primary_field_skips_edit_primary_cmd():
 
 
 def test_spec_context_non_server_value_primary_field_still_gets_edit_primary_cmd():
-    """Sanity check (pre-fix baseline behavior, unaffected): a primary FK to
-    user with no x-server-value still gets the selectAutocomplete
-    edit_primary_cmd and populate_count_3_3 == 2."""
+    """A primary FK to user with no x-server-value still gets the
+    selectAutocomplete edit_primary_cmd and populate_count_3_3 == 2."""
     ctx = spec_context(
         "shift", [], _server_value_primary_shift_schema(None), "shift", "shift_detail",
         _entity("shift")["generate_config"],
@@ -482,6 +481,14 @@ def test_spec_context_non_server_value_primary_field_still_gets_edit_primary_cmd
     # cmd_618: base instance is now letter-indexed ('Test User A').
     assert ctx["edit_primary_cmd"] == "        cy.selectAutocomplete('User', 'Test User A');"
     assert ctx["populate_count_3_3"] == 2
+    # cmd_633: edit_update_value ('Test User A') is the letter-suffixed dep
+    # row created only by populate{Pascal}Dependencies() -- populate_count_3_3's
+    # loop (populate{Pascal}Data) never creates it for is_user_account primary
+    # FKs (see test_seed_relation_label_value_is_user_account_excludes_
+    # callindex_prefix's sibling fixture: the loop only emits `Test User ${i}`).
+    # So 3.3 must route through populate{Pascal}Dependencies() too, or the
+    # target row the test selects never exists in the DB.
+    assert ctx["use_deps_in_3_3"] is True
 
 
 def test_seed_relation_label_value_is_user_account_excludes_callindex_prefix():

@@ -3170,6 +3170,17 @@ def spec_context(
             # selectAutocomplete and rely on populate_count_3_3==2 to ensure
             # the "Test X 2" target row exists.
             edit_primary_cmd = f"        cy.selectAutocomplete('{edit_field_label}', '{edit_update_value}');"
+            # cmd_633: is_user_account is the one primary_is_fk case where the
+            # "Test X 2" row above doesn't exist — populate{Pascal}Data's
+            # is_user_account loop (test_helper.ts.jinja2) only ever creates
+            # `Test User ${i}`, never a letter-suffixed row. edit_update_value
+            # here is the letter-suffixed dep instance ('Test User A', from
+            # _seed_relation_label_value's unique_index=None fallback), which
+            # only exists once populate{Pascal}Dependencies() has actually run
+            # — so route this edit test through it like the autocomplete
+            # branch above does, instead of relying on populate_count_3_3.
+            if primary_rel and primary_rel.get('target') == 'user':
+                use_deps_in_3_3 = has_deps
         else:
             edit_primary_cmd = f"        cy.clearAndFillField('{edit_field_label}', '{edit_update_value}');"
     else:
