@@ -33,6 +33,7 @@ from helpers.schema_helpers import get_splittable_bridge_field
 from helpers.schema_helpers import resolve_ledger_domain
 from helpers.schema_helpers import get_entity_properties
 from helpers.schema_helpers import get_self_only_flags
+from helpers.schema_helpers import get_parent_relationships
 from generators import (
     chart_context,
     page_list_context,
@@ -1679,6 +1680,20 @@ def generate(schema_path: str, output_dir: str) -> None:
         has_organization_id = 'organization_id' in all_props
         should_filter_by_org = has_organization_id or (org_id_field_override is not None)
         effective_org_id_field = org_id_field_override if org_id_field_override else 'organization_id'
+        # Mirrors build_context.py's org_relationship_optional (already used by
+        # actions.ts.jinja2/getters.ts.jinja2/api_detail_route.ts.jinja2/
+        # api_import_route.ts.jinja2): an org-scoped entity whose `organization`
+        # FK is itself optional (organization_id nullable) needs its read-scope
+        # filter to admit NULL rows too, or an org-less row becomes invisible to
+        # every org-scoped actor, including its own creator. Guarded on
+        # org_id_field_override is None: the override case (e.g.
+        # x-search.org_id_field: 'id' for the organization entity itself)
+        # points at a column that is never null (a primary key), so there is no
+        # optional relationship to speak of there.
+        org_relationship_optional = should_filter_by_org and org_id_field_override is None and not next(
+            (r['required'] for r in get_parent_relationships(base_def, schema) if r['target'] == 'organization'),
+            True,
+        )
         # creator_id is always auto-injected by the code generator (present in every Prisma model)
         # assignee_id is entity-specific; check schema properties
         has_assignee_id = 'assignee_id' in all_props
@@ -1758,6 +1773,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             # DP-a: authorization variables aligned with build<Entity>AccessWhere
             'should_filter_by_org':  should_filter_by_org,
             'org_id_field':          effective_org_id_field,
+            'org_relationship_optional': org_relationship_optional,
             'has_assignee_id':       has_assignee_id,
             'is_self_only':          is_self_only,
             # Pre-computed TypeScript identifiers (avoids Jinja2/TypeScript ${{{...}}} delimiter conflict)
