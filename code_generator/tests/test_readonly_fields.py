@@ -105,6 +105,35 @@ class TestBuildContextReadonlyFields:
         assert ctx["readonly_fields_api_select"] is None
         assert ctx["readonly_fields_api"] == []
 
+    def test_unresolved_entity_level_readonly_field_fails_closed(self):
+        """An x-readonly-fields entry that doesn't match a real property (e.g.
+        a relation name typo'd instead of the FK column) must raise, not
+        silently render as fully editable (cmd_642)."""
+        schema = _schema_with_readonly(entity_level_ro=["not_a_real_property"])
+        with pytest.raises(ValueError, match="not_a_real_property"):
+            build_context(_entity(), schema)
+
+    def test_relation_name_instead_of_fk_column_fails_closed(self):
+        """A relation name used without the '_id' suffix must raise: FK
+        properties are always named '<relation>_id', so a bare relation name
+        never resolves to an actual property."""
+        schema = _schema_with_readonly()
+        schema["definitions"]["item"]["properties"]["parent_id"] = {
+            "type": "string", "pattern": "^c[a-z0-9]{24,}$",
+        }
+        schema["definitions"]["item"]["x-readonly-fields"] = ["parent"]
+        with pytest.raises(ValueError, match="parent"):
+            build_context(_entity(), schema)
+
+    def test_field_level_x_readonly_cannot_be_unresolved(self):
+        """Field-level x-readonly is sourced directly from filtered_props, so
+        it can never name a nonexistent property — no fail-closed check is
+        needed on that path (sanity check the two sources are asymmetric by
+        construction, not by omission)."""
+        schema = _schema_with_readonly(field_level_ro=["status"])
+        ctx = build_context(_entity(), schema)
+        assert "status" in ctx["readonly_fields"]
+
 
 # ---------------------------------------------------------------------------
 # form_upsert_context: readonly field rendering
@@ -123,13 +152,20 @@ class TestFormUpsertReadonlyFields:
         assert "readOnly" in jsx
 
     def test_readonly_field_not_in_normal_enum_jsx(self):
-        """Status is an int enum field; when readonly it must NOT appear as an Autocomplete."""
+        """Status is an int enum field; when readonly it must NOT appear as an
+        editable Autocomplete/Select widget. It still needs its options array
+        (enum_opt_setups) so the readonly display can resolve the translated
+        label instead of showing the raw stored code (cmd_642) — only the
+        editable-state variable (all_states, used by the Autocomplete's
+        controlled value) is what must stay absent."""
         schema = _schema_with_readonly(field_level_ro=["status"])
         upsert = self._build(schema)
+        jsx = upsert["all_parent_fields_jsx"]
         all_states = upsert.get("all_states", "")
         enum_opts = upsert.get("enum_opt_setups", "")
+        assert "AppFieldSelect" not in jsx
         assert "statusOptions" not in all_states
-        assert "statusOptions" not in enum_opts
+        assert "statusOptions" in enum_opts
 
     def test_readonly_field_excluded_from_formdata_sets(self):
         """Readonly fields must not appear in parent_form_data_sets."""

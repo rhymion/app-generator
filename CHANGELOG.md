@@ -6,6 +6,22 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`FormUpsert`'s readonly-field display was type-blind, showing raw FK ids with a nonexistent
+  i18n key instead of the relation's label** (cmd_642): the readonly-field loop in
+  `form_upsert_context()` rendered every readonly field the same way —
+  `String(src.<prop>)` with `tf(to_camel_case(prop))` as the label — regardless of type. For a
+  relation, the property name is `<rel>_id`, so this produced an untranslated
+  `tf('parentGoodsReceiptLineId')` label and the raw id as the value instead of the relation's
+  resolved `labelField`. The same blind loop also affected enum (raw untranslated stored code),
+  date/datetime/time, boolean, and image (`format: uri`) readonly fields, though those remained
+  legible (unstyled) rather than incorrect. Fixed by extracting `form_view_context()`'s existing
+  per-type dispatch (FormView is always read-only, so it already rendered every type correctly)
+  into a shared `_readonly_display_field()`, reused by both `form_view_context()` and
+  `form_upsert_context()` — the two paths can no longer render the same field differently.
+  Also added a fail-closed check: an `x-readonly-fields` entry that doesn't resolve to an actual
+  property (e.g. the relation name instead of the FK column) now raises at generation time
+  instead of silently leaving the field fully editable. See
+  `docs/knowledge/readonly-field-form-rendering.md`.
 - **Generated "requestor can re-submit a rejected request" approval test used a page-wide,
   unscoped `[aria-label="Re-submit"]` lookup** (cmd_641, real case: `purchase_per_item.cy.ts`
   7.8, seen as `cy.click() can only be called on a single element. Your subject contained 2

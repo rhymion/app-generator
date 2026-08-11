@@ -1053,6 +1053,23 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # x-server-value fields are always readonly too (server-computed, never
     # client-editable through the normal form path).
     _ro_from_entity: set[str] = set(model_def.get('x-readonly-fields') or [])
+    # Fail closed (cmd_642): every x-readonly-fields entry must name an actual
+    # property. Downstream consumers (this function's readonly_fields_api
+    # filter, and generators.py's FormUpsert readonly-field loop) both silently
+    # skip entries that don't match filtered_props — an unresolved name used to
+    # leave the field fully editable with no error (fail open), defeating the
+    # readonly declaration. A common miswrite is the relation name instead of
+    # the FK property (e.g. 'parent_goods_receipt_line' instead of
+    # 'parent_goods_receipt_line_id').
+    _unresolved_ro = sorted(_ro_from_entity - set(filtered_props))
+    if _unresolved_ro:
+        raise ValueError(
+            f"x-readonly-fields on '{model}' references unknown propert"
+            f"{'y' if len(_unresolved_ro) == 1 else 'ies'}: {_unresolved_ro}. "
+            "Each entry must be an exact property name (e.g. the FK column "
+            "'parent_goods_receipt_line_id', not the relation name "
+            "'parent_goods_receipt_line')."
+        )
     _ro_from_props: set[str] = {
         fn for fn, fp in filtered_props.items()
         if isinstance(fp, dict) and fp.get('x-readonly')
