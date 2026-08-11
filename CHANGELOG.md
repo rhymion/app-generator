@@ -526,34 +526,34 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/notification-triggers.md`.
 
 ### Internal
-- **New `sameEntityField` generator mechanism: self-referential many-to-many `x-relationships` can
-  now declare that a linked record must share the parent's value for a given field, filtered live
-  in the picker and enforced at save time** (cmd_646, `approval_flow`'s `preceded_by`/`followed_by`
-  self-ref links: a request-type `approval_flow` must only chain to other `approval_flow` rows with
-  the same `entity_name`, never a cross-entity one). One new `x-relationships.<rel>.sameEntityField:
-  <field>` declaration in `json_schema.yaml` drives three generated locations from a single source
-  of truth: (1) `code_generator/generators.py`'s `form_upsert_context()` — a new
-  `live_state_var_by_field` lookup resolves the declared field to its live `useState` variable and
-  splices it into the self-ref child's `formValues`, so the Autocomplete filter sees the form's
-  current on-screen value rather than the last-saved DB value; (2)
-  `code_generator/validation_context.py` (new `same_entity_checks` list) +
-  `code_generator/build_context.py` (`validation_data_obj`) +
-  `code_generator/templates/service_validation.ts.jinja2` — a generated `validateSameEntityRefs()`
-  save-time guard rejects any linked id whose `entity_name` differs, covering both the UI form path
-  and direct REST/server-action calls; (3) `code_generator/generators_test.py`'s
-  `_get_dep_populate_fields()` gained a `match_self_entity` argument so generated fixtures seed
-  same-`entity_name` dependency rows instead of the deliberately-mismatched rows the generic
-  self-ref decoy pattern (cmd_592) otherwise produces. The filter (UI) and the guard (save-time)
-  both resolve "is this a cross-entity reference?" through one shared predicate,
-  `isCrossEntityRef(entityName, relatedEntityName)`, newly added to the entity's GENERATED-ONCE
-  `lib/{entity}/autocomplete_filter.ts` stub, so the two can't drift out of sync with each other.
-  `validate.py` gained a matching fail-closed check: `sameEntityField` must be a string, must name
-  a self-referential relationship, and must resolve to an actual property on the entity — a
-  misconfigured declaration now errors at `generate-code` time instead of silently no-op'ing.
-  A new `cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts` spec (UI + direct-API
-  deviation-injection tests) exercises the mechanism end-to-end and doubles as the reference
-  fixture for applying it to a future entity. See
-  `docs/knowledge/same-entity-field-mechanism.md`.
+- **cmd_646's `sameEntityField` generator mechanism replaced with a hand-written validation socket
+  — the business condition ("same-`entity_name`" for `approval_flow`'s `preceded_by`/`followed_by`)
+  no longer lives in `json_schema.yaml` or a `*.jinja2` template** (cmd_652, correcting cmd_646:
+  reviewed as a case of a coincidental business rule being generalized into the schema, when a
+  future self-ref relation could need an entirely different condition). Removed entirely:
+  `x-relationships.<rel>.sameEntityField` (`json_schema.yaml`), its `validate.py` checks, its
+  `code_generator/validation_context.py` `same_entity_checks` list, and the generated
+  `validateSameEntityRefs()` function `code_generator/templates/service_validation.ts.jinja2` used
+  to emit. In its place, two purely structural (schema-free) generator changes provide a socket:
+  (1) `code_generator/templates/service_validation.ts.jinja2` now unconditionally imports and calls
+  a new write-once stub, `lib/{entity}/service_validation_custom.ts`
+  (`code_generator/templates/service_validation_custom_stub.ts.jinja2`, same GENERATED-ONCE
+  skip-if-exists convention as `autocomplete_filter.ts`) — every entity gets this call, regardless
+  of whether it needs custom validation; `code_generator/build_context.py`'s `validation_data_obj`
+  now unconditionally exposes every connect-style child's selected id array so a hand-written hook
+  can read any child selection it needs; (2) `code_generator/generators.py`'s
+  `form_upsert_context()` now unconditionally splices every field with a live `useState` variable
+  onto a self-referential child's search `formValues` (previously limited to the one field named by
+  `sameEntityField`) — the generator no longer decides which field (if any) a hand-written filter
+  cares about. `approval_flow`'s actual same-`entity_name` rule is now entirely hand-written: the
+  existing `isCrossEntityRef()` predicate in `lib/approval_flow/autocomplete_filter.ts` (GENERATED
+  ONCE, unchanged) plus a new `lib/approval_flow/service_validation_custom.ts` (GENERATED ONCE) that
+  calls it as the save-time backstop. Also reverts `code_generator/generators_test.py`'s
+  `match_self_entity` self-ref dependency-fixture special-casing (which cmd_646 had reintroduced)
+  back to the cmd_636 baseline, and the matching selector precision in
+  `code_generator/templates/test_spec.cy.ts.jinja2`'s self-ref autocomplete-picker branch — see
+  `docs/knowledge/same-entity-validation-socket.md` (replaces
+  `docs/knowledge/same-entity-field-mechanism.md`) for the full design and history.
 - **Generated `parent1`-style Cypress spec (2+ DataGrid children on one parent form) intermittently
   failed with "can only scroll 1 element, you tried to scroll 2 elements", and generated
   DataGrid-child date/date-time/time edit cells rejected every typed value** (cmd_634, two

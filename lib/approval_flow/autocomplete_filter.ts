@@ -14,19 +14,22 @@ export type AutocompleteFilterContext = {
   formValues?: Record<string, unknown>;
 };
 
-// cmd_646: the ONE judgment "does this candidate belong to a different
-// entity_name chain than the record being edited?" — shared verbatim by
-// filterAutocompleteOptions() below (client-side narrowing, best-effort:
-// missing/empty entityName degrades to "show everything", see below) and
-// service_validation.ts's validateSameEntityRefs() (save-time backstop,
-// authoritative: rejects the save outright). Keeping both call sites on
-// this single function is what makes them provably the same check rather
-// than two independently-maintained copies of the same string comparison —
-// see json_schema.yaml's x-relationships.<rel>.sameEntityField comment on
-// approval_flow.preceded_by for the generator-side half of this contract.
-// A future entity adopting the same "sameEntityField" pattern should add
-// its own isCrossEntityRef() here (or in its own lib/{{entity}}/
-// autocomplete_filter.ts) with the same signature.
+// cmd_652 (corrected from cmd_646 — see docs/knowledge/
+// same-entity-validation-socket.md): the ONE judgment "does this candidate
+// belong to a different entity_name chain than the record being edited?".
+// This is hand-written business content — it does NOT come from
+// json_schema.yaml or any *.jinja2 template; the generator only knows to
+// call filterAutocompleteOptions()/validateCustomRules() unconditionally
+// and to expose live form values / connected child ids for this file to
+// use however it needs (see build_context.py / generators.py comments).
+//
+// filterAutocompleteOptions() below expresses this rule as a Prisma WHERE
+// equality (a query predicate — there is no per-row candidate value at
+// query-construction time, so it can't call this function directly).
+// service_validation_custom.ts's validateCustomRules() expresses the exact
+// same rule as a per-row check AFTER fetching the linked rows, and calls
+// this function directly for that comparison. Both live in this one
+// hand-written place so a future change to the rule only needs one edit.
 export function isCrossEntityRef(entityName: string, relatedEntityName: string): boolean {
   return entityName !== relatedEntityName;
 }
@@ -48,9 +51,9 @@ export function isCrossEntityRef(entityName: string, relatedEntityName: string):
 // generator mechanism to conditionally disable a child list based on a
 // sibling field's value, and bolting one on for this one case would not be
 // a reusable template. Safety in that window is provided entirely by
-// validateSameEntityRefs() in service_validation.ts (same isCrossEntityRef
-// predicate), which always runs at save time regardless of what the
-// client-side filter allowed through.
+// validateCustomRules() in service_validation_custom.ts (same
+// isCrossEntityRef predicate), which always runs at save time regardless of
+// what the client-side filter allowed through.
 export function filterAutocompleteOptions(
   context: AutocompleteFilterContext,
 ): Record<string, unknown> {

@@ -3033,12 +3033,14 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     custom_upsert_props  = [p for p in cats['custom_upsert'] if p not in readonly_field_names]
     entity_select_props  = [p for p in cats.get('entity_select', []) if p not in readonly_field_names]
 
-    # cmd_646: fields whose current UI value is available as a `useState`
+    # cmd_652: fields whose current UI value is available as a `useState`
     # variable (as opposed to text/number fields, which are uncontrolled
-    # inputs read via `.Ref.current?.value`). Used below to forward a
-    # self-referential m2m relation's `sameEntityField` (x-relationships.
-    # <rel>.sameEntityField) as its LIVE value rather than the stale
-    # DB-snapshot `src` prop — see the is_self branch in the child-grid loop.
+    # inputs read via `.Ref.current?.value`). Used below to forward every
+    # live value on top of the stale DB-snapshot `src` prop when a
+    # self-referential (is_self) child's candidate search runs — see the
+    # is_self branch in the child-grid loop. Generic/unconditional: which
+    # field (if any) a hand-written filter/validator cares about is entirely
+    # its own business, not something this generator decides.
     live_state_var_by_field = {
         p: safe_var_name(p)
         for p in (
@@ -4133,32 +4135,31 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             # hand-written filter (see lib/{{ entity }}/autocomplete_filter.ts)
             # opts in.
             #
-            # cmd_646: `src` is the initial DB snapshot passed in as a prop —
-            # it does NOT reflect an in-progress edit to `sameEntityField`
-            # made earlier in the same form session (e.g. changing
-            # entity_name before picking preceded_by/followed_by). Where the
-            # relation declares x-relationships.<rel>.sameEntityField AND
-            # that field has a live useState variable in this component
-            # (live_state_var_by_field), override just that one key with its
-            # current value on top of the src spread — every other field
-            # still comes from src unchanged. Falls back to the old
-            # unconditional `src` forwarding when no sameEntityField is
-            # declared, or when it names a field with no live state var
-            # (e.g. an uncontrolled text input) — see docs/knowledge/
-            # cmd646-same-entity-field.md for the latter's scope.
-            same_entity_field = rel.get('same_entity_field')
-            same_entity_live_var = live_state_var_by_field.get(same_entity_field) if same_entity_field else None
+            # cmd_652: `src` is the initial DB snapshot passed in as a prop —
+            # it does NOT reflect an in-progress edit made earlier in the
+            # same form session (e.g. changing a sibling field before
+            # picking a self-ref candidate). Every field with a live
+            # useState variable (live_state_var_by_field) is overridden on
+            # top of the src spread with its CURRENT on-screen value; fields
+            # without a live var (e.g. uncontrolled text inputs) still come
+            # from src unchanged. This is unconditional and generic — the
+            # generator does not decide which field (if any) matters, it
+            # just makes every live value visible; a hand-written filter
+            # (lib/{{ entity }}/autocomplete_filter.ts) picks whichever
+            # field its own business rule needs from context.formValues.
+            _live_override_str = ', '.join(
+                f"{_f}: {_v}" for _f, _v in live_state_var_by_field.items()
+            )
             _search_call_args = 'query, includeIds'
-            if is_self and same_entity_live_var:
-                _search_call_args = (
-                    "query, includeIds, undefined, "
-                    f"{{ callerEntity: '{model}', formValues: {{ ...(src as unknown as Record<string, unknown>), "
-                    f"{same_entity_field}: {same_entity_live_var} }} }}"
+            if is_self:
+                _formvalues_expr = (
+                    "{ ...(src as unknown as Record<string, unknown>)"
+                    + (f", {_live_override_str}" if _live_override_str else "")
+                    + " }"
                 )
-            elif is_self:
                 _search_call_args = (
                     "query, includeIds, undefined, "
-                    f"{{ callerEntity: '{model}', formValues: src as unknown as Record<string, unknown> }}"
+                    f"{{ callerEntity: '{model}', formValues: {_formvalues_expr} }}"
                 )
             _ch_prop_def = model_def.get('properties', {}).get(prop_name, {})
             _ch_width_cols = _ui_width_cols(_ch_prop_def)

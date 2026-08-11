@@ -357,10 +357,7 @@ def _seed_path_part(
     return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
 
 
-def _get_dep_populate_fields(
-    target: str, var_name: str, title: str, schema: dict,
-    is_self_ref: bool = False, match_self_entity: bool = False,
-) -> list[dict]:
+def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dict, is_self_ref: bool = False) -> list[dict]:
     """Compute extra_required_fields for a dep record in populateDependencies.
 
     Uses title-based name (e.g. 'Test Parent', 'Test Assignee') and encodes
@@ -372,23 +369,18 @@ def _get_dep_populate_fields(
     under test — but the entity being generated is what the test's own "creates
     with minimal/full data" flow also creates, using the first x-entity-select
     option (see cypress_create_value). If a self-ref dep also picked that same
-    first option for an x-entity-select field, and that field participates in a
-    @@unique constraint alongside another dep FK the test also reuses directly,
-    the self-ref dep's create() and the test's own create() collide with P2002.
-    Self-ref deps pick the second entity option instead so the two never share
-    a unique key — UNLESS match_self_entity is set (see below).
-
-    match_self_entity: True when this self-ref dep is a same-entity-only
-    relation (x-relationships.<rel>.sameEntityField, cmd_646 — e.g.
-    approval_flow's preceded_by/followed_by) whose whole point is to link
-    records that DO share the primary record's x-entity-select value. Using
-    the second option here would make the generated "creates/edits with a
-    linked dep" test itself violate the very save-time guard cmd_646 added
-    (validateSameEntityRefs in service_validation.ts.jinja2) — see
-    docs/knowledge/cmd646-same-entity-field.md. Takes priority over the
-    is_self_ref divergence above; still degrades to the first option (not a
-    P2002 risk in practice — sameEntityField relations don't currently pair
-    with a @@unique spanning the entity-select field).
+    first option for an x-entity-select field, AND that field actually
+    participates in a Prisma `@@unique([...])` group alongside another dep FK
+    the test also reuses directly, the self-ref dep's create() and the test's
+    own create() would collide with P2002 — so in that case (checked via
+    `_prisma_uniques`, a structural Prisma-schema fact, cmd_652: not a
+    business-rule flag) the self-ref dep picks the second entity option
+    instead, so the two never share a unique key. When no such constraint
+    exists (the common case — and currently true for every self-ref entity in
+    this schema), the self-ref dep matches the primary's first option instead:
+    matching is strictly safer whenever there is no P2002 risk, since it can
+    never collide with a hand-written save-time guard that expects same-value
+    self-ref links (e.g. lib/approval_flow/service_validation_custom.ts).
     """
     if target == 'user':
         return [
@@ -421,12 +413,22 @@ def _get_dep_populate_fields(
     exclude = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | rel_props | oto_props | _inferred_internal
     _entity_opts = _get_entity_options(schema)
     _first_entity_val = f"'{_entity_opts[0]['value']}'" if _entity_opts else "''"
-    # Self-ref deps use the second entity option (see docstring) so they never
-    # share an x-entity-select value with the primary create test, which always
-    # uses the first option (see cypress_create_value's 'entity_select' branch).
+    # Self-ref deps only diverge to the second entity option (see docstring)
+    # when the x-entity-select field genuinely participates in a Prisma
+    # @@unique group — a structural fact read from _prisma_uniques, not a
+    # business-rule declaration. Otherwise they match the primary's first
+    # option, which is always safe when there is no such constraint.
+    _entity_select_field = next((pn for pn, p in props.items() if p.get('x-entity-select')), None)
+    _entity_select_in_composite_unique = bool(
+        _entity_select_field
+        and any(
+            _entity_select_field in group
+            for group in (_prisma_uniques.get(target, {}) or {}).get('composite', [])
+        )
+    )
     _self_ref_entity_val = (
-        _first_entity_val if match_self_entity
-        else f"'{_entity_opts[1]['value']}'" if is_self_ref and len(_entity_opts) > 1
+        f"'{_entity_opts[1]['value']}'"
+        if is_self_ref and _entity_select_in_composite_unique and len(_entity_opts) > 1
         else _first_entity_val
     )
     result = []
@@ -2078,9 +2080,6 @@ def helper_context(
                 'title': title_str,
                 'fk_deps': self_ref_fk_deps,
                 'label_field': label_field,
-                # cmd_646: threaded through to _get_dep_populate_fields via
-                # match_self_entity below — see its docstring.
-                'same_entity_field': rel.get('same_entity_field'),
             })
 
     # Enrich deps with extra_required_fields, has_user_accounts, needs_second.
@@ -2101,9 +2100,7 @@ def helper_context(
         x_rels = dep_def.get('x-relationships', {})
         dep_label_info = dep_label_info_by_var.get(dep['var_name'])
         extra_required_fields = _get_dep_populate_fields(
-            dep['target'], dep['var_name'], title_str, schema,
-            is_self_ref=(dep['target'] == model_name),
-            match_self_entity=bool(dep.get('same_entity_field')),
+            dep['target'], dep['var_name'], title_str, schema, is_self_ref=(dep['target'] == model_name),
         )
         # Idempotency hook for `populateXxxDependencies`: when the dep record
         # can be found again by a deterministic key, the template uses

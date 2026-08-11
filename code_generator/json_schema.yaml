@@ -297,21 +297,10 @@ definitions:
         type: many-to-many
         target: approval_flow
         labelField: [entity_name, approver_role.name]
-        # sameEntityField (cmd_646): self-referential m2m candidates/links must
-        # share this scalar field's CURRENT (not stale DB-snapshot) value with
-        # the row being edited. Drives three generated call sites off one
-        # declaration — FormUpsert's live-state formValues forwarding, the
-        # service_validation.ts save-time guard, and (by convention) the
-        # hand-written isCrossEntityRef() predicate in this entity's
-        # lib/{{entity}}/autocomplete_filter.ts that both the filter and the
-        # validator call. Template for future same-entity-only self-refs —
-        # see docs/knowledge/cmd646-same-entity-field.md.
-        sameEntityField: entity_name
       followed_by:
         type: many-to-many
         target: approval_flow
         labelField: [entity_name, approver_role.name]
-        sameEntityField: entity_name
     x-import-key: [entity_name]
     x-display:
       table:
