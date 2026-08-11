@@ -871,6 +871,19 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `develop` copies) now excludes cypress from grouping and ignores its
   routine minor/patch bumps; security-update PRs are unaffected. See
   `docs/knowledge/testing-cypress.md` ("Cypress version held back").
+- **`receiving_confirm_route.ts.jinja2` deleted — orphaned since cmd_494** (cmd_651): the RC-1
+  ruling (2026-07-13, `docs/knowledge/appendix/inventory-domain-generalization-design.md` §4.5)
+  abolished `x-receiving` and stated `ReceivingConfirmForm.tsx` + the confirm route were "deleted,
+  no replacement." In practice only `ReceivingConfirmForm.tsx` and its `generate.py` call site were
+  removed at the time; the route template itself was never wired into `generate.py` to begin with
+  (git history: both files were added together in the same original commit, `1cebe8ed`, alongside
+  the unrelated `x-reservation.actions` ship/release/cancel feature) and was never referenced by any
+  `_render()`/`_write()` call — an unused, dead file from day one. Confirmed no equivalent leftover
+  for ship/release/cancel: `x-reservation.actions` (the feature that originally shipped
+  `reservation_actions.ts.jinja2`) was already fully removed in cmd_494, template included.
+  Repo-wide grep for `receiving_confirm`/`ReceivingConfirmForm` across `code_generator/`,
+  `json_schema.yaml`/`json_schema_internal.yaml`, and both consumer submodule checkouts
+  (`app-template`, `app-template-4`) returns zero hits after this change.
 
 ## [3.0.0] - 2026-07-30
 

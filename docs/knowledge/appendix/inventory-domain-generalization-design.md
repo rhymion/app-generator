@@ -322,6 +322,12 @@ receiving flow, the implementor must **stop and raise the issue for maintainer r
 proceeding with blind deletion. The ruling is based on the premise that the form is
 unused in the current approval flow; if that premise is wrong, escalate.
 
+**Update (cmd_651)**: item 2 above ("confirm route... deleted") was not literally true at the time
+this section was written — only `ReceivingConfirmForm.tsx` and its `generate.py` call site were
+removed; `code_generator/templates/receiving_confirm_route.ts.jinja2` itself was left behind,
+unreferenced by any `_render()`/`_write()` call, until cmd_651 deleted it. See `CHANGELOG.md`
+(`### Internal`, cmd_651) for the full grep evidence trail.
+
 ### 4.6 Standalone Release Action — Deletion Safety (C.2 Verification Result)
 
 **Investigation finding: no standalone `/actions/release` routes exist in the current schema.**
