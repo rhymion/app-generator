@@ -1181,13 +1181,19 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.clearCookies();
           cy.login(setup.requestorUser.email, 'test-password');
           cy.visit(`/en/{{ parent }}/view/${data.record.id}`);
-          cy.get('[aria-label="Re-submit"]').should('be.visible');
-          cy.get('[aria-label="Re-submit"]').click();
+          // Scope to this approval_flow's own row (exact match, cmd_641):
+          // an entity can have a second, ungated approval_flow (no
+          // requestor_role_id, so it applies to every requestor — see the
+          // 7.1 comment above), and once more than one of this approvable's
+          // requests is rejected a page-wide `[aria-label="Re-submit"]`
+          // lookup matches more than one row. Grab the one this test means,
+          // by the approver role name, not position.
+          cy.contains('td', exactRe('Test {{ title }} Approver Role')).closest('tr').find('[aria-label="Re-submit"]').should('be.visible').click();
           cy.get('[role="dialog"]').find('button').contains('Re-submit').click();
           cy.contains('Pending').should('be.visible');
-          cy.get('[aria-label="Re-submit"]').should('not.exist');
+          cy.contains('td', exactRe('Test {{ title }} Approver Role')).closest('tr').find('[aria-label="Re-submit"]').should('not.exist');
           // History expand button should appear after re-submission
-          cy.get('[aria-label="Expand history"]').should('be.visible');
+          cy.contains('td', exactRe('Test {{ title }} Approver Role')).closest('tr').find('[aria-label="Expand history"]').should('be.visible');
         });
       });
     });
