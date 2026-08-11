@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireSession, handleApiError, ApiError } from '@/lib/api-auth';
+import { requireDualAuth, handleApiError, ApiError } from '@/lib/api-auth';
 import prisma from '@/lib/prisma';
 {% if has_approvable %}
 import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
@@ -22,7 +22,9 @@ type SplitPart = {
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { userId } = await requireSession();
+    // cmd_648: dual-auth — X-API-Key/Authorization header when present,
+    // session cookie otherwise (see app/api/search/route.ts).
+    const { userId } = await requireDualAuth(req);
     {% if not has_approvable %}
     void userId;
     {% endif %}

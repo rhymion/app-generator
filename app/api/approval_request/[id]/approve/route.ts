@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireSession, handleApiError } from '@/lib/api-auth';
+import { requireDualAuth, handleApiError } from '@/lib/api-auth';
 import { ApiError } from '@/lib/api-auth';
 import prisma from '@/lib/prisma';
 import { getUserRoleIds } from '@/lib/authz';
@@ -12,7 +12,9 @@ import { notifyApprovalOrderReached } from '@/lib/_notifyApprovalRequest';
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const { userId } = await requireSession();
+    // cmd_648: dual-auth — X-API-Key/Authorization header when present,
+    // session cookie otherwise (see app/api/search/route.ts).
+    const { userId } = await requireDualAuth(request);
 
     const req = await prisma.approval_request.findUnique({
       where: { id },
