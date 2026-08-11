@@ -25,8 +25,30 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   sibling `[aria-label="Approve"]` / `[aria-label="Reject"]` lookups in the same describe block
   (tests 7.4/7.5/7.6/7.7/7.9) carry the identical latent hazard and were left unscoped — noted for
   a follow-up cmd, out of this task's scope. Verified: `purchase_per_item.cy.ts` 9/9 passing
-  individually against the regenerated app; `code_generator` pytest suite 1223 passed, 0 skipped
-  after `generate-code`.
+  individually and in a full 23-spec CI-order run (`approval_flow.cy.ts` through
+  `purchase_per_item.cy.ts`, matching the exact failing CI run's spec order) against the exact
+  submodule commit that failed in CI; `code_generator` pytest suite 1227 passed, 0 skipped after
+  `generate-code`.
+- **`helper_context()`'s per-dependency loop variable shadowed the entity-level `title`**
+  (`code_generator/generators_test.py`, found verifying the fix above): the multi-FK-to-same-target
+  dep-splitting loop (e.g. `inventory_movement`'s `from_inventory_id`/`to_inventory_id`, both
+  pointing at `inventory`) reused the bare name `title` for each per-dependency label, permanently
+  overwriting the outer `title = to_title_case(parent)` for the rest of the function — so
+  `helper_context()`'s returned `title` (used by `test_helper.ts.jinja2` to name every approval-flow
+  seed role, e.g. `Test {{ title }} Approver Role`) silently became the *last-processed FK's* label
+  (`"To Inventory"`) instead of the entity's own title (`"Inventory Movement"`), while
+  `spec_context()` (no such loop) still returned the correct title — a cross-context mismatch
+  invisible until a test asserted on the seeded role's display text. The fix above's
+  `exactRe('Test {{ title }} Approver Role')` scoping does exactly that, so it surfaced the bug on
+  every entity hitting this pattern (`inventory_movement.cy.ts` 7.8 failed:
+  `Expected to find content: '/^Test Inventory Movement Approver Role$/' within the selector: 'td'
+  but never did`) — the old page-wide `[aria-label="Re-submit"]` selector never looked at role text,
+  so the mismatch had no test-visible effect before this task. Renamed the loop-local variable to
+  `dep_title`. Verified: instrumented `helper_context()`/`spec_context()` directly for
+  `inventory_movement` (`title` now `'Inventory Movement'` from both, previously `'To Inventory'`
+  vs `'Inventory Movement'`); `inventory_movement.cy.ts` 14/14 passing standalone after
+  `generate-code`; `code_generator` pytest suite unaffected (1227 passed, 0 skipped, same count
+  before and after this fix — no fixture relied on the shadowed value).
 - **Cross-entity global search never surfaced a row whose `organization` relationship was NULL**
   (cmd_640): `search_helpers.ts.jinja2`'s per-entity access clause filtered strictly on
   `{{ org_id_field }} IN (${ associatedOrgIds })`, which never matches `NULL` in SQL. Once an

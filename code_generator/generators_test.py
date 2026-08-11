@@ -1898,9 +1898,11 @@ def helper_context(
         for r in fk_rels:
             prop_stem = re.sub(r'_id$', '', r['prop_name'])
             var_name = to_camel_case(prop_stem)
-            title = to_title_case(prop_stem)
+            # Local to this dep entry — must not shadow the entity-level `title`
+            # (used later for the approval-role names in this same function).
+            dep_title = to_title_case(prop_stem)
             if not any(d['var_name'] == var_name for d in deps):
-                deps.append({'target': target, 'var_name': var_name, 'title': title, 'fk_deps': _orig_fk_deps})
+                deps.append({'target': target, 'var_name': var_name, 'title': dep_title, 'fk_deps': _orig_fk_deps})
             entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
 
     # Handle single-FK non-standard prop names (e.g. work_creator_id → creator).
