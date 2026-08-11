@@ -47,6 +47,9 @@ import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
 {% if has_image_props %}
 import ImageUpload from '@/components/_standard/ImageUpload';
 {% endif %}
+{% if uses_image_display %}
+import ImageDisplay from '@/components/_standard/ImageDisplay';
+{% endif %}
 {% if custom_upsert_imports %}
 {{ custom_upsert_imports }}
 {% endif %}

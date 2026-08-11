@@ -116,6 +116,140 @@ def _int_enum_option(v, i: int) -> str:
         return f"{{ value: {i}, label: '{v}' }}"
 
 
+def _readonly_display_field(
+    p: str,
+    filtered_props: dict,
+    rel_by_prop: dict,
+    schema: dict | None,
+    seen_ns: set,
+    indent: str = "      ",
+) -> dict:
+    """Build the read-only display JSX for property `p`, dispatching on its
+    relation/type exactly like FormView renders every one of its fields
+    (FormView is always read-only). Shared by form_view_context (every
+    field) and form_upsert_context (x-readonly-fields, edit mode only) so
+    the two render identically and can never drift apart (cmd_642:
+    FormUpsert used to hand-roll a type-blind `String(src.field)` TextField
+    for every readonly field regardless of type — for a FK this showed the
+    raw id with a nonexistent i18n key instead of the resolved labelField
+    value, and for enum fields it showed the raw untranslated code).
+
+    Returns a dict: jsx, ns_hooks (list[str]), opt_setups (list[str]),
+    uses_format_label_value (bool), use_dayjs (bool). `seen_ns` is mutated
+    to dedupe `useTranslations` hooks — pass the same set across every field
+    rendered into one file.
+    """
+    result = {
+        'jsx': '', 'ns_hooks': [], 'opt_setups': [],
+        'uses_format_label_value': False, 'use_dayjs': False,
+    }
+    fk = to_camel_case(p)
+    rel = rel_by_prop.get(p)
+
+    if rel:
+        label_f       = rel.get('label_field', 'name')
+        label_fk      = fk.removesuffix('Id')
+        rel_name      = rel.get('relation_name', p.removesuffix('_id'))
+        target        = rel.get('target', p.removesuffix('_id'))
+        is_oto        = rel.get('is_selector_oto', False)
+        # For selector OTO, the FK prop is excluded from src type; use relation?.id instead
+        fk_id_expr    = f"src.{rel_name}?.id" if is_oto else f"src.{p}"
+        built = build_label_expression(f"src.{rel_name}", label_f, target, schema or {})
+        if built['has_format']:
+            result['uses_format_label_value'] = True
+        rel_value_expr = built['expression']
+        # For non-selector m2o, allow falling back to the raw FK value when
+        # the relation row failed to include — preserves the historical
+        # behaviour where empty labels still show *something* identifying.
+        value_expr = rel_value_expr if is_oto else f"({rel_value_expr}) || src.{p} || ''"
+        result['jsx'] = (
+            f"{indent}<AppFieldRelation\n"
+            f"{indent}  label={{tf('{label_fk}')}}\n"
+            f"{indent}  value={{{value_expr}}}\n"
+            f"{indent}  href={{{fk_id_expr} ? `/{target}/view/${{{fk_id_expr}}}` : null}}\n"
+            f"{indent}  readOnly\n"
+            f"{indent}/>"
+        )
+        return result
+
+    prop = filtered_props.get(p, {}) or {}
+    actual = _get_actual_type(prop)
+    fmt = prop.get('format')
+    enum_vals = prop.get('enum')
+
+    if actual == 'string' and fmt in ('date', 'date-time', 'time'):
+        show_time_attr = '' if fmt in ('date-time', 'time') else ' show_time={false}'
+        show_date_attr = ' show_date={false}' if fmt == 'time' else ''
+        if fmt == 'date':
+            result['use_dayjs'] = True
+            # Convert UTC midnight ISO string to local midnight Date so dayjs() shows the
+            # correct calendar date in all timezones. 'T00:00:00' without tz suffix = local.
+            date_time_expr = f"{{src.{p} ? dayjs(new Date(src.{p}).toISOString().slice(0, 10) + 'T00:00:00').toDate() : null}}"
+        else:
+            date_time_expr = f"{{src.{p}}}"
+        result['jsx'] = (
+            f"{indent}<DateTimeWrapper label={{tf('{fk}')}} date_time={date_time_expr}"
+            f"{show_time_attr}{show_date_attr} readOnly />"
+        )
+        return result
+
+    if actual == 'string' and fmt == 'uri':
+        result['jsx'] = f"{indent}<ImageDisplay url={{src.{p}}} alt={{tf('{fk}')}} />"
+        return result
+
+    if actual == 'boolean':
+        result['jsx'] = (
+            f"{indent}<AppFieldBoolean\n{indent}  label={{tf('{fk}')}}\n"
+            f"{indent}  checked={{Boolean(src.{p})}}\n{indent}  readOnly\n{indent}/>"
+        )
+        return result
+
+    if actual in ('integer', 'number') and isinstance(enum_vals, list):
+        state_name = f"{safe_var_name(p)}Options"
+        ns = prop.get('x-enum-namespace')
+        if ns:
+            if ns not in seen_ns:
+                seen_ns.add(ns)
+                result['ns_hooks'].append(f"  const t{ns} = useTranslations('{ns}');")
+            opts = ', '.join(
+                (f"{{ value: {(v if isinstance(v, (int, float)) else (i if not str(v).lstrip('-').isdigit() else int(v)))}, "
+                 f"label: t{ns}('{(v.lower()[0]+v[1:] if isinstance(v, str) and not str(v).lstrip('-').isdigit() else str(v))}') }}")
+                for i, v in enumerate(enum_vals)
+            )
+        else:
+            opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(enum_vals))
+        result['opt_setups'].append(f"  const {state_name} = [{opts}];")
+        result['jsx'] = (
+            f"{indent}<AppFieldText\n{indent}  label={{tf('{fk}')}}\n"
+            f"{indent}  value={{{state_name}.find(o => o.value === src.{p})?.label ?? ''}}\n"
+            f"{indent}  readOnly\n{indent}/>"
+        )
+        return result
+
+    if actual == 'string' and isinstance(enum_vals, list) and _native_enum_ns(prop):
+        ns = _native_enum_ns(prop)
+        state_name = f"{safe_var_name(p)}Options"
+        if ns not in seen_ns:
+            seen_ns.add(ns)
+            result['ns_hooks'].append(f"  const t{ns} = useTranslations('{ns}');")
+        opts = ', '.join(f"{{ value: '{v}', label: t{ns}('{_native_enum_key(v)}') }}" for v in enum_vals)
+        result['opt_setups'].append(f"  const {state_name} = [{opts}];")
+        result['jsx'] = (
+            f"{indent}<AppFieldText\n{indent}  label={{tf('{fk}')}}\n"
+            f"{indent}  value={{{state_name}.find(o => o.value === src.{p})?.label ?? ''}}\n"
+            f"{indent}  readOnly\n{indent}/>"
+        )
+        return result
+
+    fallback_op = '??' if actual in ('integer', 'number') else '||'
+    result['jsx'] = (
+        f"{indent}<AppFieldText\n{indent}  label={{tf('{fk}')}}\n"
+        f"{indent}  value={{src.{p} {fallback_op} ''}}\n"
+        f"{indent}  readOnly\n{indent}/>"
+    )
+    return result
+
+
 # ---------------------------------------------------------------------------
 # chart getters / page_chart
 # ---------------------------------------------------------------------------
@@ -2499,9 +2633,11 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         if filtered_props.get(p, {}).get('x-entity-select')
     }
     entity_select_options = ctx.get('entity_select_options', [])
+    enum_ns_hooks  = []
+    enum_opt_setups = []
+    seen_ns = set()
     for p in other_flds:
         fk = _tf(p)
-        rel = rel_by_prop.get(p)
         if p in entity_select_props_view:
             opts_var = f'{safe_var_name(p)}Options'
             opts_items = ', '.join(
@@ -2513,118 +2649,23 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 f"        value={{[{opts_items}].find((o) => o.value === src.{p})?.label ?? src.{p} ?? ''}}\n"
                 f"        readOnly\n      />"
             )
-        elif rel:
-            label_f       = rel.get('label_field', 'name')
-            label_fk      = fk.removesuffix('Id')
-            rel_name      = rel.get('relation_name', p.removesuffix('_id'))
-            target        = rel.get('target', p.removesuffix('_id'))
-            target_pascal = to_pascal_case(target)
-            is_oto        = rel.get('is_selector_oto', False)
-            # For selector OTO, the FK prop is excluded from src type; use relation?.id instead
-            fk_id_expr    = f"src.{rel_name}?.id" if is_oto else f"src.{p}"
-            built = build_label_expression(f"src.{rel_name}", label_f, target, schema or {})
-            if built['has_format']:
+        else:
+            built = _readonly_display_field(p, filtered_props, rel_by_prop, schema, seen_ns)
+            jsx_by_field[p] = built['jsx']
+            if built['uses_format_label_value']:
                 uses_format_label_value = True
-            rel_value_expr = built['expression']
-            # For non-selector m2o, allow falling back to the raw FK value when
-            # the relation row failed to include — preserves the historical
-            # behaviour where empty labels still show *something* identifying.
-            if is_oto:
-                value_expr = rel_value_expr
-            else:
-                value_expr = f"({rel_value_expr}) || src.{p} || ''"
-            jsx_by_field[p] = (
-                f"      <AppFieldRelation\n"
-                f"        label={{tf('{label_fk}')}}\n"
-                f"        value={{{value_expr}}}\n"
-                f"        href={{{fk_id_expr} ? `/{target}/view/${{{fk_id_expr}}}` : null}}\n"
-                f"        readOnly\n"
-                f"      />"
-            )
-        else:
-            fallback_actual = _get_actual_type(filtered_props.get(p, {}))
-            fallback_op = '??' if fallback_actual in ('integer', 'number') else '||'
-            jsx_by_field[p] = (
-                f"      <AppFieldText\n        label={{tf('{fk}')}}\n"
-                f"        value={{src.{p} {fallback_op} ''}}\n"
-                f"        readOnly\n      />"
-            )
+            enum_ns_hooks.extend(built['ns_hooks'])
+            enum_opt_setups.extend(built['opt_setups'])
 
-    # DateTime fields
-    for p in date_time_flds:
-        fk  = _tf(p)
-        fmt = filtered_props[p].get('format')
-        show_time_attr = '' if fmt in ('date-time', 'time') else ' show_time={false}'
-        show_date_attr = ' show_date={false}' if fmt == 'time' else ''
-        if fmt == 'date':
+    # DateTime / Image / Boolean / Enum fields — same shared renderer as
+    # above, dispatching by actual type (see `_readonly_display_field`).
+    for p in date_time_flds + image_flds + boolean_flds + enum_integer_flds + enum_native_flds:
+        built = _readonly_display_field(p, filtered_props, rel_by_prop, schema, seen_ns)
+        jsx_by_field[p] = built['jsx']
+        if built['use_dayjs']:
             use_dayjs = True
-            # Convert UTC midnight ISO string to local midnight Date so dayjs() shows the
-            # correct calendar date in all timezones. 'T00:00:00' without tz suffix = local.
-            date_time_expr = f"{{src.{p} ? dayjs(new Date(src.{p}).toISOString().slice(0, 10) + 'T00:00:00').toDate() : null}}"
-        else:
-            date_time_expr = f"{{src.{p}}}"
-        jsx_by_field[p] = (
-            f"      <DateTimeWrapper label={{tf('{fk}')}} date_time={date_time_expr}{show_time_attr}{show_date_attr} readOnly />"
-        )
-
-    # Image fields
-    for p in image_flds:
-        jsx_by_field[p] = f"      <ImageDisplay url={{src.{p}}} alt={{tf('{_tf(p)}')}} />"
-
-    # Boolean fields
-    for p in boolean_flds:
-        jsx_by_field[p] = (
-            f"      <AppFieldBoolean\n        label={{tf('{_tf(p)}')}}\n        checked={{Boolean(src.{p})}}\n        readOnly\n      />"
-        )
-
-    # Enum integer fields
-    enum_ns_hooks  = []
-    enum_opt_setups = []
-    seen_ns = set()
-    for p in enum_integer_flds:
-        prop       = filtered_props[p]
-        state_name = safe_var_name(p)
-        enum_vals  = prop.get('enum', [])
-        ns         = prop.get('x-enum-namespace')
-        if ns and ns not in seen_ns:
-            seen_ns.add(ns)
-            enum_ns_hooks.append(f"  const t{ns} = useTranslations('{ns}');")
-        if ns:
-            opts = ', '.join(
-                (f"{{ value: {(v if isinstance(v, (int, float)) else (i if not str(v).lstrip('-').isdigit() else int(v)))}, "
-                 f"label: t{ns}('{(v.lower()[0]+v[1:] if isinstance(v,str) and not str(v).lstrip('-').isdigit() else str(v))}') }}")
-                for i, v in enumerate(enum_vals)
-            )
-        else:
-            opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(enum_vals))
-        enum_opt_setups.append(f"  const {state_name}Options = [{opts}];")
-        fk = _tf(p)
-        jsx_by_field[p] = (
-            f"      <AppFieldText\n        label={{tf('{fk}')}}\n"
-            f"        value={{{state_name}Options.find(o => o.value === src.{p})?.label ?? ''}}\n"
-            f"        readOnly\n      />"
-        )
-
-    # Enum nativeEnum fields (string-backed Prisma enum, always translated)
-    for p in enum_native_flds:
-        prop       = filtered_props[p]
-        state_name = safe_var_name(p)
-        enum_vals  = prop.get('enum', [])
-        ns         = _native_enum_ns(prop)
-        if ns not in seen_ns:
-            seen_ns.add(ns)
-            enum_ns_hooks.append(f"  const t{ns} = useTranslations('{ns}');")
-        opts = ', '.join(
-            f"{{ value: '{v}', label: t{ns}('{_native_enum_key(v)}') }}"
-            for v in enum_vals
-        )
-        enum_opt_setups.append(f"  const {state_name}Options = [{opts}];")
-        fk = _tf(p)
-        jsx_by_field[p] = (
-            f"      <AppFieldText\n        label={{tf('{fk}')}}\n"
-            f"        value={{{state_name}Options.find(o => o.value === src.{p})?.label ?? ''}}\n"
-            f"        readOnly\n      />"
-        )
+        enum_ns_hooks.extend(built['ns_hooks'])
+        enum_opt_setups.extend(built['opt_setups'])
 
     # Custom view fields
     for p in custom_view_props:
@@ -2929,6 +2970,22 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     parent_rels_raw = ctx['parent_rels_raw']
     selector_oto_rels = ctx.get('selector_oto_rels', [])
     selector_oto_prop_names = {r['prop_name'] for r in selector_oto_rels}
+
+    # rel_by_prop (cmd_642): built from the UNFILTERED ctx['parent_rels_raw'] /
+    # ctx['selector_oto_rels'] — mirrors form_view_context exactly — so a
+    # readonly relation field (excluded below from the editable
+    # parent_rels_raw/selector_oto_rels lists) can still be looked up by the
+    # shared _readonly_display_field renderer.
+    rel_by_prop = {r['prop_name']: r for r in ctx['parent_rels_raw']}
+    for _oto_r in ctx.get('selector_oto_rels', []):
+        rel_by_prop[_oto_r['prop_name']] = {
+            'prop_name': _oto_r['prop_name'],
+            'label_field': _oto_r['label_field'],
+            'label_field_is_date': _oto_r.get('label_field_is_date', False),
+            'relation_name': _oto_r['relation_name'],
+            'target': _oto_r['target'],
+            'is_selector_oto': True,
+        }
 
     # Readonly fields: exclude from editable field lists; render as disabled in edit mode only.
     # Relation fields (parent_rels_raw / selector_oto_rels) are filtered here too, matching
@@ -3429,20 +3486,29 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         setter = _setter(sn)
         jsx_by_field[p] = f"      <{comp} value={{{sn}}} onChange={{set{setter}}} isEdit={{isEdit}} />"
 
-    # Readonly fields: displayed as readOnly text fields in edit mode, omitted in new mode.
-    # Ordered the same as every other field (schema declaration order, or
-    # x-display.form) — no longer forced to the trailing position.
+    # Readonly fields: displayed as readOnly in edit mode, omitted in new mode.
+    # Rendered via the same shared _readonly_display_field renderer FormView
+    # uses for every one of its (always read-only) fields (cmd_642) — before
+    # this fix, every readonly field here was hand-rolled as a type-blind
+    # `String(src.field)` TextField regardless of type, which for a FK
+    # showed the raw id under a nonexistent i18n key instead of the
+    # resolved labelField value, and for an enum field showed the raw
+    # untranslated code instead of its translated label. Ordered the same
+    # as every other field (schema declaration order, or x-display.form) —
+    # no longer forced to the trailing position.
     for _ro_fn in readonly_field_names:
         if _ro_fn not in filtered_props:
             continue
-        _ro_fk = _tf(_ro_fn)
+        _ro_built = _readonly_display_field(
+            _ro_fn, filtered_props, rel_by_prop, schema, enum_ns_set, indent="        "
+        )
+        enum_ns_hooks.extend(_ro_built['ns_hooks'])
+        enum_opt_setups.extend(_ro_built['opt_setups'])
+        if _ro_built['uses_format_label_value']:
+            uses_format_label_value = True
         jsx_by_field[_ro_fn] = (
             f"      {{isEdit && (\n"
-            f"        <AppFieldText\n"
-            f"          label={{tf('{_ro_fk}')}}\n"
-            f"          value={{src.{_ro_fn} !== null && src.{_ro_fn} !== undefined ? String(src.{_ro_fn}) : ''}}\n"
-            f"          readOnly\n"
-            f"        />\n"
+            f"{_ro_built['jsx']}\n"
             f"      )}}"
         )
 
@@ -4652,6 +4718,14 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     ]))
     uses_app_field_text = 'AppFieldText' in _rendered_body_text
     uses_app_field_boolean = 'AppFieldBoolean' in _rendered_body_text
+    # x-readonly relation/image fields (cmd_642) render AppFieldRelation /
+    # ImageDisplay via the shared _readonly_display_field renderer even when
+    # this entity has no *editable* relation or image field — same
+    # text-search rationale as uses_app_field_text/uses_app_field_boolean
+    # above (cmd_529): re-deriving every path's boolean condition is fragile
+    # and easy to miss a branch.
+    uses_app_field_relation = 'AppFieldRelation' in _rendered_body_text
+    uses_image_display = 'ImageDisplay' in _rendered_body_text
     uses_use_callback = bool(parent_rels_raw) or bool(selector_oto_rels)
     # useRef is declared from several independent paths (top-level text/number
     # field refs, child-list/grid refs, flatten-section refs) — same
@@ -4686,9 +4760,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'has_comment_children':     has_comment_children,
         'has_many_to_one':          has_many_to_one or bool(enum_int_props) or bool(enum_str_props) or bool(entity_select_props) or flatten_needs_autocomplete,
         'has_field_select':         bool(enum_int_props) or bool(enum_str_props) or bool(entity_select_props) or flatten_needs_autocomplete,
-        'has_entity_autocomplete':  bool(parent_rels_raw) or bool(selector_oto_rels),
+        'has_entity_autocomplete':  bool(parent_rels_raw) or bool(selector_oto_rels) or uses_app_field_relation,
+        'uses_image_display':       uses_image_display,
         'has_child_entity_autocomplete': bool(child_entity_rel_opt),
-        'has_datetime_props':       bool(date_time_props) or flatten_needs_datetime,
+        'has_datetime_props':       bool(date_time_props) or flatten_needs_datetime or 'DateTimeWrapper' in _rendered_body_text,
         'has_image_props':          bool(image_props),
         'has_number_props':         bool(number_props) or flatten_needs_number_field,
         'has_boolean_props':        bool(boolean_props) or flatten_needs_boolean,
