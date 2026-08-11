@@ -27,6 +27,24 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   a follow-up cmd, out of this task's scope. Verified: `purchase_per_item.cy.ts` 9/9 passing
   individually against the regenerated app; `code_generator` pytest suite 1223 passed, 0 skipped
   after `generate-code`.
+- **Cross-entity global search never surfaced a row whose `organization` relationship was NULL**
+  (cmd_640): `search_helpers.ts.jinja2`'s per-entity access clause filtered strictly on
+  `{{ org_id_field }} IN (${ associatedOrgIds })`, which never matches `NULL` in SQL. Once an
+  org-scoped entity's `organization` relationship becomes optional (cmd_611/612), an org-less row
+  was invisible to `buildSearchQuery()` for every caller, including its own creator — the one
+  remaining call site still using the pre-cmd_611/612 unconditional-deny shape (every other
+  `org_relationship_optional` site — `actions.ts.jinja2`, `getters.ts.jinja2`,
+  `api_detail_route.ts.jinja2`, `api_import_route.ts.jinja2` — already had the OR-null admission
+  via cmd_611/612/632/634). Fixed by wiring the same `org_relationship_optional` computation into
+  `generate.py`'s search-entity context (search builds its own independent Prisma.sql fragments,
+  so it needed its own plumbing rather than reusing the object-filter templates' existing
+  context), gated at both org-filter sites in the template (the direct access clause and its
+  `parent.`-qualified `no_page_children` sibling). Verified against a real Postgres DB via proj_c's
+  `parent1` entity: `api/parent1.cy.ts`'s N10 spec failed with `expected false to equal true`
+  before this fix, passed after. See `docs/knowledge/org-optional-entity-support.md` for the full
+  design context, including a follow-up gap found but not fixed in this pass (CSV import's
+  dotted-FK lookup-target org filter doesn't admit a NULL-organization row on the lookup target
+  side either).
 - **Generated 3.3 "edits with mixed changes" test for a `user`-FK primary field selected a
   `Test User A` row that was never seeded, failing the `cy.selectAutocomplete` assertion**
   (cmd_633, real case: `shift`/`shift_template`): `spec_context()`'s `is_user_account` primary-FK

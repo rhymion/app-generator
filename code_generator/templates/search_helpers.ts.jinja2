@@ -56,11 +56,26 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
     // Build access WHERE mirroring build{{ entity.entity_type | replace("_", "") | title }}AccessWhere
     const {{ entity.access_clauses_ts_var }}: Prisma.Sql[] = [];
 {% if entity.should_filter_by_org %}
+{% if entity.org_relationship_optional %}
+    // org_relationship_optional: organization_id is nullable here, and
+    // `IN (...)` never matches NULL in SQL — an org-less row must stay
+    // visible to every caller (it belongs to no organization, so no
+    // organization boundary excludes it), not just callers who happen to
+    // share an org. Unconditional OR-null, no associatedOrgIds.length guard
+    // on admission — the length check below exists only because Prisma.join
+    // over an empty array cannot form a valid `IN (...)` list.
+    if (associatedOrgIds.length > 0) {
+      {{ entity.access_clauses_ts_var }}.push(Prisma.sql`({{ entity.org_id_field }} IN (${ Prisma.join(associatedOrgIds.map((id) => Prisma.sql`${ id }`)) }) OR {{ entity.org_id_field }} IS NULL)`);
+    } else {
+      {{ entity.access_clauses_ts_var }}.push(Prisma.sql`{{ entity.org_id_field }} IS NULL`);
+    }
+{% else %}
     if (associatedOrgIds.length > 0) {
       {{ entity.access_clauses_ts_var }}.push(Prisma.sql`{{ entity.org_id_field }} IN (${ Prisma.join(associatedOrgIds.map((id) => Prisma.sql`${ id }`)) })`);
     } else {
       {{ entity.access_clauses_ts_var }}.push(Prisma.sql`1=0`);
     }
+{% endif %}
 {% endif %}
 {% if entity.is_self_only %}
     // x-self-only: any explicit read grant (general or Creator/Assignee)
@@ -96,11 +111,21 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
     // Parent-qualified ACL for child subqueries (D-8: parent. prefix avoids creator_id ambiguity)
     const {{ entity.parent_access_clauses_ts_var }}: Prisma.Sql[] = [];
 {% if entity.should_filter_by_org %}
+{% if entity.org_relationship_optional %}
+    // See the non-parent-qualified branch above for rationale — same
+    // unconditional OR-null, qualified to the parent row.
+    if (associatedOrgIds.length > 0) {
+      {{ entity.parent_access_clauses_ts_var }}.push(Prisma.sql`(parent.{{ entity.org_id_field }} IN (${ Prisma.join(associatedOrgIds.map((id) => Prisma.sql`${ id }`)) }) OR parent.{{ entity.org_id_field }} IS NULL)`);
+    } else {
+      {{ entity.parent_access_clauses_ts_var }}.push(Prisma.sql`parent.{{ entity.org_id_field }} IS NULL`);
+    }
+{% else %}
     if (associatedOrgIds.length > 0) {
       {{ entity.parent_access_clauses_ts_var }}.push(Prisma.sql`parent.{{ entity.org_id_field }} IN (${ Prisma.join(associatedOrgIds.map((id) => Prisma.sql`${ id }`)) })`);
     } else {
       {{ entity.parent_access_clauses_ts_var }}.push(Prisma.sql`1=0`);
     }
+{% endif %}
 {% endif %}
 {% if entity.is_self_only %}
     // x-self-only: same unconditional-restriction rule as above, qualified
