@@ -85,13 +85,22 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
       // at mobile widths. Clicking the toolbar Add button mid-swap lands on a
       // non-hydrated handler and navigation silently no-ops — wait for the
       // CardListClient to finish hydration before clicking.
-{% if seed_count == 0 %}
-      // No seed items: wait for the "No items found" message as hydration marker.
-      cy.get('p[class*="MuiTypography-root"]').should('exist');
-{% else %}
-      // Seed items exist: wait for cards to appear as hydration marker.
-      cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', {{ seed_count }});
-{% endif %}
+      //
+      // The previous hydration markers here (checkbox count / "No items
+      // found" text) were satisfied by the desktop DataGrid too: MUI's
+      // built-in row-selection checkbox carries aria-label "Select row"
+      // (matches the same `aria-label^="Select "` prefix used for
+      // CardListClient's per-card checkboxes), and DataGridClient renders
+      // its own MuiTypography-root content regardless of viewport. So the
+      // wait could pass while the desktop DataGrid was still mounted,
+      // letting this click race the client-side swap — CardListClient's
+      // toolbar button carries the *same* aria-label as the desktop
+      // variant's ("Create New {{ title }}", by design), so landing on the
+      // wrong one during the swap intermittently threw
+      // `cy.click() ... contained 2 elements` in CI (cmd_653). `.MuiDataGrid-root`
+      // only ever renders in the desktop variant, so waiting for it to be
+      // gone is an unambiguous, viewport-independent hydration marker.
+      cy.get('.MuiDataGrid-root').should('not.exist');
       // CardListClient renders the toolbar add as an IconButton with the same
       // aria-label as the desktop variant ("Create New {{ title }}").
       cy.get('button[aria-label="Create New {{ title }}"]').click();
