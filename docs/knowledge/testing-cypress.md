@@ -360,6 +360,41 @@ This ensures the DataGrid has fully rendered before the count assertion.
 - Serialize `Date` fields to ISO strings before passing as props to client
   components (reduces hydration surface area).
 
+### Scroll selectors must be scoped to their own grid (cmd_634)
+
+**Problem**: a parent form with 2+ DataGrid children on the same page (e.g. proj_c's `parent1`,
+which has both `parent1_child1s` and `parent1_child2s`) intermittently failed the generated
+"scroll into view" helper with `can only scroll 1 element, you tried to scroll 2 elements` —
+because Cypress's `.MuiDataGrid-virtualScroller` / `data-rowindex` selectors, as generated,
+matched **every** DataGrid on the page, not just the target child's.
+
+**Fix**: scope every such selector to the specific grid under test (e.g. via the grid's own
+container/`data-field` ancestor) rather than querying the document globally. Applies to any
+generated DataGrid-child scroll helper — the bug is generic, not specific to `parent1`; it just
+needed 2+ DataGrid children on one form to surface.
+
+### DataGrid-child date/date-time/time edit cells need ISO input, not the top-level format (cmd_634)
+
+**This is a separate input mechanism from the `MUI DateTimePicker patterns` section below** — a
+DataGrid-child date/date-time/time column has no `renderEditCell` override, so editing it goes
+through the browser's **native `datetime-local` input**, not the `DateTimeWrapper`/MUI
+`DateTimePicker` widget the top-level form uses.
+
+**Problem**: `cy.type()` against a native `datetime-local` input validates the **entire** typed
+string against a strict `YYYY-MM-DDThh:mm` regex. Two things break it:
+1. The human-readable `MM/DD/YYYY` value format that works for the top-level form's
+   `DateTimeWrapper` (keyboard-segment input) fails outright against a `datetime-local` input.
+2. Even after converting to ISO format, the generated DataGrid-cell-edit helper's
+   `{selectall}` + value convention (needed for text/number cells, which do accept keystroke
+   sequences) still fails — `{selectall}` is typed as literal characters into a `datetime-local`
+   input, and Cypress's strict-regex validation rejects the combined string
+   (`You passed: {selectAll}2025-01-16T00:00`).
+
+**Fix**: for a DataGrid-child date/date-time/time cell, (a) format the value as ISO
+`YYYY-MM-DDThh:mm` before typing, and (b) use `.clear().type(value)` instead of the
+`{selectall}`-prefix pattern (text/number cells keep the `{selectall}` pattern unchanged — this
+is a `datetime-local`-input-specific carve-out, not a general replacement).
+
 ---
 
 ## MUI DateTimePicker patterns

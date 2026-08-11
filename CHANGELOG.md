@@ -49,6 +49,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   vs `'Inventory Movement'`); `inventory_movement.cy.ts` 14/14 passing standalone after
   `generate-code`; `code_generator` pytest suite unaffected (1227 passed, 0 skipped, same count
   before and after this fix — no fixture relied on the shadowed value).
+- **A parent record created with a NULL `organization` (cmd_611/612) became permanently
+  un-updatable — `upsert<Parent>()`'s pre-permission existence check threw `Error('Not found')`
+  even for its own creator** (cmd_634): `generators.py`'s `_actor_and_existing_block()` filtered
+  strictly on `organization_id: { in: _orgIds } }`, which never matches `NULL` in SQL, unlike its
+  three sibling org-filter sites (`remove<Parent>()` in `actions.ts.jinja2`,
+  `get<Parent>Detail()` in `getters.ts.jinja2`, and the CSV import route in
+  `api_import_route.ts.jinja2`), which already admitted a NULL-organization row via the same
+  `org_relationship_optional` OR-null clause. Wired the same (previously computed but unused)
+  context value into the upsert existence check so create/update, delete, and read now treat a
+  null organization consistently. Verified against proj_c's `parent1` entity in an isolated
+  worktree: the update-existence-check regression case now passes; `code_generator` pytest suite
+  1220 passed, 1 skipped (pre-existing, unrelated), 0 failed.
 - **Cross-entity global search never surfaced a row whose `organization` relationship was NULL**
   (cmd_640): `search_helpers.ts.jinja2`'s per-entity access clause filtered strictly on
   `{{ org_id_field }} IN (${ associatedOrgIds })`, which never matches `NULL` in SQL. Once an
@@ -498,6 +510,29 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/notification-triggers.md`.
 
 ### Internal
+- **Generated `parent1`-style Cypress spec (2+ DataGrid children on one parent form) intermittently
+  failed with "can only scroll 1 element, you tried to scroll 2 elements", and generated
+  DataGrid-child date/date-time/time edit cells rejected every typed value** (cmd_634, two
+  independent generator-scaffold bugs found and fixed together): (1) the generated scroll-into-view
+  helper's `.MuiDataGrid-virtualScroller` / `data-rowindex` selectors were unscoped, so on a form
+  with multiple DataGrid children (e.g. proj_c's `parent1`, with both `parent1_child1s` and
+  `parent1_child2s`) Cypress matched every grid on the page at once instead of just the target
+  child's — fixed by scoping the selectors to their own grid. (2) `generators.py`'s column_def
+  codegen renders every `date`/`date-time`/`time` field as MUI's built-in `type: 'dateTime'`
+  DataGrid column with no `renderEditCell` override, so editing goes through the browser's native
+  `datetime-local` input, which Cypress's `.type()` validates strictly as ISO `YYYY-MM-DDThh:mm`
+  — but the generated test scaffold's `fillDataGridRow` entries reused the human-readable
+  `MM/DD/YYYY` value the top-level form's `DateTimeWrapper` accepts, and even after ISO-formatting
+  that value, `editDataGridCell`'s `{selectall}`-prefix convention (needed for text/number cells)
+  still failed the same strict `.type()` validation on a datetime-local input. Fixed with a new
+  `_child_datetime_iso_value()` helper plus routing ISO-formatted values through `.clear().type()`
+  instead of the `{selectall}` pattern (text/number cells unchanged). Verified end-to-end in an
+  isolated proj_c worktree, both individually and combined with the sibling org-null fix above:
+  `parent1.cy.ts` 15/15 passing; `code_generator` pytest suite 1220 passed, 1 skipped
+  (pre-existing, unrelated), 0 failed. A repo-wide grep confirmed the underlying generator defect
+  is generic (any project could hit it with a future date-typed DataGrid-child field) even though
+  only proj_c's `parent1` currently exercises it (proj_b/proj_g's only DataGrid children have
+  text-only fields).
 - **Generated test helper's primary-FK-dep and own-record find-or-create removed; each `populate*Data`/`populate*FullData` call now gets a fully isolated slice of the primary FK dep's namespace** (cmd_620, Option β / Phase 2): closes the collision cmd_618's Phase 1 letter-indexed fix (above) deliberately left open — `populate*Data(n)`/`populate*FullData(n)` called more than once in the same test (same DB session, no `db:reset` in between) could have their per-iteration primary-FK-dep row (`record_lookup_where`'s guard) and the primary FK dep's own row (`primary_fk_dep`'s `lookup_where_unique` guard) found-and-reused across calls, silently entangling two logically independent test scenarios into sharing one FK target row. Both find-or-creates in `test_helper.ts.jinja2` are now unconditional `create()`s. To keep the second call from tripping `@unique` on the primary FK dep's own required fields, a per-entity monotonic `callIndex` (module-scope counter shared by `populate*Data`/`populate*FullData`, persists for the life of the Cypress plugin process) is spliced into the loop value: `` `Test {Title} ${i}` `` → `` `Test {Title} ${callIndex}_${i}` ``. `callIndex` is always `0` for a generated spec's own calls (each `it()` calls a given populate helper at most once), so generated fixtures are unaffected in form beyond the literal string; the isolation matters for hand-written specs (or composite helpers) that call the same populate function more than once in one test. `record_lookup_where`'s own computation, and the now-fully-dead `lookup_where_unique`, are removed from `code_generator/generators_test.py`. D∩L=∅ (cmd_618 Phase 1) is preserved — callIndex-shifted loop values still start with a digit, still disjoint from the letter-suffixed shared dep values. See `docs/knowledge/cmd614-test-data-uniqueness-design.md` §4.4.
 - **Generated test helper dep records now use a letter-indexed name suffix(`'Test {Title} A'`/`'Test {Title} B'`) instead of `'Test {Title}'`/`'Test {Title} 2'`** (cmd_618, Phase 1): 
   the old dep naming collided byte-for-byte with `populate*Data(n)`'s loop rows (`` `Test {Title} ${i}` ``)
