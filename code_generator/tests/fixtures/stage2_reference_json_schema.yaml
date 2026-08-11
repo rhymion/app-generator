@@ -432,10 +432,12 @@ definitions:
         type: many-to-many
         target: approval_flow
         labelField: [entity_name, approver_role.name]
+        sameEntityField: entity_name
       followed_by:
         type: many-to-many
         target: approval_flow
         labelField: [entity_name, approver_role.name]
+        sameEntityField: entity_name
     allOf:
       - $ref: "#/definitions/approval_flow"
       - type: object

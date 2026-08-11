@@ -2034,6 +2034,20 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         for c in embedded_ch
     )
 
+    # cmd_646: expose a connect-style m2m child's selected id list to
+    # validateOnAdd/validateOnUpdate via `data['{{ property_name }}']` —
+    # WITHOUT changing their `data: Record<string, unknown>` signature —
+    # scoped to children whose x-relationships.<rel>.sameEntityField is
+    # declared (see json_schema.yaml comment on approval_flow.preceded_by),
+    # not every m2m child, so this is inert for entities that don't opt in.
+    _same_entity_connect_lines = '\n'.join(
+        f"      {c['property_name']}: {c['child_var']}Ids,"
+        for c in embedded_ch
+        if c['use_connect'] and (c.get('relationship') or {}).get('same_entity_field')
+    )
+    if _same_entity_connect_lines:
+        validation_data_obj = validation_data_obj + '\n' + _same_entity_connect_lines
+
     child_nested_create = _build_child_nested_create(embedded_ch)
     child_nested_update = _build_child_nested_update(embedded_ch)
     child_assignee_notify_create_code = _build_child_assignee_notify_create_code(

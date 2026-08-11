@@ -48,8 +48,13 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
 
   it('(A)(B) shows a same-entity_name candidate and hides a different-entity_name candidate when adding Preceded By', () => {
     cy.task<any>('db:populateApprovalFlowDependencies').then((deps) => {
-      // deps.precededBy already exists with entity_name 'setting' — the (B)
-      // candidate: a different entity_name than editTarget.
+      // deps.precededBy already exists with entity_name 'user' (cmd_646:
+      // matches populateApprovalFlowDependencies' own base record, so the
+      // generated approval_flow.cy.ts 2.2/3.1 create/edit flows link a
+      // SAME-entity dep and don't trip the cmd_646 save-time guard below) —
+      // unused here as the (B) candidate; this test creates its own
+      // 'setting'-entity_name row instead. The (B) candidate below is a
+      // different entity_name than editTarget.
       //
       // editTarget and the (A) candidate share entity_name 'permission' but
       // use DIFFERENT roles (approverRole vs approverRole2): approval_flow's
@@ -113,6 +118,111 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
             cy.contains(expectedLabel).should('exist');
             cy.visit(`/en/approval_flow/view/${editTarget.id}`);
             cy.contains(expectedLabel).should('exist');
+          });
+        });
+      });
+    });
+  });
+
+  // cmd_646 D1 (Option B): entity_name empty/mid-edit windows intentionally
+  // show every candidate rather than disabling preceded_by/followed_by
+  // outright (no existing generator mechanism to conditionally disable a
+  // child list on a sibling field's value — see the isCrossEntityRef()
+  // comment in lib/approval_flow/autocomplete_filter.ts). The two tests
+  // below prove the AC-2(3)/AC-5 backstop this relies on instead: a
+  // cross-entity_name link can never actually be PERSISTED, whatever the
+  // client-side filter let through — enforced by validateSameEntityRefs()
+  // in lib/approval_flow/service_validation.ts, reached both through the
+  // UI (FormUpsert's server action) and a bare API call.
+  // cmd_646 finding: pre-existing, not fixed here (out of scope). See report.
+  it('(UI) rejects saving after changing entity_name to no longer match an already-added Preceded By', () => {
+    cy.task<any>('db:populateApprovalFlowDependencies').then((deps) => {
+      createApprovalFlow('permission', deps.approverRole2.id).then(() => {
+        createApprovalFlow('permission', deps.approverRole.id).then((editTarget) => {
+          cy.visit(`/en/approval_flow/edit/${editTarget.id}`);
+          // Add a Preceded By that is same-entity_name at the moment it is
+          // picked (the client-side filter narrows to 'permission' here).
+          cy.clickButton('Add Preceded By');
+          cy.get('div[role="dialog"]').find('input').type('permission');
+          cy.contains('.MuiAutocomplete-popper li', 'permission').click();
+          cy.get('div[role="dialog"]').find('button').contains('Add').click();
+          // Now change entity_name — the already-added item is NOT
+          // retroactively removed client-side (EditableListWrapper only
+          // holds what was explicitly added/removed), so this reproduces a
+          // real "stale selection now mismatches" save attempt.
+          cy.selectAutocomplete('Entity Name', 'Setting');
+          cy.intercept('POST', `/en/approval_flow/edit/${editTarget.id}`).as('save');
+          cy.clickButton('Save');
+          cy.wait('@save').its('response.statusCode').should('be.gte', 400);
+          // Strongest available proof the save never committed: the record
+          // is unchanged server-side, independent of the client's crashed
+          // rendering (see comment above).
+          cy.request({
+            method: 'GET',
+            url: `/api/approval_flow/${editTarget.id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+          }).then((res) => {
+            expect(res.body.entity_name).to.eq('permission');
+          });
+        });
+      });
+    });
+  });
+
+  it('(API) rejects a bare POST linking preceded_by to a different-entity_name row', () => {
+    cy.task<any>('db:populateApprovalFlowDependencies').then((deps) => {
+      createApprovalFlow('setting', deps.approverRole2.id).then((crossEntityRow) => {
+        cy.request({
+          method: 'POST',
+          url: API_BASE,
+          headers: { 'X-API-Key': TEST_API_KEY },
+          failOnStatusCode: false,
+          body: {
+            entity_name: 'permission',
+            approver_role_id: deps.approverRole.id,
+            precededBy_ids: [crossEntityRow.id],
+            followedBy_ids: [],
+          },
+        }).then((res) => {
+          // plain `throw new Error(...)` in validateSchemaRules (not
+          // ApiError) falls through handleApiError()'s 500 branch — same
+          // convention the generated api/approval_flow.cy.ts spec already
+          // uses (`.to.be.gte(400)`) for the pre-existing REQUIRED_FIELDS
+          // checks, not a cmd_646-specific choice.
+          expect(res.status).to.be.gte(400);
+          expect(res.body?.error ?? JSON.stringify(res.body)).to.contain(
+            "Preceded By must share this record's entity_name",
+          );
+        });
+      });
+    });
+  });
+
+  it('(API) rejects a bare PUT linking followed_by to a different-entity_name row', () => {
+    cy.task<any>('db:populateApprovalFlowDependencies').then((deps) => {
+      createApprovalFlow('setting', deps.approverRole2.id).then((crossEntityRow) => {
+        createApprovalFlow('permission', deps.approverRole.id).then((editTarget) => {
+          cy.request({
+            method: 'PUT',
+            url: `${API_BASE}/${editTarget.id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            failOnStatusCode: false,
+            body: {
+              entity_name: 'permission',
+              approver_role_id: deps.approverRole.id,
+              precededBy_ids: [],
+              followedBy_ids: [crossEntityRow.id],
+            },
+          }).then((res) => {
+            // plain `throw new Error(...)` in validateSchemaRules (not
+          // ApiError) falls through handleApiError()'s 500 branch — same
+          // convention the generated api/approval_flow.cy.ts spec already
+          // uses (`.to.be.gte(400)`) for the pre-existing REQUIRED_FIELDS
+          // checks, not a cmd_646-specific choice.
+          expect(res.status).to.be.gte(400);
+            expect(res.body?.error ?? JSON.stringify(res.body)).to.contain(
+              "Followed By must share this record's entity_name",
+            );
           });
         });
       });

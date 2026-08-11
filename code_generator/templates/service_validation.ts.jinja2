@@ -1,4 +1,7 @@
 import prisma from '@/lib/prisma';
+{% if same_entity_checks %}
+import { isCrossEntityRef } from '@/lib/{{ model }}/autocomplete_filter';
+{% endif %}
 
 type TransactionClient = Pick<typeof prisma, '{{ model }}'{% for check in one_to_one_checks %} | '{{ check.target }}'{% endfor %}>;
 type RequiredField = { key: string; label: string };
@@ -67,7 +70,44 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
       throw new Error(`${relation.label} is already linked`);
     }
   }
+{% if same_entity_checks %}
+
+  await validateSameEntityRefs(tx, data);
+{% endif %}
 }
+{% if same_entity_checks %}
+
+// cmd_646: self-referential m2m links (e.g. a multi-stage approval chain's
+// preceded_by/followed_by) are only ever meaningful WITHIN the same
+// x-relationships.<rel>.sameEntityField value (see json_schema.yaml comment
+// on the schema declaration this is generated from). isCrossEntityRef() is
+// the SAME predicate the autocomplete filter (lib/{{ model }}/
+// autocomplete_filter.ts) uses to narrow candidates client-side — this is
+// the save-time backstop for whatever the client-side filter didn't catch
+// (a bare API call, a stale form, a race with another edit).
+async function validateSameEntityRefs(tx: TransactionClient, data: Record<string, unknown>): Promise<void> {
+{% for check in same_entity_checks %}
+  {
+    const selfValue = data['{{ check.same_field }}'];
+    const ids = Array.isArray(data['{{ check.prop_name }}'])
+      ? (data['{{ check.prop_name }}'] as unknown[]).filter((v): v is string => typeof v === 'string')
+      : [];
+    if (typeof selfValue === 'string' && selfValue.length > 0 && ids.length > 0) {
+      const linked = await tx.{{ model }}.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, {{ check.same_field }}: true },
+      });
+      for (const row of linked) {
+        const rowValue = (row as unknown as Record<string, unknown>)['{{ check.same_field }}'];
+        if (isCrossEntityRef(selfValue, typeof rowValue === 'string' ? rowValue : '')) {
+          throw new Error('{{ check.label }} must share this record\'s {{ check.same_field }}');
+        }
+      }
+    }
+  }
+{% endfor %}
+}
+{% endif %}
 
 export async function validateOnAdd(tx: TransactionClient, data: Record<string, unknown>): Promise<void> {
   await validateSchemaRules(tx, data, null);

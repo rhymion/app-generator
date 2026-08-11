@@ -182,7 +182,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}cy.clickButton('Add {{ child.title }}');
 {% if child.dep_var_name %}
 {{ I }}cy.get('div[role="dialog"]').find('input').type(deps.{{ child.dep_var_name }}.name);
-{{ I }}cy.get('.MuiAutocomplete-popper li').first().click();
+{{ I }}cy.contains('.MuiAutocomplete-popper li', exactRe(deps.{{ child.dep_var_name }}.name)).click();
 {% else %}
 {{ I }}cy.get('div[role="dialog"]').find('input').type('{{ child.autocomplete_seed_label_1 }}');
 {{ I }}cy.get('.MuiAutocomplete-popper li').contains('{{ child.autocomplete_seed_label_1 }}').click();
@@ -231,7 +231,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
     it('3.1 adds optional data and child items', () => {
 {% if use_deps_in_3_1 %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
-        cy.task('db:populate{{ pascal }}', 1);
+        cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
 {% for child in list_children_data %}
 {% if child.render_type == 'editable-list-autocomplete' and child.is_external_target and not child.dep_var_name %}
         cy.task('db:populate{{ child.target_pascal }}', 1);
@@ -246,12 +246,17 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
 {% endif %}
 {% if can_list and can_view %}
+{% if list_id_is_unique %}
         cy.visit('/en/{{ parent }}');
         cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-{% if list_id_is_unique %}
         cy.contains('{{ list_id_1 }}').click();
 {% else %}
-        cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+        {# list_id_1 ('{{ list_id_1 }}') is not guaranteed unique in the DB —
+           a self-ref m2m dep (cmd_646) or another row can share the same
+           display text, making '.find(\'a\').first()' pick an arbitrary
+           matching row instead of the one just created. Navigate straight to
+           the known record's own id instead of searching the list by text. #}
+        cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
 {% endif %}
         cy.get('a[aria-label="Edit"]').click();
 {% elif can_list %}
@@ -290,7 +295,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.clickButton('Add {{ child.title }}');
 {% if use_deps_in_3_1 and child.dep_var_name %}
         cy.get('div[role="dialog"]').find('input').type(deps.{{ child.dep_var_name }}.name);
-        cy.get('.MuiAutocomplete-popper li').first().click();
+        cy.contains('.MuiAutocomplete-popper li', exactRe(deps.{{ child.dep_var_name }}.name)).click();
 {% else %}
         cy.get('div[role="dialog"]').find('input').type('{{ child.autocomplete_seed_label_1 }}');
         cy.get('.MuiAutocomplete-popper li').contains('{{ child.autocomplete_seed_label_1 }}').click();
@@ -334,7 +339,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if list_id_is_unique %}
         cy.contains('{{ list_id_1 }}').click();
 {% else %}
-        cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+        {# See the entry-navigation comment above — list_id_1 may not be
+           unique, so navigate straight to the known id instead. #}
+        cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
 {% endif %}
 {% else %}
         cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
@@ -354,6 +361,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.checkField('{{ check_field_label }}', '{{ check_field_value_1 }}');
 {% endif %}
 {% endif %}
+{% endif %}
+{% if use_deps_in_3_1 %}
+      });
 {% endif %}
       });
     });

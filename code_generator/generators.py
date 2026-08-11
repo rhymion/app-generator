@@ -3033,6 +3033,23 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     custom_upsert_props  = [p for p in cats['custom_upsert'] if p not in readonly_field_names]
     entity_select_props  = [p for p in cats.get('entity_select', []) if p not in readonly_field_names]
 
+    # cmd_646: fields whose current UI value is available as a `useState`
+    # variable (as opposed to text/number fields, which are uncontrolled
+    # inputs read via `.Ref.current?.value`). Used below to forward a
+    # self-referential m2m relation's `sameEntityField` (x-relationships.
+    # <rel>.sameEntityField) as its LIVE value rather than the stale
+    # DB-snapshot `src` prop — see the is_self branch in the child-grid loop.
+    live_state_var_by_field = {
+        p: safe_var_name(p)
+        for p in (
+            date_time_props + boolean_props + enum_int_props + enum_str_props
+            + custom_upsert_props + entity_select_props
+        )
+    }
+    live_state_var_by_field.update(
+        {r['prop_name']: safe_var_name(r['prop_name']) for r in (list(parent_rels_raw) + list(selector_oto_rels))}
+    )
+
     rel_prop_names = {r['prop_name'] for r in parent_rels_raw}
 
     # ---- States / Refs ----
@@ -4115,8 +4132,30 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             # defaults to a no-op {} regardless, so this is inert unless a
             # hand-written filter (see lib/{{ entity }}/autocomplete_filter.ts)
             # opts in.
+            #
+            # cmd_646: `src` is the initial DB snapshot passed in as a prop —
+            # it does NOT reflect an in-progress edit to `sameEntityField`
+            # made earlier in the same form session (e.g. changing
+            # entity_name before picking preceded_by/followed_by). Where the
+            # relation declares x-relationships.<rel>.sameEntityField AND
+            # that field has a live useState variable in this component
+            # (live_state_var_by_field), override just that one key with its
+            # current value on top of the src spread — every other field
+            # still comes from src unchanged. Falls back to the old
+            # unconditional `src` forwarding when no sameEntityField is
+            # declared, or when it names a field with no live state var
+            # (e.g. an uncontrolled text input) — see docs/knowledge/
+            # cmd646-same-entity-field.md for the latter's scope.
+            same_entity_field = rel.get('same_entity_field')
+            same_entity_live_var = live_state_var_by_field.get(same_entity_field) if same_entity_field else None
             _search_call_args = 'query, includeIds'
-            if is_self:
+            if is_self and same_entity_live_var:
+                _search_call_args = (
+                    "query, includeIds, undefined, "
+                    f"{{ callerEntity: '{model}', formValues: {{ ...(src as unknown as Record<string, unknown>), "
+                    f"{same_entity_field}: {same_entity_live_var} }} }}"
+                )
+            elif is_self:
                 _search_call_args = (
                     "query, includeIds, undefined, "
                     f"{{ callerEntity: '{model}', formValues: src as unknown as Record<string, unknown> }}"

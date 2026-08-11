@@ -357,7 +357,10 @@ def _seed_path_part(
     return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
 
 
-def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dict, is_self_ref: bool = False) -> list[dict]:
+def _get_dep_populate_fields(
+    target: str, var_name: str, title: str, schema: dict,
+    is_self_ref: bool = False, match_self_entity: bool = False,
+) -> list[dict]:
     """Compute extra_required_fields for a dep record in populateDependencies.
 
     Uses title-based name (e.g. 'Test Parent', 'Test Assignee') and encodes
@@ -370,10 +373,22 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
     with minimal/full data" flow also creates, using the first x-entity-select
     option (see cypress_create_value). If a self-ref dep also picked that same
     first option for an x-entity-select field, and that field participates in a
-    @@unique constraint alongside another dep FK the test also reuses directly
-    (e.g. approval_flow's @@unique([entity_name, approver_role_id])), the self-ref
-    dep's create() and the test's own create() collide with P2002. Self-ref deps
-    pick the second entity option instead so the two never share a unique key.
+    @@unique constraint alongside another dep FK the test also reuses directly,
+    the self-ref dep's create() and the test's own create() collide with P2002.
+    Self-ref deps pick the second entity option instead so the two never share
+    a unique key — UNLESS match_self_entity is set (see below).
+
+    match_self_entity: True when this self-ref dep is a same-entity-only
+    relation (x-relationships.<rel>.sameEntityField, cmd_646 — e.g.
+    approval_flow's preceded_by/followed_by) whose whole point is to link
+    records that DO share the primary record's x-entity-select value. Using
+    the second option here would make the generated "creates/edits with a
+    linked dep" test itself violate the very save-time guard cmd_646 added
+    (validateSameEntityRefs in service_validation.ts.jinja2) — see
+    docs/knowledge/cmd646-same-entity-field.md. Takes priority over the
+    is_self_ref divergence above; still degrades to the first option (not a
+    P2002 risk in practice — sameEntityField relations don't currently pair
+    with a @@unique spanning the entity-select field).
     """
     if target == 'user':
         return [
@@ -410,7 +425,9 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
     # share an x-entity-select value with the primary create test, which always
     # uses the first option (see cypress_create_value's 'entity_select' branch).
     _self_ref_entity_val = (
-        f"'{_entity_opts[1]['value']}'" if is_self_ref and len(_entity_opts) > 1 else _first_entity_val
+        _first_entity_val if match_self_entity
+        else f"'{_entity_opts[1]['value']}'" if is_self_ref and len(_entity_opts) > 1
+        else _first_entity_val
     )
     result = []
     for prop_name, prop in props.items():
@@ -2061,6 +2078,9 @@ def helper_context(
                 'title': title_str,
                 'fk_deps': self_ref_fk_deps,
                 'label_field': label_field,
+                # cmd_646: threaded through to _get_dep_populate_fields via
+                # match_self_entity below — see its docstring.
+                'same_entity_field': rel.get('same_entity_field'),
             })
 
     # Enrich deps with extra_required_fields, has_user_accounts, needs_second.
@@ -2081,7 +2101,9 @@ def helper_context(
         x_rels = dep_def.get('x-relationships', {})
         dep_label_info = dep_label_info_by_var.get(dep['var_name'])
         extra_required_fields = _get_dep_populate_fields(
-            dep['target'], dep['var_name'], title_str, schema, is_self_ref=(dep['target'] == model_name),
+            dep['target'], dep['var_name'], title_str, schema,
+            is_self_ref=(dep['target'] == model_name),
+            match_self_entity=bool(dep.get('same_entity_field')),
         )
         # Idempotency hook for `populateXxxDependencies`: when the dep record
         # can be found again by a deterministic key, the template uses

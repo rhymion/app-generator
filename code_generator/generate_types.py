@@ -67,6 +67,10 @@ def _extract_children(defn: dict, schema: dict) -> list[dict]:
                     'type': rel_info['type'],
                     'target': rel_info.get('target', child_name),
                     'label_field': rel_info.get('labelField', 'name'),
+                    # cmd_646: same_entity_field (from x-relationships.<rel>.
+                    # sameEntityField) — see json_schema.yaml comment on
+                    # approval_flow.preceded_by for the full contract.
+                    'same_entity_field': rel_info.get('sameEntityField'),
                 }
             children.append({
                 'name': child_name,

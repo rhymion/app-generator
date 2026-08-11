@@ -78,9 +78,29 @@ def build_validation_context(ctx: dict) -> dict:
             'unique': True,
         })
 
+    # cmd_646: self-referential m2m children whose x-relationships.<rel>.
+    # sameEntityField is declared (json_schema.yaml — see the comment on
+    # approval_flow.preceded_by for the full contract) get a save-time guard
+    # in service_validation.ts requiring every connected row to share the
+    # current row's value of that field. Template for future same-entity-
+    # only self-refs: declaring sameEntityField on a new relation is enough
+    # to opt in here — see docs/knowledge/cmd646-same-entity-field.md.
+    same_entity_checks = []
+    for c in ctx.get('non_comment_ch', []):
+        rel = c.get('relationship') or {}
+        same_field = rel.get('same_entity_field')
+        if not (c.get('use_connect') and same_field):
+            continue
+        same_entity_checks.append({
+            'prop_name': c['property_name'],
+            'label': _field_label(c['property_name']),
+            'same_field': same_field,
+        })
+
     return {
         'model': model,
         'required_fields': required_fields,
         'client_required_fields': client_required_fields,
         'one_to_one_checks': one_to_one_checks,
+        'same_entity_checks': same_entity_checks,
     }

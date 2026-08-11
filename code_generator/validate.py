@@ -541,6 +541,34 @@ def validate_schema(schema: dict) -> None:
                     f"empty.  Add 'name' to '{target}' or set labelField."
                 )
 
+            # cmd_646: sameEntityField only makes sense for a SELF-referential
+            # m2m (this entity linking to more rows of itself) — the guard it
+            # drives (validateSameEntityRefs in service_validation.ts.jinja2)
+            # compares data['sameEntityField'] against the SAME field read
+            # off the linked row via tx.{{ model }}.findMany(), which is only
+            # well-formed when target === def_key.
+            same_field = rel_info.get('sameEntityField')
+            if same_field is not None:
+                own_props = get_entity_properties(def_key, schema)
+                if not isinstance(same_field, str):
+                    errors.append(
+                        f"Definition '{def_key}', x-relationships '{rel_prop}': "
+                        f"sameEntityField must be a property-name string."
+                    )
+                elif target != def_key:
+                    errors.append(
+                        f"Definition '{def_key}', x-relationships '{rel_prop}': "
+                        f"sameEntityField is only valid on a self-referential "
+                        f"many-to-many relationship (target must equal "
+                        f"'{def_key}', got '{target}')."
+                    )
+                elif same_field not in own_props:
+                    errors.append(
+                        f"Definition '{def_key}', x-relationships '{rel_prop}': "
+                        f"sameEntityField references '{same_field}', which is "
+                        f"not a property of '{def_key}'."
+                    )
+
     # -----------------------------------------------------------------------
     # 4. x-generate entity-level constraints (chart fields, comment children)
     # -----------------------------------------------------------------------
