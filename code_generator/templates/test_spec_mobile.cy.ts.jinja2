@@ -79,31 +79,40 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
   describe('Create from card list', () => {
     it('2.1 navigates to the new page via the toolbar add button', () => {
       cy.visit('/en/{{ parent }}');
-      // ResponsiveListClient's `useMediaQuery` returns false during SSR (no
-      // window), so the initial HTML at any viewport ships the desktop
-      // DataGrid; hydration re-runs the hook and swaps DataGrid → CardListClient
-      // at mobile widths. Clicking the toolbar Add button mid-swap lands on a
-      // non-hydrated handler and navigation silently no-ops — wait for the
-      // CardListClient to finish hydration before clicking.
+      // The list page's server content sits behind a Suspense boundary
+      // (TableSkeleton fallback) *above* ResponsiveListClient, and
+      // ResponsiveListClient's own `useMediaQuery` returns false during its
+      // first client render (SSR-safe default, no window yet) before a
+      // post-hydration effect swaps it to CardListClient at mobile widths.
+      // That is two independent async gaps the toolbar Add button click has
+      // to clear, not one: (1) TableSkeleton → real content, (2) desktop
+      // DataGrid → CardListClient.
       //
-      // The previous hydration markers here (checkbox count / "No items
-      // found" text) were satisfied by the desktop DataGrid too: MUI's
-      // built-in row-selection checkbox carries aria-label "Select row"
-      // (matches the same `aria-label^="Select "` prefix used for
-      // CardListClient's per-card checkboxes), and DataGridClient renders
-      // its own MuiTypography-root content regardless of viewport. So the
-      // wait could pass while the desktop DataGrid was still mounted,
-      // letting this click race the client-side swap — CardListClient's
-      // toolbar button carries the *same* aria-label as the desktop
-      // variant's ("Create New {{ title }}", by design), so landing on the
-      // wrong one during the swap intermittently threw
-      // `cy.click() ... contained 2 elements` in CI (cmd_653). `.MuiDataGrid-root`
-      // only ever renders in the desktop variant, so waiting for it to be
-      // gone is an unambiguous, viewport-independent hydration marker.
-      cy.get('.MuiDataGrid-root').should('not.exist');
+      // A `not.exist` wait on any desktop-only marker (checkbox count /
+      // "No items found" text / `.MuiDataGrid-root`) is satisfied just as
+      // trivially by TableSkeleton — nothing has rendered yet either — as by
+      // an actual mobile swap, so it is not a real hydration wait at all; it
+      // just narrows *which* premature state slips through. Both were tried
+      // and both let a click land on a button mid-transition whose handler
+      // either wasn't wired up yet or got unmounted before navigating,
+      // producing `cy.click() ... contained 2 elements` (cmd_653, original
+      // markers) or a silent `cy.url()` no-op (cmd_653, `.MuiDataGrid-root`
+      // marker) depending on which transition the click raced.
+      //
+      // The only marker that can't be satisfied by a state earlier than the
+      // one we actually want is a positive one owned by the target itself:
+      // CardListClient's own root carries `data-testid="mobile-card-list"`
+      // unconditionally, so waiting for it to *exist* (not for something
+      // else to be gone) proves CardListClient has actually mounted, and
+      // scoping the click inside it rules out ever landing on the desktop
+      // toolbar's identically-labelled button even if both were somehow
+      // transiently present.
+      cy.get('[data-testid="mobile-card-list"]').should('exist');
       // CardListClient renders the toolbar add as an IconButton with the same
-      // aria-label as the desktop variant ("Create New {{ title }}").
-      cy.get('button[aria-label="Create New {{ title }}"]').click();
+      // aria-label as the desktop variant ("Create New {{ title }}") —
+      // scope the selector to the mobile container so it can only match
+      // CardListClient's own button.
+      cy.get('[data-testid="mobile-card-list"] button[aria-label="Create New {{ title }}"]').click();
       cy.url().should('include', '/{{ parent }}/new');
     });
   });
