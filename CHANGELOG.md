@@ -6,6 +6,49 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Generated "requestor can re-submit a rejected request" approval test used a page-wide,
+  unscoped `[aria-label="Re-submit"]` lookup** (cmd_641, real case: `purchase_per_item.cy.ts`
+  7.8, seen as `cy.click() can only be called on a single element. Your subject contained 2
+  elements.` in a full 150-spec CI run, passing in isolation): `ApprovalSection.tsx` renders one
+  Re-submit `IconButton` per `approval_request` row with `status === 'rejected'`, all sharing the
+  same static `aria-label="Re-submit"` — and an entity can legitimately have a second, "ungated"
+  `approval_flow` (`requestor_role_id: null`, applying to every requestor) alongside a role-gated
+  one (see the adjacent 7.1 test's own comment: "both flows apply → 2 approval_requests"), so once
+  more than one of an approvable's requests is rejected, more than one element matches. Two full
+  local reproductions matching the exact failing CI commit and exact preceding 23-spec order could
+  not force the second row, so the triggering condition from that CI run stays unconfirmed — but
+  the selector was unsafe by construction regardless, the same "only one graspable" assumption
+  already fixed for `parent1` (cmd_634), the self-referential decoy (cmd_590), and
+  `goods_receipt_line` candidate selection. Fixed by scoping the interaction to the specific
+  `approval_flow`'s own table row (via its approver-role-name `<td>`, exact-matched with the
+  existing `exactRe()` helper, then `.closest('tr')`) instead of a page-wide selector. The
+  sibling `[aria-label="Approve"]` / `[aria-label="Reject"]` lookups in the same describe block
+  (tests 7.4/7.5/7.6/7.7/7.9) carry the identical latent hazard and were left unscoped — noted for
+  a follow-up cmd, out of this task's scope. Verified: `purchase_per_item.cy.ts` 9/9 passing
+  individually and in a full 23-spec CI-order run (`approval_flow.cy.ts` through
+  `purchase_per_item.cy.ts`, matching the exact failing CI run's spec order) against the exact
+  submodule commit that failed in CI; `code_generator` pytest suite 1227 passed, 0 skipped after
+  `generate-code`.
+- **`helper_context()`'s per-dependency loop variable shadowed the entity-level `title`**
+  (`code_generator/generators_test.py`, found verifying the fix above): the multi-FK-to-same-target
+  dep-splitting loop (e.g. `inventory_movement`'s `from_inventory_id`/`to_inventory_id`, both
+  pointing at `inventory`) reused the bare name `title` for each per-dependency label, permanently
+  overwriting the outer `title = to_title_case(parent)` for the rest of the function — so
+  `helper_context()`'s returned `title` (used by `test_helper.ts.jinja2` to name every approval-flow
+  seed role, e.g. `Test {{ title }} Approver Role`) silently became the *last-processed FK's* label
+  (`"To Inventory"`) instead of the entity's own title (`"Inventory Movement"`), while
+  `spec_context()` (no such loop) still returned the correct title — a cross-context mismatch
+  invisible until a test asserted on the seeded role's display text. The fix above's
+  `exactRe('Test {{ title }} Approver Role')` scoping does exactly that, so it surfaced the bug on
+  every entity hitting this pattern (`inventory_movement.cy.ts` 7.8 failed:
+  `Expected to find content: '/^Test Inventory Movement Approver Role$/' within the selector: 'td'
+  but never did`) — the old page-wide `[aria-label="Re-submit"]` selector never looked at role text,
+  so the mismatch had no test-visible effect before this task. Renamed the loop-local variable to
+  `dep_title`. Verified: instrumented `helper_context()`/`spec_context()` directly for
+  `inventory_movement` (`title` now `'Inventory Movement'` from both, previously `'To Inventory'`
+  vs `'Inventory Movement'`); `inventory_movement.cy.ts` 14/14 passing standalone after
+  `generate-code`; `code_generator` pytest suite unaffected (1227 passed, 0 skipped, same count
+  before and after this fix — no fixture relied on the shadowed value).
 - **A parent record created with a NULL `organization` (cmd_611/612) became permanently
   un-updatable — `upsert<Parent>()`'s pre-permission existence check threw `Error('Not found')`
   even for its own creator** (cmd_634): `generators.py`'s `_actor_and_existing_block()` filtered
