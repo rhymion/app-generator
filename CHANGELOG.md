@@ -526,6 +526,25 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/notification-triggers.md`.
 
 ### Internal
+- **Vercel's `migrate:deploy` ran through Neon's pooled connection instead of a direct one**
+  (cmd_657): `prisma.config.ts`'s `datasource.url` (read only by the Prisma CLI — `lib/prisma.ts`
+  reads `DATABASE_URL` independently for the running app, unaffected by this file) pointed at
+  `DATABASE_URL`, which on Vercel is Neon's pooled (PgBouncer transaction-mode) endpoint.
+  Prisma's migration engine takes a session-scoped advisory lock across a sequence of statements,
+  which a transaction-mode pooler doesn't guarantee routes to the same backend connection — a risk
+  that grows with every migration added, even though nothing has broken from it yet. Fixed by
+  having `prisma.config.ts` prefer a new `DIRECT_URL` env var when set, falling back to
+  `DATABASE_URL` everywhere it isn't (GCP Cloud Run and local/CI already connect directly, no
+  pooler in front of `DATABASE_URL` there — unchanged). Deliberately not Prisma's classic
+  `directUrl` datasource field: confirmed empirically that this project's Prisma config API
+  (`@prisma/config` 7.9.1) doesn't have one (`tsc` rejects it with `TS2353`), and `schema.prisma`'s
+  own `datasource db` block carries no `url` at all in Prisma 7 — the connection string lives only
+  in `prisma.config.ts`. To keep an unset `DIRECT_URL` from silently regressing back to the pooled
+  path on Vercel specifically, config loading now throws if Vercel's own auto-injected `VERCEL` env
+  var is set and `DIRECT_URL` is not — everywhere else the fallback stays silent because there's
+  nothing to route around. Consuming projects (`app-template`, `inventory-app`) pick this up via
+  their `app-generator` submodule pointer — neither carries its own copy of `prisma.config.ts`.
+  See `docs/knowledge/prisma-direct-vs-pooled-connection.md`.
 - **Generated `parent1`-style Cypress spec (2+ DataGrid children on one parent form) intermittently
   failed with "can only scroll 1 element, you tried to scroll 2 elements", and generated
   DataGrid-child date/date-time/time edit cells rejected every typed value** (cmd_634, two
