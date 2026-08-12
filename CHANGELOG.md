@@ -5,6 +5,38 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **CSV export/import and approve/reject now accept `X-API-Key` as well as a browser session**
+  (cmd_648): `api_export_route.ts.jinja2`, `api_import_route.ts.jinja2`,
+  `split_action_route.ts.jinja2`, and the two static `app/api/approval_request/[id]/{approve,reject}/route.ts`
+  routes previously resolved the caller exclusively via `getSessionUserId()`/`requireSession()`,
+  so an external API-key client could never call them — only a logged-in browser session could.
+  Added `resolveActorId()`/`requireDualAuth()` to `lib/api-auth.ts` (same dual-auth pattern
+  already used by `app/api/search/route.ts`: `X-API-Key`/`Authorization: Bearer` header when
+  present, session cookie otherwise) and switched all five routes to it. Verified both paths
+  behaviorally: API-key-only calls now succeed (export 200, import reaches CSV validation instead
+  of 401, approve/reject reach their 404-not-found business logic instead of 401), and the
+  pre-existing session-only path is unchanged. `split_action_route.ts.jinja2` has no exercised
+  entity in this repo's own `json_schema.yaml` (no `x-splittable` declaration) — verified instead
+  via direct Jinja2 template-render assertion and the existing `code_generator/tests/test_reservation.py`
+  / `test_ledger_location_id_fk.py` / `test_ledger_item_naming_generalization.py` suites that
+  already render this template with full context.
+- **New API-only regression test for FK read-permission graceful degradation** (cmd_648): added
+  "4.5 returns 200 for GET (list and detail) when the acting user cannot read `<fk target>`" to
+  `test_api_spec.cy.ts.jinja2`, alongside the pre-existing "4.4 preserves `<fk>_id` ... omits it
+  from the PUT body" — both pure `X-API-Key` (`cy.request`), no browser. Together they are the
+  API-gate-covered counterpart of `fk_read_permission_graceful_degradation.cy.ts`.
+
+### Changed
+- **`fk_read_permission_graceful_degradation.cy.ts` moved from `cypress/e2e/api/` to
+  `cypress/e2e/`** (cmd_648): every case in this hand-written spec drives the browser
+  (`cy.visit`/`cy.login`/`cy.selectAutocomplete`) and never issues a raw `cy.request` — it was
+  never actually `test:e2e:cy:api`-gate coverage despite living under `api/`. It now sits under
+  `test:e2e:cy:ui`'s spec glob (`cypress/e2e/*.cy.ts`) instead. (Note: the task instruction that
+  prompted this move said "move to `cypress/e2e/ui/`", but no such subdirectory exists in this
+  repo — `cypress/e2e/*.cy.ts` is the actual UI-spec convention; moving it into a nonexistent
+  `ui/` subdirectory would have dropped it from both gates' spec globs silently.)
+
 ### Fixed
 - **`FormUpsert`'s readonly-field display was type-blind, showing raw FK ids with a nonexistent
   i18n key instead of the relation's label** (cmd_642): the readonly-field loop in

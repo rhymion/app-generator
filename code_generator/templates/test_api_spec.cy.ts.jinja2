@@ -550,6 +550,32 @@ describe('API: {{ title }}', () => {
         });
       });
     });
+
+    // cmd_648: pure-API counterpart of the UI regression spec
+    // (fk_read_permission_graceful_degradation.cy.ts, now under
+    // cypress/e2e/ui/ since it drives the browser rather than the API) —
+    // proves via X-API-Key alone that GET (list and detail) never crashes
+    // for an actor who can read {{ parent }} but not {{ fk_preservation_relation.target }};
+    // it simply returns 200 with whatever the FK relation resolves to.
+    it('4.5 returns 200 for GET (list and detail) when the acting user cannot read {{ fk_preservation_relation.target }}', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        const original = records[0];
+        cy.task<string>('db:createApiUserWithPermission', {
+          entityName: '{{ parent }}',
+          flags: { create: true, read: true, update: true, delete: true },
+          label: 'fk_read_denied_get',
+        }).then((restrictedKey) => {
+          cy.request({ url: API_BASE, headers: { 'X-API-Key': restrictedKey } })
+            .then((listRes) => {
+              expect(listRes.status).to.eq(200);
+            });
+          cy.request({ url: `${API_BASE}/${original.id}`, headers: { 'X-API-Key': restrictedKey } })
+            .then((getRes) => {
+              expect(getRes.status).to.eq(200);
+            });
+        });
+      });
+    });
   });
 {% endif %}
 

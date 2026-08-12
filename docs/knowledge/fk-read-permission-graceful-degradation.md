@@ -110,8 +110,15 @@ only a component that silently behaves as if the flag were always unset.
   if any, got picked for 4.4) — this is the case row (h) actually asserts: the same
   `db:createApiUserWithPermission` fixture used for 4.4 (full CRUD, zero org memberships), but the
   expectation is rejection, not preservation.
-- `cypress/e2e/api/fk_read_permission_graceful_degradation.cy.ts` (hand-written, mandatory gate):
-  browser-session coverage proving the edit page doesn't crash, that unrelated field changes can
-  still be saved, and that the optional/required clear-button asymmetry actually renders as
-  designed — this is the layer that caught the serialization pitfall above, since the generated
-  API-key-based spec never exercises the Server-to-Client boundary at all.
+- `cypress/e2e/api/{entity}.cy.ts` also generates `4.5 returns 200 for GET (list and detail) when
+  the acting user cannot read {fk target}` (cmd_648) alongside 4.4, in the same
+  `db:createApiUserWithPermission`-fixture describe block — proves via `X-API-Key` alone that both
+  the list and detail GET routes return 200 rather than erroring when the actor can read the
+  parent but not the FK target.
+- `cypress/e2e/fk_read_permission_graceful_degradation.cy.ts` (hand-written, mandatory gate via
+  `test:e2e:cy:ui`; moved from `cypress/e2e/api/` in cmd_648 — every case here drives the browser
+  and never issues a raw `cy.request`, so it was never actually `test:e2e:cy:api` coverage despite
+  its old location): browser-session coverage proving the edit page doesn't crash, that unrelated
+  field changes can still be saved, and that the optional/required clear-button asymmetry actually
+  renders as designed — this is the layer that caught the serialization pitfall above, since the
+  generated API-key-based spec (4.4/4.5) never exercises the Server-to-Client boundary at all.
