@@ -667,19 +667,15 @@ describe('API: {{ title }}', () => {
 {% endif %}
 {% if can_list and can_export %}
 
-    // 7.5 uses a SESSION-loginable actor (db:createSessionUserWithPermission + cy.login),
-    // not X-API-Key: the export route resolves the actor exclusively via
-    // getSessionUserId() (see lib/authz.ts / api_export_route.ts.jinja2) and never reads
-    // X-API-Key, so createLimitedApiUser's key would be silently ignored here.
+    // cmd_658: export now resolves the actor via resolveActorId() (cmd_648
+    // dual-auth), which reads X-API-Key the same as every other route below —
+    // this used to require a SESSION-loginable actor (cy.login) because the
+    // route read getSessionUserId() exclusively; that exclusivity is gone.
     it('7.5 returns 4xx for GET export when permission denied', () => {
-      cy.task<string>('db:createSessionUserWithPermission', {
-        entityName: '{{ parent }}',
-        flags: {},
-        label: 'export_denied',
-      }).then((email) => {
-        cy.login(email, TEST_CREDENTIALS.password);
+      cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
         cy.request({
           url: `${API_BASE}/export`,
+          headers: { 'X-API-Key': limitedKey },
           failOnStatusCode: false,
         }).then((res) => {
           expect(res.status).to.be.gte(400);
@@ -689,18 +685,14 @@ describe('API: {{ title }}', () => {
 {% endif %}
 {% if import_eligible %}
 
-    // 7.6 uses a SESSION-loginable actor — see the 7.5 comment above; the import
-    // route (api_import_route.ts.jinja2) resolves the actor the same way.
+    // cmd_658: see the 7.5 comment above — import resolves the actor the same
+    // dual-auth way (cmd_648) and no longer needs a session-loginable actor.
     it('7.6 returns 4xx for POST import when permission denied', () => {
-      cy.task<string>('db:createSessionUserWithPermission', {
-        entityName: '{{ parent }}',
-        flags: {},
-        label: 'import_denied',
-      }).then((email) => {
-        cy.login(email, TEST_CREDENTIALS.password);
+      cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
         cy.request({
           method: 'POST',
           url: `${API_BASE}/import`,
+          headers: { 'X-API-Key': limitedKey },
           body: { csv: '', dryRun: true },
           failOnStatusCode: false,
         }).then((res) => {
@@ -914,12 +906,10 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.approverUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/approve`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
           }).then((res) => {
             expect(res.status).to.eq(200);
             expect(res.body.status).to.eq('approved');
@@ -935,12 +925,10 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.requestorUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/approve`,
+            headers: { 'X-API-Key': setup.requestorUser.api_key },
             failOnStatusCode: false,
           }).then((res) => {
             expect(res.status).to.eq(403);
@@ -959,12 +947,10 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.approverUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/reject`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
           }).then((res) => {
             expect(res.status).to.eq(200);
             expect(res.body.status).to.eq('rejected');
@@ -981,12 +967,10 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.requestorUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/reject`,
+            headers: { 'X-API-Key': setup.requestorUser.api_key },
             failOnStatusCode: false,
           }).then((res) => {
             expect(res.status).to.eq(403);
@@ -1002,12 +986,10 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.approverUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/reject`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
             body: { message: 'Needs more info' },
           }).then((res) => {
             expect(res.status).to.eq(200);
@@ -1030,12 +1012,10 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.approverUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/reject`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
           }).then((res) => {
             expect(res.status).to.eq(200);
             cy.request({
@@ -1057,12 +1037,10 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.approverUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/reject`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
           }).then((res) => {
             expect(res.status).to.eq(200);
             expect(res.body.status).to.eq('terminal_rejected');
@@ -1078,12 +1056,10 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.approverUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/reject`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
           }).then(() => {
             cy.request({
               url: `{{ api_path }}/${data.record.id}`,
@@ -1105,12 +1081,10 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flow1.id, setup.flow2.id],
         }).then((data) => {
           const ar2 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow2.id);
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.approverUser2.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${ar2.id}/approve`,
+            headers: { 'X-API-Key': setup.approverUser2.api_key },
             failOnStatusCode: false,
           }).then((res) => {
             expect(res.status).to.eq(400);
@@ -1127,20 +1101,16 @@ describe('API: {{ title }}', () => {
         }).then((data) => {
           const ar1 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow1.id);
           const ar2 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow2.id);
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.approverUser1.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${ar1.id}/approve`,
+            headers: { 'X-API-Key': setup.approverUser1.api_key },
           }).then((res) => {
             expect(res.status).to.eq(200);
-            Cypress.session.clearAllSavedSessions();
-            cy.clearCookies();
-            cy.login(setup.approverUser2.email, 'test-password');
             cy.request({
               method: 'POST',
               url: `/api/approval_request/${ar2.id}/approve`,
+              headers: { 'X-API-Key': setup.approverUser2.api_key },
             }).then((res2) => {
               expect(res2.status).to.eq(200);
               expect(res2.body.status).to.eq('approved');
@@ -1239,13 +1209,8 @@ describe('API: {{ title }}', () => {
 {% if can_list and can_export %}
 
   describe('GET {{ api_path }}/export', () => {
-    beforeEach(() => {
-      Cypress.session.clearAllSavedSessions();
-      cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
-    });
-
     it('N1 returns 200 CSV with attachment disposition', () => {
-      cy.request({ url: `{{ api_path }}/export` })
+      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           expect(res.status).to.eq(200);
           expect(res.headers['content-type']).to.include('text/csv');
@@ -1255,7 +1220,7 @@ describe('API: {{ title }}', () => {
 
     it('N2 CSV header row does not include an id column', () => {
       cy.task('db:populate{{ pascal }}', 1);
-      cy.request({ url: `{{ api_path }}/export` })
+      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
           const headers = headerLine.split(',');
@@ -1268,7 +1233,7 @@ describe('API: {{ title }}', () => {
       cy.task('db:populateOrganizationWithUser', 1).then(() => {
         cy.task<{ id: string; name: string }[]>('db:populateOrganization', 1).then((otherOrgs) => {
           cy.task('db:populate{{ pascal }}', 1);
-          cy.request({ url: `{{ api_path }}/export` })
+          cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
             .then((res) => {
               expect(res.status).to.eq(200);
               const lines = (res.body as string).replace(/^\uFEFF/, '').split('\r\n').filter(Boolean);
@@ -1283,7 +1248,7 @@ describe('API: {{ title }}', () => {
 
     it('N4 CSV header includes the x-import-key natural-key column(s) present in the export allowlist', () => {
       cy.task('db:populate{{ pascal }}', 1);
-      cy.request({ url: `{{ api_path }}/export` })
+      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
           const headers = headerLine.split(',');
@@ -1296,7 +1261,7 @@ describe('API: {{ title }}', () => {
 
     it('N5 CSV header does not include system fields (timestamps/audit/tenant refs)', () => {
       cy.task('db:populate{{ pascal }}', 1);
-      cy.request({ url: `{{ api_path }}/export` })
+      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
           const headers = headerLine.split(',');
@@ -1318,7 +1283,7 @@ describe('API: {{ title }}', () => {
 
     it('N6 CSV export headers match the view-field allowlist exactly', () => {
       cy.task('db:populate{{ pascal }}', 1);
-      cy.request({ url: `{{ api_path }}/export` })
+      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
           const headers = headerLine.split(',');
@@ -1347,7 +1312,7 @@ describe('API: {{ title }}', () => {
 
     it('N7 CSV export does not expose sensitive columns (allowlist enforcement)', () => {
       cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
-        cy.request({ url: `{{ api_path }}/export` })
+        cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
           .then((res) => {
             const body = res.body as string;
             const headerLine = body.replace(/^\uFEFF/, '').split('\r\n')[0];
@@ -1379,7 +1344,7 @@ describe('API: {{ title }}', () => {
             roles: [],
           },
         }).then(() => {
-          cy.request({ url: `{{ api_path }}/export` })
+          cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
             .then((res) => {
               const body = res.body as string;
               // The formula-trigger value must be neutralized with a leading tab...
@@ -1396,7 +1361,7 @@ describe('API: {{ title }}', () => {
 
     it('N9 CSV export excludes internal bridge FK columns', () => {
       cy.task('db:populate{{ pascal }}', 1);
-      cy.request({ url: `{{ api_path }}/export` })
+      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           expect(res.status).to.eq(200);
           const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
@@ -1411,7 +1376,7 @@ describe('API: {{ title }}', () => {
 
     it('N11 CSV import round-trip: re-importing an exported row matches it via the natural key with zero errors (dry run)', () => {
       cy.task('db:populate{{ pascal }}', 1).then(() => {
-        cy.request({ url: `{{ api_path }}/export` }).then((exportRes) => {
+        cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } }).then((exportRes) => {
           expect(exportRes.status).to.eq(200);
 {% if round_trip_unimportable_columns %}
           const csv = _stripRoundTripUnimportableCsvColumns(exportRes.body as string);
@@ -1421,6 +1386,7 @@ describe('API: {{ title }}', () => {
           cy.request({
             method: 'POST',
             url: `{{ api_path }}/import`,
+            headers: { 'X-API-Key': TEST_API_KEY },
             body: { csv, dryRun: true },
           }).then((res) => {
             expect(res.status).to.eq(200);
@@ -1436,7 +1402,7 @@ describe('API: {{ title }}', () => {
 
     it('N12 CSV import round-trip: confirming the dry run (dryRun=false) commits with zero write failures', () => {
       cy.task('db:populate{{ pascal }}', 1).then(() => {
-        cy.request({ url: `{{ api_path }}/export` }).then((exportRes) => {
+        cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } }).then((exportRes) => {
 {% if round_trip_unimportable_columns %}
           const csv = _stripRoundTripUnimportableCsvColumns(exportRes.body as string);
 {% else %}
@@ -1445,12 +1411,14 @@ describe('API: {{ title }}', () => {
           cy.request({
             method: 'POST',
             url: `{{ api_path }}/import`,
+            headers: { 'X-API-Key': TEST_API_KEY },
             body: { csv, dryRun: true },
           }).then((dryRunRes) => {
             const confirmToken = dryRunRes.body.confirmToken as string;
             cy.request({
               method: 'POST',
               url: `{{ api_path }}/import`,
+              headers: { 'X-API-Key': TEST_API_KEY },
               body: { csv, dryRun: false, confirmToken },
             }).then((commitRes) => {
               expect(commitRes.status).to.eq(200);
@@ -1465,7 +1433,7 @@ describe('API: {{ title }}', () => {
 
     it('N13 CSV import rejects an unconfirmed commit (dryRun=false without a valid confirmToken)', () => {
       cy.task('db:populate{{ pascal }}', 1).then(() => {
-        cy.request({ url: `{{ api_path }}/export` }).then((exportRes) => {
+        cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } }).then((exportRes) => {
 {% if round_trip_unimportable_columns %}
           const csv = _stripRoundTripUnimportableCsvColumns(exportRes.body as string);
 {% else %}
@@ -1474,6 +1442,7 @@ describe('API: {{ title }}', () => {
           cy.request({
             method: 'POST',
             url: `{{ api_path }}/import`,
+            headers: { 'X-API-Key': TEST_API_KEY },
             body: { csv, dryRun: false },
             failOnStatusCode: false,
           }).then((res) => {
@@ -1484,20 +1453,34 @@ describe('API: {{ title }}', () => {
       });
     });
 {% endif %}
+
+    // cmd_658: N1-N13 above prove the X-API-Key path (cmd_648 dual-auth).
+    // This is the one deliberate session-cookie test for this route family —
+    // resolveActorId()/requireDualAuth() (lib/api-auth.ts) is shared by every
+    // dual-auth route, so proving the session branch here once is sufficient;
+    // it is not re-proven per route. Do not delete this without also removing
+    // the last session-cookie coverage for dual-auth routes (see docs/knowledge
+    // on the API-test/UI-test boundary, cmd_658).
+    // dual-auth-session-canary: the cy.login() below is the machine-checked
+    // exemption (code_generator/check_generated.py rule test:unexplained-login)
+    // — do not copy this pattern elsewhere without the same justification.
+    it('N14 also authenticates via a NextAuth session cookie (dual-auth)', () => {
+      Cypress.session.clearAllSavedSessions();
+      cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
+      cy.request({ url: `{{ api_path }}/export` }).then((res) => {
+        expect(res.status).to.eq(200);
+      });
+    });
   });
 {% endif %}
 {% if is_searchable %}
 
   describe('Search coverage (GET /api/search)', () => {
-    beforeEach(() => {
-      Cypress.session.clearAllSavedSessions();
-      cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
-    });
 
     it('N10 per-entity data surfaces in global search results', () => {
       cy.task<any[]>('db:populate{{ pascal }}{% if not search_sample_field_required %}Full{% endif %}', 1).then((records) => {
         const q = records[0].{{ search_sample_field }} as string;
-        cy.request({ url: `/api/search?q=${encodeURIComponent(q)}` })
+        cy.request({ url: `/api/search?q=${encodeURIComponent(q)}`, headers: { 'X-API-Key': TEST_API_KEY } })
           .then((res) => {
             expect(res.status).to.eq(200);
             expect(
