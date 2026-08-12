@@ -139,7 +139,7 @@ export default function CardListClient<T extends BaseEntity>({
   };
 
   return (
-    <Box>
+    <Box data-testid="mobile-card-list">
       <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
         {permissions.create && allowCreate && (
           <NextLink href={`${basePath}/new`}>

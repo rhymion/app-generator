@@ -259,6 +259,37 @@ export async function authenticateApiKey(request: NextRequest): Promise<{ userId
 
 The API key is looked up against `user.api_key` in the DB. A TTL LRU cache (5 min, 1000 entries) reduces DB load. The cache is gated to production (`process.env.NODE_ENV === 'production'`) so Cypress test resets do not encounter stale entries.
 
+### Dual authentication (session OR API key)
+
+A handful of routes are reachable from both a browser (session cookie) and an external API-key
+client — because a client-side widget in the app itself calls them via `fetch`, not a server
+action (`app/api/search/route.ts` is the original case; `search{Entity}Options()` FK autocomplete,
+by contrast, is invoked from a Server Component and a bound server-action prop, never a fetchable
+route, so it stays session-only by construction). `lib/api-auth.ts` provides two helpers for this:
+
+```typescript
+// lib/api-auth.ts
+export async function resolveActorId(request: NextRequest): Promise<string | null>
+export async function requireDualAuth(request: NextRequest): Promise<{ userId: string }>
+```
+
+Both check `X-API-Key`/`Authorization: Bearer` first and fall back to the session cookie;
+`resolveActorId` returns `null` when neither is present (for routes that build their own 401 JSON
+body), `requireDualAuth` throws `ApiError(401, ...)` instead (for routes that already funnel every
+error through `handleApiError`). `authenticateApiKey()` itself is API-key-only — it throws if the
+header is absent — so dual-auth routes always branch on header presence before calling it, rather
+than calling it unconditionally.
+
+As of cmd_648, the dual-auth routes are: `app/api/search/route.ts` (inline, the original
+implementation these helpers were extracted from), `api_export_route.ts.jinja2`,
+`api_import_route.ts.jinja2`, `split_action_route.ts.jinja2` (all via `resolveActorId`/
+`requireDualAuth`), and the static `app/api/approval_request/[id]/approve/route.ts` /
+`.../reject/route.ts` (via `requireDualAuth`). Everything else under `app/api/<entity>/` is either
+plain API-key-only (`authenticateApiKey`, the entity CRUD/bulk/detail routes — the browser UI
+reaches these through server actions, not this REST surface) or plain session-only
+(`app/api/approval_request/[id]/resubmit/route.ts` is actually API-key-only too, and
+`app/api/notifications/*` is session-only — neither was in cmd_648's scope).
+
 ### Full API route pattern with permission check
 
 ```typescript

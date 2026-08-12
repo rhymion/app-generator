@@ -5,6 +5,38 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **CSV export/import and approve/reject now accept `X-API-Key` as well as a browser session**
+  (cmd_648): `api_export_route.ts.jinja2`, `api_import_route.ts.jinja2`,
+  `split_action_route.ts.jinja2`, and the two static `app/api/approval_request/[id]/{approve,reject}/route.ts`
+  routes previously resolved the caller exclusively via `getSessionUserId()`/`requireSession()`,
+  so an external API-key client could never call them — only a logged-in browser session could.
+  Added `resolveActorId()`/`requireDualAuth()` to `lib/api-auth.ts` (same dual-auth pattern
+  already used by `app/api/search/route.ts`: `X-API-Key`/`Authorization: Bearer` header when
+  present, session cookie otherwise) and switched all five routes to it. Verified both paths
+  behaviorally: API-key-only calls now succeed (export 200, import reaches CSV validation instead
+  of 401, approve/reject reach their 404-not-found business logic instead of 401), and the
+  pre-existing session-only path is unchanged. `split_action_route.ts.jinja2` has no exercised
+  entity in this repo's own `json_schema.yaml` (no `x-splittable` declaration) — verified instead
+  via direct Jinja2 template-render assertion and the existing `code_generator/tests/test_reservation.py`
+  / `test_ledger_location_id_fk.py` / `test_ledger_item_naming_generalization.py` suites that
+  already render this template with full context.
+- **New API-only regression test for FK read-permission graceful degradation** (cmd_648): added
+  "4.5 returns 200 for GET (list and detail) when the acting user cannot read `<fk target>`" to
+  `test_api_spec.cy.ts.jinja2`, alongside the pre-existing "4.4 preserves `<fk>_id` ... omits it
+  from the PUT body" — both pure `X-API-Key` (`cy.request`), no browser. Together they are the
+  API-gate-covered counterpart of `fk_read_permission_graceful_degradation.cy.ts`.
+
+### Changed
+- **`fk_read_permission_graceful_degradation.cy.ts` moved from `cypress/e2e/api/` to
+  `cypress/e2e/`** (cmd_648): every case in this hand-written spec drives the browser
+  (`cy.visit`/`cy.login`/`cy.selectAutocomplete`) and never issues a raw `cy.request` — it was
+  never actually `test:e2e:cy:api`-gate coverage despite living under `api/`. It now sits under
+  `test:e2e:cy:ui`'s spec glob (`cypress/e2e/*.cy.ts`) instead. (Note: the task instruction that
+  prompted this move said "move to `cypress/e2e/ui/`", but no such subdirectory exists in this
+  repo — `cypress/e2e/*.cy.ts` is the actual UI-spec convention; moving it into a nonexistent
+  `ui/` subdirectory would have dropped it from both gates' spec globs silently.)
+
 ### Fixed
 - **`FormUpsert`'s readonly-field display was type-blind, showing raw FK ids with a nonexistent
   i18n key instead of the relation's label** (cmd_642): the readonly-field loop in
@@ -549,6 +581,34 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   is corrected (cmd_657 addendum): it originally described a manual, dashboard-only step. `DIRECT_URL`
   is now injected by `app-template`'s `scripts/vercel-env.sh` alongside every other Vercel env var —
   see that repo's CHANGELOG for the actual injection change.
+- **cmd_646's `sameEntityField` generator mechanism replaced with a hand-written validation socket
+  — the business condition ("same-`entity_name`" for `approval_flow`'s `preceded_by`/`followed_by`)
+  no longer lives in `json_schema.yaml` or a `*.jinja2` template** (cmd_652, correcting cmd_646:
+  reviewed as a case of a coincidental business rule being generalized into the schema, when a
+  future self-ref relation could need an entirely different condition). Removed entirely:
+  `x-relationships.<rel>.sameEntityField` (`json_schema.yaml`), its `validate.py` checks, its
+  `code_generator/validation_context.py` `same_entity_checks` list, and the generated
+  `validateSameEntityRefs()` function `code_generator/templates/service_validation.ts.jinja2` used
+  to emit. In its place, two purely structural (schema-free) generator changes provide a socket:
+  (1) `code_generator/templates/service_validation.ts.jinja2` now unconditionally imports and calls
+  a new write-once stub, `lib/{entity}/service_validation_custom.ts`
+  (`code_generator/templates/service_validation_custom_stub.ts.jinja2`, same GENERATED-ONCE
+  skip-if-exists convention as `autocomplete_filter.ts`) — every entity gets this call, regardless
+  of whether it needs custom validation; `code_generator/build_context.py`'s `validation_data_obj`
+  now unconditionally exposes every connect-style child's selected id array so a hand-written hook
+  can read any child selection it needs; (2) `code_generator/generators.py`'s
+  `form_upsert_context()` now unconditionally splices every field with a live `useState` variable
+  onto a self-referential child's search `formValues` (previously limited to the one field named by
+  `sameEntityField`) — the generator no longer decides which field (if any) a hand-written filter
+  cares about. `approval_flow`'s actual same-`entity_name` rule is now entirely hand-written: the
+  existing `isCrossEntityRef()` predicate in `lib/approval_flow/autocomplete_filter.ts` (GENERATED
+  ONCE, unchanged) plus a new `lib/approval_flow/service_validation_custom.ts` (GENERATED ONCE) that
+  calls it as the save-time backstop. Also reverts `code_generator/generators_test.py`'s
+  `match_self_entity` self-ref dependency-fixture special-casing (which cmd_646 had reintroduced)
+  back to the cmd_636 baseline, and the matching selector precision in
+  `code_generator/templates/test_spec.cy.ts.jinja2`'s self-ref autocomplete-picker branch — see
+  `docs/knowledge/same-entity-validation-socket.md` (replaces
+  `docs/knowledge/same-entity-field-mechanism.md`) for the full design and history.
 - **Generated `parent1`-style Cypress spec (2+ DataGrid children on one parent form) intermittently
   failed with "can only scroll 1 element, you tried to scroll 2 elements", and generated
   DataGrid-child date/date-time/time edit cells rejected every typed value** (cmd_634, two

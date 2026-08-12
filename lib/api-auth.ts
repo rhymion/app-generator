@@ -86,6 +86,32 @@ export async function requireSession(): Promise<{ userId: string }> {
   return { userId };
 }
 
+/**
+ * Resolve the caller's user id via X-API-Key/Authorization header when
+ * present, falling back to the NextAuth session cookie otherwise. Mirrors
+ * the dual-auth pattern in app/api/search/route.ts. Returns null when
+ * neither credential is present; throws ApiError(401) when an API key
+ * header is present but the key itself is invalid.
+ */
+export async function resolveActorId(request: NextRequest): Promise<string | null> {
+  const apiKey =
+    request.headers.get('X-API-Key') ||
+    request.headers.get('Authorization')?.replace('Bearer ', '');
+  if (apiKey) {
+    const { userId } = await authenticateApiKey(request);
+    return userId;
+  }
+  return getSessionUserId();
+}
+
+/** Same as {@link resolveActorId}, but throws ApiError(401) instead of
+ * returning null when neither an API key nor a session is present. */
+export async function requireDualAuth(request: NextRequest): Promise<{ userId: string }> {
+  const userId = await resolveActorId(request);
+  if (!userId) throw new ApiError(401, 'Authentication required. Provide X-API-Key header or sign in.');
+  return { userId };
+}
+
 export async function requireApiPermission(
   userId: string,
   model: string,

@@ -1,13 +1,21 @@
-import { TEST_CREDENTIALS } from '../../support/test-credentials';
+import { TEST_CREDENTIALS } from '../support/test-credentials';
 
 // FK read-permission graceful degradation: browser-session regression
-// coverage. The generated API spec (cypress/e2e/api/approval_flow.cy.ts,
-// "preserves approver_role_id ... omits it from the PUT body") proves the
-// server-side persistence guarantee via a raw API-key PUT. This spec proves
-// the actual UI path an acting user with full CRUD on approval_flow but no
-// read permission on its required FK target (role) experiences: the edit
-// page must not crash, and saving unrelated field changes must still
-// succeed. See docs/knowledge/fk-read-permission-graceful-degradation.md.
+// coverage. Moved here from cypress/e2e/api/ (cmd_648) — every case in this
+// file drives the browser (cy.visit/cy.login/cy.selectAutocomplete) and
+// never issues a raw cy.request, so it was never actually API-gate coverage
+// despite living under api/; it belongs in test:e2e:cy:ui's spec glob
+// (cypress/e2e/*.cy.ts), not test:e2e:cy:api's. The generated API spec
+// (cypress/e2e/api/approval_flow.cy.ts, "4.4 preserves approver_role_id ...
+// omits it from the PUT body" and "4.5 returns 200 for GET (list and
+// detail) when the acting user cannot read role") proves the server-side
+// contract via raw X-API-Key requests — that pair is this file's API-side
+// counterpart and now carries the mandatory-gate coverage for the same
+// underlying mechanism. This spec proves the actual UI path an acting user
+// with full CRUD on approval_flow but no read permission on its required FK
+// target (role) experiences: the edit page must not crash, and saving
+// unrelated field changes must still succeed. See
+// docs/knowledge/fk-read-permission-graceful-degradation.md.
 //
 // The same graceful-degradation treatment applied to the selector
 // one-to-one autocomplete (getAvailable{Target}sFor{Parent}()) has no live

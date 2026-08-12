@@ -1,22 +1,19 @@
 // AUTO-GENERATED - DO NOT EDIT
-import { NextResponse } from 'next/server';
-import { getModelPermissions, assertPermission{% if should_filter_by_org %}, getSessionUserId{% endif %} } from '@/lib/authz';
-import { handleApiError } from '@/lib/api-auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { getModelPermissions, assertPermission } from '@/lib/authz';
+import { handleApiError, resolveActorId } from '@/lib/api-auth';
 import { escapeCSV } from '@/lib/_csv';
 import { get{{ parent_pascal }}ChunkForExport } from '@/lib/{{ parent }}/getters';
 
 const EXPORT_CHUNK_SIZE = Number(process.env.EXPORT_CHUNK_SIZE ?? '200');
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-{% if should_filter_by_org %}
-    const actorId = await getSessionUserId();
+    // cmd_648: dual-auth — X-API-Key/Authorization header when present,
+    // session cookie otherwise (see app/api/search/route.ts).
+    const actorId = await resolveActorId(request);
     if (!actorId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const { permissions } = await getModelPermissions('{{ parent }}', actorId);
-{% else %}
-    const { permissions, userId: actorId } = await getModelPermissions('{{ parent }}');
-    if (!actorId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-{% endif %}
     try {
       await assertPermission(permissions, 'read', '{{ parent }}');
     } catch {

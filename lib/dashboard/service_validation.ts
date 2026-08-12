@@ -1,4 +1,5 @@
 import prisma from '@/lib/prisma';
+import { validateCustomRules } from '@/lib/dashboard/service_validation_custom';
 
 type TransactionClient = Pick<typeof prisma, 'dashboard'>;
 type RequiredField = { key: string; label: string };
@@ -62,6 +63,14 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
       throw new Error(`${relation.label} is already linked`);
     }
   }
+
+  // cmd_652: hand-written entity-specific business rules (e.g. a
+  // self-referential relation that must only link same-"chain" rows) live
+  // entirely in lib/dashboard/service_validation_custom.ts, a
+  // GENERATED-ONCE stub — see that file for the socket contract. This call
+  // is unconditional and identical for every entity; the generator carries
+  // no knowledge of what (if anything) the hook checks.
+  await validateCustomRules(tx, data, currentId);
 }
 
 export async function validateOnAdd(tx: TransactionClient, data: Record<string, unknown>): Promise<void> {
