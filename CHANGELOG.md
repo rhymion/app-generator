@@ -5,6 +5,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Internal
+- Set `x-generate.test: false` on `approval_flow` (cmd_661) — its generated CRUD Cypress specs (desktop/mobile/API) and support helper are being replaced by hand-written coverage that already exercises the entity_name filter/validation design (cmd_652) in `cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts`, placed directly in this repo's `cypress/e2e/` so it reaches every consumer via the submodule. Verified via `generate-code`: the three specs, `cypress/support/approval_flow/helper.ts`, and the task registry entry in `cypress/support/generated-tasks.ts` are no longer written (confirmed against `.generated-manifest.json`).
+- Refactored `approval_flow_same_entity_autocomplete_filter.cy.ts` to seed its own two `Role` rows via direct `POST /api/role` calls instead of `cy.task('db:populateApprovalFlowDependencies')`, which only existed while `approval_flow`'s generated test helper (`cypress/support/approval_flow/helper.ts`) was being written — now that `test: false` removes that helper, the spec would otherwise fail its `beforeEach` on every run. Verified: 7/7 tests pass (`cypress run --spec cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts` against a real build), and a full-repo grep confirms no other spec references the removed generated task.
+
 ### Added
 - **CSV export/import and approve/reject now accept `X-API-Key` as well as a browser session**
   (cmd_648): `api_export_route.ts.jinja2`, `api_import_route.ts.jinja2`,

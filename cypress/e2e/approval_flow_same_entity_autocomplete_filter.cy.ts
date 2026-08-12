@@ -31,6 +31,45 @@ function createApprovalFlow(entityName: string, approverRoleId: string) {
     });
 }
 
+// Self-contained dependency seeding (cmd_661) — this spec used to call the
+// generator-produced `db:populateApprovalFlowDependencies` Cypress task, but
+// that task lives in cypress/support/approval_flow/helper.ts, which is only
+// written while x-generate.test is true for approval_flow. Now that
+// approval_flow is a fully hand-written-test entity (test: false), this spec
+// seeds its own two Role rows directly through the (still generated, still
+// api: true) /api/role endpoint instead of depending on generated test
+// scaffolding. db:reset in beforeEach wipes the DB before every test, so a
+// plain create (no find-or-create) is enough — each test starts from empty.
+function createApprovalFlowDeps() {
+  return cy
+    .request({
+      method: 'POST',
+      url: '/api/role',
+      headers: { 'X-API-Key': TEST_API_KEY },
+      body: { name: 'Test Approver Role A' },
+    })
+    .then((approverRoleRes) => {
+      expect(approverRoleRes.status).to.eq(201);
+      return cy
+        .request({
+          method: 'POST',
+          url: '/api/role',
+          headers: { 'X-API-Key': TEST_API_KEY },
+          body: { name: 'Test Approver Role B' },
+        })
+        .then((approverRole2Res) => {
+          expect(approverRole2Res.status).to.eq(201);
+          // POST /api/role's response body is { id } only (see
+          // lib/role/service.ts's addRole() return type) — the name comes
+          // back from what we just sent, not from re-reading the response.
+          return {
+            approverRole: { id: (approverRoleRes.body as { id: string }).id, name: 'Test Approver Role A' },
+            approverRole2: { id: (approverRole2Res.body as { id: string }).id, name: 'Test Approver Role B' },
+          };
+        });
+    });
+}
+
 describe('approval_flow preceded_by/followed_by same-entity_name candidate filtering (cmd_613)', () => {
   beforeEach(() => {
     cy.task('db:reset');
@@ -47,7 +86,7 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
   });
 
   it('(A)(B) shows a same-entity_name candidate and hides a different-entity_name candidate when adding Preceded By', () => {
-    cy.task<any>('db:populateApprovalFlowDependencies').then((deps) => {
+    createApprovalFlowDeps().then((deps) => {
       // deps.precededBy/deps.followedBy share entity_name 'user' with the
       // generated approval_flow.cy.ts 2.2/3.1 flows' primary record
       // (cmd_652: generators_test.py's self-ref dep divergence is now keyed
@@ -92,7 +131,7 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
   // in code_generator/templates/page_edit.tsx.jinja2. This test opens the
   // dialog and asserts on the popper BEFORE typing anything.
   it('(1) hides a different-entity_name candidate before any search text is typed', () => {
-    cy.task<any>('db:populateApprovalFlowDependencies').then((deps) => {
+    createApprovalFlowDeps().then((deps) => {
       createApprovalFlow('permission', deps.approverRole.id).then((editTarget) => {
         createApprovalFlow('permission', deps.approverRole2.id).then(() => {
           createApprovalFlow('setting', deps.approverRole.id).then(() => {
@@ -117,7 +156,7 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
   // `src` prop (the DB snapshot at page-load) — changing Entity Name in the
   // UI without saving had no effect on which candidates the picker showed.
   it('(2) candidate popper follows the on-screen entity_name value after changing it, before any save', () => {
-    cy.task<any>('db:populateApprovalFlowDependencies').then((deps) => {
+    createApprovalFlowDeps().then((deps) => {
       // editTarget's DB-saved entity_name is 'permission'.
       createApprovalFlow('permission', deps.approverRole.id).then((editTarget) => {
         // A candidate whose entity_name is 'setting' — under the OLD
@@ -147,7 +186,7 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
   });
 
   it('View and Edit render the identical preceded_by label (entity_name + approver_role.name, space-joined)', () => {
-    cy.task<any>('db:populateApprovalFlowDependencies').then((deps) => {
+    createApprovalFlowDeps().then((deps) => {
       // Different roles (approverRole vs approverRole2) so the two
       // 'permission' rows don't trip @@unique([entity_name, approver_role_id])
       // where it exists (e.g. proj_c) — see the (A)(B) test above for detail.
@@ -208,7 +247,7 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
   // the UI (FormUpsert's server action) and a bare API call.
   // cmd_646 finding: pre-existing, not fixed here (out of scope). See report.
   it('(UI) rejects saving after changing entity_name to no longer match an already-added Preceded By', () => {
-    cy.task<any>('db:populateApprovalFlowDependencies').then((deps) => {
+    createApprovalFlowDeps().then((deps) => {
       createApprovalFlow('permission', deps.approverRole2.id).then(() => {
         createApprovalFlow('permission', deps.approverRole.id).then((editTarget) => {
           cy.visit(`/en/approval_flow/edit/${editTarget.id}`);
@@ -242,7 +281,7 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
   });
 
   it('(API) rejects a bare POST linking preceded_by to a different-entity_name row', () => {
-    cy.task<any>('db:populateApprovalFlowDependencies').then((deps) => {
+    createApprovalFlowDeps().then((deps) => {
       createApprovalFlow('setting', deps.approverRole2.id).then((crossEntityRow) => {
         cy.request({
           method: 'POST',
@@ -271,7 +310,7 @@ describe('approval_flow preceded_by/followed_by same-entity_name candidate filte
   });
 
   it('(API) rejects a bare PUT linking followed_by to a different-entity_name row', () => {
-    cy.task<any>('db:populateApprovalFlowDependencies').then((deps) => {
+    createApprovalFlowDeps().then((deps) => {
       createApprovalFlow('setting', deps.approverRole2.id).then((crossEntityRow) => {
         createApprovalFlow('permission', deps.approverRole.id).then((editTarget) => {
           cy.request({
