@@ -76,24 +76,31 @@ if `VERCEL` is set and `DIRECT_URL` is not, config loading throws instead of
 silently falling back. Everywhere else (`VERCEL` unset), the fallback is
 silent and correct, because there's nothing to route around.
 
-## Setting `DIRECT_URL` on Vercel (manual step — human hands only)
+## Setting `DIRECT_URL` on Vercel (superseded — see subtask_657b)
 
-Agents must not set Vercel environment variables (see CLAUDE.md "Destructive
-Operation Safety" — this is a production deploy configuration change, and
-connection strings are secrets that must never be typed into an inbox,
-report, PR, or commit). This is one of the operations tracked alongside
-`docs/knowledge/manual-ops.md`'s GCP list, for Vercel instead:
+**This section originally described a manual, dashboard-only step. That is
+superseded (cmd_657 follow-up, 2026-08-12).** All Vercel setup for this
+project has always gone through the consumer repo's (`app-template`)
+`scripts/vercel-setup.sh` / `scripts/vercel-env.sh` — the same single place
+`DATABASE_URL`, `AUTH_SECRET`, `REDIS_URL`, and every other Vercel env var
+are already set. Splitting `DIRECT_URL` out into a separate manual dashboard
+step would put configuration in two places instead of one.
 
-1. In the Neon console, open the project used by this Vercel deployment and
-   copy the **unpooled** connection string (the one *without* `-pooler` in
-   the hostname — Neon shows both a pooled and a direct connection string
-   side by side on the same page `DATABASE_URL` was originally copied from).
-2. In the Vercel project → Settings → Environment Variables, add `DIRECT_URL`
-   with that value, scoped to the same environments (Production/Preview)
-   that already have `DATABASE_URL`.
-3. Do this **before** merging/deploying the `prisma.config.ts` change above —
-   once deployed, a build on Vercel with `DIRECT_URL` unset fails immediately
-   (see "Why this can't silently regress"), by design.
+Concretely, `app-template/scripts/vercel-env.sh`'s `vercel_env_inject()` now
+also injects `DIRECT_URL`, sourced from `DATABASE_URL_UNPOOLED_PROD` /
+`DATABASE_URL_UNPOOLED_STAGING` — values `vercel-setup.sh`'s
+`get_neon_connection_strings()` already fetches from Neon and persists to
+`.env.production.local` for both branches. Nothing new needs to be fetched
+from Neon; the unpooled values were already being retrieved and just weren't
+being forwarded to Vercel. Running (or re-running — idempotent)
+`app-template/scripts/vercel-setup.sh` sets `DIRECT_URL` on both Production
+and Preview alongside `DATABASE_URL`. See `app-template`'s
+`docs/vercel-automation-design.md` for the consumer-side detail.
 
-No application code change is needed after this — `prisma.config.ts` already
+This is still a production Vercel deploy configuration change and
+`DIRECT_URL`'s value is still a secret — it must never be typed into an
+inbox, report, PR, or commit; the script is the only thing that ever
+touches the value.
+
+No application code change is needed beyond this — `prisma.config.ts` already
 picks up `DIRECT_URL` once it's set.
