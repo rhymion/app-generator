@@ -545,6 +545,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   nothing to route around. Consuming projects (`app-template`, `inventory-app`) pick this up via
   their `app-generator` submodule pointer — neither carries its own copy of `prisma.config.ts`.
   See `docs/knowledge/prisma-direct-vs-pooled-connection.md`.
+- `docs/knowledge/prisma-direct-vs-pooled-connection.md`'s "Setting `DIRECT_URL` on Vercel" section
+  is corrected (cmd_657 addendum): it originally described a manual, dashboard-only step. `DIRECT_URL`
+  is now injected by `app-template`'s `scripts/vercel-env.sh` alongside every other Vercel env var —
+  see that repo's CHANGELOG for the actual injection change.
 - **Generated `parent1`-style Cypress spec (2+ DataGrid children on one parent form) intermittently
   failed with "can only scroll 1 element, you tried to scroll 2 elements", and generated
   DataGrid-child date/date-time/time edit cells rejected every typed value** (cmd_634, two
