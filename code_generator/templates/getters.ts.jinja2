@@ -543,7 +543,15 @@ export async function get{{ parent_pascal }}ChunkForExport(
   const associatedOrganizations = await getAssociatedOrganizations(userId);
   const associatedOrganizationIds = associatedOrganizations.map((o) => o.id);
 {% else %}
-  const { permissions } = await getModelPermissions('{{ parent }}');
+  // cmd_658: this branch used to omit userId, so getModelPermissions() fell
+  // back to getSessionUserId() — silently reading the caller's browser
+  // session cookie instead of the actor this function was called with. Every
+  // export API test always authenticated via cy.login (a real session), so
+  // this was invisible; switching those tests to X-API-Key (cmd_658, no
+  // session cookie) exposed it as a real bug: an API-key-only caller with
+  // genuine 'read' permission (already asserted by the route) got back
+  // permissions: EMPTY_FLAGS here and silently exported zero rows.
+  const { permissions } = await getModelPermissions('{{ parent }}', userId);
 {% endif %}
   const accessAnd = await build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
   const rows = await prisma.{{ model }}.findMany({

@@ -101,6 +101,67 @@ default grant), returning 403. The main test user has no roles → no matching r
 API tests use `TEST_API_KEY` (defined in `cypress/support/test-credentials.ts`) which
 is seeded into the test user by `seedTestDatabase()` in `db-helpers.ts`.
 
+#### API test / UI test boundary — `cy.login()` policy (cmd_658)
+
+An API test's job is to prove *the API* is correct. `cy.login()` drives the real
+`/login` page (`cypress/support/commands.ts`) — it is a screen operation. A `cy.login()`
+call inside `cypress/e2e/api/**` couples an API test's pass/fail to whether the login
+*page* renders and submits correctly, which defeats the point of having a separate,
+browser-free API suite: a login-page regression now fails API specs too, and the two
+failure causes can no longer be told apart from the gate output alone.
+
+**Rule**: `cypress/e2e/api/**` specs authenticate with `X-API-Key` (`TEST_API_KEY`, or
+a key from `db:createLimitedApiUser` / `db:createApiUserWithPermission` for
+permission-denied scenarios), never `cy.login()` — with exactly one exception.
+
+**The one exception — dual-auth session canary.** Routes that accept *either*
+`X-API-Key` or a NextAuth session cookie (export, import, approve, reject — see
+`lib/api-auth.ts`'s `resolveActorId()` / `requireDualAuth()`, introduced in cmd_648)
+need *some* test proving the session-cookie half still works, or a regression there
+would go undetected while every API test stays green on the key-only half. That single
+canary test (`test_api_spec.cy.ts.jinja2`'s `N14 also authenticates via a NextAuth
+session cookie (dual-auth)`) is deliberately kept, marked with an in-file
+`// dual-auth-session-canary: ...` comment. It is not duplicated per-route: the
+session-vs-key resolution is shared code, exercised once is enough — the routes'
+individual business logic is what the X-API-Key tests above it already cover.
+
+Before cmd_658, this boundary didn't hold: the generated API spec template had 15
+`cy.login()` call sites (11 in an approve/reject block that simply predated cmd_648's
+dual-auth and had never been updated, 2 in an export/import permission-denied pair
+whose own comment — now stale — claimed the route "never reads X-API-Key", and 2 more
+in an export/import happy-path block and a search-coverage block that had no
+route-specific reason to use a browser session at all). Fixing the first two exposed a
+real, previously-latent bug: `get<Entity>ChunkForExport()` in `getters.ts.jinja2` called
+`getModelPermissions('<entity>')` with no `userId` argument, silently falling back to
+`getSessionUserId()` — invisible under `cy.login()` (a session cookie was always
+present) but returning `EMPTY_FLAGS`, and therefore zero exported rows, for a caller
+with genuine read permission who authenticated via `X-API-Key` only. Also fixed (the
+`{% if should_filter_by_org %}` branch already passed `userId` through correctly — this
+was a single missing branch, not a systemic pattern; the search/list/paged-data
+functions that call `getModelPermissions()` with no `userId` are page/Server-Action-only
+entry points with no `userId` parameter of their own, and correctly resolve the actor
+from the session there).
+
+**Machine enforcement**: `code_generator/check_generated.py`'s `test:unexplained-login`
+rule (part of `npm run check:generated`, gate step 6) scans every generated
+`cypress/e2e/api/<entity>.cy.ts` for `cy.login(` with no `dual-auth-session-canary`
+marker in the 5 lines above it. This is **not** allowlist-exemptable (unlike the
+`raw:*` / `write:direct` rules above it) — cmd_658's ruling was that the exemption
+mechanism itself must be machine-checkable *in the file*, not filed away in a separate
+YAML a reviewer has to go find (cmd_498: an exemption nothing checks is a hole, not an
+exemption).
+
+**Scope note**: this rule only walks *generated* specs (mirrors the existing
+`raw:*`/`write:direct` rule enumeration — schema entities with `api: true`). It does
+not yet cover proj_b's 5 hand-written `cypress/e2e/api/*.cy.ts` files
+(`import_batch2.cy.ts`, `round_trip.cy.ts`, `user_import.cy.ts`,
+`multi_stage_approval_order_reached.cy.ts`,
+`approval_request_resubmit_notification.cy.ts` — still `cy.login()`-based as of
+cmd_658, since export/import/approve/reject now accept `X-API-Key` too) or proj_c's
+`prj/`-owned hand-written API specs. Both are tracked as a follow-up (cmd_658's
+classification report); extending this same rule (or a parallel scan) to hand-written
+files once that work lands is the natural next step — don't reinvent the mechanism.
+
 ---
 
 ## Mandatory gate (`test:e2e:cy:api`) composition

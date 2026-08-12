@@ -28,6 +28,29 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   API-gate-covered counterpart of `fk_read_permission_graceful_degradation.cy.ts`.
 
 ### Changed
+- **Generated API test spec (`test_api_spec.cy.ts.jinja2`) no longer authenticates via
+  `cy.login()` except one deliberate case** (cmd_658, 殿's report: `api/approval_flow.cy.ts`
+  still drove the browser login screen even after cmd_648 added `X-API-Key` support to
+  export/import/approve/reject). 15 `cy.login()` call sites classified one by one: 11 in the
+  approve/reject block (12.1–15.2) simply predated cmd_648's dual-auth and had never been
+  updated to use the `api_key` the same test fixtures already expose (`setup.approverUser.api_key`
+  etc., the exact pattern the adjacent resubmit tests already used) — switched to `X-API-Key`. 2
+  in the export/import permission-denied pair (7.5/7.6) carried a comment claiming the route
+  "never reads X-API-Key"; that claim is now false (cmd_648) — switched to
+  `db:createLimitedApiUser`, the same helper 7.2–7.4 already use, making 7.5/7.6 identical in
+  shape to their siblings. 2 more (an export/import happy-path block's `beforeEach`, and a
+  search-coverage block) had no route-specific reason to use a session at all — switched to
+  `TEST_API_KEY`. The one exception is new: `N14 also authenticates via a NextAuth session
+  cookie (dual-auth)`, a single canary proving the session-cookie half of `resolveActorId()`
+  still authenticates, kept because eliminating every `cy.login()` would silently stop measuring
+  that half of dual-auth's "works via either" guarantee. See
+  `docs/knowledge/testing-cypress.md`'s "API test / UI test boundary" section for the policy and
+  `code_generator/check_generated.py`'s new `test:unexplained-login` gate rule that now enforces
+  it (regenerated output confirmed `cy.login`-free except the one marked canary; full
+  `test:e2e:cy:api` run: 248/270 passing across all 16 relevant specs, the 22 failures isolated
+  to a single pre-existing, untracked, gitignored orphan spec — `personal_note.cy.ts`, 404s
+  because the `personal_note` entity no longer exists in `json_schema.yaml` — unrelated to this
+  change and present before it).
 - **`fk_read_permission_graceful_degradation.cy.ts` moved from `cypress/e2e/api/` to
   `cypress/e2e/`** (cmd_648): every case in this hand-written spec drives the browser
   (`cy.visit`/`cy.login`/`cy.selectAutocomplete`) and never issues a raw `cy.request` — it was
@@ -38,6 +61,23 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `ui/` subdirectory would have dropped it from both gates' spec globs silently.)
 
 ### Fixed
+- **`get<Entity>ChunkForExport()` silently exported zero rows for an `X-API-Key`-only caller
+  with genuine `read` permission** (cmd_658, found while removing `cy.login()` from generated
+  export API tests): `getters.ts.jinja2`'s CSV-export getter has two branches for computing
+  permissions — the `should_filter_by_org` branch correctly calls
+  `getModelPermissions('<entity>', userId)` with the `userId` the export route already resolved
+  (via `resolveActorId()`, cmd_648 dual-auth) and passed in; the other branch called
+  `getModelPermissions('<entity>')` with no `userId` at all, which falls back to
+  `getSessionUserId()` inside `authz.ts`. Every export API test always authenticated via
+  `cy.login()` (a real session cookie), so this was invisible — `getSessionUserId()` happened to
+  resolve the same actor. Switching those tests to `X-API-Key` (no session cookie present)
+  exposed it: `getSessionUserId()` returns `null`, `getModelPermissions()` returns
+  `EMPTY_FLAGS`, and the export's own access-where builder filters out every row — a 200 response
+  with an empty CSV body, not an error, for a caller the *route* had already confirmed has read
+  access. Fixed by passing `userId` through in both branches. Verified: `dashboard.cy.ts`'s N6/N11/
+  N12/N13 (which use `to.include` assertions that fail on empty data, unlike N1/N2/N5's
+  `to.not.include`, which pass vacuously either way) went from failing (`expected [''] to include
+  'name'`) to passing after the fix, confirmed on a from-scratch server + build.
 - **`FormUpsert`'s readonly-field display was type-blind, showing raw FK ids with a nonexistent
   i18n key instead of the relation's label** (cmd_642): the readonly-field loop in
   `form_upsert_context()` rendered every readonly field the same way —
@@ -558,6 +598,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/notification-triggers.md`.
 
 ### Internal
+- **`check_generated.py`: new `test:unexplained-login` gate rule** (cmd_658): scans every
+  generated `cypress/e2e/api/<entity>.cy.ts` for `cy.login(` with no `dual-auth-session-canary`
+  marker comment in the 5 lines above it, so a `cy.login()` reintroduced into a future template
+  edit fails `npm run check:generated` (gate step 6) instead of silently reintroducing the
+  screen-operation coupling this same cmd removed. Deliberately not allowlist-exemptable like the
+  existing `raw:*`/`write:direct` rules — the exemption has to be the in-file marker, checkable in
+  the same diff that adds the `cy.login()` call, not a separate YAML entry a reviewer has to go
+  find (cmd_498's "an exemption nothing checks is a hole"). Verified with a fault-injection test
+  (added an unmarked `cy.login()` to a generated spec, confirmed the gate caught it, reverted) per
+  cmd_476's convention, plus 7 new `code_generator/tests/test_check_generated.py` cases. Scope:
+  only walks generated specs for now (mirrors the existing rules' entity-driven enumeration) — the
+  5 proj_b hand-written API specs and proj_c's `prj/`-owned ones are tracked separately (cmd_658
+  classification report) as a follow-up, not yet covered by this rule. See
+  `docs/knowledge/testing-cypress.md`'s "API test / UI test boundary" section.
 - **Vercel's `migrate:deploy` ran through Neon's pooled connection instead of a direct one**
   (cmd_657): `prisma.config.ts`'s `datasource.url` (read only by the Prisma CLI — `lib/prisma.ts`
   reads `DATABASE_URL` independently for the running app, unaffected by this file) pointed at
