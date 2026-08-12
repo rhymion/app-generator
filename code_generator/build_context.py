@@ -2034,6 +2034,22 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         for c in embedded_ch
     )
 
+    # cmd_652: expose every connect-style child's selected id list to
+    # validateOnAdd/validateOnUpdate/afterCreate via `data['{{ property_name }}']`
+    # — WITHOUT changing their `data: Record<string, unknown>` signature. This
+    # is unconditional structural wiring (every entity's hand-written
+    # validateCustomRules(), see lib/{{ model }}/service_validation_custom.ts,
+    # can read any connect-style child selection it needs); the default
+    # no-op stub simply ignores the extra keys, so this is inert unless a
+    # hand-written hook opts in.
+    _connect_child_data_lines = '\n'.join(
+        f"      {c['property_name']}: {c['child_var']}Ids,"
+        for c in embedded_ch
+        if c['use_connect']
+    )
+    if _connect_child_data_lines:
+        validation_data_obj = validation_data_obj + '\n' + _connect_child_data_lines
+
     child_nested_create = _build_child_nested_create(embedded_ch)
     child_nested_update = _build_child_nested_update(embedded_ch)
     child_assignee_notify_create_code = _build_child_assignee_notify_create_code(

@@ -27,11 +27,12 @@ export default async function Edit{{ parent_pascal }}Page({ params }: {{ parent_
   );
 }
 
+{% set _other_selection_targets = selection_targets | reject('equalto', parent) | list %}
 async function {{ parent_pascal }}EditContent({ id }: { id: string }) {
-{% if selection_targets or selector_oto_rels %}
-  const [detail, {% for target in selection_targets %}initial{{ target | pascal_case }}s{% if not loop.last or selector_oto_rels or entity_edit_components %}, {% endif %}{% endfor %}{% for oto in selector_oto_rels %}initialAvailable{{ oto.target | pascal_case }}s{% if not loop.last or entity_edit_components %}, {% endif %}{% endfor %}{% if entity_edit_components %}currentUserRoleIds{% endif %}] = await Promise.all([
+{% if _other_selection_targets or selector_oto_rels %}
+  const [detail, {% for target in _other_selection_targets %}initial{{ target | pascal_case }}s{% if not loop.last or selector_oto_rels or entity_edit_components %}, {% endif %}{% endfor %}{% for oto in selector_oto_rels %}initialAvailable{{ oto.target | pascal_case }}s{% if not loop.last or entity_edit_components %}, {% endif %}{% endfor %}{% if entity_edit_components %}currentUserRoleIds{% endif %}] = await Promise.all([
     get{{ parent_pascal }}DetailPageData(id, 'update'),
-{% for target in selection_targets %}
+{% for target in _other_selection_targets %}
 {% if target == 'organization' %}
     searchAssociatedOrganizationOptions('', [], 50),
 {% else %}
@@ -61,5 +62,17 @@ async function {{ parent_pascal }}EditContent({ id }: { id: string }) {
   if (!detail.{{ parent_camel }}) {
     notFound();
   }
+{% if parent in selection_targets %}
+  // cmd_652: self-referential candidate list — fetched AFTER detail resolves
+  // (unlike the other selection targets above, which run in the initial
+  // Promise.all before any record data is available) so the record's OWN
+  // current field values can be forwarded as context.formValues, the same
+  // as the live search in FormUpsert.tsx. Without this, the "no search
+  // text typed yet" popper state would show every {{ parent }} row
+  // regardless of any hand-written filter (lib/{{ parent }}/autocomplete_filter.ts),
+  // since a call with no context always resolves to that filter's
+  // no-context branch.
+  const initial{{ parent_pascal }}s = await search{{ parent_pascal }}Options('', [], 50, { callerEntity: '{{ parent }}', formValues: detail.{{ parent_camel }} as unknown as Record<string, unknown> });
+{% endif %}
   return <FormUpsert src={detail.{{ parent_camel }}} isEdit={true} permissions={detail.userPermissions}{% if comment_has_mention %} canViewUserProfile={detail.canViewUserProfile} mentionUserContext={detail.mentionUserContext}{% endif %}{% if entity_edit_components %} currentUserRoleIds={currentUserRoleIds}{% endif %}{% for target in selection_targets %} initial{{ target | pascal_case }}s={ initial{{ target | pascal_case }}s } initial{{ target | pascal_case }}sPermissionDenied={Boolean((initial{{ target | pascal_case }}s as { permissionDenied?: boolean } | undefined)?.permissionDenied)} search{{ target | pascal_case }}Options={ {% if target == 'organization' %}searchAssociatedOrganizationOptions{% else %}search{{ target | pascal_case }}Options{% endif %} }{% endfor %}{% for oto in selector_oto_rels %} initial{{ oto.target | pascal_case }}s={ initialAvailable{{ oto.target | pascal_case }}s } initial{{ oto.target | pascal_case }}sPermissionDenied={Boolean((initialAvailable{{ oto.target | pascal_case }}s as { permissionDenied?: boolean } | undefined)?.permissionDenied)}{% endfor %}{% if comment_children %} currentUserId={currentUserId}{% endif %} />;
 }

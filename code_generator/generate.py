@@ -841,6 +841,13 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'parent_pascal': parent_pascal,
             }),
         )
+        _write_stub(
+            lib_dir / 'service_validation_custom.ts',
+            _render(env, 'service_validation_custom_stub.ts.jinja2', {
+                'parent': parent,
+                'parent_pascal': parent_pascal,
+            }),
+        )
 
         # --- virtual column resolver stub (per-entity, async/bulk) ---
         if ctx.get('virtual_columns'):
