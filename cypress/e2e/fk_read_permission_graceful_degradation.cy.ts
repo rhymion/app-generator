@@ -1,4 +1,49 @@
-import { TEST_CREDENTIALS } from '../support/test-credentials';
+import { TEST_API_KEY, TEST_CREDENTIALS } from '../support/test-credentials';
+
+// Self-contained dependency seeding (cmd_663) — this spec used to call the
+// generator-produced `db:populateApprovalFlow` / `db:populateApprovalFlowFull`
+// Cypress tasks, which lived in cypress/support/approval_flow/helper.ts. That
+// file is only written while x-generate.test is true for approval_flow; cmd_661
+// set approval_flow to test: false, which silently broke this spec as
+// collateral damage — verified by grepping the repo for both task names and
+// finding no registration left anywhere except this file's own now-dead
+// cy.task() calls. Fixed the same way cmd_661 already fixed
+// approval_flow_same_entity_autocomplete_filter.cy.ts: seed directly through
+// the (still generated, still api: true) /api/role and /api/approval_flow
+// endpoints instead of depending on generated test scaffolding. db:reset in
+// beforeEach wipes the DB before every test, so a plain create (no
+// find-or-create) is enough — each test starts from empty.
+function createRole(name: string) {
+  return cy
+    .request({
+      method: 'POST',
+      url: '/api/role',
+      headers: { 'X-API-Key': TEST_API_KEY },
+      body: { name },
+    })
+    .then((res) => {
+      expect(res.status).to.eq(201);
+      return (res.body as { id: string }).id;
+    });
+}
+
+function createApprovalFlow(body: {
+  entity_name: string;
+  approver_role_id: string;
+  requestor_role_id?: string;
+}) {
+  return cy
+    .request({
+      method: 'POST',
+      url: '/api/approval_flow',
+      headers: { 'X-API-Key': TEST_API_KEY },
+      body: { ...body, precededBy_ids: [], followedBy_ids: [] },
+    })
+    .then((res) => {
+      expect(res.status).to.eq(201);
+      return res.body as { id: string };
+    });
+}
 
 // FK read-permission graceful degradation: browser-session regression
 // coverage. Moved here from cypress/e2e/api/ (cmd_648) — every case in this
@@ -32,36 +77,40 @@ describe('FK read-permission graceful degradation — browser session', () => {
   });
 
   it('a) the edit page opens without crashing when the actor cannot read the required FK target (role)', () => {
-    cy.task<any[]>('db:populateApprovalFlow', 1).then((records) => {
-      cy.task<string>('db:createSessionUserWithPermission', {
-        entityName: 'approval_flow',
-        flags: { create: true, read: true, update: true, delete: true },
-        label: 'ui_fk_read_denied_a',
-      }).then((email) => {
-        cy.login(email, TEST_CREDENTIALS.password);
-        cy.visit(`/en/approval_flow/edit/${records[0].id}`);
-        // Previously: search{Entity}Options() threw inside Promise.all,
-        // crashing the whole page. Now: the FK field renders as a
-        // disabled, labeled field instead.
-        cy.contains('Entity Name').should('be.visible');
-        cy.contains('Approver Role').should('be.visible');
+    createRole('Test Approver Role A').then((approverRoleId) => {
+      createApprovalFlow({ entity_name: 'user', approver_role_id: approverRoleId }).then((record) => {
+        cy.task<string>('db:createSessionUserWithPermission', {
+          entityName: 'approval_flow',
+          flags: { create: true, read: true, update: true, delete: true },
+          label: 'ui_fk_read_denied_a',
+        }).then((email) => {
+          cy.login(email, TEST_CREDENTIALS.password);
+          cy.visit(`/en/approval_flow/edit/${record.id}`);
+          // Previously: search{Entity}Options() threw inside Promise.all,
+          // crashing the whole page. Now: the FK field renders as a
+          // disabled, labeled field instead.
+          cy.contains('Entity Name').should('be.visible');
+          cy.contains('Approver Role').should('be.visible');
+        });
       });
     });
   });
 
   it('b) other fields can still be changed and saved when the required FK target (role) is unreadable', () => {
-    cy.task<any[]>('db:populateApprovalFlow', 1).then((records) => {
-      cy.task<string>('db:createSessionUserWithPermission', {
-        entityName: 'approval_flow',
-        flags: { create: true, read: true, update: true, delete: true },
-        label: 'ui_fk_read_denied_b',
-      }).then((email) => {
-        cy.login(email, TEST_CREDENTIALS.password);
-        cy.visit(`/en/approval_flow/edit/${records[0].id}`);
-        cy.selectAutocomplete('Entity Name', 'Setting');
-        cy.clickButton('Save');
-        cy.url().should('include', '/approval_flow');
-        cy.url().should('not.include', '/approval_flow/edit');
+    createRole('Test Approver Role B').then((approverRoleId) => {
+      createApprovalFlow({ entity_name: 'user', approver_role_id: approverRoleId }).then((record) => {
+        cy.task<string>('db:createSessionUserWithPermission', {
+          entityName: 'approval_flow',
+          flags: { create: true, read: true, update: true, delete: true },
+          label: 'ui_fk_read_denied_b',
+        }).then((email) => {
+          cy.login(email, TEST_CREDENTIALS.password);
+          cy.visit(`/en/approval_flow/edit/${record.id}`);
+          cy.selectAutocomplete('Entity Name', 'Setting');
+          cy.clickButton('Save');
+          cy.url().should('include', '/approval_flow');
+          cy.url().should('not.include', '/approval_flow/edit');
+        });
       });
     });
   });
@@ -74,30 +123,38 @@ describe('FK read-permission graceful degradation — browser session', () => {
     // (`!required && !!value`) for the optional one — clearing a required
     // FK would leave the record permanently unsubmittable, since there is
     // no way for this actor to pick a replacement.
-    cy.task<any[]>('db:populateApprovalFlowFull', 1).then((records) => {
-      cy.task<string>('db:createSessionUserWithPermission', {
-        entityName: 'approval_flow',
-        flags: { create: true, read: true, update: true, delete: true },
-        label: 'ui_fk_read_denied_c',
-      }).then((email) => {
-        cy.login(email, TEST_CREDENTIALS.password);
-        cy.visit(`/en/approval_flow/edit/${records[0].id}`);
-        // Capture the seeded Approver Role label instead of asserting a
-        // hardcoded literal (cmd_620: populateApprovalFlowFullData's
-        // primary-FK-dep row is now callIndex-suffixed to give every call a
-        // fully isolated row, so the exact string depends on how many prior
-        // calls happened in this process — round-trip the actual value
-        // instead of assuming it's always the first-ever call).
-        cy.getFieldValue('Approver Role').then((approverRoleLabel) => {
-          // Exactly one clear affordance on the page: the optional FK's.
-          cy.get('button[aria-label="clear"]').should('have.length', 1);
-          cy.get('button[aria-label="clear"]').click();
-          cy.clickButton('Save');
-          cy.url().should('include', '/approval_flow');
-          cy.url().should('not.include', '/approval_flow/edit');
-          cy.visit(`/en/approval_flow/view/${records[0].id}`);
-          cy.checkField('Requestor Role', '');
-          cy.checkField('Approver Role', approverRoleLabel);
+    createRole('Test Requestor Role C').then((requestorRoleId) => {
+      createRole('Test Approver Role C').then((approverRoleId) => {
+        createApprovalFlow({
+          entity_name: 'user',
+          requestor_role_id: requestorRoleId,
+          approver_role_id: approverRoleId,
+        }).then((record) => {
+          cy.task<string>('db:createSessionUserWithPermission', {
+            entityName: 'approval_flow',
+            flags: { create: true, read: true, update: true, delete: true },
+            label: 'ui_fk_read_denied_c',
+          }).then((email) => {
+            cy.login(email, TEST_CREDENTIALS.password);
+            cy.visit(`/en/approval_flow/edit/${record.id}`);
+            // Capture the seeded Approver Role label instead of asserting a
+            // hardcoded literal (cmd_620: populateApprovalFlowFullData's
+            // primary-FK-dep row is now callIndex-suffixed to give every call a
+            // fully isolated row, so the exact string depends on how many prior
+            // calls happened in this process — round-trip the actual value
+            // instead of assuming it's always the first-ever call).
+            cy.getFieldValue('Approver Role').then((approverRoleLabel) => {
+              // Exactly one clear affordance on the page: the optional FK's.
+              cy.get('button[aria-label="clear"]').should('have.length', 1);
+              cy.get('button[aria-label="clear"]').click();
+              cy.clickButton('Save');
+              cy.url().should('include', '/approval_flow');
+              cy.url().should('not.include', '/approval_flow/edit');
+              cy.visit(`/en/approval_flow/view/${record.id}`);
+              cy.checkField('Requestor Role', '');
+              cy.checkField('Approver Role', approverRoleLabel);
+            });
+          });
         });
       });
     });

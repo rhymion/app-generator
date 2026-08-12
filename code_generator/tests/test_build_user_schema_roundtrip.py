@@ -5,8 +5,7 @@ Stage 4 replaces the Stage 3 `{model}_detail` naming convention with a bare
 `{model}` view name; the synthesized raw entity that used to occupy the
 bare `{model}` name moves to a reserved `__{model}` name instead.
 `tests/fixtures/stage4_reference.yaml` is a snapshot of the Stage 4
-intermediate schema this builder must reproduce from the (renamed)
-`json_schema.yaml` + `prisma/schema.prisma` pair.
+intermediate schema the builder must reproduce.
 
 `tests/fixtures/stage2_reference_json_schema.yaml` -- the pre-Stage-3
 legacy full schema, which cmd_408's own roundtrip test already proved is
@@ -14,6 +13,32 @@ exactly what the Stage 3 builder produced -- doubles as ground truth for
 the Phase A golden-diff invariant (see docs/knowledge/schema-restructuring-build-order.md
 Sec.5 phase_A_schema_level): renaming a paired entity must not change its
 content, only its key and its self-referential `$ref`.
+
+cmd_663 (3rd recurrence of the same failure class -- cmd_476, and a
+2026-07-30 prj:sync-triggered incident, being the first two): the two
+golden-diff tests below used to derive their "actual" side from THIS
+project's live, ever-changing `json_schema.yaml` and diff it against the
+frozen fixtures above -- so *any* schema edit, however unrelated to what
+these tests exist to guard, broke them, and the fix each time was a
+manual fixture-expected-value rewrite. That habit is retired as of
+cmd_663: both tests now derive "actual" from `stage2_reference_json_schema.yaml`
+itself, round-tripped through `convert_to_user_schema.py` (the documented
+mirror-image of `build_user_schema.py`) -- see `_rebuild_from_stage2_fixture`.
+Verified empirically (cmd_663) that this reproduces `stage4_reference.yaml`
+byte-for-byte, so neither frozen fixture needed a content edit to make
+this change. Going forward, editing the live `json_schema.yaml` cannot
+break either test -- only editing `stage2_reference_json_schema.yaml` (or
+the fixture files) itself can.
+
+`test_live_schema_derivation_does_not_raise` below is the intentionally
+separate test that keeps *some* coverage on the live schema, per cmd_663's
+own instruction: derivation succeeding is still worth checking, but never
+again as a content diff against a frozen reference -- only "did it raise."
+
+`prisma/schema.prisma` is NOT frozen the same way (out of cmd_663's
+diagnosed scope, which named `json_schema.yaml` specifically) -- Prisma
+model shape changes to the entities under test could in principle still
+break these two tests. Residual risk, not addressed here.
 """
 from pathlib import Path
 
@@ -27,7 +52,8 @@ from build_user_schema import (
     build_intermediate_schema,
     build_user_schema,
 )
-from schema_deriver import SchemaDivergenceError, parse_prisma_schema
+from convert_to_user_schema import convert_to_user_schema
+from schema_deriver import SchemaDivergenceError, parse_prisma_enums, parse_prisma_schema
 
 SCHEMA_PATH = Path(__file__).parent.parent / "json_schema.yaml"
 PRISMA_SCHEMA_PATH = Path(__file__).parent.parent.parent / "prisma" / "schema.prisma"
@@ -99,16 +125,39 @@ def _deep_diff(a, b, path=""):
     return diffs
 
 
-def test_stage4_derivation_matches_reference(tmp_path):
-    _fail_if_prj_synced_tree()
-    out_path = tmp_path / ".generated" / "json_schema.yaml"
-    build_user_schema(SCHEMA_PATH, PRISMA_SCHEMA_PATH, out_path)
+def _rebuild_from_stage2_fixture():
+    """Derive a Stage 4 intermediate schema entirely from the frozen
+    `stage2_reference_json_schema.yaml` fixture -- never touches the live
+    `json_schema.yaml` (see module docstring, cmd_663). `prisma/schema.prisma`
+    and `json_schema_internal.yaml` are still read live; `SCHEMA_PATH` is
+    passed to `_merge_internal_definitions` only to locate that sibling
+    file by path, its *content* is never read here.
+    """
+    prisma_models = parse_prisma_schema(PRISMA_SCHEMA_PATH)
+    prisma_enums = parse_prisma_enums(PRISMA_SCHEMA_PATH)
+    legacy = _load(STAGE2_REFERENCE_PATH)
+    converted = convert_to_user_schema(legacy, prisma_models)
+    _merge_internal_definitions(converted, SCHEMA_PATH, _make_yaml())
+    return build_intermediate_schema(converted, prisma_models, prisma_enums)
 
+
+def test_stage4_derivation_matches_reference():
+    _fail_if_prj_synced_tree()
+    rebuilt = _rebuild_from_stage2_fixture()
     expected = _load(STAGE4_REFERENCE_PATH)
-    rebuilt = _load(out_path)
 
     diffs = _deep_diff(expected, rebuilt)
     assert not diffs, "Stage 4 output diverges from the reference:\n" + "\n".join(diffs)
+
+
+def test_live_schema_derivation_does_not_raise(tmp_path):
+    """Separate, intentionally content-free check (cmd_663 point 2): the
+    live schema must still derive successfully, but this must never again
+    be a content diff against a frozen reference -- only "did it raise."
+    """
+    _fail_if_prj_synced_tree()
+    out_path = tmp_path / ".generated" / "json_schema.yaml"
+    build_user_schema(SCHEMA_PATH, PRISMA_SCHEMA_PATH, out_path)  # must not raise
 
 
 def test_missing_user_schema_raises():
@@ -225,15 +274,18 @@ def _normalize_legacy_view_self_ref(view: dict, base: str) -> dict:
     return normalized
 
 
-def test_phase_a_golden_diff_zero(tmp_path):
+def test_phase_a_golden_diff_zero():
     """Old `{base}` (raw) content == new `__{base}` content, and old
     `{base}_detail` (view) content == new `{base}` content (modulo the
     expected self-ref rename), for every paired entity. Standalone and
-    pass-through entities must be byte-for-byte untouched by the rename."""
+    pass-through entities must be byte-for-byte untouched by the rename.
+
+    `new` and `old` are BOTH derived from the same frozen stage2 fixture
+    (see `_rebuild_from_stage2_fixture`) -- this proves the rename
+    transform itself is content-preserving, independent of whatever the
+    live `json_schema.yaml` currently says (cmd_663)."""
     _fail_if_prj_synced_tree()
-    out_path = tmp_path / ".generated" / "json_schema.yaml"
-    build_user_schema(SCHEMA_PATH, PRISMA_SCHEMA_PATH, out_path)
-    new = _load(out_path)
+    new = _rebuild_from_stage2_fixture()
     old = _load(STAGE2_REFERENCE_PATH)
 
     diffs = []

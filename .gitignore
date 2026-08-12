@@ -211,9 +211,12 @@ cypress/e2e/*.cy.ts
 !cypress/e2e/import_modal.cy.ts
 !cypress/e2e/legal_pages.cy.ts
 !cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts
+!cypress/e2e/approval_flow_self_referential_children.cy.ts
+!cypress/e2e/approval_flow_desktop_crud.cy.ts
 cypress/e2e/mobile/*.cy.ts
 !cypress/e2e/mobile/layout.cy.ts
 !cypress/e2e/mobile/audit_log.cy.ts
+!cypress/e2e/mobile/approval_flow_crud.cy.ts
 cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/search.cy.ts
 !cypress/e2e/api/user_invalidate.cy.ts
@@ -223,6 +226,7 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/import_batch2.cy.ts
 !cypress/e2e/api/round_trip.cy.ts
 !cypress/e2e/api/fk_read_permission_graceful_degradation.cy.ts
+!cypress/e2e/api/approval_flow_crud.cy.ts
 !cypress/e2e/api/notification_approval.cy.ts
 !cypress/e2e/api/receiving_receipt_notification.cy.ts
 !cypress/e2e/api/multi_stage_approval_order_reached.cy.ts
