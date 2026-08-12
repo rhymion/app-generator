@@ -21,7 +21,7 @@ RUN apk add --no-cache python3 py3-pip
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN pip3 install -r requirements.txt --break-system-packages
-RUN python3 code_generator/generate.py code_generator/json_schema.yaml ./
+RUN npm run generate-code
 RUN npx prisma generate
 ENV NODE_ENV=production
 RUN npm run build
@@ -40,9 +40,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 # Generated Prisma client lives under app/generated/prisma (custom `output` in
-# schema.prisma), not node_modules/.prisma. On GCP the client talks to the DB via
-# Prisma Accelerate (PRISMA_DATABASE_URL) — no query-engine binary or pg adapter
-# is bundled at runtime.
+# schema.prisma), not node_modules/.prisma. On GCP the client talks to the DB
+# via a direct Cloud SQL socket connection (PrismaPg adapter, DATABASE_URL) —
+# Accelerate is off by default (see docs/knowledge/architecture-overview.md).
 COPY --from=builder --chown=nextjs:nodejs /app/app/generated/prisma ./app/generated/prisma
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

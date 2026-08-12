@@ -14,7 +14,38 @@ eliminating manual dependencies to establish sustainable operation.
 
 ## 1. Operation Sequence
 
-Complete procedure for initial GCP environment setup through deployment:
+Complete procedure for initial GCP environment setup through deployment. **The
+order below is load-bearing** — `gcp-deploy.sh` (Step 4) needs the `Dockerfile`
+that only `generate-code` (Step A) produces, and `generate-code` only produces
+the GCP artifacts when `x-cloud` is already enabled at the time it runs.
+Running `generate-code` before enabling `x-cloud` — then discovering the
+missing `Dockerfile` in Step 4 and patching one in by hand instead of going
+back to Step A — silently leaves the upload route on the default Vercel Blob
+path instead of GCS, because both artifacts come from the same generator gate
+(`code_generator/generate.py`, the `x-cloud` block) and only a real
+`generate-code` re-run switches both together.
+
+### Step A: Enable `x-cloud` and run `generate-code`
+
+```bash
+# code_generator/json_schema.yaml — uncomment and fill in:
+#   x-cloud:
+#     enabled: true
+#     provider: gcp
+#     service: cloud_run
+#     region: asia-northeast1
+npm run generate-code
+```
+
+This emits the multi-stage `Dockerfile` + `.dockerignore` at the project
+root (untracked by git — neither committed nor listed in `.gitignore` — so
+they show up as untracked files after this step; regenerated on every
+`generate-code` run), sets `next.config.ts`'s
+`output: 'standalone'`, and switches the upload/serve routes to
+GCS-Signed-URL (overriding the default Vercel Blob routes). None of these
+exist in the tree beforehand. This step is a hard requirement of Step 4
+(`gcp-deploy.sh`) — but, as verified below, NOT a requirement of Step 2
+(`gcp-setup.sh`), which runs to completion without it.
 
 ### Step 1: Prepare .env.production.local
 
@@ -31,6 +62,12 @@ cp .env.production.local.example .env.production.local
 ```bash
 bash scripts/gcp-setup.sh
 ```
+
+Does not read or depend on any `generate-code` output (verified 2026-08-12:
+`DRY_RUN=true` run against a tree with no `Dockerfile` present completed all
+6 steps; the script contains no reference to `Dockerfile`/`docker build` at
+all). Step A above is not a prerequisite for this step, but do it first
+anyway per the sequence above — there is no benefit to deferring it.
 
 Operations performed (idempotent — safe to re-run):
 - Enable GCP APIs
@@ -73,6 +110,28 @@ Platform API does not support URL issuance):
 ```bash
 bash scripts/gcp-deploy.sh
 ```
+
+**Requires the `Dockerfile` from Step A to already exist at the project
+root** — the script's own internal "Step 1" (`docker build -f
+"${PROJECT_ROOT}/Dockerfile"`) has no existence check; a missing
+`Dockerfile` fails the build immediately
+(reproduced 2026-08-12: `ERROR: failed to build: ... open Dockerfile: no
+such file or directory`, before any push or `gcloud` call — this is a purely
+local, no-side-effect failure). This is the exact failure hit by skipping
+Step A.
+
+**`DRY_RUN=true` does NOT catch a missing `Dockerfile`** — every
+`docker build`/`docker push` call in this script is wrapped in the script's
+own dry-run `run()` helper, so under `DRY_RUN=true` the command is only
+echoed, never executed, regardless of whether the file exists (verified
+2026-08-12: a `DRY_RUN=true` run against a tree with no `Dockerfile` printed
+the would-be `docker build` line and ran through to completion of the
+script's own internal Steps 1-4, only failing at the very end on an
+unrelated `gcloud run services describe` lookup — because no real deploy
+had actually happened). Use a real (non-`DRY_RUN`) run to
+confirm the `Dockerfile` is actually present before deploying — the build
+step alone is safe to test this way since it fails locally, before any
+push/`gcloud` mutation, if the file is missing.
 
 Operations performed (default = direct socket path, Option A):
 - Docker image build + push to Artifact Registry (service + migrate images)
