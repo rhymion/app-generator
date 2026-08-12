@@ -304,7 +304,7 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 - **ストリーミング Suspense**: ページが即座にブラウザへ HTML をストリームし、TTFB を削減します。データは Suspense 境界内で非同期に読み込まれます。
 - **スケルトン画面**: 生成されたすべてのリスト・詳細ページは、データ読み込み中にスケルトンを表示してレイアウトシフトを防ぎます。
 - **並列フェッチ**: データと権限チェックを `Promise.all` で並列フェッチし、サーバーへのラウンドトリップを最小化します。
-- **クエリタイムアウト**（`lib/prisma.ts`）: 直結接続（PrismaPg）パスにはデフォルト30秒の `statement_timeout` が適用されます。`STATEMENT_TIMEOUT_MS` で設定変更可能（`0` で無効化）。Accelerate パス（Vercel）は `statement_timeout` を転送しないため対象外です。
+- **クエリタイムアウト**（`lib/prisma.ts`）: 直結接続（PrismaPg）パスにはデフォルト30秒の `statement_timeout` が適用されます。`STATEMENT_TIMEOUT_MS` で設定変更可能（`0` で無効化）。この直結パスが全環境のデフォルトです — Accelerate（`PRISMA_DATABASE_URL`）はオプトインでデフォルト無効、有効化した場合は `statement_timeout` を転送しないため対象外です。
 - **FK インデックス網羅**: `scripts/add_required_indexes.py` が `@relation` の FK カラムを自動検出し `@@index` を追加します（ジェネレーターのデモスキーマは18本から36本へ増加）。
 - **検索用 pg_trgm GIN インデックス**: `generate-code` が `scripts/create-gin-indexes.sql` を生成し、`psql` で手動適用します — `gin_trgm_ops` による `prisma migrate dev` のドリフトループを避けるため `prisma/schema.prisma` の外に置いています。
 - **検索の `COUNT(*)` オプトアウト**: `SearchOpts.count: false` でエンティティ横断検索の2本の `COUNT(*)` クエリをスキップできます（`total: -1` を返却）。
@@ -404,7 +404,9 @@ Next.js は `NODE_ENV` に基づいて環境ファイルを自動的に読み込
 - GCS Signed URL アップロードルート（デフォルトの Vercel Blob アップロードルートを上書き）と V4 Signed URL プロキシルート（`app/api/gcs/[...path]/route.ts`）
 - Cloud Run 内部ポート `:8080` がリダイレクトの `Location` ヘッダーに漏出しないようにする `proxy.ts` のヘッダー書き換え
 
-`scripts/` 配下の冪等な自動化スクリプトが GCP 側を駆動します:
+`scripts/` 配下の冪等な自動化スクリプトが GCP 側を駆動します。実行順は
+`x-cloud` 有効化 → `generate-code` → `gcp-setup.sh` → `gcp-deploy.sh` →
+（必要なら）`gcp-seed.sh` です:
 
 | スクリプト | 用途 |
 |---|---|
@@ -414,9 +416,14 @@ Next.js は `NODE_ENV` に基づいて環境ファイルを自動的に読み込
 | `gcp-seed.sh` | データベースのシード |
 | `gcp-teardown.sh` | GCP リソースの削除（2段階確認付き） |
 
-GCP はデータベースに直結します（`DATABASE_URL`、`PrismaPg`、pooler 無し、`STATEMENT_TIMEOUT_MS` 適用）。Vercel は `PRISMA_DATABASE_URL`（Accelerate）を使用し、Accelerate は `statement_timeout` を転送しないため `STATEMENT_TIMEOUT_MS` は無効です。
+`gcp-deploy.sh` は `generate-code` が生成する `Dockerfile` を要します —
+`x-cloud` を有効化した**後**に `generate-code` を実行し、`gcp-deploy.sh`
+より前に済ませてください。`gcp-setup.sh` にはこの依存はなく、
+`generate-code` の前後どちらでも実行できます。順序が重要な理由と実測結果
+は [docs/knowledge/gcp-automation-design.md](docs/knowledge/gcp-automation-design.md)
+のランブックを参照してください。
 
-詳細なランブックは [docs/knowledge/gcp-automation-design.md](docs/knowledge/gcp-automation-design.md) を参照してください。
+GCP はデータベースに直結します（`DATABASE_URL`、`PrismaPg`、pooler 無し、`STATEMENT_TIMEOUT_MS` 適用）。Accelerate（`PRISMA_DATABASE_URL`）は全環境（本番含む）でデフォルト無効です — 詳細は `docs/knowledge/architecture-overview.md` の「Environment configuration」節と `lib/prisma.ts` のコメントを参照してください。
 
 ---
 

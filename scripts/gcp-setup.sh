@@ -9,7 +9,8 @@
 #   DRY_RUN=true ./scripts/gcp-setup.sh  # echo all write commands, no GCP changes
 #
 # Prerequisites: gcloud CLI, curl, docker
-# Must run after: scripts/gcp-deploy.sh (builds and pushes Docker images)
+# Must run before: scripts/gcp-deploy.sh (this script creates the Artifact
+# Registry repository that gcp-deploy.sh pushes images into)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

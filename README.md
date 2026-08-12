@@ -323,7 +323,7 @@ See [docs/knowledge/multi-tenancy-and-permissions.md](docs/knowledge/multi-tenan
 - **Streaming Suspense**: pages stream HTML to the browser immediately, reducing TTFB. Data is loaded asynchronously in Suspense boundaries.
 - **Skeleton screens**: every generated list and view page renders a skeleton while data loads, preventing layout shift.
 - **Parallel fetching**: data and permission checks are fetched in parallel using `Promise.all`, minimizing server round-trips.
-- **Query timeout** (`lib/prisma.ts`): the direct-connection (PrismaPg) path applies a default 30-second `statement_timeout`, configurable via `STATEMENT_TIMEOUT_MS` (`0` disables it). Not applied on the Accelerate path (Vercel), which does not forward `statement_timeout`.
+- **Query timeout** (`lib/prisma.ts`): the direct-connection (PrismaPg) path applies a default 30-second `statement_timeout`, configurable via `STATEMENT_TIMEOUT_MS` (`0` disables it). This is the default path in every environment — Accelerate (`PRISMA_DATABASE_URL`) is opt-in and off by default; if enabled, `statement_timeout` is not forwarded and has no effect.
 - **FK index coverage**: `scripts/add_required_indexes.py` auto-detects `@relation` FK columns and adds `@@index` for them (the generator's demo schema grew from 18 to 36 indexes).
 - **pg_trgm GIN indexes for search**: `generate-code` emits `scripts/create-gin-indexes.sql`, applied manually with `psql` — kept outside `prisma/schema.prisma` to avoid a `prisma migrate dev` drift loop on `gin_trgm_ops`.
 - **Search `COUNT(*)` opt-out**: `SearchOpts.count: false` skips both `COUNT(*)` queries in cross-entity search (returns `total: -1`).
@@ -423,7 +423,9 @@ When enabled, `generate-code` additionally emits:
 - A GCS Signed URL upload route (overrides the default Vercel Blob upload route) and a V4 Signed URL proxy route (`app/api/gcs/[...path]/route.ts`)
 - `proxy.ts` header rewriting so Cloud Run's internal `:8080` port never leaks into a redirect `Location` header
 
-Idempotent automation scripts in `scripts/` drive the GCP side:
+Idempotent automation scripts in `scripts/` drive the GCP side, run in this
+order — `x-cloud` enable → `generate-code` → `gcp-setup.sh` → `gcp-deploy.sh` →
+`gcp-seed.sh` (optional):
 
 | Script | Purpose |
 |---|---|
@@ -433,9 +435,15 @@ Idempotent automation scripts in `scripts/` drive the GCP side:
 | `gcp-seed.sh` | Seed the database |
 | `gcp-teardown.sh` | Tear down GCP resources (two-step confirmation) |
 
-GCP connects to the database directly (`DATABASE_URL`, `PrismaPg`, no pooler, `STATEMENT_TIMEOUT_MS` applied); Vercel uses `PRISMA_DATABASE_URL` (Accelerate), where `STATEMENT_TIMEOUT_MS` has no effect since Accelerate does not forward `statement_timeout`.
+`gcp-deploy.sh` needs the `Dockerfile` that `generate-code` emits — run
+`generate-code` after enabling `x-cloud`, before `gcp-deploy.sh`.
+`gcp-setup.sh` has no such dependency and may run before or after
+`generate-code`. See
+[docs/knowledge/gcp-automation-design.md](docs/knowledge/gcp-automation-design.md)
+for the full runbook, including why the order matters and how each step was
+verified.
 
-See [docs/knowledge/gcp-automation-design.md](docs/knowledge/gcp-automation-design.md) for the full runbook.
+GCP connects to the database directly (`DATABASE_URL`, `PrismaPg`, no pooler, `STATEMENT_TIMEOUT_MS` applied). Accelerate (`PRISMA_DATABASE_URL`) is off by default in every environment, including production — see `docs/knowledge/architecture-overview.md`'s "Environment configuration" section and the comment in `lib/prisma.ts`.
 
 ---
 
