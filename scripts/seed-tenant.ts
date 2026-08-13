@@ -8,7 +8,7 @@ import * as bcrypt from 'bcryptjs';
 import { createId } from "@paralleldrive/cuid2";
 import { resolveAdminCredentials, requiresExplicitCredentials } from './seed-tenant-credentials';
 
-const connectionString = process.env.DATABASE_URL;
+const connectionString = process.env.DIRECT_URL || process.env.DATABASE_URL;
 if (!connectionString) {
   throw new Error(
     'DATABASE_URL is required. Set NODE_ENV=test for test defaults, or create .env.local for local secrets.'
