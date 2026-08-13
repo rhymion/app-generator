@@ -33,6 +33,7 @@
     "migrate:deploy": "prisma migrate deploy",
     "migrate:reset:test": "cross-env NODE_ENV=test prisma migrate reset",
     "lint": "eslint --max-warnings 20",
+    "lint:prj": "python3 scripts/lint_prj_synced.py",
     "test:pytest": "pytest code_generator/tests",
     "test:mention-gate": "bash scripts/check_mention_gate_fixture.sh",
     "start": "node scripts/run-next-start.js",
