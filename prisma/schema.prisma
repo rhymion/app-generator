@@ -199,6 +199,7 @@ model approval_flow {
   creator          user @relation("ApprovalFlowCreator", fields: [creator_id], references: [id])
   updater_id       String
   updater          user @relation("ApprovalFlowUpdater", fields: [updater_id], references: [id])
+  @@unique([entity_name, approver_role_id])
   @@index([creator_id])
   @@index([approver_role_id])
   @@index([requestor_role_id])

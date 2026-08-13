@@ -78,6 +78,12 @@ describe('Testing Approval Flow pages and their behavior (hand-written port, cmd
   });
 
   describe('Create', () => {
+    // apiPopulateApprovalFlowDependencies() also creates two entity_name
+    // 'user' decoy rows (precededBy/followedBy candidates) before this test
+    // creates its own — with three 'user' rows in the grid,
+    // `.first()` is not guaranteed to land on the record just created (see
+    // cmd_590's decoy-row note in generators_test.py). Use `.last()`
+    // instead, mirroring 2.2 below, which sorts newest-by-id last.
     it('2.1 creates with minimal data (required fields only)', () => {
       apiPopulateApprovalFlowDependencies().then((deps) => {
         cy.visit('/en/approval_flow');
@@ -91,7 +97,7 @@ describe('Testing Approval Flow pages and their behavior (hand-written port, cmd
         cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
         cy.contains('user').scrollIntoView().should('be.visible');
         cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-        cy.contains('.MuiDataGrid-row', 'user').find('a').first().click();
+        cy.get('.MuiDataGrid-row').last().find('a').first().click();
         cy.url().should('include', '/approval_flow/view');
         cy.checkField('Entity Name', 'User');
         cy.checkField('Approver Role', 'Test Approver Role A');

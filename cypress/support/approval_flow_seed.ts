@@ -125,19 +125,31 @@ export function seedApprovalFlowRowsFull(length: number) {
 // with Entity Name = 'User' — this is why the ORIGINAL generated 2.2/3.1
 // tests never actually exercised a cross-entity_name link (verified by
 // reading the pre-cmd_661 helper.ts; see subtask_660a/661a reports).
+//
+// The precededBy candidate uses its OWN role (Test Approver Role C),
+// distinct from `approverRole`/`deps.role` — callers create/select their
+// OWN record with `deps.role`/`deps.approverRole` (entity_name 'user'), and
+// on a consumer schema carrying approval_flow's
+// @@unique([entity_name, approver_role_id]) (cmd_681), reusing approverRole
+// for the precededBy decoy would collide with that record. Same three
+// distinct-role pattern already used by
+// approval_flow_self_referential_children.cy.ts and
+// approval_flow_same_entity_autocomplete_filter.cy.ts.
 export function apiPopulateApprovalFlowDependencies() {
   return apiCreateRole('Test Requestor Role A').then((requestorRole) =>
     apiCreateRole('Test Approver Role A').then((approverRole) =>
       apiCreateRole('Test Approver Role B').then((approverRole2) =>
-        apiCreateApprovalFlow({ entityName: 'user', approverRoleId: approverRole.id }).then((precededBy) =>
-          apiCreateApprovalFlow({ entityName: 'user', approverRoleId: approverRole2.id }).then((followedBy) => ({
-            requestorRole,
-            approverRole,
-            approverRole2,
-            role: approverRole,
-            precededBy: { ...precededBy, name: `user ${approverRole.name}` },
-            followedBy: { ...followedBy, name: `user ${approverRole2.name}` },
-          })),
+        apiCreateRole('Test Approver Role C').then((precededByApproverRole) =>
+          apiCreateApprovalFlow({ entityName: 'user', approverRoleId: precededByApproverRole.id }).then((precededBy) =>
+            apiCreateApprovalFlow({ entityName: 'user', approverRoleId: approverRole2.id }).then((followedBy) => ({
+              requestorRole,
+              approverRole,
+              approverRole2,
+              role: approverRole,
+              precededBy: { ...precededBy, name: `user ${precededByApproverRole.name}` },
+              followedBy: { ...followedBy, name: `user ${approverRole2.name}` },
+            })),
+          ),
         ),
       ),
     ),
