@@ -6,6 +6,28 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Internal
+- **Fixed an SSL deprecation warning during `db:seed-tenant`/runtime queries against Neon** (cmd_691):
+  `pg-connection-string`'s one-time `deprecatedSslModeWarning` fires whenever a connection string's
+  `sslmode` is `prefer`/`require`/`verify-ca` — Neon's connection strings embed `sslmode=require` by
+  default. No first-party code sets any SSL option explicitly (repo-wide grep for
+  `sslmode|ssl:|rejectUnauthorized|NODE_TLS` in `.ts`/`.js` returns zero hits). Confirmed by direct
+  inspection of the installed `pg-connection-string@2.11.0` source, and by a live `pg.Pool.connect()`
+  attempt, that `sslmode=require` and `sslmode=verify-full` produce a byte-identical resulting `ssl`
+  config today — so this is currently cosmetic, not a live weakness — but the deprecation notice means
+  `require`/`prefer`/`verify-ca` will adopt weaker standard libpq semantics once
+  `pg-connection-string`/`pg` reach their next major version, while `verify-full` is guaranteed to keep
+  today's stricter behavior across that bump. Added `lib/db-url.ts`'s `pinSslModeVerifyFull()`, a pure
+  string transform applied in `lib/prisma.ts` and `scripts/seed-tenant.ts` right before constructing the
+  `PrismaPg` adapter: rewrites `prefer`/`require`/`verify-ca` to `verify-full`, no-op otherwise (so
+  local/CI Postgres URLs, which have no `sslmode` param, are unaffected). `prisma migrate deploy`
+  (`vercel-build`) does not go through `pg-connection-string` at all — Prisma's migration engine is a
+  separate Rust-based connector — so it was never affected. Not fixed by suppressing the warning
+  (`NODE_NO_WARNINGS` or similar): that would hide the future behavior change instead of freezing
+  today's safe behavior. Verified live (real `pool.connect()` attempt, no Neon/Vercel connection
+  involved): the warning fires for a raw `sslmode=require` DSN and is silent for the same DSN passed
+  through `pinSslModeVerifyFull()` first, with an identical connection outcome either way. 7 new unit
+  tests in `lib/db-url.test.ts`. Full root-cause writeup:
+  `docs/knowledge/pg-connection-string-sslmode-deprecation.md`.
 - Added `scripts/lint_prj_synced.py` (`npm run lint:prj`) for consumer projects to lint only their own `prj/`-tracked `.ts`/`.tsx` files, at their real synced destination paths, without linting this repo's own templates or a consumer's fully generated codebase (cmd_683, see `docs/knowledge/consumer-prj-scoped-lint.md`). Runs `prj:sync`, parses its own `copied`/`merged` stdout as the source of truth for what to lint, and fails closed (non-zero exit) if that list is empty for any reason — never silently lints nothing and reports success. Verified standalone (no `../prj` present): fails closed as expected. Verified with a synthetic `../prj` containing one clean and one syntactically-broken `.ts` file: lints both, exits non-zero on the broken one. Does not cap the ESLint warning count (errors-only gate), unlike this repo's own `lint` script — see the knowledge doc for why a shared ceiling would not be meaningful across two structurally different populations.
 - Set `x-generate.test: false` on `approval_flow` (cmd_661) — its generated CRUD Cypress specs (desktop/mobile/API) and support helper are being replaced by hand-written coverage that already exercises the entity_name filter/validation design (cmd_652) in `cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts`, placed directly in this repo's `cypress/e2e/` so it reaches every consumer via the submodule. Verified via `generate-code`: the three specs, `cypress/support/approval_flow/helper.ts`, and the task registry entry in `cypress/support/generated-tasks.ts` are no longer written (confirmed against `.generated-manifest.json`).
 - Refactored `approval_flow_same_entity_autocomplete_filter.cy.ts` to seed its own two `Role` rows via direct `POST /api/role` calls instead of `cy.task('db:populateApprovalFlowDependencies')`, which only existed while `approval_flow`'s generated test helper (`cypress/support/approval_flow/helper.ts`) was being written — now that `test: false` removes that helper, the spec would otherwise fail its `beforeEach` on every run. Verified: 7/7 tests pass (`cypress run --spec cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts` against a real build), and a full-repo grep confirms no other spec references the removed generated task.

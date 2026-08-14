@@ -1,6 +1,7 @@
 import { PrismaClient, type Prisma } from '@/app/generated/prisma/client'
 import { withAccelerate } from '@prisma/extension-accelerate';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { pinSslModeVerifyFull } from './db-url';
 
 const globalForPrisma = global as unknown as { prisma: PrismaClient };
 
@@ -87,6 +88,10 @@ const createPrismaClient = () => {
       u.searchParams.set('statement_timeout', String(timeoutMs));
       connectionString = u.toString();
     } catch { /* malformed URL — fall through with original values */ }
+    // Pin the SSL verification mode Neon's DSN embeds (sslmode=require) so a
+    // future pg-connection-string major version doesn't silently weaken it;
+    // see lib/db-url.ts. No-op for local/CI URLs, which have no sslmode param.
+    connectionString = pinSslModeVerifyFull(connectionString);
 
     // Statically imported (see top of file) rather than dynamically: a
     // dynamic import here made this function async, which forced a
