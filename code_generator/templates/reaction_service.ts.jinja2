@@ -1,0 +1,23 @@
+// Service layer for the shared `reaction` model (x-internal, the comment-
+// reactions feature — see docs/knowledge/schema-yaml-configuration.md
+// §"x-internal at the entity level"). `reaction` has no standalone
+// pages/API of its own; every write reaches it through a parent entity's
+// toggle{Parent}CommentReaction server action (see build_context.py's
+// _build_comment_actions_bridge) or the comment reactions API route
+// (comment_reactions_api_route.ts.jinja2). Both call these functions
+// instead of `prisma.reaction.*` directly so check_generated.py's
+// write:direct rule is satisfied the same way it is for any other entity's
+// service.ts.
+import prisma from '@/lib/prisma';
+
+export async function createReaction(data: {
+  comment_id: string;
+  user_id: string;
+  type: {{ reaction_value_type }};
+}): Promise<{ id: string }> {
+  return prisma.reaction.create({ data });
+}
+
+export async function deleteReaction(id: string): Promise<void> {
+  await prisma.reaction.delete({ where: { id } });
+}

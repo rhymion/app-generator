@@ -58,8 +58,13 @@ def test_bridge_mention_true_retires_encode_mentions():
     assert 'encodeMentions' not in out
     assert 'userLookup' not in out
     assert 'storedMessage' not in out
-    assert 'data: { message, commentable_id, creator_id: userId }' in out
-    assert 'data: { message }' in out
+    # cmd_705 (write:direct fix): writes route through lib/comment/service.ts
+    # instead of prisma.comment.* directly — see test_check_generated_comment_
+    # reaction_service.py for the check_generated.py-level regression test.
+    assert 'createComment({ message, commentable_id, creator_id: userId })' in out
+    assert 'updateComment(commentId, { message })' in out
+    assert 'prisma.comment.create' not in out
+    assert 'prisma.comment.update' not in out
 
 
 def test_bridge_mention_true_selects_commentable_id_for_parent_resolution():

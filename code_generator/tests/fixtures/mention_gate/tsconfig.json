@@ -15,6 +15,8 @@
     "paths": {
       "@/lib/mention_gate_item/*": ["./lib/mention_gate_item/*"],
       "@/lib/mention/*": ["./lib/mention/*"],
+      "@/lib/comment/*": ["./lib/comment/*"],
+      "@/lib/reaction/*": ["./lib/reaction/*"],
       "@/lib/reaction_constants": ["./lib/reaction_constants.ts"],
       "@/components/mention_gate_item/*": ["./components/mention_gate_item/*"],
       "@/lib/prisma": ["./lib/prisma.ts"],
