@@ -166,3 +166,118 @@ fixed is a separate, unscoped decision. In practice this means:
 - This is intentional least-privilege-by-default behavior, not a
   provisioning failure. Document it for the deployment's own operators if
   it's likely to surprise them.
+
+## Development use: the `grant-all-permissions` script
+
+> **Not part of the standard setup.** `scripts/grant-all-permissions.ts` is a
+> development / verification tool. Do not run it in production without
+> deliberate opt-in.
+
+The section above is unchanged and remains correct: `seed-tenant.ts` keeps
+its fixed, least-privilege enumeration. Separately, `code-generator` now
+derives the full "independent entity" population of the project schema (the
+same criteria `cypress/support/db-helpers.ts`'s deletion-order helper uses,
+adapted for permission-grant purposes) into `scripts/generated/seed-entities.ts`
+at `generate-code` time — this automatically includes any entity a consuming
+project adds on top of the default schema, with no manual update required.
+
+`scripts/grant-all-permissions.ts` consumes that generated list to grant the
+`Administrator` role full CRUD on every independent entity in one step —
+useful after adding a new entity, to exercise it end-to-end without manually
+opening the Permissions UI first.
+
+Not to be confused with `grantAllEntityPermissions()` / `cy.task('db:grant
+AllPermissions')` (`cypress/support/db-helpers.ts` —
+`docs/knowledge/authorization-default-deny.md` §"Test 3-Category
+Classification"): that one operates only inside a Cypress test run, against
+the Cypress **test user** (not `Administrator`), over `ALL_ENTITIES` (the
+test-spec entity population — see `db_helpers_context()`). This script is a
+standalone CLI for a real `Administrator` role, over the independent-entity
+population (`SEED_ENTITIES`) described above. Similar name, different
+mechanism, different population, different actor.
+
+| Script | Purpose | When to run |
+|---|---|---|
+| `seed-tenant.ts` | Minimum privilege for production use | Every `npm run db:seed-tenant` |
+| `scripts/grant-all-permissions.ts` | Full permission for development / verification | Manually, `npm run db:grant-all-permissions` |
+
+Safeguards:
+
+- **`DRY_RUN=true`**: prints what would be changed without writing.
+- **Production guard**: refused unless `--force` is passed when
+  `NODE_ENV=production`.
+- **`audit_log` / `mfa_recovery_code` excluded**: never granted write
+  access; `audit_log` stays read-only regardless (its permission row is
+  managed by `seed-tenant.ts`'s own dedicated upsert, untouched by this
+  script). This exclusion is layered: the generated entity list already
+  structurally excludes both (neither is a schema-defined entity — see
+  `seed_entities_context()` in `code_generator/generators.py`), and this
+  script re-asserts it explicitly (`ALWAYS_EXCLUDED`) rather than relying
+  on the upstream guarantee alone.
+
+If the minimum-privilege boundary changes in a future release,
+`grantAllPermissions()` is exported (not just a CLI) so it could be wired
+into `seed-tenant.ts` with a single import + call — that integration is
+not made today.
+
+## `Creator` / `Assignee` roles
+
+`seed-tenant.ts` also seeds two special, item-scoped roles resolved by name
+in `lib/authz.ts` (`SPECIAL_ROLE_NAMES`). Neither requires an explicit
+per-user role *connection* — every user implicitly qualifies for whichever
+applies to a given row (`creator_id === userId` / `assignee_id === userId`),
+evaluated per item by `resolvePermissions()`.
+
+- **`Creator`**: granted exactly `setting.read` + `setting.update` and
+  nothing else. This is the mechanism by which a non-admin user reaches
+  their own `/setting` page — without it, `getModelPermissions()` denies
+  everyone but an Administrator when no permission row exists at all (see
+  its `rows.length === 0` branch). Deliberately not extended to any other
+  entity: a broader "owners can manage their own records" grant is a
+  separate decision this seed does not make.
+- **`Assignee`**: seeded with no permissions at all — a placeholder role
+  for future use, matching the vocabulary `getters.ts.jinja2` already uses
+  without granting anything today.
+
+## `user.creator_id` self-reference exception
+
+Every generated `add<Entity>()` service function sets `creator_id: actorId`
+(the acting user) unconditionally — this is correct for every entity except
+`user` itself. `setting` is a proxy view of a user's own row (`allOf: user`), and
+its `x-self-only` access check filters by `creator_id === the logged-in
+user's id`. If a newly created user's `creator_id` were left as the actor
+who created them (e.g. an Administrator provisioning a new account), that
+user could never reach their own `/setting` page — their row's `creator_id`
+would point at the admin, not at themselves.
+
+`user.x-generate.new` is `false` by default, so this code path is not
+normally reachable — no default create form/route exists for `user`, and
+this is not expected to change in the default schema. If a consumer project
+ever sets it to `true`, add a hand-written `lib/user/service_after_create.ts`
+(the standard write-once customization point, not a generator template
+change — `x-generate.new: true` is a per-project schema edit, and this fix
+is specific to the one entity a project chooses to expose it on):
+
+```ts
+import type { PrismaClient } from '@/app/generated/prisma/client';
+
+type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+
+export async function afterCreate(
+  tx: unknown,
+  created: Record<string, unknown>,
+  _data: Record<string, unknown>,
+): Promise<void> {
+  const db = tx as Tx;
+  const id = created.id as string;
+  await db.user.update({ where: { id }, data: { creator_id: id } });
+}
+```
+
+Verified against a live database: with this hook, a user created by an
+Administrator ends up with `creator_id === id` and can read/update their own
+`/setting` row; without it, `getModelPermissions('setting', ...)` and the
+`x-self-only` `creator_id` filter both correctly deny access to the row —
+reproducing the exact failure this hook exists to prevent. A hand-written
+hook was tried first and found sufficient; no generator/schema flag (e.g. a
+prospective `x-self-creator-id`) was needed.

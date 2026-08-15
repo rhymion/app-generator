@@ -4816,3 +4816,79 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'uses_use_callback':        uses_use_callback,
         'uses_use_ref':             uses_use_ref,
     }
+
+
+# ---------------------------------------------------------------------------
+# scripts/generated/seed-entities.ts context
+# ---------------------------------------------------------------------------
+
+# Internal marker/bridge-target entities (the generic comment/attachment/
+# approval/notification system's polymorphic "owner" side) declare every
+# core x-generate flag False — no list/view/new/edit/delete page and no API
+# route is ever generated for them, so a permission row keyed to their name
+# would be inert (nothing consumes it). 'approvable' is the motivating
+# example; 'commentable'/'attachable'/'notification' share the identical
+# structural signature (same raw/view split shape, same all-False
+# x-generate) and are excluded by the same generalized rule rather than a
+# second hardcoded name, mirroring the core-flags check extract_entities()
+# already uses to skip internal models.
+_SEED_ENTITY_CORE_FLAGS = ('list', 'view', 'new', 'edit', 'delete', 'api')
+
+
+def _seed_entity_is_internal_only(bare_key: str, defs: dict) -> bool:
+    x_generate = defs.get(bare_key, {}).get('x-generate') or {}
+    if not x_generate:
+        return False
+    return all(x_generate.get(f) is False for f in _SEED_ENTITY_CORE_FLAGS)
+
+
+def seed_entities_context(schema: dict) -> dict:
+    """Build context for scripts/generated/seed-entities.ts.
+
+    Derives the "independent entity" population `scripts/grant-all-
+    permissions.ts` (a development / verification tool, NOT the production
+    seed) grants full Administrator CRUD on. An entity is independent when
+    it satisfies all of:
+
+    1. It is a key of schema['definitions'] (not a Python-injected
+       system_first table — this structurally excludes audit_log and
+       mfa_recovery_code, neither of which is ever a definitions key; see
+       db_helpers_context's system_first list for the analogous case).
+    2. It has an 'id' property directly (bare 'entity', or the '__entity'
+       raw twin of a raw/view split pair — the view side proxies id via
+       allOf and never carries it directly, same resolution db_helpers_
+       context uses for its deletion-order base_entities).
+    3. It is not an x-bridge junction table target (defn.x-bridge.name).
+    4. It is not an internal-only marker/bridge-target entity (see
+       _seed_entity_is_internal_only above).
+
+    Deliberately excludes 'setting': it is a proxy view of the same
+    underlying user row (allOf: user) and never satisfies condition 2 on
+    its own account. Administrator access to any user's settings already
+    flows through trySelfOnlyAdminBypass() (lib/authz.ts) — a second,
+    redundant grant keyed to 'setting' is unnecessary.
+    """
+    defs = schema['definitions']
+
+    xbridge_table_names: set[str] = set()
+    for defn in defs.values():
+        bridge_name = (defn.get('x-bridge') or {}).get('name')
+        if bridge_name:
+            xbridge_table_names.add(bridge_name)
+
+    candidates: set[str] = set()
+    for key, defn in defs.items():
+        if key.endswith('_input'):
+            continue
+        bare_key = key[2:] if key.startswith('__') else key
+        if bare_key in xbridge_table_names:
+            continue
+        if defn.get('type') != 'object' or 'id' not in defn.get('properties', {}):
+            continue
+        if _seed_entity_is_internal_only(bare_key, defs):
+            continue
+        candidates.add(bare_key)
+
+    return {
+        'seed_entity_names': sorted(candidates),
+    }
