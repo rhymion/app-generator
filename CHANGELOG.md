@@ -6,6 +6,41 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Internal
+- **Added Prisma `Decimal` support to the code generator (cmd_705), mapped to JSON schema type
+  `"string"` — never `"number"` (a deliberate product decision: a JS-float mapping risks silent
+  rounding error on read/write/CSV round-trip; the Prisma schema previously had no supported way
+  to declare a `Decimal` column at all — `schema_deriver.py` raised `SchemaDivergenceError` for
+  any entity that tried). Six layers: (1) `schema_deriver.py`'s `_SCALAR_JSON_TYPE` maps
+  `Decimal` to `string` and auto-reflects `@db.Decimal(p, s)`'s scale as `x-decimal-scale`; (2)
+  `form_validation.ts`/`service_validation.ts` gained a `DECIMAL_FIELDS` numeric-format check
+  (client + server); (3) the form renders a numeric-styled text input
+  (`AppFieldText`/`inputMode="decimal"`), not the JS-`number`-backed `NumberField`; (4) CSV
+  import/export never calls `Number()` on a Decimal cell (new `'decimal'` `ts_type`, format-
+  validated but kept as a string) and `getters.ts`'s Decimal columns are explicitly
+  `.toString()`'d before crossing the Server-to-Client Component boundary (a raw Prisma `Decimal`
+  instance there would otherwise throw — this was a hard crash, not just a display nicety); (5)
+  DataGrid-child test-row seeding gained a Decimal branch; (6) migrations use Prisma's own
+  `@db.Decimal(p, s)` support directly, no generator-specific step needed. Also fixed two
+  latent bugs surfaced while wiring this in: (a) the search-token/autocomplete-filter helper
+  previously swept any `type: "string"` field into a Prisma `contains` filter, which a Decimal
+  column doesn't support — excluded via the new internal marker; (b) `form_validation.ts.jinja2`'s
+  `DECIMAL_FIELDS = [] as const` pattern, when empty (true for every entity without a Decimal
+  field), typed the `for...of` loop variable as `never` and failed to compile — fixed with an
+  explicit array type instead of `as const`. Regression coverage: `code_generator/tests/
+  test_schema_deriver.py` (pytest, confirmed to raise `SchemaDivergenceError` against the pre-fix
+  generator and pass against the fixed one) plus a new permanent fixture gate,
+  `test:decimal-gate` (`code_generator/tests/fixtures/decimal_gate/`, mirroring the existing
+  `test:mention-gate` pattern — wired into the Completion gate and CI, since this repo's own
+  `json_schema.yaml` has no Decimal field and would otherwise never compile any of these
+  branches). Verified against a real Postgres round-trip (create, read, `.toString()`) with
+  values chosen to defeat JS-float precision, and against the CSV import format-check logic
+  directly. `Json` is out of scope for this change (existing usage is internal-only, hand-written,
+  never exposed through the `fields:`-driven schema pipeline this change touches). Checked
+  `app-template` (proj_c, zero `Decimal` usage) and `app-template-4`/`app-template-5`
+  (proj_g/proj_h): neither declares an actual Prisma `Decimal` column today, but both carry
+  code comments documenting that they chose `Int`-cents specifically because the generator
+  didn't support `Decimal` — direct evidence of the gap this change closes, though migrating
+  either consumer to `Decimal` is a separate, unstarted decision.
 - **Fixed two generator defects confirmed real by deviation-injection reproduction (cmd_704, subtask_702b):**
   - A required one-to-one selector FK (`x-relationship: {type: one-to-one, ...}` on a field listed in
     the entity's `required`) made the generated `page_new.tsx` unbuildable. `build_context.py`'s

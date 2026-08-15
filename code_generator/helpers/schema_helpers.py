@@ -46,6 +46,13 @@ def derive_text_fields(properties: dict) -> list[str]:
         # Non-text formats
         if prop.get('format') in ('date', 'date-time', 'time', 'uri'):
             continue
+        # Decimal-backed fields: exposed as JSON type "string" (precision-
+        # preserving), but Prisma's Decimal column does not support the
+        # `contains` filter this list feeds into (search_helpers.ts.jinja2 /
+        # autocomplete_filter.ts.jinja2) -- a string-shape check alone can't
+        # tell a Decimal column from an ordinary text column.
+        if prop.get('_prisma_decimal_type'):
+            continue
         # Write-only fields (e.g. password, api_key)
         xc = prop.get('x-custom-component', {})
         if isinstance(xc, dict) and 'upsert' in (xc.get('target') or []):

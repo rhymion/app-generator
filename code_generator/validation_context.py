@@ -53,6 +53,17 @@ def build_validation_context(ctx: dict) -> dict:
     # only explicitly cleared, which getValidationError() must block.
     required_fields: list[dict] = []
     client_required_fields: list[dict] = []
+    # decimal_fields: Decimal-backed columns (schema_deriver._prisma_decimal_type)
+    # need a numeric-string format check that plain 'string' fields don't --
+    # they are exposed as JSON type "string" (precision-preserving, no JS
+    # float), but an unvalidated non-numeric value would otherwise reach
+    # Prisma's create()/update() and surface as an opaque write error rather
+    # than a field-level validation message. Shared by both
+    # form_validation.ts (client UX) and service_validation.ts (the actual
+    # guard -- covers the REST API / server action path; CSV import has its
+    # own format check in api_import_route.ts.jinja2 since it writes via
+    # `tx.model.create()` directly, bypassing validateOnAdd()).
+    decimal_fields: list[dict] = []
     for prop_info in parent_prop_infos:
         prop = prop_info['prop']
         if prop in _SYSTEM_FIELDS:
@@ -66,6 +77,8 @@ def build_validation_context(ctx: dict) -> dict:
             client_required_fields.append(entry)
         elif is_forced_required_field(defn):
             client_required_fields.append(entry)
+        if defn.get('_prisma_decimal_type'):
+            decimal_fields.append(entry)
 
     one_to_one_checks = []
     for rel in selector_oto_rels:
@@ -82,5 +95,6 @@ def build_validation_context(ctx: dict) -> dict:
         'model': model,
         'required_fields': required_fields,
         'client_required_fields': client_required_fields,
+        'decimal_fields': decimal_fields,
         'one_to_one_checks': one_to_one_checks,
     }

@@ -1,0 +1,51 @@
+// Self-contained fixture Prisma schema for the decimal-gate check
+// (subtask_705a / cmd_705). NOT the project's real prisma/schema.prisma --
+// this file exists only to give the fixture json_schema.yaml enough real
+// Prisma models (user + one entity with Decimal columns) to run through the
+// actual build_user_schema.py -> generate.py -> tsc pipeline in isolation.
+// Mirrors the structure of tests/fixtures/mention_gate/schema.prisma.
+//
+// This repo's own json_schema.yaml has zero Decimal-typed fields (confirmed
+// by grep, subtask_705a report), so test:e2e:build's own tsc pass never
+// compiles the Decimal-specific branches (schema_deriver.py's Decimal->string
+// mapping, getters.ts.jinja2's decimal_display_columns serialization,
+// form_upsert_context's decimal_props rendering, form_validation.ts /
+// service_validation.ts's DECIMAL_FIELDS check, api_import_route.ts.jinja2's
+// 'decimal' ts_type) -- this fixture exists so a future change to any of
+// those can't silently regress unnoticed, the same rationale as mention_gate.
+
+generator client {
+  provider = "prisma-client"
+  output   = "./.generated-client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model user {
+  id       String @id @default(cuid())
+  name     String
+  email    String @unique
+  created_items decimal_gate_item[] @relation("DecimalGateItemCreator")
+  updated_items decimal_gate_item[] @relation("DecimalGateItemUpdater")
+}
+
+// The one entity this fixture exists for: a minimal entity with both a
+// required and a nullable Decimal column, and an explicit scale on each
+// (@db.Decimal(p, s) -- exercises schema_deriver.py's x-decimal-scale
+// auto-reflection).
+model decimal_gate_item {
+  id         String   @id @default(cuid())
+  name       String
+  price      Decimal  @db.Decimal(10, 2)
+  weight     Decimal? @db.Decimal(8, 3)
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("DecimalGateItemCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("DecimalGateItemUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}

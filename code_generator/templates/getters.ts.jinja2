@@ -190,6 +190,13 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
       ? {{ parent_camel }}.{{ dtcol }}.toISOString().replace('T', ' ').slice(0, 19)
       : '',
 {% endfor %}
+{% for dcol in decimal_display_columns %}
+    // Decimal columns arrive from Prisma as decimal.js instances, not a
+    // plain value the Server-to-Client Component boundary can serialize —
+    // stringify here (precision-preserving; no JS float conversion) rather
+    // than passing the raw instance through the `...{{ parent_camel }}` spread.
+    {{ dcol }}: {{ parent_camel }}.{{ dcol }} !== null && {{ parent_camel }}.{{ dcol }} !== undefined ? {{ parent_camel }}.{{ dcol }}.toString() : {{ parent_camel }}.{{ dcol }},
+{% endfor %}
 {% if bridge_child_ir and bridge_parent_options %}
     parent_type: (() => {
 {% for bpo in bridge_parent_options %}
@@ -566,7 +573,13 @@ export async function get{{ parent_pascal }}ChunkForExport(
   return rows.map((row) => {
     const result: Record<string, unknown> = {
 {% for field in export_scalar_fields %}
+{% if field in decimal_field_names %}
+      // Decimal → string (precision-preserving; not Number()) so the CSV
+      // cell holds the exact stored value, not a float-rounded one.
+      '{{ field }}': (row as Record<string, unknown>)['{{ field }}'] != null ? String((row as Record<string, unknown>)['{{ field }}']) : (row as Record<string, unknown>)['{{ field }}'],
+{% else %}
       '{{ field }}': (row as Record<string, unknown>)['{{ field }}'],
+{% endif %}
 {% endfor %}
     };
 {% if is_self_only %}

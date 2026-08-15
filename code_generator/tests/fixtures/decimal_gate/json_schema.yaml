@@ -1,0 +1,58 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+format-version: 3.0
+
+x-generator:
+  search:
+    default_scope: all
+
+x-pii:
+  type: string
+  enum: [direct, indirect, sensitive, none]
+
+x-retention:
+  type: string
+
+x-gdpr-mode:
+  type: string
+  enum: [internal, consumer, both]
+  default: both
+
+x-import-key:
+  type: array
+  items:
+    type: string
+
+definitions:
+  user:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name: {}
+      email: {}
+
+  # The one entity this fixture exists to exercise: a required Decimal
+  # column (price) and a nullable one (weight), both with an explicit
+  # @db.Decimal(p, s) scale.
+  decimal_gate_item:
+    x-generate:
+      list: false
+      view: true
+      new: true
+      edit: true
+      delete: false
+      invalidate: false
+      api: true
+      test: false
+    x-import-key:
+      - name
+    fields:
+      name: {}
+      price: {}
+      weight: {}

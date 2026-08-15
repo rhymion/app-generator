@@ -100,6 +100,10 @@ code_generator/.generated/
 # regenerates this from code_generator/tests/fixtures/mention_gate/ on every run.
 .generated-mention-gate/
 
+# decimal-gate fixture check (cmd_705) scratch output — scripts/check_decimal_gate_fixture.sh
+# regenerates this from code_generator/tests/fixtures/decimal_gate/ on every run.
+.generated-decimal-gate/
+
 # oto-mandatory-gate fixture check (cmd_704 [2-a] / subtask_705c) scratch
 # output — scripts/check_oto_mandatory_gate_fixture.sh regenerates this from
 # code_generator/tests/fixtures/oto_mandatory/ on every run.

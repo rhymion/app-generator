@@ -37,6 +37,7 @@
     "lint:prj": "python3 scripts/lint_prj_synced.py",
     "test:pytest": "pytest code_generator/tests",
     "test:mention-gate": "bash scripts/check_mention_gate_fixture.sh",
+    "test:decimal-gate": "bash scripts/check_decimal_gate_fixture.sh",
     "test:oto-mandatory-gate": "bash scripts/check_oto_mandatory_gate_fixture.sh",
     "start": "node scripts/run-next-start.js",
     "test": "vitest",

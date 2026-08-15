@@ -33,13 +33,14 @@ Run in this order:
 2. `npm run test:pytest`       — Python unit tests for code generator
 3. `npm run test:vitest`      — vitest unit/component tests
 4. `npm run test:mention-gate` — fixture-schema generate-code → tsc check (see below)
-5. `npm run test:oto-mandatory-gate` — required one-to-one selector fixture generate-code → tsc check (see below)
-6. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
-7. `npm run check:generated`  — generated code matches templates/schema
-8. `npm run test:e2e:cy:api`  — API Cypress specs only
-9. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop + mobile)
-10. `npm audit --omit=dev --audit-level=high`
-11. `pip-audit -r requirements.txt`
+5. `npm run test:decimal-gate` — fixture-schema generate-code → tsc check (see below)
+6. `npm run test:oto-mandatory-gate` — required one-to-one selector fixture generate-code → tsc check (see below)
+7. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
+8. `npm run check:generated`  — generated code matches templates/schema
+9. `npm run test:e2e:cy:api`  — API Cypress specs only
+10. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop + mobile)
+11. `npm audit --omit=dev --audit-level=high`
+12. `pip-audit -r requirements.txt`
 
 **Step 1 (`npm run lint`) must run on a checkout where `generate-code` has
 not yet run** — that is what CI's `Lint` job actually checks (`npm ci && npm
@@ -67,14 +68,14 @@ number CI can never reproduce. Running lint first (matching CI's exact
 condition) makes local and CI agree on the same count by construction; see
 `docs/knowledge/lint-gate-must-match-ci-precondition.md`.
 
-Steps 2, 3, 4, and 5 run unconditionally, with no "unchanged" exemption: CI's
+Steps 2, 3, 4, 5, and 6 run unconditionally, with no "unchanged" exemption: CI's
 `unit-tests` (`npm run test:vitest`), `pytest` (Python Generator Tests),
-`mention-gate-fixture`, and `oto-mandatory-gate-fixture` jobs run on every
-push/PR to `main`/`master` with no path filter, so a local gate that
-conditionally skips any of them can go green while CI goes red on the same
-commit. This exact gap caused PR #218's Unit Tests job to fail after cmd_493
-(see `docs/knowledge/gate-exemption-must-be-machine-checkable.md` — cmd_498,
-the third recurrence of "gate ≠ CI").
+`mention-gate-fixture`, `decimal-gate-fixture`, and `oto-mandatory-gate-fixture`
+jobs run on every push/PR to `main`/`master` with no path filter, so a local
+gate that conditionally skips any of them can go green while CI goes red on
+the same commit. This exact gap caused PR #218's Unit Tests job to fail after
+cmd_493 (see `docs/knowledge/gate-exemption-must-be-machine-checkable.md` —
+cmd_498, the third recurrence of "gate ≠ CI").
 
 **Step 4 (`test:mention-gate`, cmd_535)**: runs a small, standalone fixture
 entity (commentable + comment + `x-mention: true`) through the real
@@ -91,8 +92,20 @@ does not (only this one branch — this repo's templates have on the order of
 700 `{% if %}` branches total, most still uncovered by any fixture), and how
 to extend it to a new dark branch.
 
-**Step 5 (`test:oto-mandatory-gate`, cmd_704 [2-a] / subtask_705c)**: runs a
-second, unrelated small fixture entity pair (`oto_gate_target`, a
+**Step 5 (`test:decimal-gate`, cmd_705)**: same shape as step 4, for a
+different dark branch — a fixture entity with a required and a nullable
+`Decimal` column (each with an explicit `@db.Decimal(p, s)` scale),
+type-checking `getters.ts` (the `.toString()` serialization a Decimal
+column needs to cross the Server-to-Client Component boundary without
+throwing), `FormUpsert.tsx` (the `AppFieldText`-based decimal input
+rendering), `form_validation.ts`/`service_validation.ts` (the
+`DECIMAL_FIELDS` numeric-format check), and the CSV import route (the
+`'decimal'` `ts_type` coercion). This repo's own `json_schema.yaml` has zero
+Decimal-typed fields, so none of these branches are ever compiled by step 7
+otherwise. ~6s. See `scripts/check_decimal_gate_fixture.sh`.
+
+**Step 6 (`test:oto-mandatory-gate`, cmd_704 [2-a] / subtask_705c)**: runs a
+third, unrelated small fixture entity pair (`oto_gate_target`, a
 `type: one-to-one` selector target with its own list/view/new/edit pages,
 and `oto_gate_item`, whose FK to it is REQUIRED — non-nullable) through the
 same `build_user_schema.py` → `generate.py` → `tsc --noEmit` pipeline and
@@ -101,7 +114,7 @@ found broken (`build_context.py`'s `required_relation_fields` rebuilt a
 single `initial{Target}s` name in `page_new.tsx.jinja2` for both
 `parent_rels_raw` and `selector_oto_rels` entries, but the latter actually
 destructures as `initialAvailable{Target}s`), and that this repo's own
-`test:e2e:build` (step 6) can never catch because no entity in this repo's
+`test:e2e:build` (step 7) can never catch because no entity in this repo's
 own `json_schema.yaml` — nor any currently known consumer schema — has a
 required one-to-one selector FK. ~5s. A separate fixture from
 `test:mention-gate` rather than an extension of it: unrelated branch, kept

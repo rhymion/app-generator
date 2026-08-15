@@ -468,6 +468,7 @@ supplies everything Prisma can't express.
 | `DateTime` (+ `format: time` override) | `string` | `Date` | Time only (`@db.Timetz(0)`) |
 | `String` (+ `format: uri` override) | `string` | `string` | URL; rendered as image or link |
 | `Int` | `integer` | `number` | |
+| `Decimal` (+ `@db.Decimal(p, s)`) | `string` | `string` | **Not** `number` — a deliberate product decision (cmd_705): a JS-float mapping risks silent rounding error (`0.1 + 0.2` style) on every read/write/CSV round-trip. Rendered as a numeric-styled text input (`inputMode="decimal"`), never the `number`-typed `NumberField`. `s` (scale) is auto-reflected as `x-decimal-scale`, bounding the input format check's max decimal places. |
 | `Boolean` | `boolean` | `boolean` | |
 | Prisma `enum` type | `string` | Literal-union string type | nativeEnum — see §4.3 |
 
@@ -2059,6 +2060,7 @@ For detailed subsystem documentation, see:
 | `String` | `string` |
 | `String?` | `[string, "null"]` |
 | `Int` | `integer` |
+| `Decimal` (+ `@db.Decimal(p, s)`) | `string` (never `number` — cmd_705, precision-preserving) |
 | `Boolean` | `boolean` |
 | `DateTime` + `format: date-time` override | `string` |
 | `DateTime` + `format: date` override | `string` |

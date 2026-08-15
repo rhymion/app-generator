@@ -35,11 +35,18 @@ from dataclasses import dataclass, field as _dc_field
 from pathlib import Path
 
 # Category A scalar type mapping (design doc Sec.3 Category A table).
+# `Decimal`: mapped to "string", not "number" --殿ご裁定(cmd_705, 2026-08-15).
+# Prisma's Decimal (decimal.js) round-trips through a JS `number` with float
+# rounding error (e.g. 0.1 + 0.2); a string preserves exact precision through
+# JSON response / form value / CSV round-trip. See
+# `_prisma_decimal_type` below for how downstream codegen distinguishes a
+# Decimal-backed string field from an ordinary string field.
 _SCALAR_JSON_TYPE = {
     "String": "string",
     "Boolean": "boolean",
     "Int": "integer",
     "DateTime": "string",
+    "Decimal": "string",
 }
 
 _CUID_PATTERN = "^c[a-z0-9]{24,}$"
@@ -50,6 +57,11 @@ _FIELD_HEAD_RE = re.compile(
 )
 _RELATION_FIELDS_RE = re.compile(r'fields\s*:\s*\[([^\]]*)\]')
 _BLOCK_UNIQUE_RE = re.compile(r'@@unique\(\s*\[([^\]]*)\]')
+# `@db.Decimal(precision, scale)` -- not matched by _ATTR_RE (its `@(\w+)`
+# group can't cross the `.`). Only `scale` is consumed downstream (max
+# decimal places for input format validation); precision is parsed too for
+# completeness but not currently used.
+_DB_DECIMAL_RE = re.compile(r'@db\.Decimal\(\s*(\d+)\s*,\s*(\d+)\s*\)')
 
 
 class SchemaDivergenceError(Exception):
@@ -70,6 +82,8 @@ class PrismaField:
     default_is_dynamic: bool = False  # now(), cuid(), uuid() -- not a literal
     is_relation_object: bool = False
     relation_fk_fields: tuple = ()  # local scalar FK column names, for relation-object fields
+    decimal_precision: int | None = None  # @db.Decimal(p, s) -- p
+    decimal_scale: int | None = None  # @db.Decimal(p, s) -- s
 
 
 @dataclass
@@ -128,6 +142,13 @@ def _parse_field_line(line: str) -> PrismaField | None:
     default_is_dynamic = False
     is_relation_object = False
     relation_fk_fields: tuple = ()
+    decimal_precision = None
+    decimal_scale = None
+
+    m_decimal = _DB_DECIMAL_RE.search(rest)
+    if m_decimal:
+        decimal_precision = int(m_decimal.group(1))
+        decimal_scale = int(m_decimal.group(2))
 
     for attr_name, attr_args in _ATTR_RE.findall(rest):
         if attr_name == "id":
@@ -161,6 +182,8 @@ def _parse_field_line(line: str) -> PrismaField | None:
         default_is_dynamic=default_is_dynamic,
         is_relation_object=is_relation_object,
         relation_fk_fields=relation_fk_fields,
+        decimal_precision=decimal_precision,
+        decimal_scale=decimal_scale,
     )
 
 
@@ -322,6 +345,24 @@ def derive_property(
         # a Prisma `data: {...}` write are structurally typed. The exposed
         # `type` stays "string" above (Class B: API/JSON shape unchanged).
         prop["_prisma_native_enum_type"] = pf.prisma_type
+
+    if pf.prisma_type == "Decimal":
+        # Internal marker (not a real JSON schema keyword, stripped before any
+        # client-facing output): the exposed `type` is "string" above (a
+        # deliberate product decision -- precision-preserving, avoids JS
+        # float rounding error), but downstream codegen (form input
+        # rendering, CSV coercion, display formatting, DataGrid-child
+        # test-value seeding) needs to distinguish this from an ordinary
+        # string field. Mirrors `_prisma_native_enum_type`.
+        prop["_prisma_decimal_type"] = True
+        if pf.decimal_scale is not None:
+            # Auto-reflected from `@db.Decimal(p, s)` (Category A, like the
+            # `default:` auto-reflection at cmd_574) -- not a user-schema
+            # override. Used to bound the input format check's max decimal
+            # places so a value the DB would reject on the scale (not the
+            # rounding-error) axis gets a UI-level error instead of an opaque
+            # Prisma write failure.
+            prop["x-decimal-scale"] = pf.decimal_scale
 
     fk_target = model.fk_target(field_name)
     if fk_target is not None and not user_field_overrides.get("_no_fk_pattern"):
