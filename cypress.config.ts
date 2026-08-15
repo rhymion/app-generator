@@ -70,6 +70,33 @@ export default defineConfig({
           const { createSessionUserWithPermission } = require('./cypress/support/db-helpers');
           return await createSessionUserWithPermission(params.entityName, params.flags, params.label);
         },
+        // cmd_695: mutate an already-granted session user's permission flags
+        // mid-test (e.g. read:true,delete:true at page-load, then delete:false
+        // before submit) — the error-message-delivery specs use this to
+        // simulate a permission revoked between page load and Server Action
+        // submit, which is the only reliable way to reach the
+        // requirePermission()-denied branch of a Server Action without the
+        // page's own assertPermission() gate blocking navigation first (both
+        // read the same DB row, so a static permission set can't disagree
+        // with itself). Assumes the user has exactly one role with exactly
+        // one permission row for entityName, which is how
+        // createSessionUserWithPermission above constructs it.
+        async 'db:setEntityPermission'(params: {
+          email: string;
+          entityName: string;
+          flags: { create?: boolean; read?: boolean; update?: boolean; delete?: boolean; import?: boolean };
+        }) {
+          const { prisma } = require('./cypress/support/db-helpers');
+          const user = await prisma.user.findUnique({ where: { email: params.email }, include: { roles: true } });
+          if (!user) throw new Error(`db:setEntityPermission: user not found: ${params.email}`);
+          const roleId = user.roles[0]?.id;
+          if (!roleId) throw new Error(`db:setEntityPermission: user ${params.email} has no role`);
+          await prisma.permission.updateMany({
+            where: { role_id: roleId, name: params.entityName },
+            data: params.flags,
+          });
+          return null;
+        },
         // cmd_452: X-API-Key-bearing actor with a custom permission set, NOT
         // enrolled in any organization — the org-isolation IDOR fixture for
         // API-route tests (detail GET/PUT/DELETE, list, export).

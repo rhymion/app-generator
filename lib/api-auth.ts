@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requirePermission, getSessionUserId, type RichPermissions, type Operation, type ItemContext } from '@/lib/authz';
 import { TtlLruCache } from '@/lib/_ttl_lru';
+import { AppError, type ErrorCode } from '@/lib/_errors';
 
 export class ApiError extends Error {
   constructor(
@@ -126,11 +127,26 @@ export async function requireApiPermission(
   }
 }
 
+const APP_ERROR_STATUS_MAP: Record<ErrorCode, number> = {
+  SESSION_EXPIRED: 401,
+  PERMISSION_DENIED: 403,
+  NOT_FOUND: 404,
+  VALIDATION: 422,
+  CONFLICT: 409,
+  CAPACITY: 409,
+  UNKNOWN: 500,
+};
+
 export function handleApiError(error: unknown): NextResponse {
   if (error instanceof ApiError) {
     return NextResponse.json({ error: error.message }, { status: error.statusCode });
   }
+  if (error instanceof AppError) {
+    return NextResponse.json(
+      { error: error.message, code: error.code, ...(error.field ? { field: error.field } : {}) },
+      { status: APP_ERROR_STATUS_MAP[error.code] ?? 500 },
+    );
+  }
   console.error('API error:', error);
-  const message = error instanceof Error ? error.message : 'Internal server error';
-  return NextResponse.json({ error: message }, { status: 500 });
+  return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
 }

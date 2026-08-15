@@ -1,5 +1,6 @@
 import prisma from '@/lib/prisma';
 import { validateCustomRules } from '@/lib/dashboard/service_validation_custom';
+import { AppError } from '@/lib/_errors';
 
 type TransactionClient = Pick<typeof prisma, 'dashboard'>;
 type RequiredField = { key: string; label: string };
@@ -30,7 +31,7 @@ function isMissingValue(value: unknown): boolean {
 async function validateSchemaRules(tx: TransactionClient, data: Record<string, unknown>, currentId: string | null): Promise<void> {
   for (const field of REQUIRED_FIELDS) {
     if (isMissingValue(data[field.key])) {
-      throw new Error(`${field.label} is required`);
+      throw new AppError('VALIDATION', `${field.label} is required`, field.key);
     }
   }
 
@@ -38,7 +39,7 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
     const value = data[relation.key];
     if (isMissingValue(value)) {
       if (relation.required) {
-        throw new Error(`${relation.label} is required`);
+        throw new AppError('VALIDATION', `${relation.label} is required`, relation.key);
       }
       continue;
     }
@@ -50,7 +51,7 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
       select: { id: true },
     });
     if (!targetExists) {
-      throw new Error(`${relation.label} does not exist`);
+      throw new AppError('VALIDATION', `${relation.label} does not exist`, relation.key);
     }
 
     const conflict = await tx.dashboard.findFirst({
@@ -60,7 +61,7 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
       select: { id: true },
     });
     if (conflict) {
-      throw new Error(`${relation.label} is already linked`);
+      throw new AppError('CONFLICT', `${relation.label} is already linked`, relation.key);
     }
   }
 

@@ -213,6 +213,7 @@ cypress/e2e/*.cy.ts
 !cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts
 !cypress/e2e/approval_flow_self_referential_children.cy.ts
 !cypress/e2e/approval_flow_desktop_crud.cy.ts
+!cypress/e2e/error_message_delivery.cy.ts
 cypress/e2e/mobile/*.cy.ts
 !cypress/e2e/mobile/layout.cy.ts
 !cypress/e2e/mobile/audit_log.cy.ts

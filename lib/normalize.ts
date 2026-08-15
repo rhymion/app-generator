@@ -1,3 +1,5 @@
+import { AppError } from '@/lib/_errors';
+
 export type NormalizedSnapshot = Record<string, unknown>;
 
 export function normalizeValue(value: unknown, kind: 'date' | 'number' | 'boolean' | 'string' | 'other') {
@@ -47,15 +49,15 @@ export async function assertNotStale(
   try {
     expectedSnapshot = normalizeSnapshot(JSON.parse(srcSnapshotRaw) as Record<string, unknown>);
   } catch {
-    throw new Error('Invalid snapshot data. Please reload and try again.');
+    throw new AppError('CONFLICT', 'Invalid snapshot data. Please reload and try again.');
   }
 
   const currentSnapshot = await fetchCurrentSnapshot();
   if (!currentSnapshot) {
-    throw new Error('This record no longer exists.');
+    throw new AppError('NOT_FOUND', 'This record no longer exists.');
   }
 
   if (JSON.stringify(currentSnapshot) !== JSON.stringify(expectedSnapshot)) {
-    throw new Error('This record has been updated since you opened it. Please reload to compare with the latest changes.');
+    throw new AppError('CONFLICT', 'This record has been updated since you opened it. Please reload to compare with the latest changes.');
   }
 }

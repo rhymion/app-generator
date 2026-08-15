@@ -5,6 +5,7 @@ import prisma from '@/lib/prisma';
 import { cache } from 'react';
 import { TtlLruCache } from '@/lib/_ttl_lru';
 import { SELF_ONLY_ADMIN_BYPASS_ENTITIES } from '@/lib/self_only_admin_bypass_entities';
+import { AppError } from '@/lib/_errors';
 
 export const getSessionUserId = cache(async function getSessionUserId(): Promise<string | null> {
   const session = await auth();
@@ -14,7 +15,7 @@ export const getSessionUserId = cache(async function getSessionUserId(): Promise
 export async function getSessionUserIdOrThrow(): Promise<string> {
   const userId = await getSessionUserId();
   if (!userId) {
-    throw new Error('User not authenticated');
+    throw new AppError('SESSION_EXPIRED', 'User not authenticated');
   }
   return userId;
 }
@@ -303,7 +304,7 @@ export async function requirePermission(
     ? await resolvePermissions(permissions, item, resolvedUserId)
     : permissions;
   if (!resolved[operation]) {
-    throw new Error(`Access denied: ${model}.${operation}`);
+    throw new AppError('PERMISSION_DENIED', `Access denied: ${model}.${operation}`);
   }
   return resolved;
 }

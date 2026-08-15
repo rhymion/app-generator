@@ -1,8 +1,8 @@
 # Error Message Framework
 
-**Status**: Design — pending approval (cmd_512, 2026-08-01)
+**Status**: Design — approved (cmd_695, 2026-08-14); Implementation: cmd_695 (subtask_695b)
 **Scope**: All generated entities in app-generator-2
-**Implementation cmd**: TBD (separate cmd, post-approval)
+**Implementation cmd**: cmd_695
 
 ---
 
@@ -68,6 +68,59 @@ applied, 2026-08-01).
 | U14 | Record deleted between form-open and submit | error.tsx: "This record no longer exists." (dev) / redacted (prod) | `lib/normalize.ts assertNotStale` → throw |
 | U15 | Reservation capacity (form path) | Inline form error, raw string | `actions.ts` catches `InsufficientPoolCapacityError` → `return { error }` |
 | U16 | Reservation conflict (form path) | Inline form error, raw string | `actions.ts` catches `ReservationMutationError` → `return { error }` |
+| NEW-1 | Any server-throw path (U3-U14), as observed in production before cmd_695 | "Minified React error #441; ..." + "Error ID: xxx" | React SC render boundary (production) |
+
+**2026-08-14 (cmd_695)**: a real production screen confirmed that U3-U14 scenarios
+appeared this way. React strips the original `error.message` at the Server Components
+render boundary and replaces it with the minified error #441 text; `error.digest`
+("Error ID: xxx") survives. The fix was not to add display code to `error.tsx` (it
+already rendered `error.message`) but to stop throwing `AppError` from Server Actions
+and return `ActionFailure` instead (Layer 2).
+
+**Implemented (cmd_695, 2026-08-15)**: U6/U7/U10-U14 now return inline `ActionFailure`
+instead of throwing. U7 (bulk delete, `removeXxx`) was added beyond the checklist's
+per-file list, since the checklist's own throw-sites table already named it and leaving
+it unconverted would have left permission-denied (one of the three named types) still
+crashing to `error.tsx` on the delete path. **U3-U5 are unchanged by design** —
+`getters.ts`'s `assertPermission` (used by Server Component pages, not Server Actions)
+still throws and still terminates at `error.tsx`; converting that path would require
+redesigning the page itself (`notFound()` / conditional render), which is out of scope
+here. `error.tsx` now shows a static, safe `te('pageError')` message instead of a
+hardcoded string, so U3-U5 are no less safe than before — just not yet inline.
+
+**NEW-2 (found during cmd_695 implementation, not in the original checklist)**: a real
+literal "Unique key constraint violation" had no throw site anywhere in this
+framework — `service_validation.ts.jinja2`'s checks only cover the schema-driven
+required-field and one-to-one-relation cases (`AppError('VALIDATION'|'CONFLICT', ...)`).
+A genuine DB-level `@unique`/`@@unique` violation (`user.email`, `approval_flow`'s
+`[entity_name, approver_role_id]`, `permission`'s `[name, role_id]`) is never
+pre-checked anywhere in application code — it surfaces as a raw
+`Prisma.PrismaClientKnownRequestError` (code `P2002`) thrown out of
+`prisma.$transaction()` in `service.ts.jinja2`. Before this fix that error was neither
+an `AppError` nor a reservation-specific class, so it fell through the new
+`actions.ts` catch blocks unconverted and still crashed to `error.tsx` — reproducing
+this exact symptom. Fixed by wrapping `add{{ parent_pascal }}`/`update{{ parent_pascal }}`'s
+`prisma.$transaction()` call in `service.ts.jinja2` in a `try`/`catch` that converts
+`P2002` to `AppError('CONFLICT', ...)` (not `VALIDATION` — the field is not missing, it
+conflicts with an existing row, so it reuses the same `fieldAlreadyLinked` i18n message
+as the OTO-conflict case) before it ever reaches the transport layer —
+this also fixes the equivalent gap on the API route path (`lib/api-auth.ts`'s
+`handleApiError` previously had no case for a raw `PrismaClientKnownRequestError`
+either, so it fell to the generic 500).
+
+The violated field name (`AppError`'s 3rd, UI-facing argument) is read via a new
+`lib/_errors.ts` helper, `p2002Field(meta)` — **empirically confirmed necessary**: this
+generated app's Prisma version/driver (7.9.1, Postgres driver adapter) puts the
+violated column names at `e.meta.driverAdapterError.cause.constraint.fields`, not the
+classic `e.meta.target` most Prisma docs/examples show. Getting this wrong doesn't
+crash — it silently produces `field: undefined`, which falls back to the CONFLICT
+code's field-less wording (`staleMutation`, "updated by another user") instead of the
+correct field-bearing one (`fieldAlreadyLinked`, "{field} is already linked to another
+record") — a wrong-but-plausible message that a code read alone would not catch. Found
+only by adding a temporary diagnostic log to the generated output and running the new
+`cypress/e2e/error_message_delivery.cy.ts` (§UI e2e coverage below) against it; do not
+assume Prisma's error `meta` shape without checking it against the actual runtime error
+for the Prisma version/driver in use.
 
 ### U1/U2 unreachable (cmd_525)
 
@@ -386,15 +439,28 @@ inline instead of crashing to `error.tsx`.
 
 | Impact area | Current behavior | After framework | Spec change needed |
 |-------------|-----------------|-----------------|-------------------|
-| API e2e: validation error status | 500 | 422 | Yes — update `cy:api` assertions for 422 and `code:"VALIDATION"` |
+| API e2e: validation error status | 500 | 422 | No pre-existing spec asserted the old 500 (grepped generated `test_api_spec.cy.ts.jinja2` and all `cypress/e2e/api/*.cy.ts`, cmd_695) |
 | API e2e: stale update (API path passes `null` — not triggered) | N/A | N/A | No |
 | API e2e: permission denied status | 403 ✅ | 403 ✅ (unchanged) | No |
-| UI e2e: validation error flow | Rarely reaches server (client `validateForm` catches first) | Same | Likely none |
-| UI e2e: stale update | Hard to trigger in e2e | Inline error instead of `error.tsx` | Low risk; new spec if desired |
-| UI e2e: FK autocomplete denied (cmd_516) | Not yet specced | Disabled field with i18n text | New spec in cmd_516 |
+| API e2e: unique constraint violation (P2002) | 500 (generic fallback) | 409 (`AppError('CONFLICT', ...)`) | No pre-existing spec asserted the old 500 |
+| UI e2e: validation error flow | Rarely reaches server (client `validateForm` catches first) | Same | None |
+| UI e2e: stale update | Hard to trigger in e2e | Inline error instead of `error.tsx` | Done — `cypress/e2e/error_message_delivery.cy.ts` test 2 |
+| UI e2e: unique constraint violation | Crashed to `error.tsx` | Inline error instead | Done — same spec, test 1 |
+| UI e2e: permission denied (delete) | Crashed to `error.tsx` | Inline error + optimistic-removal rollback | Done — same spec, test 3 |
+| UI e2e: FK autocomplete denied (cmd_516) | Not yet specced | Disabled field with i18n text | Out of scope for cmd_695 — cmd_516's own task |
 
 Client-side `validateForm` catches required-field errors before the server call. Server-side
-validation is a backend defense rarely triggered by normal usage. Impact on existing specs is low.
+validation is a backend defense rarely triggered by normal usage. Impact on existing specs is low
+— confirmed by the full mandatory gate (`test:e2e:cy:api`, 240/240 passing, 0 skipped) staying
+green with no assertion changes needed anywhere in the repo.
+
+**New hand-written UI e2e coverage (cmd_695)**: `cypress/e2e/error_message_delivery.cy.ts` exercises
+the three scenarios named literally end-to-end through the browser (unique constraint violation,
+stale update, permission denied), asserting the inline message renders and the page never falls
+through to `error.tsx`. All three pass against a full production build. One test (permission
+denied) needed a 31s wait to clear `lib/authz.ts`'s 30s `getModelPermissions` process cache —
+see that test's own comment for what was tried and why a wait, not a targeted cache-bust, was
+the reliable option found.
 
 ---
 

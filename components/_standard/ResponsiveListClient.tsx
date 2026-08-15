@@ -5,6 +5,7 @@ import DataGridClient from './DataGridClient';
 import CardListClient from './CardListClient';
 import type { ModelPermissions } from '@/lib/authz';
 import type { PageOpts, PageResult } from '@/lib/_pagination';
+import type { ActionFailure } from '@/lib/_errors';
 
 interface BaseEntity {
   id: string;
@@ -32,7 +33,7 @@ interface ResponsiveListClientProps<T extends BaseEntity> {
   initialPageSize?: number;
   fetchPage?: (opts: PageOpts) => Promise<PageResult<T>>;
   basePath: string;
-  removeAction?: (ids: string[]) => Promise<void>;
+  removeAction?: (ids: string[]) => Promise<ActionFailure | void>;
   invalidateAction?: (id: string) => Promise<void>;
   entityLabel?: string;
   displayFields?: DisplayFieldConfig<T>[];

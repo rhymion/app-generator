@@ -3,6 +3,8 @@
 import { redirect } from 'next/navigation';
 {% if comment_actions_code or (can_list and can_delete) or can_invalidate %}import { revalidatePath } from 'next/cache';
 {% endif %}import { getSessionUserIdOrThrow, requirePermission{% if can_delete %}, getModelPermissions{% endif %} } from '@/lib/authz';
+{% if can_create or can_update or can_delete %}import { AppError, type ActionFailure } from '@/lib/_errors';
+{% endif %}
 {% if can_invalidate %}
 {% if invalidate_module %}
 import { {{ invalidate_handler }} } from '@/{{ invalidate_module }}';
@@ -34,45 +36,52 @@ export async function upsert{{ parent_pascal }}(data: FormData) {
 {% endif %}
 {% if can_delete %}
 export async function remove{{ parent_pascal }}(ids: string[]) {
+  try {
 {% if should_filter_by_org %}
-  const {% if is_self_only %}{ userId }{% else %}{ permissions: userPermissions, userId }{% endif %} = await getModelPermissions('{{ parent }}');
-  if (!userId) throw new Error('No permission to delete');
-  const _assocOrgs = await getAssociatedOrganizations(userId);
-  const _assocOrgIds = _assocOrgs.map((o) => o.id);
+    const {% if is_self_only %}{ userId }{% else %}{ permissions: userPermissions, userId }{% endif %} = await getModelPermissions('{{ parent }}');
+    if (!userId) throw new AppError('PERMISSION_DENIED', 'No permission to delete');
+    const _assocOrgs = await getAssociatedOrganizations(userId);
+    const _assocOrgIds = _assocOrgs.map((o) => o.id);
 {% if org_relationship_optional %}
-  const {{ parent_camel }}s = await prisma.{{ model }}.findMany({
-    where: { id: { in: ids }, OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }] },
-    select: { id: true, creator_id: true },
-  });
+    const {{ parent_camel }}s = await prisma.{{ model }}.findMany({
+      where: { id: { in: ids }, OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }] },
+      select: { id: true, creator_id: true },
+    });
 {% else %}
-  const {{ parent_camel }}s = await prisma.{{ model }}.findMany({
-    where: { id: { in: ids }, organization_id: { in: _assocOrgIds } },
-    select: { id: true, creator_id: true },
-  });
+    const {{ parent_camel }}s = await prisma.{{ model }}.findMany({
+      where: { id: { in: ids }, organization_id: { in: _assocOrgIds } },
+      select: { id: true, creator_id: true },
+    });
 {% endif %}
 {% else %}
-  const [{% if is_self_only %}{ userId }{% else %}{ permissions: userPermissions, userId }{% endif %}, {{ parent_camel }}s] = await Promise.all([
-    getModelPermissions('{{ parent }}'),
-    await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } }),
-  ]);
+    const [{% if is_self_only %}{ userId }{% else %}{ permissions: userPermissions, userId }{% endif %}, {{ parent_camel }}s] = await Promise.all([
+      getModelPermissions('{{ parent }}'),
+      await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } }),
+    ]);
 {% endif %}
 {% if is_self_only %}
-  // x-self-only: no general.delete/Creator-role override — ownership is
-  // the sole gate, unconditionally (no admin bypass on delete).
-  const filtered{{ parent_pascal }}s = {{ parent_camel }}s.filter(item => item.creator_id === userId);
+    // x-self-only: no general.delete/Creator-role override — ownership is
+    // the sole gate, unconditionally (no admin bypass on delete).
+    const filtered{{ parent_pascal }}s = {{ parent_camel }}s.filter(item => item.creator_id === userId);
 {% else %}
-  const filtered{{ parent_pascal }}s = userPermissions.general.delete
-    ? {{ parent_camel }}s
-    : {{ parent_camel }}s.filter(item =>
-        (userPermissions.creator?.delete && item.creator_id === userId) ||
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (userPermissions.assignee?.delete && (item as any).assignee_id === userId)
-      );
+    const filtered{{ parent_pascal }}s = userPermissions.general.delete
+      ? {{ parent_camel }}s
+      : {{ parent_camel }}s.filter(item =>
+          (userPermissions.creator?.delete && item.creator_id === userId) ||
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (userPermissions.assignee?.delete && (item as any).assignee_id === userId)
+        );
 {% endif %}
-  if (filtered{{ parent_pascal }}s.length === 0) {
-    throw new Error('No permission to delete');
+    if (filtered{{ parent_pascal }}s.length === 0) {
+      throw new AppError('PERMISSION_DENIED', 'No permission to delete');
+    }
+    await delete{{ parent_pascal }}({% if is_audited %}userId, {% endif %}filtered{{ parent_pascal }}s.map(item => item.id));
+  } catch (e) {
+    if (e instanceof AppError) {
+      return { ok: false, errorCode: e.code } satisfies ActionFailure;
+    }
+    throw e;
   }
-  await delete{{ parent_pascal }}({% if is_audited %}userId, {% endif %}filtered{{ parent_pascal }}s.map(item => item.id));
 {% if can_list %}
   revalidatePath('/[locale]/{{ parent }}', 'page');
 {% endif %}
