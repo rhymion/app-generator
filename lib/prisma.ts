@@ -1,6 +1,7 @@
 import { PrismaClient, type Prisma } from '@/app/generated/prisma/client'
 import { withAccelerate } from '@prisma/extension-accelerate';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaNeon } from '@prisma/adapter-neon';
 import { pinSslModeVerifyFull } from './db-url';
 
 const globalForPrisma = global as unknown as { prisma: PrismaClient };
@@ -60,6 +61,73 @@ const createPrismaClient = () => {
     const client = new PrismaClient({
       accelerateUrl,
     }).$extends(withAccelerate()) as unknown as PrismaClient;
+    return client;
+  } else if (process.env.USE_NEON_ADAPTER === 'true') {
+    // Vercel+Neon only (cmd_692/cmd_654(は)). Deliberately NOT a NODE_ENV
+    // branch — cmd_528 measured Turbopack baking process.env.NODE_ENV into
+    // the build in all three access forms (dot/bracket/destructured), so a
+    // NODE_ENV-gated branch can't be toggled at runtime. USE_NEON_ADAPTER is
+    // a plain, non-NEXT_PUBLIC_ server env var, read only inside this
+    // Node.js-only module — never bundled for the client, never baked in.
+    // Unset (the default everywhere except Vercel Production/Preview once
+    // Doreen sets it there): falls straight through to the existing PrismaPg
+    // branch below with zero behavior change — GCP Cloud Run and local/CI
+    // never set this var, so they always take that branch.
+    console.log('Using Neon adapter for Prisma Client');
+    const rawUrl = `${process.env.DATABASE_URL}`;
+
+    // Same URL handling as the PrismaPg branch below (schema extraction +
+    // statement_timeout) — Postgres connection-string semantics, not a
+    // pg-vs-neon-driver concern. Duplicated rather than extracted into a
+    // shared helper so the existing PrismaPg branch stays byte-for-byte
+    // unmodified (task instruction: leave existing branches' internal logic
+    // untouched).
+    let connectionString = rawUrl;
+    let schemaName: string | undefined;
+    try {
+      const u = new URL(rawUrl);
+      const s = u.searchParams.get('schema');
+      if (s) {
+        schemaName = s;
+        u.searchParams.delete('schema');
+      }
+      const rawTimeout = process.env.STATEMENT_TIMEOUT_MS;
+      const parsedTimeout = (rawTimeout == null || rawTimeout === '') ? NaN : parseInt(rawTimeout, 10);
+      const timeoutMs = Number.isNaN(parsedTimeout) ? 30000 : parsedTimeout;
+      u.searchParams.set('statement_timeout', String(timeoutMs));
+      connectionString = u.toString();
+    } catch { /* malformed URL — fall through with original values */ }
+    // @neondatabase/serverless (the driver behind PrismaNeon) bundles its own
+    // copy of pg-connection-string (see node_modules/@neondatabase/serverless
+    // package.json) with the same prefer/require/verify-ca sslmode handling
+    // as node-postgres, so it carries the same future-deprecation exposure
+    // the PrismaPg branch below guards against. Pin it here too; see
+    // lib/db-url.ts. No-op when sslmode is absent from the URL.
+    connectionString = pinSslModeVerifyFull(connectionString);
+
+    // PrismaNeon's config is a `neon.PoolConfig` (re-exported `pg.PoolConfig`
+    // shape — https://neon.com/docs/guides/prisma), so `connectionString`/
+    // `max` line up with the PrismaPg branch's adapter config. No
+    // `neonConfig.webSocketConstructor` override needed: this project's
+    // supported Node versions (package.json engines: ^22.22.2 || ^24.15.0 ||
+    // >=26.0.0) all ship a native global `WebSocket`, which
+    // @neondatabase/serverless (a transitive dep pulled in by
+    // @prisma/adapter-neon — not installed directly, per Neon's own
+    // guidance) falls back to automatically when no constructor is set.
+    const adapter = new PrismaNeon(
+      { connectionString, max: 2 },
+      schemaName ? { schema: schemaName } : undefined,
+    );
+    if (slowQueryLogEnabled) {
+      const stdoutLevels = prismaLogLevels.filter((l) => l !== 'query');
+      const client = new PrismaClient({
+        adapter,
+        log: [{ emit: 'event', level: 'query' }, ...stdoutLevels],
+      });
+      attachSlowQueryListener(client);
+      return client as unknown as PrismaClient;
+    }
+    const client = new PrismaClient({ adapter, log: prismaLogLevels });
     return client;
   } else {
     console.log('Using direct database connection for Prisma Client');

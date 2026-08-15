@@ -68,6 +68,23 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   through `pinSslModeVerifyFull()` first, with an identical connection outcome either way. 7 new unit
   tests in `lib/db-url.test.ts`. Full root-cause writeup:
   `docs/knowledge/pg-connection-string-sslmode-deprecation.md`.
+- Added an opt-in Neon serverless driver adapter path to `lib/prisma.ts`, gated by the
+  `USE_NEON_ADAPTER` env var (cmd_692/cmd_698). **Not active anywhere yet** — nothing sets this
+  var today, so this change has zero effect on any environment until it's explicitly configured
+  on Vercel (Project Settings → Environment Variables → `USE_NEON_ADAPTER=true` on Production
+  and/or Preview; see `.env.example` for details). When unset, or set to anything other than the
+  literal string `"true"` (fixed in this same change — the original branch used a truthy check,
+  so `USE_NEON_ADAPTER=false` or `=0` would have incorrectly enabled it), behavior is unchanged:
+  falls straight through to the existing `PrismaPg` branch. GCP Cloud Run and local/CI never set
+  this var. Verified: with the var unset, `false`, and `0`, the log line stays
+  `Using direct database connection for Prisma Client` (existing `PrismaPg` path, byte-for-byte
+  unmodified); with the var set to `true`, the log line switches to
+  `Using Neon adapter for Prisma Client`. Reconciled with the `pinSslModeVerifyFull()` fix above
+  on a `develop` re-merge: `@neondatabase/serverless` (the driver behind `PrismaNeon`) bundles its
+  own copy of `pg-connection-string` with the same `sslmode` deprecation handling as `pg`, so the
+  Neon branch's connection string is now piped through `pinSslModeVerifyFull()` too, right before
+  constructing the `PrismaNeon` adapter — same guard, same reasoning, applied to both code paths
+  instead of leaving the new one exposed.
 - Added `scripts/lint_prj_synced.py` (`npm run lint:prj`) for consumer projects to lint only their own `prj/`-tracked `.ts`/`.tsx` files, at their real synced destination paths, without linting this repo's own templates or a consumer's fully generated codebase (cmd_683, see `docs/knowledge/consumer-prj-scoped-lint.md`). Runs `prj:sync`, parses its own `copied`/`merged` stdout as the source of truth for what to lint, and fails closed (non-zero exit) if that list is empty for any reason — never silently lints nothing and reports success. Verified standalone (no `../prj` present): fails closed as expected. Verified with a synthetic `../prj` containing one clean and one syntactically-broken `.ts` file: lints both, exits non-zero on the broken one. Does not cap the ESLint warning count (errors-only gate), unlike this repo's own `lint` script — see the knowledge doc for why a shared ceiling would not be meaningful across two structurally different populations.
 - Set `x-generate.test: false` on `approval_flow` (cmd_661) — its generated CRUD Cypress specs (desktop/mobile/API) and support helper are being replaced by hand-written coverage that already exercises the entity_name filter/validation design (cmd_652) in `cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts`, placed directly in this repo's `cypress/e2e/` so it reaches every consumer via the submodule. Verified via `generate-code`: the three specs, `cypress/support/approval_flow/helper.ts`, and the task registry entry in `cypress/support/generated-tasks.ts` are no longer written (confirmed against `.generated-manifest.json`).
 - Refactored `approval_flow_same_entity_autocomplete_filter.cy.ts` to seed its own two `Role` rows via direct `POST /api/role` calls instead of `cy.task('db:populateApprovalFlowDependencies')`, which only existed while `approval_flow`'s generated test helper (`cypress/support/approval_flow/helper.ts`) was being written — now that `test: false` removes that helper, the spec would otherwise fail its `beforeEach` on every run. Verified: 7/7 tests pass (`cypress run --spec cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts` against a real build), and a full-repo grep confirms no other spec references the removed generated task.
