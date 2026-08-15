@@ -49,6 +49,7 @@ from generators import (
     _build_approval_create_block_for_entity,
     _build_split_approval_inherit_block,
     _raw_def,
+    seed_entities_context,
 )
 from generators_i18n import (
     update_i18n_and_config,
@@ -1947,6 +1948,14 @@ def generate(schema_path: str, output_dir: str) -> None:
     print('\nGenerating db-helpers.ts...')
     _write(out / 'cypress' / 'support' / 'db-helpers.ts',
            _render(env, 'test_db_helpers.ts.jinja2', db_ctx))
+
+    # --- scripts/generated/seed-entities.ts ---
+    # Consumed by scripts/grant-all-permissions.ts (dev/verification tool),
+    # not by scripts/seed-tenant.ts — see seed_entities_context() docstring.
+    print('\nGenerating seed-entities.ts...')
+    seed_ctx = seed_entities_context(schema)
+    _write(out / 'scripts' / 'generated' / 'seed-entities.ts',
+           _render(env, 'seed_entities.ts.jinja2', seed_ctx))
 
     # --- i18n / config updates ---
     print('\nUpdating i18n and navigation config...')

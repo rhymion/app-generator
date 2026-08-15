@@ -146,6 +146,63 @@ async function main() {
     },
   });
 
+  // ── Creator / Assignee roles ──────────────────────────────────────────────
+  // Special item-scoped roles resolved by name in lib/authz.ts
+  // (SPECIAL_ROLE_NAMES) — every user implicitly "has" whichever of these
+  // applies to a given row (creator_id === userId / assignee_id === userId),
+  // no explicit role assignment needed. `role.name` has no unique
+  // constraint (see prisma/schema.prisma), so this uses the same
+  // findFirst-then-create idiom as the Administrator role above rather
+  // than an upsert.
+  //
+  // Creator gets exactly setting.read + setting.update and nothing else:
+  // it is the mechanism by which a non-admin user reaches their own
+  // /setting page (x-self-only filters the row set to creator_id ===
+  // userId once this grant lets assertPermission('read'/'update') pass —
+  // see lib/authz.ts's rows.length === 0 fallback, which denies everyone
+  // but an Administrator when no permission row exists at all). Deliberately
+  // NOT extended to any other entity — a broader "owners can manage their
+  // own records" grant is a separate decision this seed does not make.
+  //
+  // Assignee is seeded with no permissions at all — a placeholder role for
+  // future use, matching the existing getters.ts.jinja2 vocabulary without
+  // granting anything today.
+  let creatorRole = await prisma.role.findFirst({ where: { name: 'Creator' } });
+  if (!creatorRole) {
+    creatorRole = await prisma.role.create({
+      data: {
+        name: 'Creator',
+        creator_id: admin.id,
+        updater_id: admin.id,
+      },
+    });
+  }
+  await prisma.permission.upsert({
+    where: { name_role_id: { name: 'setting', role_id: creatorRole.id } },
+    update: { read: true, update: true },
+    create: {
+      name: 'setting',
+      role_id: creatorRole.id,
+      creator_id: admin.id,
+      updater_id: admin.id,
+      create: false,
+      read: true,
+      update: true,
+      delete: false,
+    },
+  });
+
+  let assigneeRole = await prisma.role.findFirst({ where: { name: 'Assignee' } });
+  if (!assigneeRole) {
+    assigneeRole = await prisma.role.create({
+      data: {
+        name: 'Assignee',
+        creator_id: admin.id,
+        updater_id: admin.id,
+      },
+    });
+  }
+
   console.log('Tenant seeded successfully!');
 }
 
