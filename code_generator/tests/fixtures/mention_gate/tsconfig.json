@@ -22,6 +22,7 @@
       "@/lib/api-auth": ["./lib/api-auth.ts"],
       "@/lib/_notifier": ["./lib/_notifier.ts"],
       "@/lib/organization/getters_associated": ["./lib/organization/getters_associated.ts"],
+      "@/app/generated/prisma/client": ["./prisma/.generated-client/client"],
       "@/*": ["../*"]
     }
   },
