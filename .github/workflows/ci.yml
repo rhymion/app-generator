@@ -220,3 +220,31 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - run: npm run test:mention-gate
+
+  oto-mandatory-gate-fixture:
+    name: OTO Mandatory Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_704 [2-a] / subtask_705c: a small fixture entity pair
+    # (oto_gate_target, a one-to-one selector target with its own pages, and
+    # oto_gate_item, whose FK to it is REQUIRED -- non-nullable) run through
+    # the real generate-code -> tsc pipeline, catching regressions in the
+    # required_relation_fields/selector_oto_rels split in build_context.py
+    # and the `{{ f.init_var }}` reference it drives in page_new.tsx.jinja2
+    # -- a branch this repo's own generate-code/build (the e2e-tests job)
+    # never compiles, because no entity in this repo's own json_schema.yaml
+    # has a required one-to-one selector FK, and neither does any currently
+    # known consumer schema. No path filter, same as unit-tests/pytest/
+    # mention-gate-fixture above, per docs/knowledge/gate-exemption-must-be-
+    # machine-checkable.md. See scripts/check_oto_mandatory_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:oto-mandatory-gate

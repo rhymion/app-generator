@@ -1,0 +1,82 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+format-version: 3.0
+
+# Fixture design note (subtask_705c / cmd_704 [2-a] follow-up): a NEW
+# fixture, not an extension of mention_gate. mention_gate
+# (code_generator/tests/fixtures/mention_gate/) is scoped narrowly to the
+# `named_constants and has_commentable` branch (commentable + comment +
+# x-mention) per its own docstring and docs/knowledge/mention-system.md
+# "Fixture gate: how to grow it". A required one-to-one *selector* FK
+# (`type: one-to-one`, non-nullable) is an unrelated dark branch --
+# page_new.tsx.jinja2's `required_relation_fields` / `selector_oto_rels`,
+# nothing to do with commentable bridges. Folding it into mention_gate would
+# make that fixture cover two unrelated defect classes under one name and
+# force every future reader of mention_gate to also understand OTO selector
+# semantics to know what's actually being asserted. A second small,
+# self-contained fixture (this directory) keeps each fixture's purpose
+# legible from its own json_schema.yaml, matching the existing precedent of
+# invalidate_gate/ being its own fixture rather than folded into mention_gate
+# either, even though both eventually touch actions.ts.jinja2.
+
+definitions:
+  user:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name: {}
+      email: {}
+      image: {}
+
+  # The one-to-one selector's target. Given real list/view/new/edit pages
+  # (default x-generate, api/test off) -- generate_types.py's
+  # extract_entities() deliberately drops any entity whose every user-facing
+  # x-generate flag is False ("internal models"), and a selector OTO target
+  # with no pages of its own isn't a shape that exists in a real schema
+  # anyway (the whole point of `type: one-to-one`, vs. `one-to-one_bridge`,
+  # is that the target has its own identity and pages to pick from -- see
+  # get_one_to_one_rels()'s docstring in helpers/schema_helpers.py).
+  oto_gate_target:
+    x-generate:
+      api: false
+      test: false
+    fields:
+      name: {}
+
+  # The entity this fixture exists to exercise: a can_new entity with a
+  # REQUIRED (non-nullable) `type: one-to-one` selector FK -- the exact
+  # condition that populates `required_relation_fields` in build_context.py
+  # (`selector_oto_rels` entries where `not r.get('nullable', True)`) and
+  # drives page_new.tsx.jinja2's `{{ f.init_var }}` permission-denied guard
+  # (cmd_704 [2-a]: this used to always read `initial{Target}s`, which is
+  # correct for parent_rels_raw but not for selector_oto_rels, which
+  # destructures as `initialAvailable{Target}s` -- a `Cannot find name` tsc
+  # failure this fixture is designed to catch if the split regresses).
+  # Nullability comes from the Prisma schema (oto_gate_target_id has no `?`)
+  # -- json_schema.yaml only declares the relationship shape, not the type.
+  oto_gate_item:
+    x-generate:
+      list: false
+      view: false
+      new: true
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name: {}
+      oto_gate_target_id:
+        x-relationship:
+          type: one-to-one
+          target: oto_gate_target
+          labelField: name
+    properties:
+      oto_gate_target:
+        $ref: "#/definitions/oto_gate_target"
