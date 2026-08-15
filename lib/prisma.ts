@@ -61,7 +61,7 @@ const createPrismaClient = () => {
       accelerateUrl,
     }).$extends(withAccelerate()) as unknown as PrismaClient;
     return client;
-  } else if (process.env.USE_NEON_ADAPTER) {
+  } else if (process.env.USE_NEON_ADAPTER === 'true') {
     // Vercel+Neon only (cmd_692/cmd_654(は)). Deliberately NOT a NODE_ENV
     // branch — cmd_528 measured Turbopack baking process.env.NODE_ENV into
     // the build in all three access forms (dot/bracket/destructured), so a
