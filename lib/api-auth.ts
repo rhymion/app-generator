@@ -148,5 +148,16 @@ export function handleApiError(error: unknown): NextResponse {
     );
   }
   console.error('API error:', error);
-  return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  // Plain `throw new Error(...)` sites (e.g. hand-written custom validation
+  // in service_validation_custom.ts, and the generated REQUIRED_FIELDS
+  // checks) are not converted to AppError — their message is the intended
+  // caller-facing text (cmd_613/cmd_646's convention, exercised by
+  // cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts's
+  // (API) specs). The AppError message-hiding rationale from cmd_695
+  // (React stripping error.message at the Server Components render
+  // boundary) does not apply here — this handler produces a plain JSON
+  // HTTP response, not a React render, so forwarding the message is safe
+  // and was the pre-cmd_695 behavior this restores.
+  const message = error instanceof Error ? error.message : 'Internal server error';
+  return NextResponse.json({ error: message }, { status: 500 });
 }
