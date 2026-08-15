@@ -1,0 +1,71 @@
+// Self-contained fixture Prisma schema for the required one-to-one selector
+// gate (subtask_705c / cmd_704 [2-a]). NOT the project's real
+// prisma/schema.prisma -- this file exists only to give the fixture
+// json_schema.yaml enough real Prisma models to run through the actual
+// build_user_schema.py -> generate.py -> tsc pipeline in isolation, exercising
+// the branch cmd_704 fixed: a required (non-nullable) `type: one-to-one`
+// selector FK on a can_new entity. See docs/knowledge/mention-system.md
+// "Fixture gate: how to grow it" for the general pattern this follows
+// (adapted for a new, unrelated dark branch -- see this fixture's own
+// json_schema.yaml header for why a new fixture was chosen over extending
+// mention_gate).
+
+generator client {
+  provider = "prisma-client"
+  output   = "./.generated-client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model user {
+  id              String            @id @default(cuid())
+  name            String
+  email           String            @unique
+  image           String?
+  created_items   oto_gate_item[]   @relation("OtoGateItemCreator")
+  updated_items   oto_gate_item[]   @relation("OtoGateItemUpdater")
+  created_targets oto_gate_target[] @relation("OtoGateTargetCreator")
+  updated_targets oto_gate_target[] @relation("OtoGateTargetUpdater")
+}
+
+// The one-to-one selector target: has its own identity (own list/view/new/
+// edit pages, like a real selector target always does -- e.g. the real
+// menlab-auto consumer's checkup_result), picked via the
+// `getAvailable{Target}sFor{Parent}` autocomplete getter -- never nested
+// under the parent as a bridge/auto-create relation.
+model oto_gate_target {
+  id            String         @id @default(cuid())
+  name          String
+  oto_gate_item oto_gate_item?
+  created_at    DateTime       @default(now()) @db.Timestamptz(0)
+  updated_at    DateTime       @updatedAt @db.Timestamptz(0)
+  creator_id    String
+  creator       user           @relation("OtoGateTargetCreator", fields: [creator_id], references: [id])
+  updater_id    String
+  updater       user           @relation("OtoGateTargetUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// The entity this fixture exists for: a `new`-page-generating entity whose
+// FK to oto_gate_target is REQUIRED (non-nullable) -- the exact condition
+// (`selector_oto_rels` entries where `not r.get('nullable', True)`) that
+// populates `required_relation_fields` in build_context.py and drives the
+// `{{ f.init_var }}` reference in page_new.tsx.jinja2 that cmd_704 fixed.
+model oto_gate_item {
+  id                  String          @id @default(cuid())
+  name                String
+  oto_gate_target_id  String          @unique
+  oto_gate_target     oto_gate_target @relation(fields: [oto_gate_target_id], references: [id], onDelete: Cascade)
+  created_at          DateTime        @default(now()) @db.Timestamptz(0)
+  updated_at          DateTime        @updatedAt @db.Timestamptz(0)
+  creator_id          String
+  creator             user            @relation("OtoGateItemCreator", fields: [creator_id], references: [id])
+  updater_id          String
+  updater             user            @relation("OtoGateItemUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+  @@index([oto_gate_target_id])
+}
