@@ -34,6 +34,24 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - Added `scripts/lint_prj_synced.py` (`npm run lint:prj`) for consumer projects to lint only their own `prj/`-tracked `.ts`/`.tsx` files, at their real synced destination paths, without linting this repo's own templates or a consumer's fully generated codebase (cmd_683, see `docs/knowledge/consumer-prj-scoped-lint.md`). Runs `prj:sync`, parses its own `copied`/`merged` stdout as the source of truth for what to lint, and fails closed (non-zero exit) if that list is empty for any reason — never silently lints nothing and reports success. Verified standalone (no `../prj` present): fails closed as expected. Verified with a synthetic `../prj` containing one clean and one syntactically-broken `.ts` file: lints both, exits non-zero on the broken one. Does not cap the ESLint warning count (errors-only gate), unlike this repo's own `lint` script — see the knowledge doc for why a shared ceiling would not be meaningful across two structurally different populations.
 - Set `x-generate.test: false` on `approval_flow` (cmd_661) — its generated CRUD Cypress specs (desktop/mobile/API) and support helper are being replaced by hand-written coverage that already exercises the entity_name filter/validation design (cmd_652) in `cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts`, placed directly in this repo's `cypress/e2e/` so it reaches every consumer via the submodule. Verified via `generate-code`: the three specs, `cypress/support/approval_flow/helper.ts`, and the task registry entry in `cypress/support/generated-tasks.ts` are no longer written (confirmed against `.generated-manifest.json`).
 - Refactored `approval_flow_same_entity_autocomplete_filter.cy.ts` to seed its own two `Role` rows via direct `POST /api/role` calls instead of `cy.task('db:populateApprovalFlowDependencies')`, which only existed while `approval_flow`'s generated test helper (`cypress/support/approval_flow/helper.ts`) was being written — now that `test: false` removes that helper, the spec would otherwise fail its `beforeEach` on every run. Verified: 7/7 tests pass (`cypress run --spec cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts` against a real build), and a full-repo grep confirms no other spec references the removed generated task.
+- **Removed the dead in-process notification store from `lib/_notifier.ts`** (cmd_700): the module-scope
+  `console.log` on import (`[_notifier] in-memory notification store initialized...`) — audible during
+  every `next build` and `next dev`/`next start` boot — described a `Map<userId, Notification[]>` read
+  path (`listNotifications()` / `unreadCount()` / `markAllRead()` / `clearInbox()`) that had zero
+  production callers: `app/api/notifications/*` has read the `notification` Prisma table directly since
+  the table was introduced (cmd_475), and a full-repo grep (source + generated-code templates) found the
+  only callers of those four functions to be this module's own `lib/_notifier.test.ts`. Removed the
+  `console.log`, the `Map`, `pruneExpired()`, and the four dead functions plus `_resetForTests()`;
+  `notify()` (the write path — 6 real call sites, plus the `service.ts.jinja2`/`test_helper.ts.jinja2`/
+  `actions.ts.jinja2` generator templates) is untouched apart from its return type going from
+  `Notification` to `void` (the return value was unused everywhere). `INBOX_CAP`/`TTL_MS`/`type
+  Notification` are kept — `app/api/notifications/route.ts` imports all three for its own DB-side
+  cap/TTL. Corrected the module's header doc comment and `docs/knowledge/notification-triggers.md` (both
+  described the now-removed Map) and a stale "`notify()` itself is in-memory" comment in
+  `lib/_notifyApprovalRequest.ts`. `lib/_notifier.test.ts`'s in-memory-only coverage (per-user isolation,
+  50-entry FIFO cap, 7-day TTL eviction, `unreadCount`/`markAllRead`/`clearInbox`) was removed along with
+  the code it tested; the two tests that cover `notify()`'s own DB write (success + swallowed write
+  failure) were kept and updated for the `void` signature.
 
 ### Added
 - **CSV export/import and approve/reject now accept `X-API-Key` as well as a browser session**
