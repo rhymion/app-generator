@@ -151,13 +151,13 @@ Both triggers share the same notification plumbing:
 
 - `lib/_notifier.ts` — each `notify()` call fire-and-forget writes a row
   to the `notification` Prisma model, the single source of truth read by
-  `app/api/notifications/*`. It also updates an in-process
-  `Map<userId, Notification[]>` (capped at 50 entries per user, 7-day
-  TTL swept on read), kept only for `listNotifications()` /
-  `unreadCount()` / `markAllRead()` backward compatibility — nothing in
-  `app/api/notifications/*` reads it. A DB write failure (e.g. an FK
-  violation because `user_id` no longer exists) is logged and swallowed,
-  never surfaced to the caller.
+  `app/api/notifications/*`. A DB write failure (e.g. an FK violation
+  because `user_id` no longer exists) is logged and swallowed, never
+  surfaced to the caller. (An in-process `Map<userId, Notification[]>`
+  used to back a second, in-memory read path here — `listNotifications()`
+  / `unreadCount()` / `markAllRead()` / `clearInbox()` — but it was
+  removed (cmd_700): nothing outside this module's own tests ever called
+  those four functions.)
 - `app/api/notifications/*` — REST endpoints backed by the
   `notification` table directly: `GET` (7-day filter, 50-row cap, newest
   first, plus unread count) and `POST mark-read` (bulk `updateMany`).

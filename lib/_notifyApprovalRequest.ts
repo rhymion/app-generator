@@ -46,8 +46,8 @@ interface NotifyOptions {
  *
  * Fire-and-forget — does not share a transaction with the caller. Safe to
  * call from inside an entity's afterCreate hook (it receives a `tx` so the
- * role/user lookup sees uncommitted rows; the `notify()` itself is
- * in-memory and not transactional).
+ * role/user lookup sees uncommitted rows; `notify()`'s own DB write is not
+ * part of that transaction).
  */
 export async function notifyApprovalRequestCreated(
   tx: unknown,
