@@ -71,7 +71,7 @@ from pathlib import Path
 
 import yaml
 
-from generate_types import extract_entities
+from generate_types import extract_entities, extract_named_constants
 
 
 # ---------------------------------------------------------------------------
@@ -198,9 +198,12 @@ def _generated_api_test_file_for_entity(entity: dict, root: Path) -> Path | None
     return root / 'cypress' / 'e2e' / 'api' / f'{parent}.cy.ts'
 
 
-def _load_entities(schema_path: Path) -> list[dict]:
+def _load_schema(schema_path: Path) -> dict:
     with open(schema_path, 'r') as f:
-        schema = yaml.safe_load(f)
+        return yaml.safe_load(f)
+
+
+def _load_entities(schema: dict, schema_path: Path) -> list[dict]:
     entities = extract_entities(schema)
     if not entities:
         print(
@@ -214,6 +217,23 @@ def _load_entities(schema_path: Path) -> list[dict]:
         )
         sys.exit(2)
     return entities
+
+
+# comment/reaction (the `commentable` bridge) are bespoke schema-wide
+# artifacts, not entities run through extract_entities() -- see
+# generate.py's "Comment/reaction service layer" block for why. Mirrors that
+# block's own gate (named_constants truthy = reactions enabled) and file
+# list (lib/comment/service.ts, lib/reaction/service.ts, plus the reactions
+# API route emitted by the neighbouring block) so this scan sees the same
+# files generate.py actually writes.
+def _bespoke_reaction_files(schema: dict, root: Path) -> list[Path]:
+    if not extract_named_constants(schema):
+        return []
+    return [
+        root / 'lib' / 'comment' / 'service.ts',
+        root / 'lib' / 'reaction' / 'service.ts',
+        root / 'app' / 'api' / 'comment' / '[commentId]' / 'reactions' / 'toggle' / 'route.ts',
+    ]
 
 
 def _enumerate_generated_files(entities: list[dict], root: Path) -> list[Path]:
@@ -331,8 +351,12 @@ def _scan_login_file(path: Path, root: Path) -> list[Violation]:
 def check(schema_path: Path, root: Path,
           allowlist_path: Path = _ALLOWLIST_PATH) -> list[Violation]:
     """Public entry point. Returns the filtered violation list."""
-    entities = _load_entities(schema_path)
+    schema = _load_schema(schema_path)
+    entities = _load_entities(schema, schema_path)
     files = _enumerate_generated_files(entities, root)
+    for p in _bespoke_reaction_files(schema, root):
+        if p.exists() and p not in files:
+            files.append(p)
     allowlist = _load_allowlist(allowlist_path)
     out: list[Violation] = []
     for path in files:

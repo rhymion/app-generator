@@ -1400,6 +1400,40 @@ def generate(schema_path: str, output_dir: str) -> None:
         )
         print('  Mention candidate search → lib/mention/search.ts')
 
+    # --- Comment/reaction service layer (lib/comment/service.ts, lib/reaction/service.ts) ---
+    # Emitted whenever x-internal enum entities exist (i.e., reactions are
+    # enabled) -- same gate as the reactions API route below, since both
+    # features share the same comment/reaction models. comment/reaction have
+    # no x-generate (no standalone pages/API — see docs/knowledge/
+    # schema-yaml-configuration.md §"x-internal at the entity level"), so
+    # they are not run through extract_entities()/the per-entity pipeline:
+    # that pipeline's service.ts assumes a standard creator_id+updater_id
+    # CRUD shape (see service.ts.jinja2/service_context()), but `comment`
+    # has no updater_id and `reaction` has neither creator_id nor updater_id
+    # plus toggle (delete-if-exists-else-create) write semantics — forcing
+    # them through the generic machinery would require widening it for a
+    # shape no other entity has. Written directly here instead, following
+    # the same "bespoke schema-wide artifact" pattern already used below for
+    # the reactions API route and above for the mention parser/search
+    # modules. _build_comment_actions_bridge() (build_context.py) and
+    # comment_reactions_api_route.ts.jinja2 both call these functions
+    # instead of writing `prisma.comment.*`/`prisma.reaction.*` directly, so
+    # check_generated.py's write:direct rule treats them the same as any
+    # other entity's service.ts.
+    if named_constants:
+        _write(
+            out / 'lib' / 'comment' / 'service.ts',
+            _render(env, 'comment_service.ts.jinja2', {}),
+        )
+        print('  Comment service layer → lib/comment/service.ts')
+        _write(
+            out / 'lib' / 'reaction' / 'service.ts',
+            _render(env, 'reaction_service.ts.jinja2', {
+                'reaction_value_type': reaction_type_ts(schema),
+            }),
+        )
+        print('  Reaction service layer → lib/reaction/service.ts')
+
     # --- Comment reactions API route (app/api/comment/[commentId]/reactions/toggle/route.ts) ---
     # Emitted whenever x-internal enum entities exist (i.e., reactions are enabled).
     # D3=A: toggle endpoint is POST /api/comment/[commentId]/reactions/toggle

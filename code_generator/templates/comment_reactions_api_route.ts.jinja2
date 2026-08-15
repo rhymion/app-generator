@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateApiKey, handleApiError } from '@/lib/api-auth';
 import prisma from '@/lib/prisma';
 import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
+import { createReaction, deleteReaction } from '@/lib/reaction/service';
 
 export type CommentReactionSummary = {
   commentId: string;
@@ -78,10 +79,10 @@ export async function POST(request: NextRequest, { params }: Params) {
     });
     let active: boolean;
     if (existing) {
-      await prisma.reaction.delete({ where: { id: existing.id } });
+      await deleteReaction(existing.id);
       active = false;
     } else {
-      await prisma.reaction.create({ data: { comment_id: commentId, user_id: userId, type } });
+      await createReaction({ comment_id: commentId, user_id: userId, type });
       active = true;
     }
 

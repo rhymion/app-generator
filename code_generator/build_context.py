@@ -649,9 +649,7 @@ def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool
     return f"""
 export async function add{parent_pascal}Comment(commentable_id: string, message: string): Promise<void> {{
   const userId = await getSessionUserIdOrThrow();
-  await prisma.comment.create({{
-    data: {{ message, commentable_id, creator_id: userId }},
-  }});
+  await createComment({{ message, commentable_id, creator_id: userId }});
   // Trigger #4 (notification design 2026-05-11): notify the entity creator
   // and (if present) assignee; never the commenter themselves.
   const parentRow = await prisma.{model}.findFirst({{
@@ -679,7 +677,7 @@ export async function update{parent_pascal}Comment(commentId: string, message: s
   if (!comment || comment.creator_id !== userId) {{
     throw new Error('Not authorized to edit this comment');
   }}
-  await prisma.comment.update({{ where: {{ id: commentId }}, data: {{ message }} }});{mention_notify_update}
+  await updateComment(commentId, {{ message }});{mention_notify_update}
   revalidatePath('/{parent}');
 }}
 
@@ -690,7 +688,7 @@ export async function delete{parent_pascal}Comment(commentId: string): Promise<v
   if (comment.creator_id !== userId) {{
     await requirePermission('{parent}', 'delete');
   }}
-  await prisma.comment.delete({{ where: {{ id: commentId }} }});
+  await deleteComment(commentId);
   revalidatePath('/{parent}');
 }}"""
 
