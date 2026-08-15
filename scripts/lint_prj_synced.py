@@ -22,14 +22,24 @@ the list), filter to .ts/.tsx, and lint exactly those files at their
 synced destination paths (so file-scoped ESLint overrides, e.g. for
 cypress/**, apply exactly as they would post generate-code).
 
-Deliberately fail-closed: if the extracted file list is empty for any
-reason (no ../prj sibling directory, or a real ../prj with zero
-.ts/.tsx content), this is treated as a failure, not a silent pass.
-Silently linting nothing and exiting 0 is a worse failure mode than a
-loud error -- a gate that can go green without ever running is a bug
-class this repo has hit before (candidate (i)'s naive invocation in
-subtask_664b linted 0 files and exited 0; this script exists partly to
-avoid ever reproducing that shape here).
+Fail-closed on "could not measure", not on "measured and found
+nothing": this script fails if prj:sync could not be observed running
+against a real ../prj (no ../prj sibling directory, prj_sync.py
+exiting non-zero, or prj:sync reporting zero copied/merged files of
+any kind -- i.e. prj/ exists but is completely empty). It does NOT
+fail merely because none of the files prj:sync did observe and sync
+happen to be .ts/.tsx -- a consumer whose prj/ holds only e.g.
+schema/SQL/migration files and no hand-written TypeScript is a
+legitimate state (2026-08-15 product decision), not a temporary gap
+to be treated as red. Silently linting nothing without ever having
+measured anything is still the worse failure mode this script exists
+to avoid -- a gate that can go green without prj:sync ever actually
+running is a bug class this repo has hit before (candidate (i)'s
+naive invocation in subtask_664b linted 0 files and exited 0 without
+prj:sync running against a real ../prj at all; this script exists
+partly to avoid ever reproducing that shape here). The distinction
+is: did prj:sync observe and report on a real ../prj (pass, whatever
+it found), or did it fail to observe one at all (fail).
 
 Unlike this generator's own `lint` script, this script does not cap
 the ESLint warning count (no --max-warnings). It only fails on ESLint
@@ -70,6 +80,11 @@ PRJ_SYNC_SCRIPT = PROJECT_ROOT / "scripts" / "prj_sync.py"
 # so a path is still extracted correctly if that ever changes.
 SYNC_LINE_RE = re.compile(r"^prj:sync: (?:copied|merged)(?: \(new\))? (.+)$")
 
+# prj_sync.py's own "no ../prj sibling directory" marker line -- the only
+# way to detect this case, since prj_sync.py itself exits 0 (a missing
+# ../prj is a no-op, not an error) when it prints this.
+NO_PRJ_RE = re.compile(r"^prj:sync: no \.\./prj, skipping$")
+
 TS_SUFFIXES = (".ts", ".tsx")
 
 
@@ -96,35 +111,66 @@ def run_prj_sync() -> str:
     return result.stdout
 
 
-def extract_ts_files(prj_sync_stdout: str) -> list[str]:
+def extract_synced_files(prj_sync_stdout: str) -> list[str]:
+    """All copied/merged files prj:sync reported, any extension -- not just .ts/.tsx.
+
+    Used to tell "prj:sync observed a real ../prj and synced something"
+    (any file at all) apart from "prj:sync observed ../prj but it was
+    completely empty" -- the latter is still a measurement failure, not a
+    legitimate empty state, since an empty prj/ directory is not a thing a
+    consumer would deliberately commit.
+    """
     files = []
     for line in prj_sync_stdout.splitlines():
         m = SYNC_LINE_RE.match(line)
-        if not m:
-            continue
-        rel = m.group(1)
-        if rel.endswith(TS_SUFFIXES):
-            files.append(rel)
+        if m:
+            files.append(m.group(1))
     return files
+
+
+def extract_ts_files(synced_files: list[str]) -> list[str]:
+    return [f for f in synced_files if f.endswith(TS_SUFFIXES)]
+
+
+def prj_observed(prj_sync_stdout: str) -> bool:
+    """Did prj:sync report finding a real ../prj sibling directory at all?"""
+    return not any(NO_PRJ_RE.match(line) for line in prj_sync_stdout.splitlines())
 
 
 def main() -> int:
     stdout = run_prj_sync()
-    ts_files = extract_ts_files(stdout)
 
-    if not ts_files:
+    if not prj_observed(stdout):
         print(
-            "lint:prj: FAIL-CLOSED -- prj:sync reported zero .ts/.tsx files "
-            "to lint. This is treated as a failure, not a pass: either "
-            "../prj does not exist, or it exists but has no .ts/.tsx "
-            "content today. A gate that silently lints nothing and exits 0 "
-            "is worse than one that fails loudly (see this script's "
-            "module docstring). If this is a genuinely fresh consumer "
-            "with no hand-written prj/ TS content yet, that is expected "
-            "to be a temporary state, not a permanent green.",
+            "lint:prj: FAIL-CLOSED -- prj:sync reported no ../prj sibling "
+            'directory ("prj:sync: no ../prj, skipping"). prj/ was never '
+            "observed -- this is a measurement failure, not a legitimate "
+            "empty state.",
             file=sys.stderr,
         )
         return 1
+
+    synced_files = extract_synced_files(stdout)
+
+    if not synced_files:
+        print(
+            "lint:prj: FAIL-CLOSED -- prj:sync observed ../prj but synced "
+            "zero files of any kind. An empty prj/ is not a legitimate "
+            "state to pass on -- this is treated as a measurement failure, "
+            "not a pass.",
+            file=sys.stderr,
+        )
+        return 1
+
+    ts_files = extract_ts_files(synced_files)
+
+    if not ts_files:
+        print(
+            f"lint:prj: PASS -- prj:sync observed ../prj and synced "
+            f"{len(synced_files)} file(s), none of them .ts/.tsx. Nothing "
+            "to lint. This is a legitimate state (measured, not skipped)."
+        )
+        return 0
 
     print(f"lint:prj: {len(ts_files)} .ts/.tsx file(s) synced from prj/, linting:")
     for f in ts_files:

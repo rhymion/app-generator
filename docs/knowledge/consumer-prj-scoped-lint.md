@@ -53,29 +53,54 @@ someone reordering steps without understanding why the old order was
 wrong — see each consumer repo's own `generate-schema.md` for the
 corrected step order and its own worked example).
 
-## Fail-closed, deliberately
+## Fail-closed on measurement, not on empty result
 
-`lint:prj` exits non-zero if the extracted `.ts`/`.tsx` list is empty —
-whether because `../prj` does not exist, or exists but currently has no
-`.ts`/`.tsx` content. This mirrors this repo's own "no silent green"
+`lint:prj` exits non-zero if `prj:sync` could not be observed running
+against a real `../prj` — no `../prj` sibling directory at all, or a
+`../prj` that exists but from which `prj:sync` synced zero files of any
+kind. It does **not** fail merely because none of the files `prj:sync`
+did observe and sync happen to be `.ts`/`.tsx` — a consumer whose
+`prj/` holds only e.g. schema/SQL/migration files and no hand-written
+TypeScript is a legitimate state, not a temporary gap to be treated as
+red (2026-08-15 product decision). The earlier version of this script
+conflated the two: "zero `.ts`/`.tsx` files to lint" was itself the
+fail-closed trigger, which meant a consumer that had genuinely synced
+real content — just none of it TypeScript — failed exactly like a
+consumer whose `prj:sync` never ran at all. Those are not the same
+failure mode, and only one of them is actually a bug.
+
+The distinction now driving the gate: did `prj:sync` observe and report
+on a real `../prj` (pass, whatever it found), or did it fail to observe
+one at all (fail)? This still mirrors this repo's own "no silent green"
 principle applied to the earlier candidate (i) investigation
 (`subtask_664b`): its naive invocation (`../prj/**` passed directly to
 ESLint with this repo's `cwd`) hit ESLint's `--config`-implies-fixed-
 base-path behavior and reported `File ignored because outside of base
-path` for every file — 0 files linted, exit 0. A gate that can go green
-without ever actually running is worse than one that fails loudly;
-`lint:prj` refuses to reproduce that shape by construction, checking the
-file count itself before ever invoking ESLint, rather than trusting
-ESLint's own exit code to reflect "nothing to check" as a failure (it
-does not — ESLint given zero targets is a no-op with exit 0).
+path` for every file — 0 files linted, exit 0, without `prj:sync` ever
+running against a real `../prj` at all. A gate that can go green without
+ever actually measuring anything is worse than one that fails loudly;
+`lint:prj` refuses to reproduce that shape by construction, checking
+what `prj:sync` actually observed before ever invoking ESLint, rather
+than trusting ESLint's own exit code to reflect "nothing to check" as a
+failure (it does not — ESLint given zero targets is a no-op with exit
+0).
 
-Verified directly (script run standalone, no consumer present — the
-worktree used for this fix has no `../prj` sibling at all):
-`npm run lint:prj` → `prj:sync: no ../prj, skipping` → `FAIL-CLOSED` →
-exit 1. A synthetic `../prj` with one syntactically-broken `.ts` file
-added afterward was also linted and correctly failed (exit 1, ESLint
-parse error surfaced) — confirming the fail-closed check does not
-substitute for ESLint actually running once files are present.
+Verified directly, three scenarios:
+- No `../prj` sibling at all: `npm run lint:prj` → `prj:sync: no
+  ../prj, skipping` → `FAIL-CLOSED` → exit 1.
+- A real `../prj` synced successfully but holding no `.ts`/`.tsx`
+  content (only e.g. a `.prisma` file) — the case this fix exists
+  for: `prj:sync: copied ...` → `PASS -- ... none of them .ts/.tsx`
+  → exit 0. Reproduced directly against a real consumer's actual
+  `prj/` content (copied read-only into a scratch directory, the
+  consumer's own working tree never touched), whose `prj/` holds only
+  `.prisma`/`.sql`/`.toml`/`.yaml` files and zero `.ts`/`.tsx`: the
+  prior implementation failed closed on this exact content, the fixed
+  implementation passes.
+- A real `../prj` with one syntactically-broken `.ts` file: linted and
+  correctly failed (exit 1, ESLint parse error surfaced) — confirming
+  the fail-closed-on-measurement-failure check does not substitute for
+  ESLint actually running once `.ts`/`.tsx` files are present.
 
 ## No warning ceiling, unlike this repo's own `lint`
 
