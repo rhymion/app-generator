@@ -220,3 +220,30 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - run: npm run test:mention-gate
+
+  decimal-gate-fixture:
+    name: Decimal Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_705: a small fixture entity (required + nullable Decimal column,
+    # each with an explicit @db.Decimal(p, s) scale) run through the real
+    # generate-code -> tsc pipeline, catching regressions in the
+    # Decimal-specific branches of schema_deriver.py / getters.ts.jinja2 /
+    # form_upsert_context (generators.py) / form_validation.ts.jinja2 /
+    # service_validation.ts.jinja2 / api_import_route.ts.jinja2 -- branches
+    # this repo's own generate-code/build (the e2e-tests job) never
+    # compiles, because no entity in this repo's own json_schema.yaml has a
+    # Decimal-typed field. No path filter, same as unit-tests/pytest/
+    # mention-gate-fixture above, per docs/knowledge/gate-exemption-must-be-
+    # machine-checkable.md. See scripts/check_decimal_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:decimal-gate

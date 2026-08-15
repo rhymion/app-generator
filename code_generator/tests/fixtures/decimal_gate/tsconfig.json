@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/lib/decimal_gate_item/*": ["./lib/decimal_gate_item/*"],
+      "@/components/decimal_gate_item/*": ["./components/decimal_gate_item/*"],
+      "@/lib/prisma": ["./lib/prisma.ts"],
+      "@/lib/authz": ["./lib/authz.ts"],
+      "@/lib/api-auth": ["./lib/api-auth.ts"],
+      "@/app/generated/prisma/client": ["./prisma/.generated-client/client"],
+      "@/*": ["../*"]
+    }
+  },
+  "include": [
+    "lib/decimal_gate_item/getters.ts",
+    "lib/decimal_gate_item/service_validation.ts",
+    "components/decimal_gate_item/form_validation.ts",
+    "components/decimal_gate_item/FormUpsert.tsx",
+    "app/api/decimal_gate_item/import/route.ts"
+  ],
+  "exclude": ["node_modules"]
+}

@@ -10,6 +10,21 @@ const REQUIRED_FIELDS: RequiredField[] = [
   { key: 'name', label: 'Name' },
 ] ;
 
+const DECIMAL_FIELDS: RequiredField[] = [
+] ;
+
+// Optional sign, digits, optional fractional part -- matches what a Prisma
+// Decimal column accepts. This is the authoritative guard for the REST
+// API / server-action write path (CSV import bypasses validateOnAdd/
+// validateOnUpdate entirely -- see api_import_route.ts.jinja2's own
+// DECIMAL_CELL_RE check).
+const DECIMAL_PATTERN = /^-?\d+(\.\d+)?$/;
+
+function isInvalidDecimal(value: unknown): boolean {
+  if (typeof value !== 'string' || value.trim() === '') return false;
+  return !DECIMAL_PATTERN.test(value.trim());
+}
+
 const ONE_TO_ONE_RELATIONS: OneToOneRelation[] = [
 ] ;
 
@@ -32,6 +47,12 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
   for (const field of REQUIRED_FIELDS) {
     if (isMissingValue(data[field.key])) {
       throw new AppError('VALIDATION', `${field.label} is required`, field.key);
+    }
+  }
+
+  for (const field of DECIMAL_FIELDS) {
+    if (isInvalidDecimal(data[field.key])) {
+      throw new AppError('VALIDATION', `${field.label} must be a valid decimal number`, field.key);
     }
   }
 

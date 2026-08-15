@@ -781,6 +781,7 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
     custom_upsert = []
     date_time     = []
     number        = []
+    decimal       = []
     enum_integer  = []
     enum_string   = []
     image         = []
@@ -814,6 +815,11 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
             entity_select.append(p)
         elif actual == 'string' and isinstance(defn.get('enum'), list):
             enum_string.append(p)
+        elif actual == 'string' and defn.get('_prisma_decimal_type'):
+            # Decimal fields are exposed as JSON type "string" (precision
+            # preservation -- no JS float rounding), but still render as a
+            # numeric-styled input rather than falling through to plain text.
+            decimal.append(p)
         else:
             text.append(p)
 
@@ -821,6 +827,7 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
         'custom_upsert': custom_upsert,
         'date_time': date_time,
         'number': number,
+        'decimal': decimal,
         'enum_integer': enum_integer,
         'enum_string': enum_string,
         'image': image,
@@ -1002,6 +1009,19 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             'properties': {**model_def.get('properties', {}), **_parent_bridge_fks},
         }
     filtered_props = filter_fields(model_def.get('properties', {}), gen_cfg.get('fields'))
+
+    # decimal_field_names: fields backed by a Prisma `Decimal` column
+    # (schema_deriver._prisma_decimal_type marker). Prisma Client returns
+    # these as decimal.js `Decimal` instances, not plain JS values -- passed
+    # unconverted across the Server-to-Client Component boundary (a
+    # getters.ts return value consumed by a 'use client' component such as
+    # FormUpsert/DataGrid), React's serialization rejects the class instance.
+    # Every getters.ts read path that can reach a client prop must convert to
+    # string first; see decimal_display_columns / parent_mapping below.
+    decimal_field_names: list[str] = [
+        k for k, v in filtered_props.items()
+        if isinstance(v, dict) and v.get('_prisma_decimal_type')
+    ]
 
     # x-server-value: server-computed field values the client can never set directly
     # (cmd_556/cmd_565). Accepts the legacy string form `"actor"` (client value
@@ -1750,7 +1770,17 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             _types = [_types]
         _nullable  = 'null' in _types
         _base      = [t for t in _types if t != 'null']
-        _ts_type   = _TSTYPE_MAP.get(_base[0] if _base else 'string', 'string')
+        if _prop.get('_prisma_decimal_type'):
+            # Decimal is exposed as JSON type "string" (precision-preserving),
+            # but must not go through the generic 'string' passthrough
+            # without at least a numeric-format check -- a CSV cell like
+            # "abc" would otherwise reach `tx.model.create()` unvalidated and
+            # surface as an opaque Prisma write error instead of an
+            # INVALID_VALUE row error. 'decimal' still returns the raw string
+            # (never Number()) so precision is never at risk either way.
+            _ts_type = 'decimal'
+        else:
+            _ts_type = _TSTYPE_MAP.get(_base[0] if _base else 'string', 'string')
         import_field_specs.append({
             'name':      _f,
             'ts_type':   _ts_type,
@@ -2713,8 +2743,21 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     creator_filtered_props = copy.deepcopy(filtered_props)
     creator_filtered_props['creator_id'] = {'type': 'string'}
 
+    # decimal_display_columns: consumed by get{{ parent_pascal }}Detail's raw
+    # `...{{ parent_camel }}` spread (getters.ts.jinja2) to override each
+    # Decimal-backed column with its .toString() form, the same
+    # override-after-spread shape already used for the DateTime columns above
+    # it. Null-safe: a nullable Decimal column reads back as `null` (not a
+    # `Decimal` instance) and must pass through unconverted.
+    decimal_display_columns = [k for k in decimal_field_names if k not in _EXCLUDE_FIELDS]
+
+    def _parent_mapping_entry(k: str) -> str:
+        if k in decimal_field_names:
+            return f"    {k}: {parent_camel}.{k} !== null && {parent_camel}.{k} !== undefined ? {parent_camel}.{k}.toString() : {parent_camel}.{k},"
+        return f"    {k}: {parent_camel}.{k},"
+
     parent_mapping = '\n'.join(
-        f"    {k}: {parent_camel}.{k},"
+        _parent_mapping_entry(k)
         for k in creator_filtered_props
         if k not in _EXCLUDE_FIELDS
     )
@@ -2844,6 +2887,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         parent_default_props=parent_default_props,
         parent_mapping=parent_mapping,
         relationship_mapping=relationship_mapping,
+        decimal_field_names=decimal_field_names,
+        decimal_display_columns=decimal_display_columns,
         # Children
         children_raw=children_raw,
         children_data=children_data,

@@ -35,7 +35,10 @@ export async function POST() {
   );
 }
 {% else %}
-type FieldSpec = { name: string; ts_type: 'string' | 'number' | 'boolean'; nullable: boolean; is_key: boolean; is_update: boolean };
+type FieldSpec = { name: string; ts_type: 'string' | 'number' | 'boolean' | 'decimal'; nullable: boolean; is_key: boolean; is_update: boolean };
+// Decimal-format cells: optional sign, digits, optional fractional part —
+// matches what a Prisma Decimal column accepts. No thousands separators.
+const DECIMAL_CELL_RE = /^-?\d+(\.\d+)?$/;
 const FIELD_SPECS: FieldSpec[] = {{ import_field_specs | tojson }};
 const KEY_COLUMNS: string[] = {{ import_key_specs | map(attribute='csv_col') | list | tojson }};
 // cmd_530: exported FK columns with no CSV-import write path (composite/dotted
@@ -58,6 +61,12 @@ function coerceValue(raw: string | undefined, spec: FieldSpec): { ok: true; valu
   if (spec.ts_type === 'number') {
     const n = Number(v);
     return Number.isFinite(n) ? { ok: true, value: n } : { ok: false };
+  }
+  if (spec.ts_type === 'decimal') {
+    // Format-checked, but kept as the original string (never Number()) —
+    // Prisma accepts a decimal string directly, so this never risks the
+    // float rounding error a Number() round-trip would introduce.
+    return DECIMAL_CELL_RE.test(v.trim()) ? { ok: true, value: v.trim() } : { ok: false };
   }
   if (spec.ts_type === 'boolean') {
     if (v === 'true' || v === '1') return { ok: true, value: true };

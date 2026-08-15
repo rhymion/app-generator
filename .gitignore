@@ -100,6 +100,10 @@ code_generator/.generated/
 # regenerates this from code_generator/tests/fixtures/mention_gate/ on every run.
 .generated-mention-gate/
 
+# decimal-gate fixture check (cmd_705) scratch output — scripts/check_decimal_gate_fixture.sh
+# regenerates this from code_generator/tests/fixtures/decimal_gate/ on every run.
+.generated-decimal-gate/
+
 # sample data
 custom/
 memory/

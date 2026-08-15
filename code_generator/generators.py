@@ -3065,6 +3065,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     text_props           = [p for p in cats['text']           if p not in readonly_field_names and p not in mention_field_names]
     number_props         = [p for p in cats['number']         if p not in readonly_field_names]
+    # decimal_props: Decimal-backed columns. Rendered like text_props (an
+    # uncontrolled ref-based <input>, string value all the way through) --
+    # NOT like number_props, which uses NumberField (@base-ui/react's
+    # number-field manages state as a JS `number`, defeating the whole
+    # point of the string-representation decision).
+    decimal_props        = [p for p in cats.get('decimal', []) if p not in readonly_field_names]
     date_time_props      = [p for p in cats['date_time']      if p not in readonly_field_names]
     image_props          = [p for p in cats['image']          if p not in readonly_field_names]
     boolean_props        = [p for p in cats['boolean']        if p not in readonly_field_names]
@@ -3097,7 +3103,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # ---- States / Refs ----
     text_refs = '\n'.join(f"  const {p}Ref = useRef<HTMLInputElement>(null);" for p in text_props)
     number_refs = '\n'.join(f"  const {p}Ref = useRef<HTMLInputElement>(null);" for p in number_props)
-    parent_refs = '\n'.join(filter(None, [text_refs, number_refs]))
+    decimal_refs = '\n'.join(f"  const {p}Ref = useRef<HTMLInputElement>(null);" for p in decimal_props)
+    parent_refs = '\n'.join(filter(None, [text_refs, number_refs, decimal_refs]))
 
     _bridge_child_ir = ctx.get('bridge_child_ir')
     if _bridge_child_ir:
@@ -3230,6 +3237,40 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"      />"
         )
         jsx_by_field[p] = _maybe_box_wrap(_text_jsx, _text_width_cols)
+
+    # Decimal fields: rendered via AppFieldText (uncontrolled, string value —
+    # NOT NumberField, whose @base-ui/react/number-field state is a JS
+    # `number` and would reintroduce the float rounding error the string
+    # representation exists to avoid). `inputMode`/`pattern` are UI hints
+    # only (mobile numeric keypad, native browser format nudge) — the actual
+    # guard is DECIMAL_FIELDS in form_validation.ts/service_validation.ts.
+    for p in decimal_props:
+        prop = filtered_props[p]
+        fk   = _tf(p)
+        req  = p in (model_def.get('required') or [])
+        scale = prop.get('x-decimal-scale')
+        decimal_pattern = (
+            r'-?\d+(\.\d{1,' + str(int(scale)) + r'})?' if scale is not None
+            else r'-?\d+(\.\d+)?'
+        )
+        # Backslashes must be doubled to survive as literal backslashes in
+        # the generated JS single-quoted string (a single `\d` in the emitted
+        # source is not a recognized JS string escape and silently drops the
+        # backslash, corrupting the pattern into `d+(.d{1,2})?` at runtime).
+        decimal_pattern_js = decimal_pattern.replace('\\', '\\\\')
+        _decimal_width_cols = _ui_width_cols(prop)
+        if _decimal_width_cols:
+            has_box_import = True
+        _decimal_jsx = (
+            f"      <AppFieldText\n"
+            f"        label={{tf('{fk}')}}\n"
+            f"        inputRef={{{p}Ref}}\n"
+            f"        defaultValue={{src.{p} || ''}}\n"
+            f"        {'required' if req else ''}\n"
+            f"        slotProps={{{{ htmlInput: {{ inputMode: 'decimal', pattern: '{decimal_pattern_js}' }} }}}}\n"
+            f"      />"
+        )
+        jsx_by_field[p] = _maybe_box_wrap(_decimal_jsx, _decimal_width_cols)
 
     # Mention fields (cmd_522c): x-mention: true text fields use the @picker.
     for p in mention_props:
@@ -3614,6 +3655,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         return f"    formData.set('{p}', {var} || '');"
     entity_select_ds = '\n'.join(_entity_select_fds_line(p) for p in entity_select_props)
     num_ds   = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in number_props)
+    decimal_ds = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in decimal_props)
     dt_ds_parts = []
     for p in date_time_props:
         sn = safe_var_name(p)
@@ -3656,7 +3698,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             return f"    formData.set('{p}', {safe_var_name(p)}.toString());"
         return f"    formData.set('{p}', {safe_var_name(p)});"
     cust_ds  = '\n'.join(_custom_form_data_line(p) for p in custom_upsert_props)
-    parent_form_data_sets = '\n'.join(filter(None, [text_ds, mention_ds, entity_select_ds, rel_ds, num_ds, enum_ds, enum_str_ds, bool_ds, dt_ds, img_ds, cust_ds]))
+    parent_form_data_sets = '\n'.join(filter(None, [text_ds, mention_ds, entity_select_ds, rel_ds, num_ds, decimal_ds, enum_ds, enum_str_ds, bool_ds, dt_ds, img_ds, cust_ds]))
 
     # ---- Children analysis ----
     # Use the pre-filtered embedded_ch from build_context (passed as non_comment_ch in ctx).
@@ -3866,6 +3908,18 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 return str(defn.get('default', False)).lower()
             if actual == 'string' and fmt in ('date', 'date-time', 'time'):
                 return "dayjs().toISOString()"
+            if actual == 'string' and defn.get('_prisma_decimal_type'):
+                # Decimal-backed field: a plain quoted decimal string (never a
+                # JS number literal) -- picked to be exact in binary float
+                # too (10.50 has no float representation error at this
+                # magnitude), but the point is the *type*: this seed must
+                # stay a string all the way to the Prisma create() call, the
+                # same as any real Decimal write.
+                if 'default' in defn:
+                    return f"'{defn['default']}'"
+                if nullable:
+                    return 'null'
+                return "'10.50'"
             if actual == 'string':
                 # Prisma nativeEnum-backed field: '' is not a valid enum member,
                 # so the new-row seed must use the schema's actual default
@@ -4408,6 +4462,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     validation_entry_lines = ['    isEdit,', '    id: src.id,']
     validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in text_props)
     validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in number_props)
+    validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in decimal_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in date_time_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in image_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in mention_props)
