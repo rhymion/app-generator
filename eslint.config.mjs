@@ -72,6 +72,11 @@ const eslintConfig = defineConfig([
     // scripts/check_mention_gate_fixture.sh run, gitignored, never part of
     // the shipped product.
     ".generated-mention-gate/**",
+    // OTO-mandatory-gate fixture check (cmd_704 [2-a] / subtask_705c) scratch
+    // output — rebuilt from code_generator/tests/fixtures/oto_mandatory/ on
+    // every scripts/check_oto_mandatory_gate_fixture.sh run, gitignored,
+    // never part of the shipped product.
+    ".generated-oto-mandatory-gate/**",
   ]),
 ]);
 
