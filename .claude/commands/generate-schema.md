@@ -18,6 +18,18 @@ Task: $ARGUMENTS
 - Create Prisma schema first, then create JSON schema.
 - If the user requests a model similar to a built-in model (comment, attachment, etc.),
   first confirm whether the built-in model can be used instead.
+- The resulting schema does not have to match any ER diagram or
+  external design document verbatim. Shaping the schema around
+  what the generator actually supports (relationship types,
+  `x-*` extension keys, generated code paths) is a legitimate
+  design choice, not a deviation that needs excusing.
+- Before treating a generator limitation as a reason to reshape
+  the schema, check whether an existing `x-*` key (see
+  `docs/knowledge/schema-yaml-configuration.md`) already covers
+  the case. Built-in keys are the default, proactive choice even
+  when the task description doesn't name them — this applies
+  with extra force in fast-track mode, where no confirmation
+  step catches a missed key.
 
 ## Common rules
 

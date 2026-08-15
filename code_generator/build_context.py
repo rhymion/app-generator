@@ -2101,11 +2101,19 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # message instead of rendering a create form that can never succeed. Each
     # entry's `field_key` matches the same Fields-namespace i18n key
     # _autocomplete_rel_jsx() already uses for the field's label.
+    #
+    # `init_var` is pre-computed here rather than rebuilt from `target` in
+    # the template (cmd_704, subtask_702b [2-a]): parent_rels_raw entries
+    # are destructured in page_new.tsx.jinja2's Promise.all as
+    # `initial{Target}s`, but selector_oto_rels entries are destructured as
+    # `initialAvailable{Target}s` — a naming split the template can't see if
+    # it reconstructs the name from `target` alone.
     required_relation_fields = [
         {
             'prop_name': r['prop_name'],
             'target': r['target'],
             'field_key': to_camel_case(r['prop_name'].removesuffix('_id') if r['prop_name'].endswith('_id') else r['prop_name']),
+            'init_var': f"initial{to_pascal_case(r['target'])}s",
         }
         for r in parent_rels_raw
         if r.get('required')
@@ -2114,6 +2122,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             'prop_name': r['prop_name'],
             'target': r['target'],
             'field_key': to_camel_case(r['prop_name'].removesuffix('_id') if r['prop_name'].endswith('_id') else r['prop_name']),
+            'init_var': f"initialAvailable{to_pascal_case(r['target'])}s",
         }
         for r in selector_oto_rels
         if not r.get('nullable', True)

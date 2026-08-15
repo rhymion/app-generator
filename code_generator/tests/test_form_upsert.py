@@ -545,6 +545,22 @@ class TestSelectorOTOMandatory:
         ctx = self._build_ctx()
         assert "checkup" not in ctx["one_to_one_pre_creates"]
 
+    def test_required_relation_fields_init_var_uses_available_prefix(self):
+        """Regression (cmd_704, subtask_702b [2-a]): a required selector-OTO FK's
+        required_relation_fields entry must carry init_var
+        'initialAvailable{Target}s' — the name page_new.tsx.jinja2's Promise.all
+        actually destructures selector_oto_rels entries into (see
+        TestSelectorOTOMandatory.test_selector_oto_in_form_upsert_params above).
+        Before the fix, page_new.tsx.jinja2 re-derived this name from `target`
+        alone as plain 'initial{Target}s' — the same name used for a *different*
+        variable (see test_form_upsert.py's un-prefixed rel_opt_setups check) —
+        producing a reference to an identifier that Promise.all never declares.
+        """
+        ctx = self._build_ctx()
+        entry = next((f for f in ctx["required_relation_fields"] if f["target"] == "checkup"), None)
+        assert entry is not None, "checkup_id (required selector-OTO) must appear in required_relation_fields"
+        assert entry["init_var"] == "initialAvailableCheckups"
+
 
 # ---------------------------------------------------------------------------
 # Selector OTO — optional FK (nullable)
@@ -626,6 +642,107 @@ class TestSelectorOTOOptional:
         ctx = self._ctx()
         assert "initialUserAccounts" in ctx["rel_opt_setups"]
         assert "searchUserAccountOptions" in ctx["rel_opt_setups"]
+
+
+# ---------------------------------------------------------------------------
+# required_relation_fields init_var (cmd_704, subtask_702b [2-a])
+# ---------------------------------------------------------------------------
+
+class TestRequiredRelationFieldsInitVarPlainFK:
+    """
+    A required plain many-to-one FK (parent_rels_raw, NOT a selector-OTO) must
+    get an init_var of 'initial{Target}s' — the un-prefixed form. Guards the
+    other half of the cmd_704 fix: only selector-OTO entries should carry the
+    'Available' infix; a regression that always prefixes (or never prefixes)
+    would silently break one of the two branches.
+    """
+
+    def _schema(self) -> dict:
+        return {
+            "definitions": {
+                "category": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "properties": _base_props(),
+                },
+                "__product": {
+                    "type": "object",
+                    "required": ["id", "name", "category_id"],
+                    "properties": {
+                        **_base_props(),
+                        "category_id": _fk_field("category", nullable=False),
+                    },
+                },
+                "product": {
+                    "x-generate": {"list": True, "view": True, "new": True, "edit": True,
+                                   "delete": True, "api": False, "test": False},
+                    "allOf": [{"$ref": "#/definitions/__product"}],
+                },
+            }
+        }
+
+    def test_required_many_to_one_init_var_has_no_available_infix(self):
+        ctx = build_context(_entity("product"), self._schema())
+        entry = next((f for f in ctx["required_relation_fields"] if f["target"] == "category"), None)
+        assert entry is not None, "category_id (required many-to-one) must appear in required_relation_fields"
+        assert entry["init_var"] == "initialCategorys", (
+            f"Expected the plain 'initial{{Target}}s' form (no 'Available' infix), got {entry['init_var']!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# has_datetime_props via inline child-grid dayjs() calls (cmd_704, subtask_702b [2-c])
+# ---------------------------------------------------------------------------
+
+class TestChildGridDatetimePropsGate:
+    """
+    A parent with NO date/date-time/time field of its own, but with an inline
+    (non-independent) datagrid child that DOES have one, must still report
+    has_datetime_props=True — _new_prop_val() embeds a bare `dayjs()` call into
+    that child's createNew{Child}() (part of child_grid_setup), and
+    form_upsert.tsx.jinja2 only imports dayjs when has_datetime_props is True.
+    Before the fix, has_datetime_props only looked at the parent's own fields
+    plus a 'DateTimeWrapper' substring check over _rendered_body_text — neither
+    of which sees this child_grid_setup call site — so the import was silently
+    dropped and the generated FormUpsert.tsx failed to build.
+    """
+
+    def _schema(self) -> dict:
+        return {
+            "definitions": {
+                "log_entry": {
+                    "type": "object",
+                    "required": ["id", "logged_at"],
+                    "properties": {
+                        "id": {"type": "string"},
+                        "logged_at": {"type": "string", "format": "date"},
+                    },
+                },
+            }
+        }
+
+    def _ctx(self) -> dict:
+        entity = _entity("session", children=[
+            _child_entry("log_entry", "log_entries"),  # no output_type → inline DataGrid
+        ])
+        return _build_upsert_ctx(entity, self._schema())
+
+    def test_has_datetime_props_true_from_child_date_field_alone(self):
+        ctx = self._ctx()
+        assert ctx["has_datetime_props"] is True
+
+    def test_child_grid_setup_contains_bare_dayjs_call(self):
+        """Sanity check the fixture actually reproduces the emitting code path."""
+        ctx = self._ctx()
+        assert "dayjs(" in ctx["child_grid_setup"]
+
+    def test_parent_alone_has_no_datetime_props(self):
+        """Control: a parent with neither its own date field nor a datagrid
+        child with one must NOT report has_datetime_props."""
+        entity = _entity("session")
+        schema = {"definitions": {}}
+        ctx = _build_upsert_ctx(entity, schema)
+        assert ctx["has_datetime_props"] is False
 
 
 # ---------------------------------------------------------------------------
