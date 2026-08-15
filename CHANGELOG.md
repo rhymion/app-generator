@@ -6,6 +6,42 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Internal
+- **Fixed two generator defects confirmed real by deviation-injection reproduction (cmd_704, subtask_702b):**
+  - A required one-to-one selector FK (`x-relationship: {type: one-to-one, ...}` on a field listed in
+    the entity's `required`) made the generated `page_new.tsx` unbuildable. `build_context.py`'s
+    `required_relation_fields` (the cmd_516 Option B permission-guard list) merged entries from
+    `parent_rels_raw` and `selector_oto_rels` without distinguishing them, and
+    `page_new.tsx.jinja2` re-derived a single `initial{Target}s` variable name for both — correct for
+    `parent_rels_raw` entries (matching the `Promise.all` destructure) but wrong for `selector_oto_rels`
+    entries, which actually destructure as `initialAvailable{Target}s`. The guard block referenced an
+    identifier `Promise.all` never declared (`Cannot find name 'initialAppForms'`-style TypeScript
+    build failure), while the optional (nullable) form of the same relationship was unaffected. Fixed
+    by pre-computing each entry's `init_var` in `build_context.py` at the correct naming convention for
+    its source list, and having the template reference `f.init_var` directly instead of reconstructing
+    the name from `target`. Verified both-sides with a synthetic schema (required vs. optional
+    one-to-one selector to the same target): the required side's generated `page_new.tsx` referenced
+    the undeclared variable before the fix and the correctly-declared one after, with the optional
+    side's generated output byte-identical across both runs.
+  - A parent entity with no date/date-time/time field of its own, but with an inline (non-independent)
+    datagrid child that has one, generated a `FormUpsert.tsx` calling `dayjs()` (embedded by
+    `_new_prop_val()`'s child-row-default logic, part of `child_grid_setup`) without importing `dayjs`
+    — the `has_datetime_props` gate for the `dayjs` import in `form_upsert.tsx.jinja2` only checked the
+    parent's own date fields plus a `'DateTimeWrapper'` substring fallback over `_rendered_body_text`,
+    neither of which sees `child_grid_setup`'s content. Fixed by also checking `'dayjs('` against
+    `child_grid_setup` in `generators.py`'s `has_datetime_props` computation. Verified both-sides with a
+    synthetic schema (date-free parent, inline child with a `format: date` field): `dayjs` was called
+    without an import before the fix and correctly imported after.
+  - Both fixes are unit-tested (`code_generator/tests/test_form_upsert.py`,
+    `TestRequiredRelationFieldsInitVarPlainFK` / `TestSelectorOTOMandatory`'s new
+    `test_required_relation_fields_init_var_uses_available_prefix` / `TestChildGridDatetimePropsGate`),
+    confirmed to fail against the pre-fix generator and pass against the fixed one. Checked for live
+    impact against `app-template` (proj_c) and `app-template-4`'s (proj_g) actual schemas: neither has
+    any `type: one-to-one` selector relationship (only the unrelated `one-to-one_bridge` mechanism), so
+    the first defect has zero current exposure in either; the only inline, non-independent child with a
+    date field in either schema (`app-template`'s `parent1_child2`) belongs to a parent (`parent1`)
+    that already has its own `date-time` field, which already satisfied `has_datetime_props` before this
+    fix, so the second defect was also not live-exposed there either — confirmed by direct inspection of
+    each consumer's schema, not by regenerating their code.
 - Re-keyed `lint:prj`'s (`scripts/lint_prj_synced.py`) fail-closed condition from "zero `.ts`/`.tsx` files synced" to "`prj:sync` could not be observed running against a real `../prj`" — a consumer whose `prj/` holds only non-TypeScript content (e.g. schema/SQL/migration files) with no hand-written TS is now a legitimate PASS (with an explicit "measured N files, none .ts/.tsx" message), not a FAIL. The three genuine "could not measure" cases (`prj_sync.py` exiting non-zero, no `../prj` sibling directory, or zero synced files of any kind) still FAIL exactly as before. Verified with three injection scenarios (no `../prj` → FAIL; `../prj` with only non-TS content → PASS; `../prj` with one syntactically-broken `.ts` file → FAIL) and against a real consumer's actual `prj/` content (copied read-only into a scratch directory, the consumer's own working tree never touched): the prior implementation failed closed on that exact content, the fixed implementation passes. Also revised the module docstring, failure/pass messages, and `docs/knowledge/consumer-prj-scoped-lint.md`'s "Fail-closed" section to describe the new measured-vs-unmeasured distinction (the old text's "that is expected to be a temporary state, not a permanent green" framing is removed — a TS-free `prj/` is not temporary, it's a legitimate consumer shape).
 - Added `scripts/generated/seed-entities.ts` (auto-generated by `generate-code`, via `seed_entities_context()` in `code_generator/generators.py`) — derives the "independent entity" population of a project's schema (any entity that is a `schema['definitions']` key, has an `id` property directly, is not an x-bridge junction target, and is not an internal-only marker entity such as `approvable`/`commentable`/`attachable`/`notification`). This is consumed by a new development/verification-only script, `scripts/grant-all-permissions.ts` (`npm run db:grant-all-permissions`) — grants the `Administrator` role full CRUD on every independent entity in one step, including any entity a consumer project adds on top of the default schema. `audit_log`/`mfa_recovery_code` are excluded both structurally (never schema-defined entities) and explicitly (`ALWAYS_EXCLUDED` in the script) — verified via a deviation-injection test (`code_generator/tests/test_seed_entities_context.py`) and a live-database check confirming zero write-access permission rows on `audit_log` after running the script. `scripts/seed-tenant.ts` (the production seed) is unchanged — it keeps its existing fixed, least-privilege entity enumeration; see `docs/knowledge/seed-tenant-credential-hardening.md` for the full design and the distinction from the similarly-named Cypress-only `grantAllEntityPermissions()` test helper.
 - `scripts/seed-tenant.ts` now also seeds `Creator` and `Assignee` roles (resolved by name in `lib/authz.ts`, no per-user role assignment needed). `Creator` is granted exactly `setting.read` + `setting.update`, so a non-admin user can reach their own `/setting` page via the existing `x-self-only` mechanism; `Assignee` is seeded with no permissions (placeholder for future use). Verified against a live database, including the negative case: a user whose `creator_id` does not equal their own id is correctly denied read/update access to their own settings row.

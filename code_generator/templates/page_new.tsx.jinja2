@@ -67,7 +67,7 @@ async function {{ parent_pascal }}NewContent() {
   // successfully submit. See docs/knowledge/fk-read-permission-graceful-degradation.md.
   const _blockedRelationFieldKeys: string[] = [];
 {% for f in required_relation_fields %}
-  if ((initial{{ f.target | pascal_case }}s as { permissionDenied?: boolean } | undefined)?.permissionDenied) {
+  if (({{ f.init_var }} as { permissionDenied?: boolean } | undefined)?.permissionDenied) {
     _blockedRelationFieldKeys.push('{{ f.field_key }}');
   }
 {% endfor %}

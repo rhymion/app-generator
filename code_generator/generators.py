@@ -4843,7 +4843,18 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'has_entity_autocomplete':  bool(parent_rels_raw) or bool(selector_oto_rels) or uses_app_field_relation,
         'uses_image_display':       uses_image_display,
         'has_child_entity_autocomplete': bool(child_entity_rel_opt),
-        'has_datetime_props':       bool(date_time_props) or flatten_needs_datetime or 'DateTimeWrapper' in _rendered_body_text,
+        # child_grid_setup (built above, line ~3930) is checked here in
+        # addition to _rendered_body_text: an inline datagrid child with a
+        # date/date-time/time field has _new_prop_val() embed a literal
+        # `dayjs().toISOString()` call into that child's create_body, which
+        # is rendered into this same parent FormUpsert file via
+        # child_grid_setup — a code path _rendered_body_text (defined below)
+        # doesn't include. Without this, such a call site was reflected in
+        # neither the parent's own date_time_props/flatten_needs_datetime nor
+        # the 'DateTimeWrapper' substring fallback, so it silently bypassed
+        # this gate and produced an unimported `dayjs` reference (cmd_704,
+        # subtask_702b [2-c]).
+        'has_datetime_props':       bool(date_time_props) or flatten_needs_datetime or 'DateTimeWrapper' in _rendered_body_text or 'dayjs(' in child_grid_setup,
         'has_image_props':          bool(image_props),
         'has_number_props':         bool(number_props) or flatten_needs_number_field,
         'has_boolean_props':        bool(boolean_props) or flatten_needs_boolean,
