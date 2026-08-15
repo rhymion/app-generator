@@ -7,13 +7,18 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import * as bcrypt from 'bcryptjs';
 import { createId } from "@paralleldrive/cuid2";
 import { resolveAdminCredentials, requiresExplicitCredentials } from './seed-tenant-credentials';
+import { pinSslModeVerifyFull } from '../lib/db-url';
 
-const connectionString = process.env.DIRECT_URL || process.env.DATABASE_URL;
-if (!connectionString) {
+const rawConnectionString = process.env.DIRECT_URL || process.env.DATABASE_URL;
+if (!rawConnectionString) {
   throw new Error(
     'DATABASE_URL is required. Set NODE_ENV=test for test defaults, or create .env.local for local secrets.'
   );
 }
+// Pin the SSL verification mode Neon's DSN embeds (sslmode=require) so a
+// future pg-connection-string major version doesn't silently weaken it;
+// see lib/db-url.ts. No-op for local/CI URLs, which have no sslmode param.
+const connectionString = pinSslModeVerifyFull(rawConnectionString);
 const adapter = new PrismaPg({ connectionString });
 const prisma = new PrismaClient({ adapter });
 

@@ -2,6 +2,7 @@ import { PrismaClient, type Prisma } from '@/app/generated/prisma/client'
 import { withAccelerate } from '@prisma/extension-accelerate';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaNeon } from '@prisma/adapter-neon';
+import { pinSslModeVerifyFull } from './db-url';
 
 const globalForPrisma = global as unknown as { prisma: PrismaClient };
 
@@ -96,6 +97,13 @@ const createPrismaClient = () => {
       u.searchParams.set('statement_timeout', String(timeoutMs));
       connectionString = u.toString();
     } catch { /* malformed URL — fall through with original values */ }
+    // @neondatabase/serverless (the driver behind PrismaNeon) bundles its own
+    // copy of pg-connection-string (see node_modules/@neondatabase/serverless
+    // package.json) with the same prefer/require/verify-ca sslmode handling
+    // as node-postgres, so it carries the same future-deprecation exposure
+    // the PrismaPg branch below guards against. Pin it here too; see
+    // lib/db-url.ts. No-op when sslmode is absent from the URL.
+    connectionString = pinSslModeVerifyFull(connectionString);
 
     // PrismaNeon's config is a `neon.PoolConfig` (re-exported `pg.PoolConfig`
     // shape — https://neon.com/docs/guides/prisma), so `connectionString`/
@@ -148,6 +156,10 @@ const createPrismaClient = () => {
       u.searchParams.set('statement_timeout', String(timeoutMs));
       connectionString = u.toString();
     } catch { /* malformed URL — fall through with original values */ }
+    // Pin the SSL verification mode Neon's DSN embeds (sslmode=require) so a
+    // future pg-connection-string major version doesn't silently weaken it;
+    // see lib/db-url.ts. No-op for local/CI URLs, which have no sslmode param.
+    connectionString = pinSslModeVerifyFull(connectionString);
 
     // Statically imported (see top of file) rather than dynamically: a
     // dynamic import here made this function async, which forced a
