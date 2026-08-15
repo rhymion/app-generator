@@ -857,7 +857,59 @@ def actions_context(ctx: dict) -> dict:
             f"{indent}const _orgs = await getAssociatedOrganizations(actorId);\n"
             f"{indent}const _orgIds = _orgs.map((o) => o.id);\n"
             f"{indent}const existing = await prisma.{model}.findFirst({{ where: {{ id, {_org_where} }}, select: {item_context_select} }});\n"
-            f"{indent}if (!existing) throw new Error('Not found');\n"
+            f"{indent}if (!existing) throw new AppError('NOT_FOUND', 'Not found');\n"
+        )
+
+    def _wrap_call_with_catch(call_stmt: str, indent: str) -> str:
+        """Wrap a single create/update service call in a try/catch that
+        converts a thrown AppError (and, for reservation entities, the
+        reservation-specific error classes) into an ActionFailure return
+        value instead of letting it propagate to the React Server
+        Components render boundary, where production builds erase the
+        message ("Minified React error #441" — see
+        docs/knowledge/error-message-framework.md). Anything else is a
+        truly unexpected error and is re-thrown to error.tsx unchanged."""
+        lines = [
+            f"{indent}try {{",
+            f"{indent}  {call_stmt}",
+            f"{indent}}} catch (e) {{",
+            f"{indent}  if (e instanceof AppError) {{",
+            f"{indent}    return {{ ok: false, errorCode: e.code, field: e.field }} satisfies ActionFailure;",
+            f"{indent}  }}",
+        ]
+        if has_reservation:
+            lines += [
+                f"{indent}  if (e instanceof ReservationMutationError) {{",
+                f"{indent}    return {{ ok: false, errorCode: 'CONFLICT' }} satisfies ActionFailure;",
+                f"{indent}  }}",
+                f"{indent}  if (e instanceof InsufficientPoolCapacityError) {{",
+                f"{indent}    return {{ ok: false, errorCode: 'CAPACITY' }} satisfies ActionFailure;",
+                f"{indent}  }}",
+            ]
+        lines += [
+            f"{indent}  throw e;",
+            f"{indent}}}",
+        ]
+        return "\n".join(lines)
+
+    def _wrap_block_with_catch(block: str, indent: str) -> str:
+        """Same as _wrap_call_with_catch, but for a multi-line statement
+        block (already newline-terminated) instead of a single call —
+        used to wrap the requirePermission()/existence-check section of
+        upsertXxx, which throws AppError('PERMISSION_DENIED' | 'NOT_FOUND',
+        ...) via lib/authz.ts's requirePermission and _actor_and_existing_block
+        above. Never needs the reservation-specific branches: those errors
+        only originate from the create/update service call, not a
+        permission check."""
+        return (
+            f"{indent}try {{\n"
+            f"{block}"
+            f"{indent}}} catch (e) {{\n"
+            f"{indent}  if (e instanceof AppError) {{\n"
+            f"{indent}    return {{ ok: false, errorCode: e.code, field: e.field }} satisfies ActionFailure;\n"
+            f"{indent}  }}\n"
+            f"{indent}  throw e;\n"
+            f"{indent}}}\n"
         )
 
     def _upsert_body(has_ch: bool) -> str:
@@ -867,161 +919,149 @@ def actions_context(ctx: dict) -> dict:
             update_call = f'await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);'
             if has_reservation:
                 if should_filter_by_org:
-                    return (
-                        f"  const id = data.get('id') as string | null;\n"
-                        f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
-                        f"  const actorId = await getSessionUserIdOrThrow();\n"
+                    _perm_block = (
                         f"  if (id) {{\n"
                         + _actor_and_existing_block("    ") +
                         f"    await requirePermission('{parent}', 'update', existing);\n"
                         f"  }} else {{\n"
                         f"    await requirePermission('{parent}', 'create');\n"
                         f"  }}\n"
-                        f"{form_data_gets}\n"
+                    )
+                    return (
+                        f"  const id = data.get('id') as string | null;\n"
+                        f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
+                        f"  const actorId = await getSessionUserIdOrThrow();\n"
+                        + _wrap_block_with_catch(_perm_block, "  ")
+                        + f"{form_data_gets}\n"
                         + (f"{child_form_data_extractions}\n" if has_ch else "")
                         + _flatten_block
                         + _ro_reject_guarded +
-                        f"\n  let _serviceError: string | null = null;\n"
-                        f"  if (id) {{\n"
-                        f"    try {{\n"
-                        f"      {update_call}\n"
-                        f"    }} catch (e) {{\n"
-                        f"      if (e instanceof ReservationMutationError) {{\n"
-                        f"        _serviceError = (e as Error).message;\n"
-                        f"      }} else {{\n"
-                        f"        throw e;\n"
-                        f"      }}\n"
-                        f"    }}\n"
+                        f"\n  if (id) {{\n"
+                        + _wrap_call_with_catch(update_call, "    ") + "\n"
                         f"  }} else {{\n"
-                        f"    try {{\n"
-                        f"      {create_call}\n"
-                        f"    }} catch (e) {{\n"
-                        f"      if (e instanceof InsufficientPoolCapacityError) {{\n"
-                        f"        _serviceError = (e as Error).message;\n"
-                        f"      }} else {{\n"
-                        f"        throw e;\n"
-                        f"      }}\n"
-                        f"    }}\n"
-                        f"  }}\n"
-                        f"  if (_serviceError) {{\n"
-                        f"    return {{ error: _serviceError }};\n"
+                        + _wrap_call_with_catch(create_call, "    ") + "\n"
                         f"  }}"
                     )
-                return (
-                    f"  const id = data.get('id') as string | null;\n"
-                    f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
+                _perm_block = (
                     f"  if (id) {{\n"
                     f"    const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
                     f"    await requirePermission('{parent}', 'update', existing);\n"
                     f"  }} else {{\n"
                     f"    await requirePermission('{parent}', 'create');\n"
                     f"  }}\n"
-                    f"{form_data_gets}\n"
+                )
+                return (
+                    f"  const id = data.get('id') as string | null;\n"
+                    f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
+                    + _wrap_block_with_catch(_perm_block, "  ")
+                    + f"{form_data_gets}\n"
                     + (f"{child_form_data_extractions}\n" if has_ch else "")
                     + _flatten_block
                     + _ro_reject_guarded +
                     f"  const actorId = await getSessionUserIdOrThrow();\n\n"
-                    f"  let _serviceError: string | null = null;\n"
                     f"  if (id) {{\n"
-                    f"    try {{\n"
-                    f"      {update_call}\n"
-                    f"    }} catch (e) {{\n"
-                    f"      if (e instanceof ReservationMutationError) {{\n"
-                    f"        _serviceError = (e as Error).message;\n"
-                    f"      }} else {{\n"
-                    f"        throw e;\n"
-                    f"      }}\n"
-                    f"    }}\n"
+                    + _wrap_call_with_catch(update_call, "    ") + "\n"
                     f"  }} else {{\n"
-                    f"    try {{\n"
-                    f"      {create_call}\n"
-                    f"    }} catch (e) {{\n"
-                    f"      if (e instanceof InsufficientPoolCapacityError) {{\n"
-                    f"        _serviceError = (e as Error).message;\n"
-                    f"      }} else {{\n"
-                    f"        throw e;\n"
-                    f"      }}\n"
-                    f"    }}\n"
-                    f"  }}\n"
-                    f"  if (_serviceError) {{\n"
-                    f"    return {{ error: _serviceError }};\n"
+                    + _wrap_call_with_catch(create_call, "    ") + "\n"
                     f"  }}"
                 )
             if should_filter_by_org:
-                return (
-                    f"  const id = data.get('id') as string | null;\n"
-                    f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
-                    f"  const actorId = await getSessionUserIdOrThrow();\n"
+                _perm_block = (
                     f"  if (id) {{\n"
                     + _actor_and_existing_block("    ") +
                     f"    await requirePermission('{parent}', 'update', existing);\n"
                     f"  }} else {{\n"
                     f"    await requirePermission('{parent}', 'create');\n"
                     f"  }}\n"
-                    f"{form_data_gets}\n"
+                )
+                return (
+                    f"  const id = data.get('id') as string | null;\n"
+                    f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
+                    f"  const actorId = await getSessionUserIdOrThrow();\n"
+                    + _wrap_block_with_catch(_perm_block, "  ")
+                    + f"{form_data_gets}\n"
                     + (f"{child_form_data_extractions}\n" if has_ch else "")
                     + _flatten_block
                     + _ro_reject_guarded +
                     f"\n  if (id) {{\n"
-                    f"    {update_call}\n"
+                    + _wrap_call_with_catch(update_call, "    ") + "\n"
                     f"  }} else {{\n"
-                    f"    {create_call}\n"
+                    + _wrap_call_with_catch(create_call, "    ") + "\n"
                     f"  }}"
                 )
-            return (
-                f"  const id = data.get('id') as string | null;\n"
-                f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
+            _perm_block = (
                 f"  if (id) {{\n"
                 f"    const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
                 f"    await requirePermission('{parent}', 'update', existing);\n"
                 f"  }} else {{\n"
                 f"    await requirePermission('{parent}', 'create');\n"
                 f"  }}\n"
-                f"{form_data_gets}\n"
+            )
+            return (
+                f"  const id = data.get('id') as string | null;\n"
+                f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
+                + _wrap_block_with_catch(_perm_block, "  ")
+                + f"{form_data_gets}\n"
                 + (f"{child_form_data_extractions}\n" if has_ch else "")
                 + _flatten_block
                 + _ro_reject_guarded +
                 f"  const actorId = await getSessionUserIdOrThrow();\n\n"
                 f"  if (id) {{\n"
-                f"    {update_call}\n"
+                + _wrap_call_with_catch(update_call, "    ") + "\n"
                 f"  }} else {{\n"
-                f"    {create_call}\n"
+                + _wrap_call_with_catch(create_call, "    ") + "\n"
                 f"  }}"
             )
         elif can_update:
             if should_filter_by_org:
+                _perm_block = (
+                    _actor_and_existing_block("  ") +
+                    f"  await requirePermission('{parent}', 'update', existing);\n"
+                )
                 return (
                     f"  const id = data.get('id') as string | null;\n"
                     f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
                     f"  if (!id) throw new Error('Create not supported');\n"
                     f"  const actorId = await getSessionUserIdOrThrow();\n"
-                    + _actor_and_existing_block("  ") +
-                    f"  await requirePermission('{parent}', 'update', existing);\n"
-                    f"{form_data_gets}\n"
+                    + _wrap_block_with_catch(_perm_block, "  ")
+                    + f"{form_data_gets}\n"
                     + (f"{child_form_data_extractions}\n" if has_ch else "")
                     + _flatten_block +
-                    f"\n  await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);"
+                    "\n" + _wrap_call_with_catch(
+                        f'await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);',
+                        "  ",
+                    )
                 )
+            _perm_block = (
+                f"  const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
+                f"  await requirePermission('{parent}', 'update', existing);\n"
+            )
             return (
                 f"  const id = data.get('id') as string | null;\n"
                 f"  const srcSnapshotRaw = data.get('__src_snapshot') as string | null;\n"
                 f"  if (!id) throw new Error('Create not supported');\n"
-                f"  const existing = await prisma.{model}.findUnique({{ where: {{ id }}, select: {item_context_select} }});\n"
-                f"  await requirePermission('{parent}', 'update', existing);\n"
-                f"{form_data_gets}\n"
+                + _wrap_block_with_catch(_perm_block, "  ")
+                + f"{form_data_gets}\n"
                 + (f"{child_form_data_extractions}\n" if has_ch else "")
                 + _flatten_block +
                 f"\n  const actorId = await getSessionUserIdOrThrow();\n"
-                f"  await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);"
+                + _wrap_call_with_catch(
+                    f'await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);',
+                    "  ",
+                )
             )
         else:  # create only
+            _perm_block = f"  await requirePermission('{parent}', 'create');\n"
             return (
-                f"  await requirePermission('{parent}', 'create');\n"
-                f"{form_data_gets}\n"
+                _wrap_block_with_catch(_perm_block, "  ")
+                + f"{form_data_gets}\n"
                 + (f"{child_form_data_extractions}\n" if has_ch else "")
                 + _ro_reject_unguarded +
                 f"\n  const actorId = await getSessionUserIdOrThrow();\n"
-                f"  await add{parent_pascal}(actorId, {parent_params}{full_child_args}{flatten_args_str});"
+                + _wrap_call_with_catch(
+                    f'await add{parent_pascal}(actorId, {parent_params}{full_child_args}{flatten_args_str});',
+                    "  ",
+                )
             )
 
     service_fns = [
@@ -2293,7 +2333,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
 
     utility_code = (
         f"import prisma from '@/lib/prisma';\n"
-        + (f"import {{ Prisma }} from '@/app/generated/prisma/client';\n" if has_item_reservation else '')
+        + (f"import {{ Prisma }} from '@/app/generated/prisma/client';\n" if has_item_reservation or can_create or can_update else '')
         + f"import {{ normalizeValue,{' normalizeChildRefs,' if has_non_comment_ch else ''}"
         f"{' assertNotStale,' if can_update else ''} type NormalizedSnapshot }} from '@/lib/normalize';"
         + (
@@ -2313,7 +2353,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
            if approval_lines_post_create_code or approval_lines_post_update_code else '')
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
         + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/getters_associated';" if should_filter_by_org and (can_create or can_update) else '')
-        + (f"\nimport {{ ApiError }} from '@/lib/api-auth';" if (should_filter_by_org and (can_create or can_update)) or (is_self_only and can_update) else '')
+        + (f"\nimport {{ AppError, p2002Field }} from '@/lib/_errors';" if can_create or can_update else '')
         + (f"\nimport {{ getModelPermissions }} from '@/lib/authz';" if server_value_override_fields and can_create else '')
         + insufficient_inventory_error_class +
         f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'{_pool_entity_pick}>;\n\n"

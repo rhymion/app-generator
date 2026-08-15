@@ -27,6 +27,9 @@ import EditIcon from '@mui/icons-material/Edit';
 import BlockIcon from '@mui/icons-material/Block';
 import type { ModelPermissions } from '@/lib/authz';
 import type { PageOpts, PageResult } from '@/lib/_pagination';
+import type { ActionFailure } from '@/lib/_errors';
+import { errorMessageKey } from '@/lib/_errors';
+import { AppAlert } from '@/components/ui';
 
 interface BaseEntity {
   id: string;
@@ -58,7 +61,7 @@ interface DataGridClientProps<T extends BaseEntity> {
   /** Server-mode page fetcher (Server Action). When provided, DataGrid runs in server-paginated mode. */
   fetchPage?: (opts: PageOpts) => Promise<PageResult<T>>;
   basePath: string;
-  removeAction?: (ids: string[]) => Promise<void>;
+  removeAction?: (ids: string[]) => Promise<ActionFailure | void>;
   invalidateAction?: (id: string) => Promise<void>;
   entityLabel?: string;
   displayFields?: DisplayFieldConfig<T>[];
@@ -107,9 +110,11 @@ export default function DataGridClient<T extends BaseEntity>({
   const [selectedRowIds, setSelectedRowIds] = useState<GridRowSelectionModel>({ type: 'include', ids: new Set() });
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([]);
   const [pendingInvalidateId, setPendingInvalidateId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const apiRef = useGridApiRef();
   const tc = useTranslations('Common');
   const tf = useTranslations('Fields');
+  const terr = useTranslations('Errors');
 
   const reload = useCallback((p: GridPaginationModel, s: GridSortModel, f: GridFilterModel) => {
     if (!fetchPage) return;
@@ -138,9 +143,22 @@ export default function DataGridClient<T extends BaseEntity>({
 
   const deleteConfirmed = () => {
     if (pendingDeleteIds.length > 0 && removeAction) {
-      setItems(prev => prev.filter(item => !pendingDeleteIds.includes((item as { id: string }).id)));
-      if (serverMode) setRowCount(prev => Math.max(0, prev - pendingDeleteIds.length));
-      startTransition(() => removeAction(pendingDeleteIds));
+      const idsToDelete = pendingDeleteIds;
+      const removedItems = items.filter(item => idsToDelete.includes((item as { id: string }).id));
+      setDeleteError(null);
+      setItems(prev => prev.filter(item => !idsToDelete.includes((item as { id: string }).id)));
+      if (serverMode) setRowCount(prev => Math.max(0, prev - idsToDelete.length));
+      startTransition(async () => {
+        const result = await removeAction(idsToDelete);
+        if (result && !result.ok) {
+          // Delete failed server-side (e.g. permission denied on some of
+          // the selected rows) — roll back the optimistic removal instead
+          // of leaving the grid showing rows that were never deleted.
+          setItems(prev => [...prev, ...removedItems]);
+          if (serverMode) setRowCount(prev => prev + idsToDelete.length);
+          setDeleteError(terr(errorMessageKey(result.errorCode)));
+        }
+      });
     }
     setOpenDeleteDialog(false);
     setPendingDeleteIds([]);
@@ -271,6 +289,9 @@ export default function DataGridClient<T extends BaseEntity>({
 
   return (
     <div>
+      {deleteError && (
+        <AppAlert severity="error" mb={2}>{deleteError}</AppAlert>
+      )}
       <div className="flex mb-4">
         {permissions.create && allowCreate && (
         <NextLink href={`${basePath}/new`}>

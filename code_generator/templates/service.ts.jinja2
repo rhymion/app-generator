@@ -5,11 +5,13 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
   if (organizationId) {
     const _createOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
     if (!_createOrgIds.includes(organizationId)) {
-      throw new ApiError(404, 'Not found');
+      throw new AppError('NOT_FOUND', 'Not found');
     }
   }
 {% endif %}
-  const result = await prisma.$transaction(async (tx) => {
+  let result;
+  try {
+  result = await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
 {{ validation_data_obj }}
     });
@@ -80,6 +82,12 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% else %}
   });
 {% endif %}
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+      throw new AppError('CONFLICT', 'Unique constraint violation', p2002Field(e.meta));
+    }
+    throw e;
+  }
 {% if has_assignee_id %}
   // Trigger #1 (notification design 2026-05-11): the new assignee learns
   // they were assigned. Skipped when self-assigned.
@@ -108,7 +116,7 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
   if (organizationId) {
     const _updateOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
     if (!_updateOrgIds.includes(organizationId)) {
-      throw new ApiError(404, 'Not found');
+      throw new AppError('NOT_FOUND', 'Not found');
     }
   }
 {% endif %}
@@ -119,9 +127,10 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
   // No admin_bypass here: bypass (where declared) only widens reads.
   const _selfOnlyExisting = await prisma.{{ model }}.findUnique({ where: { id }, select: { creator_id: true } });
   if (!_selfOnlyExisting || _selfOnlyExisting.creator_id !== actorId) {
-    throw new ApiError(404, 'Not found');
+    throw new AppError('NOT_FOUND', 'Not found');
   }
 {% endif %}
+  try {
   await prisma.$transaction(async (tx) => {
 {% if reservation_mutation_guard_update %}
 {{ reservation_mutation_guard_update }}
@@ -184,6 +193,12 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 {% else %}
   });
 {% endif %}
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+      throw new AppError('CONFLICT', 'Unique constraint violation', p2002Field(e.meta));
+    }
+    throw e;
+  }
 {% if has_assignee_id %}
   if (assigneeId && assigneeId !== _prevAssigneeId && assigneeId !== actorId) {
     notify(assigneeId, 'assigned', {

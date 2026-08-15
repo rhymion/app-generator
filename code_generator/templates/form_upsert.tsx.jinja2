@@ -21,6 +21,7 @@ import { upsert{{ parent_pascal }}{% if can_delete %}, remove{{ parent_pascal }}
 import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 {% endif %}
 import type { FormUpsertProps{% if has_comment_children and named_constants %}, CommentReactionSummary{% endif %} } from '@/lib/{{ parent }}/types';
+import type { ActionFailure } from '@/lib/_errors';
 import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
 import AuditInfo from '@/components/_standard/AuditInfo';
 import { {% if uses_app_field_text %}AppFieldText, {% endif %}{% if uses_app_field_boolean %}AppFieldBoolean, {% endif %}AppValidationError{% if has_entity_autocomplete %}, AppFieldRelation{% endif %}{% if has_flatten_accordion_upsert %}, AppSection{% endif %}{% if has_field_select %}, AppFieldSelect{% endif %} } from '@/components/ui';
@@ -61,6 +62,7 @@ export default function FormUpsert({{ form_upsert_params }}) {
   const tf = useTranslations('Fields');
   const te = useTranslations('EntityLabel');
   const tc = useTranslations('Common');
+  const terr = useTranslations('Errors');
 {% if enum_ns_hooks %}
 {{ enum_ns_hooks }}
 {% endif %}
@@ -94,6 +96,18 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% endif %}
 {{ validation_call }}
 
+  const getErrorMessage = (err: ActionFailure): string => {
+    switch (err.errorCode) {
+      case 'SESSION_EXPIRED':   return terr('sessionExpired');
+      case 'PERMISSION_DENIED': return terr('permissionDenied');
+      case 'NOT_FOUND':         return terr('notFound');
+      case 'VALIDATION':        return err.field ? terr('fieldRequired', { field: err.field }) : terr('unknown');
+      case 'CONFLICT':          return err.field ? terr('fieldAlreadyLinked', { field: err.field }) : terr('staleMutation');
+      case 'CAPACITY':          return terr('capacityExhausted');
+      default:                  return terr('unknown');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
@@ -122,9 +136,9 @@ export default function FormUpsert({{ form_upsert_params }}) {
 
     try {
       startTransition(async () => {
-        const result = (await upsert{{ parent_pascal }}(formData)) as { error?: string } | void;
-        if (result?.error) {
-          setError(result.error);
+        const result = (await upsert{{ parent_pascal }}(formData)) as ActionFailure | void;
+        if (result && !result.ok) {
+          setError(getErrorMessage(result));
         }
       });
     } catch (err) {

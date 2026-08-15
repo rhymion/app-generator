@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requirePermission, getSessionUserId, type RichPermissions, type Operation, type ItemContext } from '@/lib/authz';
 import { TtlLruCache } from '@/lib/_ttl_lru';
+import { AppError, type ErrorCode } from '@/lib/_errors';
 
 export class ApiError extends Error {
   constructor(
@@ -126,11 +127,37 @@ export async function requireApiPermission(
   }
 }
 
+const APP_ERROR_STATUS_MAP: Record<ErrorCode, number> = {
+  SESSION_EXPIRED: 401,
+  PERMISSION_DENIED: 403,
+  NOT_FOUND: 404,
+  VALIDATION: 422,
+  CONFLICT: 409,
+  CAPACITY: 409,
+  UNKNOWN: 500,
+};
+
 export function handleApiError(error: unknown): NextResponse {
   if (error instanceof ApiError) {
     return NextResponse.json({ error: error.message }, { status: error.statusCode });
   }
+  if (error instanceof AppError) {
+    return NextResponse.json(
+      { error: error.message, code: error.code, ...(error.field ? { field: error.field } : {}) },
+      { status: APP_ERROR_STATUS_MAP[error.code] ?? 500 },
+    );
+  }
   console.error('API error:', error);
+  // Plain `throw new Error(...)` sites (e.g. hand-written custom validation
+  // in service_validation_custom.ts, and the generated REQUIRED_FIELDS
+  // checks) are not converted to AppError — their message is the intended
+  // caller-facing text (cmd_613/cmd_646's convention, exercised by
+  // cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts's
+  // (API) specs). The AppError message-hiding rationale from cmd_695
+  // (React stripping error.message at the Server Components render
+  // boundary) does not apply here — this handler produces a plain JSON
+  // HTTP response, not a React render, so forwarding the message is safe
+  // and was the pre-cmd_695 behavior this restores.
   const message = error instanceof Error ? error.message : 'Internal server error';
   return NextResponse.json({ error: message }, { status: 500 });
 }

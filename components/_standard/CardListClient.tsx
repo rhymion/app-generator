@@ -23,6 +23,9 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import type { ModelPermissions } from '@/lib/authz';
 import type { PageOpts, PageResult } from '@/lib/_pagination';
+import type { ActionFailure } from '@/lib/_errors';
+import { errorMessageKey } from '@/lib/_errors';
+import { AppAlert } from '@/components/ui';
 
 interface BaseEntity {
   id: string;
@@ -49,7 +52,7 @@ interface CardListClientProps<T extends BaseEntity> {
   initialPageSize?: number;
   fetchPage?: (opts: PageOpts) => Promise<PageResult<T>>;
   basePath: string;
-  removeAction?: (ids: string[]) => Promise<void>;
+  removeAction?: (ids: string[]) => Promise<ActionFailure | void>;
   entityLabel?: string;
   /** Fields to display. Defaults to name + description. */
   displayFields?: DisplayFieldConfig<T>[];
@@ -108,9 +111,11 @@ export default function CardListClient<T extends BaseEntity>({
   };
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const tf = useTranslations('Fields');
   const tc = useTranslations('Common');
+  const terr = useTranslations('Errors');
   const defaultDisplayFields: DisplayFieldConfig<T>[] = displayFields ?? [
     { field: 'name' as keyof T, headerName: tf('name') },
     { field: 'description' as keyof T, headerName: tf('description') },
@@ -130,8 +135,12 @@ export default function CardListClient<T extends BaseEntity>({
   const handleDeleteConfirm = () => {
     if (selectedIds.size > 0 && removeAction) {
       const ids = Array.from(selectedIds);
+      setDeleteError(null);
       startTransition(async () => {
-        await removeAction(ids);
+        const result = await removeAction(ids);
+        if (result && !result.ok) {
+          setDeleteError(terr(errorMessageKey(result.errorCode)));
+        }
       });
       setSelectedIds(new Set());
     }
@@ -140,6 +149,9 @@ export default function CardListClient<T extends BaseEntity>({
 
   return (
     <Box data-testid="mobile-card-list">
+      {deleteError && (
+        <AppAlert severity="error" mb={2}>{deleteError}</AppAlert>
+      )}
       <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
         {permissions.create && allowCreate && (
           <NextLink href={`${basePath}/new`}>

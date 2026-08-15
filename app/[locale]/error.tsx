@@ -2,6 +2,7 @@
 'use client'; // Required for error components
 
 import { useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 
 export default function Error({
   error,
@@ -10,6 +11,8 @@ export default function Error({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const t = useTranslations('Errors');
+
   useEffect(() => {
     // Log the error to an error reporting service (e.g., Sentry)
     console.error(error);
@@ -17,7 +20,7 @@ export default function Error({
 
   return (
     <div>
-      <h2>Something went wrong!</h2>
+      <h2>{t('pageError')}</h2>
       {error.message && (
         <p style={{ color: '#555', margin: '0.5rem 0' }}>{error.message}</p>
       )}
@@ -25,7 +28,7 @@ export default function Error({
         <p style={{ color: '#999', fontSize: '0.8em' }}>Error ID: {error.digest}</p>
       )}
       <button onClick={() => reset()}>
-        Try again
+        {t('tryAgain')}
       </button>
     </div>
   );

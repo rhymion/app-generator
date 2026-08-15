@@ -91,6 +91,39 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `ui/` subdirectory would have dropped it from both gates' spec globs silently.)
 
 ### Fixed
+- **Server Action errors (permission denied, unique-constraint violations, stale updates, and
+  more) showed a "Minified React error #441" screen with no actionable text instead of the
+  underlying reason** (cmd_695, design from cmd_512): Next.js strips a thrown error's `message`
+  at the Server Components render boundary in production, replacing it with the minified error
+  text and an opaque digest — this happened for every error thrown by `upsertXxx`/`removeXxx`'s
+  service-layer calls, regardless of how actionable the underlying error was. Fixed per
+  `docs/knowledge/error-message-framework.md`'s Layer 2 design: added a typed `AppError`/
+  `ActionResult` taxonomy (new write-once `lib/_errors.ts`), converted the named throw sites
+  (`lib/authz.ts`, `lib/normalize.ts`, `service.ts.jinja2`, `service_validation.ts.jinja2`) to
+  throw `AppError`, and had `actions.ts.jinja2`'s `upsertXxx`/`removeXxx` catch it and return an
+  `ActionFailure` value instead of letting it propagate — the value survives production
+  untouched, since it is data, not an exception crossing the render boundary. The client renders
+  the corresponding message via a new `Errors` i18n namespace (`messages/en.json`, translated to
+  `messages/ja.json`). `removeXxx` (bulk delete) was extended beyond the original per-file
+  checklist, since a permission-denied delete would otherwise still crash — `DataGridClient.tsx`/
+  `CardListClient.tsx` now show the failure via `AppAlert` and roll back the optimistic row
+  removal instead. Also fixed, found only empirically during implementation (no throw site for it
+  existed anywhere): a genuine DB-level `@unique`/`@@unique` violation surfaced as an uncaught
+  `Prisma.PrismaClientKnownRequestError` (P2002) — `service.ts.jinja2` now converts it to
+  `AppError('CONFLICT', ...)`, reading the violated field name via a new `p2002Field()` helper
+  (`lib/_errors.ts`) written against this Prisma version's actual driver-adapter error shape,
+  which differs from the classic `meta.target` most Prisma examples show. Org isolation
+  violations continue to surface as `NOT_FOUND` (unchanged, cmd_515/cmd_522) — never as
+  "permission denied", which would leak that the record exists in another organization. `error.tsx`
+  now shows a static, safe `Errors.pageError` i18n key instead of a hardcoded string; it remains
+  the fallback for truly unexpected errors and for permission checks on Server Component pages
+  (`assertPermission`, list/detail access), which cannot return a data value the way a Server
+  Action can. New hand-written UI e2e coverage,
+  `cypress/e2e/error_message_delivery.cy.ts`, exercises all three scenarios end-to-end
+  (unique-constraint violation, stale update, permission denied) against a full production build,
+  confirming the inline message renders and the page never falls through to `error.tsx`. Full
+  mandatory gate green (1238 pytest, 459 vitest, 240 API e2e — 0 skipped in any suite — plus the
+  new UI spec, 0 npm audit findings).
 - **`get<Entity>ChunkForExport()` silently exported zero rows for an `X-API-Key`-only caller
   with genuine `read` permission** (cmd_658, found while removing `cy.login()` from generated
   export API tests): `getters.ts.jinja2`'s CSV-export getter has two branches for computing

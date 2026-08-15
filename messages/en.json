@@ -24,8 +24,20 @@
     "save": "Save"
   },
   "Errors": {
+    "capacityExhausted": "No capacity is available. Please try a different selection.",
+    "fieldAlreadyLinked": "{field} is already linked to another record.",
+    "fieldRequired": "{field} is required.",
     "fkPermissionDenied": "You do not have permission to view {entity} options.",
-    "fkPermissionDeniedHint": "Contact your administrator to request read access to {entity}."
+    "fkPermissionDeniedHint": "Contact your administrator to request read access to {entity}.",
+    "invalidSnapshot": "The form data is outdated. Please reload the page.",
+    "notFound": "The record could not be found. It may have been deleted.",
+    "pageError": "Something went wrong.",
+    "permissionDenied": "You do not have permission to perform this action.",
+    "reservationConflict": "This action conflicts with an existing reservation.",
+    "sessionExpired": "Your session has expired. Please sign in again.",
+    "staleMutation": "This record was updated by another user. Please reload the page and try again.",
+    "tryAgain": "Try again",
+    "unknown": "An unexpected error occurred. Please try again."
   },
   "EntityLabel": {
     "approvalFlow": "Approval Flow",

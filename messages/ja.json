@@ -24,8 +24,20 @@
     "save": "保存"
   },
   "Errors": {
+    "capacityExhausted": "利用可能な容量がありません。別の選択肢をお試しください。",
+    "fieldAlreadyLinked": "{field}は既に他のレコードにリンクされています。",
+    "fieldRequired": "{field}は必須です。",
     "fkPermissionDenied": "{entity}の選択肢を閲覧する権限がありません。",
-    "fkPermissionDeniedHint": "管理者に{entity}の閲覧権限付与を依頼してください。"
+    "fkPermissionDeniedHint": "管理者に{entity}の閲覧権限付与を依頼してください。",
+    "invalidSnapshot": "フォームのデータが古くなっています。ページを再読み込みしてください。",
+    "notFound": "レコードが見つかりませんでした。削除された可能性があります。",
+    "pageError": "問題が発生しました。",
+    "permissionDenied": "この操作を行う権限がありません。",
+    "reservationConflict": "この操作は既存の予約と競合しています。",
+    "sessionExpired": "セッションの有効期限が切れました。再度サインインしてください。",
+    "staleMutation": "このレコードは他のユーザーによって更新されました。ページを再読み込みして再度お試しください。",
+    "tryAgain": "再試行",
+    "unknown": "予期しないエラーが発生しました。もう一度お試しください。"
   },
   "EntityLabel": {
     "approvalFlow": "承認フロー",
