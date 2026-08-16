@@ -50,3 +50,71 @@ updated with this copy yet — left as a follow-up so as not to trigger
 additional Actions runs against those repos' limited/newly-enabled
 allotments as a side effect of a documentation task. The change itself
 is a two-line addition; copying it in is mechanical once picked up.
+
+## Docs-only E2E skip
+
+Added a `detect-changes` job that classifies the diff by path and a
+`needs:`+`if:` gate on `e2e-tests`, instead of a top-level
+`paths-ignore:` trigger filter. Two reasons `paths-ignore:` was
+rejected even though it is the more obvious/shorter option:
+
+1. **Visibility.** When a `paths-ignore:`-filtered event doesn't match,
+   the workflow never triggers at all — no check run of any kind is
+   created for that commit/PR. That is indistinguishable, from the PR
+   Checks list, from the check never having existed. A `needs:`+`if:`
+   gate still runs the (cheap, few-second) `detect-changes` job and
+   shows `E2E Tests` in the Checks list with a "Skipped" badge — the
+   skip is a visible, positive signal, not an absence.
+2. **Required-status-check safety (future-proofing).** None of the
+   consumer repos currently has branch protection configured (verified
+   directly against each repo's branch-protection API, 404 on every
+   branch), so this isn't live today. But `paths-ignore:` is documented
+   by GitHub to leave a required status check permanently "Expected —
+   Waiting for status to be reported" for path-filtered-out commits,
+   because the check run that branch protection is waiting for is
+   never created. If branch protection is ever added later, a
+   `paths-ignore:` design would silently turn into a permanent merge
+   blocker on docs-only PRs. `needs:`+`if:` has no such trap: a job
+   that ran and was skipped still reports a (non-blocking) conclusion.
+
+**Classification is by path only, computed by the workflow itself**
+(`git diff <base> HEAD -- . ':(exclude)...'`), never by commit message
+or a human "this is docs-only" claim — a condition the workflow itself
+cannot see is a hole, not an exemption. Base commit:
+`github.event.pull_request.base.sha` for `pull_request` events,
+`github.event.before` for `push` events; if neither resolves to a
+commit present in history (new branch, force-push edge case), the job
+fails closed to `docs_only=false` (full suite runs) rather than
+guessing.
+
+**Excluded (treated as docs-only, safe to skip) paths**, matched
+against each consumer repo's real top-level layout:
+`docs/**`, `README.md`, `README_ja.md`, `CHANGELOG.md`, `AGENTS.md`,
+`CLAUDE.md`, `LICENSE`.
+
+**Deliberately NOT included** (still trigger the full suite even
+though they look docs-adjacent): `.claude/**`, `.codex/**` (agent
+tooling — kept conservative rather than asserting they can never
+affect a generate-code run), `spec/**` (inventory-app/insurance-app
+only — ER-diagram source, not `.md`; a plausible future addition, not
+decided here), `.github/**` (workflow files themselves — must never be
+skippable, including edits to this very `ci.yml`), `app-generator`
+(the submodule pointer — a pointer bump is a real code change),
+`.gitmodules`, `package.json`, `.env*`, `prj/**`, `scripts/**`.
+
+**Before/after contrast, measured on app-template (public, disposable
+probe PRs closed after measurement)**:
+- Before (pre-existing `.github/workflows/ci.yml`, no path gate): a
+  docs-only diff (`README.md` only) still ran the full `E2E Tests` job
+  end-to-end.
+- After (this canonical `ci.yml` copied in): the same shape of
+  docs-only diff shows `E2E Tests` as **Skipped** in the Checks list
+  (job conclusion `skipped`, `detect-changes` job runs and completes in
+  seconds). A mixed diff (touches `README.md` **and** a non-excluded
+  path in the same commit) still runs `E2E Tests` to completion,
+  unskipped.
+
+inventory-app and insurance-app (both private) have **not** received
+this copy yet, same reasoning as the concurrency change above — left
+as a follow-up so as not to burn their limited/newly-enabled Actions
+allotment as a side effect of this task.
