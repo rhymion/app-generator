@@ -28,6 +28,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  verify-canonical-ci:
+    name: Verify ci.yml matches canonical source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - name: Diff this file's body against app-generator's canonical source
+        # Machine-checked, not a human "I copied it verbatim" claim — same
+        # reasoning as the detect-changes job below (cmd_498: "a condition
+        # the machine doesn't see is a hole, not an exemption"). Both sides
+        # are extracted from "name: CI" onward: this file's own body (per
+        # the canonical source's header, everything from that line IS what
+        # a consumer should have), and the canonical source's body with its
+        # own canonical-source-only annotation header stripped the same
+        # way. Compares against the submodule commit this repo currently
+        # pins, not app-generator's latest — a stale submodule pointer is a
+        # separate, already-covered concern (bumping it is a real code
+        # change, excluded from the docs-only skip below), not this job's
+        # job. See docs/knowledge/ci-workflow-canonical-source.md "Drift
+        # check" for what to do when this fails, and for the missing-file
+        # case just below (this job's own bootstrapping edge case, found
+        # verifying against app-template: a submodule pointer pinned to a
+        # commit older than the one that introduced this canonical file in
+        # the first place has nothing to compare against yet — that is not
+        # drift and must not fail the build).
+        run: |
+          set -euo pipefail
+          CANONICAL=app-generator/docs/consumer-commands/ci.yml
+          if [ ! -f "$CANONICAL" ]; then
+            echo "::notice::Canonical source $CANONICAL is not present at the commit this repo's app-generator submodule currently pins (older than the commit that introduced it) — nothing to compare against yet. Not a drift; the check activates automatically once the submodule pointer is next bumped past that commit."
+            exit 0
+          fi
+          sed -n '/^name: CI$/,$p' "$CANONICAL" > /tmp/canonical-body.yml
+          sed -n '/^name: CI$/,$p' .github/workflows/ci.yml > /tmp/this-body.yml
+          if ! diff -u /tmp/canonical-body.yml /tmp/this-body.yml; then
+            echo "::error::.github/workflows/ci.yml has drifted from the canonical source ($CANONICAL, at the commit this repo's app-generator submodule currently pins). Copy the canonical body (from 'name: CI' onward) verbatim into this file."
+            exit 1
+          fi
+
   detect-changes:
     name: Detect docs-only change
     runs-on: ubuntu-latest

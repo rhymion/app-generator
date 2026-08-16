@@ -6,6 +6,24 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Internal
+- **Added a machine-checked drift gate for the canonical consumer
+  `.github/workflows/ci.yml` (cmd_723).** `docs/consumer-commands/ci.yml`
+  is distributed to consumers as a plain copy (not a symlink — GitHub
+  Actions resolves workflow files, including trigger eligibility, from
+  the target repo's own tree before any checkout happens, so a symlink
+  risks silently breaking trigger discovery). A copy can only ever be
+  claimed to be "verbatim" by whoever distributed it; the first
+  distributed copy already wasn't (a step's `name:` field carried an
+  appended internal tracking suffix, and several comments were
+  reworded). Added a `verify-canonical-ci` job to the canonical body
+  itself, so it travels with every future distribution: it checks out
+  the consumer's `app-generator` submodule, extracts both this file's
+  own body and the submodule's `docs/consumer-commands/ci.yml` body
+  (from the `name: CI` line onward) and fails the job on any diff. See
+  `docs/knowledge/ci-workflow-canonical-source.md` "Drift check" for the
+  placement rationale (consumer-side only — a generator-side check would
+  need cross-repo tokens for the two private consumers) and the
+  full-body-vs-structure-only scope decision.
 - **Added opt-in Stripe payment integration to the code generator (cmd_706),
   gated by a new `x-payment` entity-level schema key.** Not a default-schema
   feature and generates no `Plan`/`Product`/`Purchase`-style entity, authz
