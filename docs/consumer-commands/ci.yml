@@ -1,0 +1,108 @@
+# CANONICAL SOURCE (see docs/knowledge/ci-workflow-canonical-source.md).
+# This file is the shared content of `.github/workflows/ci.yml` used by
+# every consumer repo generated from this generator (app-template /
+# inventory-app / insurance-app). It is distributed to consumers as a
+# plain copy (not a symlink) because GitHub Actions resolves workflow
+# files — including whether a push/pull_request even triggers a run —
+# from the target repository's own tree, not from a checked-out
+# submodule; a symlink into `app-generator/` would risk silently
+# breaking trigger discovery, unlike the `.claude/commands/*.md` and
+# `scripts/vercel-*.sh` cases where a symlink is read only after the
+# repository is already checked out by a running job/agent.
+#
+# When editing: change this file, then copy the result verbatim into
+# each consumer's `.github/workflows/ci.yml` (the header comment below,
+# from "name: CI" onward, IS the file consumers should have — everything
+# above this line is canonical-source-only annotation and must not be
+# copied).
+name: CI
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - name: Generate package-lock.json for npm cache
+        run: npm install --package-lock-only
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - name: Cache Cypress binary
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - name: Install app-generator Node.js dependencies
+        working-directory: app-generator
+        run: npm install
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install app-generator Python dependencies
+        working-directory: app-generator
+        run: pip install -r requirements.txt
+      - name: Generate disposable test-only AUTH_SECRET (not a production secret)
+        # AUTH_SECRET is a throwaway value scoped to this CI run only, so
+        # it's generated in-workflow instead of read from repository
+        # secrets. GitHub does not pass repository secrets to
+        # Dependabot-authored `pull_request` runs or to fork PRs, so
+        # referencing secrets.AUTH_SECRET here made CI unusable for those
+        # PRs: the secret resolved empty, got written to .env.test.local
+        # anyway, and only surfaced much later as an Auth.js MissingSecret
+        # failure deep into the UI test suite.
+        run: echo "AUTH_SECRET=$(openssl rand -base64 32)" >> app-generator/.env.test.local
+      - name: Enable the test-only mock Google OAuth provider
+        # Registers an extra CredentialsProvider under id:"google" in
+        # auth.ts, used only by cypress/e2e/auth/mfa.cy.ts to exercise the
+        # OAuth+MFA code path without any real Google credentials or
+        # outbound network call — see
+        # app-generator/docs/knowledge/authentication.md "MFA on the
+        # OAuth path". Safe to always set in this workflow: this job only
+        # ever runs against the ephemeral CI test database, never a real
+        # deployment, and the flag adds a provider, it never removes or
+        # weakens one.
+        #
+        # This env var alone is NOT sufficient to register the provider:
+        # auth.ts also requires the filesystem sentinel written by
+        # scripts/write-mock-oauth-sentinel.js, which runs automatically
+        # via the `pre*` hooks on the `test:e2e:build`/`test:e2e:cy:start`
+        # npm scripts invoked below. Real deploy pipelines never run that
+        # script, so this flag alone leaking into a real deployment's env
+        # vars can't enable the mock provider.
+        run: echo "MOCK_GOOGLE_OAUTH_TEST=true" >> app-generator/.env.test.local
+      - name: Verify required test env is non-empty (fail-closed)
+        # Guards right at env-generation time so a future accidental
+        # regression back to an empty/undefined value fails fast here
+        # instead of resurfacing as a confusing downstream test failure.
+        run: |
+          if [ -z "$(grep '^AUTH_SECRET=' app-generator/.env.test.local | cut -d= -f2-)" ]; then
+            echo "::error::AUTH_SECRET resolved empty in app-generator/.env.test.local — refusing to continue."
+            exit 1
+          fi
+      - name: Generate code, start test database, push schema and build
+        run: npm run test:e2e:build
+      - name: Check generated output for banned patterns (write:direct, raw SQL)
+        # Was never wired into CI (only ran as a local generate-schema.md
+        # completion-gate step, so it only executed on schema-changing
+        # tasks). Runs after the build step above so the generated
+        # lib/app tree it scans actually exists on disk.
+        run: npm run check:generated
+      - name: Run API E2E tests
+        run: npm run test:e2e:cy:start
