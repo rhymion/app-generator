@@ -17,6 +17,7 @@
     "db:grant-all-permissions": "tsx scripts/grant-all-permissions.ts",
     "db:reset:test:sql": "cross-env NODE_ENV=test bash scripts/db-reset-sql.sh",
     "db:seed": "tsx scripts/seed.ts",
+    "db:seed-demo": "tsx scripts/seed-demo.ts",
     "db:seed-tenant": "tsx scripts/seed-tenant.ts",
     "db:studio": "prisma studio",
     "db:push": "prisma db push",
