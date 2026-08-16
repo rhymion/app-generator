@@ -6,6 +6,16 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Internal
+- **Added `scripts/vercel-{setup,deploy,env,teardown}.sh` and
+  `.env.vercel.production.local.example` as the canonical source of the
+  Vercel deployment tooling used by generated consumer apps (cmd_711).**
+  These five files were previously duplicated independently across three
+  consumer repos (app-template, inventory-app, insurance-app); they were
+  found byte-identical (scripts) or near-identical (env template, missing
+  `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` in app-template only — a real
+  gap, now fixed via the shared copy) and are promoted here so consumers
+  can reference a single source instead of three independently drifting
+  copies. See `docs/knowledge/vercel-deploy-scripts-canonical-source.md`.
 - **Added Prisma `Decimal` support to the code generator (cmd_705), mapped to JSON schema type
   `"string"` — never `"number"` (a deliberate product decision: a JS-float mapping risks silent
   rounding error on read/write/CSV round-trip; the Prisma schema previously had no supported way
