@@ -1365,7 +1365,7 @@ def api_value(field: dict, entity_title: str) -> str:
 def gen_fill_command(field: dict, value: str, indent: str) -> str:
     cat = field['category']
     label = field['label']
-    if cat in ('text', 'number'):
+    if cat in ('text', 'number', 'decimal'):
         return f"{indent}cy.fillField('{label}', '{value}');"
     elif cat == 'datetime':
         fmt = field.get('format')
@@ -1385,7 +1385,7 @@ def gen_fill_command(field: dict, value: str, indent: str) -> str:
 def gen_clear_command(field: dict, indent: str) -> str:
     cat = field['category']
     label = field['label']
-    if cat in ('text', 'number'):
+    if cat in ('text', 'number', 'decimal'):
         return f"{indent}cy.clearField('{label}');"
     elif cat == 'datetime':
         return f"{indent}cy.clearDateTime('{label}');"

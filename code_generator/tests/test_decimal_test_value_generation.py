@@ -26,6 +26,8 @@ from generators_test import (
     cypress_create_value,
     cypress_edit_value,
     api_value,
+    gen_fill_command,
+    gen_clear_command,
     _get_dep_populate_fields,
     _get_dep_extra_required_fields,
 )
@@ -93,6 +95,28 @@ def test_api_value_decimal_is_quoted_numeric_string():
     val = api_value(field, 'Item')
     assert val.startswith("'") and val.endswith("'")
     assert _NUMERIC_RE.match(val[1:-1]), f'expected numeric string, got {val!r}'
+
+
+def test_gen_fill_command_decimal_uses_fill_field_not_autocomplete():
+    # cmd_713 follow-up: get_field_metas() categorizes a Decimal field as
+    # 'decimal' (not 'number'), but gen_fill_command/gen_clear_command's
+    # dispatch tuples only checked for ('text', 'number') and fell through
+    # to the `else` branch, which emits cy.selectAutocomplete(). A Decimal
+    # scalar field has no MuiAutocomplete-root input to find, so the
+    # generated cypress spec times out on `cy.get('label').filter(...)`
+    # ("Expected to find element: `filter`, but never found it") — this
+    # broke purchase_order_line/sales_order/sales_order_line's generated
+    # UI specs in PR#29's CI (test:e2e:cy:start), even though the
+    # tsc-based decimal_gate fixture and the API-only mandatory gate
+    # (test:e2e:cy:api) both stayed green, since neither exercises the
+    # generated Cypress command text.
+    field = {'category': 'decimal', 'prop_name': 'unit_price', 'label': 'Unit Price'}
+    fill = gen_fill_command(field, '150.00', '        ')
+    clear = gen_clear_command(field, '        ')
+    assert "cy.fillField('Unit Price', '150.00');" in fill, f'expected fillField, got {fill!r}'
+    assert "cy.clearField('Unit Price');" in clear, f'expected clearField, got {clear!r}'
+    assert 'selectAutocomplete' not in fill
+    assert 'clearAutocomplete' not in clear
 
 
 def _dep_target_schema(required_extra: bool = True) -> dict:
