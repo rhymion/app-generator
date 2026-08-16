@@ -46,6 +46,47 @@ def _raw_def(entity_name: str, schema: dict) -> dict:
     return defs.get(f'__{entity_name}', {}) or defs.get(entity_name, {})
 
 
+def _entity_decimal_deep(entity_name: str, schema: dict, _visited: frozenset = frozenset()) -> bool:
+    """True if `entity_name` itself has a Decimal-backed scalar column, or
+    any many-to-one/one-to-one/one-to-many relation it embeds carries one,
+    at any nesting depth (cmd_711f).
+
+    getters.ts's decimal_display_columns only stringifies an entity's OWN
+    scalar Decimal columns before they cross the Server-to-Client Component
+    boundary. A Decimal column reached through an *embedded relation*
+    (e.g. asn_line.purchase_order_line.unit_price, or a to-many child list
+    such as purchase_order.purchase_order_lines[].unit_price) is untouched
+    by that check and reaches the client as a raw decimal.js instance,
+    which React cannot serialize — TS2322 at build time. This walks the
+    relation graph recursively (m2o/o2o via get_parent_relationships, o2m
+    via the entity-level x-relationships children) so a relation embed at
+    any depth is caught, not just the immediate target's own fields.
+
+    _visited guards against a cycle (e.g. a self-referential parent FK)
+    recursing forever; it is never meant to be passed by callers.
+    """
+    if entity_name in _visited:
+        return False
+    _visited = _visited | {entity_name}
+
+    raw = _raw_def(entity_name, schema)
+    for v in raw.get('properties', {}).values():
+        if isinstance(v, dict) and v.get('_prisma_decimal_type'):
+            return True
+
+    for r in get_parent_relationships(raw, schema):
+        if _entity_decimal_deep(r['target'], schema, _visited):
+            return True
+
+    view = schema.get('definitions', {}).get(entity_name, {})
+    for rel_info in (view.get('x-relationships') or {}).values():
+        target = rel_info.get('target')
+        if target and _entity_decimal_deep(target, schema, _visited):
+            return True
+
+    return False
+
+
 def _is_scalar_prop(prop: dict) -> bool:
     """True for plain scalar fields safe to filter/sort on (no relations, arrays, objects)."""
     t = prop.get('type')
@@ -2759,17 +2800,55 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         for k in creator_filtered_props
         if k not in _EXCLUDE_FIELDS
     )
+
+    # relationship_mapping (cmd_711f): a m2o/selector-OTO relation embedded
+    # here is a full nested object pulled straight off the Prisma row — if
+    # its target carries a Decimal column at any depth (_entity_decimal_deep),
+    # wrap it in deepStringifyDecimals() the same way decimal_display_columns
+    # does for this entity's own scalar columns, or the raw decimal.js
+    # instance reaches the client unconverted (TS2322).
+    def _relationship_mapping_entry(r: dict) -> str:
+        src = f"{parent_camel}.{r['relation_name']}"
+        if _entity_decimal_deep(r['target'], schema):
+            return f"    {r['relation_name']}: {src} ? deepStringifyDecimals({src}) : {src},"
+        return f"    {r['relation_name']}: {src},"
+
     relationship_mapping = '\n'.join(
-        f"    {r['relation_name']}: {parent_camel}.{r['relation_name']},"
+        _relationship_mapping_entry(r)
         for r in parent_rels
     ) + (
         '\n' + '\n'.join(
-            f"    {r['relation_name']}: {parent_camel}.{r['relation_name']},"
+            _relationship_mapping_entry(r)
             for r in selector_oto_rels
         ) if selector_oto_rels else ''
     )
+    relationship_mapping_needs_decimal_helper = any(
+        _entity_decimal_deep(r['target'], schema) for r in [*parent_rels, *selector_oto_rels]
+    )
     # Note: reverse_oto_rels are NOT in relationship_mapping because they are not included in
     # the list query. They are fetched only in the detail query and auto-spread via { ...entity }.
+
+    # decimal_deep_relations (cmd_711f): embedded relations reachable from
+    # get{{ parent_pascal }}Detail's raw `...{{ parent_camel }}` spread whose
+    # target carries a Decimal column at any depth — single-object embeds
+    # (m2o FK / selector-OTO / auto-create-OTO / reverse-OTO) and to-many
+    # child list embeds alike. decimal_display_columns (above) only covers
+    # this entity's own scalar columns; this covers the relation-embed case
+    # the entity spread otherwise leaves as raw decimal.js instances. See
+    # _entity_decimal_deep's docstring for why this must recurse.
+    decimal_deep_relations = [
+        {'key': r['relation_name'], 'source': r['relation_name'], 'is_list': False}
+        for r in [*parent_rels, *selector_oto_rels, *auto_create_oto_rels]
+        if _entity_decimal_deep(r['target'], schema)
+    ] + [
+        {'key': r['prop_name'], 'source': r['relation_name'], 'is_list': False}
+        for r in reverse_oto_rels
+        if _entity_decimal_deep(r['target'], schema)
+    ] + [
+        {'key': c['property_name'], 'source': c['property_name'], 'is_list': True}
+        for c in children_raw
+        if c.get('output_type') != 'comments' and _entity_decimal_deep(c['name'], schema)
+    ]
     virtual_mapping = '\n'.join(
         f"    {vc['field_name']}: virtualData.get(String({parent_camel}.id ?? ''))?.{vc['field_name']} ?? '',"
         for vc in virtual_columns
@@ -2887,6 +2966,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         relationship_mapping=relationship_mapping,
         decimal_field_names=decimal_field_names,
         decimal_display_columns=decimal_display_columns,
+        decimal_deep_relations=decimal_deep_relations,
+        relationship_mapping_needs_decimal_helper=relationship_mapping_needs_decimal_helper,
         # Children
         children_raw=children_raw,
         children_data=children_data,

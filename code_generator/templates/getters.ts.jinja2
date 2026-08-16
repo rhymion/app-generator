@@ -28,6 +28,9 @@ import { filterListQuery } from '@/lib/{{ parent }}/list_filter';
 {% if export_uses_format_label_value %}
 import { formatLabelValue } from '@/lib/_format';
 {% endif %}
+{% if decimal_deep_relations or relationship_mapping_needs_decimal_helper %}
+import { deepStringifyDecimals } from '@/lib/_decimal';
+{% endif %}
 
 // Allow-lists for sort/filter — anything not in here is silently dropped at
 // request time so external input cannot pick arbitrary columns.
@@ -196,6 +199,17 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
     // stringify here (precision-preserving; no JS float conversion) rather
     // than passing the raw instance through the `...{{ parent_camel }}` spread.
     {{ dcol }}: {{ parent_camel }}.{{ dcol }} !== null && {{ parent_camel }}.{{ dcol }} !== undefined ? {{ parent_camel }}.{{ dcol }}.toString() : {{ parent_camel }}.{{ dcol }},
+{% endfor %}
+{% for drel in decimal_deep_relations %}
+    // {{ drel.source }} embeds a relation that carries a Decimal column
+    // (directly or through one of its own relations) — the `...{{ parent_camel }}`
+    // spread above passes it through as raw decimal.js instance(s);
+    // deepStringifyDecimals() walks it and converts every one to string.
+{% if drel.is_list %}
+    {{ drel.key }}: ({{ parent_camel }}.{{ drel.source }} ?? []).map((_item) => deepStringifyDecimals(_item)),
+{% else %}
+    {{ drel.key }}: {{ parent_camel }}.{{ drel.source }} ? deepStringifyDecimals({{ parent_camel }}.{{ drel.source }}) : {{ parent_camel }}.{{ drel.source }},
+{% endif %}
 {% endfor %}
 {% if bridge_child_ir and bridge_parent_options %}
     parent_type: (() => {
