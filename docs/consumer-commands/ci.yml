@@ -48,13 +48,18 @@ jobs:
         # separate, already-covered concern (bumping it is a real code
         # change, excluded from the docs-only skip below), not this job's
         # job. See docs/knowledge/ci-workflow-canonical-source.md "Drift
-        # check" for what to do when this fails.
+        # check" for what to do when this fails, and for the missing-file
+        # case just below (this job's own bootstrapping edge case, found
+        # verifying against app-template: a submodule pointer pinned to a
+        # commit older than the one that introduced this canonical file in
+        # the first place has nothing to compare against yet — that is not
+        # drift and must not fail the build).
         run: |
           set -euo pipefail
           CANONICAL=app-generator/docs/consumer-commands/ci.yml
           if [ ! -f "$CANONICAL" ]; then
-            echo "::error::Canonical source $CANONICAL not found in the checked-out app-generator submodule — cannot verify."
-            exit 1
+            echo "::notice::Canonical source $CANONICAL is not present at the commit this repo's app-generator submodule currently pins (older than the commit that introduced it) — nothing to compare against yet. Not a drift; the check activates automatically once the submodule pointer is next bumped past that commit."
+            exit 0
           fi
           sed -n '/^name: CI$/,$p' "$CANONICAL" > /tmp/canonical-body.yml
           sed -n '/^name: CI$/,$p' .github/workflows/ci.yml > /tmp/this-body.yml

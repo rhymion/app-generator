@@ -146,6 +146,23 @@ it guards against (a consumer's copy silently diverging from the
 version of the canonical file its own submodule pointer already pins)
 is not a "was this push docs-only" question.
 
+**Bootstrapping edge case (found live, verifying against app-template's
+actual CI run)**: a consumer's `app-generator` submodule pointer can be
+pinned to a commit *older than the one that introduced
+`docs/consumer-commands/ci.yml` in the first place* — app-template's
+pointer was, at the time this job was first added. In that state the
+extraction step finds no canonical file to compare against at all. This
+is not drift (there is nothing to have drifted from yet) and must not
+fail the build — the job treats a missing canonical file as a `::notice`
+and exits 0; it starts actually comparing automatically the next time
+the consumer's submodule pointer is bumped past the commit that added
+the canonical file. Bumping the pointer sooner is not required by this
+job and is a separate, already-tracked concern (a pointer bump is
+excluded from the docs-only skip above precisely because it's a real
+code change, reviewed on its own schedule — see the "submodule pointer
+bump becomes regression" pattern in this generator's own change
+history).
+
 **Placement — consumer side only, not app-generator's own CI**: the
 check could in principle also run in app-generator's own CI, comparing
 this file against each consumer's live `.github/workflows/ci.yml`. That
