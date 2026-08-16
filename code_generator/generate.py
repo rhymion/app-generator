@@ -1400,6 +1400,44 @@ def generate(schema_path: str, output_dir: str) -> None:
         )
         print('  Mention candidate search → lib/mention/search.ts')
 
+    # --- Stripe payment integration write-once stubs (cmd_706) ---
+    # Emitted when at least one entity in any schema definition declares
+    # x-payment: true. Same write-once convention as
+    # lib/<parent>/invalidate_handler.ts (cmd_583) -- these three files are
+    # only written if they don't already exist, so a consumer's hand-written
+    # implementation is never clobbered by regeneration.
+    _has_any_payment = any(
+        isinstance(defn, dict) and defn.get('x-payment') is True
+        for defn in schema.get('definitions', {}).values()
+    )
+    if _has_any_payment:
+        stripe_lib_path = out / 'lib' / 'stripe.ts'
+        _write_stub(stripe_lib_path, _render(env, 'stripe_lib_stub.ts.jinja2', {}))
+        print('  Stripe SDK stub → lib/stripe.ts')
+        _note_stub_created(
+            stripe_lib_path,
+            'x-payment: true is declared on at least one entity.',
+            'Set STRIPE_SECRET_KEY in your env (this stub fails closed if unset).',
+        )
+
+        checkout_route_path = out / 'app' / 'api' / 'payment' / 'checkout' / 'route.ts'
+        _write_stub(checkout_route_path, _render(env, 'stripe_checkout_route_stub.ts.jinja2', {}))
+        print('  Checkout Session stub → app/api/payment/checkout/route.ts')
+        _note_stub_created(
+            checkout_route_path,
+            'x-payment: true is declared on at least one entity.',
+            'Fill in the price_id / line_items for what you are selling.',
+        )
+
+        webhook_route_path = out / 'app' / 'api' / 'webhooks' / 'stripe' / 'route.ts'
+        _write_stub(webhook_route_path, _render(env, 'stripe_webhook_route_stub.ts.jinja2', {}))
+        print('  Webhook receiver stub → app/api/webhooks/stripe/route.ts')
+        _note_stub_created(
+            webhook_route_path,
+            'x-payment: true is declared on at least one entity.',
+            'Set STRIPE_WEBHOOK_SECRET and implement checkout.session.completed handling.',
+        )
+
     # --- Comment/reaction service layer (lib/comment/service.ts, lib/reaction/service.ts) ---
     # Emitted whenever x-internal enum entities exist (i.e., reactions are
     # enabled) -- same gate as the reactions API route below, since both

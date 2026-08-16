@@ -1,0 +1,18 @@
+// GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
+
+// x-payment (cmd_706): at least one entity declared x-payment: true.
+// Stripe SDK initialization, fail-closed -- an app that never configured
+// STRIPE_SECRET_KEY must not silently boot with payment routes half-broken.
+import Stripe from 'stripe';
+
+if (!process.env.STRIPE_SECRET_KEY) {
+  throw new Error(
+    'STRIPE_SECRET_KEY is not set. Add it to .env.local (dev) or your ' +
+    "deployment platform's env vars (prod). Use a test key (sk_test_...) " +
+    'from https://dashboard.stripe.com/test/apikeys.'
+  );
+}
+
+export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: '2025-03-31.basil',
+});

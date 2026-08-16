@@ -6,6 +6,23 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Internal
+- **Added opt-in Stripe payment integration to the code generator (cmd_706),
+  gated by a new `x-payment` entity-level schema key.** Not a default-schema
+  feature and generates no `Plan`/`Product`/`Purchase`-style entity, authz
+  layer, or UI — declaring `x-payment: true` on any entity causes
+  `generate.py` to write three write-once stub files the first time
+  `generate-code` runs: `lib/stripe.ts` (Stripe SDK init, fails closed if
+  `STRIPE_SECRET_KEY` is unset), `app/api/payment/checkout/route.ts`
+  (Checkout Session creation), and `app/api/webhooks/stripe/route.ts`
+  (webhook receiver, signature-verified via `req.text()` →
+  `constructEvent`, fails closed if `STRIPE_WEBHOOK_SECRET` is unset). Same
+  write-once convention as `lib/<parent>/invalidate_handler.ts` (cmd_583) —
+  a consumer's edits to these files survive regeneration. Scope is
+  one-time purchases only (Checkout Session `mode: payment`); subscription
+  lifecycle handling is left for a consumer to add. `.env.example` gained
+  `STRIPE_SECRET_KEY`/`STRIPE_PUBLISHABLE_KEY`/`STRIPE_WEBHOOK_SECRET`
+  placeholders (no values). Added `stripe` (`^22.5.0`) as a runtime
+  dependency. See `docs/knowledge/stripe-payment-integration.md`.
 - **Added `scripts/vercel-{setup,deploy,env,teardown}.sh` and
   `.env.vercel.production.local.example` as the canonical source of the
   Vercel deployment tooling used by generated consumer apps (cmd_711).**

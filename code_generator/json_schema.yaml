@@ -68,6 +68,30 @@ x-import-key:
     Dotted FK path for Phase 2: [name, role.name] (role_id resolved via role.name)
     Entities without x-import-key: export-only in Phase 1; import blocked in Phase 2.
 
+x-payment:
+  type: boolean
+  default: false
+  description: |
+    Opt-in Stripe payment integration. When at least one entity in the
+    schema declares `x-payment: true`, the generator emits three write-once
+    stub files (same convention as lib/<parent>/invalidate_handler.ts --
+    written only if the file does not already exist, so hand-written
+    implementations survive regeneration):
+      - lib/stripe.ts                     -- Stripe SDK init, fail-closed on
+                                              a missing STRIPE_SECRET_KEY
+      - app/api/payment/checkout/route.ts -- Checkout Session creation stub
+      - app/api/webhooks/stripe/route.ts  -- Webhook receiver stub
+                                              (req.text() -> constructEvent)
+    The generator does NOT generate a Plan/Product/Purchase-style entity, an
+    authz/entitlement layer, or any payment UI -- consumers model their own
+    payment-related entities as ordinary schema entities and wire them into
+    the stub routes. Scope is one-time purchases (Checkout Session
+    mode: payment); subscription lifecycle handling is left to the consumer
+    to add. Requires STRIPE_SECRET_KEY / STRIPE_PUBLISHABLE_KEY /
+    STRIPE_WEBHOOK_SECRET env vars (see .env.example) -- the generated
+    lib/stripe.ts and webhook route both throw at import time if their
+    required key is unset (fail-closed; never a silent pass-through).
+
 definitions:
   user:
     x-generate:

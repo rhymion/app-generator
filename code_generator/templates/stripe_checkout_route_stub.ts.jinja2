@@ -1,0 +1,47 @@
+// GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
+
+// x-payment (cmd_706): Checkout Session creation stub. Fill in the price /
+// line_items for whatever you are selling, then redirect the client to the
+// returned URL. See docs/knowledge/stripe-payment-integration.md.
+
+import { NextResponse } from 'next/server';
+import { getSessionUserId } from '@/lib/authz';
+import { stripe } from '@/lib/stripe';
+
+export async function POST(req: Request) {
+  const userId = await getSessionUserId();
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const body = await req.json().catch(() => ({}) as Record<string, unknown>);
+  const priceId = body.price_id;
+
+  // TODO: replace with the real Stripe Price ID (or a full `line_items`
+  // array with `price_data`) for what you are selling. `price_id` here is a
+  // placeholder request shape -- the client must supply one until you wire
+  // this to a real entity.
+  if (typeof priceId !== 'string' || !priceId) {
+    return NextResponse.json({ error: 'price_id is required' }, { status: 400 });
+  }
+
+  const origin = req.headers.get('origin') ?? process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
+
+  const session = await stripe.checkout.sessions.create({
+    mode: 'payment',
+    line_items: [{ price: priceId, quantity: 1 }],
+    success_url: `${origin}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${origin}/payment/cancel`,
+    client_reference_id: userId,
+    // TODO: pass metadata identifying which record this checkout is for, so
+    // the webhook handler (app/api/webhooks/stripe/route.ts) can
+    // create/update the right row on checkout.session.completed.
+    metadata: {},
+  });
+
+  if (!session.url) {
+    return NextResponse.json({ error: 'Failed to create checkout session' }, { status: 500 });
+  }
+
+  return NextResponse.json({ url: session.url });
+}
