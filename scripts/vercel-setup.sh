@@ -1,16 +1,26 @@
 #!/usr/bin/env bash
 # Vercel project setup for consumer apps generated from this repo
-# (app-generator). Canonical copy — consumer repos reference this file via
-# their app-generator submodule rather than keeping their own duplicate
-# (cmd_711).
-# Verifies the app-generator submodule,
-# links the Vercel project, injects env vars for both production and preview
-# (two-DB pattern), then runs migrate:deploy once against the production DB
-# before the first deploy.
+# (app-generator) — control plane only. Canonical copy — consumer repos
+# reference this file via their app-generator submodule rather than keeping
+# their own duplicate (cmd_711).
+# Verifies the
+# app-generator submodule, provisions Neon/Upstash/Blob, links the Vercel
+# project, and injects env vars for both production and preview (two-DB
+# pattern). Does NOT run any database migration or seed — those are two
+# separate, later stages:
+#   scripts/vercel-deploy.sh [--prod]   — first deploy, creates the schema
+#   scripts/vercel-seed.sh   [--prod]   — bootstrap tenant/admin data
+# (cmd_691 — this script used to also run migrate:deploy/db:seed-tenant here,
+# as Steps 3/4/5/5.5; removed because vercel-build already runs
+# migrate:deploy on every deploy (see §18 of docs/vercel-automation-design.md),
+# making a second, earlier owner here redundant, and because seeding before
+# any deploy has ever run means seeding a database with no schema yet — see
+# §19 of that doc for the corrected three-stage ordering.)
 #
 # Usage:
 #   ./scripts/vercel-setup.sh              # live run
 #   DRY_RUN=true ./scripts/vercel-setup.sh # echo all write commands, no Vercel/DB changes
+#   ./scripts/vercel-setup.sh --status     # read-only diagnostic, no writes (see bottom of file)
 #
 # Prerequisites: vercel CLI, npm
 # Must run after: git submodule update --init --recursive (or let Step 0 do it)
@@ -20,6 +30,40 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/vercel-env.sh"
+
+# ── --status: read-only migration-state diagnostic, no writes ──────────────
+# Compares production vs. staging `prisma migrate status` without touching
+# either database's schema or data. Exits before any provisioning/injection
+# logic below. See §19 of docs/vercel-automation-design.md.
+if [[ "${1:-}" == "--status" ]]; then
+  echo ""
+  echo "================================================================="
+  echo "  Vercel/Neon migration status (read-only)"
+  echo "================================================================="
+  echo ""
+  for pair in "production:DATABASE_URL_UNPOOLED_PROD" "staging:DATABASE_URL_UNPOOLED_STAGING"; do
+    _label="${pair%%:*}"
+    _var="${pair#*:}"
+    _url="${!_var:-}"
+    echo "--- ${_label} (${_var}) ---"
+    if [[ -z "$_url" ]]; then
+      echo "  [SKIP] ${_var} is not set in .env.production.local — run vercel-setup.sh first."
+    else
+      # `npm --prefix <dir> exec` does not cd into <dir> the way `npm --prefix
+      # <dir> run <script>` does — confirmed live: prisma then fails to find
+      # prisma/schema.prisma relative to the caller's cwd. Neither `migrate:deploy`
+      # nor any other package.json script exposes a bare `prisma <args>` passthrough,
+      # so a subshell cd is used instead of adding a new script just for this.
+      (cd "${ROOT}/app-generator" && DATABASE_URL="${_url}" npx prisma migrate status 2>&1) \
+        | grep -v '^$' || true
+    fi
+    echo ""
+  done
+  echo "================================================================="
+  echo "  End of status report — no changes made."
+  echo "================================================================="
+  exit 0
+fi
 
 DRY_RUN="${DRY_RUN:-false}"
 
@@ -596,100 +640,27 @@ vercel_env_inject preview
 run vercel env rm PRISMA_DATABASE_URL production --yes 2>/dev/null || true
 run vercel env rm PRISMA_DATABASE_URL preview --yes 2>/dev/null || true
 
-# ── Step 3: First-time migration against production DB ─────────────────────
-# This one-time, local, unpooled `prisma migrate deploy` call is correct and
-# unchanged. What was wrong (cmd_657 correction) was the claim below it: this
-# comment used to say migration is "deliberately NOT part of vercel.json
-# buildCommand ... a failed migration on every build would block ALL
-# deploys." That was true when written (cmd_290, 2026-07-07) of the
-# then-current root-level `vercel.json`, whose buildCommand never included
-# `migrate:deploy` (confirmed via `git log -- vercel.json`). It went stale,
-# not wrong-from-the-start: cmd_484 (2026-07-29) deleted that root
-# `vercel.json` and made `app-generator/vercel.json` — whose buildCommand had
-# included `migrate:deploy` since 2026-05-24 (commit 74383f86), predating
-# even the comment above — the one Vercel actually reads (§17.5). The comment
-# was never updated for that switch. Concretely: `prisma migrate deploy` DOES
-# run on every Vercel deploy today, inside `vercel-build`, via the pooled
-# `DATABASE_URL` (this is the actual deviation cmd_657 exists to close —
-# see §18). This Step 3 call is still needed for a different, still-valid
-# reason: `db:seed-tenant` (Step 4) is not part of buildCommand and needs the
-# schema to already exist — this call, and the deploy that follows it, are
-# what create that schema before the very first `vercel-build` ever runs.
-echo ""
-echo "[Step 3] Running migrate:deploy against production DB..."
-if [[ "$DRY_RUN" == "true" ]]; then
-  echo "[DRY-RUN] DATABASE_URL=<redacted> npm --prefix ${ROOT}/app-generator run migrate:deploy"
-else
-  : "${DATABASE_URL_UNPOOLED_PROD:?DATABASE_URL_UNPOOLED_PROD is required in .env.production.local}"
-  DATABASE_URL="${DATABASE_URL_UNPOOLED_PROD}" npm --prefix "${ROOT}/app-generator" run migrate:deploy
-fi
-echo "  OK: migration complete."
-
-# ── Step 4: Seed production DB (bootstrap tenant/admin) ─────────────────────
-# `db:seed-tenant` (not `db:seed`) is the production default: it bootstraps
-# the minimum needed to sign in and operate the app — default tenant,
-# Administrator role + full-CRUD permissions, and the admin@example.com user
-# — with every write idempotent (extension via CREATE EXTENSION IF NOT
-# EXISTS, tenant/user via upsert on a unique key, role via findFirst+create
-# guarded by that same findFirst, permissions via upsert on the
-# @@unique([name, role_id]) constraint — confirmed by reading
-# app-generator/scripts/seed-tenant.ts in full). `db:seed` is demo/sample
-# data (a second "worker" user, sample issues, etc. — confirmed by reading
-# app-generator/scripts/seed.ts, which itself assumes db:seed-tenant already
-# ran and looks up admin@example.com via findFirstOrThrow) and is not
-# appropriate to run unattended against production.
-#
-# Same unpooled-connection rationale as Step 3/5: pooled/PgBouncer
-# transaction-mode connections don't support the multi-statement/prepared
-# patterns Prisma's migration and seed clients rely on.
-echo ""
-echo "[Step 4] Seeding production DB (db:seed-tenant)..."
-if [[ "$DRY_RUN" == "true" ]]; then
-  echo "[DRY-RUN] DATABASE_URL=<redacted> npm --prefix ${ROOT}/app-generator run db:seed-tenant"
-else
-  : "${DATABASE_URL_UNPOOLED_PROD:?DATABASE_URL_UNPOOLED_PROD is required in .env.production.local}"
-  DATABASE_URL="${DATABASE_URL_UNPOOLED_PROD}" npm --prefix "${ROOT}/app-generator" run db:seed-tenant
-fi
-echo "  OK: seed complete."
-
-# ── Step 5: First-time migration against staging DB ─────────────────────────
-# Same rationale as Step 3, but for the preview/staging DB (see two-DB pattern
-# in vercel-env.sh). Run once here so the first preview deploy doesn't hit an
-# un-migrated staging database.
-echo ""
-echo "[Step 5] Running migrate:deploy against staging DB..."
-if [[ "$DRY_RUN" == "true" ]]; then
-  echo "[DRY-RUN] DATABASE_URL=<redacted> npm --prefix ${ROOT}/app-generator run migrate:deploy"
-else
-  : "${DATABASE_URL_UNPOOLED_STAGING:?DATABASE_URL_UNPOOLED_STAGING is required in .env.production.local}"
-  DATABASE_URL="${DATABASE_URL_UNPOOLED_STAGING}" npm --prefix "${ROOT}/app-generator" run migrate:deploy
-fi
-echo "  OK: migration complete."
-
-# ── Step 5.5: Seed staging DB (bootstrap tenant/admin for preview environment) ─
-# Same rationale as Step 4 but for the staging/preview branch. Without this,
-# the first preview deploy hits an empty staging DB with no default tenant or
-# admin user, making the app unusable for manual preview testing.
-# Uses unpooled endpoint (same rationale as Steps 3/4/5: pgBouncer transaction
-# mode does not support Prisma seed's multi-statement patterns).
-# db:seed-tenant is idempotent (upsert on unique keys) — safe to re-run.
-echo ""
-echo "[Step 5.5] Seeding staging DB (db:seed-tenant)..."
-if [[ "$DRY_RUN" == "true" ]]; then
-  echo "[DRY-RUN] DATABASE_URL=<redacted> npm --prefix ${ROOT}/app-generator run db:seed-tenant"
-else
-  : "${DATABASE_URL_UNPOOLED_STAGING:?DATABASE_URL_UNPOOLED_STAGING is required in .env.production.local}"
-  DATABASE_URL="${DATABASE_URL_UNPOOLED_STAGING}" npm --prefix "${ROOT}/app-generator" run db:seed-tenant
-fi
-echo "  OK: staging seed complete."
+# Migration and seeding are deliberately NOT run here (cmd_691 — see the file
+# header and §19 of docs/vercel-automation-design.md). `vercel-build` already
+# runs `migrate:deploy` on every deploy (§18), and seeding before any deploy
+# has ever happened means seeding a database with no schema yet. Those two
+# steps now live in scripts/vercel-deploy.sh and scripts/vercel-seed.sh,
+# which must run in that order after this script.
 
 echo ""
 echo "================================================================="
-echo "  Vercel setup complete"
+echo "  Vercel setup complete (control plane only — no migration/seed run)"
 echo "================================================================="
 if [[ "$DRY_RUN" == "true" ]]; then
   echo "[DRY-RUN] Run without DRY_RUN=true to apply changes."
 else
-  echo "  Next: git push (Git-provider auto-deploy) or bash scripts/vercel-deploy.sh [--prod]"
+  echo "  Next:"
+  echo "    1. First deploy (creates the schema):"
+  echo "         staging:    git push (Git-provider auto-deploy) or bash scripts/vercel-deploy.sh"
+  echo "         production: bash scripts/vercel-deploy.sh --prod"
+  echo "    2. Seed (after step 1 has completed for each environment):"
+  echo "         staging:    bash scripts/vercel-seed.sh"
+  echo "         production: bash scripts/vercel-seed.sh --prod"
+  echo "    Diagnostic (any time, read-only): bash scripts/vercel-setup.sh --status"
 fi
 echo ""

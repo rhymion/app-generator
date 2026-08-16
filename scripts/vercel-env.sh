@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Vercel env-injection helpers for consumer apps generated from this repo
+# (app-generator). Canonical copy — consumer repos reference this file via
+# their app-generator submodule rather than keeping their own duplicate
+# (cmd_711).
 # Source this file to load Vercel deployment variables and the vercel_env_inject
 # function, used by vercel-setup.sh and vercel-deploy.sh.
 # Usage (sourced):   source "$(dirname "${BASH_SOURCE[0]}")/vercel-env.sh"
@@ -184,6 +188,14 @@ vercel_env_inject() {
   inject_var GOOGLE_CLIENT_ID "$GOOGLE_CLIENT_ID" "$target"
   inject_var GOOGLE_CLIENT_SECRET "$GOOGLE_CLIENT_SECRET" "$target"
   inject_var AUTH_TRUST_HOST "true" "$target"
+  # USE_NEON_ADAPTER: fixed flag, not a per-deployment secret — same pattern
+  # as AUTH_TRUST_HOST above. Injected as the literal string "true" on both
+  # production and preview (lib/prisma.ts does an exact-match check, so any
+  # other value is treated as unset). Vercel+Neon only; GCP Cloud Run and
+  # local/CI never set this var and keep using the PrismaPg branch
+  # unconditionally (cmd_692/cmd_711/cmd_712). See .env.example for the
+  # branch this flips in lib/prisma.ts.
+  inject_var USE_NEON_ADAPTER "true" "$target"
   # inject_var NODE_ENV "production" "$target"
   echo "=== Injection complete for ${target}. Trigger a redeploy for changes to take effect. ==="
 }
