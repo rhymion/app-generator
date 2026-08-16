@@ -61,6 +61,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - **エンティティ横断検索** — オプトインしたエンティティへの UNION ALL による `GET /api/search`；ファセット・ハイライト・日本語 pg_bigm 対応；ヘッダー検索アイコンと検索ページを生成
 - **承認後イベント発火** — `x-approval.on_approved.set_fields`（フィールド更新）および `x-approval.on_approved.emit_hook`（生成 `service_after_approve.ts` による カスタムロジック）；`approvable.approved_at` による冪等性保証。`x-approval-lines` は承認明細エンティティをインベントリ台帳操作に接続する作成前後のヘルパーを生成
 - **終端却下**（`x-readonly-fields`） — エンティティが終端の却下状態に達した後にフィールドをロックするための注釈；却下時は `on_rejected_dispatch` 経由でワンスタブ（`service_after_reject_stub.ts`）を発火し、通知や在庫調整などのカスタムロジックに対応
+- **Stripe 決済**（`x-payment`、オプトイン） — 任意のエンティティへ `x-payment: true` を宣言すると、Stripe Checkout Session 作成と Webhook 処理の write-once スタブ（`lib/stripe.ts`、`app/api/payment/checkout/route.ts`、`app/api/webhooks/stripe/route.ts`）を生成、鍵未設定時は fail-closed；対応は一回払いのみで、エンティティ・認可・UI は生成しない — 詳細は後述の[決済](#決済stripeオプトイン)を参照
 
 ### パフォーマンス
 
@@ -296,6 +297,25 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 - `x-gdpr-mode`（`internal`/`consumer`/`both`）はモデル/フィールド単位のデータ主体区分（対象が従業員データか一般消費者データか）を分類する注釈です。`code_generator/validate.py` でスキーマ検証はされますが、コード生成テンプレート側では未参照のため、3.0時点で生成コードへの影響はありません。
 - 添付ファイル名は AES-256-GCM で at-rest 暗号化されます（`lib/compliance/attachment_name_crypto.ts`）。
 - `x-mention` によりコメント内で `@[user_id:uuid]` メンション構文が有効になり、メンションパーサーが生成されます。
+
+---
+
+## 決済（Stripe、オプトイン）
+
+既定スキーマの機能ではありません。`json_schema.yaml` の任意のエンティティに
+`x-payment: true` を宣言すると、`generate-code` の初回実行時に 3 本の
+write-once スタブファイルが書き込まれます(`lib/<parent>/invalidate_handler.ts`
+と同じ規約 — 編集内容は再生成後も保持されます): `lib/stripe.ts`(SDK 初期化、
+`STRIPE_SECRET_KEY` 未設定時は fail-closed)、`app/api/payment/checkout/route.ts`
+(Checkout Session 作成)、`app/api/webhooks/stripe/route.ts`(Webhook 受信、
+署名検証あり、`STRIPE_WEBHOOK_SECRET` 未設定時は fail-closed)。生成器は
+`Plan`/`Product`/`Purchase` 相当のエンティティ・認可/権限レイヤー・決済 UI は
+一切生成しません — それらは通常のスキーマエンティティとして自前でモデル化し、
+上記スタブへ接続してください。対応範囲は一回払いのみ(Checkout Session
+`mode: payment`)で、サブスクリプションは対象外(必要であれば自前で追加)です。
+詳細は
+[docs/knowledge/stripe-payment-integration.md](docs/knowledge/stripe-payment-integration.md)
+を参照してください。
 
 ---
 

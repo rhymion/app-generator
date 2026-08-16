@@ -56,6 +56,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - **Cross-entity search** — `GET /api/search` with UNION ALL across searchable entities; facets, highlight, Japanese pg_bigm support; header search icon and full search page generated
 - **Approval event dispatch** — post-approval hooks (`x-approval.on_approved.set_fields`, `x-approval.on_approved.emit_hook`) with fire-once idempotency via `approvable.approved_at`; `x-approval-lines` generates matching pre-/post-create helpers that wire approval-line entities to inventory ledger operations
 - **Terminal rejection** (`x-readonly-fields`) — annotate fields to lock them once an entity reaches a terminal rejected state; rejection fires a once-stub (`service_after_reject_stub.ts`) via `on_rejected_dispatch` for custom post-rejection logic (e.g. notifications, inventory adjustments)
+- **Stripe payments** (`x-payment`, opt-in) — declaring `x-payment: true` on any entity generates write-once stubs for Stripe Checkout Session creation and webhook handling (`lib/stripe.ts`, `app/api/payment/checkout/route.ts`, `app/api/webhooks/stripe/route.ts`), fail-closed on missing secrets; one-time purchases only, no entity/authz/UI generated — see [Payments](#payments-stripe-opt-in) below
 
 ### Performance
 
@@ -315,6 +316,24 @@ See [docs/knowledge/multi-tenancy-and-permissions.md](docs/knowledge/multi-tenan
 - `x-gdpr-mode` (`internal` / `consumer` / `both`) classifies a model/field's data-subject scope for compliance bookkeeping. It is schema-validated (`code_generator/validate.py`) but not yet read by any codegen template — no effect on generated code as of 3.0.
 - Attachment filenames are encrypted at rest with AES-256-GCM (`lib/compliance/attachment_name_crypto.ts`).
 - `x-mention` enables `@[user_id:uuid]` mention syntax in comments, with generated mention-parser utilities.
+
+---
+
+## Payments (Stripe, opt-in)
+
+Not a default-schema feature. Declaring `x-payment: true` on any entity in
+`json_schema.yaml` causes `generate-code` to write three write-once stub
+files the first time it runs (same convention as
+`lib/<parent>/invalidate_handler.ts` — edits survive regeneration):
+`lib/stripe.ts` (SDK init, fails closed if `STRIPE_SECRET_KEY` is unset),
+`app/api/payment/checkout/route.ts` (Checkout Session creation), and
+`app/api/webhooks/stripe/route.ts` (webhook receiver, signature-verified,
+fails closed if `STRIPE_WEBHOOK_SECRET` is unset). The generator does not
+generate a `Plan`/`Product`/`Purchase`-style entity, an authz/entitlement
+layer, or any payment UI — model those as ordinary schema entities and
+wire them into the stub routes. Scope is one-time purchases only (Checkout
+Session `mode: payment`); subscriptions are left for a consumer to add. See
+[docs/knowledge/stripe-payment-integration.md](docs/knowledge/stripe-payment-integration.md).
 
 ---
 
