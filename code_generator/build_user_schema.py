@@ -116,6 +116,7 @@ _ENTITY_LEVEL_DATA_KEYS = (
     "x-reservation",
     "x-gdpr-mode",
     "x-self-only",
+    "x-payment",
 )
 
 # Category D: unchanged location, stay on the view entity as before. Also

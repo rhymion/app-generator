@@ -1,0 +1,66 @@
+// GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
+
+// x-payment (cmd_706): Stripe webhook receiver stub. Only
+// `checkout.session.completed` is handled by default (one-time purchases
+// only) -- add cases for subscription lifecycle events (invoice.paid,
+// customer.subscription.deleted, invoice.payment_failed, ...) if you extend
+// this to subscriptions. See docs/knowledge/stripe-payment-integration.md.
+//
+// Idempotency: Stripe may deliver the same event more than once. Guard
+// against double-processing with either (a) a DB unique constraint on the
+// business row you create/update (e.g. a unique stripe_checkout_session_id
+// column), or (b) a dedicated ProcessedWebhookEvent table keyed by
+// event.id, checked before doing any work. Pick one before wiring real
+// business logic into the TODO below.
+
+import { NextResponse } from 'next/server';
+import type Stripe from 'stripe';
+import { stripe } from '@/lib/stripe';
+
+if (!process.env.STRIPE_WEBHOOK_SECRET) {
+  throw new Error(
+    'STRIPE_WEBHOOK_SECRET is not set. Generate one with `stripe listen` ' +
+    '(dev) or the Stripe Dashboard webhook settings (prod), then add it to ' +
+    '.env.local / your deployment env vars.'
+  );
+}
+
+export async function POST(req: Request) {
+  const signature = req.headers.get('stripe-signature');
+  if (!signature) {
+    return NextResponse.json({ error: 'Missing stripe-signature header' }, { status: 400 });
+  }
+
+  // Next.js App Router route handlers don't expose a raw body the way
+  // Express's `req.body` does under `express.raw()` -- constructEvent needs
+  // the exact bytes Stripe signed, so read the body as text, not JSON.
+  const payload = await req.text();
+
+  let event: Stripe.Event;
+  try {
+    event = stripe.webhooks.constructEvent(payload, signature, process.env.STRIPE_WEBHOOK_SECRET!);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json(
+      { error: `Webhook signature verification failed: ${message}` },
+      { status: 400 },
+    );
+  }
+
+  switch (event.type) {
+    case 'checkout.session.completed': {
+      const session = event.data.object;
+      // TODO: look up session.client_reference_id / session.metadata to
+      // find which record this purchase is for, then create/update it here
+      // (guarded by the idempotency strategy noted above).
+      void session;
+      break;
+    }
+    default:
+      // Unhandled event types are expected -- Stripe sends many event types
+      // even when your webhook endpoint only subscribes to one.
+      break;
+  }
+
+  return NextResponse.json({ received: true });
+}
