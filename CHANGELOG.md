@@ -6,6 +6,16 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Internal
+- **Added `scripts/vercel-{setup,deploy,env,teardown}.sh` and
+  `.env.vercel.production.local.example` as the canonical source of the
+  Vercel deployment tooling used by generated consumer apps (cmd_711).**
+  These five files were previously duplicated independently across three
+  consumer repos (app-template, inventory-app, insurance-app); they were
+  found byte-identical (scripts) or near-identical (env template, missing
+  `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` in app-template only — a real
+  gap, now fixed via the shared copy) and are promoted here so consumers
+  can reference a single source instead of three independently drifting
+  copies. See `docs/knowledge/vercel-deploy-scripts-canonical-source.md`.
 - **Added Prisma `Decimal` support to the code generator (cmd_705), mapped to JSON schema type
   `"string"` — never `"number"` (a deliberate product decision: a JS-float mapping risks silent
   rounding error on read/write/CSV round-trip; the Prisma schema previously had no supported way
@@ -131,14 +141,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   tests in `lib/db-url.test.ts`. Full root-cause writeup:
   `docs/knowledge/pg-connection-string-sslmode-deprecation.md`.
 - Added an opt-in Neon serverless driver adapter path to `lib/prisma.ts`, gated by the
-  `USE_NEON_ADAPTER` env var (cmd_692/cmd_698). **Not active anywhere yet** — nothing sets this
-  var today, so this change has zero effect on any environment until it's explicitly configured
-  on Vercel (Project Settings → Environment Variables → `USE_NEON_ADAPTER=true` on Production
-  and/or Preview; see `.env.example` for details). When unset, or set to anything other than the
+  `USE_NEON_ADAPTER` env var (cmd_692/cmd_698). Originally shipped inactive — nothing set this
+  var anywhere. `scripts/vercel-env.sh` now injects it as the fixed literal `"true"` on both
+  Production and Preview for every consumer app provisioned via `vercel-setup.sh` (cmd_711/
+  cmd_712), the same way `AUTH_TRUST_HOST` is injected; `vercel-teardown.sh` removes it on
+  teardown. GCP Cloud Run and local/CI still never set this var, so they are unaffected.
+  When unset, or set to anything other than the
   literal string `"true"` (fixed in this same change — the original branch used a truthy check,
   so `USE_NEON_ADAPTER=false` or `=0` would have incorrectly enabled it), behavior is unchanged:
-  falls straight through to the existing `PrismaPg` branch. GCP Cloud Run and local/CI never set
-  this var. Verified: with the var unset, `false`, and `0`, the log line stays
+  falls straight through to the existing `PrismaPg` branch. Verified: with the var unset, `false`, and `0`, the log line stays
   `Using direct database connection for Prisma Client` (existing `PrismaPg` path, byte-for-byte
   unmodified); with the var set to `true`, the log line switches to
   `Using Neon adapter for Prisma Client`. Reconciled with the `pinSslModeVerifyFull()` fix above
