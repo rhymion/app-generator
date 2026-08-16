@@ -11,8 +11,8 @@
 # repository is already checked out by a running job/agent.
 #
 # When editing: change this file, then copy the result verbatim into
-# each consumer's `.github/workflows/ci.yml` (the header comment below,
-# from "name: CI" onward, IS the file consumers should have — everything
+# each consumer's `.github/workflows/ci.yml` (the body below, from
+# "name: CI" onward, IS the file consumers should have — everything
 # above this line is canonical-source-only annotation and must not be
 # copied).
 name: CI
