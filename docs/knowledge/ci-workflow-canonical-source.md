@@ -118,3 +118,111 @@ inventory-app and insurance-app (both private) have **not** received
 this copy yet, same reasoning as the concurrency change above — left
 as a follow-up so as not to burn their limited/newly-enabled Actions
 allotment as a side effect of this task.
+
+## Drift check (cmd_723)
+
+The distribution measured above already proved the risk this section
+answers: the first copy distributed (app-template) was **not**
+byte-identical to the canonical body — one step's `name:` field carried
+an internal-tracking suffix the canonical source doesn't have, and
+several step comments had been reworded to reference internal task
+numbers. Nobody caught it at distribution time because nothing checked.
+"Copy the result verbatim" (the instruction at the top of this file) is
+unenforceable as long as compliance is a human claim — same shape of
+gap as cmd_498 ("a condition the machine doesn't see is a hole, not an
+exemption").
+
+**Mechanism**: a `verify-canonical-ci` job, now part of the canonical
+body itself (so it is distributed to every consumer along with
+everything else). It checks out the consumer repo with
+`submodules: recursive` (already required by `e2e-tests` below, so no
+new checkout cost), extracts this file's own body from `.github/
+workflows/ci.yml` starting at the line `name: CI`, extracts the same
+range from `app-generator/docs/consumer-commands/ci.yml` in the
+just-checked-out submodule, and fails the job with a `diff -u` if they
+differ. No dependency on `detect-changes` — it runs on every push/PR
+unconditionally, independent of path classification, because the thing
+it guards against (a consumer's copy silently diverging from the
+version of the canonical file its own submodule pointer already pins)
+is not a "was this push docs-only" question.
+
+**Placement — consumer side only, not app-generator's own CI**: the
+check could in principle also run in app-generator's own CI, comparing
+this file against each consumer's live `.github/workflows/ci.yml`. That
+was rejected: app-generator's own CI has no checkout of the three
+consumer repos (inventory-app and insurance-app are private), so a
+generator-side check would need cross-repo read tokens provisioned
+solely to lint a documentation-drift condition — a real credential-
+scope increase for a low-severity check, and asymmetric with how every
+other canonicalized file in this repo already works (`.claude/
+commands/*.md` and `scripts/vercel-*.sh` are read by the consumer via
+its own submodule checkout, never fetched by app-generator reaching
+outward). The consumer-side placement instead falls out for free: the
+`e2e-tests` job below already proves a consumer's CI run has the
+canonical source available locally (the submodule checkout), so the
+check requires zero new access and lives entirely inside the file
+being distributed — verification travels with the artifact it verifies.
+No "both" option was pursued for the same reason — a generator-side
+half would either duplicate this exact check against a token-gated
+fetch (redundant with the consumer-side one for public app-template,
+useless for the two private consumers unless a token is provisioned) or
+check nothing meaningful on its own.
+
+**Scope — full-body match, not structure-only**: the diff compares the
+*entire* body (from `name: CI` to end of file, comments included), not
+just the executable structure (`name:`/`on:`/`jobs:` keys with comments
+stripped). Reasons:
+
+1. The canonical file's own header already states the contract in
+   these exact terms — "copy the result verbatim... from `name: CI`
+   onward" — full-body match enforces that literal, pre-existing
+   instruction rather than inventing a new, narrower one.
+2. The actual drift instance this task started from (a step's `name:`
+   field carrying an appended tracking suffix) sits in ordinary
+   workflow structure, not inside a `#`-comment — a scope that only
+   diffed structure-with-comments-stripped could plausibly still miss
+   it depending on exactly how "structural" is defined for a step
+   `name:` field. Full-body match sidesteps having to define that
+   boundary at all.
+3. This file is explicitly framed as a plain, non-customizable copy
+   (unlike, say, `generate-schema.md`'s KEEP LOCAL sections in
+   `consumer-commands-canonical-source.md`, which exist precisely
+   because consumers legitimately hold measured, consumer-specific
+   facts). There is no legitimate reason for a consumer to carry its
+   own supplementary comment inside this file, so a stricter check
+   costs nothing in practice.
+4. Full-text diff is a two-line `sed`+`diff`; a structure-only,
+   comment-blind comparison would need a YAML-aware normalization step
+   and a definition of which fields are "structural" — more moving
+   parts, and the extra judgment call is exactly the kind of thing this
+   task exists to take out of human hands, not re-introduce as an
+   implementation detail.
+
+The earlier partial canonicalization of `generate-schema.md` (see
+`docs/knowledge/consumer-commands-canonical-source.md`'s KEEP LOCAL
+sections) was considered as a precedent but does not transfer: that
+file mixes genuinely shared procedure with genuinely consumer-specific
+measured facts, so partial canonicalization preserves real information.
+`ci.yml` has no consumer-specific facts in it at all — every byte of
+the body is meant to be identical across consumers by design — so there
+is nothing a partial/structural check would be protecting that a full
+match doesn't already cover for free.
+
+**Internal cmd-number annotations (e.g. `cmd_527`, `cmd_528`, `cmd_705`
+found in the first distributed copy) — not a vocabulary violation**:
+checked against `scripts/vocab_patterns.sh` (this control repo's SoT
+for internal-vocabulary leaks into public repos), which has no pattern
+matching a bare `cmd_NNN` token in file *content* — only a cmd number
+immediately fused to a round-label kanji character is a content-leak
+pattern there, and a separate filename-only pattern for `cmd_NNN`
+matches only a file's *path*, never its body. A bare `cmd_527` sitting
+inside a YAML comment matches neither. This is consistent with public
+commit titles in this repo's own history already carrying the same
+shape (`feat(scripts/cmd711): ...`) without being flagged. So: the
+reason those annotations must not survive in a consumer's copy is
+**only** "the canonical source doesn't have them and the file is a
+verbatim copy by design" (enforced by the full-body match above) — not
+an internal-vocabulary rule. A future distribution or review of this
+file should not cite vocabulary-leak policy as additional justification
+for stripping them; the drift check alone is sufficient and correctly
+scoped.
