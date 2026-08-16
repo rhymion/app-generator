@@ -452,6 +452,16 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             val = 'new Date(2025, 0, 1).toISOString()'
             val_unique = 'new Date(2025, 0, i).toISOString()'
             val_second = 'new Date(2025, 0, 2).toISOString()'
+        elif actual == 'string' and prop.get('_prisma_decimal_type'):
+            # Decimal columns are exposed as JSON type "string" (cmd_705) —
+            # without this branch they fell into the generic 'string' case
+            # below and got a non-numeric placeholder, which Prisma's
+            # Decimal column rejects outright ("invalid digit found in
+            # string. Expected decimal String."). Discovered via proj_g's
+            # Int-cents→Decimal migration (subtask_711b/cmd_711f).
+            val = "'10.00'"
+            val_unique = '`${i * 10}.00`'
+            val_second = "'20.00'"
         elif actual == 'string':
             field_title = to_title_case(prop_name)
             # Deterministic, human-readable values. Dep-helper-call collisions
@@ -600,6 +610,13 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
             val = 'new Date(2025, 0, 1).toISOString()'
             val_unique = 'new Date(2025, 0, i).toISOString()'
             val_second = 'new Date(2025, 0, 2).toISOString()'
+        elif actual == 'string' and prop.get('_prisma_decimal_type'):
+            # See the matching branch in _get_dep_populate_fields (cmd_711f)
+            # for why: decimal columns are exposed as JSON type "string"
+            # (cmd_705) and reject a non-numeric placeholder.
+            val = "'10.00'"
+            val_unique = '`${i * 10}.00`'
+            val_second = "'20.00'"
         elif actual == 'string':
             field_title = to_title_case(prop_name)
             val = f"'Test {field_title} A'"
@@ -977,6 +994,21 @@ def get_field_metas(
                 # generated test's expected label matches what's actually rendered.
                 'enum_namespace': prop.get('x-enum-namespace') or prop.get('_prisma_native_enum_type'),
             })
+        elif prop_type == 'string' and prop.get('_prisma_decimal_type'):
+            # Decimal columns are exposed as JSON type "string" (cmd_705:
+            # precision-preserving, no JS float rounding) — without this
+            # branch they fell into the generic 'text' category below and
+            # got a non-numeric placeholder ('Test Unit Price 1'), which
+            # Prisma's Decimal column rejects outright
+            # ("invalid digit found in string. Expected decimal String.").
+            # Discovered via proj_g's Int-cents→Decimal migration
+            # (subtask_711b/cmd_711f).
+            metas.append({
+                **base,
+                'label': to_title_case(prop_name),
+                'category': 'decimal',
+                'required': prop_name in required_fields,
+            })
         else:
             metas.append({
                 **base,
@@ -1101,6 +1133,13 @@ def prisma_value(field: dict, index: str, entity_title: str) -> str:
             return f"'{field['enum_values'][0]}'"
         return f'`Test {field["label"]} ${{{index}}}`'
 
+    elif cat == 'decimal':
+        # Decimal columns need a valid decimal-format string (cmd_705:
+        # exposed as JSON type "string"), not the 'text' category's
+        # human-readable placeholder — Prisma's Decimal column rejects
+        # anything that doesn't parse as a number (cmd_711f).
+        return f'`${{{index} * 10}}.00`'
+
     elif cat == 'entity_select':
         options = field.get('entity_options') or []
         return f"'{options[0]['value']}'" if options else "''"
@@ -1156,6 +1195,11 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
             return field['enum_values'][0]
         return f'Test {field["label"]}'
 
+    elif cat == 'decimal':
+        # Plain numeric-format string typed into the AppFieldText decimal
+        # input — same reasoning as prisma_value's 'decimal' branch (cmd_711f).
+        return '150.00'
+
     elif cat == 'entity_select':
         options = field.get('entity_options') or []
         return options[0]['label'] if options else ''
@@ -1210,6 +1254,10 @@ def cypress_edit_value(field: dict, entity_title: str) -> str:
         if enum_values:
             return enum_values[1] if len(enum_values) > 1 else enum_values[0]
         return f'Updated {field["label"]}'
+
+    elif cat == 'decimal':
+        # Distinct from cypress_create_value's 'decimal' value (cmd_711f).
+        return '250.00'
 
     elif cat == 'entity_select':
         options = field.get('entity_options') or []
@@ -1271,6 +1319,12 @@ def api_value(field: dict, entity_title: str) -> str:
         if field.get('enum_values'):
             return f"'{field['enum_values'][0]}'"
         return f"'Test {field['label']}'"
+
+    elif cat == 'decimal':
+        # Quoted decimal string literal — the API JSON contract for a
+        # Decimal field is a string too (cmd_705), same reasoning as
+        # prisma_value/cypress_create_value's 'decimal' branches (cmd_711f).
+        return "'150.00'"
 
     elif cat == 'entity_select':
         options = field.get('entity_options') or []
@@ -2942,7 +2996,9 @@ def spec_context(
             check_field_label = lbl
             check_field_value_1 = list_id_1
             check_field_updated = list_id_updated
-        elif prim_meta.get('category') == 'number':
+        elif prim_meta.get('category') in ('number', 'decimal'):
+            # 'decimal' (cmd_711f): same shape as 'number' — cypress_create_value/
+            # cypress_edit_value already return valid numeric-format strings for it.
             _first_val = cypress_create_value(prim_meta, title)   # '100'
             _edit_val  = cypress_edit_value(prim_meta, title)     # '200'
             list_id_1 = _first_val
