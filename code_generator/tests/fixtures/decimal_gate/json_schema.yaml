@@ -56,3 +56,36 @@ definitions:
       name: {}
       price: {}
       weight: {}
+
+  # cmd_711f: embeds decimal_gate_item both as a single-object many-to-one
+  # FK (primary_item) and as a to-many child list (lines) -- neither of
+  # decimal_gate_wrapper's own columns is Decimal. Exercises the relation-
+  # embed coverage gap decimal_display_columns (item's own fields, above)
+  # never covered: a Decimal column reached through an embedded relation.
+  decimal_gate_wrapper:
+    x-generate:
+      list: false
+      view: true
+      new: true
+      edit: true
+      delete: false
+      invalidate: false
+      api: true
+      test: false
+    x-relationships:
+      lines:
+        type: one-to-many
+        target: decimal_gate_item
+        labelField: name
+    fields:
+      name: {}
+      primary_item_id:
+        x-relationship: {}
+    required:
+      - lines
+    properties:
+      lines:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/decimal_gate_item"

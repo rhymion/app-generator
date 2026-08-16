@@ -29,6 +29,8 @@ model user {
   email    String @unique
   created_items decimal_gate_item[] @relation("DecimalGateItemCreator")
   updated_items decimal_gate_item[] @relation("DecimalGateItemUpdater")
+  created_wrappers decimal_gate_wrapper[] @relation("DecimalGateWrapperCreator")
+  updated_wrappers decimal_gate_wrapper[] @relation("DecimalGateWrapperUpdater")
 }
 
 // The one entity this fixture exists for: a minimal entity with both a
@@ -46,6 +48,36 @@ model decimal_gate_item {
   creator    user     @relation("DecimalGateItemCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user     @relation("DecimalGateItemUpdater", fields: [updater_id], references: [id])
+  wrapper_id String?
+  wrapper    decimal_gate_wrapper? @relation("DecimalGateWrapperLines", fields: [wrapper_id], references: [id])
+  primary_of decimal_gate_wrapper[] @relation("DecimalGateWrapperPrimaryItem")
   @@index([creator_id])
   @@index([updater_id])
+  @@index([wrapper_id])
+}
+
+// cmd_711f: a second entity that EMBEDS decimal_gate_item via a relation,
+// both as a single-object many-to-one FK (primary_item) and as a to-many
+// child list (lines). Neither of decimal_gate_wrapper's own columns is a
+// Decimal -- the coverage gap this entity exists to close is that
+// getters.ts.jinja2's decimal_display_columns only stringified an entity's
+// OWN scalar Decimal columns, never a Decimal column reached through an
+// embedded relation (see subtask_711b's discovery in proj_g: asn_line
+// embeds purchase_order_line, whose unit_price is Decimal; purchase_order
+// embeds a to-many list of purchase_order_line for the same reason).
+model decimal_gate_wrapper {
+  id              String            @id @default(cuid())
+  name            String
+  primary_item_id String
+  primary_item    decimal_gate_item @relation("DecimalGateWrapperPrimaryItem", fields: [primary_item_id], references: [id])
+  lines           decimal_gate_item[] @relation("DecimalGateWrapperLines")
+  created_at      DateTime          @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime          @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user              @relation("DecimalGateWrapperCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user              @relation("DecimalGateWrapperUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+  @@index([primary_item_id])
 }
