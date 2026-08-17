@@ -1,8 +1,8 @@
 // AUTO-GENERATED - DO NOT EDIT
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
-import prisma from '@/lib/prisma';
-{% if can_create %}
+{% if can_update or can_delete %}import prisma from '@/lib/prisma';
+{% endif %}{% if can_create %}
 import { add{{ parent_pascal }} } from '@/lib/{{ parent }}/service';
 {% endif %}
 {% if can_update or can_delete %}

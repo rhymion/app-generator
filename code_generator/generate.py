@@ -895,6 +895,19 @@ def generate(schema_path: str, output_dir: str) -> None:
         # --- actions.ts ---
         if can_new or can_edit or can_delete or can_invalidate:
             act_ctx = {**ctx, **actions_context(ctx)}
+            # uses_prisma: whether anything in this entity's rendered body
+            # (not just the static template branches) calls `prisma.` — the
+            # can_delete/has_commentable blocks in actions.ts.jinja2 are the
+            # common case, but per-entity injected content like upsert_body
+            # can also embed a raw prisma call (e.g. setting/user's
+            # ownership lookup), which a static condition can't see ahead of
+            # time. Render once with the import forced on to inspect the
+            # actual body, then render for real with the measured flag —
+            # avoids a dangling unused `import prisma` (cmd_735 lint finding)
+            # without having to enumerate every body-content code path.
+            _probe = _render(env, 'actions.ts.jinja2', {**act_ctx, 'uses_prisma': True})
+            _probe_sans_import = _probe.replace("import prisma from '@/lib/prisma';\n", '', 1)
+            act_ctx['uses_prisma'] = 'prisma.' in _probe_sans_import
             _write(lib_dir / 'actions.ts', _render(env, 'actions.ts.jinja2', act_ctx))
 
         # --- API routes ---
@@ -932,7 +945,12 @@ def generate(schema_path: str, output_dir: str) -> None:
             print(f'  Invalidate route → app/api/{parent}/[id]/actions/invalidate/')
 
         # --- column_def.tsx ---
-        has_children = bool(entity.get('children'))
+        # Use the filtered non_comment_ch (embedded_ch), not the raw entity
+        # children list — an entity whose only children are comment-type or
+        # otherwise filtered out has nothing for column_def_context() to loop
+        # over, leaving the unconditional GridColDef/useTranslations imports
+        # unused in the written file (cmd_735 lint finding).
+        has_children = bool(ctx['non_comment_ch'])
         if has_children and (can_view or can_edit):
             col_ctx = {**ctx, **column_def_context(ctx, schema)}
             _write(components_dir / 'column_def.tsx', _render(env, 'column_def.tsx.jinja2', col_ctx))

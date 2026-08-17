@@ -97,8 +97,11 @@ export default function ImageUpload({
       </label>
       {value && (
         <div style={{ marginTop: '8px' }}>
-          <img 
-            src={value} 
+          {/* value is an arbitrary uploaded-file URL of unknown origin/dimensions; next/image
+              needs a configured remote pattern and fixed dimensions, out of scope here. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={value}
             alt="Preview" 
             style={{ 
               maxWidth: '200px', 
