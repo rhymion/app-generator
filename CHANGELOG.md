@@ -256,6 +256,30 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   the code it tested; the two tests that cover `notify()`'s own DB write (success + swallowed write
   failure) were kept and updated for the `void` signature.
 
+### Security
+- **Value-level write lockdown for `x-approval` entities** (cmd_732): a value that
+  `on_approved.set_fields`/`on_rejected.set_fields` writes when an approval request is
+  approved or rejected (e.g. a `status` field's `approved`/`rejected` value) could
+  previously also be written directly by an ordinary user through the generated form, the
+  REST API, or CSV import — nothing stopped a create/update call from setting the field to
+  that value outright, bypassing the approval/rejection step entirely. `code_generator/
+  helpers/schema_helpers.py`'s new `derive_approval_locked_values()` derives, per entity
+  and per field, the exact value set declared by that entity's own `set_fields`; the
+  shared server-side validator (`service_validation.ts.jinja2`, the single path both the
+  Server Action and the REST route call) and the CSV import route
+  (`api_import_route.ts.jinja2`, which bypasses that shared validator and needed its own
+  copy of the same check) both now reject a client-submitted value from that set, while
+  still allowing a no-op resubmit of a record's own current value so routine edits to
+  other fields on an already-approved/rejected record are not blocked. The generated form
+  (`AppFieldSelect`) also disables the option in the UI, as a usability aid — the two
+  server-side checks are the actual safety boundary, not the disabled UI option. Coverage
+  is not uniform: which entity is fully protected (both `on_approved` and `on_rejected`
+  declare `set_fields`) versus only partially protected (just one of the two does) versus
+  not protected at all (neither does) depends entirely on that entity's own schema
+  declaration — this change does not itself change which entities declare what. An
+  already-generated consumer app only gains this protection after its next
+  `generate-code`.
+
 ### Added
 - **CSV export/import and approve/reject now accept `X-API-Key` as well as a browser session**
   (cmd_648): `api_export_route.ts.jinja2`, `api_import_route.ts.jinja2`,
