@@ -81,16 +81,34 @@ branches/PRs, closed/deleted after measurement):
   `README.md`, `README_ja.md`, `CHANGELOG.md`, `AGENTS.md`, `CLAUDE.md`,
   `LICENSE`. Exit 0 (docs-only) to skip, non-zero to build.
 - **`app-generator/vercel-ignore.json`** -- a tiny stub,
-  `{"ignoreCommand": "sh scripts/vercel-ignore-check.sh"}`. This is
-  the file each consumer's root actually needs.
-- **Each consumer repo's root gets a symlink**, `vercel.json ->
-  app-generator/vercel-ignore.json`, following the same "one canonical
-  copy + thin reference" pattern already used for the
-  `scripts/vercel-{setup,deploy,env,teardown}.sh` family (see
-  `docs/knowledge/vercel-deploy-scripts-canonical-source.md`) and for
-  `.claude/commands/investigate.md`. Not a byte-for-byte copy: a copy
-  would drift the same way those files did before cmd_711 consolidated
-  them.
+  `{"ignoreCommand": "sh scripts/vercel-ignore-check.sh"}`, kept here as
+  the readable single source of what each consumer's root file should
+  contain.
+- **Each consumer repo's root gets its own real `vercel.json` file**
+  with that exact content -- **not** a symlink. A symlink was tried
+  first (matching the "one canonical copy + thin reference" pattern
+  already used for the `scripts/vercel-{setup,deploy,env,teardown}.sh`
+  family, see `docs/knowledge/vercel-deploy-scripts-canonical-source.md`,
+  and for `.claude/commands/investigate.md`) and **measurably failed**:
+  every consumer PR's Vercel check went straight to `FAILURE` with an
+  empty target URL and no deployment record was ever created. Root
+  cause: Vercel reads `vercel.json` before/without a normal git
+  checkout (the entire point of `ignoreCommand` is to decide before
+  paying for a clone), almost certainly via a raw blob fetch rather
+  than a resolved working-tree read -- a symlink's blob content at that
+  path is the link-target string itself
+  (`app-generator/vercel-ignore.json`), not the JSON it points to, so
+  config validation fails closed immediately. Reproduced on a live PR
+  (app-template PR#69) and fixed by switching to a real file; the other
+  two consumer PRs were fixed the same way without needing to
+  re-reproduce. The `vercel-deploy-scripts-canonical-source.md` symlink
+  pattern still holds for files read during the already-cloned
+  build/execution phase (`vercel-deploy.sh` etc.) -- it just doesn't
+  extend to `vercel.json`'s pre-clone config discovery. This means the
+  three consumer copies are real duplicated content, not single-sourced
+  the way the rest of this design tries to be; the drift risk that
+  implies is worth someone revisiting if a fourth consumer is ever
+  added.
 - `app-generator/vercel.json` (the Root-Directory-scoped file) is
   **unchanged** -- `framework`/`buildCommand`/`regions` stay exactly as
   they were; `ignoreCommand` was never added there because it would
@@ -139,9 +157,10 @@ dashboard/API, no git file at all -- was also verified working, but
 the same 256-character cap forces it to run silent (no room for the
 diagnostic `echo` lines that make a wrong skip decision debuggable
 from the build log), and it isn't version-controlled or
-code-reviewable. The symlink-stub route was chosen over the dashboard
-route for that reason; the dashboard route remains available as a
-fallback if a future incident traces back to this stub file.
+code-reviewable. The per-consumer real-file stub route was chosen over
+the dashboard route for that reason; the dashboard route remains
+available as a fallback if a future incident traces back to this stub
+file.
 
 ## Evidence
 
