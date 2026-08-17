@@ -164,7 +164,38 @@ file.
 
 ## Evidence
 
-See `queue/reports/subtask_728_vercel_docs_only_ignore_command_ashigaru7.yaml`
-for the full probe deployment/run URL list (both directions, the
-fail-closed fresh-branch case, and the repo-wide `prj/**` visibility
-case).
+See the internal verification report for this design for the full probe
+deployment/run URL list (both directions, the fail-closed fresh-branch
+case, and the repo-wide `prj/**` visibility case).
+
+## Verification discipline: don't cancel a real PR's own deployment
+
+During this design's verification, a real-deployment check (confirming
+a build actually reaches the "Building" state, as proof the
+fail-closed path and the real-file fix both work) was carried out
+against one of the four real, non-disposable consumer PRs rather than
+against a disposable probe branch, and the running deployment was then
+manually canceled from the Vercel dashboard/API to save time. Because
+that PR was a real, still-open PR (not a throwaway probe), the
+cancellation left a permanent `FAILURE` ("Canceled from the Vercel
+Dashboard") on that PR's GitHub checks -- unlike a probe branch's
+deployments, which are simply discarded along with the disposable
+branch/PR itself. This was traced after the fact and fixed with a
+redeploy trigger. Three rules going forward:
+
+1. **Use a disposable probe branch for any check that requires a real
+   deployment to reach a specific state** (e.g. "Building", "Canceled
+   by Ignored Build Step"). Never drive a real, non-disposable PR's own
+   commit to that state for verification purposes.
+2. **If a real PR's own deployment is driven into a state that requires
+   canceling it anyway** (unavoidable exception), trigger a fresh
+   deployment for that same commit immediately afterward (a Vercel
+   dashboard/CLI redeploy, or -- only as a last resort -- an empty
+   commit/minor repush) so the PR's GitHub checks return to green (or
+   not-yet-run) *before* reporting the task complete. Do not leave a
+   real PR's checks in a permanently-canceled state.
+3. **When recording evidence, always state whether a given deployment
+   belongs to a disposable probe branch or to a real PR's own commit.**
+   Do not use the same shorthand (e.g. "status Building -> manual
+   cancel") for both cases -- the two carry very different consequences
+   and must be distinguishable after the fact.
