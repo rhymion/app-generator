@@ -6,6 +6,21 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Internal
+- **Added a docs-only Vercel build skip for the three consumer
+  projects (cmd_728).** `scripts/vercel-ignore-check.sh` (canonical
+  logic) + `vercel-ignore.json` (a tiny stub `ignoreCommand`) in this
+  repo; each consumer repo's root carries that same stub content as its
+  own real `vercel.json` file (a symlink was tried first and measurably
+  broke Vercel's config discovery — see the doc below). `ignoreCommand`
+  set inside this repo's own
+  `vercel.json` (Root-Directory-scoped, for the three Vercel projects)
+  is never read by Vercel — confirmed empirically across many probe
+  deployments — so a root-level file is required for this one key
+  specifically; `framework`/`buildCommand`/`regions` are unchanged
+  here and keep resolving as before. See
+  `docs/knowledge/vercel-docs-only-ignore-command.md` for the full
+  measured mechanics and why this deviates from a pure single-file
+  design.
 - **Added `concurrency` and a docs-only `detect-changes` gate to
   app-generator's own `.github/workflows/ci.yml` (cmd_725).**
   `concurrency: {group: ${{ github.workflow }}-${{ github.ref }},
