@@ -21,6 +21,32 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/vercel-docs-only-ignore-command.md` for the full
   measured mechanics and why this deviates from a pure single-file
   design.
+- **Added `concurrency` and a docs-only `detect-changes` gate to
+  app-generator's own `.github/workflows/ci.yml` (cmd_725).**
+  `concurrency: {group: ${{ github.workflow }}-${{ github.ref }},
+  cancel-in-progress: true}` cancels a superseded run on the same ref — a
+  public repo has no billed-minutes savings from this, only shorter queue
+  wait. `detect-changes` classifies each push/PR as docs-only or not via
+  `git diff` pathspec exclusion and gates only `e2e-tests` (the
+  dominant-cost job, ~57-60 min) via `needs:`+`if:` — not
+  `paths-ignore:`, so a skip shows up as "Skipped" in PR checks rather
+  than the check not existing at all. The other eight generator-specific
+  jobs (`lint`, `unit-tests`, `audit`, `audit-full-scope`, `pytest`,
+  `mention-gate-fixture`, `decimal-gate-fixture`,
+  `oto-mandatory-gate-fixture`) always run, as a safety net against a
+  path-judgment mistake. `docs/consumer-commands/**` is excluded from the
+  docs-only exemption (checked before, not folded into, the general
+  `docs/**` exclusion — git pathspec exclude has no re-include operator):
+  it is the canonical source distributed to every consumer's own CI/gate
+  definitions, not documentation about this repo, and a PR editing it
+  must still run this repo's own suite. `AGENTS.md` and
+  `.claude/commands/*.md` are excluded from the exemption for the same
+  reason (CLAUDE.md "Gate SoT Rule" — they carry this repo's own gate
+  definitions). A missing/unusable base commit (new branch, shallow
+  history) runs the full suite (fail-closed), never skips on "unknown."
+  `verify-canonical-ci` (cmd_723) stays consumer-side only — app-generator
+  is the canonical source itself, so there is nothing meaningful for it
+  to diff against locally.
 - **Added a machine-checked drift gate for the canonical consumer
   `.github/workflows/ci.yml` (cmd_723).** `docs/consumer-commands/ci.yml`
   is distributed to consumers as a plain copy (not a symlink — GitHub

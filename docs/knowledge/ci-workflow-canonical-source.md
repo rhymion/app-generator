@@ -6,8 +6,13 @@ generated from this generator (app-template / inventory-app /
 insurance-app). This repo's own `.github/workflows/ci.yml` is a
 **different, unrelated** workflow (it tests this generator's own
 `code_generator/` and root Node app — lint/unit-tests/audit/e2e-tests/
-pytest jobs, triggered on `[master, main]` only) and is not affected by
-this file.
+pytest jobs, triggered on `[master, main, develop]`) — the job content
+of the two files remains unrelated. As of cmd_725, though, this repo's
+own `detect-changes` job's path classification does treat this
+canonical file specially (see "Docs-only E2E skip — app-generator's own
+CI (cmd_725)" below): editing it must never be classified docs-only in
+*this* repo's own CI, even though it is not itself part of this repo's
+`e2e-tests` build.
 
 Before this canonicalization, the three consumer repos each carried
 their own independently-edited copy of the single-job `E2E Tests`
@@ -118,6 +123,73 @@ inventory-app and insurance-app (both private) have **not** received
 this copy yet, same reasoning as the concurrency change above — left
 as a follow-up so as not to burn their limited/newly-enabled Actions
 allotment as a side effect of this task.
+
+## Docs-only E2E skip — app-generator's own CI (cmd_725)
+
+Separate from the consumer-side gate documented above: this repo's own
+`.github/workflows/ci.yml` gained the same `concurrency` +
+`detect-changes`/`needs:`+`if:` shape (cmd_725), gating only its own
+`e2e-tests` job — `lint`/`unit-tests`/`audit`/`audit-full-scope`/
+`pytest`/`mention-gate-fixture`/`decimal-gate-fixture`/
+`oto-mandatory-gate-fixture` always run regardless of `docs_only`,
+both because `e2e-tests` is the dominant cost here too (~57-60 min,
+cmd_719) and as a safety net against a path-judgment mistake in this
+job.
+
+**This repo's exempt (docs-only) path list differs from the consumer
+list above in two ways:**
+
+1. **`docs/consumer-commands/**` is carved out — checked and excluded
+   from the exemption *before* the general `docs/**` exclusion, not
+   folded into it.** `docs/` in general is documentation about this
+   repo (safe to skip), but `docs/consumer-commands/` holds the
+   canonical CI/gate source distributed to every consumer's own
+   `.github/workflows/ci.yml` and `.claude/commands/{generate-schema,
+   update-code,update-component}.md` — editing it is a change to what
+   every consumer runs, not prose about this repo, so a PR touching it
+   must never be skipped here. This has to be a separate `git diff
+   --name-only ... -- docs/consumer-commands` check run *before* the
+   general exclusion, not a pathspec combining `':(exclude)docs/**'`
+   with a later positive `docs/consumer-commands/**` entry — git
+   pathspec exclude magic has no re-include operator; once a path
+   matches an `:(exclude)` pattern it is removed from the match set
+   regardless of what other (non-exclude) pathspecs are also given.
+   Verified empirically in a scratch repo before relying on it.
+2. **`AGENTS.md` is dropped from the exemption list** (present in the
+   consumer list). Unlike consumers, this repo's `AGENTS.md` carries
+   this repo's own gate definitions (CLAUDE.md "Gate SoT Rule" — the
+   `## Completion gate` section `.claude/commands/*.md` files point
+   to). `.claude/commands/*.md` was never in either list to begin
+   with, for the same reason — no code change was needed to exclude
+   it, only this note that it stays excluded on purpose.
+
+**Verification (cmd_725).** A same-shape local proof, run against a
+scratch repo mirroring this layout (`docs/knowledge/`,
+`docs/consumer-commands/ci.yml`, `AGENTS.md`, `.claude/commands/`,
+`.github/workflows/ci.yml`, run with both this job's actual script body
+and a without-the-carve-out counterfactual):
+
+| diff touches only… | with carve-out | without carve-out (counterfactual) |
+|---|---|---|
+| `docs/consumer-commands/ci.yml` | `docs_only=false` (correct — carve-out fires) | `docs_only=true` (**wrong** — the failure mode the carve-out prevents) |
+| `docs/knowledge/foo.md` | `docs_only=true` | `docs_only=true` |
+| `AGENTS.md` | `docs_only=false` | `docs_only=false` |
+| `.claude/commands/update-generator.md` | `docs_only=false` | `docs_only=false` |
+| `.github/workflows/ci.yml` itself | `docs_only=false` | `docs_only=false` |
+| no usable base commit (new branch) | `docs_only=false` (fail-closed) | (same check, untouched) |
+
+Live in real GitHub Actions: PR
+[#364](https://github.com/rhymion/app-generator/pull/364) (this task's
+own implementation commit, which itself touches `.github/workflows/
+ci.yml` and is therefore correctly classified non-docs-only) — all 9
+pre-existing jobs plus the new `detect-changes` job ran and passed,
+`e2e-tests` scheduled (not skipped). A live PR isolating *only* a
+canonical-file edit against this job (rather than the local proof
+above) needs `docs/consumer-commands/**`'s carve-out to already be on
+`develop`, because `pull_request` only triggers for
+`branches: [master, main, develop]` — a PR against a feature branch
+never runs this workflow at all, so that specific isolation has to
+wait until after this PR merges.
 
 ## Drift check (cmd_723)
 

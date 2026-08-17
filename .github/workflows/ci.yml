@@ -6,7 +6,82 @@ on:
   pull_request:
     branches: [master, main, develop]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  detect-changes:
+    name: Detect docs-only change
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.check.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Classify this diff as docs-only or not (machine-checked path judgment)
+        # Path-based, not a human "this is docs-only" claim in the commit
+        # message or PR text (cmd_498: "a condition the machine doesn't see
+        # is a hole, not an exemption"). Only e2e-tests below is gated on
+        # this job's output via needs:+if: (cmd_725: lint/unit-tests/audit/
+        # audit-full-scope/pytest/mention-gate-fixture/decimal-gate-fixture/
+        # oto-mandatory-gate-fixture keep running unconditionally — e2e-tests
+        # is the dominant cost (~57-60 min per cmd_719) and the other eight
+        # stay as a safety net against a path-judgment mistake here). Not a
+        # top-level `paths-ignore:` trigger filter — that would make the
+        # workflow (and its checks) not run at all for a docs-only push/PR,
+        # indistinguishable in the PR Checks list from the check never
+        # having existed. Gating the job instead makes it show up as
+        # "Skipped" — visible, not silently absent.
+        #
+        # This repo's docs/ tree is not all documentation: docs/consumer-
+        # commands/ holds the canonical source distributed to every
+        # consumer repo's own CI workflow and gate definitions (ci.yml,
+        # generate-schema.md, update-code.md, update-component.md) — editing
+        # it is a change to what every consumer runs, not prose about this
+        # repo. So it is checked and excluded from the docs-only exemption
+        # BEFORE the general docs/** exclusion below, not folded into it:
+        # git pathspec exclude magic has no re-include operator (a later
+        # positive pathspec cannot carve a path back out of an earlier
+        # ':(exclude)docs/**' — verified empirically, exclude always wins),
+        # so a single combined pathspec list cannot express "docs/** except
+        # docs/consumer-commands/**". AGENTS.md and .claude/commands/*.md
+        # are excluded from this repo's exemption list for the same
+        # reason — they carry this repo's own gate definitions (CLAUDE.md
+        # "Gate SoT Rule") — but need no separate check: unlike
+        # docs/consumer-commands/**, they were never added to the exclude
+        # list below in the first place, so a change to either already
+        # falls outside every ':(exclude)' pattern and is counted as a
+        # real (non-docs) change by the general check on its own.
+        id: check
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          if [ -z "${BASE:-}" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BASE" 2>/dev/null; then
+            echo "No usable base commit (new branch or shallow history) — running the full suite (fail-closed)."
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "$(git diff --name-only "$BASE" HEAD -- docs/consumer-commands)" ]; then
+            echo "docs/consumer-commands/** changed — this is the canonical source distributed to consumers, not docs-only."
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --quiet "$BASE" HEAD -- . \
+              ':(exclude)docs/**' \
+              ':(exclude)README.md' ':(exclude)README_ja.md' \
+              ':(exclude)CHANGELOG.md' ':(exclude)CLAUDE.md' \
+              ':(exclude)LICENSE'; then
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          fi
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -119,6 +194,8 @@ jobs:
 
   e2e-tests:
     name: E2E Tests
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     env:
       NODE_ENV: test
