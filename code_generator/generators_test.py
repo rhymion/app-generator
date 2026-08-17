@@ -136,6 +136,7 @@ from helpers.schema_helpers import (
     get_entity_properties,
     get_entity_required,
     get_self_only_flags,
+    derive_approval_locked_values,
 )
 from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import (
@@ -1242,15 +1243,23 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
     return ''  # autocomplete
 
 
-def cypress_edit_value(field: dict, entity_title: str) -> str:
-    """Generate a Cypress edit (updated) value."""
+def cypress_edit_value(field: dict, entity_title: str, approval_locked_values: dict | None = None) -> str:
+    """Generate a Cypress edit (updated) value.
+
+    approval_locked_values (field -> locked values, from
+    derive_approval_locked_values): an enum/string_enum field's edit value
+    must never be picked from this set. Those values are approval/
+    rejection-workflow-only; a generated spec that wrote one directly would
+    fabricate an approved/rejected record the workflow never produced.
+    """
     cat = field['category']
     prop_name = field['prop_name']
+    _locked = set((approval_locked_values or {}).get(prop_name) or [])
 
     if cat == 'text':
         if prop_name == 'name':
             return f'Updated {entity_title}'
-        enum_values = field.get('enum_values')
+        enum_values = [v for v in (field.get('enum_values') or []) if v not in _locked]
         if enum_values:
             return enum_values[1] if len(enum_values) > 1 else enum_values[0]
         return f'Updated {field["label"]}'
@@ -1266,7 +1275,7 @@ def cypress_edit_value(field: dict, entity_title: str) -> str:
         return options[0]['label'] if options else ''
 
     elif cat in ('enum', 'string_enum'):
-        values = [v for v in (field.get('enum_values') or []) if v is not None]
+        values = [v for v in (field.get('enum_values') or []) if v is not None and v not in _locked]
         raw = values[1] if len(values) > 1 else (values[0] if values else None)
         if raw is None:
             return ''
@@ -2683,6 +2692,8 @@ def spec_context(
     if not parent_def or not parent_def.get('properties'):
         return {}
 
+    _approval_locked_values = derive_approval_locked_values(parent_def)
+
     title = to_title_case(parent)
     pascal = to_pascal_case(parent)
     properties = filter_fields(parent_def['properties'], generate_config.get('fields'))
@@ -2978,12 +2989,25 @@ def spec_context(
             check_field_updated = second_label
         elif prim_meta.get('category') == 'enum':
             # Integer enum primary (e.g. plan.tier = [free, premium, vip])
-            raw_vals = [str(v) for v in (prim_meta.get('enum_values') or [])]
+            _raw_enum_values = prim_meta.get('enum_values') or []
+            raw_vals = [str(v) for v in _raw_enum_values]
             prim_prop = prim_meta.get('prop_name', prim or '')
             if _messages_fields:
                 enum_labels = [_messages_fields.get(f'{prim_prop}_{v}', v) for v in raw_vals]
             else:
                 enum_labels = raw_vals
+            # Approval-locked values (workflow-only) are never picked as a
+            # generated test's create/edit value -- neither by direct value
+            # match nor by ordinal position (unlabeled int-enum resolves a
+            # set_fields label to its index; see derive_approval_locked_values).
+            _prim_locked = set(_approval_locked_values.get(prim_prop) or [])
+            _prim_unlocked_idx = [
+                i for i, v in enumerate(_raw_enum_values)
+                if i not in _prim_locked and v not in _prim_locked
+            ]
+            if _prim_unlocked_idx:
+                raw_vals = [raw_vals[i] for i in _prim_unlocked_idx]
+                enum_labels = [enum_labels[i] for i in _prim_unlocked_idx]
             list_id_1 = enum_labels[0] if enum_labels else f'Test {lbl} 1'
             list_id_is_unique = False
             after_create_id = enum_labels[0] if enum_labels else f'Test {lbl}'
@@ -3300,7 +3324,9 @@ def spec_context(
             None,
         )
         if first_opt is not None:
-            edit_fill_cmd_3_3 = gen_fill_command(first_opt, cypress_edit_value(first_opt, title), '        ')
+            edit_fill_cmd_3_3 = gen_fill_command(
+                first_opt, cypress_edit_value(first_opt, title, _approval_locked_values), '        ',
+            )
 
     # Section 5.1: fill all required fields except one
     fail_create_5_1 = None

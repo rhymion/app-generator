@@ -6,6 +6,73 @@ _DATE_FORMATS = frozenset({'date', 'date-time', 'time'})
 _SYSTEM_FIELDS = frozenset({'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'})
 
 
+def _get_actual_type(defn: dict) -> str | None:
+    t = defn.get('type')
+    if isinstance(t, list):
+        return next((x for x in t if x != 'null'), None)
+    return t
+
+
+def resolve_set_fields(entity_props: dict, raw: dict) -> dict:
+    """Resolve an x-approval set_fields {field: value} map to the values the
+    write actually persists — legacy int-enum labels resolve to their
+    ordinal; every other field passes through unchanged. Shared by the
+    approval/rejection dispatch context builder and the value-lockdown
+    derivation below, so both agree on the exact value a set_fields entry
+    writes.
+    """
+    resolved = {}
+    for field, value in raw.items():
+        prop_def = entity_props.get(field, {})
+        actual = _get_actual_type(prop_def)
+        enum_vals = prop_def.get('enum')
+        if actual in ('integer', 'number') and isinstance(enum_vals, list) and isinstance(value, str):
+            lower_labels = [str(v).lower() for v in enum_vals]
+            if value.lower() not in lower_labels:
+                raise ValueError(
+                    f"set_fields: label '{value}' not found in enum {enum_vals} "
+                    f"for field '{field}'"
+                )
+            resolved[field] = lower_labels.index(value.lower())
+        else:
+            resolved[field] = value
+    return resolved
+
+
+def derive_approval_locked_values(model_def: dict) -> dict[str, list]:
+    """Per x-approval entity, the set of (field, value) pairs only the
+    approval/rejection mechanism may write — collected from
+    on_approved.set_fields and on_rejected.set_fields. No new schema key:
+    derived from the set_fields mappings that already describe what the
+    approval/rejection hooks write.
+
+    Field-scoped, not entity-wide: locking a field's whole range would also
+    block values an ordinary create needs (e.g. the initial pending
+    value) — only the specific values that appear in set_fields are
+    locked. Not bundled across entities either — a value that is
+    approval-only on one entity may be an ordinary user-writable value on
+    another.
+
+    Returns {} for entities without x-approval, or where both hooks have
+    empty/absent set_fields — those entities are unprotected by this
+    mechanism. Callers must treat an empty result as "unprotected", not as
+    "nothing to protect here".
+    """
+    x_approval = model_def.get('x-approval')
+    if not x_approval:
+        return {}
+    entity_props = model_def.get('properties', {})
+    locked: dict[str, list] = {}
+    for stage in ('on_approved', 'on_rejected'):
+        raw = (x_approval.get(stage) or {}).get('set_fields') or {}
+        resolved = resolve_set_fields(entity_props, raw)
+        for field, value in resolved.items():
+            values = locked.setdefault(field, [])
+            if value not in values:
+                values.append(value)
+    return locked
+
+
 def is_string_prop(prop: dict) -> bool:
     t = prop.get('type')
     if isinstance(t, str):

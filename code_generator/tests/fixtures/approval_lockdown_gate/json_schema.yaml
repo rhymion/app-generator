@@ -1,0 +1,77 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+format-version: 3.0
+
+x-generator:
+  search:
+    default_scope: all
+
+x-pii:
+  type: string
+  enum: [direct, indirect, sensitive, none]
+
+x-retention:
+  type: string
+
+x-gdpr-mode:
+  type: string
+  enum: [internal, consumer, both]
+  default: both
+
+x-import-key:
+  type: array
+  items:
+    type: string
+
+definitions:
+  user:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name: {}
+      email: {}
+
+  # The one entity this fixture exists for: a nativeEnum status field with
+  # x-approval.on_approved/on_rejected.set_fields declared on it. Exercises
+  # the full value-level lockdown path -- derive_approval_locked_values,
+  # the screen's disabled-option rendering, service_validation.ts's
+  # create/update check, and api_import_route.ts.jinja2's CSV create/update
+  # check -- through the real build_user_schema.py -> generate.py -> tsc
+  # pipeline. This repo's own json_schema.yaml declares no x-approval
+  # entity, so test:e2e:build's own tsc pass never compiles any of these
+  # branches; a regression in any of them would otherwise only ever surface
+  # in a downstream consumer schema, late. Mirrors decimal_gate/mention_gate.
+  approval_lockdown_gate_item:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: false
+      invalidate: false
+      api: true
+      test: false
+    x-import-key:
+      - name
+    x-approval:
+      on_approved:
+        set_fields:
+          status: active
+      on_rejected:
+        set_fields:
+          status: released
+    fields:
+      name: {}
+      status:
+        enum:
+          - pending
+          - active
+          - released
+          - rejected
+        default: pending

@@ -106,14 +106,15 @@ def _native_enum_key(v) -> str:
     return s[0].lower() + s[1:] if s else s
 
 
-def _int_enum_option(v, i: int) -> str:
+def _int_enum_option(v, i: int, disabled: bool = False) -> str:
+    _suffix = ', disabled: true' if disabled else ''
     if isinstance(v, (int, float)):
-        return f"{{ value: {int(v)}, label: '{v}' }}"
+        return f"{{ value: {int(v)}, label: '{v}'{_suffix} }}"
     try:
         float(str(v))
-        return f"{{ value: {v}, label: '{v}' }}"
+        return f"{{ value: {v}, label: '{v}'{_suffix} }}"
     except ValueError:
-        return f"{{ value: {i}, label: '{v}' }}"
+        return f"{{ value: {i}, label: '{v}'{_suffix} }}"
 
 
 def _readonly_display_field(
@@ -3037,6 +3038,13 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # create via native "please fill out this field" validation since the field is never
     # user-fillable per x-readonly's documented contract).
     readonly_field_names: set[str] = set(ctx.get('readonly_fields') or [])
+    # Value-level lockdown (x-approval entities): per field, the values only
+    # the approval/rejection mechanism may write. Used below to render the
+    # approval-only options as present-but-disabled in enum selects, so an
+    # already-approved/rejected record's current value still displays
+    # instead of the field going blank, while ordinary create/edit can never
+    # newly select it.
+    approval_locked_values: dict = ctx.get('approval_locked_values') or {}
 
     parent_rels_raw = [
         r for r in parent_rels_raw
@@ -3416,6 +3424,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         # even when the schema doesn't list it (cmd_472/R-2; see
         # validation_context._is_select_like).
         req       = p in (model_def.get('required') or []) or not _is_nullable(prop)
+        _locked_vals = set(approval_locked_values.get(p) or [])
 
         if ns and ns not in enum_ns_set:
             enum_ns_set.add(ns)
@@ -3423,12 +3432,18 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
         if ns:
             opts = ', '.join(
-                (f"{{ value: {(v if isinstance(v, (int, float)) else (i if not str(v).lstrip('-').isdigit() else int(v)))}, "
-                 f"label: t{ns}('{(v.lower()[0]+v[1:] if isinstance(v,str) and not str(v).lstrip('-').isdigit() else str(v))}') }}")
+                (lambda _resolved: (
+                    f"{{ value: {_resolved}, "
+                    f"label: t{ns}('{(v.lower()[0]+v[1:] if isinstance(v,str) and not str(v).lstrip('-').isdigit() else str(v))}')"
+                    f"{', disabled: true' if _resolved in _locked_vals else ''} }}"
+                ))(v if isinstance(v, (int, float)) else (i if not str(v).lstrip('-').isdigit() else int(v)))
                 for i, v in enumerate(enum_vals)
             )
         else:
-            opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(enum_vals))
+            opts = ', '.join(
+                _int_enum_option(v, i, disabled=(v if isinstance(v, (int, float)) else i) in _locked_vals)
+                for i, v in enumerate(enum_vals)
+            )
         enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
 
         _enum_int_width_cols = _ui_width_cols(prop)
@@ -3458,17 +3473,22 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         # keeps it out of json_schema `required:`.
         req       = p in (model_def.get('required') or []) or not _is_nullable(prop)
         native_ns = _native_enum_ns(prop)
+        _locked_vals = set(approval_locked_values.get(p) or [])
 
         if native_ns:
             if native_ns not in enum_ns_set:
                 enum_ns_set.add(native_ns)
                 enum_ns_hooks.append(f"  const t{native_ns} = useTranslations('{native_ns}');")
             opts = ', '.join(
-                f"{{ value: '{v}', label: t{native_ns}('{_native_enum_key(v)}') }}"
+                f"{{ value: '{v}', label: t{native_ns}('{_native_enum_key(v)}')"
+                f"{', disabled: true' if v in _locked_vals else ''} }}"
                 for v in enum_vals
             )
         else:
-            opts = ', '.join(f"{{ value: '{v}', label: '{v}' }}" for v in enum_vals)
+            opts = ', '.join(
+                f"{{ value: '{v}', label: '{v}'{', disabled: true' if v in _locked_vals else ''} }}"
+                for v in enum_vals
+            )
         enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
 
         _enum_str_width_cols = _ui_width_cols(prop)
