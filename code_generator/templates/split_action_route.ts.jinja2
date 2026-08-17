@@ -290,7 +290,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             // `part.inventory_id ?? parent.inventory_id` — the child must
             // never inherit the parent's inventory_id (auto-allocate can
             // span multiple lots, so a single inherited id would be wrong).
+            {% if f in per_part_required_mandatory %}
+            // cmd_734: {{ f }} is schema-required (non-nullable column) —
+            // the per_part_required_mandatory check above already threw a
+            // 400 for any part missing it, before this transaction started,
+            // so `_childInventoryId` is guaranteed defined here. TypeScript
+            // can't see across that earlier loop, so this cast documents
+            // (not creates) the guarantee — `?? null` would violate the
+            // column's NOT NULL type instead.
+            {{ f }}: _childInventoryId as string,
+            {% else %}
             {{ f }}: _childInventoryId ?? null,
+            {% endif %}
             {% else %}
             {{ f }}: part.{{ f }} ?? parent.{{ f }},
             {% endif %}

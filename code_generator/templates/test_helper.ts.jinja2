@@ -182,6 +182,54 @@ async function _create{{ pascal }}BaseDeps() {
 {% endif %}
 {% endif %}
 {% endfor %}
+{% if reservation_nolines_pool_seed %}
+{% if reservation_nolines_pool_seed.existing_dep_var %}
+  // cmd_734 single-lot pattern (request.criteria: {id: <field>}): the pool
+  // dep this entity's own FK already created above needs enough quantity
+  // for the generated Create tests' default quantity_reserved to clear
+  // InsufficientPoolCapacityError (see helper_context()'s
+  // reservation_nolines_pool_seed — has_self_ref_deps entities build their
+  // deps in this function, not the non-self-ref populateDependencies body).
+  await prisma.{{ reservation_nolines_pool_seed.pool_entity }}.update({
+    where: { id: {{ reservation_nolines_pool_seed.existing_dep_var }}.id },
+    data: { {{ reservation_nolines_pool_seed.pool_qty_field }}: 100 },
+  });
+{% else %}
+{% for dep in reservation_nolines_pool_seed.pool_extra_deps %}
+{% for b in dep.bridge_otos %}
+  const {{ dep.var_name }}{{ b.var_name | pascal_case }} = await prisma.{{ b.target }}.create({ data: {{ b.create_data }} });
+{% endfor %}
+  const {{ dep.var_name }} = await prisma.{{ dep.target }}.create({
+    data: {
+{% for b in dep.bridge_otos %}
+      {{ b.prop_name }}: {{ dep.var_name }}{{ b.var_name | pascal_case }}.id,
+{% endfor %}
+{% for fk in dep.fk_deps %}
+      {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
+{% endfor %}
+{% for ef in dep.extra_required_fields %}
+      {{ ef.prop_name }}: {{ ef.prisma_val }},
+{% endfor %}
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+{% endfor %}
+  await prisma.{{ reservation_nolines_pool_seed.pool_entity }}.create({
+    data: {
+{% if reservation_nolines_pool_seed.has_name %}
+      name: 'Test {{ reservation_nolines_pool_seed.pool_title }}',
+{% endif %}
+{% for fk in reservation_nolines_pool_seed.pool_extra_fk_props %}
+      {{ fk.prop_name }}: {{ fk.dep_var_name }}.id,
+{% endfor %}
+      {{ reservation_nolines_pool_seed.pool_qty_field }}: 100,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+    },
+  });
+{% endif %}
+{% endif %}
   return JSON.parse(JSON.stringify({ {{ non_self_deps_return }} }));
 {% endif %}
 }
@@ -449,6 +497,17 @@ export async function populate{{ pascal }}Dependencies() {
   });
 {% endif %}
 {% if reservation_nolines_pool_seed %}
+{% if reservation_nolines_pool_seed.existing_dep_var %}
+  // cmd_734 single-lot pattern (request.criteria: {id: <field>}): the pool
+  // dep this entity's own FK already created above (not a freestanding
+  // extra row — see helper_context()'s reservation_nolines_pool_seed) needs
+  // enough quantity for the generated Create tests' default
+  // quantity_reserved to clear InsufficientPoolCapacityError.
+  await prisma.{{ reservation_nolines_pool_seed.pool_entity }}.update({
+    where: { id: {{ reservation_nolines_pool_seed.existing_dep_var }}.id },
+    data: { {{ reservation_nolines_pool_seed.pool_qty_field }}: 100 },
+  });
+{% else %}
 {% for dep in reservation_nolines_pool_seed.pool_extra_deps %}
 {% for b in dep.bridge_otos %}
   const {{ dep.var_name }}{{ b.var_name | pascal_case }} = await prisma.{{ b.target }}.create({ data: {{ b.create_data }} });
@@ -482,6 +541,7 @@ export async function populate{{ pascal }}Dependencies() {
       updater_id: testUser.id,
     },
   });
+{% endif %}
 {% endif %}
   return { {{ deps_return }} };
 {% endif %}
