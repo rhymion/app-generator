@@ -1046,7 +1046,9 @@ export async function setup{{ pascal }}OrderedApprovalFlow() {
 }
 
 export async function populate{{ pascal }}WithRejectedApproval(creatorId: string, approvalFlowIds: string[]) {
+{% if ua_dep_fields %}
   const testUser = await getTestUser();
+{% endif %}
 {% if needs_deps_in_populate %}
   const deps = await populate{{ pascal }}Dependencies();
 {% endif %}
@@ -1092,7 +1094,9 @@ export async function populate{{ pascal }}WithRejectedApproval(creatorId: string
 }
 
 export async function populate{{ pascal }}WithTerminalRejectedApproval(creatorId: string, approvalFlowIds: string[]) {
+{% if ua_dep_fields %}
   const testUser = await getTestUser();
+{% endif %}
 {% if needs_deps_in_populate %}
   const deps = await populate{{ pascal }}Dependencies();
 {% endif %}
@@ -1135,7 +1139,9 @@ export async function populate{{ pascal }}WithTerminalRejectedApproval(creatorId
 }
 
 export async function populate{{ pascal }}WithApproval(creatorId: string, approvalFlowIds: string[], overrides: Record<string, any> = {}) {
+{% if ua_dep_fields %}
   const testUser = await getTestUser();
+{% endif %}
 {% if needs_deps_in_populate %}
   const deps = await populate{{ pascal }}Dependencies();
 {% endif %}

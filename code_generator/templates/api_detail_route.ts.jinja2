@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
-import prisma from '@/lib/prisma';
-{% if can_view %}
+{% if (can_view and comment_has_mention) or can_update or can_delete %}import prisma from '@/lib/prisma';
+{% endif %}{% if can_view %}
 import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
 {% endif %}
 {% if can_view and comment_has_mention %}

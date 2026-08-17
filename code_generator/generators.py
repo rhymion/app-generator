@@ -2415,8 +2415,12 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     utility_code = (
         f"import prisma from '@/lib/prisma';\n"
         + (f"import {{ Prisma }} from '@/app/generated/prisma/client';\n" if has_item_reservation or can_create or can_update else '')
-        + f"import {{ normalizeValue,{' normalizeChildRefs,' if has_non_comment_ch else ''}"
-        f"{' assertNotStale,' if can_update else ''} type NormalizedSnapshot }} from '@/lib/normalize';"
+        + (
+            f"import {{ {'normalizeValue, ' if can_update else ''}"
+            f"{'normalizeChildRefs, ' if has_non_comment_ch else ''}"
+            f"{'assertNotStale, type NormalizedSnapshot' if can_update else ''} }} from '@/lib/normalize';"
+            if (can_update or has_non_comment_ch) else ''
+        )
         + (
             "\nimport { "
             + ', '.join(filter(None, [
@@ -2436,24 +2440,33 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/getters_associated';" if should_filter_by_org and (can_create or can_update) else '')
         + (f"\nimport {{ AppError, p2002Field }} from '@/lib/_errors';" if can_create or can_update else '')
         + (f"\nimport {{ getModelPermissions }} from '@/lib/authz';" if server_value_override_fields and can_create else '')
-        + insufficient_inventory_error_class +
-        f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'{_pool_entity_pick}>;\n\n"
-        f"function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {{\n"
-        f"  const safeSnapshot = (snapshot ?? {{}}) as Record<string, unknown>;\n"
-        f"  return {{\n"
-        f"    id: String(safeSnapshot.id ?? ''),\n"
-        f"{snapshot_field_mappings}"
-        + (f"\n{snapshot_child_mappings}" if snapshot_child_mappings else '') +
-        f"\n  }};\n}}\n\n"
-        f"async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<NormalizedSnapshot | null> {{\n"
-        f"  const current = await tx.{model}.findUnique({{\n"
-        f"    where: {{ id }}{snapshot_include_props}\n"
-        f"  }});\n\n"
-        f"  if (!current) {{\n"
-        f"    return null;\n"
-        f"  }}\n\n"
-        f"  return normalizeSnapshot(current as Record<string, unknown>);\n"
-        f"}}"
+        + insufficient_inventory_error_class
+        # TransactionClient/normalizeSnapshot/getCurrentSnapshot exist solely
+        # to support update{{parent}}'s assertNotStale staleness check —
+        # defining them unconditionally left all three unused (dangling
+        # NormalizedSnapshot import too) when can_update is false, e.g.
+        # x-splittable entities that mutate only via their split action
+        # (lint finding).
+        + (
+            f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'{_pool_entity_pick}>;\n\n"
+            f"function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {{\n"
+            f"  const safeSnapshot = (snapshot ?? {{}}) as Record<string, unknown>;\n"
+            f"  return {{\n"
+            f"    id: String(safeSnapshot.id ?? ''),\n"
+            f"{snapshot_field_mappings}"
+            + (f"\n{snapshot_child_mappings}" if snapshot_child_mappings else '') +
+            f"\n  }};\n}}\n\n"
+            f"async function getCurrentSnapshot(tx: TransactionClient, id: string): Promise<NormalizedSnapshot | null> {{\n"
+            f"  const current = await tx.{model}.findUnique({{\n"
+            f"    where: {{ id }}{snapshot_include_props}\n"
+            f"  }});\n\n"
+            f"  if (!current) {{\n"
+            f"    return null;\n"
+            f"  }}\n\n"
+            f"  return normalizeSnapshot(current as Record<string, unknown>);\n"
+            f"}}"
+            if can_update else ''
+        )
     )
 
     return {
@@ -4497,6 +4510,21 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     #   - initial{Xxx}s   : Xxx[] (limited initial set fetched server-side)
     #   - search{Xxx}Options : (query, includeIds) => Promise<Xxx[]>
     # The page server-fetches both and passes them as props.
+    # selection_targets (ctx-level, built in build_context.py's
+    # _get_selection_targets()) is computed from the UNFILTERED
+    # parent_rels_raw, so a target reachable *only* through a readonly FK
+    # (e.g. x-splittable's self-referencing parent_{{model}}_id, excluded
+    # above from the editable parent_rels_raw/selector_oto_rels) still ends
+    # up here — the resulting initial{Xxx}s/search{Xxx}Options props are
+    # then never referenced by the (correctly readonly-excluding) field JSX
+    # below, leaving them unused (lint finding). Drop a target only
+    # when every many-to-one relation naming it is readonly and no
+    # surviving (non-readonly) parent_rels_raw/selector_oto_rels entry
+    # reaches it either — i.e. it has no other, still-editable path in.
+    _readonly_rel_targets = {rel['target'] for _pn, rel in rel_by_prop.items() if _pn in readonly_field_names}
+    _editable_rel_targets = {r['target'] for r in parent_rels_raw} | {r['target'] for r in selector_oto_rels}
+    _readonly_only_targets = _readonly_rel_targets - _editable_rel_targets
+    selection_targets = [t for t in selection_targets if t not in _readonly_only_targets]
     _all_targets = list(selection_targets) + [r['target'] for r in selector_oto_rels]
     # Dedupe while preserving order
     _seen: set[str] = set()

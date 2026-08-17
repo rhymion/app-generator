@@ -82,7 +82,13 @@ export function SplitActionSection({
   {% if f.is_relation %}
   useEffect(() => {
     search{{ pascal_name }}{{ f.field | pascal_case }}Options('', []).then(set{{ f.field | pascal_case }}Options);
+    {% if f.context_fields %}
   }, [search{{ pascal_name }}{{ f.field | pascal_case }}Options]);
+    {% else %}
+    {# module-scope function (not useCallback-wrapped) — a stable outer-scope
+       reference is not a valid dep (react-hooks/exhaustive-deps). #}
+  }, []);
+    {% endif %}
   {% endif %}
   {% endfor %}
 

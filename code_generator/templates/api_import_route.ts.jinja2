@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Papa from 'papaparse';
 import prisma from '@/lib/prisma';
-import { getModelPermissions, assertPermission, canAccess } from '@/lib/authz';
+import { getModelPermissions, assertPermission{% if import_can_update and not is_self_only %}, canAccess{% endif %} } from '@/lib/authz';
 import { handleApiError, resolveActorId } from '@/lib/api-auth';
 import { unescapeImportValue } from '@/lib/_csv';
 import { generateImportToken, verifyImportToken } from '@/lib/_import';

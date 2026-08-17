@@ -15,8 +15,8 @@ import { {{ invalidate_handler }} } from '@/{{ invalidate_module }}';
 import { invalidate{{ parent_pascal }} as _invalidate{{ parent_pascal }}Stub } from '@/lib/{{ parent }}/invalidate_handler';
 {% endif %}
 {% endif %}
-import prisma from '@/lib/prisma';
-{% if comment_actions_code %}import { notify } from '@/lib/_notifier';
+{% if uses_prisma %}import prisma from '@/lib/prisma';
+{% endif %}{% if comment_actions_code %}import { notify } from '@/lib/_notifier';
 {% endif %}{% if comment_has_mention %}import { extractMentionedUserIds } from '@/lib/mention/parser';
 {% endif %}{% if has_commentable %}import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 import type { CommentReactionSummary } from './types';
