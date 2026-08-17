@@ -903,7 +903,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             # ownership lookup), which a static condition can't see ahead of
             # time. Render once with the import forced on to inspect the
             # actual body, then render for real with the measured flag —
-            # avoids a dangling unused `import prisma` (cmd_735 lint finding)
+            # avoids a dangling unused `import prisma` (lint finding)
             # without having to enumerate every body-content code path.
             _probe = _render(env, 'actions.ts.jinja2', {**act_ctx, 'uses_prisma': True})
             _probe_sans_import = _probe.replace("import prisma from '@/lib/prisma';\n", '', 1)
@@ -949,7 +949,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         # children list — an entity whose only children are comment-type or
         # otherwise filtered out has nothing for column_def_context() to loop
         # over, leaving the unconditional GridColDef/useTranslations imports
-        # unused in the written file (cmd_735 lint finding).
+        # unused in the written file (lint finding).
         has_children = bool(ctx['non_comment_ch'])
         if has_children and (can_view or can_edit):
             col_ctx = {**ctx, **column_def_context(ctx, schema)}

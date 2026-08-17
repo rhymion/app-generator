@@ -2446,7 +2446,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         # defining them unconditionally left all three unused (dangling
         # NormalizedSnapshot import too) when can_update is false, e.g.
         # x-splittable entities that mutate only via their split action
-        # (cmd_735 lint finding).
+        # (lint finding).
         + (
             f"\n\ntype TransactionClient = Pick<typeof prisma, '{model}'{_pool_entity_pick}>;\n\n"
             f"function normalizeSnapshot(snapshot: Record<string, unknown> | null | undefined): NormalizedSnapshot {{\n"
@@ -4517,7 +4517,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # above from the editable parent_rels_raw/selector_oto_rels) still ends
     # up here — the resulting initial{Xxx}s/search{Xxx}Options props are
     # then never referenced by the (correctly readonly-excluding) field JSX
-    # below, leaving them unused (cmd_735 lint finding). Drop a target only
+    # below, leaving them unused (lint finding). Drop a target only
     # when every many-to-one relation naming it is readonly and no
     # surviving (non-readonly) parent_rels_raw/selector_oto_rels entry
     # reaches it either — i.e. it has no other, still-editable path in.

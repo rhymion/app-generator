@@ -86,7 +86,7 @@ export function SplitActionSection({
   }, [search{{ pascal_name }}{{ f.field | pascal_case }}Options]);
     {% else %}
     {# module-scope function (not useCallback-wrapped) — a stable outer-scope
-       reference is not a valid dep (react-hooks/exhaustive-deps, cmd_735). #}
+       reference is not a valid dep (react-hooks/exhaustive-deps). #}
   }, []);
     {% endif %}
   {% endif %}
