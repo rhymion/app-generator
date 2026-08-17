@@ -26,9 +26,10 @@ jobs:
         # is a hole, not an exemption"). Only e2e-tests below is gated on
         # this job's output via needs:+if: (cmd_725: lint/unit-tests/audit/
         # audit-full-scope/pytest/mention-gate-fixture/decimal-gate-fixture/
-        # oto-mandatory-gate-fixture keep running unconditionally — e2e-tests
-        # is the dominant cost (~57-60 min per cmd_719) and the other eight
-        # stay as a safety net against a path-judgment mistake here). Not a
+        # oto-mandatory-gate-fixture/approval-lockdown-gate-fixture keep
+        # running unconditionally — e2e-tests is the dominant cost (~57-60
+        # min per cmd_719) and the other nine stay as a safety net against a
+        # path-judgment mistake here). Not a
         # top-level `paths-ignore:` trigger filter — that would make the
         # workflow (and its checks) not run at all for a docs-only push/PR,
         # indistinguishable in the PR Checks list from the check never
@@ -352,3 +353,33 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - run: npm run test:oto-mandatory-gate
+
+  approval-lockdown-gate-fixture:
+    name: Approval Lockdown Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_732: a small fixture entity (a nativeEnum status field with
+    # x-approval.on_approved/on_rejected.set_fields declared on it) run
+    # through the real generate-code -> tsc pipeline, catching regressions
+    # in derive_approval_locked_values (helpers/schema_helpers.py), the
+    # disabled-option rendering in form_upsert_context (generators.py), the
+    # APPROVAL_LOCKED_FIELDS check in service_validation.ts.jinja2 (shared
+    # by the REST API route and the Server Action write path), and its
+    # duplicate in api_import_route.ts.jinja2 (CSV import bypasses the
+    # service layer entirely) -- branches this repo's own generate-code/
+    # build (the e2e-tests job) never compiles, because no entity in this
+    # repo's own json_schema.yaml declares x-approval. No path filter, same
+    # as unit-tests/pytest/mention-gate-fixture above, per docs/knowledge/
+    # gate-exemption-must-be-machine-checkable.md. See
+    # scripts/check_approval_lockdown_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:approval-lockdown-gate

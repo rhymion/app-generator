@@ -34,6 +34,7 @@ from helpers.schema_helpers import resolve_ledger_domain
 from helpers.schema_helpers import get_entity_properties
 from helpers.schema_helpers import get_self_only_flags
 from helpers.schema_helpers import get_parent_relationships
+from helpers.schema_helpers import resolve_set_fields as _resolve_set_fields
 from generators import (
     chart_context,
     page_list_context,
@@ -495,25 +496,6 @@ _handwritten_notices: list[str] = []
 
 def _note_stub_created(path: Path, why: str, action: str) -> None:
     _handwritten_notices.append(f'  - {path}\n      {why}\n      -> {action}')
-
-
-def _resolve_set_fields(entity_props: dict, raw: dict) -> dict:
-    resolved = {}
-    for field, value in raw.items():
-        prop_def = entity_props.get(field, {})
-        actual = _get_actual_type(prop_def)
-        enum_vals = prop_def.get('enum')
-        if actual in ('integer', 'number') and isinstance(enum_vals, list) and isinstance(value, str):
-            lower_labels = [str(v).lower() for v in enum_vals]
-            if value.lower() not in lower_labels:
-                raise ValueError(
-                    f"set_fields: label '{value}' not found in enum {enum_vals} "
-                    f"for field '{field}'"
-                )
-            resolved[field] = lower_labels.index(value.lower())
-        else:
-            resolved[field] = value
-    return resolved
 
 
 # ---------------------------------------------------------------------------

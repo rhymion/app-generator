@@ -19,6 +19,7 @@ from helpers.schema_helpers import (
     derive_cross_entity_searchable_fields,
     get_internal_bridge_fk_prop_names,
     get_entity_properties, get_self_only_flags,
+    derive_approval_locked_values,
 )
 from helpers.label_field import build_label_expression, render_prisma_include
 from helpers.bridge_direction import (
@@ -1150,6 +1151,24 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     readonly_fields_create_reject: list[str] = [
         f for f in readonly_fields_api if f not in _server_value_prop_names
     ]
+
+    # Value-level lockdown for x-approval entities: per field, the values
+    # only the approval/rejection mechanism may write, derived from
+    # x-approval.on_approved/on_rejected set_fields. Field-scoped (locks a
+    # value, not the whole field — CREATE still needs values like pending)
+    # and per-entity (a value locked here may be ordinary elsewhere) — see
+    # derive_approval_locked_values for the full reasoning.
+    approval_locked_values: dict[str, list] = derive_approval_locked_values(model_def)
+    approval_locked_fields: list[str] = sorted(approval_locked_values)
+    # Select clause to fetch an existing row's current values for the
+    # approval-locked fields, so UPDATE / CSV-import UPDATE can allow a
+    # no-op resubmission of the value a record already holds without
+    # treating it as a lockdown violation (mirrors the readonly_fields_api
+    # / readonly_fields_api_select current-value-comparison pattern above).
+    approval_locked_values_select: str | None = (
+        '{ ' + ', '.join(f'{f}: true' for f in approval_locked_fields) + ' }'
+        if approval_locked_fields else None
+    )
 
     # Config flags
     can_create = gen_cfg.get('new',    True) is not False
@@ -3071,6 +3090,13 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         readonly_fields_api=readonly_fields_api,
         readonly_fields_api_select=readonly_fields_api_select,
         readonly_fields_create_reject=readonly_fields_create_reject,
+        # Value-level lockdown for x-approval entities: fields that carry at
+        # least one approval/rejection-only value, and per-field the locked
+        # values themselves. Empty dict/list when the entity has no
+        # x-approval or its set_fields are empty (unprotected).
+        approval_locked_values=approval_locked_values,
+        approval_locked_fields=approval_locked_fields,
+        approval_locked_values_select=approval_locked_values_select,
         # x-server-value: server-computed field values (cmd_556/cmd_565).
         server_value_fields=server_value_fields,
         server_value_override_fields=server_value_override_fields,

@@ -1,0 +1,55 @@
+// Self-contained fixture Prisma schema for the approval-lockdown-gate check
+// (cmd_732). NOT the project's real prisma/schema.prisma -- this file
+// exists only to give the fixture json_schema.yaml enough real Prisma
+// models (user + one x-approval entity with a nativeEnum status) to run
+// through the actual build_user_schema.py -> generate.py -> tsc pipeline
+// in isolation. Mirrors the structure of tests/fixtures/decimal_gate/schema.prisma.
+//
+// This repo's own json_schema.yaml declares no x-approval entity, so
+// test:e2e:build's own tsc pass never compiles the value-lockdown branches
+// (build_context.py's derive_approval_locked_values wiring,
+// form_upsert_context's disabled-option rendering, service_validation.ts's
+// APPROVAL_LOCKED_FIELDS check, api_import_route.ts.jinja2's CSV-side
+// check) -- this fixture exists so a future change to any of those can't
+// silently regress unnoticed, the same rationale as decimal_gate/mention_gate.
+
+generator client {
+  provider = "prisma-client"
+  output   = "./.generated-client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ApprovalLockdownGateItemStatus {
+  pending
+  active
+  released
+  rejected
+}
+
+model user {
+  id      String @id @default(cuid())
+  name    String
+  email   String @unique
+  created_items approval_lockdown_gate_item[] @relation("ApprovalLockdownGateItemCreator")
+  updated_items approval_lockdown_gate_item[] @relation("ApprovalLockdownGateItemUpdater")
+}
+
+// The one entity this fixture exists for: a nativeEnum status field with
+// x-approval.on_approved/on_rejected.set_fields declared on it in
+// json_schema.yaml (status: active on approve, status: released on reject).
+model approval_lockdown_gate_item {
+  id         String                          @id @default(cuid())
+  name       String
+  status     ApprovalLockdownGateItemStatus  @default(pending)
+  created_at DateTime                        @default(now()) @db.Timestamptz(0)
+  updated_at DateTime                        @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user                            @relation("ApprovalLockdownGateItemCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user                            @relation("ApprovalLockdownGateItemUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}

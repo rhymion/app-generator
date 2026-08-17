@@ -40,6 +40,7 @@
     "test:mention-gate": "bash scripts/check_mention_gate_fixture.sh",
     "test:decimal-gate": "bash scripts/check_decimal_gate_fixture.sh",
     "test:oto-mandatory-gate": "bash scripts/check_oto_mandatory_gate_fixture.sh",
+    "test:approval-lockdown-gate": "bash scripts/check_approval_lockdown_gate_fixture.sh",
     "start": "node scripts/run-next-start.js",
     "test": "vitest",
     "test:coverage": "vitest --coverage",
