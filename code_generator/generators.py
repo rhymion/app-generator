@@ -1172,6 +1172,20 @@ def _build_reservation_mutation_guard_delete(rc: dict, model: str) -> str:
     )
 
 
+def _reservation_self_case_has_approvable_bridge(rc: dict, model: str, schema: dict | None) -> bool:
+    """True for x-reservation's self case (ledger_transaction, no lines_entity)
+    when the model's own approvable_id is a cmd_296 one-to-one_bridge — i.e.
+    approvable is already pre-created (and approval_request(s) + notify
+    already handled by the standard afterCreate mechanism), so
+    _build_ledger_reservation_allocation_code must not create/notify a
+    second one. See that function's docstring for the full rationale."""
+    if rc.get('transaction_strategy') != 'ledger_transaction' or rc.get('lines_entity'):
+        return False
+    prop = _status_prop_defn(schema, model, 'approvable_id')
+    rel = prop.get('x-relationship') or {}
+    return rel.get('type') == 'one-to-one_bridge' and rel.get('target') == 'approvable'
+
+
 def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict | None = None) -> str:
     """Generate the TypeScript reserve phase for strategy: ledger_transaction.
 
@@ -1187,12 +1201,34 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
     so this function only claims inventory and links the bridge FK here —
     it does not touch approvable at all, and never back-fills approvable_id.
 
-    Self case (has_lines=False, no lines_entity — currently unexercised by
-    any schema entity): kept on the original create-then-back-fill approvable
-    pattern, since there is no embedded child array for the pre-create
-    mechanism to hook into; an entity that needs this path with a NOT NULL
-    approvable_id would need the leave_request-style one_to_one_pre_creates
-    treatment instead (out of scope here — see docs/knowledge/appendix/approval-flow.md §16.10).
+    Self case (has_lines=False, no lines_entity): if the model's own
+    approvable_id is declared `x-relationship.type: one-to-one_bridge`
+    (cmd_296 leave_request-style one_to_one_pre_creates — the normal way an
+    x-approval entity gets a NOT NULL approvable_id), that bridge has
+    already created the approvable and set approvable_id in `created`'s own
+    initial insert, BEFORE this function's code ever runs (see
+    service.ts.jinja2: one_to_one_pre_creates → the `created = tx.model
+    .create()` call → reservation_allocation_code) — AND the template's
+    standard afterCreate hook (service_after_create_stub.ts.jinja2, gated
+    purely on a one-to-one_bridge/selector relation to `approvable`
+    existing, independent of x-reservation) already creates the matching
+    approval_request(s) and calls notifyApprovalRequestCreated right after
+    this function returns. In that case this function must touch approvable
+    *nothing at all* — claim inventory and link the ledger bridge FK only.
+    Creating approval_request(s) here too would double them (and double the
+    notification) against the one afterCreate already makes (cmd_734/
+    subtask_733b otsui_2 — two earlier attempts at this fix each introduced
+    a different bug: removing the bridge entirely broke `next build`
+    because a plain FK renders a real Autocomplete pointing at `approvable`,
+    which has no generated getters.ts to import; keeping the bridge but
+    still having this function create its own approval_request(s) doubled
+    them against afterCreate's — verified by reading the actual generated
+    service.ts + service_after_create.ts, not by inspection of either file
+    alone). Falls back to create-then-back-fill (approvable AND
+    approval_request(s), notifying itself) only for a hypothetical future
+    entity that has x-reservation's self case without an x-approval
+    one-to-one_bridge of its own — in which case no afterCreate logic will
+    ever run for it, so this function is the only place notify can happen.
     """
     pool           = rc.get('pool') or {}
     req            = rc.get('request') or {}
@@ -1240,6 +1276,10 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
     entity_name    = lines_entity or model
     has_lines      = rc.get('hasLines', bool(lines_entity))
     self_qty_field = rc.get('selfQuantityField', req_qty_field)
+    # See docstring: self case defers entirely to the standard afterCreate
+    # mechanism when the model itself declares the cmd_296 one-to-one_bridge
+    # pattern for approvable_id.
+    _has_approvable_bridge = _reservation_self_case_has_approvable_bridge(rc, model, schema)
 
     def _order_entry(field: str, direction: str) -> str:
         if direction == 'asc_nulls_last':
@@ -1254,7 +1294,16 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
             order_parts.append(_order_entry(field, str(direction)))
     order_str = ', '.join(order_parts)
 
-    criteria_lines = [f'          {k}: _line.{v},' for k, v in criteria.items()]
+    # Self case (no lines_entity) has no per-line loop variable — `_line` is
+    # only ever bound inside the lines-case `for (const _line of
+    # _reservationLines)` loop below. criteria must instead read off `created`
+    # (this cmd_734: the self case's request.criteria was previously
+    # unexercised by any schema entity — see this function's docstring —
+    # so this `_line` reference had never been generated for real and the
+    # bug was latent).
+    _criteria_source = '_line' if lines_entity else '(created as Record<string, unknown>)'
+    _criteria_cast   = '' if lines_entity else ' as string'
+    criteria_lines = [f'          {k}: {_criteria_source}.{v}{_criteria_cast},' for k, v in criteria.items()]
     criteria_str   = '\n'.join(criteria_lines) if criteria_lines else ''
     where_clause = f"          {pool_qty_field}: {{ gt: 0 }},"
     if criteria_str:
@@ -1304,25 +1353,25 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
         f"      }}\n"
     )
 
-    # Self case only (no lines_entity): approvable is created inline and
-    # back-filled, since there's no embedded child array for the pre-create
-    # mechanism to hook into (see function docstring).
+    # Self case only (no lines_entity), fallback path (no pre-existing
+    # approvable_id bridge — see docstring): create approvable +
+    # approval_request(s) inline via the standard shared block
+    # (_build_approval_create_block_for_entity), since no afterCreate logic
+    # will otherwise ever run for this entity to do it.
     approval_body = (
         f"\n"
         f"      const approvable = await tx.approvable.create({{ data: {{}} }});\n"
-        f"      let _hasFlow = false;\n"
-        f"      for (const flow of _approvalFlows) {{\n"
-        f"        if (flow.requestor_role_id && !_creatorRoleIds.includes(flow.requestor_role_id)) {{\n"
-        f"          continue;\n"
-        f"        }}\n"
-        f"        await tx.approval_request.create({{\n"
-        f"          data: {{ approvable_id: approvable.id, approval_flow_id: flow.id, status: 'pending' }},\n"
-        f"        }});\n"
-        f"        _hasFlow = true;\n"
-        f"      }}\n"
-        f"      if (_hasFlow) {{\n"
-        f"        await tx.approvable.update({{ where: {{ id: approvable.id }}, data: {{ creator_id: actorId }} }});\n"
-        f"      }}\n"
+        + _build_approval_create_block_for_entity(
+            approvable_id_expr='approvable.id',
+            actor_id_expr='actorId',
+            flows_var='_approvalFlows',
+            role_ids_var='_creatorRoleIds',
+            tx_var='tx',
+            indent='      ',
+            target_entity_name=entity_name,
+            target_id_expr='created.id',
+        )
+        + "\n"
     )
 
     header_comment = (
@@ -1342,6 +1391,24 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
 
     if not lines_entity:
         # count mode without lines: the request entity itself is the single line
+        if _has_approvable_bridge:
+            # approvable + approval_request(s) + notify are already fully
+            # handled by the standard one-to-one_bridge + afterCreate
+            # mechanism (see docstring) — claim inventory and link the
+            # ledger bridge FK only, nothing approval-related.
+            return (
+                header_comment +
+                f"    {{\n"
+                f"      let _remaining = (created as Record<string, unknown>).{self_qty_field} as number;\n"
+                + claim_body +
+                f"      await tx.{model}.update({{\n"
+                f"        where: {{ id: created.id }},\n"
+                f"        data: {{\n"
+                f"          {line_txable_f}: bridge.id,\n"
+                f"        }},\n"
+                f"      }});\n"
+                f"    }}"
+            )
         return (
             header_comment + approval_lookup_header +
             f"    {{\n"
@@ -2267,8 +2334,21 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
 
     # Reservation count mode: build allocation code block
     reservation_allocation_code = ''
+    reservation_self_case_notifies = False
     if has_reservation and reservation_config is not None:
         reservation_allocation_code = _build_reservation_allocation_code(reservation_config, model, schema)
+        # ledger_transaction self-case (no lines_entity) calls
+        # notifyApprovalRequestCreated itself (cmd_734) ONLY in the fallback
+        # path (no pre-existing approvable_id one-to-one_bridge) — needs the
+        # import even though it has no approval_lines_post_create_code. When
+        # a bridge exists, the standard afterCreate hook notifies instead
+        # (see _reservation_self_case_has_approvable_bridge docstring) and
+        # this import would be unused (lint error) if added unconditionally.
+        reservation_self_case_notifies = (
+            reservation_config.get('transaction_strategy') == 'ledger_transaction'
+            and not reservation_config.get('lines_entity')
+            and not _reservation_self_case_has_approvable_bridge(reservation_config, model, schema)
+        )
 
     # Reservation item mode (cmd_555): reserve{Entity}() had no caller — wire it into
     # add{Entity}'s own transaction (allocation) and update{Entity}'s own transaction
@@ -2351,7 +2431,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         + (f"\nimport {{ notify }} from '@/lib/_notifier';"
            if has_assignee_id or child_assignee_notify_create_code or child_assignee_notify_update_code else '')
         + (f"\nimport {{ notifyApprovalRequestCreated }} from '@/lib/_notifyApprovalRequest';"
-           if approval_lines_post_create_code or approval_lines_post_update_code else '')
+           if approval_lines_post_create_code or approval_lines_post_update_code or reservation_self_case_notifies else '')
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
         + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/getters_associated';" if should_filter_by_org and (can_create or can_update) else '')
         + (f"\nimport {{ AppError, p2002Field }} from '@/lib/_errors';" if can_create or can_update else '')

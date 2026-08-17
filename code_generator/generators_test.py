@@ -2625,8 +2625,47 @@ def helper_context(
             and not _xres_h.get('lines')):
         _pool_cfg_nolines = _xres_h.get('pool', {})
         _pool_entity_nolines = _pool_cfg_nolines.get('entity')
+        # OD-1 (cmd_734): strategy: ledger_transaction resolves pool.entity
+        # via transaction.ledgerDomain instead of declaring it directly —
+        # mirrors the WITH-lines branch above. Without this, a self-case
+        # (no lines) ledger_transaction entity's pool never gets seeded with
+        # quantity here, so every generated Create test's default
+        # quantity_reserved trips InsufficientPoolCapacityError against a
+        # quantity: 0 pool row (found via cmd_734 subtask_734a e2e run).
+        if not _pool_entity_nolines:
+            _domain_key_nolines = (_xres_h.get('transaction') or {}).get('ledgerDomain')
+            if _domain_key_nolines:
+                _pool_entity_nolines = resolve_ledger_domain(schema, _domain_key_nolines)['pool']
         _pool_qty_nolines = _pool_cfg_nolines.get('quantityField', 'quantity')
-        if _pool_entity_nolines:
+        # cmd_734 single-lot pattern: request.criteria: {id: <field>} matches
+        # the pool by exact row id (not by a shared FK value like the
+        # WITH-lines branch's {product_id: product_id}). <field>'s own
+        # x-relationship target is very likely already one of this entity's
+        # regular FK deps (e.g. inventory_id → the same `inventory` dep
+        # created above for the create-form's own FK) — seeding a *second*,
+        # freestanding pool row (the WITH-lines branch's pattern) would be
+        # inert, since every generated test passes the existing dep's id as
+        # the request's own criteria field value, never the freestanding
+        # row's. Detect that case and UPDATE the existing dep in place
+        # instead of creating an unrelated one.
+        _existing_dep_var_nolines = None
+        _crit_nolines = (_xres_h.get('request') or {}).get('criteria') or {}
+        if list(_crit_nolines.keys()) == ['id']:
+            _crit_field_nolines = _crit_nolines['id']
+            _crit_prop_nolines = _raw_def(parent, schema).get('properties', {}).get(_crit_field_nolines, {})
+            _crit_fk_target_nolines = (_crit_prop_nolines.get('x-relationship') or {}).get('target', '')
+            if _crit_fk_target_nolines == _pool_entity_nolines:
+                _existing_dep_var_nolines = next(
+                    (d['var_name'] for d in enriched_deps if d['target'] == _pool_entity_nolines),
+                    None,
+                )
+        if _pool_entity_nolines and _existing_dep_var_nolines:
+            reservation_nolines_pool_seed = {
+                'pool_entity': _pool_entity_nolines,
+                'pool_qty_field': _pool_qty_nolines,
+                'existing_dep_var': _existing_dep_var_nolines,
+            }
+        elif _pool_entity_nolines:
             _pool_def_nolines = _raw_def(_pool_entity_nolines, schema)
             _pool_has_name_nolines = 'name' in (_pool_def_nolines.get('properties') or {})
             _pool_extra_fk_props_nolines, _pool_extra_deps_nolines = _resolve_pool_extra_deps(
@@ -2635,6 +2674,7 @@ def helper_context(
             reservation_nolines_pool_seed = {
                 'pool_entity': _pool_entity_nolines,
                 'pool_qty_field': _pool_qty_nolines,
+                'existing_dep_var': None,
                 'has_name': _pool_has_name_nolines,
                 'pool_title': to_title_case(_pool_entity_nolines),
                 'pool_extra_fk_props': _pool_extra_fk_props_nolines,
