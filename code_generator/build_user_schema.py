@@ -118,6 +118,7 @@ _ENTITY_LEVEL_DATA_KEYS = (
     "x-self-only",
     "x-payment",
     "x-nav",
+    "x-scheduled-task",
 )
 
 # Category D: unchanged location, stay on the view entity as before. Also

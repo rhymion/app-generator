@@ -1474,6 +1474,100 @@ def validate_schema(schema: dict) -> None:
                 )
 
     # -----------------------------------------------------------------------
+    # 15. x-scheduled-task entity-level validation (cmd_750 / subtask_741a)
+    # -----------------------------------------------------------------------
+    _scheduled_task_ids = {}
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        xsched = defn.get('x-scheduled-task')
+        if not xsched:
+            continue
+        if not isinstance(xsched, dict):
+            errors.append(
+                f"Definition '{def_key}': x-scheduled-task must be a mapping, got "
+                f"{type(xsched).__name__}."
+            )
+            continue
+
+        task_id = xsched.get('task_id')
+        if not isinstance(task_id, str) or not task_id:
+            errors.append(
+                f"Definition '{def_key}': x-scheduled-task.task_id is required and must be "
+                f"a non-empty string (it doubles as the registry key and the "
+                f"/api/scheduled-tasks/[task] URL segment)."
+            )
+        else:
+            prior_owner = _scheduled_task_ids.get(task_id)
+            if prior_owner:
+                errors.append(
+                    f"Definition '{def_key}': x-scheduled-task.task_id {task_id!r} is also "
+                    f"declared by '{prior_owner}' — task_id must be unique across the schema."
+                )
+            else:
+                _scheduled_task_ids[task_id] = def_key
+
+        handler = xsched.get('handler')
+        if not isinstance(handler, str) or not re.match(r'^[A-Za-z_$][A-Za-z0-9_$]*$', handler):
+            errors.append(
+                f"Definition '{def_key}': x-scheduled-task.handler is required and must be "
+                f"a valid TypeScript identifier (the exported function name in "
+                f"service_scheduled_handler.ts), got {handler!r}."
+            )
+
+        interval = xsched.get('interval')
+        if not isinstance(interval, str) or not interval:
+            errors.append(
+                f"Definition '{def_key}': x-scheduled-task.interval is required and must be "
+                f"a non-empty cron expression string (informational only — generators never "
+                f"write vercel.json; it is surfaced in the generated file's header comment "
+                f"for the consumer to copy into prj/vercel.json)."
+            )
+
+        xfilter = xsched.get('filter')
+        if not isinstance(xfilter, dict) or not xfilter:
+            errors.append(
+                f"Definition '{def_key}': x-scheduled-task.filter is required and must be a "
+                f"non-empty mapping — at least one of expires_at_before_now/status_in must "
+                f"be set (an empty filter would select every row on every run)."
+            )
+            continue
+
+        props = defn.get('properties', {})
+        expires_at_before_now = xfilter.get('expires_at_before_now')
+        if expires_at_before_now:
+            if not isinstance(expires_at_before_now, bool):
+                errors.append(
+                    f"Definition '{def_key}': x-scheduled-task.filter.expires_at_before_now "
+                    f"must be a boolean, got {type(expires_at_before_now).__name__}."
+                )
+            if 'expires_at' not in props:
+                errors.append(
+                    f"Definition '{def_key}': x-scheduled-task.filter.expires_at_before_now "
+                    f"is set but the entity has no 'expires_at' property."
+                )
+
+        status_in = xfilter.get('status_in')
+        if status_in is not None:
+            if not isinstance(status_in, list) or not status_in or not all(isinstance(s, str) for s in status_in):
+                errors.append(
+                    f"Definition '{def_key}': x-scheduled-task.filter.status_in must be a "
+                    f"non-empty list of strings, got {status_in!r}."
+                )
+            elif 'status' not in props:
+                errors.append(
+                    f"Definition '{def_key}': x-scheduled-task.filter.status_in is set but "
+                    f"the entity has no 'status' property."
+                )
+
+        if not expires_at_before_now and not status_in:
+            errors.append(
+                f"Definition '{def_key}': x-scheduled-task.filter must set at least one of "
+                f"expires_at_before_now/status_in (an empty filter would select every row "
+                f"on every run)."
+            )
+
+    # -----------------------------------------------------------------------
     # Report
     # -----------------------------------------------------------------------
     if errors:
