@@ -359,6 +359,25 @@ def validate_schema(schema: dict) -> None:
         return
     errors = []
 
+    # Entities referenced as the `items.$ref` of some *other* entity's array
+    # property — i.e. rendered as an inline embedded DataGrid child on that
+    # parent's form. Used by 2b2 below to distinguish a genuinely embedded
+    # child entity (no `x-generate` of its own, and actually consumed as a
+    # child list somewhere) from an entity that merely happens to omit
+    # `x-generate` in a minimal test fixture never embedded by anything —
+    # the latter is not the §15.9 hazard and must not be flagged.
+    # Uses get_entity_properties() (allOf-merge aware), not a plain
+    # `d.get('properties')`, so an array child declared on the *view* half
+    # of an already-migrated (allOf raw+view) parent entity is still seen —
+    # a plain top-level lookup finds nothing there (see the section 2 fix
+    # below for the same raw/view gap).
+    _embedded_child_targets = {
+        (prop_def.get('items') or {}).get('$ref', '').split('/')[-1]
+        for def_key in defs
+        for prop_def in get_entity_properties(def_key, schema).values()
+        if isinstance(prop_def, dict) and isinstance(prop_def.get('items'), dict)
+    } - {''}
+
     # -----------------------------------------------------------------------
     # 1. Entity / definition names must be lowercase snake_case
     # -----------------------------------------------------------------------
@@ -373,13 +392,80 @@ def validate_schema(schema: dict) -> None:
             )
 
     # -----------------------------------------------------------------------
+    # 1b. A '_detail'-suffixed key must be a genuine Stage-3-style base/view
+    #     pair: '{base}_detail' carrying x-generate + `allOf: [{$ref: '#/
+    #     definitions/{base}'}]`, with '{base}' itself present in the schema
+    #     (this shape is still actively exercised by this file's own test
+    #     suite — test_bridge_validation.py, test_validate_import_*.py — and
+    #     by convert_to_user_schema.py's legacy-schema converter, so it
+    #     remains accepted). What is NOT accepted: a self-contained entity
+    #     that merely happens to be named with a '_detail' suffix (no
+    #     matching base, no allOf $ref to one) — that shape silently
+    #     mis-scopes this file's own x-import-key eligibility check (section
+    #     12 below excludes any '_detail'-suffixed key from _base_model_keys,
+    #     assuming it is always the split's carrier) instead of erroring
+    #     (cmd_746, 2026-08-14 proj_h demo: build passed but generated code
+    #     was inconsistent for a self-contained 'endorsement_detail' entity
+    #     until it was renamed). See docs/knowledge/schema-restructuring-
+    #     build-order.md "Current entity-naming convention (cmd_409)" — new
+    #     entities should generally avoid this suffix entirely, but the
+    #     paired form is not itself an error.
+    # -----------------------------------------------------------------------
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue  # already reported above
+        if def_key.startswith('__') or not def_key.endswith('_detail'):
+            continue
+        if not isinstance(defn, dict):
+            continue
+        base_key = def_key[:-len('_detail')]
+        allof_refs = {
+            (item.get('$ref') or '').split('/')[-1]
+            for item in (defn.get('allOf') or [])
+            if isinstance(item, dict)
+        }
+        if base_key in defs and base_key in allof_refs:
+            continue  # genuine Stage-3 base/view pair — accepted
+        errors.append(
+            f"Definition '{def_key}': entity names ending in '_detail' are "
+            f"reserved for the base/view split naming convention (cmd_409) — "
+            f"a '{def_key}' definition must carry `allOf: [{{$ref: "
+            f"'#/definitions/{base_key}'}}]` with a matching '{base_key}' "
+            f"definition present.  This definition is self-contained (no such "
+            f"allOf/base pair), which silently mis-scopes this file's own "
+            f"x-import-key eligibility check (section 12) and "
+            f"convert_to_user_schema.py's legacy converter instead of "
+            f"erroring.  Rename to a name that does not end in '_detail' "
+            f"(e.g. '{base_key}' or a more specific business name), or add "
+            f"the matching '{base_key}' base definition and allOf $ref if a "
+            f"base/view split was genuinely intended."
+        )
+
+    # -----------------------------------------------------------------------
     # 2. Per-property relationship checks
     # -----------------------------------------------------------------------
     for def_key, defn in defs.items():
         if not _SNAKE_CASE.match(def_key):
             continue  # already reported; can't safely inspect properties
+        if def_key.startswith('__'):
+            # Raw base entity (build_user_schema.py's allOf[0] target for its
+            # view entity, e.g. `__role` for `role`) — its properties are
+            # already covered via the view entity below through
+            # get_entity_properties()'s allOf merge. Checking it again here
+            # under its own def_key would just duplicate every finding.
+            continue
 
-        props = defn.get('properties', {})
+        # get_entity_properties()/get_entity_required() resolve the allOf
+        # merge (raw base + view overlay) that build_user_schema.py produces
+        # for any entity already present in prisma/schema.prisma — a plain
+        # `defn.get('properties', {})` sees nothing for those (their fields
+        # live on the allOf[0]-referenced `__x` base, not on `x` itself) and
+        # silently skips every per-property check below for ~40% of a
+        # typical schema's entities (cmd_746/747 A1/B1 injection testing
+        # caught this: deviations added to an already-migrated entity went
+        # undetected until this fix).
+        props = get_entity_properties(def_key, schema)
+        req_set = get_entity_required(def_key, schema)
         for prop_name, prop_def in props.items():
             rel = prop_def.get('x-relationship', {})
             if not rel or rel.get('type') not in ('many-to-one', 'one-to-one', 'one-to-one_bridge'):
@@ -399,6 +485,25 @@ def validate_schema(schema: dict) -> None:
                     f"and React component props."
                 )
 
+            # 2a2. A field cannot simultaneously be a plain enum-valued column
+            # (`enum:` — a fixed set of literal values, rendered as a select)
+            # and a required FK reference (`x-relationship` — a pointer to
+            # another entity's row, rendered as an autocomplete). The two
+            # value shapes are incompatible: nativeEnum/int-enum derivation
+            # (schema_deriver.py) and FK relation derivation both claim the
+            # same column, and required: true forces the contradiction to be
+            # load-bearing rather than just dead config (cmd_746/747, A1).
+            if 'enum' in prop_def and prop_name in req_set:
+                errors.append(
+                    f"Definition '{def_key}', property '{prop_name}': "
+                    f"declares both `enum: {prop_def.get('enum')!r}` and "
+                    f"`x-relationship` (FK to '{target}'), and is required. "
+                    f"A column cannot be both a fixed-choice enum value and a "
+                    f"foreign-key reference. Remove `enum:` if this is a "
+                    f"genuine FK, or remove `x-relationship:` if this is a "
+                    f"genuine enum column."
+                )
+
             # 2b. Relationship target must exist in definitions
             if target and target not in defs:
                 errors.append(
@@ -410,6 +515,48 @@ def validate_schema(schema: dict) -> None:
 
             if not target:
                 continue
+
+            # 2b2. FK target must be an independent entity (its own
+            # x-generate block, per docs/knowledge/schema-yaml-configuration.md
+            # §15.9), not an embedded child (rendered only as an inline
+            # DataGrid on its parent's form, with no x-generate block of its
+            # own and therefore no Prisma model page/route the FK could link
+            # to). Generator gap confirmed as a build-breaking TypeScript
+            # error, not merely a style issue (cmd_746/747, B1). Gated on
+            # _embedded_child_targets (not just "x-generate absent") so an
+            # entity that merely omits x-generate in an unrelated minimal
+            # test fixture — never actually embedded as anyone's array child
+            # — is not false-flagged.
+            #
+            # Also skip when the FK's *own* entity carries entity-level
+            # `x-internal` (schema-yaml-configuration.md §4.5): such an
+            # entity (e.g. `reaction`, api: custom / page: false / embed:
+            # false) is never rendered through the standard DataGrid-
+            # column / autocomplete pipeline §15.9 is about — its FK fields
+            # are hand-coded, so a target lacking `x-generate` is not a
+            # hazard there. Confirmed against the real default schema:
+            # `reaction.comment_id` legitimately targets `comment` (a
+            # backing-only entity, no x-generate, also embedded elsewhere
+            # as a DataGrid child) — without this guard the unmodified
+            # default schema itself fails validate:schema.
+            target_def = defs.get(target, {})
+            if (
+                target in _embedded_child_targets
+                and isinstance(target_def, dict)
+                and 'x-generate' not in target_def
+                and not defn.get('x-internal')
+            ):
+                errors.append(
+                    f"Definition '{def_key}', property '{prop_name}': "
+                    f"x-relationship target '{target}' is an embedded child "
+                    f"entity (rendered as an inline DataGrid child elsewhere, "
+                    f"no `x-generate` block of its own — see "
+                    f"schema-yaml-configuration.md §15.9) and cannot be "
+                    f"referenced by FK. Either add an `x-generate` block to "
+                    f"'{target}' (making it independent, at least "
+                    f"`list: true`), or point '{prop_name}' at '{target}''s "
+                    f"parent entity instead."
+                )
 
             target_props = get_entity_properties(target, schema)
 

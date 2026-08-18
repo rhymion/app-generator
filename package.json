@@ -12,6 +12,7 @@
     "cleanup": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/cleanup.py code_generator/.generated/json_schema.yaml ./ --prune-orphans --keep-stubs",
     "cleanup:all": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/cleanup.py code_generator/.generated/json_schema.yaml ./ --prune-orphans",
     "check:generated": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/check_generated.py code_generator/.generated/json_schema.yaml ./",
+    "validate:schema": "python3 code_generator/build_user_schema.py code_generator/json_schema.yaml prisma/schema.prisma --out code_generator/.generated/json_schema.yaml && python3 code_generator/validate_schema_cli.py code_generator/.generated/json_schema.yaml ./",
     "cy:open": "cross-env NODE_ENV=test cypress open",
     "db:generate": "prisma generate",
     "db:grant-all-permissions": "tsx scripts/grant-all-permissions.ts",
