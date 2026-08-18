@@ -7,7 +7,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ### Internal
 - **Added a docs-only Vercel build skip for the three consumer
-  projects (cmd_728).** `scripts/vercel-ignore-check.sh` (canonical
+  projects.** `scripts/vercel-ignore-check.sh` (canonical
   logic) + `vercel-ignore.json` (a tiny stub `ignoreCommand`) in this
   repo; each consumer repo's root carries that same stub content as its
   own real `vercel.json` file (a symlink was tried first and measurably
@@ -22,7 +22,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   measured mechanics and why this deviates from a pure single-file
   design.
 - **Added `concurrency` and a docs-only `detect-changes` gate to
-  app-generator's own `.github/workflows/ci.yml` (cmd_725).**
+  app-generator's own `.github/workflows/ci.yml`.**
   `concurrency: {group: ${{ github.workflow }}-${{ github.ref }},
   cancel-in-progress: true}` cancels a superseded run on the same ref — a
   public repo has no billed-minutes savings from this, only shorter queue
@@ -44,11 +44,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   reason (CLAUDE.md "Gate SoT Rule" — they carry this repo's own gate
   definitions). A missing/unusable base commit (new branch, shallow
   history) runs the full suite (fail-closed), never skips on "unknown."
-  `verify-canonical-ci` (cmd_723) stays consumer-side only — app-generator
+  `verify-canonical-ci` stays consumer-side only — app-generator
   is the canonical source itself, so there is nothing meaningful for it
   to diff against locally.
 - **Added a machine-checked drift gate for the canonical consumer
-  `.github/workflows/ci.yml` (cmd_723).** `docs/consumer-commands/ci.yml`
+  `.github/workflows/ci.yml`.** `docs/consumer-commands/ci.yml`
   is distributed to consumers as a plain copy (not a symlink — GitHub
   Actions resolves workflow files, including trigger eligibility, from
   the target repo's own tree before any checkout happens, so a symlink
@@ -65,7 +65,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   placement rationale (consumer-side only — a generator-side check would
   need cross-repo tokens for the two private consumers) and the
   full-body-vs-structure-only scope decision.
-- **Added opt-in Stripe payment integration to the code generator (cmd_706),
+- **Added opt-in Stripe payment integration to the code generator,
   gated by a new `x-payment` entity-level schema key.** Not a default-schema
   feature and generates no `Plan`/`Product`/`Purchase`-style entity, authz
   layer, or UI — declaring `x-payment: true` on any entity causes
@@ -75,7 +75,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   (Checkout Session creation), and `app/api/webhooks/stripe/route.ts`
   (webhook receiver, signature-verified via `req.text()` →
   `constructEvent`, fails closed if `STRIPE_WEBHOOK_SECRET` is unset). Same
-  write-once convention as `lib/<parent>/invalidate_handler.ts` (cmd_583) —
+  write-once convention as `lib/<parent>/invalidate_handler.ts` —
   a consumer's edits to these files survive regeneration. Scope is
   one-time purchases only (Checkout Session `mode: payment`); subscription
   lifecycle handling is left for a consumer to add. `.env.example` gained
@@ -84,7 +84,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   dependency. See `docs/knowledge/stripe-payment-integration.md`.
 - **Added `scripts/vercel-{setup,deploy,env,teardown}.sh` and
   `.env.vercel.production.local.example` as the canonical source of the
-  Vercel deployment tooling used by generated consumer apps (cmd_711).**
+  Vercel deployment tooling used by generated consumer apps.**
   These five files were previously duplicated independently across three
   consumer repos (app-template, inventory-app, insurance-app); they were
   found byte-identical (scripts) or near-identical (env template, missing
@@ -92,7 +92,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   gap, now fixed via the shared copy) and are promoted here so consumers
   can reference a single source instead of three independently drifting
   copies. See `docs/knowledge/vercel-deploy-scripts-canonical-source.md`.
-- **Added Prisma `Decimal` support to the code generator (cmd_705), mapped to JSON schema type
+- **Added Prisma `Decimal` support to the code generator, mapped to JSON schema type
   `"string"` — never `"number"` (a deliberate product decision: a JS-float mapping risks silent
   rounding error on read/write/CSV round-trip; the Prisma schema previously had no supported way
   to declare a `Decimal` column at all — `schema_deriver.py` raised `SchemaDivergenceError` for
@@ -127,10 +127,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   code comments documenting that they chose `Int`-cents specifically because the generator
   didn't support `Decimal` — direct evidence of the gap this change closes, though migrating
   either consumer to `Decimal` is a separate, unstarted decision.
-- **Fixed two generator defects confirmed real by deviation-injection reproduction (cmd_704):**
+- **Fixed two generator defects confirmed real by deviation-injection reproduction:**
   - A required one-to-one selector FK (`x-relationship: {type: one-to-one, ...}` on a field listed in
     the entity's `required`) made the generated `page_new.tsx` unbuildable. `build_context.py`'s
-    `required_relation_fields` (the cmd_516 Option B permission-guard list) merged entries from
+    `required_relation_fields` (the Option B permission-guard list from an earlier change) merged entries from
     `parent_rels_raw` and `selector_oto_rels` without distinguishing them, and
     `page_new.tsx.jinja2` re-derived a single `initial{Target}s` variable name for both — correct for
     `parent_rels_raw` entries (matching the `Promise.all` destructure) but wrong for `selector_oto_rels`
@@ -170,8 +170,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `app-template-4`/proj_g, `inventory-app`), has an entity with a required (non-nullable)
   `type: one-to-one` selector FK, so the actual `page_new.tsx.jinja2` template branch the fix touches
   was never compiled by any mandatory gate — "all green" did not mean "this branch works," the same
-  gap `test:mention-gate` (cmd_535) already closes for an unrelated branch. Follows that same pattern
-  (and the `invalidate_handler` write-once-stub precedent, cmd_583): a new, self-contained fixture
+  gap `test:mention-gate` already closes for an unrelated branch. Follows that same pattern
+  (and the `invalidate_handler` write-once-stub precedent): a new, self-contained fixture
   entity pair (`code_generator/tests/fixtures/oto_mandatory/` — `oto_gate_target`, a selector target
   with its own pages, and `oto_gate_item`, whose FK to it is required) run through the real
   `build_user_schema.py` → `generate.py` → `tsc --noEmit` pipeline
@@ -182,7 +182,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   A new fixture rather than an extension of `mention_gate` — that fixture's own scope is deliberately
   narrow to the unrelated `commentable`/`x-mention` branch (see its `json_schema.yaml`'s design note for
   why folding in an unrelated defect class was rejected). Verified both-sides: run against the
-  generator commit immediately before the `cmd_704` fix (`b0d1f298`, detached worktree, `git worktree
+  generator commit immediately before the fix above (`b0d1f298`, detached worktree, `git worktree
   add --detach` — no `git checkout`/`reset`/`stash` on the working branch, per D004), the fixture's
   generated `page_new.tsx` produces the exact `Cannot find name 'initialOtoGateTargets'` `tsc` failure
   the fix corrects; run against the fixed generator, `tsc` exits 0. Real consumer relevance: the
@@ -194,7 +194,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - Added `scripts/generated/seed-entities.ts` (auto-generated by `generate-code`, via `seed_entities_context()` in `code_generator/generators.py`) — derives the "independent entity" population of a project's schema (any entity that is a `schema['definitions']` key, has an `id` property directly, is not an x-bridge junction target, and is not an internal-only marker entity such as `approvable`/`commentable`/`attachable`/`notification`). This is consumed by a new development/verification-only script, `scripts/grant-all-permissions.ts` (`npm run db:grant-all-permissions`) — grants the `Administrator` role full CRUD on every independent entity in one step, including any entity a consumer project adds on top of the default schema. `audit_log`/`mfa_recovery_code` are excluded both structurally (never schema-defined entities) and explicitly (`ALWAYS_EXCLUDED` in the script) — verified via a deviation-injection test (`code_generator/tests/test_seed_entities_context.py`) and a live-database check confirming zero write-access permission rows on `audit_log` after running the script. `scripts/seed-tenant.ts` (the production seed) is unchanged — it keeps its existing fixed, least-privilege entity enumeration; see `docs/knowledge/seed-tenant-credential-hardening.md` for the full design and the distinction from the similarly-named Cypress-only `grantAllEntityPermissions()` test helper.
 - `scripts/seed-tenant.ts` now also seeds `Creator` and `Assignee` roles (resolved by name in `lib/authz.ts`, no per-user role assignment needed). `Creator` is granted exactly `setting.read` + `setting.update`, so a non-admin user can reach their own `/setting` page via the existing `x-self-only` mechanism; `Assignee` is seeded with no permissions (placeholder for future use). Verified against a live database, including the negative case: a user whose `creator_id` does not equal their own id is correctly denied read/update access to their own settings row.
 - Documented (and verified against a live database) a `creator_id` self-reference exception for the `user` entity: every generated `add<Entity>()` sets `creator_id` to the acting user unconditionally, which is wrong for `user` itself (a newly created user could never reach their own `/setting` page, since it filters by `creator_id === the logged-in user's id`). A hand-written `lib/user/service_after_create.ts` hook fixes this — tried first per the generator's existing write-once-stub customization convention, and found sufficient (no new schema flag needed). Not reachable by default (`user.x-generate.new` is `false`); documented in `docs/knowledge/seed-tenant-credential-hardening.md` for any consumer project that enables user creation.
-- **Fixed an SSL deprecation warning during `db:seed-tenant`/runtime queries against Neon** (cmd_691):
+- **Fixed an SSL deprecation warning during `db:seed-tenant`/runtime queries against Neon**:
   `pg-connection-string`'s one-time `deprecatedSslModeWarning` fires whenever a connection string's
   `sslmode` is `prefer`/`require`/`verify-ca` — Neon's connection strings embed `sslmode=require` by
   default. No first-party code sets any SSL option explicitly (repo-wide grep for
@@ -217,10 +217,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   tests in `lib/db-url.test.ts`. Full root-cause writeup:
   `docs/knowledge/pg-connection-string-sslmode-deprecation.md`.
 - Added an opt-in Neon serverless driver adapter path to `lib/prisma.ts`, gated by the
-  `USE_NEON_ADAPTER` env var (cmd_692/cmd_698). Originally shipped inactive — nothing set this
+  `USE_NEON_ADAPTER` env var (added across two earlier changes). Originally shipped inactive — nothing set this
   var anywhere. `scripts/vercel-env.sh` now injects it as the fixed literal `"true"` on both
-  Production and Preview for every consumer app provisioned via `vercel-setup.sh` (cmd_711/
-  cmd_712), the same way `AUTH_TRUST_HOST` is injected; `vercel-teardown.sh` removes it on
+  Production and Preview for every consumer app provisioned via `vercel-setup.sh` (across two
+  further earlier changes), the same way `AUTH_TRUST_HOST` is injected; `vercel-teardown.sh` removes it on
   teardown. GCP Cloud Run and local/CI still never set this var, so they are unaffected.
   When unset, or set to anything other than the
   literal string `"true"` (fixed in this same change — the original branch used a truthy check,
@@ -234,15 +234,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Neon branch's connection string is now piped through `pinSslModeVerifyFull()` too, right before
   constructing the `PrismaNeon` adapter — same guard, same reasoning, applied to both code paths
   instead of leaving the new one exposed.
-- Added `scripts/lint_prj_synced.py` (`npm run lint:prj`) for consumer projects to lint only their own `prj/`-tracked `.ts`/`.tsx` files, at their real synced destination paths, without linting this repo's own templates or a consumer's fully generated codebase (cmd_683, see `docs/knowledge/consumer-prj-scoped-lint.md`). Runs `prj:sync`, parses its own `copied`/`merged` stdout as the source of truth for what to lint, and fails closed (non-zero exit) if that list is empty for any reason — never silently lints nothing and reports success. Verified standalone (no `../prj` present): fails closed as expected. Verified with a synthetic `../prj` containing one clean and one syntactically-broken `.ts` file: lints both, exits non-zero on the broken one. Does not cap the ESLint warning count (errors-only gate), unlike this repo's own `lint` script — see the knowledge doc for why a shared ceiling would not be meaningful across two structurally different populations.
-- Set `x-generate.test: false` on `approval_flow` (cmd_661) — its generated CRUD Cypress specs (desktop/mobile/API) and support helper are being replaced by hand-written coverage that already exercises the entity_name filter/validation design (cmd_652) in `cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts`, placed directly in this repo's `cypress/e2e/` so it reaches every consumer via the submodule. Verified via `generate-code`: the three specs, `cypress/support/approval_flow/helper.ts`, and the task registry entry in `cypress/support/generated-tasks.ts` are no longer written (confirmed against `.generated-manifest.json`).
+- Added `scripts/lint_prj_synced.py` (`npm run lint:prj`) for consumer projects to lint only their own `prj/`-tracked `.ts`/`.tsx` files, at their real synced destination paths, without linting this repo's own templates or a consumer's fully generated codebase (see `docs/knowledge/consumer-prj-scoped-lint.md`). Runs `prj:sync`, parses its own `copied`/`merged` stdout as the source of truth for what to lint, and fails closed (non-zero exit) if that list is empty for any reason — never silently lints nothing and reports success. Verified standalone (no `../prj` present): fails closed as expected. Verified with a synthetic `../prj` containing one clean and one syntactically-broken `.ts` file: lints both, exits non-zero on the broken one. Does not cap the ESLint warning count (errors-only gate), unlike this repo's own `lint` script — see the knowledge doc for why a shared ceiling would not be meaningful across two structurally different populations.
+- Set `x-generate.test: false` on `approval_flow` — its generated CRUD Cypress specs (desktop/mobile/API) and support helper are being replaced by hand-written coverage that already exercises the entity_name filter/validation design from an earlier change in `cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts`, placed directly in this repo's `cypress/e2e/` so it reaches every consumer via the submodule. Verified via `generate-code`: the three specs, `cypress/support/approval_flow/helper.ts`, and the task registry entry in `cypress/support/generated-tasks.ts` are no longer written (confirmed against `.generated-manifest.json`).
 - Refactored `approval_flow_same_entity_autocomplete_filter.cy.ts` to seed its own two `Role` rows via direct `POST /api/role` calls instead of `cy.task('db:populateApprovalFlowDependencies')`, which only existed while `approval_flow`'s generated test helper (`cypress/support/approval_flow/helper.ts`) was being written — now that `test: false` removes that helper, the spec would otherwise fail its `beforeEach` on every run. Verified: 7/7 tests pass (`cypress run --spec cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts` against a real build), and a full-repo grep confirms no other spec references the removed generated task.
-- **Removed the dead in-process notification store from `lib/_notifier.ts`** (cmd_700): the module-scope
+- **Removed the dead in-process notification store from `lib/_notifier.ts`**: the module-scope
   `console.log` on import (`[_notifier] in-memory notification store initialized...`) — audible during
   every `next build` and `next dev`/`next start` boot — described a `Map<userId, Notification[]>` read
   path (`listNotifications()` / `unreadCount()` / `markAllRead()` / `clearInbox()`) that had zero
   production callers: `app/api/notifications/*` has read the `notification` Prisma table directly since
-  the table was introduced (cmd_475), and a full-repo grep (source + generated-code templates) found the
+  the table was introduced, and a full-repo grep (source + generated-code templates) found the
   only callers of those four functions to be this module's own `lib/_notifier.test.ts`. Removed the
   `console.log`, the `Map`, `pruneExpired()`, and the four dead functions plus `_resetForTests()`;
   `notify()` (the write path — 6 real call sites, plus the `service.ts.jinja2`/`test_helper.ts.jinja2`/
@@ -257,7 +257,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   failure) were kept and updated for the `void` signature.
 
 ### Security
-- **Value-level write lockdown for `x-approval` entities** (cmd_732): a value that
+- **Value-level write lockdown for `x-approval` entities**: a value that
   `on_approved.set_fields`/`on_rejected.set_fields` writes when an approval request is
   approved or rejected (e.g. a `status` field's `approved`/`rejected` value) could
   previously also be written directly by an ordinary user through the generated form, the
@@ -281,8 +281,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `generate-code`.
 
 ### Added
-- **CSV export/import and approve/reject now accept `X-API-Key` as well as a browser session**
-  (cmd_648): `api_export_route.ts.jinja2`, `api_import_route.ts.jinja2`,
+- **CSV export/import and approve/reject now accept `X-API-Key` as well as a browser session**:
+  `api_export_route.ts.jinja2`, `api_import_route.ts.jinja2`,
   `split_action_route.ts.jinja2`, and the two static `app/api/approval_request/[id]/{approve,reject}/route.ts`
   routes previously resolved the caller exclusively via `getSessionUserId()`/`requireSession()`,
   so an external API-key client could never call them — only a logged-in browser session could.
@@ -296,7 +296,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   via direct Jinja2 template-render assertion and the existing `code_generator/tests/test_reservation.py`
   / `test_ledger_location_id_fk.py` / `test_ledger_item_naming_generalization.py` suites that
   already render this template with full context.
-- **New API-only regression test for FK read-permission graceful degradation** (cmd_648): added
+- **New API-only regression test for FK read-permission graceful degradation**: added
   "4.5 returns 200 for GET (list and detail) when the acting user cannot read `<fk target>`" to
   `test_api_spec.cy.ts.jinja2`, alongside the pre-existing "4.4 preserves `<fk>_id` ... omits it
   from the PUT body" — both pure `X-API-Key` (`cy.request`), no browser. Together they are the
@@ -304,14 +304,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ### Changed
 - **Generated API test spec (`test_api_spec.cy.ts.jinja2`) no longer authenticates via
-  `cy.login()` except one deliberate case** (cmd_658, 殿's report: `api/approval_flow.cy.ts`
-  still drove the browser login screen even after cmd_648 added `X-API-Key` support to
+  `cy.login()` except one deliberate case** (per a report from the project owner: `api/approval_flow.cy.ts`
+  still drove the browser login screen even after an earlier change added `X-API-Key` support to
   export/import/approve/reject). 15 `cy.login()` call sites classified one by one: 11 in the
-  approve/reject block (12.1–15.2) simply predated cmd_648's dual-auth and had never been
+  approve/reject block (12.1–15.2) simply predated that dual-auth change and had never been
   updated to use the `api_key` the same test fixtures already expose (`setup.approverUser.api_key`
   etc., the exact pattern the adjacent resubmit tests already used) — switched to `X-API-Key`. 2
   in the export/import permission-denied pair (7.5/7.6) carried a comment claiming the route
-  "never reads X-API-Key"; that claim is now false (cmd_648) — switched to
+  "never reads X-API-Key"; that claim is now false — switched to
   `db:createLimitedApiUser`, the same helper 7.2–7.4 already use, making 7.5/7.6 identical in
   shape to their siblings. 2 more (an export/import happy-path block's `beforeEach`, and a
   search-coverage block) had no route-specific reason to use a session at all — switched to
@@ -327,7 +327,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   because the `personal_note` entity no longer exists in `json_schema.yaml` — unrelated to this
   change and present before it).
 - **`fk_read_permission_graceful_degradation.cy.ts` moved from `cypress/e2e/api/` to
-  `cypress/e2e/`** (cmd_648): every case in this hand-written spec drives the browser
+  `cypress/e2e/`**: every case in this hand-written spec drives the browser
   (`cy.visit`/`cy.login`/`cy.selectAutocomplete`) and never issues a raw `cy.request` — it was
   never actually `test:e2e:cy:api`-gate coverage despite living under `api/`. It now sits under
   `test:e2e:cy:ui`'s spec glob (`cypress/e2e/*.cy.ts`) instead. (Note: the task instruction that
@@ -338,7 +338,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ### Fixed
 - **Server Action errors (permission denied, unique-constraint violations, stale updates, and
   more) showed a "Minified React error #441" screen with no actionable text instead of the
-  underlying reason** (cmd_695, design from cmd_512): Next.js strips a thrown error's `message`
+  underlying reason** (design from an earlier proposal): Next.js strips a thrown error's `message`
   at the Server Components render boundary in production, replacing it with the minified error
   text and an opaque digest — this happened for every error thrown by `upsertXxx`/`removeXxx`'s
   service-layer calls, regardless of how actionable the underlying error was. Fixed per
@@ -358,7 +358,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `AppError('CONFLICT', ...)`, reading the violated field name via a new `p2002Field()` helper
   (`lib/_errors.ts`) written against this Prisma version's actual driver-adapter error shape,
   which differs from the classic `meta.target` most Prisma examples show. Org isolation
-  violations continue to surface as `NOT_FOUND` (unchanged, cmd_515/cmd_522) — never as
+  violations continue to surface as `NOT_FOUND` (unchanged from earlier behavior) — never as
   "permission denied", which would leak that the record exists in another organization. `error.tsx`
   now shows a static, safe `Errors.pageError` i18n key instead of a hardcoded string; it remains
   the fallback for truly unexpected errors and for permission checks on Server Component pages
@@ -370,11 +370,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   mandatory gate green (1238 pytest, 459 vitest, 240 API e2e — 0 skipped in any suite — plus the
   new UI spec, 0 npm audit findings).
 - **`get<Entity>ChunkForExport()` silently exported zero rows for an `X-API-Key`-only caller
-  with genuine `read` permission** (cmd_658, found while removing `cy.login()` from generated
+  with genuine `read` permission** (found while removing `cy.login()` from generated
   export API tests): `getters.ts.jinja2`'s CSV-export getter has two branches for computing
   permissions — the `should_filter_by_org` branch correctly calls
   `getModelPermissions('<entity>', userId)` with the `userId` the export route already resolved
-  (via `resolveActorId()`, cmd_648 dual-auth) and passed in; the other branch called
+  (via `resolveActorId()`'s dual-auth) and passed in; the other branch called
   `getModelPermissions('<entity>')` with no `userId` at all, which falls back to
   `getSessionUserId()` inside `authz.ts`. Every export API test always authenticated via
   `cy.login()` (a real session cookie), so this was invisible — `getSessionUserId()` happened to
@@ -387,7 +387,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `to.not.include`, which pass vacuously either way) went from failing (`expected [''] to include
   'name'`) to passing after the fix, confirmed on a from-scratch server + build.
 - **`FormUpsert`'s readonly-field display was type-blind, showing raw FK ids with a nonexistent
-  i18n key instead of the relation's label** (cmd_642): the readonly-field loop in
+  i18n key instead of the relation's label**: the readonly-field loop in
   `form_upsert_context()` rendered every readonly field the same way —
   `String(src.<prop>)` with `tf(to_camel_case(prop))` as the label — regardless of type. For a
   relation, the property name is `<rel>_id`, so this produced an untranslated
@@ -403,7 +403,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   instead of silently leaving the field fully editable. See
   `docs/knowledge/readonly-field-form-rendering.md`.
 - **Generated "requestor can re-submit a rejected request" approval test used a page-wide,
-  unscoped `[aria-label="Re-submit"]` lookup** (cmd_641, real case: `purchase_per_item.cy.ts`
+  unscoped `[aria-label="Re-submit"]` lookup** (real case: `purchase_per_item.cy.ts`
   7.8, seen as `cy.click() can only be called on a single element. Your subject contained 2
   elements.` in a full 150-spec CI run, passing in isolation): `ApprovalSection.tsx` renders one
   Re-submit `IconButton` per `approval_request` row with `status === 'rejected'`, all sharing the
@@ -414,7 +414,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   local reproductions matching the exact failing CI commit and exact preceding 23-spec order could
   not force the second row, so the triggering condition from that CI run stays unconfirmed — but
   the selector was unsafe by construction regardless, the same "only one graspable" assumption
-  already fixed for `parent1` (cmd_634), the self-referential decoy (cmd_590), and
+  already fixed for `parent1` in an earlier change, the self-referential decoy in another earlier change, and
   `goods_receipt_line` candidate selection. Fixed by scoping the interaction to the specific
   `approval_flow`'s own table row (via its approver-role-name `<td>`, exact-matched with the
   existing `exactRe()` helper, then `.closest('tr')`) instead of a page-wide selector. The
@@ -445,9 +445,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   vs `'Inventory Movement'`); `inventory_movement.cy.ts` 14/14 passing standalone after
   `generate-code`; `code_generator` pytest suite unaffected (1227 passed, 0 skipped, same count
   before and after this fix — no fixture relied on the shadowed value).
-- **A parent record created with a NULL `organization` (cmd_611/612) became permanently
+- **A parent record created with a NULL `organization` (added in an earlier change that made the relationship optional) became permanently
   un-updatable — `upsert<Parent>()`'s pre-permission existence check threw `Error('Not found')`
-  even for its own creator** (cmd_634): `generators.py`'s `_actor_and_existing_block()` filtered
+  even for its own creator**: `generators.py`'s `_actor_and_existing_block()` filtered
   strictly on `organization_id: { in: _orgIds } }`, which never matches `NULL` in SQL, unlike its
   three sibling org-filter sites (`remove<Parent>()` in `actions.ts.jinja2`,
   `get<Parent>Detail()` in `getters.ts.jinja2`, and the CSV import route in
@@ -457,15 +457,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   null organization consistently. Verified against proj_c's `parent1` entity in an isolated
   worktree: the update-existence-check regression case now passes; `code_generator` pytest suite
   1220 passed, 1 skipped (pre-existing, unrelated), 0 failed.
-- **Cross-entity global search never surfaced a row whose `organization` relationship was NULL**
-  (cmd_640): `search_helpers.ts.jinja2`'s per-entity access clause filtered strictly on
+- **Cross-entity global search never surfaced a row whose `organization` relationship was NULL**:
+  `search_helpers.ts.jinja2`'s per-entity access clause filtered strictly on
   `{{ org_id_field }} IN (${ associatedOrgIds })`, which never matches `NULL` in SQL. Once an
-  org-scoped entity's `organization` relationship becomes optional (cmd_611/612), an org-less row
+  org-scoped entity's `organization` relationship becomes optional (per the earlier change noted above), an org-less row
   was invisible to `buildSearchQuery()` for every caller, including its own creator — the one
-  remaining call site still using the pre-cmd_611/612 unconditional-deny shape (every other
+  remaining call site still using the pre-that-change unconditional-deny shape (every other
   `org_relationship_optional` site — `actions.ts.jinja2`, `getters.ts.jinja2`,
   `api_detail_route.ts.jinja2`, `api_import_route.ts.jinja2` — already had the OR-null admission
-  via cmd_611/612/632/634). Fixed by wiring the same `org_relationship_optional` computation into
+  via that same set of earlier changes). Fixed by wiring the same `org_relationship_optional` computation into
   `generate.py`'s search-entity context (search builds its own independent Prisma.sql fragments,
   so it needed its own plumbing rather than reusing the object-filter templates' existing
   context), gated at both org-filter sites in the template (the direct access clause and its
@@ -477,7 +477,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   side either).
 - **Generated 3.3 "edits with mixed changes" test for a `user`-FK primary field selected a
   `Test User A` row that was never seeded, failing the `cy.selectAutocomplete` assertion**
-  (cmd_633, real case: `shift`/`shift_template`): `spec_context()`'s `is_user_account` primary-FK
+  (real case: `shift`/`shift_template`): `spec_context()`'s `is_user_account` primary-FK
   branch builds `edit_update_value` from the letter-suffixed dependency instance (`Test User A`,
   from `_seed_relation_label_value`'s `unique_index=None` fallback) but only routed the edit
   through `populate{Pascal}Dependencies()` (`use_deps_in_3_3`) for the `selectAutocomplete`
@@ -488,9 +488,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   so the 3.3 edit is routed through the dependency populator like the other `is_user_account`
   paths already are. Verified: `shift.cy.ts`/`shift_template.cy.ts` (desktop + mobile) 40/40
   passing in an isolated worktree; full `code_generator` pytest suite 1216 passed, 0 skipped.
-- **Generated Cypress test's per-entity `callIndex` counter (cmd_618/cmd_620's isolation counter,
+- **Generated Cypress test's per-entity `callIndex` counter (an earlier isolation counter,
   `` `Test {Title} ${callIndex}_${i}` ``) persisted for the life of the Cypress plugin process, not
-  per test case** (cmd_625, "per-test-case callIndex reset"): a generated spec's own `it()` blocks
+  per test case** ("per-test-case callIndex reset"): a generated spec's own `it()` blocks
   are hardcoded to expect `callIndex=0`, but two `it()` blocks in the same spec calling the same
   `populate*Data`/`populate*FullData` helper gave the second block `callIndex=1`, failing its
   assertions — and separately meant a single `it()` run in isolation could produce different
@@ -547,7 +547,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 - **Generated test helper's find-or-create dep block gave `create()` an `include` for
   composite-labelField resolution but not the paired `findFirst()`, a latent TS2551/TS2339 type error
-  in every affected `cypress/support/*/helper.ts`** (cmd_615a): when a many-to-one relationship's
+  in every affected `cypress/support/*/helper.ts`**: when a many-to-one relationship's
   `labelField` is composite (e.g. `[purchase_order.po_number, item.sku]`), the generated dep record's
   label expression reads an included relation (`record.purchase_order?.po_number`) that only exists on
   the `create()` branch's inferred type — the `findFirst()`-declared variable's type lacks it, since
@@ -562,7 +562,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `cypress/support/**` confirms zero remaining errors of this class across all 5 composite-labelField
   occurrences in its schema. proj_c has one dormant occurrence of the same latent bug class (not
   exercised here — its generator pointer hasn't bumped to include this fix yet). Covered by a new
-  regression test (`test_composite_labelfield_helper_findfirst_include.py`, cmd_476 convention: render
+  regression test (`test_composite_labelfield_helper_findfirst_include.py`, following an established convention: render
   the actual jinja2 template, assert the generated TypeScript). Full `code_generator` pytest suite:
   1130 passed (+2 new), 0 regressions. See
   `docs/knowledge/composite-labelfield-helper-findfirst-include-mismatch.md`.
@@ -570,9 +570,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **The CSV-import commit-time CREATE path built its Prisma `create()` call entirely from the
   dry-run-computed row data, bypassing the same auto-create-bridge-FK pre-create mechanism
   (`one_to_one_pre_creates` / FK-merge) that the normal `add<Entity>()` service function already
-  uses** (cmd_614): any entity with a required internal bridge FK (e.g. `approvable_id` on an
+  uses**: any entity with a required internal bridge FK (e.g. `approvable_id` on an
   `x-approval` entity) failed CSV-import row creation at commit time with a Prisma
-  `PrismaClientValidationError` for the missing FK, even after cmd_609 correctly let
+  `PrismaClientValidationError` for the missing FK, even after an earlier fix correctly let
   `import_can_create` come out `true` for such entities. The dry run (which never touches the DB)
   reported success and issued a `confirmToken`, making the failure visible only on commit — a
   concrete trap for anyone confirming a dry run that "succeeded". Concrete trigger: `goods_receipt_line`
@@ -618,7 +618,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/csv-import-dotted-fk-org-filter.md`.
 
 - **`approval_flow.preceded_by`/`followed_by` rendered a different label on the View page than on
-  the Edit page for the same row** (cmd_613): View rendered `approver_role.name || entity_name`
+  the Edit page for the same row**: View rendered `approver_role.name || entity_name`
   (dropping `entity_name` entirely whenever a role was set), Edit rendered
   `entity_name + ' - ' + approver_role.name`. The legacy `secondaryLabelField` mechanism that caused
   this (only honored in one of the several label-rendering call sites) is removed entirely — zero
@@ -641,14 +641,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   
 - **`_create_feasible` (the CSV CREATE-feasibility gate) never excluded FKs to internal bridge
   models (e.g. `approvable_id`, `x-relationship.type: one-to-one_bridge`), wrongly counting them as
-  unfillable required columns and gating off `import_can_create`** (cmd_609): a bridge FK is
+  unfillable required columns and gating off `import_can_create`**: a bridge FK is
   server-managed plumbing the service layer creates and wires at CREATE time — it was already
   correctly excluded from CSV *export*, but nothing then removed it from the required-fields gap
   set, so it stayed a "gap" and `import_can_create` came out `False`. Combined with
   `x-generate.edit: false`, this collapsed the entire generated `import/route.ts` to the
   `ENTITY_IMPORT_NOT_SUPPORTED` 400 stub (`api_import_route.ts.jinja2:24`), not just CREATE — the
-  concrete trigger is `goods_receipt_line` (cmd_610's pending edit:false ruling for that entity).
-  A prior cmd_421 test for this exact scenario asserted the buggy value as correct, under the
+  concrete trigger is `goods_receipt_line` (a pending edit:false ruling for that entity from an earlier task).
+  A prior earlier test for this exact scenario asserted the buggy value as correct, under the
   mistaken belief the exclusion already happened; that test's assertion and rationale are corrected
   as part of this fix. `_create_feasible` now subtracts `get_internal_bridge_fk_prop_names()` —
   the same shared helper `validate.py` and `generators_test.py` already call — rather than a
@@ -659,7 +659,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   injection (assertions fail against the pre-fix code). Full `code_generator` pytest suite: 1131
   passed, 0 skipped. See `docs/knowledge/create-feasible-internal-bridge-fk-fix.md`.
 
-- **Generator-side lint debt invisible to CI (cmd_607)**: `npm run generate-code && npm run lint`
+- **Generator-side lint debt invisible to CI**: `npm run generate-code && npm run lint`
   surfaced 83 eslint warnings (0 errors) that CI's `Lint` job — which runs before `generate-code`,
   never after — could never see. Broken down: 48 were a Chai getter-assertion false positive
   (`expect(x).to.be.true`/`.to.exist` read as unused expressions by
@@ -680,7 +680,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   See `docs/knowledge/cmd607-generator-lint-debt-fix.md`.
 
 - **x-reservation test-helper generation only ever resolved the pool entity's criteria-field FK,
-  silently omitting any OTHER required FK on the pool entity** (cmd_602): when a pool entity (e.g.
+  silently omitting any OTHER required FK on the pool entity**: when a pool entity (e.g.
   `inventory`) has a required FK beyond the one named in `x-reservation.request.criteria` (e.g.
   `location_id`, added 2026-08-06 alongside `product_id`), three separate generated-test code paths
   built `prisma.<pool>.create()` calls that omitted it, all failing at seed time with a
@@ -699,7 +699,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `populate{{Pascal}}Dependencies()` returned `{}` unconditionally whenever `deps` and
   `reservation_nolines_pool_seed` were both empty, without checking `reservation_lines_pool_seed`.
   Entities whose pool has no extra required FK (the common case, e.g. `supply_request`/`supply_pool`)
-  render byte-identical output. Covered by 15 new injected-fixture tests (cmd_476 convention: render
+  render byte-identical output. Covered by 15 new injected-fixture tests (following an established convention: render
   the actual jinja2 template, assert generated TypeScript sets the column) across
   `test_reservation_helper_pool_extra_fk.py` and `test_helper_pool_extra_fk.py`. Verified live in an
   isolated proj_c worktree, both specs isolated (28/28 passing, up from 7/28 before) and as part of
@@ -707,7 +707,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   915/61/11 before the fix — exactly the 21 targeted failures resolved, zero new failures anywhere
   else; SKIP=0 both runs). The 40 failures/9 red specs that remain are pre-existing and out of this
   fix's scope (37 failures across 8 specs are the separate hand-written-helper class fixed by
-  cmd_601; 3 failures in 1 spec are an unrelated `x-self-only` 404-vs-403 issue). proj_g has zero
+  an earlier change; 3 failures in 1 spec are an unrelated `x-self-only` 404-vs-403 issue). proj_g has zero
   `x-reservation` consumer entities (feature unused there) — confirmed by mechanically walking its
   schema with the fixed generator's own context builders, N/A for this bug class. Full
   `code_generator` pytest suite: 1127 passed, 0 regressions. See
@@ -715,7 +715,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 - **A field with a Prisma `@default(...)` but no schema `default:` marker (dynamic defaults like
   `now()`) or with a static default the generator ignored (number/boolean/plain-string) silently
-  lost that default on the "new" page whenever the user left it untouched** (cmd_594): for
+  lost that default on the "new" page whenever the user left it untouched**: for
   `DateTime @default(now())` NOT NULL columns, the "new" page seeded `null`, the browser then
   submitted `''`, and the server turned that into `new Date('')` (Invalid Date) — crashing
   `create()` outright for any consumer entity with such a column (the concrete symptom this fixes:
@@ -738,7 +738,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   for this field-default family specifically. See `docs/knowledge/writable-default-value-fix.md`.
 - **`npm run cleanup`'s defaults deleted write-once stubs while leaving true orphans behind, and a
   reordered `generate-code` → `cleanup` run silently deleted the entire just-generated tree**
-  (cmd_450, building on cmd_469's earlier fix that pointed cleanup at the Stage-4 built schema):
+  (building on an earlier fix that pointed cleanup at the Stage-4 built schema):
   `cleanup` now passes `--prune-orphans --keep-stubs` (the safe default — sweep stale entity
   boilerplate, keep customizable stubs) where it previously passed neither (orphans ignored, stubs
   deleted); `cleanup:all` keeps `--prune-orphans` alone (full clean-slate, stubs deleted too).
@@ -758,7 +758,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   and `docs/knowledge/schema-restructuring-build-order.md`.
 
 ### Added
-- **`x-server-value` now supports actor delegation** (cmd_565, extending cmd_556): a field
+- **`x-server-value` now supports actor delegation** (extending an earlier delegation revision): a field
   declared `x-server-value: {source: actor, override_permission: <Operation>}` still defaults to
   writing the authenticated actor's id on create, but an actor holding `override_permission` (any
   `lib/authz.ts` `Operation`) may now supply an explicit value that is honored as-is — e.g. an
@@ -770,7 +770,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   discarded). See `docs/knowledge/x-server-value-actor-delegation.md`.
 
 ### Security
-- **CREATE had no read-only field enforcement at all** (cmd_565): PUT's existing AP-3=B rejects a
+- **CREATE had no read-only field enforcement at all**: PUT's existing AP-3=B rejects a
   submitted read-only field value that mismatches the persisted row, but CREATE has no row to
   compare against, so a plain `x-readonly`/`x-readonly-fields` field's client-submitted value flowed
   straight into the database on create, via both the REST route and the server action — reproduced
@@ -781,7 +781,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ### Fixed
 - **Generated Cypress test fixtures could crash or click the wrong row for entities with a
-  self-referential FK** (cmd_592): a self-ref dependency record (e.g. a split-lineage decoy) was
+  self-referential FK**: a self-ref dependency record (e.g. a split-lineage decoy) was
   created via an unconditional `prisma.create()` in `populate{{pascal}}Dependencies()` with no
   find-or-create guard, so calling the populate helper more than once in the same spec (routine —
   once per `it()` block) duplicated the row and could trip any `@@unique` constraint the entity
@@ -793,7 +793,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   record; for entities with a self-referential FK, this now uses an anchored exact-match instead.
   See `docs/knowledge/self-ref-dep-fixture-unique-collision.md`.
 - **`x-generate.invalidate` enabled with no handler/module produced code that could not build**
-  (cmd_583): `actions.ts.jinja2`'s fallback branch never imported anything (a bare runtime
+  : `actions.ts.jinja2`'s fallback branch never imported anything (a bare runtime
   `throw`), while `invalidate_action_route.ts.jinja2`'s fallback branch unconditionally imported
   a file `generate.py` never wrote — `next build` failed the moment any entity took this branch.
   This repo's only `invalidate` consumer (`user`) always supplies an explicit handler/module, so
@@ -805,7 +805,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   generalized `invalidate_action_route.ts.jinja2`'s docstring, which hardcoded `user`-specific PII
   wording. See `docs/knowledge/invalidate-no-handler-write-once-stub.md`.
 - **The no-handler/module invalidate stub called `prisma.<model>.update()` unconditionally, even
-  when the Prisma model has no `invalidated_at` column** (cmd_587, regressing the cmd_583 fix
+  when the Prisma model has no `invalidated_at` column** (regressing the fix
   above): a later change to `invalidate_handler_stub.ts.jinja2` replaced the safe `throw` with an
   unconditional default update against an `invalidated_at` column — for any entity whose model
   lacks that column, the write-once stub no longer throws a clear error, it fails to build.
@@ -818,7 +818,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   the earlier fixture test only checked file existence and import statements, which is why this
   regression wasn't caught.
 - **Item-master entity naming was silently hardcoded to `product`/`product_id` throughout the
-  ledger/split generator** (cmd_545/cmd_546): any consumer naming its item-master entity or its
+  ledger/split generator**: any consumer naming its item-master entity or its
   pool entity's location/lot/expiration columns differently got no error — three independent
   breaks, all traced to literal-name comparisons instead of schema-derived resolution.
   1. `helper_context()`'s `needs_second` compared a reference name (the `x-display.table` key,
@@ -843,7 +843,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   generation fails immediately with a named error; no generated-code content changes as a result
   of adding them alone. See `docs/knowledge/appendix/inventory-reservation-split.md` §7–8.
 - **Ledger row's location column is now an id-FK, not a denormalized display string**
-  (cmd_562, superseding cmd_550/PR #269 before either shipped in a release): cmd_550 taught the
+  (superseding an earlier design, PR #269, before either shipped in a release): that earlier design taught the
   ledger row's location write to render the pool entity's declared `x-relationship.labelField`
   into a display-string snapshot (instead of hardcoding `.name`), plus a *reverse*
   `findFirst({ where: { <labelField>: <string> } })` lookup everywhere that string needed to be
@@ -862,7 +862,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/appendix/cmd562-location-id-fk-consumer-migration.md` for the consumer migration.
 
 ### Security
-- **Server-action path can no longer bypass multi-stage approval ordering** (cmd_540): the
+- **Server-action path can no longer bypass multi-stage approval ordering**: the
   REST route (`app/api/approval_request/[id]/{approve,reject}/route.ts`) enforced
   `preceded_by` ordering via `assertApprovalOrder()`, but the server action
   (`lib/approval_request/actions_core.ts`'s `approveApprovalRequest`/`rejectApprovalRequest`,
@@ -875,7 +875,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `test/flows/approval_order_bypass.test.ts`.
 
 ### Fixed
-- **`npm run cleanup` could wipe every translated `messages/ja.json` entry** (cmd_560):
+- **`npm run cleanup` could wipe every translated `messages/ja.json` entry**:
   `cleanup.py` deleted every Fields/EntityLabel/Nav key belonging to any entity in the
   passed schema from `messages/*.json` — including entries for entities still in
   production use, not just genuinely removed ones. Since `npm run cleanup` always
@@ -892,7 +892,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/i18n-locale-routing.md` "`messages/*.json` are append-only, never
   generator-truncated".
 
-- **Re-submitting a rejected approval request never notified the approver** (cmd_539):
+- **Re-submitting a rejected approval request never notified the approver**:
   `resubmitApprovalRequest()` (both the server action in
   `lib/approval_request/actions_core.ts` and the REST route
   `app/api/approval_request/[id]/resubmit/route.ts`) transitions status back to `pending` by
@@ -906,22 +906,22 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/notification-triggers.md`.
 
 ### Internal
-- **`check_generated.py`: new `test:unexplained-login` gate rule** (cmd_658): scans every
+- **`check_generated.py`: new `test:unexplained-login` gate rule**: scans every
   generated `cypress/e2e/api/<entity>.cy.ts` for `cy.login(` with no `dual-auth-session-canary`
   marker comment in the 5 lines above it, so a `cy.login()` reintroduced into a future template
   edit fails `npm run check:generated` (gate step 6) instead of silently reintroducing the
   screen-operation coupling this same cmd removed. Deliberately not allowlist-exemptable like the
   existing `raw:*`/`write:direct` rules — the exemption has to be the in-file marker, checkable in
   the same diff that adds the `cy.login()` call, not a separate YAML entry a reviewer has to go
-  find (cmd_498's "an exemption nothing checks is a hole"). Verified with a fault-injection test
+  find (the same reasoning as before: an exemption nothing checks is a hole, not a safeguard). Verified with a fault-injection test
   (added an unmarked `cy.login()` to a generated spec, confirmed the gate caught it, reverted) per
-  cmd_476's convention, plus 7 new `code_generator/tests/test_check_generated.py` cases. Scope:
+  the established convention, plus 7 new `code_generator/tests/test_check_generated.py` cases. Scope:
   only walks generated specs for now (mirrors the existing rules' entity-driven enumeration) — the
-  5 proj_b hand-written API specs and proj_c's `prj/`-owned ones are tracked separately (cmd_658
-  classification report) as a follow-up, not yet covered by this rule. See
+  5 proj_b hand-written API specs and proj_c's `prj/`-owned ones are tracked separately (see the separate classification
+  report) as a follow-up, not yet covered by this rule. See
   `docs/knowledge/testing-cypress.md`'s "API test / UI test boundary" section.
 - **Vercel's `migrate:deploy` ran through Neon's pooled connection instead of a direct one**
-  (cmd_657): `prisma.config.ts`'s `datasource.url` (read only by the Prisma CLI — `lib/prisma.ts`
+  : `prisma.config.ts`'s `datasource.url` (read only by the Prisma CLI — `lib/prisma.ts`
   reads `DATABASE_URL` independently for the running app, unaffected by this file) pointed at
   `DATABASE_URL`, which on Vercel is Neon's pooled (PgBouncer transaction-mode) endpoint.
   Prisma's migration engine takes a session-scoped advisory lock across a sequence of statements,
@@ -940,12 +940,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   their `app-generator` submodule pointer — neither carries its own copy of `prisma.config.ts`.
   See `docs/knowledge/prisma-direct-vs-pooled-connection.md`.
 - `docs/knowledge/prisma-direct-vs-pooled-connection.md`'s "Setting `DIRECT_URL` on Vercel" section
-  is corrected (cmd_657 addendum): it originally described a manual, dashboard-only step. `DIRECT_URL`
+  is corrected in a follow-up: it originally described a manual, dashboard-only step. `DIRECT_URL`
   is now injected by `app-template`'s `scripts/vercel-env.sh` alongside every other Vercel env var —
   see that repo's CHANGELOG for the actual injection change.
-- **cmd_646's `sameEntityField` generator mechanism replaced with a hand-written validation socket
+- **The `sameEntityField` generator mechanism replaced with a hand-written validation socket
   — the business condition ("same-`entity_name`" for `approval_flow`'s `preceded_by`/`followed_by`)
-  no longer lives in `json_schema.yaml` or a `*.jinja2` template** (cmd_652, correcting cmd_646:
+  no longer lives in `json_schema.yaml` or a `*.jinja2` template** (correcting an earlier generalization:
   reviewed as a case of a coincidental business rule being generalized into the schema, when a
   future self-ref relation could need an entirely different condition). Removed entirely:
   `x-relationships.<rel>.sameEntityField` (`json_schema.yaml`), its `validate.py` checks, its
@@ -966,14 +966,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   existing `isCrossEntityRef()` predicate in `lib/approval_flow/autocomplete_filter.ts` (GENERATED
   ONCE, unchanged) plus a new `lib/approval_flow/service_validation_custom.ts` (GENERATED ONCE) that
   calls it as the save-time backstop. Also reverts `code_generator/generators_test.py`'s
-  `match_self_entity` self-ref dependency-fixture special-casing (which cmd_646 had reintroduced)
-  back to the cmd_636 baseline, and the matching selector precision in
+  `match_self_entity` self-ref dependency-fixture special-casing (which that generalization had reintroduced)
+  back to the pre-generalization baseline, and the matching selector precision in
   `code_generator/templates/test_spec.cy.ts.jinja2`'s self-ref autocomplete-picker branch — see
   `docs/knowledge/same-entity-validation-socket.md` (replaces
   `docs/knowledge/same-entity-field-mechanism.md`) for the full design and history.
 - **Generated `parent1`-style Cypress spec (2+ DataGrid children on one parent form) intermittently
   failed with "can only scroll 1 element, you tried to scroll 2 elements", and generated
-  DataGrid-child date/date-time/time edit cells rejected every typed value** (cmd_634, two
+  DataGrid-child date/date-time/time edit cells rejected every typed value** (two
   independent generator-scaffold bugs found and fixed together): (1) the generated scroll-into-view
   helper's `.MuiDataGrid-virtualScroller` / `data-rowindex` selectors were unscoped, so on a form
   with multiple DataGrid children (e.g. proj_c's `parent1`, with both `parent1_child1s` and
@@ -994,8 +994,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   is generic (any project could hit it with a future date-typed DataGrid-child field) even though
   only proj_c's `parent1` currently exercises it (proj_b/proj_g's only DataGrid children have
   text-only fields).
-- **Generated test helper's primary-FK-dep and own-record find-or-create removed; each `populate*Data`/`populate*FullData` call now gets a fully isolated slice of the primary FK dep's namespace** (cmd_620, Option β / Phase 2): closes the collision cmd_618's Phase 1 letter-indexed fix (above) deliberately left open — `populate*Data(n)`/`populate*FullData(n)` called more than once in the same test (same DB session, no `db:reset` in between) could have their per-iteration primary-FK-dep row (`record_lookup_where`'s guard) and the primary FK dep's own row (`primary_fk_dep`'s `lookup_where_unique` guard) found-and-reused across calls, silently entangling two logically independent test scenarios into sharing one FK target row. Both find-or-creates in `test_helper.ts.jinja2` are now unconditional `create()`s. To keep the second call from tripping `@unique` on the primary FK dep's own required fields, a per-entity monotonic `callIndex` (module-scope counter shared by `populate*Data`/`populate*FullData`, persists for the life of the Cypress plugin process) is spliced into the loop value: `` `Test {Title} ${i}` `` → `` `Test {Title} ${callIndex}_${i}` ``. `callIndex` is always `0` for a generated spec's own calls (each `it()` calls a given populate helper at most once), so generated fixtures are unaffected in form beyond the literal string; the isolation matters for hand-written specs (or composite helpers) that call the same populate function more than once in one test. `record_lookup_where`'s own computation, and the now-fully-dead `lookup_where_unique`, are removed from `code_generator/generators_test.py`. D∩L=∅ (cmd_618 Phase 1) is preserved — callIndex-shifted loop values still start with a digit, still disjoint from the letter-suffixed shared dep values. See `docs/knowledge/cmd614-test-data-uniqueness-design.md` §4.4.
-- **Generated test helper dep records now use a letter-indexed name suffix(`'Test {Title} A'`/`'Test {Title} B'`) instead of `'Test {Title}'`/`'Test {Title} 2'`** (cmd_618, Phase 1): 
+- **Generated test helper's primary-FK-dep and own-record find-or-create removed; each `populate*Data`/`populate*FullData` call now gets a fully isolated slice of the primary FK dep's namespace** (Option β / Phase 2): closes the collision the Phase 1 letter-indexed fix (above) deliberately left open — `populate*Data(n)`/`populate*FullData(n)` called more than once in the same test (same DB session, no `db:reset` in between) could have their per-iteration primary-FK-dep row (`record_lookup_where`'s guard) and the primary FK dep's own row (`primary_fk_dep`'s `lookup_where_unique` guard) found-and-reused across calls, silently entangling two logically independent test scenarios into sharing one FK target row. Both find-or-creates in `test_helper.ts.jinja2` are now unconditional `create()`s. To keep the second call from tripping `@unique` on the primary FK dep's own required fields, a per-entity monotonic `callIndex` (module-scope counter shared by `populate*Data`/`populate*FullData`, persists for the life of the Cypress plugin process) is spliced into the loop value: `` `Test {Title} ${i}` `` → `` `Test {Title} ${callIndex}_${i}` ``. `callIndex` is always `0` for a generated spec's own calls (each `it()` calls a given populate helper at most once), so generated fixtures are unaffected in form beyond the literal string; the isolation matters for hand-written specs (or composite helpers) that call the same populate function more than once in one test. `record_lookup_where`'s own computation, and the now-fully-dead `lookup_where_unique`, are removed from `code_generator/generators_test.py`. D∩L=∅ (the Phase 1 invariant) is preserved — callIndex-shifted loop values still start with a digit, still disjoint from the letter-suffixed shared dep values. See `docs/knowledge/cmd614-test-data-uniqueness-design.md` §4.4.
+- **Generated test helper dep records now use a letter-indexed name suffix(`'Test {Title} A'`/`'Test {Title} B'`) instead of `'Test {Title}'`/`'Test {Title} 2'`** (Phase 1): 
   the old dep naming collided byte-for-byte with `populate*Data(n)`'s loop rows (`` `Test {Title} ${i}` ``)
   once a loop reached `i=2`, causing find-or-create to resolve both to the same DB row. Letters and 
   digits are disjoint at the first differing byte, so the dep and loop namespaces can never intersect. 
@@ -1004,8 +1004,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   See `docs/knowledge/cmd614-test-data-uniqueness-design.md` §3.
 - **`exactRe()` exact-match test helper widened from 2 self-referential entities to all entities;
   the two post-render cleanup helpers it exposed gaps in are now anchored on code structure
-  instead of comment prose, and fail loudly instead of silently no-op'ing** (cmd_614/cmd_618):
-  `test_spec.cy.ts.jinja2`'s `exactRe()` regex matcher (added by cmd_592 to stop a self-ref
+  instead of comment prose, and fail loudly instead of silently no-op'ing**:
+  `test_spec.cy.ts.jinja2`'s `exactRe()` regex matcher (added earlier to stop a self-ref
   decoy record's display name from substring-colliding with the record a spec creates) was gated
   behind `has_self_ref_deps`, reaching only 2 of proj_c's 46 generated specs even though the
   underlying `cy.contains()` substring problem isn't specific to self-referential deps — removed
@@ -1015,7 +1015,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `leave_request`'s `user` FK); fixed by scoping every call site to `cy.contains('.MuiDataGrid-cell',
   exactRe(...))` — narrow enough to exclude the header, still specific enough for an exact-match
   regex to match a single field's value rather than a whole row's concatenated text. (2) Widening
-  the gate also rewrote the comment above `exactRe()`, silently desyncing cmd_607's
+  the gate also rewrote the comment above `exactRe()`, silently desyncing an earlier cleanup helper's
   `_strip_unused_exact_re_helper()` — its regex was anchored on that exact comment text, so the
   "strip if unused" cleanup would have quietly stopped firing with no error and no test failure.
   Re-anchored on the function signature instead, and it now raises when its input contains the
@@ -1023,7 +1023,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   The same latent-gap shape existed in `_prefix_unused_then_callback_params()`'s
   `_THEN_CALLBACK_RE`: it matched only the exact literal spelling `.then((x) => {` — no `async`,
   no whitespace variance, and no TS type annotation, so every `.then((res: any) => {` in
-  `test_reservation_spec.cy.ts.jinja2` had passed through unprocessed since cmd_607 landed.
+  `test_reservation_spec.cy.ts.jinja2` had passed through unprocessed since that helper landed.
   Widened to tolerate that real variance while preserving the matched text verbatim, and added
   `_check_then_callback_coverage()` so any `.then(` shape it doesn't recognize fails generation
   loudly instead of shipping unprocessed. 10 new regression tests added to
@@ -1031,21 +1031,21 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   warning count on this branch matches the `develop` baseline exactly (5 warnings, both before and
   after), and proj_c's full API + UI Cypress suites (57 + 86 specs) reproduce the same pre-existing,
   unrelated failures before and after this change — zero new failures from any of the above.
-- **`npm run lint` Completion gate step reordered to run before `generate-code`** (cmd_600):
+- **`npm run lint` Completion gate step reordered to run before `generate-code`**:
   CI's `Lint` job never runs `generate-code` (`npm ci && npm run lint` only), but four
   `.claude/commands/*.md` gates (`update-generator`, `generate-schema`, `update-code`,
   `add-component`) ran `npm run lint` *after* a step that triggers `generate-code`, linting a
   much larger, uncalibrated file population (~230 additional generated files) than CI ever
-  checks. This was mistaken for a 15→93 warning regression between commits (investigated as
-  cmd_600) — independent re-measurement found no such regression: the post-generate-code count
+  checks. This was mistaken for a 15→93 warning regression between commits (investigated
+  separately) — independent re-measurement found no such regression: the post-generate-code count
   was already 93 at the exact commit (`c10b1b1a`, 2026-08-04) the "15" ceiling was calibrated
   against; "15" was itself the pre-generate-code count for that same commit, byte-for-byte
-  matching cmd_554's original per-rule breakdown. `npm run lint` is now the first Completion
+  matching the original per-rule breakdown from that earlier measurement. `npm run lint` is now the first Completion
   gate step in all four affected files (and `AGENTS.md`'s generated-code-prerequisites rule is
   corrected to name it as the one exception), guaranteeing local and CI report the same number.
   See `docs/knowledge/lint-gate-must-match-ci-precondition.md`.
 - **`cypress/support/db-helpers.ts`/`generated-tasks.ts` were stale, missing `personal_note`**
-  (cmd_560): these committed, generator-written files predate the `personal_note` entity
+  : these committed, generator-written files predate the `personal_note` entity
   (added later in the `x-self-only` Stage 1 work) and were never regenerated afterward —
   `resetTestDatabase()`'s cleanup ordering never deleted `personal_note` rows, so its later
   `user.deleteMany()` step hit `Foreign key constraint violated on the constraint:
@@ -1058,21 +1058,21 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `db:populatePersonalNote*` tasks).
 
 ### Added
-- **FK autocomplete search now derives from `labelField`, `searchField` retired** (cmd_552): the
+- **FK autocomplete search now derives from `labelField`, `searchField` retired**: the
   generated `search{Entity}Options` getter's cross-relation substring match (e.g. searching
   `booking` also matching on `resource.name`) used to require a separate
   `x-relationship.searchField` declaration, independent of the `labelField` that actually
   renders on screen — nothing stopped the two from drifting apart. `searchField` is removed;
   `derive_searchable_relation_fields()` (`helpers/schema_helpers.py`) now derives the same
-  `{relation, field}` list from `labelField` itself, sharing its origin with cmd_548's CSV-import
+  `{relation, field}` list from `labelField` itself, sharing its origin with the CSV-import
   full-match (`build_label_expression`), so the searched field and the displayed field can never
   disagree. Only string-typed, non-dotted `labelField` elements qualify — enum (translated
-  on-screen label vs. untranslated stored value, same trap as cmd_493), date/time, number, and
+  on-screen label vs. untranslated stored value, the same trap seen elsewhere), date/time, number, and
   CUID-pattern id fields are excluded, and a composite `labelField` is evaluated per element.
   `validate.py` now rejects any schema that still declares `searchField` by name. See
   `docs/knowledge/schema-yaml-configuration.md` §5 ("`labelField` is also the autocomplete
   search source").
-- **CSV import for composite/dotted labelField FK columns** (cmd_548): a FK relation whose
+- **CSV import for composite/dotted labelField FK columns**: a FK relation whose
   display label is composite (`[product.name, location.name]`) or a single dotted path used to be
   export-only — there was no single scalar to resolve a CSV cell back to, so the column landed in
   `UNIMPORTABLE_COLUMN`. It is now resolved by matching the CSV cell against the full rendered
@@ -1081,7 +1081,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   looks like. Ambiguous labels (two rows sharing the same rendered text) are rejected at row
   granularity (`MULTI_MATCH`, naming the column/value/match-count), not for the whole CSV. See
   `docs/knowledge/csv-import-composite-labelfield.md`.
-- **`x-self-only`: permission-independent per-user data isolation, Stage 1** (cmd_536): a new
+- **`x-self-only`: permission-independent per-user data isolation, Stage 1**: a new
   entity-level schema flag for data that must be visible/editable only by its own creator as a
   fixed invariant — no permission grant (including `general.read`) can widen it, unlike the
   existing `creator` permission scope which is just a configurable option. Every affected
@@ -1100,7 +1100,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/self-only-entity.md`. Row-Level Security (Stage 2) is not implemented — the
   current dev/test DB role is a superuser and bypasses RLS regardless, so it requires a dedicated
   non-superuser DB role as a prerequisite (an operations task, out of scope here).
-- **Post-login redirect-back with open-redirect protection** (cmd_525): unauthenticated
+- **Post-login redirect-back with open-redirect protection**: unauthenticated
   page requests were already redirected to `/login` by `proxy.ts` before this change, but
   always landed on `/` after signing in, losing the user's original destination. `proxy.ts`
   now carries the originally-requested path via `?redirect=`, and `app/[locale]/login/page.tsx`
@@ -1111,7 +1111,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   the public-path exclusion list (`/login`, `/register`, `/docs`, `/legal`, static assets) is
   unchanged and was re-verified to produce no redirect loop. See
   `docs/knowledge/unauthenticated-page-redirect.md`.
-- **`@mention` server-side support** (cmd_522, server side of a two-part feature —
+- **`@mention` server-side support** (server side of a two-part feature —
   client-side `MentionInput`/`MentionText` UI ships separately): a new schema-global
   `searchMentionUserOptions()` server action (`lib/mention/search.ts`) returns org-scoped
   candidates (via the same organization-membership relation as `getAssociatedOrganizations()`,
@@ -1124,7 +1124,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   getters add a `canViewUserProfile` flag (viewer's `user` read permission) for the display layer
   to decide whether a mentioned name links to their profile. See
   `docs/knowledge/mention-system.md`.
-- **`@mention` client UI** (cmd_522c, client side of the two-part feature above): new
+- **`@mention` client UI** (client side of the two-part feature above): new
   always-present `MentionInput`/`MentionText` components (`components/_standard/`) — an
   `@`-triggered candidate picker inserting `@[user_id:<id>]` markers, and a renderer that turns
   them into profile links or plain chips depending on the viewer's `canViewUserProfile`.
@@ -1132,19 +1132,19 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   (`mention_fields`); `MentionText` wires into the comment display when `comment_has_mention`,
   via a new `renderMessage` render-prop on `CommentListWrapper`. Fixed a latent conflict this
   exposed: the shared comment getter was already decoding `@[user_id:<id>]` to a plain name
-  server-side (pre-dating cmd_522), which left no id for `MentionText` to link — decoding moved to
+  server-side (pre-dating the mention feature), which left no id for `MentionText` to link — decoding moved to
   the REST API route only (keeping its JSON contract unchanged), while the page/FormView path now
   gets the raw text plus a `mentionUserContext` id→name map. Also fixed: `context.py` (the
   `types.ts.jinja2`-only context builder) never normalized either x-bridge form before detecting
   one-to-one relations, so bridge-based comment threads were invisible to it — now mirrors
   `build_context.py`'s normalization. See `docs/knowledge/mention-system.md`.
-- **`@mention` comment-compose picker wiring** (cmd_538): the "write a comment"/edit-comment
+- **`@mention` comment-compose picker wiring**: the "write a comment"/edit-comment
   textareas inside `CommentListWrapper` now use `MentionInput` — typing `@` opens real candidate
-  suggestions — instead of a plain `TextField`, completing the client-UI scope cmd_522c explicitly
+  suggestions — instead of a plain `TextField`, completing the client-UI scope the mention feature explicitly
   deferred. `form_upsert.tsx.jinja2` now passes `searchMentionUserOptions` down and threads
   `canViewUserProfile`/`mentionUserContext` to the edit page (previously wired only for the
   read-only `form_view.tsx.jinja2` path). See `docs/knowledge/mention-system.md`.
-- **Generated permission-denial and cross-org isolation API tests** (cmd_520 batch A): every
+- **Generated permission-denial and cross-org isolation API tests** (batch A): every
   generated `cypress/e2e/api/<entity>.cy.ts` now includes PUT/DELETE/export/import
   permission-denial tests (7.3–7.6, gated on `can_edit`/`can_delete`/`can_export`/
   `import_eligible`) and, for organization-scoped entities, cross-organization isolation tests
@@ -1175,7 +1175,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ### Fixed
 - **Mention-collection loops read the wrong field off the comment relation**
-  (cmd_532): `getters.ts.jinja2` and `api_detail_route.ts.jinja2` read
+  : `getters.ts.jinja2` and `api_detail_route.ts.jinja2` read
   `c.creator_id` in both places that collect comment authors for
   `mentionUserContext`, but the comment type only ever declares
   `creator?: { id, name, image }` — a TypeScript compile error on any
@@ -1185,7 +1185,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   safe because `build_context.py` unconditionally includes the `creator`
   relation on every comment fetch that can reach these loops. See
   `docs/knowledge/mention-system.md`.
-- **`searchMentionUserOptions()`'s permission-denied flag never reached the client** (cmd_538):
+- **`searchMentionUserOptions()`'s permission-denied flag never reached the client**:
   the function returned an array with an ad-hoc `permissionDenied` property
   (`Object.assign([], { permissionDenied: true })`). Next.js Server Actions serialize return
   values through the RSC "flight" protocol, which — like `JSON.stringify` — only preserves an
@@ -1194,7 +1194,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   denial. A component-level unit test couldn't catch this, since it calls the function in-process
   with no serialization boundary to cross. Contract changed to a plain
   `{ options, permissionDenied }` object. The identical pattern in `getters.ts.jinja2`'s
-  `searchXxxOptions()` (cmd_516) is presumed to share this bug and was **not** fixed here —
+  `searchXxxOptions()` is presumed to share this bug and was **not** fixed here —
   flagged for a follow-up cmd. Also fixed: `generators_test.py`'s `comment_has_mention`
   test-generation gate missed the commentable one-to-one bridge form, so any entity using that
   (recommended) pattern silently got zero generated mention-UI test coverage; and `lib/prisma.ts`'s
@@ -1203,20 +1203,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   rejects top-level await outright. Switched to a static import (already the established pattern in
   `cypress/support/db-helpers.ts`). See `docs/knowledge/mention-system.md`.
 - **Multi-stage approval chains never notified the next approver when their
-  turn arrived** (cmd_541): a `preceded_by` chain creates every flow's
+  turn arrived**: a `preceded_by` chain creates every flow's
   `approval_request` up front, and every flow's approver role is notified
   once at that point — but a follow-on flow isn't actually actionable until
   its preceding flow(s) are approved, and nothing told those approvers when
   that moment came; they only found out by checking back themselves.
   `approveApprovalRequest()` (both independent implementations — the server
-  action and the REST route, per cmd_479) now sends a new
+  action and the REST route) now sends a new
   `approval_order_reached` notification, distinct from the creation-time
   one, to any follow-on flow's approvers once its ordering constraint is
   satisfied. See `docs/knowledge/notification-triggers.md` "Approval
-  order-reached notification (cmd_541)".
+  order-reached notification".
 
 ### Security
-- **Enforce MFA on the Google OAuth sign-in path** (cmd_527) — previously,
+- **Enforce MFA on the Google OAuth sign-in path** — previously,
   `mfa_enabled` was only checked inside `CredentialsProvider.authorize()`,
   so an SSO-provisioned user (`password === null`) with MFA enabled could
   sign in via Google and reach a fully authenticated session without ever
@@ -1228,7 +1228,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   previously revoke an already-active JWT). See
   `docs/knowledge/authentication.md` "MFA on the OAuth path".
 - **Second, independent gate on the test-only mock Google OAuth provider**
-  (cmd_528) — `MOCK_GOOGLE_OAUTH_TEST=true` alone previously let anyone who
+  — `MOCK_GOOGLE_OAUTH_TEST=true` alone previously let anyone who
   knows a user's email sign in as them with no password/MFA check, if the
   flag ever leaked into a real deploy's env vars. Registering the mock
   provider now additionally requires a filesystem sentinel file that only
@@ -1238,7 +1238,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   "MFA on the OAuth path" → "Testing without real Google credentials".
 
 ### Fixed
-- **CSV import dotted-FK org filter gap** (cmd_521, security): a dotted `x-import-key` lookup
+- **CSV import dotted-FK org filter gap** (security): a dotted `x-import-key` lookup
   (e.g. `role.name`) on an organization-scoped entity's CSV import route was not itself
   organization-filtered — a same-named row owned by a different organization could resolve and
   get linked to the importing actor's record. The dotted-FK lookup is now org-filtered whenever
@@ -1248,7 +1248,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Template-layer change only, no Prisma schema change — regenerate to pick it up, no migration
   needed. See `docs/knowledge/csv-import-dotted-fk-org-filter.md`.
 - **CSV import silently dropped screen-editable FK columns not declared in `x-import-key`**
-  (cmd_530): an FK relation editable on screen (e.g. `approval_flow.requestor_role`) but absent
+  : an FK relation editable on screen (e.g. `approval_flow.requestor_role`) but absent
   from `x-import-key` had no CSV-import write path at all — the route answered `200 succeeded`
   while discarding the column, on both CREATE and UPDATE. Separately, even a *declared* dotted
   `x-import-key` FK was never rewritten on UPDATE (only merged into CREATE data via `keyWhere`).
@@ -1265,17 +1265,17 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/csv-import-non-key-fk-write-path.md`.
 
 ### Internal
-- **Dependabot `target-branch: develop` never took effect** (cmd_531): Dependabot always reads
+- **Dependabot `target-branch: develop` never took effect**: Dependabot always reads
   `.github/dependabot.yml` from the default branch, not `develop`, so `develop`'s copy of the
   setting was inert; ported to `main`'s copy (PR #248). See
   `docs/knowledge/dependabot-config-read-from-default-branch.md`.
-- **MUI major-update PRs grouped into one; missing Dependabot labels created** (cmd_537): added
+- **MUI major-update PRs grouped into one; missing Dependabot labels created**: added
   an `npm-mui-major` group to `.github/dependabot.yml` (PR #256, the copy on `main` that
   Dependabot reads) so major-version bumps across the whole `@mui/*` scope land as one PR
   instead of one per package. Also created the `dependencies`/`npm`/`python`/`github-actions`
   repo labels that Dependabot's config referenced but that never existed, so future PRs stop
   reporting a missing-label warning.
-- **fast-uri HIGH CVE (GHSA-7p8r-x3mc-p8w7) blocking the Dependency Audit gate** (cmd_542):
+- **fast-uri HIGH CVE (GHSA-7p8r-x3mc-p8w7) blocking the Dependency Audit gate**:
   transitive via `prisma` → `@prisma/dev` → `@prisma/streams-local` → `ajv@8.20.0` →
   `fast-uri@3.1.4`; the existing `overrides.fast-uri` pin (`^3.1.4`) had itself frozen the
   lockfile on the last vulnerable patch. Bumped the override floor to `^3.1.5` (still within
@@ -1287,7 +1287,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Deliberately did not use `npm audit fix --force`, which pulls in a `@google-cloud/storage`
   downgrade. Verified with a clean `rm -rf node_modules && npm ci` (exit 0) and
   `npm audit --omit=dev --audit-level=high` (0 vulnerabilities).
-- **`x-approval.set_fields` docs contradicted the implementation** (cmd_544): `docs/knowledge/appendix/approval-flow.md`
+- **`x-approval.set_fields` docs contradicted the implementation**: `docs/knowledge/appendix/approval-flow.md`
   §16.9 showed `on_approved.set_fields` as a list-of-`{field, value}` entries, contradicting
   §16.11's mapping form and the only shape `_resolve_set_fields()` (`code_generator/generate.py:289`)
   accepts (it iterates `raw.items()`). A schema author following §16.9 as written hit an
@@ -1296,12 +1296,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `set_fields` before generation runs, naming the entity, the offending field key(s), and the
   correct form.
 - **`npm run lint` now enforces a warning ceiling** (`eslint --max-warnings 20`, follow-up to
-  cmd_529): a prior triage found 216 unused-vars/expressions warnings had silently accumulated
+  an earlier fix): a prior triage found 216 unused-vars/expressions warnings had silently accumulated
   behind a config gap, one of which was a genuine dead branch — a ceiling that only ratchets down
   (never silently raised) stops that from recurring unnoticed. Seeded 5 warnings above the
   measured `develop`-tip count (15) rather than an exact match, so one incidental warning doesn't
   turn an unrelated PR red. See `docs/knowledge/lint-warning-ceiling-ratchet.md`.
-- **`components/*/form_validation.ts` untracked from version control** (cmd_562 follow-up):
+- **`components/*/form_validation.ts` untracked from version control** (follow-up):
   `.gitignore` negated this generated file as if it were a customizable stub, but `generate.py`
   writes it via the unconditional-overwrite `_write()` (not `_write_stub()`), and its template has
   never had a customization marker even at the file's original commit — so tracking it in git gave
@@ -1309,14 +1309,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   run. Removed the negation and untracked all 8 previously-committed instances; verified a full
   delete + `generate-code` + `tsc --noEmit` + `check:generated` cycle reproduces them identically
   with nothing else affected.
-- **cypress excluded from routine `npm-minor-and-patch` bumps** (cmd_561):
+- **cypress excluded from routine `npm-minor-and-patch` bumps**:
   cypress 15.16.0 → 15.19.0 alone (isolated via a single-variable control
   experiment) broke `dashboard.cy.ts`'s DataGrid cell lookup, unrelated to
   the product code or any MUI package. `.github/dependabot.yml` (`main` and
   `develop` copies) now excludes cypress from grouping and ignores its
   routine minor/patch bumps; security-update PRs are unaffected. See
   `docs/knowledge/testing-cypress.md` ("Cypress version held back").
-- **`receiving_confirm_route.ts.jinja2` deleted — orphaned since cmd_494** (cmd_651): the RC-1
+- **`receiving_confirm_route.ts.jinja2` deleted — orphaned since an earlier removal**: the RC-1
   ruling (2026-07-13, `docs/knowledge/appendix/inventory-domain-generalization-design.md` §4.5)
   abolished `x-receiving` and stated `ReceivingConfirmForm.tsx` + the confirm route were "deleted,
   no replacement." In practice only `ReceivingConfirmForm.tsx` and its `generate.py` call site were
@@ -1325,7 +1325,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   the unrelated `x-reservation.actions` ship/release/cancel feature) and was never referenced by any
   `_render()`/`_write()` call — an unused, dead file from day one. Confirmed no equivalent leftover
   for ship/release/cancel: `x-reservation.actions` (the feature that originally shipped
-  `reservation_actions.ts.jinja2`) was already fully removed in cmd_494, template included.
+  `reservation_actions.ts.jinja2`) was already fully removed in that earlier change, template included.
   Repo-wide grep for `receiving_confirm`/`ReceivingConfirmForm` across `code_generator/`,
   `json_schema.yaml`/`json_schema_internal.yaml`, and both consumer submodule checkouts
   (`app-template`, `app-template-4`) returns zero hits after this change.
@@ -1402,7 +1402,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   now resolve to a deny (`404` on API routes, silent no-op on session
   actions). No schema change; only bites a deployment whose client or test
   code depended on the old (permissive) cross-org behavior.
-- **nativeEnum member names normalized to lowercase snake_case (cmd_493)** —
+- **nativeEnum member names normalized to lowercase snake_case** —
   `ApprovalRequestStatus` (`Pending`/`Approved`/`Rejected`/`TerminalRejected`
   → `pending`/`approved`/`rejected`/`terminal_rejected`) and `ReactionType`
   (`Like`/`Love`/`Laugh`/`Surprised`/`Sad` → lowercase) are the only two
@@ -1417,7 +1417,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   migration SQL (verified against an isolated test database seeded with
   pre-migration rows).
 - **`db:seed-tenant` now requires `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD`
-  under `NODE_ENV=production` (cmd_504)** — `scripts/seed-tenant.ts`
+  under `NODE_ENV=production`** — `scripts/seed-tenant.ts`
   previously seeded the bootstrap admin as `admin@example.com` /
   `password123` with a fixed `api_key` literal unconditionally; since
   app-generator is a public repo, any production deployment provisioned

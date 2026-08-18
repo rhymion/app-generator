@@ -1,18 +1,18 @@
-# generate-schema — consumer procedure + Completion gate (canonical, cmd_714)
+# generate-schema — consumer procedure + Completion gate (canonical)
 
 Canonical text for the bulk of `generate-schema.md` in consumer repos
 generated from this repo (app-generator). Consumer repos hold a thin
 reference to this file instead of a standalone copy — see
 `docs/knowledge/consumer-commands-canonical-source.md`.
 
-**cmd_714 scope note**: unlike `update-component.md` and `update-code.md`,
+**Scope note**: unlike `update-component.md` and `update-code.md`,
 this file is **not** a candidate for full replacement by a one-line
 reference (the style used for `investigate.md`). Sections marked below as
 "KEEP LOCAL" contain consumer-measured facts (current `prj/` file counts,
 specific verification runs tied to a commit) that would become wrong for
 two of three consumers if collapsed into one shared line — see
-`docs/knowledge/consumer-commands-canonical-source.md` for the cmd_711/③
-finding this reaffirms. Only the sections below (Scenario &
+`docs/knowledge/consumer-commands-canonical-source.md` for the earlier
+investigation finding this reaffirms. Only the sections below (Scenario &
 Confirmation Protocol, and the generic parts of the Completion gate) are
 canonical; the consumer-specific parts stay in each consumer's own
 `.claude/commands/generate-schema.md` alongside a reference to this file
@@ -136,8 +136,8 @@ fact per consumer, see this repo's own `.claude/commands/generate-schema.md`
 `npm run lint` here does **not** delegate to app-generator's own `lint`
 script (`eslint --max-warnings 20`, unscoped over that whole repo) —
 it delegates to `npm --prefix app-generator run lint:prj`
-(`app-generator/scripts/lint_prj_synced.py`). This is a decision (cmd_683,
-2026-08-13): a consumer's lint is not a copy of the generator's own lint.
+(`app-generator/scripts/lint_prj_synced.py`). This is a decision (2026-08-13):
+a consumer's lint is not a copy of the generator's own lint.
 app-generator's own code is already covered by app-generator's own CI;
 what a consumer repo needs to check is whether `prj/`'s own hand-written
 content — the only thing unique to that repo — passes ESLint once
@@ -161,7 +161,7 @@ prevents.
 
 **KEEP LOCAL — "Fail-closed" semantics section**: the exact wording of
 the "`lint:prj` exits non-zero when..." paragraph that normally follows
-here is **not** canonicalized. cmd_714's diff audit found inventory-app's
+here is **not** canonicalized. This canonicalization effort's diff audit found inventory-app's
 and insurance-app's copies of this paragraph describe genuinely different
 fail-closed semantics (inventory-app: fails only if `prj:sync` could not
 be observed running against a real `../prj` at all — a `prj/` with zero
@@ -169,7 +169,7 @@ be observed running against a real `../prj` at all — a `prj/` with zero
 insurance-app: fails if `prj:sync` reports zero `.ts`/`.tsx` files for
 any reason, including a legitimately-empty fresh `prj/`). This is either
 a real, consumer-specific product decision or an unresolved inconsistency
-in `lint:prj`'s actual behavior across consumers — cmd_714 does not
+in `lint:prj`'s actual behavior across consumers — this canonicalization effort does not
 resolve which, since determining that requires reading each consumer's
 actual `lint:prj` invocation/config, not just comparing docs. Flagged for
 follow-up; each consumer's own doc keeps its own current wording verbatim
@@ -209,7 +209,7 @@ build step).
 Confirm this against each consumer's own `.github/workflows/ci.yml`
 directly rather than assuming — **KEEP LOCAL**, since whether a lint job
 exists in CI is itself a per-consumer fact, not a generic one. As of
-cmd_714, app-template's CI defines exactly one job (`E2E Tests`) with no
+this canonicalization effort, app-template's CI defines exactly one job (`E2E Tests`) with no
 lint job of any kind. A product gate is deliberately not made to depend
 on CI (a local-only check must still work for a developer who never
 touches CI, per this generator's own gate-design principle), so this is
@@ -225,7 +225,7 @@ audits this same dependency tree: a new high/critical CVE can be
 published in an already-pinned dependency *after* app-generator's own
 audit last passed, with no app-generator commit to re-trigger it (a
 `nanoid` vulnerability surfaced exactly this way in practice). As of
-cmd_714, none of the three known consumer repos (app-template,
+this canonicalization effort, none of the three known consumer repos (app-template,
 inventory-app, insurance-app) run an audit job in their own CI, so this
 local step is the only check standing between a newly-disclosed
 vulnerable pin and merge in any of them.

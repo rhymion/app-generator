@@ -22,7 +22,7 @@ out of scope for this rule.
 ## Why
 
 An inventory across app-generator's default schema and the full
-app-template consumer schema (cmd_493, 2026-07-30) found lowercase
+app-template consumer schema (2026-07-30) found lowercase
 snake_case is already the overwhelming established convention: **16 of 20
 nativeEnum types (61 of 80 members, 80%)** were already lowercase before
 this rule existed, plus every `x-approval.set_fields` reference-side
@@ -30,7 +30,7 @@ literal. PascalCase (`ApprovalRequestStatus`, `ReactionType`, and -- in
 app-template specifically -- `ShiftStatus`, `DayOfWeek`) was the minority
 outlier, not the norm.
 
-The Lord's ruling (cmd_493): normalize to the dominant convention and
+The Lord's ruling: normalize to the dominant convention and
 enforce it going forward with validation, rather than papering over
 inconsistency in the display layer. Humanizing case at the UI layer
 (`_humanize_enum_value()`) hides schema-level drift instead of preventing
@@ -45,7 +45,7 @@ consumer project, not just app-generator's own defaults. Any existing
 consumer schema with a PascalCase (or otherwise non-conforming) nativeEnum
 member will fail its next `generate-code` run until migrated.
 
-As of the cmd_493 inventory, this affects app-template
+As of that inventory, this affects app-template
 (`rhymion/app-template`, `prj/code_generator/json_schema.yaml`) directly:
 
 - `ShiftStatus` (`shift.status`: `Scheduled`/`Approved`/`Cancelled`)
@@ -66,7 +66,7 @@ column data -- a plain member rename is not additive. `docs/knowledge/
 migration-guide.md` covers why app-generator itself does not track
 `prisma/migrations/` and how consumers apply migrations; the SQL below is
 the worked example for the `ApprovalRequestStatus`/`ReactionType` rename
-this rule shipped with (cmd_493), verified against an isolated test
+this rule shipped with, verified against an isolated test
 database seeded with pre-migration (PascalCase) rows -- applying it
 rewrote every existing row to its lowercase equivalent with no data loss,
 and a post-migration `prisma migrate diff` against the new schema came

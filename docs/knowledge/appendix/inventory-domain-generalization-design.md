@@ -1,11 +1,11 @@
 # Inventory Domain Generalization — Design Document
 
-> **cmd_310** · 2026-07-13 · **Status: APPROVED — rulings OD-1~8 + RC-1 + RC-2 applied**
+> **Design decision** · 2026-07-13 · **Status: APPROVED — rulings OD-1~8 + RC-1 + RC-2 applied**
 >
-> **Scope**: Design only. Implementation follows separate cmds after cmd_309 is serialized and
+> **Scope**: Design only. Implementation follows separate tasks after the prerequisite migration work is serialized and
 > closed (same working tree; concurrent modification forbidden).
 >
-> **Related**: `appendix/inventory-reservation-split.md` (current behavior reference, cmd_309 item5)
+> **Related**: `appendix/inventory-reservation-split.md` (current behavior reference, prerequisite migration item 5)
 > `docs/generic-primitives-redesign.md` (upstream design rationale)
 
 ---
@@ -16,7 +16,7 @@
 > (`inventory` / `inventory_transaction` / `inventory_transactionable`) to **generic primitives
 > where customers declare roles with x-* markers and the generator resolves by marker, not name**."
 >
-> — cmd_310 north_star (direct quote)
+> — this document's approving task, north_star field (direct quote)
 
 ### 0.1 Governing Design Principle (OD-1~8 underlying idea)
 
@@ -322,11 +322,11 @@ receiving flow, the implementor must **stop and raise the issue for maintainer r
 proceeding with blind deletion. The ruling is based on the premise that the form is
 unused in the current approval flow; if that premise is wrong, escalate.
 
-**Update (cmd_651)**: item 2 above ("confirm route... deleted") was not literally true at the time
+**Update (a later follow-up)**: item 2 above ("confirm route... deleted") was not literally true at the time
 this section was written — only `ReceivingConfirmForm.tsx` and its `generate.py` call site were
 removed; `code_generator/templates/receiving_confirm_route.ts.jinja2` itself was left behind,
-unreferenced by any `_render()`/`_write()` call, until cmd_651 deleted it. See `CHANGELOG.md`
-(`### Internal`, cmd_651) for the full grep evidence trail.
+unreferenced by any `_render()`/`_write()` call, until that follow-up deleted it. See `CHANGELOG.md`
+(`### Internal`, same follow-up) for the full grep evidence trail.
 
 ### 4.6 Standalone Release Action — Deletion Safety (C.2 Verification Result)
 
@@ -398,7 +398,7 @@ and catch blocks). Per ruling, this is accepted. All callers must update when re
 
 ## 6. Staged Implementation Plan (B)
 
-> All phases assume cmd_309 is fully serialized and closed before any implementation begins.
+> All phases assume the prerequisite migration work is fully serialized and closed before any implementation begins.
 > Phases are independent cmds; each requires its own QC gate.
 
 ### Phase 1 — Smallest Safe Fix (P0, no schema change)
@@ -556,4 +556,4 @@ Only `purchase_order` gains the `ledgerDomain` reference in Phase 2.
 ---
 
 *Document end. All confirmations resolved (OD-1–8, RC-1, RC-2) as of 2026-07-13. Design phase complete.*
-*Implementation begins after cmd_309 serialization. Phase order: 1 → 2 → 3 → 4 → 5.*
+*Implementation begins after the prerequisite migration work is serialized. Phase order: 1 → 2 → 3 → 4 → 5.*

@@ -1,4 +1,4 @@
-# labelField Drives Both Display and Search — `id` Is Never a Valid Choice (cmd_589)
+# labelField Drives Both Display and Search — `id` Is Never a Valid Choice
 
 ## The observation this confirms
 
@@ -38,9 +38,9 @@ searchable text fields, used by both the full-text search context and this same 
 path) has an explicit `if field_name == 'id': continue`. Two independent layers agree that `id` is
 never a search-eligible field.
 
-## Why this used to be less visible: the `searchField` era (retired cmd_552)
+## Why this used to be less visible: the `searchField` era (retired)
 
-Before cmd_552, search eligibility for a relation was controlled by a separate `searchField`
+Before this retirement, search eligibility for a relation was controlled by a separate `searchField`
 attribute, declared independently of `labelField`. That let a schema author set `labelField: id`
 (accepting a UUID as the display label) while still setting `searchField: name` to keep the
 relation searchable by name — the display problem and the search problem were decoupled, so a
@@ -51,7 +51,7 @@ relation could show one field on screen while actually being searched by a diffe
 field, and the two would silently drift apart as the schema was edited by hand over time.
 `derive_searchable_relation_fields()` now reads `labelField` directly — the *same* source
 `build_label_expression()` uses for the on-screen label and for the CSV-import full-label-text
-match (`csv-import-composite-labelfield.md`, cmd_548). A schema still declaring `searchField` is a
+match (`csv-import-composite-labelfield.md`). A schema still declaring `searchField` is a
 validation error (see `validate.py`). The consequence of this consolidation: **whatever
 `labelField` is set to now controls both what's displayed AND what's searchable, with no
 independent escape hatch** — so `labelField: id` is not just a cosmetic UUID-on-screen choice
@@ -70,8 +70,7 @@ string is treated as a one-element list) and keeps a path only if **all** of the
   — this is the check that excludes `id`, per above.
 - **Is a string-typed property** (`is_string_prop`) — `contains` is a string-only Prisma operator.
 - **Not an enum** — an enum's on-screen label is translated (i18n) while its stored value is not,
-  so a raw substring match against the stored value would rarely hit what the user typed
-  (cmd_493).
+  so a raw substring match against the stored value would rarely hit what the user typed.
 - **Not a date/date-time/time/uri format field** — not meaningfully substring-searchable.
 - **Not a CUID-pattern id-shaped string** (`^c[a-z0-9]` pattern) — same reasoning as excluding
   `id` itself, applied to any other field that is structurally an opaque identifier.

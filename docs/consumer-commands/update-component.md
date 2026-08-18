@@ -1,4 +1,4 @@
-# update-component — consumer Completion gate (canonical, cmd_714)
+# update-component — consumer Completion gate (canonical)
 
 Canonical text for the `## Completion gate` section of `update-component.md`
 in consumer repos generated from this repo (app-generator). Consumer repos
@@ -67,7 +67,7 @@ required step even though app-generator's own `audit` CI job already
 audits this same dependency tree: a new high/critical CVE can be published
 in an already-pinned dependency *after* app-generator's own audit last
 passed, with no app-generator commit to re-trigger it (a `nanoid`
-vulnerability surfaced exactly this way in practice). As of cmd_714, none
+vulnerability surfaced exactly this way in practice). Currently, none
 of the three known consumer repos (app-template, inventory-app,
 insurance-app) run an audit job in their own CI, so this local step is the
 only check standing between a newly-disclosed vulnerable pin and merge in

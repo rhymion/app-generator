@@ -1,11 +1,11 @@
-# Constraining a self-referential m2m link to matching sibling records: hand-written socket, not a schema mechanism (cmd_652)
+# Constraining a self-referential m2m link to matching sibling records: hand-written socket, not a schema mechanism
 
 ## History
 
-cmd_646 first attempted this as a declarative `sameEntityField` generator
+An earlier attempt first tried this as a declarative `sameEntityField` generator
 mechanism (one `x-relationships.<rel>.sameEntityField: <field>` line in
-`json_schema.yaml` driving three generated call sites). On review (cmd_652)
-that design was rejected: the *business condition* itself — "same-entity_name
+`json_schema.yaml` driving three generated call sites). On review that
+design was rejected: the *business condition* itself — "same-entity_name
 is what this relation happens to require, but a future relation could need a
 different condition entirely" — must never be absorbed into the schema or a
 `*.jinja2` template. The generator's job stops at providing a **socket**: an
@@ -13,18 +13,18 @@ unconditional call site plus enough exposed data for a hand-written function
 to make the decision. The decision itself — which field(s), what "matches"
 means, what error to throw — is hand-written, in a file the generator writes
 once and never overwrites again, following the same convention as
-`lib/{entity}/autocomplete_filter.ts` (cmd_377/379).
+`lib/{entity}/autocomplete_filter.ts` (set by two earlier tasks).
 
 This also reaffirms an earlier, independent decision on the exact same
-tension: cmd_636 already rejected special-casing `approval_flow`'s
+tension: that earlier decision already rejected special-casing `approval_flow`'s
 self-referential test-fixture generation in the generator (it had briefly
-been done in cmd_630/83dd8e2e, then reverted), on the same principle —
+been done in commit 83dd8e2e, then reverted), on the same principle —
 "don't force the generator to accommodate one entity's business rule; put it
-in a hand-written spec instead." cmd_646 reintroduced generator-side
-special-casing for this same test-fixture problem (`match_self_entity`,
-threaded from the very `sameEntityField` schema key this doc replaces) —
-which cmd_652 also reverts, back to the cmd_636 baseline. See "Test
-fixtures: reverted to the cmd_636 baseline" below.
+in a hand-written spec instead." That earlier attempt (see above) reintroduced
+generator-side special-casing for this same test-fixture problem
+(`match_self_entity`, threaded from the very `sameEntityField` schema key
+this doc replaces) — which this change also reverts, back to that original
+baseline. See "Test fixtures: reverted to the original baseline" below.
 
 ## The pattern
 
@@ -82,8 +82,8 @@ All hand-written, in files the generator only writes once:
 - `lib/approval_flow/autocomplete_filter.ts` — `isCrossEntityRef(entityName,
   relatedEntityName)` (the atomic comparison) and `filterAutocompleteOptions()`
   (client-side WHERE-equality narrowing by `entity_name`, best-effort: empty
-  `entity_name` shows everything — Option B, cmd_646 D1, unchanged by this
-  correction).
+  `entity_name` shows everything — Option B, per that earlier attempt's
+  design decision D1, unchanged by this correction).
 - `lib/approval_flow/service_validation_custom.ts` — `validateCustomRules()`
   calls a local `validateSameEntityRefs()` helper for both `preceded_by` and
   `followed_by`, fetching the linked rows' own `entity_name` and calling
@@ -98,7 +98,7 @@ stubs (both hand-editable, GENERATED ONCE) and write the equivalent pair of
 functions — no `json_schema.yaml` or `*.jinja2` change is needed or
 appropriate.
 
-## Test fixtures: reverted to the cmd_636 baseline
+## Test fixtures: reverted to the original baseline
 
 `code_generator/generators_test.py`'s `_get_dep_populate_fields()` no longer
 takes a `match_self_entity` parameter. Self-referential dependency records
@@ -113,12 +113,13 @@ By"/"Add Followed By" steps can no longer assume the typed dep
 hand-written filter like `autocomplete_filter.ts`'s may narrow it out of
 the popper entirely (diverging `entity_name` in this case). Those steps use
 `cy.get('.MuiAutocomplete-popper li').first().click()` (select whatever the
-filter surfaces), not an exact-name match — see the `cmd_652` comment in
-`code_generator/templates/test_spec.cy.ts.jinja2`'s `dep_var_name` branch.
-Real, business-meaningful coverage of the filtering/linking/rejection
+filter surfaces), not an exact-name match — see the same-entity-validation
+comment in `code_generator/templates/test_spec.cy.ts.jinja2`'s `dep_var_name`
+branch. Real, business-meaningful coverage of the filtering/linking/rejection
 behavior lives entirely in the hand-written
-`cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts` (cmd_613,
-extended cmd_646) — that spec seeds its own same/different-`entity_name`
+`cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts` (written in
+an earlier task, extended by that earlier attempt) — that spec seeds its own
+same/different-`entity_name`
 records directly via the API rather than relying on generated dependency
 fixtures.
 

@@ -1,8 +1,8 @@
-# CSV Import: Composite/Dotted labelField FK via Full-Label-Text Matching (cmd_548)
+# CSV Import: Composite/Dotted labelField FK via Full-Label-Text Matching
 
 ## The gap this closes
 
-`csv-import-non-key-fk-write-path.md` (cmd_530) generalized CSV-import FK resolution to every
+`csv-import-non-key-fk-write-path.md` generalized CSV-import FK resolution to every
 screen-editable FK relation, but explicitly excluded any relation whose `labelField` is a list
 (composite, e.g. `[product.name, location.name]`) or a dotted path — there was no single scalar
 field to resolve a CSV cell back to, so the column stayed export-only and landed in
@@ -50,7 +50,7 @@ you type into the CSV" holds without a second, silently-different comparison rul
 
 The candidate-row query is filtered by `organization_id: { in: _importOrgIds }` whenever the
 composite relation's target entity is org-scoped (`lookup_entity_filter_by_org`, the same
-discriminant cmd_521/cmd_530 already use for the simple dotted-FK case) — a cross-org row's label
+discriminant the simple dotted-FK case already uses) — a cross-org row's label
 must never resolve an FK for an importer outside that organization. A composite target with no
 `organization_id` (system-global, e.g. a shared taxonomy table) is correctly left unfiltered, same
 as the existing simple-dotted-FK behavior.
@@ -83,7 +83,7 @@ correctly, and the column is removed from `import_unimportable_columns`.
 
 `code_generator/tests/test_build_context.py::TestImportFkSpecsScreenEditableGeneralization` —
 updated: a composite-labelField FK is now importable (previously asserted excluded — see the
-cmd_530 supersession note in `csv-import-non-key-fk-write-path.md`).
+supersession note in `csv-import-non-key-fk-write-path.md`).
 
 `code_generator/tests/test_import_template_branches.py` — map built once outside the per-row
 loop; map-build skipped when the header lacks the column; candidate query org-filtered/not

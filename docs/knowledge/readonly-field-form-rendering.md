@@ -1,4 +1,4 @@
-# Readonly field rendering in FormUpsert (cmd_642)
+# Readonly field rendering in FormUpsert
 
 ## Symptom
 
@@ -51,7 +51,7 @@ variable for it (see `test_readonly_field_not_in_normal_enum_jsx` in
 
 `form_upsert.tsx.jinja2` needed one addition: a conditional `ImageDisplay`
 import gated on a new `uses_image_display` flag (same text-search pattern as
-`uses_app_field_text`/`uses_app_field_relation`, cmd_529) — a readonly-only
+`uses_app_field_text`/`uses_app_field_relation`) — a readonly-only
 image field has no other path that would pull the import in.
 
 ## Fail-closed validation: `x-readonly-fields` must resolve to a real property

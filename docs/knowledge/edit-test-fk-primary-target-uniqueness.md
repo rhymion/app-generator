@@ -1,4 +1,4 @@
-# Edit-test FK-primary target must not collide with a populate-loop sibling (cmd_594)
+# Edit-test FK-primary target must not collide with a populate-loop sibling
 
 ## The rule
 
@@ -10,17 +10,17 @@ patch.
 
 ## The bug this closes
 
-`self-ref-dep-fixture-unique-collision.md` (cmd_592) predicted this exact failure and left it
+`self-ref-dep-fixture-unique-collision.md` predicted this exact failure and left it
 unfixed as out of scope: `populate{{pascal}}Data(2)`'s loop creates two rows sharing every
 composite-unique column except the primary FK (e.g. `asn_line`'s `asn_id` is constant across both
 loop iterations; only `item_id` varies). The generated 3.3 test then edited row 1 to the primary
 FK's "second instance" (`deps.item2`, label `'Test Sku 2'`) — but that is the *exact same row* the
-loop's own second iteration already attached via find-or-create (cmd_592), because both are keyed
+loop's own second iteration already attached via find-or-create, because both are keyed
 off the identical deterministic name. The edit's `update()` therefore collided with `@@unique` and
 threw `P2002` (real failures reproduced pre-fix: `asn_line.cy.ts` 3.3 and `purchase_order_line.cy.ts`
 3.3, both `[asn_id/purchase_order_id, item_id]`).
 
-cmd_592's doc speculated the real fix would need "a third distinct instance." It doesn't — see
+That earlier doc speculated the real fix would need "a third distinct instance." It doesn't — see
 below.
 
 ## The fix
@@ -46,7 +46,7 @@ expected side effect, with zero behavior change since none of them had a live co
 ## Split carve-out (not yet needed)
 
 `x-splittable` parent/child rows are *intentionally* allowed to share the same composite-unique
-tuple (cmd_596 finding: goods_receipt_line's split parent/child share `(goods_receipt_id,
+tuple (an earlier finding: goods_receipt_line's split parent/child share `(goods_receipt_id,
 item_id)` by design). If a future split-action e2e fixture reuses this 3.3 edit-test machinery
 against a split parent/child pair, it will need an explicit carve-out from this rule. Not
 implemented here — split e2e tests are 0 across both proj_g and proj_c as of this writing, so
@@ -54,7 +54,7 @@ there is nothing to carve out yet; flagging the sharp edge for whoever adds the 
 
 ## What this doesn't fix
 
-`approval_flow`'s `precededBy`/`followedBy` both displaying as `'setting'` (cmd_593 finding) is a
+`approval_flow`'s `precededBy`/`followedBy` both displaying as `'setting'` (a separately-noted finding) is a
 **different** failure class — the primary field there is a plain string (`entity_name`), not an
 FK, so `spec_context`'s `prim_is_fk` branch never runs for it. That needs a labelField design
 change, out of this fix's scope.

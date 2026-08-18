@@ -230,7 +230,7 @@ SSO-provisioned user (`password === null`, so the credentials↔OAuth
 collision guard in `signIn()` never fires for them — see "First-time
 SSO sign-in" above) with MFA enabled could sign in via Google and land
 in a fully authenticated session with the second factor never checked.
-Fixed in S8 (cmd_527).
+Fixed in S8.
 
 **Mechanism — `mfa_pending` on the JWT, enforced by `proxy.ts`:**
 
@@ -297,7 +297,7 @@ outbound calls to Google and zero real Google credentials. See
 `cypress/e2e/auth/mfa.cy.ts` (`mockGoogleSignIn()`) for the test-side
 contract.
 
-**Double-gated (cmd_528)** — a single env var is not an acceptable gate
+**Double-gated** — a single env var is not an acceptable gate
 on its own here: the mock provider's `authorize()` looks a user up by
 email with no password or MFA check, so if `MOCK_GOOGLE_OAUTH_TEST=true`
 ever leaked into a real deploy's environment (e.g. a platform env var
@@ -328,7 +328,7 @@ the first one, so it wouldn't add an independent gate. A
 `next build` (Turbopack) bakes in `process.env.NODE_ENV` at build time
 regardless of the runtime env — and this isn't limited to the
 `process.env.NODE_ENV` member-access form. Experimentally verified
-(cmd_528, throwaway probe route + `next build` + grep on the compiled
+(throwaway probe route + `next build` + grep on the compiled
 output): `process.env["NODE_ENV"]` (bracket notation) and even
 `process.env[k]` for a module-level `const k = "NODE_ENV"` all compiled
 down to the literal string `"production"` too. There is no
@@ -439,7 +439,7 @@ other change is needed.
 The following are explicitly out of scope for the current implementation:
 
 - **Server-side revocation for credentials users**: Not implemented for sign-in itself — a stolen JWT cookie is self-contained and rotating `AUTH_SECRET` is the only global invalidation. Custom `adapter.createSession()` shim deferred. See `auth.ts` `authorize()`. (MFA-state revocation is handled separately — see "MFA on the OAuth path" below.)
-- **MFA / TOTP**: Shipped in v1 (S5 phase 5a) for the credentials provider, opt-in per user. Shipped for the OAuth path too as of S8 (cmd_527) — see "MFA on the OAuth path" below. Admin-mandated MFA is still deferred.
+- **MFA / TOTP**: Shipped in v1 (S5 phase 5a) for the credentials provider, opt-in per user. Shipped for the OAuth path too as of S8 — see "MFA on the OAuth path" below. Admin-mandated MFA is still deferred.
 - **Account linking UI**: Shipped in v1 (S7). `/setting/accounts` lists and connects/detaches OAuth providers; cross-email linking deferred. See `lib/account-link/`, `auth.ts`.
 - **Audit-log table**: Not implemented. Auth events log to `console.info` only. Prisma model with role/permission hooks deferred.
 - **Rate limiting on `/api/auth/*`**: Not implemented. Planned: Next.js proxy + Upstash Redis.

@@ -1,4 +1,4 @@
-# Consumer `.claude/commands/*.md` — canonical source (cmd_714)
+# Consumer `.claude/commands/*.md` — canonical source
 
 `docs/consumer-commands/{generate-schema,update-code,update-component}.md`
 in this repo hold the canonical, shared text of the corresponding
@@ -23,16 +23,16 @@ separate `docs/consumer-commands/` location for consistency.
 
 Unlike the vercel scripts (byte-identical across all three consumers) or
 `investigate.md` (fully generic, no consumer-specific content),
-cmd_711's investigation found these three files contain
+An earlier investigation found these three files contain
 a mix of genuinely shared procedure text and genuinely consumer-specific
 measured facts (current `prj/` file counts, verification results tied to
 a specific commit, and in `generate-schema.md`'s case a real divergence
 in documented `lint:prj` fail-closed semantics between two consumers).
 Collapsing the whole file into one reference line would make the
 consumer-specific facts wrong for whichever consumer(s) didn't originate
-them — this is why cmd_711's own resolution left these three files
+them — this is why that investigation's own resolution left these three files
 untouched (recorded as "out of scope, confirmed not a match for the
-reference-collapse pattern"), and why cmd_714's canonicalization only
+reference-collapse pattern"), and why this canonicalization only
 covers the sections marked as shared in each of the three
 `docs/consumer-commands/*.md` files — the rest stays local to each
 consumer, referencing the canonical file for the shared part only.
@@ -42,23 +42,24 @@ consumer, referencing the canonical file for the shared part only.
   facts the consumer's own thin file states directly, not templated here).
 - `update-code.md`: canonicalized in full, **with one behavior change**:
   the `check:generated` gate step (previously present only in one
-  consumer's copy) is included here for all consumers. See the "cmd_714
-  finding" note at the top of `docs/consumer-commands/update-code.md` —
+  consumer's copy) is included here for all consumers. See the "Universal step,
+  not app-template-specific" note at the top of `docs/consumer-commands/update-code.md` —
   the reasoning for the step is generic to this generator's `db_table`
   service-layer convention, not specific to any one consumer's schema.
   Extending it to the consumers currently missing it is a real
   gate-behavior change and should be confirmed before the distribution
   task that actually edits those consumers' own gate docs lands.
+
 - `generate-schema.md`: **partially** canonicalized — the `## Scenario &
   Confirmation Protocol` section and most of the `## Completion gate`
   section are shared; several subsections are explicitly marked
   "KEEP LOCAL" in the canonical file because they are measured facts or
   (in one case) a genuine documented behavioral divergence between
-  consumers that this cmd does not resolve.
+  consumers that this change does not resolve.
 
-## What cmd_714 does not do
+## What this canonicalization does not do
 
-This cmd modifies **only** this repo (app-generator) — no consumer
+This change modifies **only** this repo (app-generator) — no consumer
 repo's `.claude/commands/*.md` is edited here. A future distribution
 task is expected to: (a) replace each consumer's own copy of these three
 files with a short local file (frontmatter + intro + a reference to the

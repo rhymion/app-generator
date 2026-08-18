@@ -2,10 +2,10 @@
 
 ## Note on this file
 
-This design doc is referenced by CHANGELOG entries for cmd_618 (Phase 1,
-merged in PR #312) and cmd_620 (Phase 2, this change), but was never actually
+This design doc is referenced by CHANGELOG entries for Phase 1
+(merged in PR #312) and Phase 2 (this change), but was never actually
 committed to the repository — the referencing entries pointed at a doc that
-didn't exist on disk. This file reconstructs it from the cmd_618/cmd_620 task
+didn't exist on disk. This file reconstructs it from the Phase 1/Phase 2 task
 reports and the shipped code, and folds in Phase 2. Sections §1-§3 describe
 work already merged (Phase 1); §4 covers this change (Phase 2).
 
@@ -44,10 +44,10 @@ test intended:
   constraint resolves entirely to values already available in the loop body
   (the primary FK dep's item, or another dep-backed FK), the entity's own
   per-iteration row was (pre-Phase-2) also found-or-created against that key
-  (cmd_592's original rationale — e.g. `goods_receipt_line`'s
+  (an earlier fix's original rationale — e.g. `goods_receipt_line`'s
   `@@unique([goods_receipt_id, item_id])`).
 
-## §3. Phase 1 (cmd_618, Option 甲改 "letter-indexed dep namespace", PR #312)
+## §3. Phase 1 (Option 甲改 "letter-indexed dep namespace", PR #312)
 
 Fixes the **base/second vs. loop** collision (`Test {Title}`/`Test {Title}
 2` vs. `Test {Title} ${i}`): `_get_dep_populate_fields()` /
@@ -79,7 +79,7 @@ dep helper produces, so the two mechanisms stop colliding *within a single
 call*. It does not address either mechanism sharing a row *across* multiple
 calls to the same populate function (§4).
 
-## §4. Phase 2 (cmd_620, Option β "full isolation")
+## §4. Phase 2 (Option β "full isolation")
 
 ### §4.1 The gap Phase 1 left open
 
@@ -111,7 +111,7 @@ actual call patterns:
   always `0` for a generated spec's own calls.
 - Hand-written specs and composite generated helpers *can* legitimately
   call the same populate function more than once in one test (that is
-  exactly the shape cmd_613's `approval_flow_same_entity_autocomplete_filter.cy.ts`
+  exactly the shape an earlier fix's `approval_flow_same_entity_autocomplete_filter.cy.ts`
   and the scenario motivating this change both take) — this is the actual
   exposure.
 - Applies to any entity with `primary_fk_dep` set and not `is_user_account`
@@ -196,9 +196,9 @@ length or call order.
 - proj_b mandatory gate (lint / pytest / vitest / mention-gate /
   `test:e2e:build` / `check:generated` / `test:e2e:cy:api` /
   `test:e2e:cy:ui` / `npm audit` / `pip-audit`) and proj_c's mandatory gate
-  (`test:e2e:cy:api`) — see the cmd_620 task report for full results.
+  (`test:e2e:cy:api`) — see the Phase 2 task report for full results.
 
-## §5. Phase 3 (cmd_625, "per-test-case callIndex reset")
+## §5. Phase 3 ("per-test-case callIndex reset")
 
 ### §5.1 The gap Phase 2 left open
 
@@ -382,13 +382,13 @@ independence violation the fix addresses.
 |---------|-------|-------|
 | Template files changed | 4 | `test_helper.ts.jinja2`, `test_tasks_registry.ts.jinja2`, `test_spec.cy.ts.jinja2`, `test_spec_mobile.cy.ts.jinja2` |
 | `generators_test.py` functions changed | 0 | Assertions already hardcoded to `callIndex=0`; no Python changes required |
-| proj_b helper files with callSeq | 1 | `approval_flow` — corrected post-implementation (this design estimate predated generate-code verification against proj_b's real schema; see cmd_625e's commit message and §6 below) |
+| proj_b helper files with callSeq | 1 | `approval_flow` — corrected post-implementation (this design estimate predated generate-code verification against proj_b's real schema; see the Phase 3 fix's commit message and §6 below) |
 | proj_c helper files with callSeq | 4 | `inventory`, `room_reservation`, `receiving_receipt_line`, `purchase_per_item` (from §4.2) |
 | proj_g helper files with callSeq | 6 | From CI failure analysis; 11 specs confirmed failing pre-fix |
 | proj_c spec files affected (desktop + mobile) | up to 8 | 4 entities × up to 2 spec types |
 | proj_g spec files affected (desktop + mobile) | up to 12 | 6 entities × up to 2 spec types |
 
-## §6. Phase 3 follow-up (cmd_628): API spec coverage + hand-written spec rule
+## §6. Phase 3 follow-up: API spec coverage + hand-written spec rule
 
 PR #319's diff was reviewed before merging, raising two questions: whether
 `test_api_spec.cy.ts.jinja2`'s omission from the four-template diff was
@@ -398,7 +398,7 @@ answered here.
 ### §6.1 test_api_spec.cy.ts.jinja2 had the same missing-threading defect
 
 `api_spec_context()` — like `spec_context()` and `tasks_registry_context()`
-before the cmd_625e fix — never computed `primary_fk_dep`. Unlike those two,
+before the Phase 3 fix — never computed `primary_fk_dep`. Unlike those two,
 it was never touched by the original four-template diff at all, so its
 `beforeEach` had no reset call and no guard to add one.
 
@@ -448,7 +448,7 @@ test's own intent better:
   strictly safer than a reset, because it stays correct even if the spec
   later gets called from a context where the counter *isn't* zero (a second
   `it()` in the same spec, a future composite helper, etc.) — see
-  `fk_read_permission_graceful_degradation.cy.ts`'s cmd_620① fix, which is
+  `fk_read_permission_graceful_degradation.cy.ts`'s Phase 2① fix, which is
   the reference example: it replaced a hardcoded `'Test Approver Role 1'`
   assertion with `cy.getFieldValue('Approver Role').then((label) => ...)`.
 - **(b) Add the same reset call the generated specs use.** If the spec
@@ -460,7 +460,7 @@ test's own intent better:
   has the reset task registered (check `cypress/support/generated-tasks.ts`
   for `db:reset<Entity>CallSeq` first).
 
-**Verified (cmd_628) against proj_b's only current callSeq entity,
+**Verified (this follow-up) against proj_b's only current callSeq entity,
 `approval_flow`.** Every hand-written spec calling `db:populate` for any
 entity was enumerated (`grep -rl 'db:populate' cypress/e2e --include='*.cy.ts'`,
 excluding files starting with the `AUTO-GENERATED` marker) and checked:

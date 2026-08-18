@@ -1,4 +1,4 @@
-# Writable Prisma Defaults on the "New" Page (cmd_594)
+# Writable Prisma Defaults on the "New" Page
 
 ## The problem it solves
 
@@ -28,15 +28,15 @@ Three other field classes had the same root bug without the crash:
 - **plain (non-enum) string** with a literal default (e.g. `tenant_id String @default("default")`):
   seeded `''` unconditionally, ignoring the schema default.
 
-`nativeEnum`/plain-string-enum fields were already correct (cmd_446 pilot: `_default_value()` reads
+`nativeEnum`/plain-string-enum fields were already correct (an earlier pilot: `_default_value()` reads
 `defn.get('default')`, falling back to the first enum member).
 
 ## Why `'default' in defn` alone doesn't catch `now()`
 
 `schema_deriver.py` deliberately **omits** the `default:` json-schema key for Prisma *dynamic*
 defaults (`now()`, `cuid()`, `uuid()`, `autoincrement()` — anything `_parse_default()` recognizes as
-ending in `()`), on the reasoning that a dynamic default has no static value to show in a UI
-(cmd_574). That means a field like `occurred_at` never carries a `default:` key at all — checking
+ending in `()`), on the reasoning that a dynamic default has no static value to show in a UI.
+That means a field like `occurred_at` never carries a `default:` key at all — checking
 for one misses exactly the field class this bug is about.
 
 The fix instead detects "this field has *some* Prisma default, static or dynamic" via the same

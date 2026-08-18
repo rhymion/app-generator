@@ -165,12 +165,12 @@ generated). Three server actions are provided:
 |---|---|---|
 | `approveApprovalRequest(id, message?)` | User must have `approver_role_id`; all `preceded_by` flows for this approvable must already be `approved` (`assertApprovalOrder()`, §16.6.1) | Sets status → `approved`; notifies the entity creator (Trigger #3, §16.9 note below) |
 | `rejectApprovalRequest(id, message?, options?)` | User must have `approver_role_id`; same `assertApprovalOrder()` ordering check as approve | Sets status → `rejected`, or `terminal_rejected` if `isTerminalReject()` says so (§16.11); either way, notifies the entity creator (Trigger #3) with a payload `status` matching the actual outcome |
-| `resubmitApprovalRequest(id, message?)` | Creator or user with `requestor_role_id`; only from `rejected` (not `terminal_rejected`) — ordering does not apply, resubmit is requester-initiated | Sets status → `pending`; re-notifies the approver-role holders (cmd_539, see below) |
+| `resubmitApprovalRequest(id, message?)` | Creator or user with `requestor_role_id`; only from `rejected` (not `terminal_rejected`) — ordering does not apply, resubmit is requester-initiated | Sets status → `pending`; re-notifies the approver-role holders (see below) |
 
 Each action creates an `approval_history` row recording `pre_status`, `post_status`, `message`,
 and `creator_id` (the acting user).
 
-**cmd_539**: `resubmitApprovalRequest()` reuses the existing `approval_request` row (only its
+**Re-notification on resubmit (an earlier fix)**: `resubmitApprovalRequest()` reuses the existing `approval_request` row (only its
 `status` flips back to `pending`) rather than creating a new one, so the create-path notification
 (`notifyApprovalRequestCreated()`, Trigger #2, §16.4/next section) never re-fired on resubmission
 until this fix — approver-role holders were never told a rejected request needed their attention
@@ -182,7 +182,7 @@ the Trigger #3 rejection notification's payload `status` field was hard-coded to
 for a `terminal_rejected` outcome — the notification always fired either way, but the payload
 misreported the outcome; both REST and server-action paths now report the actual status.
 
-**cmd_541 — re-notification when a preceded_by chain advances**: in a multi-stage chain, every
+**Re-notification when a preceded_by chain advances**: in a multi-stage chain, every
 flow's `approval_request` is created up front when the approvable entity is created (§16.4/16.8),
 and every flow's approver role is notified then — even flows that aren't actionable yet because a
 preceding flow hasn't been approved (§16.5's `preceded_by`). Approving a flow used to be silent
@@ -212,14 +212,14 @@ Both entry points that can transition an `approval_request` call this same funct
 REST route (`app/api/approval_request/[id]/{approve,reject}/route.ts`) and the server action
 (`lib/approval_request/actions_core.ts`'s `approveApprovalRequest`/`rejectApprovalRequest`,
 called via `approve`/`reject` in `lib/approval_request/actions.ts`) — so the rejection wording
-is identical regardless of which path a caller uses (cmd_540). Before cmd_540, only the REST
+is identical regardless of which path a caller uses (added by an earlier fix). Before that fix, only the REST
 route enforced this; the server action was reachable directly (any authenticated client can
 invoke a `'use server'` export via Next.js's Server Action RPC) and had no ordering check at
 all — `ApprovalSection.tsx`'s `precedingApproved` computation only controls whether the
 Approve/Reject buttons render, it is not an authorization boundary. See
 `test/flows/approval_order_bypass.test.ts` for the real-database regression test (calls the
 server action directly, bypassing the UI) and `lib/approval_request/actions.test.ts`'s
-"assertApprovalOrder gate (cmd_540)" describe block for the mocked-collaborator unit coverage.
+ordering-gate describe block for the mocked-collaborator unit coverage.
 
 ### 16.7 Prisma models required
 
@@ -443,7 +443,7 @@ function — owns the `approvable.approved_at` fire-once check and the transacti
 
 ### 16.10 Approval for embedded line children (`x-approval-lines`)
 
-Added in cmd_295. The normal one-to-one `approvable_id` pattern (§16.2) assumes the entity is
+Added in an earlier task. The normal one-to-one `approvable_id` pattern (§16.2) assumes the entity is
 top-level and its own `create` call is where the `approvable` gets pre-created. That breaks down
 for an embedded, `new: false` line child of a nested-create array (e.g.
 `receiving_receipt.lines[]` → `receiving_receipt_line`, `purchase_order.lines[]` →
@@ -481,7 +481,7 @@ that pre-create has happened.
 
 ### 16.11 Rejection classification and dispatch (`reason_kind`, `x-approval.on_rejected`)
 
-Added in cmd_305. `rejectApprovalRequest()` (server action, `lib/approval_request/actions.ts`) and
+Added in an earlier task. `rejectApprovalRequest()` (server action, `lib/approval_request/actions.ts`) and
 `POST /api/approval_request/{id}/reject` (REST route) both accept an optional `reason_kind`
 (`0 = Customer`, `1 = Internal`) alongside the free-text rejection message, stored on the
 `approval_history` row:

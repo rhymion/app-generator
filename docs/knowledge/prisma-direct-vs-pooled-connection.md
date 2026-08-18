@@ -1,6 +1,6 @@
 # Why migrations need a direct connection, separate from the app's pooled one
 
-## The problem (cmd_657)
+## The problem
 
 On Vercel, `DATABASE_URL` is Neon's **pooled** endpoint (PgBouncer, transaction
 mode) — see `docs/knowledge/vercel-region-alignment.md` for the region story
@@ -79,7 +79,7 @@ silent and correct, because there's nothing to route around.
 ## Setting `DIRECT_URL` on Vercel (superseded — see the follow-up notes below)
 
 **This section originally described a manual, dashboard-only step. That is
-superseded (cmd_657 follow-up, 2026-08-12).** All Vercel setup for this
+superseded (follow-up correction, 2026-08-12).** All Vercel setup for this
 project has always gone through the consumer repo's (`app-template`)
 `scripts/vercel-setup.sh` / `scripts/vercel-env.sh` — the same single place
 `DATABASE_URL`, `AUTH_SECRET`, `REDIS_URL`, and every other Vercel env var

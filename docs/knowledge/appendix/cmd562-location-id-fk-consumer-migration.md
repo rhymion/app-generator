@@ -1,6 +1,6 @@
-# cmd_562: location id-FK migration — consumer patch
+# Location id-FK migration — consumer patch
 
-> Ready-to-apply reference for any consumer still on the pre-cmd_562 string-column design for the
+> Ready-to-apply reference for any consumer still on the pre-migration string-column design for the
 > ledger entity's `location` column (`inventory_transaction.location`). Written against two
 > consumer app repos ("Consumer A" and "Consumer B" below) as they stood on 2026-08-05 —
 > re-verify current column/model names against the target repo's own `prj/prisma/schema.prisma` /
@@ -8,12 +8,12 @@
 > this doc was written (this generator repo's own tasks must not modify either consumer's working
 > tree directly).
 
-## 0. Prerequisite: both consumers' submodule pointer predates cmd_546
+## 0. Prerequisite: both consumers' submodule pointer predates the required ledger-domain field keys
 
 As of 2026-08-05, Consumer A's `app-generator` submodule is pinned at `2605998d` and Consumer B's
-at `20557b8c` — both before cmd_545/546 (the `x-ledger-entities.<domain>` required `itemField`/
-`locationField`/`lotField`/`expirationField` keys). Bumping either submodule pointer past cmd_546
-(a prerequisite for reaching cmd_562's generator, independent of this migration) requires adding
+at `20557b8c` — both before the change that made the `x-ledger-entities.<domain>` `itemField`/
+`locationField`/`lotField`/`expirationField` keys required. Bumping either submodule pointer past that change
+(a prerequisite for reaching this migration's generator, independent of the migration itself) requires adding
 those four keys to the domain declaration *first*, or `generate-code` fails immediately
 (`resolve_ledger_domain` is fail-closed, no defaults). Both consumers currently only declare
 `pool`/`ledger`/`transactionable`:
@@ -24,7 +24,7 @@ x-ledger-entities:
     pool: inventory
     ledger: inventory_transaction
     transactionable: inventory_transactionable
-    # Add before bumping past cmd_546 (unrelated to cmd_562 itself, but blocks reaching it):
+    # Add before bumping past that prerequisite change (unrelated to this migration itself, but blocks reaching it):
     itemField: product_id
     locationField: location_id
     lotField: lot_number
@@ -252,9 +252,9 @@ decision — flagged, not decided, here (see `inventory-reservation-split.md` §
 ## 5. Order of operations
 
 1. Add the four `x-ledger-entities` keys (§0) if not already present — prerequisite, independent
-   of cmd_562 itself.
+   of this migration itself.
 2. Apply §1.1 (schema.prisma), §1.2 (json_schema.yaml), §1.3 (`x-audit: true` on `location`).
-3. Bump the `app-generator` submodule pointer to (at least) the commit containing cmd_562, then
+3. Bump the `app-generator` submodule pointer to (at least) the commit containing this migration, then
    run `generate-code`.
 4. Run the migration SQL §2 steps 1–3 against the target database; review and hand-resolve any
    `ambiguous`/`unmatched` rows (§2 step 4).

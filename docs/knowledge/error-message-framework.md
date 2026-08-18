@@ -1,8 +1,8 @@
 # Error Message Framework
 
-**Status**: Design — approved (cmd_695, 2026-08-14); Implementation: cmd_695
+**Status**: Design — approved (2026-08-14); Implementation: this same effort
 **Scope**: All generated entities in app-generator-2
-**Implementation cmd**: cmd_695
+**Implementation task**: this document's own implementation effort
 
 ---
 
@@ -27,8 +27,8 @@ schema details or cross-org existence. Today's state has three problems:
 
 ## Empirical Error Inventory
 
-Tested on the running test server (worktree: subtask513b, port 20711, with cmd_515 org-check
-applied, 2026-08-01).
+Tested on the running test server (worktree: subtask513b, port 20711, with an earlier
+org-isolation check applied, 2026-08-01).
 
 ### API Route path (`X-API-Key` authentication)
 
@@ -38,8 +38,8 @@ applied, 2026-08-01).
 | A2 | Invalid API key | 401 | `{"error":"Invalid API key."}` | `lib/api-auth.ts authenticateApiKey` |
 | A3 | Entity not found (genuine) | 404 | `{"error":"Not found"}` | template explicit check |
 | A4 | Org isolation on GET/PUT/DELETE | 404 | `{"error":"Not found"}` | template: org-scoped `findFirst` returns null |
-| A5 | Org isolation on POST (pre-cmd_515) | 201 | success (security gap — fixed) | — |
-| A6 | Org isolation on POST (post-cmd_515) | **500** ❌ | `{"error":"Organization access denied"}` | service.ts org check (reveals existence — see Disclosure Policy) |
+| A5 | Org isolation on POST (before the org-isolation fix) | 201 | success (security gap — fixed) | — |
+| A6 | Org isolation on POST (after the org-isolation fix) | **500** ❌ | `{"error":"Organization access denied"}` | service.ts org check (reveals existence — see Disclosure Policy) |
 | A7 | Permission denied (read) | 403 | `{"error":"Access denied: parent1.read"}` | `lib/api-auth.ts requireApiPermission` |
 | A8 | Permission denied (create/update/delete) | 403 | `{"error":"Access denied: model.op"}` | `lib/api-auth.ts requireApiPermission` |
 | A9 | Read-only field changed | 400 | `{"error":"Field {f} is read-only and cannot be changed"}` | template explicit |
@@ -59,25 +59,25 @@ applied, 2026-08-01).
 | U5 | Permission denied — CREATE form access | error.tsx (full page) | `getters.ts assertPermission` → throw |
 | U6 | Permission denied — UPDATE submit | error.tsx (full page) | `actions.ts requirePermission` → throw |
 | U7 | Permission denied — DELETE | error.tsx (full page) | `actions.ts: throw new Error('No permission to delete')` |
-| U8 | FK autocomplete denied (case g, before cmd_516) | error.tsx — page crashes | `getters.ts assertPermission` → throw (in Promise.all) |
-| U9 | FK autocomplete denied (case g, after cmd_516) | FK field disabled, no i18n text yet | `getters.ts` returns `{ permissionDenied: true }` |
-| U10 | Org isolation violation (write, form path) | error.tsx: "Organization access denied" (dev) / redacted (prod) | service.ts cmd_515 check → throw |
+| U8 | FK autocomplete denied (case g, before the FK-autocomplete fix) | error.tsx — page crashes | `getters.ts assertPermission` → throw (in Promise.all) |
+| U9 | FK autocomplete denied (case g, after the FK-autocomplete fix) | FK field disabled, no i18n text yet | `getters.ts` returns `{ permissionDenied: true }` |
+| U10 | Org isolation violation (write, form path) | error.tsx: "Organization access denied" (dev) / redacted (prod) | service.ts's org-isolation check → throw |
 | U11 | Validation error — required field, form | error.tsx: "{label} is required" (dev) / redacted (prod) | `service_validation.ts` → throw → `actions.ts` re-throw |
 | U12 | Validation error — OTO conflict, form | error.tsx: "{label} is already linked" (dev) / redacted (prod) | `service_validation.ts` → throw → re-throw |
 | U13 | Stale update — another user edited first | error.tsx: "This record has been updated..." (dev) / redacted (prod) | `lib/normalize.ts assertNotStale` → throw |
 | U14 | Record deleted between form-open and submit | error.tsx: "This record no longer exists." (dev) / redacted (prod) | `lib/normalize.ts assertNotStale` → throw |
 | U15 | Reservation capacity (form path) | Inline form error, raw string | `actions.ts` catches `InsufficientPoolCapacityError` → `return { error }` |
 | U16 | Reservation conflict (form path) | Inline form error, raw string | `actions.ts` catches `ReservationMutationError` → `return { error }` |
-| NEW-1 | Any server-throw path (U3-U14), as observed in production before cmd_695 | "Minified React error #441; ..." + "Error ID: xxx" | React SC render boundary (production) |
+| NEW-1 | Any server-throw path (U3-U14), as observed in production before this implementation | "Minified React error #441; ..." + "Error ID: xxx" | React SC render boundary (production) |
 
-**2026-08-14 (cmd_695)**: a real production screen confirmed that U3-U14 scenarios
+**2026-08-14**: a real production screen confirmed that U3-U14 scenarios
 appeared this way. React strips the original `error.message` at the Server Components
 render boundary and replaces it with the minified error #441 text; `error.digest`
 ("Error ID: xxx") survives. The fix was not to add display code to `error.tsx` (it
 already rendered `error.message`) but to stop throwing `AppError` from Server Actions
 and return `ActionFailure` instead (Layer 2).
 
-**Implemented (cmd_695, 2026-08-15)**: U6/U7/U10-U14 now return inline `ActionFailure`
+**Implemented (2026-08-15)**: U6/U7/U10-U14 now return inline `ActionFailure`
 instead of throwing. U7 (bulk delete, `removeXxx`) was added beyond the checklist's
 per-file list, since the checklist's own throw-sites table already named it and leaving
 it unconverted would have left permission-denied (one of the three named types) still
@@ -88,7 +88,7 @@ redesigning the page itself (`notFound()` / conditional render), which is out of
 here. `error.tsx` now shows a static, safe `te('pageError')` message instead of a
 hardcoded string, so U3-U5 are no less safe than before — just not yet inline.
 
-**NEW-2 (found during cmd_695 implementation, not in the original checklist)**: a real
+**NEW-2 (found during this implementation, not in the original checklist)**: a real
 literal "Unique key constraint violation" had no throw site anywhere in this
 framework — `service_validation.ts.jinja2`'s checks only cover the schema-driven
 required-field and one-to-one-relation cases (`AppError('VALIDATION'|'CONFLICT', ...)`).
@@ -122,15 +122,15 @@ only by adding a temporary diagnostic log to the generated output and running th
 assume Prisma's error `meta` shape without checking it against the actual runtime error
 for the Prisma version/driver in use.
 
-### U1/U2 unreachable (cmd_525)
+### U1/U2 unreachable (an earlier auth-redirect fix)
 
-**Update (cmd_525, 2026-08-02)**: `proxy.ts` (this repo's Next.js middleware —
+**Update (2026-08-02)**: `proxy.ts` (this repo's Next.js middleware —
 renamed from `middleware.ts` under Next 16) already redirects unauthenticated
 requests to any protected *page* route straight to `/login`, before the page
 component (and therefore `getSessionUserIdOrThrow`/`assertPermission`) ever
 runs. This existed on `develop` prior to this doc being written — OQ-4 below
 asked whether it should be added, without realizing it already had been (in
-the earlier Cloud Run hardening work). cmd_525 empirically confirmed via
+the earlier Cloud Run hardening work). That fix empirically confirmed via
 direct HTTP requests (both unauthenticated and with a valid session cookie)
 that:
 
@@ -143,7 +143,7 @@ that:
 - `/login`, `/register`, `/docs`, `/legal/*`, static assets, and `_next/*`
   are excluded (`PUBLIC_PATHS` + the route matcher), so there is no redirect
   loop.
-- cmd_525 additionally added a `redirect` query param so the login page
+- That fix additionally added a `redirect` query param so the login page
   sends the user back to where they started (validated against open-redirect
   via `lib/auth/safe-redirect.ts` — same-origin, path-absolute values only).
 
@@ -176,8 +176,8 @@ this repo today.
   visible. In production Next.js strips it. The framework must surface user-facing information via
   `errorCode` (survives the Next.js boundary) — not via raw message text.
 
-- **FK autocomplete denied (case g)** was the original complaint. cmd_516 fixes the crash
-  (no longer throws); this framework provides the i18n keys for the disabled-field UI.
+- **FK autocomplete denied (case g)** was the original complaint. An earlier fix addressed
+  the crash (no longer throws); this framework provides the i18n keys for the disabled-field UI.
 
 ---
 
@@ -260,8 +260,8 @@ Replace all plain `Error` throws at the named sites with typed `AppError`:
 | `service_validation.ts.jinja2` | required field | `Error('{label} is required')` | `AppError('VALIDATION', ..., '{key}')` |
 | `service_validation.ts.jinja2` | OTO target not found | `Error('{label} does not exist')` | `AppError('VALIDATION', ..., '{key}')` |
 | `service_validation.ts.jinja2` | OTO already linked | `Error('{label} is already linked')` | `AppError('CONFLICT', ..., '{key}')` |
-| `service.ts.jinja2` | org membership check CREATE (cmd_515) | `Error('Organization access denied')` | `AppError('NOT_FOUND', 'Not found')` |
-| `service.ts.jinja2` | org membership check UPDATE (cmd_515) | `Error('Organization access denied')` | `AppError('NOT_FOUND', 'Not found')` |
+| `service.ts.jinja2` | org membership check CREATE (org-isolation fix) | `Error('Organization access denied')` | `AppError('NOT_FOUND', 'Not found')` |
+| `service.ts.jinja2` | org membership check UPDATE (org-isolation fix) | `Error('Organization access denied')` | `AppError('NOT_FOUND', 'Not found')` |
 | `actions.ts.jinja2` | `removeXxx` no items after org filter | `Error('No permission to delete')` | `AppError('PERMISSION_DENIED', ...)` |
 
 ### 2. Server Action transport (`actions.ts.jinja2`)
@@ -361,16 +361,16 @@ export function handleApiError(error: unknown): NextResponse {
 This fixes wrong status codes (validation → 422, stale → 409, org isolation → 404) and adds
 the `code` field for programmatic handling by API consumers.
 
-### 5. FK autocomplete disabled state (cmd_516 integration)
+### 5. FK autocomplete disabled state (integration with an earlier fix)
 
-The `permissionDenied: true` flag added by cmd_516 on `search*Options()` return needs i18n text.
+The `permissionDenied: true` flag added by an earlier fix on `search*Options()` return needs i18n text.
 The `Errors` namespace provides:
 - Disabled placeholder: `te('fkPermissionDenied', { entity: entityLabel })`
 - Helper text / tooltip: `te('fkPermissionDeniedHint', { entity: entityLabel })`
 
-The FK field rendering (cmd_516 changeset) should use these keys instead of any hardcoded text.
-The `Errors` namespace is the single source of truth for all user-facing error strings — cmd_516
-must consume from it, not define its own keys.
+The FK field rendering (from that same earlier fix) should use these keys instead of any hardcoded text.
+The `Errors` namespace is the single source of truth for all user-facing error strings — that earlier
+fix must consume from it, not define its own keys.
 
 ### 6. `error.tsx` improvements (lower priority)
 
@@ -439,7 +439,7 @@ inline instead of crashing to `error.tsx`.
 
 | Impact area | Current behavior | After framework | Spec change needed |
 |-------------|-----------------|-----------------|-------------------|
-| API e2e: validation error status | 500 | 422 | No pre-existing spec asserted the old 500 (grepped generated `test_api_spec.cy.ts.jinja2` and all `cypress/e2e/api/*.cy.ts`, cmd_695) |
+| API e2e: validation error status | 500 | 422 | No pre-existing spec asserted the old 500 (grepped generated `test_api_spec.cy.ts.jinja2` and all `cypress/e2e/api/*.cy.ts`, as part of this implementation) |
 | API e2e: stale update (API path passes `null` — not triggered) | N/A | N/A | No |
 | API e2e: permission denied status | 403 ✅ | 403 ✅ (unchanged) | No |
 | API e2e: unique constraint violation (P2002) | 500 (generic fallback) | 409 (`AppError('CONFLICT', ...)`) | No pre-existing spec asserted the old 500 |
@@ -447,14 +447,14 @@ inline instead of crashing to `error.tsx`.
 | UI e2e: stale update | Hard to trigger in e2e | Inline error instead of `error.tsx` | Done — `cypress/e2e/error_message_delivery.cy.ts` test 2 |
 | UI e2e: unique constraint violation | Crashed to `error.tsx` | Inline error instead | Done — same spec, test 1 |
 | UI e2e: permission denied (delete) | Crashed to `error.tsx` | Inline error + optimistic-removal rollback | Done — same spec, test 3 |
-| UI e2e: FK autocomplete denied (cmd_516) | Not yet specced | Disabled field with i18n text | Out of scope for cmd_695 — cmd_516's own task |
+| UI e2e: FK autocomplete denied (earlier fix) | Not yet specced | Disabled field with i18n text | Out of scope for this implementation — that earlier fix's own task |
 
 Client-side `validateForm` catches required-field errors before the server call. Server-side
 validation is a backend defense rarely triggered by normal usage. Impact on existing specs is low
 — confirmed by the full mandatory gate (`test:e2e:cy:api`, 240/240 passing, 0 skipped) staying
 green with no assertion changes needed anywhere in the repo.
 
-**New hand-written UI e2e coverage (cmd_695)**: `cypress/e2e/error_message_delivery.cy.ts` exercises
+**New hand-written UI e2e coverage**: `cypress/e2e/error_message_delivery.cy.ts` exercises
 the three scenarios named literally end-to-end through the browser (unique constraint violation,
 stale update, permission denied), asserting the inline message renders and the page never falls
 through to `error.tsx`. All three pass against a full production build. One test (permission
@@ -477,7 +477,7 @@ the reliable option found.
 8. `actions.ts.jinja2` — `upsertXxx` and `removeXxx` catch `AppError` → return `ActionFailure`
 9. `form_upsert.tsx.jinja2` — read `errorCode` from result, display via `te('Errors.*')` keys
 10. `types.ts.jinja2` — export `ActionResult` type (or import from `lib/_errors`)
-11. cmd_516 integration — FK disabled state uses `Errors.fkPermissionDenied` / `fkPermissionDeniedHint`
+11. Integration with an earlier FK-autocomplete fix — FK disabled state uses `Errors.fkPermissionDenied` / `fkPermissionDeniedHint`
 12. `error.tsx` — replace hardcoded strings with i18n keys (optional, lower-priority)
 
 Steps 1–5 are write-once lib / config changes. Steps 6–12 are generator template changes.
@@ -488,7 +488,7 @@ Steps 1–5 are write-once lib / config changes. Steps 6–12 are generator temp
 
 | ID | Question |
 |----|----------|
-| OQ-1 | **Org isolation masking**: Confirm `NOT_FOUND` is correct for org isolation violations — the cmd_515 "Organization access denied" text would be replaced by "Not found" to match the API path and avoid leaking cross-org existence. |
+| OQ-1 | **Org isolation masking**: Confirm `NOT_FOUND` is correct for org isolation violations — the earlier org-isolation fix's "Organization access denied" text would be replaced by "Not found" to match the API path and avoid leaking cross-org existence. |
 | OQ-2 | **`staleMutation` message**: "reload the page and try again" causes the user to lose form edits. Should the UI preserve or diff the form state instead? Out of scope here, but worth tracking. |
 | OQ-3 | **Japanese i18n keys**: Who authors `messages/ja.json` equivalents for the `Errors` namespace? Standard pattern: generator emits English; consumer provides Japanese. |
-| OQ-4 | ~~**error.tsx session-redirect**: Should Next.js middleware redirect unauthenticated requests to `/login` before the page renders? This would eliminate U1/U2 scenarios entirely. Separate design issue.~~ **Resolved (cmd_525)**: it already did, on `develop`, before this question was written — see "U1/U2 unreachable (cmd_525)" above. cmd_525 additionally closed the one gap that existed (no return-to-original-page behavior) by adding a validated `?redirect=` round trip through `lib/auth/safe-redirect.ts`. |
+| OQ-4 | ~~**error.tsx session-redirect**: Should Next.js middleware redirect unauthenticated requests to `/login` before the page renders? This would eliminate U1/U2 scenarios entirely. Separate design issue.~~ **Resolved (an earlier auth-redirect fix)**: it already did, on `develop`, before this question was written — see "U1/U2 unreachable (an earlier auth-redirect fix)" above. That same fix additionally closed the one gap that existed (no return-to-original-page behavior) by adding a validated `?redirect=` round trip through `lib/auth/safe-redirect.ts`. |

@@ -12,20 +12,20 @@ therefore checking a different, much larger population of files than CI
 checks, against a ceiling (`--max-warnings 20`, see
 `lint-warning-ceiling-ratchet.md`) that was calibrated for CI's condition.
 
-## What this caused (cmd_600, 2026-08-07)
+## What this caused (2026-08-07)
 
-cmd_554 (2026-08-04) measured `develop` tip `c10b1b1a` at "15 warnings ≤
+An earlier measurement (2026-08-04) measured `develop` tip `c10b1b1a` at "15 warnings ≤
 N=20, PASS" as part of introducing the ratchet ceiling, running the full
 Completion gate in the order the gate doc specified at the time
 (`test:e2e:build` — which runs `generate-code` — several steps before
-`npm run lint`). Later gate runs on later commits (cmd_567, PR #279;
-cmd_600) measured the *same style* of gate run and got 93,
-then 82-83, warnings — reported as a "15→93 regression" and escalated as
-cmd_600 to find the offending commit via bisection.
+`npm run lint`). Later gate runs on later commits (PR #279 among them)
+measured the *same style* of gate run and got 93,
+then 82-83, warnings — reported as a "15→93 regression" and escalated
+to find the offending commit via bisection.
 
-Independent re-measurement (cmd_600) found no such regression:
+Independent re-measurement found no such regression:
 
-- `c10b1b1a` (2026-08-04, the exact commit cmd_554 measured), full clean
+- `c10b1b1a` (2026-08-04, the exact commit that earlier measurement covered), full clean
   rebuild, `generate-code` run first, then `eslint`: **93 warnings** (57
   `no-unused-expressions`, 31 `no-unused-vars`, 5 `no-img-element`) —
   reproduced identically across three independent methodologies (a reused
@@ -34,8 +34,8 @@ Independent re-measurement (cmd_600) found no such regression:
   count).
 - The *same commit*, `eslint` run **without** `generate-code` having run
   first (i.e. tracked source only — CI's actual condition): **15
-  warnings**, and the per-rule breakdown is an exact match to what cmd_554
-  reported (7 `no-unused-expressions`, 5 `no-img-element`, 3
+  warnings**, and the per-rule breakdown is an exact match to what that
+  earlier measurement reported (7 `no-unused-expressions`, 5 `no-img-element`, 3
   `no-unused-vars`).
 - `c78bfef3` (2026-08-05): 93 warnings post-generate-code — identical to
   `c10b1b1a`. No commit between the two changed this number; `git diff
@@ -48,7 +48,7 @@ Independent re-measurement (cmd_600) found no such regression:
   the cause of a 15→93 jump — consistent with the "no such regression"
   finding here.)
 
-**Conclusion**: cmd_554's own gate run linted the pre-generate-code state
+**Conclusion**: that earlier gate run linted the pre-generate-code state
 (matching what CI would see) despite believing, per the gate doc's step
 order, that `generate-code` had already run — whatever the exact
 mechanical reason inside that one gate run (worktree/build-step
@@ -100,7 +100,7 @@ corrected `AGENTS.md` rule. `review-performance.md`, `review-security.md`,
 and `review-tenancy.md` carry the same stale footer note but are out of
 scope for this fix (their advisory note governs ad-hoc debugging, not a
 blocking Completion gate, so the practical impact is much lower) —
-flagged here as follow-up cleanup, not addressed in cmd_600.
+flagged here as follow-up cleanup, not addressed as part of this fix.
 
 ## What this does *not* fix
 

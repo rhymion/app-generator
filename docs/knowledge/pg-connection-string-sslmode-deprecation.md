@@ -1,6 +1,6 @@
 # Why `db:seed-tenant` warned about SSL modes, and why pinning `sslmode=verify-full` fixes it for good
 
-## The warning (cmd_691)
+## The warning
 
 Running `db:seed-tenant` against a Vercel/Neon database printed:
 

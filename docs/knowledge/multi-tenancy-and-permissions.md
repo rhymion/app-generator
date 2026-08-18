@@ -280,7 +280,7 @@ error through `handleApiError`). `authenticateApiKey()` itself is API-key-only �
 header is absent — so dual-auth routes always branch on header presence before calling it, rather
 than calling it unconditionally.
 
-As of cmd_648, the dual-auth routes are: `app/api/search/route.ts` (inline, the original
+Currently, the dual-auth routes are: `app/api/search/route.ts` (inline, the original
 implementation these helpers were extracted from), `api_export_route.ts.jinja2`,
 `api_import_route.ts.jinja2`, `split_action_route.ts.jinja2` (all via `resolveActorId`/
 `requireDualAuth`), and the static `app/api/approval_request/[id]/approve/route.ts` /
@@ -288,7 +288,7 @@ implementation these helpers were extracted from), `api_export_route.ts.jinja2`,
 plain API-key-only (`authenticateApiKey`, the entity CRUD/bulk/detail routes — the browser UI
 reaches these through server actions, not this REST surface) or plain session-only
 (`app/api/approval_request/[id]/resubmit/route.ts` is actually API-key-only too, and
-`app/api/notifications/*` is session-only — neither was in cmd_648's scope).
+`app/api/notifications/*` is session-only — neither was in that dual-auth rollout's scope).
 
 ### Full API route pattern with permission check
 

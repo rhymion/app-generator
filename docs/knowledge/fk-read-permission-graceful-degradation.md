@@ -37,12 +37,12 @@ crash was a UX accident, not something the security check itself intended.
 
 An entity with `should_filter_by_org` (any relation targeting `organization`) has its PUT/DELETE
 existence lookup scoped by `getAssociatedOrganizations(actorId)` — actual organization
-**membership** — not by any `read` permission row on the `organization` model (cmd_515). An actor
+**membership** — not by any `read` permission row on the `organization` model. An actor
 can hold full CRUD permission on the entity itself and *still* be scoped out entirely if they
 belong to zero organizations: the row is never found, so the request 404s before the FK is ever
 evaluated. This is org isolation working as designed, not a denied-read UX problem, and it must
 never be given the "field is preserved" treatment described below — that would assert success
-(HTTP 200) for a request cmd_515 correctly rejects. See cmd_576.
+(HTTP 200) for a request this org-isolation check correctly rejects.
 
 ## Option B: what changed
 
@@ -111,12 +111,12 @@ only a component that silently behaves as if the flag were always unset.
   `db:createApiUserWithPermission` fixture used for 4.4 (full CRUD, zero org memberships), but the
   expectation is rejection, not preservation.
 - `cypress/e2e/api/{entity}.cy.ts` also generates `4.5 returns 200 for GET (list and detail) when
-  the acting user cannot read {fk target}` (cmd_648) alongside 4.4, in the same
+  the acting user cannot read {fk target}` alongside 4.4, in the same
   `db:createApiUserWithPermission`-fixture describe block — proves via `X-API-Key` alone that both
   the list and detail GET routes return 200 rather than erroring when the actor can read the
   parent but not the FK target.
 - `cypress/e2e/fk_read_permission_graceful_degradation.cy.ts` (hand-written, mandatory gate via
-  `test:e2e:cy:ui`; moved from `cypress/e2e/api/` in cmd_648 — every case here drives the browser
+  `test:e2e:cy:ui`; moved from `cypress/e2e/api/` in a later change — every case here drives the browser
   and never issues a raw `cy.request`, so it was never actually `test:e2e:cy:api` coverage despite
   its old location): browser-session coverage proving the edit page doesn't crash, that unrelated
   field changes can still be saved, and that the optional/required clear-button asymmetry actually

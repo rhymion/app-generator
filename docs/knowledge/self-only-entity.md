@@ -226,7 +226,7 @@ additional depth once the DB role exists.
 - `personal_note` — a private per-user note with its own independent table and `creator_id`
   column, `admin_bypass: true` — was this repo's original minimal worked example and doubled as
   its own-table regression-test fixture. Removed from the default `json_schema.yaml`/
-  `schema.prisma` (cmd_575): it existed only to give a hand-written cypress spec
+  `schema.prisma`: it existed only to give a hand-written cypress spec
   (`self_only_access_control.cy.ts`, since deleted from this repo) something to exercise, not
   because it's a feature every consumer should inherit by default. Both the entity and its spec
   now live in `app-template`'s `prj/` (the one consumer that actually wants a personal-note
@@ -239,7 +239,7 @@ additional depth once the DB role exists.
   `setting` has no list page) `getSettingPage`/`buildSettingAccessWhere`. Everything else
   personal_note's removed spec covered (view/edit scoping, the 401-vs-404 distinction,
   admin_bypass + audit) has a home in this repo's own CI via `setting`, added/confirmed as part of
-  cmd_575's addendum.
+  that same relocation's addendum.
 
   Three options were weighed for the list-filter gap: (i) a static fixture in the mention_gate/
   invalidate_gate style (`code_generator/tests/fixtures/`, `scripts/check_*_fixture.sh`) — rejected
@@ -248,7 +248,7 @@ additional depth once the DB role exists.
   list-filter invariant this repo lost is exactly a runtime one (real DB rows, real HTTP requests,
   asserting who does and doesn't see a row), which a compile-only fixture cannot stand in for. (ii)
   proving it in `app-template`'s own CI via the relocated `personal_note` + spec — this is what
-  cmd_575 actually did, and it is real, DB-backed, behavioral coverage, just scoped to one
+  that relocation actually did, and it is real, DB-backed, behavioral coverage, just scoped to one
   consumer rather than this generator's own self-hosted gate. (iii) accepting the gap outright with
   no replacement — not chosen, since (ii) was available at no extra cost (the entity and spec had
   to move somewhere regardless). **Recommendation: (ii)**, already in place. The one honest

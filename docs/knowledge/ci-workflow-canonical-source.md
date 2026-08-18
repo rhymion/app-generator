@@ -7,10 +7,10 @@ insurance-app). This repo's own `.github/workflows/ci.yml` is a
 **different, unrelated** workflow (it tests this generator's own
 `code_generator/` and root Node app — lint/unit-tests/audit/e2e-tests/
 pytest jobs, triggered on `[master, main, develop]`) — the job content
-of the two files remains unrelated. As of cmd_725, though, this repo's
+of the two files remains unrelated. As of a later change, though, this repo's
 own `detect-changes` job's path classification does treat this
 canonical file specially (see "Docs-only E2E skip — app-generator's own
-CI (cmd_725)" below): editing it must never be classified docs-only in
+CI" below): editing it must never be classified docs-only in
 *this* repo's own CI, even though it is not itself part of this repo's
 `e2e-tests` build.
 
@@ -124,16 +124,16 @@ this copy yet, same reasoning as the concurrency change above — left
 as a follow-up so as not to burn their limited/newly-enabled Actions
 allotment as a side effect of this task.
 
-## Docs-only E2E skip — app-generator's own CI (cmd_725)
+## Docs-only E2E skip — app-generator's own CI
 
 Separate from the consumer-side gate documented above: this repo's own
 `.github/workflows/ci.yml` gained the same `concurrency` +
-`detect-changes`/`needs:`+`if:` shape (cmd_725), gating only its own
+`detect-changes`/`needs:`+`if:` shape, gating only its own
 `e2e-tests` job — `lint`/`unit-tests`/`audit`/`audit-full-scope`/
 `pytest`/`mention-gate-fixture`/`decimal-gate-fixture`/
 `oto-mandatory-gate-fixture` always run regardless of `docs_only`,
-both because `e2e-tests` is the dominant cost here too (~57-60 min,
-cmd_719) and as a safety net against a path-judgment mistake in this
+both because `e2e-tests` is the dominant cost here too (~57-60 min)
+and as a safety net against a path-judgment mistake in this
 job.
 
 **This repo's exempt (docs-only) path list differs from the consumer
@@ -163,7 +163,7 @@ list above in two ways:**
    with, for the same reason — no code change was needed to exclude
    it, only this note that it stays excluded on purpose.
 
-**Verification (cmd_725).** A same-shape local proof, run against a
+**Verification.** A same-shape local proof, run against a
 scratch repo mirroring this layout (`docs/knowledge/`,
 `docs/consumer-commands/ci.yml`, `AGENTS.md`, `.claude/commands/`,
 `.github/workflows/ci.yml`, run with both this job's actual script body
@@ -191,7 +191,7 @@ above) needs `docs/consumer-commands/**`'s carve-out to already be on
 never runs this workflow at all, so that specific isolation has to
 wait until after this PR merges.
 
-## Drift check (cmd_723)
+## Drift check
 
 The distribution measured above already proved the risk this section
 answers: the first copy distributed (app-template) was **not**
@@ -201,7 +201,7 @@ several step comments had been reworded to reference internal task
 numbers. Nobody caught it at distribution time because nothing checked.
 "Copy the result verbatim" (the instruction at the top of this file) is
 unenforceable as long as compliance is a human claim — same shape of
-gap as cmd_498 ("a condition the machine doesn't see is a hole, not an
+gap as noted elsewhere ("a condition the machine doesn't see is a hole, not an
 exemption").
 
 **Mechanism**: a `verify-canonical-ci` job, now part of the canonical
@@ -297,17 +297,17 @@ the body is meant to be identical across consumers by design — so there
 is nothing a partial/structural check would be protecting that a full
 match doesn't already cover for free.
 
-**Internal cmd-number annotations (e.g. `cmd_527`, `cmd_528`, `cmd_705`
+**Internal cmd-number annotations (e.g. task-tracking references
 found in the first distributed copy) — not a vocabulary violation**:
 checked against `scripts/vocab_patterns.sh` (this control repo's SoT
 for internal-vocabulary leaks into public repos), which has no pattern
 matching a bare `cmd_NNN` token in file *content* — only a cmd number
 immediately fused to a round-label kanji character is a content-leak
 pattern there, and a separate filename-only pattern for `cmd_NNN`
-matches only a file's *path*, never its body. A bare `cmd_527` sitting
+matches only a file's *path*, never its body. A bare `cmd_NNN`-shaped token sitting
 inside a YAML comment matches neither. This is consistent with public
 commit titles in this repo's own history already carrying the same
-shape (`feat(scripts/cmd711): ...`) without being flagged. So: the
+shape (`feat(scripts/cmd_NNN): ...`) without being flagged. So: the
 reason those annotations must not survive in a consumer's copy is
 **only** "the canonical source doesn't have them and the file is a
 verbatim copy by design" (enforced by the full-body match above) — not

@@ -1,4 +1,4 @@
-# Env File Loading Paths and the Scope of `.local` Overrides (cmd_503)
+# Env File Loading Paths and the Scope of `.local` Overrides
 
 **Status: Adopted**
 **Date: 2026-07-31**

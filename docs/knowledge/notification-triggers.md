@@ -50,7 +50,7 @@ row is created — the same call also appears in the split-action route
 (`code_generator/templates/split_action_route.ts.jinja2`) for
 `x-approval-lines` children (§16.10).
 
-**cmd_539**: this trigger also fires on **resubmission** — re-submitting a
+**Note**: this trigger also fires on **resubmission** — re-submitting a
 rejected `approval_request` reuses the existing row (only its `status`
 flips back to `pending`) rather than creating a new one, so this trigger
 did not originally re-fire for that transition; approver-role holders were
@@ -62,7 +62,7 @@ action in `lib/approval_request/actions_core.ts` and the REST route
 the resubmitter. See `docs/knowledge/appendix/approval-flow.md` §16.6 for
 the full before/after.
 
-### Link target convention (cmd_479)
+### Link target convention
 
 An approval notification must link to the **approvable's own detail
 page** (`/{entityName}/view/{id}`) — the item an approver actually needs
@@ -98,7 +98,7 @@ config for this — the target link follows automatically from the
 entity's own `x-relationship: {type: one-to-one_bridge, target:
 approvable}` declaration.
 
-### Two independent approve/reject implementations (cmd_479)
+### Two independent approve/reject implementations
 
 `lib/approval_request/actions.ts`'s `approveApprovalRequest()` /
 `rejectApprovalRequest()` (server actions, called from the UI's
@@ -109,13 +109,13 @@ approvable}` declaration.
 the requester of the outcome) must be duplicated in both places; while
 investigating the link-target fix, the REST routes were found to have
 *no* Trigger #3 notify call at all (not a link bug — a fully missing
-notification, pre-existing before cmd_479). Fixed by copying the same
+notification, pre-existing before that link-target fix). Fixed by copying the same
 post-transaction `getApprovalRequestRecipient()` + `notify()` block from
 `actions.ts` into both route handlers. If either implementation changes
 its post-approval/rejection side effects, check whether the other needs
 the same change — there's no shared code path enforcing parity.
 
-## Approval order-reached notification (cmd_541)
+## Approval order-reached notification
 
 A `preceded_by` chain (§16.5 of `docs/knowledge/appendix/approval-flow.md`) creates every flow's
 `approval_request` up front, when the approvable entity is created — so the "approval request
@@ -156,7 +156,7 @@ Both triggers share the same notification plumbing:
   surfaced to the caller. (An in-process `Map<userId, Notification[]>`
   used to back a second, in-memory read path here — `listNotifications()`
   / `unreadCount()` / `markAllRead()` / `clearInbox()` — but it was
-  removed (cmd_700): nothing outside this module's own tests ever called
+  removed (in a later cleanup): nothing outside this module's own tests ever called
   those four functions.)
 - `app/api/notifications/*` — REST endpoints backed by the
   `notification` table directly: `GET` (7-day filter, 50-row cap, newest

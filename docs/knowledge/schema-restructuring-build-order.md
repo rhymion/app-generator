@@ -1,7 +1,7 @@
-# JSON Schema Restructuring — Build Order (cmd_395)
+# JSON Schema Restructuring — Build Order
 
 Tracks the migration described in `planning/cmd395-schema-restructuring-design.md`
-(cmd_395, decided: proceed with Stages 1–4; Stage 5 CUID→UUID deferred).
+(decided: proceed with Stages 1–4; Stage 5 CUID→UUID deferred).
 Sections below are numbered in the order each increment landed, not as an
 ongoing naming convention for new work — see "Current entity-naming
 convention" for what `json_schema.yaml` looks like today and why it no
@@ -9,7 +9,7 @@ longer uses the numbering scheme in its own vocabulary. Stage 5 (switching
 the `@default(cuid())` primary-key convention to UUID) has not started;
 `prisma/schema.prisma` still uses `cuid()` throughout.
 
-## Stage 1 (cmd_406) — `build_user_schema.py` added, not yet wired in
+## Stage 1 — `build_user_schema.py` added, not yet wired in
 
 `code_generator/build_user_schema.py` exists as a standalone tool:
 
@@ -31,7 +31,7 @@ simplified (design doc §12 Stage 3).
 hand-edited, and rebuilt from source on every build (same policy as generated
 application code).
 
-## Stage 2 (cmd_407) — invocation switched to the intermediate schema
+## Stage 2 — invocation switched to the intermediate schema
 
 `package.json`'s `generate-code` script now runs `build_user_schema.py` before
 `generate.py`, pointing `generate.py` at the intermediate schema instead of the
@@ -68,7 +68,7 @@ generated files, and independent `.generated-manifest.json` sha256 hash-set
 comparison, both between the pre-switch (direct `json_schema.yaml`) and
 post-switch (`.generated/json_schema.yaml`) invocations.
 
-## Stage 3 (cmd_408) — simplified user schema + Prisma derivation
+## Stage 3 — simplified user schema + Prisma derivation
 
 `code_generator/json_schema.yaml` is now in the simplified format (§4 of the
 design doc): the ~49 raw entity definitions (`type`/`required`/full
@@ -157,7 +157,7 @@ unchanged and still exactly how the pipeline works today; only the key
 naming that tells the builder "this entity needs a raw/view split" changed
 in the next increment.
 
-## Current entity-naming convention (cmd_409) — `_detail` suffix retired
+## Current entity-naming convention — `_detail` suffix retired
 
 This is the increment the design doc and the code itself (module
 docstrings in `code_generator/build_user_schema.py` and
@@ -173,7 +173,7 @@ Stage 3 already derived the raw entity from Prisma — nothing raw was
 hand-typed by that point (see above). What Stage 3 still required was a
 name suffix on the *view*, so the builder knew which bare-named key to
 synthesize the derived raw entity under. Verified directly against the
-pre-cmd_409 commit (`git show 5963dd2^:code_generator/json_schema.yaml`,
+commit before this convention (`git show 5963dd2^:code_generator/json_schema.yaml`,
 `git show 5963dd2^:code_generator/build_user_schema.py`) — the user wrote
 only this, for the live `role` entity (`invalidate`/`search` flags trimmed
 for brevity, same as the current-form block below):
@@ -255,7 +255,7 @@ outcomes, all handled in `build_intermediate_schema()`
    entity, matching where the legacy `_detail` split kept them (see
    `_ENTITY_LEVEL_DATA_KEYS` in `code_generator/build_user_schema.py`
    for the authoritative list — `x-bridge` was missing from both this
-   list and the code until cmd_450, so a bridge-child entity that also
+   list and the code until a later fix, so a bridge-child entity that also
    carried `x-generate` silently lost its `x-bridge` declaration on the
    paired path above; only standalone-raw entities (outcome 2 below)
    were unaffected, since that path copies every key through).
@@ -276,7 +276,7 @@ non-model names like `setting`).
 
 One more build-order detail not covered by Stages 1–3: before any of the
 above runs, `build_user_schema.py` merges in
-`code_generator/json_schema_internal.yaml` (cmd_438 Batch3) — the
+`code_generator/json_schema_internal.yaml` (a later batch) — the
 framework-provided default entities (`approvable`, `commentable`,
 `attachable`) — for any entity name the app's own `json_schema.yaml`
 doesn't already define; an app's own definition always wins (whole-entity
@@ -374,7 +374,7 @@ Prisma's own `@relation`/column definitions.
 ### The old `{model}_detail` shape is not tolerated by the generator core anymore
 
 Unlike Stage 2 (which needed no `generate.py` change at all), this
-increment's cmd_409 batch2 commit is titled "retire `_detail` suffix in
+increment's batch2 commit is titled "retire `_detail` suffix in
 **generator core**" — `generate_types.py`'s `extract_entities()` itself
 changed, not just `build_user_schema.py`. Verified directly against
 `code_generator/tests/test_extract_entities.py`: its `_detail_entity()`

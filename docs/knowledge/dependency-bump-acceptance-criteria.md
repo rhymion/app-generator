@@ -15,11 +15,11 @@ lockfile. CI uses `npm ci`, which validates lockfile structural completeness;
 the corruption is invisible locally until CI runs.
 
 Two incidents of this failure pattern occurred within one week on the same
-project (cmd_442→cmd_443, Incident 2→cmd_459). A process-level
+project (Incident 1, Incident 2). A process-level
 rule is required to prevent recurrence.
 
-**Update (2026-07-29, cmd_483): a third incident occurred with the Rule
-below already in force** (cmd_482 ran and passed both required checks
+**Update (2026-07-29): a third incident occurred with the Rule
+below already in force** (the triggering change ran and passed both required checks
 locally, then broke CI after merge anyway). See Incident 3 and "Why the
 Rule wasn't enough the third time" below — the Rule as originally written
 had a silent gap: it never said *which* `npm` binary must produce the
@@ -56,7 +56,7 @@ is present and resolvable. A bump can:
 error listing the missing entry (e.g.
 `Missing @emnapi/runtime@1.11.2 from lock file`).
 
-### Why the Rule wasn't enough the third time (cmd_483)
+### Why the Rule wasn't enough the third time
 
 Incident 3 (below) happened with both required ACs satisfied, verified,
 and quoted verbatim in the landing commit message. The gap: **`npm ci`
@@ -103,11 +103,11 @@ confirm the task YAML's `acceptance_criteria` includes:
 ```yaml
 acceptance_criteria:
   - npm ci exits 0, run with the same npm version CI uses (clean node_modules,
-    not npm install — npm ci validates lockfile integrity; see cmd_483:
+    not npm install — npm ci validates lockfile integrity; see Incident 3:
     a lockfile can pass npm ci on an older/newer local npm and still fail
     CI's npm on the identical file. Check CI's actual resolved npm version
     from a recent run's "Environment details" setup-node log step, or use
-    the version pinned in package.json's engines.npm once cmd_483's fix lands)
+    the version pinned in package.json's engines.npm once this fix lands)
   - npm audit --omit=dev --audit-level=high exits 0
   - git diff package-lock.json reviewed for unexpected transitive changes
 ```
@@ -120,7 +120,7 @@ esbuild, napi-rs stack).
 
 ## Incidents
 
-### Incident 1: cmd_442 → cmd_443 (2026-07-24)
+### Incident 1 (2026-07-24)
 
 - **Package bumped**: `@emnapi/runtime` and related `@napi-rs/*` stack
 - **Failure mode**: `package-lock.json` missing `@emnapi/runtime@1.11.2`
@@ -129,20 +129,20 @@ esbuild, napi-rs stack).
 - **AC at the time**: `npm audit` only — `npm ci` exit 0 not required
 - **Repair**: `git restore package-lock.json && npm install --package-lock-only`
   (see the Repair Procedure section below)
-- **Repair task**: cmd_443
+- **Repair task**: applied the same day.
 
-### Incident 2 → cmd_459 (2026-07-26)
+### Incident 2 (2026-07-26)
 
 - **Package bumped**: `postcss` 8.5.15 → 8.5.23
 - **Failure mode**: `package-lock.json` lockfile corruption after postcss update
 - **Detection**: CI all-red (all checks failing)
 - **AC at the time**: `npm audit` only — `npm ci` not listed in acceptance
   criteria for the bump subtask
-- **Hotfix task**: cmd_459 (parallel dispatch)
+- **Hotfix task**: applied the same day (parallel dispatch)
 
-### Incident 3: cmd_482 → cmd_483 (2026-07-29)
+### Incident 3 (2026-07-29)
 
-- **Change**: cmd_482 (PR #199) resolved 5 dev-only npm
+- **Change**: PR #199 resolved 5 dev-only npm
   audit high-severity CVEs via `npm audit fix` (non-force) plus two
   scoped `package.json` `overrides` edits (minimatch pin, npm-run-all →
   npm-run-all2 swap).
@@ -152,7 +152,7 @@ esbuild, napi-rs stack).
   entry (same optional wasm32 chain, reached via
   `@tailwindcss/oxide-wasm32-wasi` / `@img/sharp-wasm32`) survived.
   Confirmed via `git log --oneline -S'"node_modules/@emnapi/core":' --
-  package-lock.json`: commit `09cf87b` (cmd_482) is the exact commit that
+  package-lock.json`: commit `09cf87b` is the exact commit that
   removed both lines.
 - **Detection**: not PR #199's own CI (none ran — see the CI-trigger gap
   below) — caught only after merge, by the standing `doreen/import → main`
@@ -164,7 +164,7 @@ esbuild, napi-rs stack).
   (11.6.2 at the time), which does not reject this lockfile; CI's npm
   (11.16.0) does. See "Why the Rule wasn't enough the third time" above
   for the full mechanism and the CI-trigger-scope gap found alongside it.
-- **Repair task**: cmd_483 (this document's update)
+- **Repair task**: this document's update
 
 ---
 
@@ -177,7 +177,7 @@ If `npm ci` fails after a dependency bump has landed:
 
 ---
 
-## Structural Fixes Considered (cmd_483, after the 3rd recurrence)
+## Structural Fixes Considered (after the 3rd recurrence)
 
 A per-task checklist item has now failed to prevent recurrence three
 times despite being followed correctly each time (Incident 3 passed the
@@ -186,7 +186,7 @@ considered instead of a fourth checklist addendum.
 
 ### (a) Pin the toolchain, so local verification can't silently diverge from CI
 
-**Implemented in cmd_483** (low-risk, scoped to this repo, no CI trigger
+**Implemented as part of this fix** (low-risk, scoped to this repo, no CI trigger
 changes):
 
 - `package.json`: added `"packageManager": "npm@11.16.0"` (informational
@@ -281,11 +281,11 @@ warnings before pushing. Whether and how to close the tier-one
 a future proposal that does not require committing a branch name into
 workflow trigger config.
 
-## CI Audit Gate Design: Blocking + Non-Blocking Split (cmd_482, Option 5)
+## CI Audit Gate Design: Blocking + Non-Blocking Split (Option 5)
 
 ### Background
 
-cmd_482 found 5 dev-only high-severity CVEs (`axios`, `brace-expansion`,
+That change found 5 dev-only high-severity CVEs (`axios`, `brace-expansion`,
 `linkify-it`, `shell-quote`, `systeminformation`) that had accumulated
 undetected, because the existing `audit` job's `npm audit --omit=dev
 --audit-level=high` step is scoped to production dependencies only by
@@ -310,7 +310,7 @@ are captured in the corresponding design record for this task.
    block a PR under this job, by design — dev tooling ships to CI runners
    and contributor machines, not to the deployed product.
 
-2. **Non-blocking gate (`audit-full-scope` job) — new, added in cmd_482.**
+2. **Non-blocking gate (`audit-full-scope` job) — new, added as part of that change.**
    Runs `npm audit --audit-level=high` (no `--omit=dev`,
    so it covers the full tree including devDependencies) in its own job,
    with `continue-on-error: true` on the audit step. A finding here never
@@ -345,7 +345,7 @@ are captured in the corresponding design record for this task.
    operational (not code) concern** and is tracked in this project's
    internal task-management process rather than in this file — a
    non-blocking job whose output nobody reads reproduces the exact
-   visibility gap that caused cmd_482 in the first place, so that review
+   visibility gap that caused Incident 3 in the first place, so that review
    step is treated as a load-bearing part of this design, not an
    afterthought, even though its specifics live outside this repository.
 

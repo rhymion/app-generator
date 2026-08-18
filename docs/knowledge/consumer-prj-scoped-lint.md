@@ -8,8 +8,8 @@ ordering is correct for a consumer:
 
 - Before `generate-code`: identical to this repo's own gate/CI, so it
   never actually looks at anything the consumer wrote (`prj/`).
-- After `generate-code` (the bug this doc's companion fix addresses,
-  cmd_682): measures this repo's own templates *plus* every file
+- After `generate-code` (the bug this doc's companion fix addresses):
+  measures this repo's own templates *plus* every file
   `generate-code` instantiates per entity in the consumer's real schema
   — hundreds of pre-existing, per-entity warnings unrelated to `prj/`'s
   own content, none of which this repo's own gate/CI has ever measured
@@ -17,7 +17,7 @@ ordering is correct for a consumer:
   schema change that touches nothing in `prj/` can still fail this way,
   for reasons entirely disconnected from what was actually changed.
 
-**Fix (cmd_683, 2026-08-13, a decision on the two candidates the
+**Fix (2026-08-13, a decision on the two candidates the
 earlier investigation report compared)**:
 `scripts/lint_prj_synced.py` (wired up as `npm run lint:prj`) runs
 `prj:sync`, takes prj_sync.py's own `copied`/`merged` stdout lines as
@@ -36,8 +36,8 @@ job measures (`npm ci && npm run lint`, no `generate-code`). That is a
 repo's own* gate.
 
 `lint:prj` is a different mechanism measuring a different, narrower
-population by design (per the decision reached in cmd_683 on the
-cmd_664 investigation: a consumer's lint is not a copy of this repo's
+population by design (per the decision reached in a follow-up investigation:
+a consumer's lint is not a copy of this repo's
 lint — this repo's own code is already covered by this repo's own CI).
 Because the population is explicitly limited to whatever `prj:sync` just
 reported (never "the whole tree, whatever state it's in"), running
@@ -113,7 +113,7 @@ into a consumer's plain `npm run lint` delegate before this fix — but a
 consumer's `prj/` content is expected to grow over time as hand-written
 specs/source are added there, and a ceiling inherited from an unrelated
 population is not a meaningful signal for it (measured directly during
-cmd_682/683: one consumer's `prj/`-scoped warning count grew from 3 to
+that investigation: one consumer's `prj/`-scoped warning count grew from 3 to
 43 in a single day between the two commands, entirely from new
 hand-written Cypress specs, not from any defect). Whether `prj/` content
 should eventually get its own warning ceiling is a separate, not-yet-

@@ -1,4 +1,4 @@
-# CSV Import Dotted-FK Org Filter (cmd_521)
+# CSV Import Dotted-FK Org Filter
 
 ## The gap
 
@@ -16,13 +16,13 @@ For an organization-scoped parent entity (`should_filter_by_org`), this lookup u
 unfiltered regardless of whether the *target* of the dotted FK was itself org-scoped. An actor
 in org A submitting a CSV value that happens to match a same-named row owned by org B would get
 that row's id back, silently linking their new/updated record to a resource outside their org —
-the exact class of gap cmd_515 closed for direct saves (`service.ts.jinja2`'s CREATE/UPDATE
-validation), but left open in the CSV import path (flagged by cmd_515, deliberately not fixed by
-cmd_520, which added the isolation test scaffolding without this fix).
+the exact class of gap an earlier fix closed for direct saves (`service.ts.jinja2`'s CREATE/UPDATE
+validation), but left open in the CSV import path (flagged at the time, deliberately not fixed by
+the follow-up that added the isolation test scaffolding without this fix).
 
 ## The fix
 
-Same discriminant as cmd_515's `should_filter_by_org`, applied per dotted-FK **lookup entity**
+Same discriminant as that earlier fix's `should_filter_by_org`, applied per dotted-FK **lookup entity**
 instead of to the parent model: `code_generator/build_context.py` computes
 `lookup_entity_filter_by_org = <lookup entity has organization_id> and <lookup entity not in
 ('organization', 'user')>` for every dotted `import_key_specs` entry, plus a route-level
@@ -87,11 +87,11 @@ fix, UPDATE never wrote the dotted-FK-resolved column back (`import_update_field
 scalar-only), so the risk here was entirely in *resolving* the wrong id, which the same fix
 eliminates for both branches.
 
-**Superseded by cmd_530**: `import_update_fields` being FK-exclusive (and the broader gap that
+**Superseded by a later fix**: `import_update_fields` being FK-exclusive (and the broader gap that
 only `x-import-key`-declared FKs had any CSV-import write path at all) turned out to be its own
 bug, not just an inert asymmetry — see `docs/knowledge/csv-import-non-key-fk-write-path.md`. The
 org-filter mechanism described here (`lookup_entity_filter_by_org`,
-`any_dotted_fk_needs_org_filter`) is unaffected — cmd_530 extends it to the new non-key
+`any_dotted_fk_needs_org_filter`) is unaffected — that later fix extends it to the new non-key
 `import_fk_specs` entries rather than replacing it.
 
 Export (`api_export_route.ts.jinja2`) has no dotted-FK resolution step — it reads through

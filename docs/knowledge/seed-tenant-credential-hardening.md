@@ -1,4 +1,4 @@
-# seed-tenant.ts Credential Hardening (cmd_504)
+# seed-tenant.ts Credential Hardening
 
 ## Problem
 
