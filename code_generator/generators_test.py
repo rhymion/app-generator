@@ -1545,7 +1545,7 @@ def helper_context(
     internal_fk_prop_names = {d['prop_name'] for d in internal_fk_deps}
     fields = [f for f in fields if f['prop_name'] not in internal_fk_prop_names]
 
-    # cmd_421 Domain 4 (M1, subtask_421i): mention field name resolution. Only
+    # cmd_421 Domain 4 (M1): mention field name resolution. Only
     # the commentable-bridge shape is supported here (comment_children direct-FK
     # shape has no populate helper of its own yet — see build_context.py's
     # _build_comment_actions/_build_comment_actions_bridge split for the two
@@ -3178,7 +3178,7 @@ def api_spec_context(
     exportable_bridge_fk_names = sorted(_api_internal_bridge_fk_names)
     has_exportable_bridge_fks = bool(exportable_bridge_fk_names)
 
-    # cmd_421 Domain 4 (M1, subtask_421i): x-mention name resolution after
+    # cmd_421 Domain 4 (M1): x-mention name resolution after
     # save. Mirrors build_context.py's comment_has_mention detection exactly
     # (the shared 'comment' model has an x-mention: true field AND this
     # entity has a one-to-one_bridge FK to 'commentable') — this test context

@@ -30,7 +30,7 @@ literal. PascalCase (`ApprovalRequestStatus`, `ReactionType`, and -- in
 app-template specifically -- `ShiftStatus`, `DayOfWeek`) was the minority
 outlier, not the norm.
 
-The Lord's ruling (cmd_493): normalize to the dominant convention and
+A product decision (cmd_493): normalize to the dominant convention and
 enforce it going forward with validation, rather than papering over
 inconsistency in the display layer. Humanizing case at the UI layer
 (`_humanize_enum_value()`) hides schema-level drift instead of preventing

@@ -1,5 +1,5 @@
 """
-Tests for the comment reaction foundation layer (subtask_132a / subtask_132a2).
+Tests for the comment reaction foundation layer.
 
 Covers:
   - extract_entities: x-internal entities are excluded (2 tests)

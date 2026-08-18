@@ -2745,7 +2745,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # every other category below — without this, an x-readonly relation field renders BOTH
     # a fully-interactive AppFieldRelation (unfiltered) AND a duplicate readonly display
     # (readonly_edit_jsxs, edit-mode only), defeating the readonly annotation entirely on
-    # the interactive copy (cmd_355 subtask_355b finding; cmd_477e inventory_movement.
+    # the interactive copy (cmd_355 finding; cmd_477e inventory_movement.
     # from_inventory_id: the unfiltered required AppFieldRelation blocked every UI-driven
     # create via native "please fill out this field" validation since the field is never
     # user-fillable per x-readonly's documented contract).

@@ -131,7 +131,7 @@ export default defineConfig({
           });
           return JSON.parse(JSON.stringify(record));
         },
-        // subtask_421f (cmd_421 Batch4): resource/product attachment
+        // cmd_421 Batch4: resource/product attachment
         // view/edit-boundary + permission + org-scope regression spec.
         async 'db:addUserToOrganizationByEmail'(params: { email: string; organizationId: string }) {
           const { addUserToOrganizationByEmail } = require('./cypress/support/attachment/helper');

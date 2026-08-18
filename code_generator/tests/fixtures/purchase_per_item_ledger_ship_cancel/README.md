@@ -31,4 +31,4 @@ before the file was untracked in `da48c2c`), i.e. the actual real code, not a
 paraphrase — the test still checks the real Prisma statements.
 
 If the real hand-authored implementation in a live generated app ever changes,
-these fixtures should be updated to match (subtask_344a, cmd_344).
+these fixtures should be updated to match (cmd_344).

@@ -1,6 +1,6 @@
 # Inventory Domain Generalization — Design Document
 
-> **cmd_310** · 2026-07-13 · **Status: APPROVED — rulings OD-1~8 + RC-1 + RC-2 applied (subtask_310f/310g/310h)**
+> **cmd_310** · 2026-07-13 · **Status: APPROVED — rulings OD-1~8 + RC-1 + RC-2 applied**
 >
 > **Scope**: Design only. Implementation follows separate cmds after cmd_309 is serialized and
 > closed (same working tree; concurrent modification forbidden).
@@ -256,7 +256,7 @@ inventory:
 | OD-5 | x-receiving **abolished** — `ReceivingConfirmForm.tsx` + confirm route deleted (no replacement) — see §4.5 |
 | OD-7 | inventory_movement: **single entity** with `from_inventory_id`/`to_inventory_id`; generator emits 2 ledger rows |
 
-### 4.2 Current Asymmetry (from subtask_310c)
+### 4.2 Current Asymmetry (from an earlier design review)
 
 | Operation | Entity | Mechanism | Code style |
 |---|---|---|---|
@@ -461,7 +461,7 @@ and catch blocks). Per ruling, this is accepted. All callers must update when re
 
 ## 7. Rulings Applied — Record
 
-The following decisions from the original Open Decisions (subtask_310e) are now resolved:
+The following decisions from the original Open Decisions record are now resolved:
 
 | OD | Decision | Adopted design |
 |---|---|---|
@@ -495,9 +495,9 @@ Confirmed 2026-07-13: adopt "Ship" over "Fulfill" for the Phase 3 renamed operat
 
 ---
 
-## 9. Appendix: x-reservation Config Reference (from subtask_310d)
+## 9. Appendix: x-reservation Config Reference (from an earlier design record)
 
-*(Unchanged from subtask_310e — verbatim extraction for reference only)*
+*(Unchanged from that earlier record — verbatim extraction for reference only)*
 
 Three current x-reservation declarations:
 
