@@ -9,6 +9,30 @@ export type NavLink = {
   label: string;
   href: string;
   external?: boolean;
+  /** Slug of the NavGroup this link is nested under (see NavGroup below). Absent = top-level (flat) link. */
+  group?: string;
+  /** Sort position among sibling links/groups within the same group. Only meaningful when `group` is set. */
+  order?: number;
+};
+
+/**
+ * A sidebar navigation group (nested menu). Declared via `x-nav.parent` on an
+ * entity (implicit group) or `x-nav-groups` (explicit group-to-group
+ * hierarchy) — see docs/knowledge/nested-nav-menu-design.md. Entirely
+ * generator-managed; hand edits belong in messages/*.json (label override,
+ * see labelKey below), not here.
+ */
+export type NavGroup = {
+  /** Stable identifier — matches NavLink.group and NavGroup.parent references. */
+  slug: string;
+  /** Key resolved via useTranslations("Nav") in the sidebar, e.g. t(labelKey). */
+  labelKey: string;
+  /** Sort position among sibling links/groups (ascending). */
+  order: number;
+  /** Optional icon name — resolved by NavGroupWrapper's ICON_MAP allowlist. */
+  icon?: string;
+  /** Slug of the parent group, for group-to-group nesting. Absent = top-level group. */
+  parent?: string;
 };
 
 /**
@@ -59,6 +83,10 @@ export const siteConfig = {
     { label: "Approval Flow", href: "/approval_flow" },
     { label: "Dashboard", href: "/dashboard" },
   ] satisfies NavLink[],
+
+  /** Sidebar navigation groups (nested menu headers). Empty by default — see NavGroup above. */
+  navGroups: [
+  ] satisfies NavGroup[],
 };
 
 // ─── Theme (Tailwind classes) ─────────────────────────────────────────────────

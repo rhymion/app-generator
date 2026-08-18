@@ -49,6 +49,7 @@ import yaml
 
 from generate_types import extract_entities
 from manifest import MANIFEST_FILENAME, sha256_file
+from nav_config import build_nav_config
 
 _SYSTEM_PROPS = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'}
 
@@ -218,15 +219,25 @@ def _clean_from_manifest(out: Path, keep_stubs: bool = False) -> bool:
 # Appended-file cleaners
 # ---------------------------------------------------------------------------
 
-def _clean_site_config(path: Path, nav_hrefs: list) -> None:
+def _clean_site_config(path: Path, nav_hrefs: list, nav_group_slugs: list) -> None:
     if not path.exists():
         return
     content = path.read_text(encoding='utf-8')
     original = content
     for href in nav_hrefs:
-        # Matches: { label: "...", href: "/parent" },  (with leading whitespace / newline)
+        # Matches: { label: "...", href: "/parent" },  or, when the entity is
+        # nested under a nav group: { label: "...", href: "/parent", group: "slug", order: N },
+        # (with leading whitespace / newline)
         content = re.sub(
-            r'[ \t]*\{ label: "[^"]*", href: "' + re.escape(href) + r'" \},\n?',
+            r'[ \t]*\{ label: "[^"]*", href: "' + re.escape(href)
+            + r'"(?:, group: "[^"]*", order: -?\d+)? \},\n?',
+            '',
+            content,
+        )
+    for slug in nav_group_slugs:
+        # Matches: { slug: "...", labelKey: "...", order: N[, icon: "..."][, parent: "..."] },
+        content = re.sub(
+            r'[ \t]*\{ slug: "' + re.escape(slug) + r'".*? \},\n?',
             '',
             content,
         )
@@ -437,7 +448,7 @@ def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False, prune_o
     if not _clean_from_manifest(out, keep_stubs):
         _clean_schema_driven(out, entities, test_entities, keep_stubs)
 
-    _clean_appended_files(out, entities)
+    _clean_appended_files(out, entities, schema)
 
     if prune_orphans:
         _prune_orphans(out, entities, keep_stubs)
@@ -583,7 +594,7 @@ def _clean_schema_driven(out: Path, entities: list, test_entities: list,
     _try_rmdir(out / 'app' / '[locale]' / 'docs')
 
 
-def _clean_appended_files(out: Path, entities: list) -> None:
+def _clean_appended_files(out: Path, entities: list, schema: dict) -> None:
     """Remove only the generator-injected ENTRIES from files that are appended on
     top of user-owned content: lib/site-config.ts and
     app/[locale]/@sidebar/page.tsx. These files are never deleted outright and are
@@ -614,7 +625,13 @@ def _clean_appended_files(out: Path, entities: list) -> None:
     ]
     nav_hrefs = [f'/{e["parent"]}' for e in nav_entities]
 
-    _clean_site_config(out / 'lib' / 'site-config.ts', nav_hrefs)
+    # Nav groups clean by their own rules (independent of nav_entities' list
+    # gate) — build_nav_config is intentionally re-run here rather than
+    # threaded through from generate.py, mirroring how nav_entities itself is
+    # recomputed locally rather than passed in.
+    nav_group_slugs = [g['slug'] for g in build_nav_config(entities, schema)['groups']]
+
+    _clean_site_config(out / 'lib' / 'site-config.ts', nav_hrefs, nav_group_slugs)
     _clean_sidebar(out / 'app' / '[locale]' / '@sidebar' / 'page.tsx', nav_hrefs)
 
 
