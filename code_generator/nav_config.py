@@ -52,12 +52,26 @@ def _raw_def(entity_name: str, schema: dict) -> dict:
 
 
 def _entity_nav(entity: dict, schema: dict) -> dict | None:
-    """Return this entity's `x-nav` dict (from its raw definition), or None."""
-    def_key = entity.get('definition_key') or entity.get('model')
-    defn = schema.get('definitions', {}).get(def_key, {})
-    x_nav = defn.get('x-nav')
-    if not x_nav and entity.get('model') != entity.get('parent'):
-        x_nav = _raw_def(entity['model'], schema).get('x-nav')
+    """Return this entity's `x-nav` dict, or None.
+
+    build_user_schema.py's Stage-4 raw/view split moves entity-level
+    annotations (x-nav included, see its `_ENTITY_LEVEL_DATA_KEYS`) onto
+    the raw ('__'-prefixed) entity, not the view — so this must resolve
+    the raw entity the same way every other entity-level annotation reader
+    in the generator does (build_context.py's own `_raw_def`), not gate on
+    entity['model'] != entity['parent'] (that condition is about proxy
+    views like 'setting', unrelated to whether a raw/view split happened,
+    and false for the common case of a paired entity whose model name
+    equals its own parent — which silently dropped x-nav for exactly that
+    case, cmd_744 proj_c verification). The definition_key lookup remains
+    as a fallback for hand-authored schemas (e.g. this module's own pytest
+    fixtures) that declare x-nav directly under the bare entity key with
+    no raw/view split at all.
+    """
+    x_nav = _raw_def(entity['model'], schema).get('x-nav')
+    if not x_nav:
+        def_key = entity.get('definition_key') or entity.get('model')
+        x_nav = schema.get('definitions', {}).get(def_key, {}).get('x-nav')
     return x_nav if isinstance(x_nav, dict) else None
 
 

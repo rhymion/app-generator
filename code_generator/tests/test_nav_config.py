@@ -5,8 +5,13 @@ Covers the fail-closed validators (cycle / depth / icon) required by
 docs/knowledge/nested-nav-menu-design.md §2, §5.1, §5.2, §6, and the
 group-list construction (§1, §3).
 """
-import pytest
+from pathlib import Path
 
+import pytest
+from ruamel.yaml import YAML
+
+from build_user_schema import build_user_schema
+from generate_types import extract_entities
 from nav_config import (
     NAV_ICON_ALLOWLIST,
     NavValidationError,
@@ -260,3 +265,63 @@ def test_no_typo_warning_when_group_declared_in_x_nav_groups(capsys):
     build_nav_config([entity], schema)
     captured = capsys.readouterr()
     assert 'WARNING' not in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Regression: x-nav must survive build_user_schema.py's Stage-4 raw/view
+# split for a PAIRED entity (one with its own x-generate, e.g. 'organization'
+# in the default schema) — not just in hand-built pytest schema dicts.
+#
+# Found via cmd_744 proj_c testbed verification: x-nav was silently dropped
+# for every paired entity because (a) build_user_schema.py's
+# _ENTITY_LEVEL_DATA_KEYS allowlist (the Category C keys copied onto the
+# raw '__'-prefixed entity) omitted 'x-nav', and (b) even after fixing (a),
+# _entity_nav()'s raw-entity fallback was gated on
+# entity['model'] != entity['parent'], which is False for the common case
+# of a paired entity whose model equals its own parent — silently skipping
+# the fallback that would have found it. Both entity_group.get(...) being
+# empty (no 'group:'/'order:' tag on the generated navLink) and the group's
+# own order falling back to 999 (no child order contributed) were the
+# observable symptoms in the actual generated lib/site-config.ts.
+# ---------------------------------------------------------------------------
+
+_REPO_ROOT = Path(__file__).parent.parent
+_PRISMA_SCHEMA_PATH = _REPO_ROOT.parent / 'prisma' / 'schema.prisma'
+
+
+def test_x_nav_survives_raw_view_split_for_paired_entity(tmp_path):
+    """'organization' is a paired entity (PAIRED_ENTITIES in
+    test_build_user_schema_roundtrip.py) in the live default schema — its
+    own x-generate triggers the raw/view split. Declaring x-nav on it here
+    must make it through build_user_schema.py to the raw entity, and
+    nav_config.build_nav_config (fed via generate_types.extract_entities,
+    the same path generate.py itself uses) must resolve it from there."""
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    with (_REPO_ROOT / 'json_schema.yaml').open('r', encoding='utf-8') as f:
+        user_schema = yaml.load(f)
+
+    assert 'x-nav' not in user_schema['definitions']['organization'], (
+        'default schema must not declare x-nav on organization (golden-diff-zero, §9)'
+    )
+    user_schema['definitions']['organization']['x-nav'] = {'parent': 'admin_group', 'order': 1}
+
+    in_path = tmp_path / 'json_schema.yaml'
+    with in_path.open('w', encoding='utf-8') as f:
+        yaml.dump(user_schema, f)
+    out_path = tmp_path / '.generated' / 'json_schema.yaml'
+
+    build_user_schema(in_path, _PRISMA_SCHEMA_PATH, out_path)
+
+    built = YAML(typ='safe').load(out_path.read_text(encoding='utf-8'))
+    assert built['definitions']['__organization'].get('x-nav') == {
+        'parent': 'admin_group', 'order': 1,
+    }, "x-nav must survive onto the raw '__organization' entity"
+
+    entities = extract_entities(built)
+    org_entity = next(e for e in entities if e['model'] == 'organization')
+    result = build_nav_config(entities, built)
+    assert result['entity_group'].get('organization') == {'group': 'admin_group', 'order': 1}, (
+        f"build_nav_config must resolve organization's x-nav via extract_entities' own "
+        f"definition_key ({org_entity['definition_key']!r}) / model ({org_entity['model']!r})"
+    )
