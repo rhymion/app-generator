@@ -13,7 +13,7 @@ String."), which is NOT a TypeScript type error — the placeholder is still
 a valid `string` — so the tsc-based decimal_gate fixture cannot catch this
 class of bug; only exercising the actual value generators (this test) or a
 live Prisma database (proj_g's own e2e, where this was discovered via
-subtask_711b's Int-cents→Decimal migration) can.
+an earlier Int-cents→Decimal migration) can.
 
 This test asserts every value generator produces a numeric-parseable
 string for a Decimal field, and non-Decimal string fields are unaffected.

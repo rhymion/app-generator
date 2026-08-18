@@ -101,7 +101,7 @@ default grant), returning 403. The main test user has no roles → no matching r
 API tests use `TEST_API_KEY` (defined in `cypress/support/test-credentials.ts`) which
 is seeded into the test user by `seedTestDatabase()` in `db-helpers.ts`.
 
-#### API test / UI test boundary — `cy.login()` policy (cmd_658)
+#### API test / UI test boundary — `cy.login()` policy
 
 An API test's job is to prove *the API* is correct. `cy.login()` drives the real
 `/login` page (`cypress/support/commands.ts`) — it is a screen operation. A `cy.login()`
@@ -116,7 +116,7 @@ permission-denied scenarios), never `cy.login()` — with exactly one exception.
 
 **The one exception — dual-auth session canary.** Routes that accept *either*
 `X-API-Key` or a NextAuth session cookie (export, import, approve, reject — see
-`lib/api-auth.ts`'s `resolveActorId()` / `requireDualAuth()`, introduced in cmd_648)
+`lib/api-auth.ts`'s `resolveActorId()` / `requireDualAuth()`, introduced in an earlier task)
 need *some* test proving the session-cookie half still works, or a regression there
 would go undetected while every API test stays green on the key-only half. That single
 canary test (`test_api_spec.cy.ts.jinja2`'s `N14 also authenticates via a NextAuth
@@ -125,9 +125,10 @@ session cookie (dual-auth)`) is deliberately kept, marked with an in-file
 session-vs-key resolution is shared code, exercised once is enough — the routes'
 individual business logic is what the X-API-Key tests above it already cover.
 
-Before cmd_658, this boundary didn't hold: the generated API spec template had 15
-`cy.login()` call sites (11 in an approve/reject block that simply predated cmd_648's
-dual-auth and had never been updated, 2 in an export/import permission-denied pair
+Before this policy was established, this boundary didn't hold: the generated API spec
+template had 15 `cy.login()` call sites (11 in an approve/reject block that simply
+predated the earlier dual-auth change and had never been updated, 2 in an export/import
+permission-denied pair
 whose own comment — now stale — claimed the route "never reads X-API-Key", and 2 more
 in an export/import happy-path block and a search-coverage block that had no
 route-specific reason to use a browser session at all). Fixing the first two exposed a
@@ -146,10 +147,10 @@ from the session there).
 rule (part of `npm run check:generated`, gate step 6) scans every generated
 `cypress/e2e/api/<entity>.cy.ts` for `cy.login(` with no `dual-auth-session-canary`
 marker in the 5 lines above it. This is **not** allowlist-exemptable (unlike the
-`raw:*` / `write:direct` rules above it) — cmd_658's ruling was that the exemption
-mechanism itself must be machine-checkable *in the file*, not filed away in a separate
-YAML a reviewer has to go find (cmd_498: an exemption nothing checks is a hole, not an
-exemption).
+`raw:*` / `write:direct` rules above it) — this rule's own ruling was that the
+exemption mechanism itself must be machine-checkable *in the file*, not filed away in
+a separate YAML a reviewer has to go find (an earlier finding: an exemption nothing
+checks is a hole, not an exemption).
 
 **Scope note**: this rule only walks *generated* specs (mirrors the existing
 `raw:*`/`write:direct` rule enumeration — schema entities with `api: true`). It does
@@ -157,9 +158,9 @@ not yet cover proj_b's 5 hand-written `cypress/e2e/api/*.cy.ts` files
 (`import_batch2.cy.ts`, `round_trip.cy.ts`, `user_import.cy.ts`,
 `multi_stage_approval_order_reached.cy.ts`,
 `approval_request_resubmit_notification.cy.ts` — still `cy.login()`-based as of
-cmd_658, since export/import/approve/reject now accept `X-API-Key` too) or proj_c's
-`prj/`-owned hand-written API specs. Both are tracked as a follow-up (cmd_658's
-classification report); extending this same rule (or a parallel scan) to hand-written
+this writing, since export/import/approve/reject now accept `X-API-Key` too) or
+proj_c's `prj/`-owned hand-written API specs. Both are tracked as a follow-up (per
+this rule's own classification report); extending this same rule (or a parallel scan) to hand-written
 files once that work lands is the natural next step — don't reinvent the mechanism.
 
 ---
@@ -176,7 +177,7 @@ and `receiving_receipt.cy.ts` are full UI specs (they still exist under
 `cypress/e2e/` and run as part of `npm run test:e2e:cy:ui`), but they are excluded
 from the mandatory gate's `--spec` value — a prior draft of this doc described them
 as an explicit curated addition to `test:e2e:cy:api`, which never matched
-`package.json` and has been corrected here (cmd_467).
+`package.json` and has been corrected here.
 
 If a future UI regression needs to become a hard gate, add its spec path to the
 `--spec` value in `package.json` directly — no separate config file governs this.
@@ -421,7 +422,7 @@ This ensures the DataGrid has fully rendered before the count assertion.
 - Serialize `Date` fields to ISO strings before passing as props to client
   components (reduces hydration surface area).
 
-### Scroll selectors must be scoped to their own grid (cmd_634)
+### Scroll selectors must be scoped to their own grid
 
 **Problem**: a parent form with 2+ DataGrid children on the same page (e.g. proj_c's `parent1`,
 which has both `parent1_child1s` and `parent1_child2s`) intermittently failed the generated
@@ -434,7 +435,7 @@ container/`data-field` ancestor) rather than querying the document globally. App
 generated DataGrid-child scroll helper — the bug is generic, not specific to `parent1`; it just
 needed 2+ DataGrid children on one form to surface.
 
-### DataGrid-child date/date-time/time edit cells need ISO input, not the top-level format (cmd_634)
+### DataGrid-child date/date-time/time edit cells need ISO input, not the top-level format
 
 **This is a separate input mechanism from the `MUI DateTimePicker patterns` section below** — a
 DataGrid-child date/date-time/time column has no `renderEditCell` override, so editing it goes
@@ -550,7 +551,7 @@ Run E2E suites sequentially, not in parallel.
 
 ---
 
-## Cypress version held back (cmd_561)
+## Cypress version held back
 
 `.github/dependabot.yml` excludes `cypress` from `npm-minor-and-patch` grouping
 and additionally `ignore`s its routine minor/patch updates (both the `main`
@@ -568,7 +569,7 @@ AssertionError: Timed out retrying after 10000ms: Expected to find element:
   at getDataGridCell (cypress/support/datagrid-helpers.ts:19)
 ```
 
-**Root cause (cmd_551)**: cypress itself, not the product code or any MUI
+**Root cause**: cypress itself, not the product code or any MUI
 package. Confirmed with a single-variable control experiment in an isolated
 worktree (not the shared working tree):
 

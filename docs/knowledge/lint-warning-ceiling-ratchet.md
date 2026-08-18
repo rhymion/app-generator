@@ -28,7 +28,7 @@ count further to 15 without anyone deliberately chasing lint count —
 don't assume a warning count quoted in an old report is still current;
 remeasure with `npm run lint` before picking `N`.
 
-**cmd_600 correction (2026-08-07)**: the "15" above was always the
+**Correction (2026-08-07)**: the "15" above was always the
 *pre-generate-code* count — the only state CI's `Lint` job ever checks
 (`npm ci && npm run lint`, no `generate-code` step). Several
 `.claude/commands/*.md` Completion gates historically ran `npm run lint`

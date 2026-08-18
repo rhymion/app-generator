@@ -1,5 +1,5 @@
 #!/bin/bash
-# Required one-to-one selector fixture check (subtask_705c / cmd_704 [2-a]).
+# Required one-to-one selector fixture check (cmd_704 [2-a]).
 #
 # Runs a small, self-contained fixture entity pair (oto_gate_target, a
 # selector target with its own pages, and oto_gate_item, whose FK to it is

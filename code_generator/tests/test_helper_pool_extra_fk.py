@@ -12,7 +12,7 @@ omitted from the pool entity's prisma.<pool>.create() call in test_helper.ts.jin
 so the generated populate{{Pascal}}Dependencies() helper's Prisma call failed at seed
 time with a missing-required-column error — reproduced live against proj_c's
 purchase_order/inventory (cypress/support/purchase_order/helper.ts:78, 20/27 tests
-in cypress/e2e/api/purchase_order.cy.ts failing; subtask_602a report has the
+in cypress/e2e/api/purchase_order.cy.ts failing; an earlier investigation report has the
 file:line trace). This is a SEPARATE code path from _reservation_base()/
 test_reservation_helper.ts.jinja2 (covered by test_reservation_helper_pool_extra_fk.py)
 — that fix alone did not resolve this failure class.

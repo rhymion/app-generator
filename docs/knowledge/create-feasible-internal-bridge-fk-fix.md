@@ -1,4 +1,4 @@
-# `_create_feasible` ignored internal bridge FKs, wrongly gating off CSV CREATE (cmd_609)
+# `_create_feasible` ignored internal bridge FKs, wrongly gating off CSV CREATE
 
 ## Symptom
 
@@ -13,7 +13,7 @@ at CREATE time and was never meant to come from a CSV row. Combined with
 `ENTITY_IMPORT_NOT_SUPPORTED` 400 stub — not just CREATE, the whole route.
 Any entity with an approval/comment/attachment-style bridge FK that also
 disallows edit hits this (the concrete trigger was `goods_receipt_line`,
-cmd_610's pending "no update" ruling for that entity).
+under a pending "no update" ruling for that entity).
 
 ## Root cause
 
@@ -29,7 +29,7 @@ names that *are* in it — it does nothing for a name that's required but
 absent from every set being subtracted. The field silently stayed a
 "gap", `_create_feasible` came out `False`, so did `import_can_create`.
 
-A prior fix pass (cmd_421) added a test for exactly this scenario
+A prior fix pass added a test for exactly this scenario
 (`TestRequiredInternalBridgeFkImportFeasibility`) but asserted the *buggy*
 value (`import_can_create is False`) as correct, under the mistaken belief
 that `get_internal_bridge_fk_prop_names()` was already unioned into
@@ -64,12 +64,12 @@ screen-editable-FK resolvability logic (`import_fk_specs`,
   → route collapses to the 400 stub. After the fix, `import_can_create=True`
   → route stays live.
 - `TestRequiredInternalBridgeFkImportFeasibility` in
-  `code_generator/tests/test_build_context.py` updated: the cmd_421 test's
+  `code_generator/tests/test_build_context.py` updated: that prior test's
   assertion flipped from `False` to `True` (with the corrected rationale
   documented inline), plus a new test asserting the compound
   edit:false-plus-bridge-FK case no longer collapses the route.
 - Both new/updated assertions fail against the pre-fix code (deviation
-  injection, cmd_476 convention) and pass against the fix.
+  injection, the established convention) and pass against the fix.
 - Both-directions check: a genuinely unfillable required FK (no bridge
   target, no dotted import key, no screen-editable resolution path) is
   untouched — `TestDP1cVisibleSourceOnlyCreateFeasibility` and the rest of

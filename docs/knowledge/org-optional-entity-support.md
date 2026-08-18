@@ -54,35 +54,35 @@ the `organization` relationship itself is not in the model's `required` list) ga
 |---|---|
 | `getters.ts.jinja2` | List access-where builder (`build{Parent}AccessWhere`), detail getter |
 | `actions.ts.jinja2` | Delete server action's existence/ownership check |
-| `actions.ts.jinja2` | Upsert server action's pre-permission existence check (`generators.py`'s `_actor_and_existing_block()`, cmd_634 — see below) |
+| `actions.ts.jinja2` | Upsert server action's pre-permission existence check (`generators.py`'s `_actor_and_existing_block()`, see below) |
 | `api_detail_route.ts.jinja2` | PUT and DELETE REST routes' existence check |
 | `api_import_route.ts.jinja2` | CSV import's match-by-natural-key lookup |
-| `search_helpers.ts.jinja2` | Cross-entity global search's per-entity access clause, both the direct site and its `parent.`-qualified `no_page_children` sibling (cmd_640, see below) |
+| `search_helpers.ts.jinja2` | Cross-entity global search's per-entity access clause, both the direct site and its `parent.`-qualified `no_page_children` sibling (see below) |
 
 A required-org model gets the plain `IN` filter unchanged — `organization_id` is never `NULL`
 there, so the `OR`-null branch would be dead code, and the flag is `false` specifically to avoid
 generating it.
 
-### cmd_640: closing the search_helpers.ts.jinja2 gap
+### Closing the search_helpers.ts.jinja2 gap
 
 `search_helpers.ts.jinja2` builds its own independent Prisma.sql fragments (a raw cross-entity
 `UNION` query, not the `and.push({...})` object-filter shape the other templates above use), so
 it needed its own `org_relationship_optional` wiring in `generate.py`'s search-entity context
 builder (mirroring `build_context.py`'s computation via
 `helpers.schema_helpers.get_parent_relationships`) rather than reusing the existing plumbing.
-Confirmed against a real Postgres DB via proj_c's `parent1` entity (org made optional by
-cmd_611/612): `api/parent1.cy.ts`'s N10 spec (global search coverage) failed with `expected false
+Confirmed against a real Postgres DB via proj_c's `parent1` entity (org made optional in an
+earlier change): `api/parent1.cy.ts`'s N10 spec (global search coverage) failed with `expected false
 to equal true` before this fix, passed after. Unlike the object-filter templates, the
 `associatedOrgIds.length > 0` branch here is kept post-fix — but only as a SQL-construction
 necessity (`Prisma.join` over an empty array cannot form a valid `IN (...)` list), not as an
 access guard; both branches admit `IS NULL` rows unconditionally.
 
-### cmd_634: closing the upsert existence-check gap (and a guard that looked right but wasn't)
+### Closing the upsert existence-check gap (and a guard that looked right but wasn't)
 
 `actions.ts.jinja2`'s upsert server action ran its own pre-permission existence check
 (`generators.py`'s `_actor_and_existing_block()`) before the shared `update{Parent}()` service
 function even fires — same `organization_id: { in: _orgIds } }` gap as every site above, on a real
-schema (proj_c's `parent1`, org made optional by cmd_611/612): a record created without an
+schema (proj_c's `parent1`, org made optional in that same earlier change): a record created without an
 organization threw `Error('Not found')` on every future update attempt, even from its own
 creator. Fixed by wiring the same `org_relationship_optional` OR-null branch into this check.
 
@@ -91,7 +91,7 @@ added `_orgIds.length > 0 &&` in front of the OR-null branch, reasoning that an 
 org memberships shouldn't get blanket access to every NULL-org row via this check. That guard was
 reverted after re-checking the codebase's own precedent — every other `org_relationship_optional`
 site in the table above (except `search_helpers.ts.jinja2`, which needs it for a different,
-SQL-construction reason — see cmd_640 above) uses the unconditional OR-null with no such guard.
+SQL-construction reason — see the search_helpers fix above) uses the unconditional OR-null with no such guard.
 Adding a length-guard at exactly one call site, while every sibling existence check for the same
 model stays unconditional, doesn't close a real hole — the identical pre-existing gap (a
 zero-org-membership `general.update` actor reaching an org-less record) is already reachable
@@ -133,10 +133,10 @@ different mechanism. Flagged for follow-up, not resolved here.
 `TestOrgRelationshipOptionalRenderedTemplates` (rendered-output assertions on `getters.ts.jinja2`
 and `api_detail_route.ts.jinja2`, deviation-injection verified — all assertions confirmed to fail
 against the pre-fix templates). `test_org_optional_create_guard.py` covers Gap 1 separately, also
-with deviation-injection proof. `test_search_org_null_row.py` (cmd_640) covers
+with deviation-injection proof. `test_search_org_null_row.py` covers
 `search_helpers.ts.jinja2`'s independent context wiring, both the direct and `no_page_children`
 parent-qualified sites, also with deviation-injection proof.
-`test_org_optional_update_existence_check.py` (cmd_634) covers `_actor_and_existing_block()`'s
+`test_org_optional_update_existence_check.py` covers `_actor_and_existing_block()`'s
 OR-null admission (admits-null-org, org-required-still-strict, unconditional-no-actor-org-guard
 regression, and deviation-injection), also verified end-to-end against proj_c's `parent1` in an
 isolated worktree.

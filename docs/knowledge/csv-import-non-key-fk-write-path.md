@@ -1,4 +1,4 @@
-# CSV Import: Non-Key FK Write Path + UPDATE Never Wrote Any FK (cmd_530)
+# CSV Import: Non-Key FK Write Path + UPDATE Never Wrote Any FK
 
 ## The bug (customer-reported)
 
@@ -45,14 +45,14 @@ duplicate an existing `import_key_specs` dotted key (their resolution code is no
   closes 筋1: a key FK's value is a no-op on UPDATE when unchanged (the row only reaches UPDATE
   because `keyWhere` already matched), and a non-key FK's value is the actual fix for 筋2.
 
-`any_dotted_fk_needs_org_filter` (cmd_521) and `_create_feasible`'s resolvable-column set are
+`any_dotted_fk_needs_org_filter` (added by an earlier org-filter fix) and `_create_feasible`'s resolvable-column set are
 both recomputed from `import_fk_specs` (the superset), so a non-key FK into an org-scoped lookup
-entity gets the same org-filtered lookup cmd_521 gives key FKs, and a *required* non-key FK
+entity gets the same org-filtered lookup that earlier fix gives key FKs, and a *required* non-key FK
 (e.g. `approval_flow.approver_role_id`, un-keyed after the pre-existing `x-import-key:
 [entity_name]` schema) now counts toward CREATE feasibility — proj_b's own `approval_flow` went
 from `import_can_create: false` (every row hit `ENTITY_IMPORT_CREATE_NOT_SUPPORTED`) to `true`.
 
-## Excluded on purpose: read-only FKs (composite/dotted labelFields — see cmd_548)
+## Excluded on purpose: read-only FKs (composite/dotted labelFields — see the follow-up below)
 
 A `x-readonly` FK stays export-only: visible in export, but there's no reason to make it writable
 via import just because it's writable via export. It is collected into
@@ -60,7 +60,7 @@ via import just because it's writable via export. It is collected into
 
 A relation whose `labelField` is a list or a dotted path (e.g. a composite display column) was
 **also** excluded here at the time this task shipped — there was no single lookup field to
-resolve a CSV cell back to. This is **no longer true**: cmd_548 made composite/dotted labelFields
+resolve a CSV cell back to. This is **no longer true**: a later change made composite/dotted labelFields
 import-resolvable via full-label-text matching against a pre-built map. See
 `docs/knowledge/csv-import-composite-labelfield.md`.
 
@@ -69,7 +69,7 @@ import-resolvable via full-label-text matching against a pre-built map. See
 Independent of root cause, a route that answers `200 succeeded` while quietly discarding a
 column it can't write is a trap for the next schema author. `import_unimportable_columns` lists
 every exported FK display column that has **no** entry in `import_fk_specs` (read-only; composite
-labelField no longer lands here as of cmd_548). The generated route checks the CSV header against
+labelField no longer lands here as of that later change). The generated route checks the CSV header against
 this list **before** processing any row — same convention as the existing `MISSING_COLUMN` check
 (`row: 0`, blocks the whole request) — and returns a new `UNIMPORTABLE_COLUMN` error instead of a
 false "succeeded".
@@ -110,11 +110,11 @@ documented KEY-field gap above (asserted as a known limitation, not a false "fix
 
 `code_generator/tests/test_build_context.py::TestImportFkSpecsScreenEditableGeneralization` —
 non-key FK becomes importable, key FK marked `is_key`, readonly FK excluded and lands in
-`import_unimportable_columns` (composite-labelField FK is importable as of cmd_548 — see
+`import_unimportable_columns` (composite-labelField FK is importable as of a later change — see
 `docs/knowledge/csv-import-composite-labelfield.md`), required non-key FK makes CREATE feasible.
 
 `code_generator/tests/test_build_context.py::TestImportKeySpecsLookupEntityFilterByOrg
-::test_any_dotted_fk_needs_org_filter_true_for_non_key_fk_too` — org-filter detection (cmd_521)
+::test_any_dotted_fk_needs_org_filter_true_for_non_key_fk_too` — org-filter detection (added by an earlier fix)
 extended correctly to non-key FKs.
 
 `code_generator/tests/test_import_template_branches.py` — non-key FK resolved once and written

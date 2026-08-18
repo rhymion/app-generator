@@ -1,4 +1,4 @@
-// Fixture-only stand-in for @/lib/authz (subtask_535a mention-gate check).
+// Fixture-only stand-in for @/lib/authz (mention-gate check).
 // Public type/function *signatures* copied verbatim from the real
 // lib/authz.ts so generated getters.ts/route.ts type-check against the real
 // contract -- but the real file itself is not used, because its own

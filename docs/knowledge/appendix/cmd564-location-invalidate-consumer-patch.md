@@ -1,9 +1,9 @@
-# cmd_564: generic invalidate mechanism — `location` consumer patch
+# Generic invalidate mechanism — `location` consumer patch
 
-> Ready-to-apply reference for wiring the generic `invalidated_at` mechanism (cmd_564) onto a
+> Ready-to-apply reference for wiring the generic `invalidated_at` mechanism onto a
 > consumer's `location` entity, once that consumer's `app-generator` submodule pointer is bumped
-> past cmd_564. This repo's own `json_schema.yaml` has no `location` entity at all (it's a
-> proj_c/proj_g-only concept, per cmd_562's own report) — the mechanism itself is proven generic
+> past the commit that introduced it. This repo's own `json_schema.yaml` has no `location` entity at all (it's a
+> proj_c/proj_g-only concept, per the location id-FK migration's own report) — the mechanism itself is proven generic
 > here via a self-contained fixture pair (`code_generator/tests/test_invalidate_mechanism_fixture.py`),
 > and this doc carries the one remaining piece (the actual `location` wiring) forward to whichever
 > consumer applies it, the same way `cmd562-location-id-fk-consumer-migration.md` did for the
@@ -55,7 +55,7 @@ No `filter_field` key is needed — the mechanism is convention-based: `enabled:
 It reads the column-name convention off the entity-level `x-generate.invalidate` block only; it
 never reads a `json_schema.yaml` property named `invalidated_at`. A field/property that never
 displays on screen needs no schema declaration at all as long as it's defined in
-`prisma/schema.prisma` (§1.2) — declaring it anyway caused two problems fixed in cmd_570: it
+`prisma/schema.prisma` (§1.2) — declaring it anyway caused two problems fixed in a later change: it
 collided with the entity-level `x-generate` key already used for a different purpose (same key
 name, different meaning, on the same entity), and its `x-generate.hidden_from_form: true` sub-key
 was never read by any generator code (dead config). **Do not reintroduce a `properties.invalidated_at`

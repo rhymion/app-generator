@@ -1,5 +1,5 @@
 #!/bin/bash
-# Mention-gate fixture check (subtask_535a / cmd_535, following on cmd_532).
+# Mention-gate fixture check (cmd_535, following on cmd_532).
 #
 # Runs a small, self-contained fixture entity (commentable + comment +
 # x-mention: true) through the real build_user_schema.py -> generate.py

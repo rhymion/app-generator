@@ -38,7 +38,7 @@ error TS2551: Property 'purchase_order' does not exist on type '{ id: string; ..
 error TS2339: Property 'item' does not exist on type '{ id: string; ...; unit_price: number }'.
 ```
 
-Reproduced in `cypress/support/goods_receipt_line/helper.ts` (cmd_615a) at the `purchase_order_line`
+Reproduced in `cypress/support/goods_receipt_line/helper.ts` at the `purchase_order_line`
 dep (labelField `[purchase_order.po_number, item.sku]`) and the `asn_line` dep (labelField
 `[asn.asn_number, item.sku]`) — both FK deps of `goods_receipt_line` in proj_g's (inventory-app)
 schema.
@@ -81,7 +81,7 @@ unset) render byte-identical output; the `{% if dep.prisma_include_str %}` guard
   the main config, so `next build`/`npx tsc -p tsconfig.json` alone won't surface it).
 - Confirmed the same errors, same two file:line locations, before and after toggling
   `goods_receipt_line.x-generate.edit`/`delete` (unrelated to the schema fields the composite
-  labelField reads) — ruling out `cmd_609`/`cmd_610`'s unrelated changes as the cause.
+  labelField reads) — ruling out other unrelated changes as the cause.
 - Deviation-injection: reverted the template to HEAD, regenerated, confirmed the exact same 4 errors
   reappear at the exact same lines; re-applied the fix, regenerated, confirmed zero errors.
 - Full proj_g `test:e2e:build` (next build) and `test:e2e:cy:api` (30 specs / 616 tests) both pass,

@@ -329,7 +329,7 @@ jobs:
   oto-mandatory-gate-fixture:
     name: OTO Mandatory Gate Fixture Check
     runs-on: ubuntu-latest
-    # cmd_704 [2-a] / subtask_705c: a small fixture entity pair
+    # cmd_704 [2-a]: a small fixture entity pair
     # (oto_gate_target, a one-to-one selector target with its own pages, and
     # oto_gate_item, whose FK to it is REQUIRED -- non-nullable) run through
     # the real generate-code -> tsc pipeline, catching regressions in the

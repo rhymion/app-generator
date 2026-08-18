@@ -1,10 +1,10 @@
-# CSV-import commit-time CREATE skipped the auto-create bridge FK pre-create (cmd_614)
+# CSV-import commit-time CREATE skipped the auto-create bridge FK pre-create
 
 ## Symptom
 
 An entity with a required internal bridge FK (e.g. `approvable_id` on an
 `x-approval` entity) had `import_can_create` correctly computed as `true`
-(cmd_609 fixed the `_create_feasible` gate that used to gate this off), and
+(an earlier fix corrected the `_create_feasible` gate that used to gate this off), and
 a CSV-import dry run for a mismatched row (no existing row matches the
 natural key) reported `succeeded: 1`, no errors, and issued a
 `confirmToken`. Confirming that same dry run — the actual commit
@@ -38,7 +38,7 @@ of `type: one-to-one_bridge`) needs its bridge row created and wired at
 CREATE time; `action.data` was computed at dry-run time and structurally
 never contains that FK, since the CSV row can never supply it (it's
 server-managed plumbing, not client data — the same reasoning `_create_feasible`
-cmd_609 already codified for feasibility).
+already codified for feasibility).
 
 `service.ts.jinja2`'s `add<Entity>()` function — the *normal* create path —
 already solves exactly this: `build_context.py` computes
@@ -112,7 +112,7 @@ Entities with no auto-create OTO relation (the common case) render the
   this repo's own worktree — `test_sql_safety.py` skips until `lib/**/service.ts`
   exists on disk).
 - **DB-level runtime replay** (isolated worktree + isolated docker compose
-  stack, real Postgres, cmd_614 verification script — not committed):
+  stack, real Postgres, a verification script written for this fix — not committed):
   direction (a) a non-bridge entity (`item`) create with the unchanged plain
   form succeeds; direction (b) the exact fixed `goods_receipt_line`
   transaction (pre-create `approvable` + merge `approvable_id`) succeeds
@@ -125,7 +125,7 @@ Entities with no auto-create OTO relation (the common case) render the
 
 While tracing `goods_receipt_line`'s generated import route to build the
 runtime replay, its required `unit_of_measure_id` FK turned out to already
-be correctly resolved via the cmd_530 non-key-FK mechanism
+be correctly resolved via the non-key-FK mechanism
 (`fkData.unit_of_measure_id`, resolved from a `unit_of_measure_name` CSV
 column) — initially looked like a second, unrelated gap, but is not one.
 No follow-up needed there.

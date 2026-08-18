@@ -1,4 +1,4 @@
-# cmd_583: `x-generate.invalidate` with no handler/module — write-once stub
+# `x-generate.invalidate` with no handler/module — write-once stub
 
 **Status: Fixed**
 **Date: 2026-08-06**
@@ -61,9 +61,9 @@ Irreversible." — `user`-specific wording baked into a generic template.
 Generalized to "Invalidates the given {{ parent }} record via the
 configured handler."
 
-## Does this conflict with cmd_564's "plug-in point, not generic soft-delete" ruling?
+## Does this conflict with the earlier "plug-in point, not generic soft-delete" ruling?
 
-Flagged for confirmation, not silently assumed: cmd_564 deliberately treats
+Flagged for confirmation, not silently assumed: that earlier ruling deliberately treats
 `invalidate` as a plug-in point — the generator does not auto-implement
 domain behavior; `user` plugs in `anonymizeUser` by hand. The stub added
 here does **not** implement any invalidate behavior (it only throws) — it
@@ -89,7 +89,7 @@ no new gap was found by this investigation beyond the general convention.
 `code_generator/tests/fixtures/invalidate_gate/` gained a third fixture
 entity, `sprocket` (`invalidate: true`, no handler/module — the
 never-before-generated branch), alongside the existing `widget`
-(with module) / `gadget` (no invalidate) pair from cmd_564.
+(with module) / `gadget` (no invalidate) pair from that earlier ruling.
 `code_generator/tests/test_invalidate_mechanism_fixture.py` asserts:
 
 - the stub file is written and exports `invalidateSprocket`
@@ -106,7 +106,7 @@ template's unconditional import was correct all along — the missing piece
 was only that `generate.py` never wrote the file it imports. All three pass
 after the fix.
 
-## Addendum (cmd_587): stub now branches on the actual `invalidated_at` column
+## Addendum: stub now branches on the actual `invalidated_at` column
 
 The "does not implement any invalidate behavior (it only throws)" claim
 above no longer holds unconditionally. A follow-up change to

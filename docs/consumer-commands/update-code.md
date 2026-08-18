@@ -1,12 +1,12 @@
-# update-code — consumer Completion gate (canonical, cmd_714)
+# update-code — consumer Completion gate (canonical)
 
 Canonical text for the `## Completion gate` section of `update-code.md` in
 consumer repos generated from this repo (app-generator). Consumer repos
 hold a thin reference to this file instead of a standalone copy — see
 `docs/knowledge/consumer-commands-canonical-source.md`.
 
-**cmd_714 finding — universal step, not app-template-specific**: as of
-cmd_714, only app-template's copy of this gate included step 2
+**Universal step, not app-template-specific**: at one point,
+only app-template's copy of this gate included step 2
 (`check:generated`) below; inventory-app's and insurance-app's copies were
 missing it. The reasoning for the step (a `check:generated`-detectable
 generated-code drift can be introduced by any `update-code` task,
@@ -46,7 +46,7 @@ Not a local step — enforced by CI instead:
 (the `commentable` bridge's comment/reaction writes going straight to
 `prisma.comment.*`/`prisma.reaction.*` from `lib/db_table/actions.ts`
 instead of through a service layer) went unnoticed from 2026-05-23 until
-cmd_705 in app-template: `update-code` tasks — routine feature work, not
+a later fix in app-template: `update-code` tasks — routine feature work, not
 schema changes — are both far more frequent and exactly the kind of task
 that can introduce a new write:direct violation (e.g. a hand-authored
 server action reaching for `prisma.<model>.*` directly) without ever
@@ -98,7 +98,7 @@ required step even though app-generator's own `audit` CI job already
 audits this same dependency tree: a new high/critical CVE can be published
 in an already-pinned dependency *after* app-generator's own audit last
 passed, with no app-generator commit to re-trigger it (a `nanoid`
-vulnerability surfaced exactly this way in practice). As of cmd_714, none
+vulnerability surfaced exactly this way in practice). Currently, none
 of the three known consumer repos (app-template, inventory-app,
 insurance-app) run an audit job in their own CI, so this local step is the
 only check standing between a newly-disclosed vulnerable pin and merge in

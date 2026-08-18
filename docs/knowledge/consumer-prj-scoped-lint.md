@@ -8,8 +8,8 @@ ordering is correct for a consumer:
 
 - Before `generate-code`: identical to this repo's own gate/CI, so it
   never actually looks at anything the consumer wrote (`prj/`).
-- After `generate-code` (the bug this doc's companion fix addresses,
-  cmd_682): measures this repo's own templates *plus* every file
+- After `generate-code` (the bug this doc's companion fix addresses):
+  measures this repo's own templates *plus* every file
   `generate-code` instantiates per entity in the consumer's real schema
   — hundreds of pre-existing, per-entity warnings unrelated to `prj/`'s
   own content, none of which this repo's own gate/CI has ever measured
@@ -17,8 +17,8 @@ ordering is correct for a consumer:
   schema change that touches nothing in `prj/` can still fail this way,
   for reasons entirely disconnected from what was actually changed.
 
-**Fix (cmd_683, 2026-08-13, a decision on the two candidates the
-`subtask_664b` investigation report compared)**:
+**Fix (2026-08-13, a decision on the two candidates the
+earlier investigation report compared)**:
 `scripts/lint_prj_synced.py` (wired up as `npm run lint:prj`) runs
 `prj:sync`, takes prj_sync.py's own `copied`/`merged` stdout lines as
 the list of what was just synced (never re-derives that list by
@@ -36,8 +36,8 @@ job measures (`npm ci && npm run lint`, no `generate-code`). That is a
 repo's own* gate.
 
 `lint:prj` is a different mechanism measuring a different, narrower
-population by design (per the decision reached in cmd_683 on the
-cmd_664 investigation: a consumer's lint is not a copy of this repo's
+population by design (per the decision reached in a follow-up investigation:
+a consumer's lint is not a copy of this repo's
 lint — this repo's own code is already covered by this repo's own CI).
 Because the population is explicitly limited to whatever `prj:sync` just
 reported (never "the whole tree, whatever state it's in"), running
@@ -72,8 +72,8 @@ failure mode, and only one of them is actually a bug.
 The distinction now driving the gate: did `prj:sync` observe and report
 on a real `../prj` (pass, whatever it found), or did it fail to observe
 one at all (fail)? This still mirrors this repo's own "no silent green"
-principle applied to the earlier candidate (i) investigation
-(`subtask_664b`): its naive invocation (`../prj/**` passed directly to
+principle applied to the earlier candidate (i) investigation:
+its naive invocation (`../prj/**` passed directly to
 ESLint with this repo's `cwd`) hit ESLint's `--config`-implies-fixed-
 base-path behavior and reported `File ignored because outside of base
 path` for every file — 0 files linted, exit 0, without `prj:sync` ever
@@ -106,14 +106,14 @@ Verified directly, three scenarios:
 
 `lint:prj` does not pass `--max-warnings` to ESLint — it only fails on
 ESLint errors (or the zero-files check above), matching what
-`subtask_664b`'s own investigation measured as success ("exit 0, 0
+that earlier investigation measured as success ("exit 0, 0
 errors, N warnings"). This repo's own `--max-warnings 20` was calibrated
 for this repo's own small, stable template surface and copied verbatim
 into a consumer's plain `npm run lint` delegate before this fix — but a
 consumer's `prj/` content is expected to grow over time as hand-written
 specs/source are added there, and a ceiling inherited from an unrelated
 population is not a meaningful signal for it (measured directly during
-cmd_682/683: one consumer's `prj/`-scoped warning count grew from 3 to
+that investigation: one consumer's `prj/`-scoped warning count grew from 3 to
 43 in a single day between the two commands, entirely from new
 hand-written Cypress specs, not from any defect). Whether `prj/` content
 should eventually get its own warning ceiling is a separate, not-yet-

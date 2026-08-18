@@ -1,4 +1,4 @@
-"""Regression tests for cmd_705 (subtask_705b): check_generated.py's
+"""Regression tests for cmd_705: check_generated.py's
 write:direct rule against comment/reaction writes.
 
 Before this fix, add/update/delete{Parent}Comment and
@@ -8,7 +8,7 @@ wrote `prisma.comment.*` / `prisma.reaction.*` directly from a file that is
 not a service layer (`lib/<parent>/actions.ts`, and the schema-wide
 reactions API route) — comment/reaction have no x-generate, so no
 `lib/comment/service.ts` / `lib/reaction/service.ts` existed for them to
-route through. Measured on proj_c (subtask_702a): 5 violations. See
+route through. Measured on proj_c (earlier measurement): 5 violations. See
 docs/knowledge/schema-yaml-configuration.md §"x-internal at the entity
 level" for the comment/reaction schema shape this reproduces.
 
@@ -219,7 +219,7 @@ def _empty_allowlist(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 def test_pre_fix_bridge_shape_is_flagged_five_times(tmp_path: Path) -> None:
-    """Reproduces the exact proj_c measurement (subtask_702a): 5 violations."""
+    """Reproduces the exact proj_c measurement (earlier): 5 violations."""
     schema = _make_tree(tmp_path, _SCHEMA_WITH_REACTION)
     (tmp_path / 'lib/widget/actions.ts').write_text(_ACTIONS_TS_BEFORE)
     vs = check(schema, tmp_path, _empty_allowlist(tmp_path))

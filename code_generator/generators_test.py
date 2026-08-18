@@ -459,7 +459,7 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             # below and got a non-numeric placeholder, which Prisma's
             # Decimal column rejects outright ("invalid digit found in
             # string. Expected decimal String."). Discovered via proj_g's
-            # Int-cents→Decimal migration (subtask_711b/cmd_711f).
+            # Int-cents→Decimal migration (cmd_711f).
             val = "'10.00'"
             val_unique = '`${i * 10}.00`'
             val_second = "'20.00'"
@@ -1003,7 +1003,7 @@ def get_field_metas(
             # Prisma's Decimal column rejects outright
             # ("invalid digit found in string. Expected decimal String.").
             # Discovered via proj_g's Int-cents→Decimal migration
-            # (subtask_711b/cmd_711f).
+            # (cmd_711f).
             metas.append({
                 **base,
                 'label': to_title_case(prop_name),
@@ -1864,7 +1864,7 @@ def helper_context(
     internal_fk_prop_names = {d['prop_name'] for d in internal_fk_deps}
     fields = [f for f in fields if f['prop_name'] not in internal_fk_prop_names]
 
-    # cmd_421 Domain 4 (M1, subtask_421i): mention field name resolution. Only
+    # cmd_421 Domain 4 (M1): mention field name resolution. Only
     # the commentable-bridge shape is supported here (comment_children direct-FK
     # shape has no populate helper of its own yet — see build_context.py's
     # _build_comment_actions/_build_comment_actions_bridge split for the two
@@ -2631,7 +2631,7 @@ def helper_context(
         # (no lines) ledger_transaction entity's pool never gets seeded with
         # quantity here, so every generated Create test's default
         # quantity_reserved trips InsufficientPoolCapacityError against a
-        # quantity: 0 pool row (found via cmd_734 subtask_734a e2e run).
+        # quantity: 0 pool row (found via cmd_734 e2e run).
         if not _pool_entity_nolines:
             _domain_key_nolines = (_xres_h.get('transaction') or {}).get('ledgerDomain')
             if _domain_key_nolines:
@@ -3800,7 +3800,7 @@ def api_spec_context(
         _api_is_self_only, _ = get_self_only_flags(model_def)
     round_trip_unimportable_columns = ['creator_id'] if _api_is_self_only else []
 
-    # cmd_421 Domain 4 (M1, subtask_421i): x-mention name resolution after
+    # cmd_421 Domain 4 (M1): x-mention name resolution after
     # save. Mirrors build_context.py's comment_has_mention detection exactly
     # (the shared 'comment' model has an x-mention: true field AND this
     # entity has a one-to-one_bridge FK to 'commentable') — this test context

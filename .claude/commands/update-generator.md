@@ -106,7 +106,7 @@ rendering), `form_validation.ts`/`service_validation.ts` (the
 Decimal-typed fields, so none of these branches are ever compiled by step 8
 otherwise. ~6s. See `scripts/check_decimal_gate_fixture.sh`.
 
-**Step 6 (`test:oto-mandatory-gate`, cmd_704 [2-a] / subtask_705c)**: runs a
+**Step 6 (`test:oto-mandatory-gate`, cmd_704 [2-a])**: runs a
 third, unrelated small fixture entity pair (`oto_gate_target`, a
 `type: one-to-one` selector target with its own list/view/new/edit pages,
 and `oto_gate_item`, whose FK to it is REQUIRED — non-nullable) through the

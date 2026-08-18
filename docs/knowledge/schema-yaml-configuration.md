@@ -304,7 +304,7 @@ Prisma-derivable defaults: `type: many-to-one` and `labelField: name`.
   `SchemaDivergenceError` and the build fails (`code_generator/schema_deriver.py:338-343`). You
   cannot declare a wrong target; you can only omit it (Prisma-derived) or confirm it.
 
-**A note on scope**: an initiative (cmd_438) to further reduce the user-visible surface of pure
+**A note on scope**: an initiative to further reduce the user-visible surface of pure
 bridge/standalone entities (e.g. splitting `x-schema-visibility` metadata into its own file, on
 top of the `approvable`/`commentable`/`attachable` split already shipped) is in progress but was
 explicitly ruled out of the 3.0.0 scope and deferred to a later 3.x release. Everything in this
@@ -423,7 +423,7 @@ Files that are **never overwritten** (extension points):
 
 These stubs are created once on first generation and then left alone.
 
-> **Naming note (cmd_570):** `x-generate` is reserved for this entity-level generation-flags
+> **Naming note:** `x-generate` is reserved for this entity-level generation-flags
 > block. Don't reuse the `x-generate` key name for a property-level control (e.g. under a
 > `properties.{field}` entry) even if the intent is unrelated — the two meanings collide and
 > confuse readers, and no generator code reads an `x-generate` key placed under `properties`
@@ -468,7 +468,7 @@ supplies everything Prisma can't express.
 | `DateTime` (+ `format: time` override) | `string` | `Date` | Time only (`@db.Timetz(0)`) |
 | `String` (+ `format: uri` override) | `string` | `string` | URL; rendered as image or link |
 | `Int` | `integer` | `number` | |
-| `Decimal` (+ `@db.Decimal(p, s)`) | `string` | `string` | **Not** `number` — a deliberate product decision (cmd_705): a JS-float mapping risks silent rounding error (`0.1 + 0.2` style) on every read/write/CSV round-trip. Rendered as a numeric-styled text input (`inputMode="decimal"`), never the `number`-typed `NumberField`. `s` (scale) is auto-reflected as `x-decimal-scale`, bounding the input format check's max decimal places. |
+| `Decimal` (+ `@db.Decimal(p, s)`) | `string` | `string` | **Not** `number` — a deliberate product decision: a JS-float mapping risks silent rounding error (`0.1 + 0.2` style) on every read/write/CSV round-trip. Rendered as a numeric-styled text input (`inputMode="decimal"`), never the `number`-typed `NumberField`. `s` (scale) is auto-reflected as `x-decimal-scale`, bounding the input format check's max decimal places. |
 | `Boolean` | `boolean` | `boolean` | |
 | Prisma `enum` type | `string` | Literal-union string type | nativeEnum — see §4.3 |
 
@@ -543,7 +543,7 @@ render translated labels keyed off the enum member names
 actual member name as a Postgres enum value — not an array index.
 
 The default app schema (`code_generator/json_schema.yaml`) has zero `minimum`/`maximum` int-enum
-fields as of the cmd_457 migration (24 fields moved from int-enum to nativeEnum) — every enum
+fields as of an earlier migration (24 fields moved from int-enum to nativeEnum) — every enum
 field in the current default schema is nativeEnum-backed.
 
 **Legacy int-enum — still supported, not recommended for new fields.** `type: integer` with
@@ -758,7 +758,7 @@ model booking {
 The resolved-object property (`resource`) must appear under `properties:` as a `$ref`.
 If it is missing, the generator will not include it in `include:` clauses.
 
-### `labelField` is also the autocomplete search source (cmd_552)
+### `labelField` is also the autocomplete search source
 
 The generated `search{Entity}Options` getter (`getters.ts.jinja2`) substring-matches not only
 the entity's own text columns but also, for each FK, the field named in that FK's
@@ -1358,7 +1358,7 @@ no `displayFields`/`primaryField` props at all, and `ResponsiveListClient`/`Data
 back to their own hardcoded default columns — `name` and `description` — **not** "all fields in
 definition order". If the entity has neither of those two exact field names (e.g. its primary
 display field is called `title`), the list page silently renders blank/id-only cells for every
-row with no build or type error (found via `personal_note`, cmd_536 — see
+row with no build or type error (found via `personal_note` — see
 `docs/knowledge/self-only-entity.md`). Always declare `x-display.table` with a `primary: true`
 column whenever the entity's natural label field isn't literally named `name`.
 
@@ -1818,14 +1818,14 @@ or set `labelField` explicitly in every `x-relationship` / `x-relationships` ref
 The generator validates this and reports an error if neither is present.
 
 **`labelField` is a display-only declaration, but CSV import also uses it for row lookup
-(cmd_572).** When a many-to-one FK has no `x-import-key`, CSV import resolves the referenced row
+.** When a many-to-one FK has no `x-import-key`, CSV import resolves the referenced row
 by querying on the FK's `labelField` value (`import_fk_specs.lookup_field` in
 `build_context.py`), the same field the CSV export column is named after. This is within the
 declaration's intended scope as long as `labelField` points to a human-readable field that is
 effectively unique (`name`, `code`, etc.) — the common case today. If a schema ever points
 `labelField` at a field that is mutable or not unique, this dual use breaks down the same way the
-pre-cmd_562 ledger reverse-lookup did; at that point, consider a dedicated identification-only
-declaration rather than continuing to overload `labelField`. Not needed today (cmd_572 surveyed
+earlier ledger reverse-lookup design did; at that point, consider a dedicated identification-only
+declaration rather than continuing to overload `labelField`. Not needed today (a later survey covered
 every call site and recommended keeping this as-is).
 
 ---
@@ -2060,7 +2060,7 @@ For detailed subsystem documentation, see:
 | `String` | `string` |
 | `String?` | `[string, "null"]` |
 | `Int` | `integer` |
-| `Decimal` (+ `@db.Decimal(p, s)`) | `string` (never `number` — cmd_705, precision-preserving) |
+| `Decimal` (+ `@db.Decimal(p, s)`) | `string` (never `number` — precision-preserving) |
 | `Boolean` | `boolean` |
 | `DateTime` + `format: date-time` override | `string` |
 | `DateTime` + `format: date` override | `string` |

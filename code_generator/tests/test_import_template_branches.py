@@ -205,7 +205,7 @@ def test_no_unimportable_columns_renders_empty_array(env):
 
 
 # ---------------------------------------------------------------------------
-# cmd_548 (subtask_547a design, option ko): composite/dotted labelField FKs
+# cmd_548 (per the earlier design, option ko): composite/dotted labelField FKs
 # are import-resolvable via a pre-built label->id map instead of a per-row
 # scalar lookup. See TestCompositeLabelFieldImportOrgFilter /
 # TestImportFkSpecsScreenEditableGeneralization in test_build_context.py for

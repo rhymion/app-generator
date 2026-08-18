@@ -1,4 +1,4 @@
-// Fixture-only stand-in for @/lib/authz (subtask_705c oto_mandatory gate).
+// Fixture-only stand-in for @/lib/authz (oto_mandatory gate).
 // Public type/function *signatures* copied verbatim from the real
 // lib/authz.ts (same copy the mention_gate fixture keeps at
 // ../mention_gate/shims/authz.ts) so generated getters.ts/FormUpsert.tsx/

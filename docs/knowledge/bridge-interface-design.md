@@ -2,7 +2,7 @@
 
 This document records the design decisions for the polymorphic bridge (`x-bridge`) UI interface,
 covering parent label resolution, child CRUD placement, read-only handling, and the parent-embedded
-DataGrid pattern. Approved decisions: cmd_167 (AP-1 through AP-3) + cmd_172–177 (hands-on feedback).
+DataGrid pattern. Approved decisions: AP-1 through AP-3, plus later hands-on feedback.
 
 See also: `docs/knowledge/schema-yaml-configuration.md` §7.6 for the schema declaration reference.
 

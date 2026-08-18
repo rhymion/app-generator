@@ -1,4 +1,4 @@
-# Self-Ref Dependency Fixtures Need Find-or-Create Too (cmd_592)
+# Self-Ref Dependency Fixtures Need Find-or-Create Too
 
 ## The observation this confirms
 
@@ -29,7 +29,7 @@ deps render *outside* that function, in `populate{{pascal}}Dependencies()` itsel
 FK vars are only reachable via `baseDeps.<var>.id`. Reusing the empty-prefix `lookup_where` as-is
 would emit references to undefined local variables. The self-ref lookup is recomputed with
 `fk_prefix='baseDeps.'`, and — critically — *after* the existing item→item2-style fk-rename pass
-(the mechanism cmd_590/6908ff49 added to keep a self-ref decoy off the same instance as the
+(the mechanism an earlier fix, commit `6908ff49`, added to keep a self-ref decoy off the same instance as the
 primary-display FK), not before: that rename mutates the same `fk_deps` dict entries the lookup
 reads, so computing the lookup earlier would bake in a stale, pre-rename variable name.
 
@@ -47,7 +47,7 @@ unwritten column.
 ## A fixed decoy can still collide with a differently-named test scenario
 
 Fixing the *decoy's own* idempotency doesn't eliminate every composite-unique collision — it just
-changes which collisions remain. `goods_receipt_line`'s self-ref decoy (after cmd_590) is routed
+changes which collisions remain. `goods_receipt_line`'s self-ref decoy (after that fix) is routed
 onto the "second" item instance (`item2`, `"Test Sku 2"`) to avoid label collision with the record
 under test. Independently, the generic `populate{{pascal}}Data(2)` loop names its second iteration
 `"Test Item 2"` / `"Test Sku 2"` — the exact same item. An edit test that intentionally switches a
@@ -56,8 +56,8 @@ record's FK to "instance 2" (a common test idiom, also seen in `asn_line`'s 3.3)
 violates the constraint — no longer a P2002 crash during setup, but a silent update failure (500,
 or a UI edit that never navigates away from the edit page). This is not a new bug introduced by
 find-or-create; it's the same underlying "composite `@@unique` + `instance 2` naming convention"
-class already identified and deliberately left unfixed for `asn_line` 3.3 (see cmd_590/591's
-report) — cmd_592 confirmed it now also affects `goods_receipt_line` 3.3 and the analogous API PUT
+class already identified and deliberately left unfixed for `asn_line` 3.3 (see that earlier
+report) — this confirmed it now also affects `goods_receipt_line` 3.3 and the analogous API PUT
 tests (4.1, 9.1, 9.2), and left them unfixed for the same reason: a real fix needs a third distinct
 instance (or some other disambiguation), which is more than "the narrow overlap" this cmd's scope
 covers.

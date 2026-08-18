@@ -546,7 +546,7 @@ class TestSelectorOTOMandatory:
         assert "checkup" not in ctx["one_to_one_pre_creates"]
 
     def test_required_relation_fields_init_var_uses_available_prefix(self):
-        """Regression (cmd_704, subtask_702b [2-a]): a required selector-OTO FK's
+        """Regression (cmd_704 [2-a]): a required selector-OTO FK's
         required_relation_fields entry must carry init_var
         'initialAvailable{Target}s' — the name page_new.tsx.jinja2's Promise.all
         actually destructures selector_oto_rels entries into (see
@@ -645,7 +645,7 @@ class TestSelectorOTOOptional:
 
 
 # ---------------------------------------------------------------------------
-# required_relation_fields init_var (cmd_704, subtask_702b [2-a])
+# required_relation_fields init_var (cmd_704 [2-a])
 # ---------------------------------------------------------------------------
 
 class TestRequiredRelationFieldsInitVarPlainFK:
@@ -691,7 +691,7 @@ class TestRequiredRelationFieldsInitVarPlainFK:
 
 
 # ---------------------------------------------------------------------------
-# has_datetime_props via inline child-grid dayjs() calls (cmd_704, subtask_702b [2-c])
+# has_datetime_props via inline child-grid dayjs() calls (cmd_704 [2-c])
 # ---------------------------------------------------------------------------
 
 class TestChildGridDatetimePropsGate:

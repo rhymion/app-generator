@@ -1,9 +1,9 @@
-# Mention System (cmd_522)
+# Mention System
 
 `@mention` support for comment fields: storage format, candidate search,
-notification, display permission (server-side, cmd_522b), and the
-`MentionInput`/`MentionText` client UI (cmd_522c, this section's second
-half).
+notification, display permission (server-side), and the
+`MentionInput`/`MentionText` client UI (the client-UI follow-up covered in
+this section's second half).
 
 ## Storage format
 
@@ -16,7 +16,7 @@ anonymized user still resolves — via a fallback label — rather than
 producing stale or incorrect text).
 
 - `encodeMentions(text, userLookup)` — infers `@Name` → `@[user_id:<id>]`
-  by longest-name-first matching. **Deprecated (cmd_522)**: no longer
+  by longest-name-first matching. **Deprecated**: no longer
   called from the save path. Kept for backward compatibility and unit
   tests exercising the inference logic directly.
 - `decodeMentions(text, context, deletedUserLabel)` — id → display name
@@ -25,15 +25,15 @@ producing stale or incorrect text).
 - `extractMentionedUserIds(text)` — returns the deduplicated list of
   mentioned user ids in a text.
 
-## Why encoding moved to the client (cmd_522)
+## Why encoding moved to the client
 
-Before cmd_522, `add/updateXxxComment()` called `encodeMentions()` on save,
+Before this change, `add/updateXxxComment()` called `encodeMentions()` on save,
 inferring markers from a fetched `allUsers` lookup by matching `@Name`
 substrings against the raw text. This had two costs: an unbounded
 `prisma.user.findMany()` on every comment save, and inherent ambiguity
 between same-name users (see the "Same-name user collision" note below).
 
-As of cmd_522, the client-side mention picker (cmd_522c) inserts the
+As of this change, the client-side mention picker (the client-UI follow-up) inserts the
 `@[user_id:<id>]` marker directly into the textarea value when the user
 selects a candidate — the save action now stores the raw client text
 unchanged (`stored_var` is always `message`, no `encode_block`). A
@@ -58,7 +58,7 @@ schema field has `x-mention: true`, not per-entity.
   `user` never substitutes for org membership as a candidate-visibility
   gate.
 - **Permission**: uses the same Option B graceful-degradation contract as
-  `searchXxxOptions()` (cmd_516) — a `user` read-permission denial
+  `searchXxxOptions()` (the established Option B pattern) — a `user` read-permission denial
   returns `Object.assign([], { permissionDenied: true })` rather than
   throwing, so the picker can render an "unavailable" state instead of
   crashing.
@@ -70,7 +70,7 @@ schema field has `x-mention: true`, not per-entity.
 
 Fires on `add/updateXxxComment()` alongside the existing
 `'comment_created'` notification (creator/assignee), via the same
-`notify()` fire-and-forget interface from cmd_475.
+`notify()` fire-and-forget interface introduced earlier for notifications.
 
 - **Self-mention**: the candidate picker does not exclude the actor
   (mentioning yourself for reference is allowed), but no notification is
@@ -87,7 +87,7 @@ Fires on `add/updateXxxComment()` alongside the existing
   destination convention as `comment_created`, see
   `docs/knowledge/notification-triggers.md`), **not** at the mentioned
   user's own profile.
-- **Deleted-user FK edge case**: handled by cmd_475's existing
+- **Deleted-user FK edge case**: handled by that same notification mechanism's existing
   fire-and-forget `catch(() => {})` — no action needed here.
 
 Two generated shapes:
@@ -106,7 +106,7 @@ Two generated shapes:
 to its return value whenever the entity's `comment_has_mention` is true —
 sourced from `getModelPermissions('user', userId).permissions.read`. The
 page's Server Component passes this to the comment display Client
-Component (cmd_522c's `MentionText`), which uses it to decide whether a
+Component (the client-UI follow-up's `MentionText`), which uses it to decide whether a
 mentioned name links to `/user/view/{id}` (viewer has `user` read) or
 renders as a plain, non-linking chip (viewer does not).
 
@@ -118,12 +118,12 @@ comment renders differently depending on who is looking at it.
 
 - `mention_fields` (per entity, `build_context.py`): fields on the
   *current* entity annotated `x-mention: true` — drives `MentionInput` on
-  a form field (cmd_522c).
+  a form field (the client-UI follow-up).
 - `comment_has_mention` (per entity, `build_context.py`): true iff the
   entity has a comment relation (bridge or child-table) **and** the
   shared `comment` model has `≥1` `x-mention` field — drives the
   mention-notify code in actions, `canViewUserProfile` in getters, and
-  `MentionText` in the comment display (cmd_522c).
+  `MentionText` in the comment display (the client-UI follow-up).
 - `_has_any_mention` (schema-level, `generate.py`): true iff **any**
   definition anywhere has an `x-mention: true` field — drives generation
   of the three schema-global files: `lib/mention/parser.ts`,
@@ -131,16 +131,16 @@ comment renders differently depending on who is looking at it.
   `db:getNotificationsForUser` in `cypress/support/generated-tasks.ts`.
 
 Schemas with zero `x-mention: true` fields generate none of the above —
-behavior is byte-identical to pre-cmd_522.
+behavior is byte-identical to before this change existed.
 
 ## Tests
 
 | Test | Gate | Notes |
 |------|------|-------|
-| M1 (decode path, cmd_421) | `test:e2e:cy:api` | Unaffected by cmd_522 — the test helper inserts `@[user_id:<id>]` directly via prisma, bypassing the (now-retired) encode step entirely. |
+| M1 (decode path, added earlier) | `test:e2e:cy:api` | Unaffected by this rollout — the test helper inserts `@[user_id:<id>]` directly via prisma, bypassing the (now-retired) encode step entirely. |
 | M2 (mention notification) | `test:e2e:cy:api` | `db:populate{Parent}WithMentionUser` calls `notify()` directly after its direct-prisma comment insert (mirroring M1's philosophy of exercising the read path through the real action/API, while using a lightweight helper — not the generated action — for write-side fixture setup, since comment actions are server actions with no REST-callable equivalent to drive from Cypress). Verified via the new `db:getNotificationsForUser` task. |
 | M3 (create/update diff logic) | `pytest` (`code_generator/tests/test_mention_notifications.py`) | Asserts `_build_comment_actions()` / `_build_comment_actions_bridge()` emit the `oldIds`/`newIds`/`freshMentions` diff pattern, correct self-exclusion, and confirms `encodeMentions`/`userLookup`/`storedMessage` are fully absent from the generated output when `comment_has_mention=True`. |
-| MentionInput UI interaction | Not in mandatory gate | UI-only — cmd_522c, consistent with the cmd_518 OQ-3 precedent for non-API specs. |
+| MentionInput UI interaction | Not in mandatory gate | UI-only — part of the client-UI follow-up, consistent with the established OQ-3 precedent for non-API specs. |
 
 Note: this repository's own self-hosted `json_schema.yaml` does not wire
 any entity to the `commentable` bridge, so `comment_has_mention` is never
@@ -154,7 +154,7 @@ verification of the rendered snippet against stub declarations.
 
 ---
 
-## Client UI (cmd_522c): MentionInput / MentionText
+## Client UI: MentionInput / MentionText
 
 ### Architecture deviation from the original design doc: static components, not generated templates
 
@@ -200,7 +200,7 @@ schema-agnostic.
   space) and moves the caret past it.
 - `permissionDenied: true` on the search result renders "Mention
   suggestions unavailable." instead of a crash or an empty silent dropdown
-  (cmd_516 Option B).
+  (the established Option B pattern).
 - Dropdown anchors below the field (not at the exact caret coordinate) —
   precise caret-relative positioning in a plain `<textarea>` needs a
   mirror-div measurement technique that's excess complexity here.
@@ -247,24 +247,24 @@ schema-agnostic" property for `CommentListWrapper` that it already had.
 
 ### The raw-text plumbing this required (getters.ts.jinja2 / api_detail_route.ts.jinja2)
 
-Gap found in the cmd_522b hand-off, not covered by its interface
+Gap found in the server-side display-permission hand-off, not covered by its interface
 contract: `get{Parent}Detail()` already called `decodeMentions()` on
-every bridge-variant comment's `message` before cmd_522 existed (see the
+every bridge-variant comment's `message` before this rollout existed (see the
 "Decode block in detail getter" row in the Foundation Inventory) — meaning
-by the time cmd_522c's `MentionText` would receive `c.message`, the
+by the time the client-UI follow-up's `MentionText` would receive `c.message`, the
 `@[user_id:<id>]` markers were already gone, replaced with plain
 `@Name` text. `MentionText`'s whole design (regex over the raw marker,
 per-mention id for the link href) cannot function on already-decoded
 text — there is no way to reconstruct per-mention ids from decoded names
 (this is exactly the ambiguity the id-based storage format exists to
-avoid). Fixed as part of this cmd, since it blocks the literal ask
+avoid). Fixed as part of this same rollout, since it blocks the literal ask
 (wire `MentionText` into the comment display):
 
 - `getters.ts.jinja2`: `get{Parent}Detail()` no longer calls
   `decodeMentions()` — the comment `message` field returned is now always
   the raw stored string. `get{Parent}DetailPageData()` (the
   page-only layer, same one that already added `canViewUserProfile` in
-  cmd_522b) now also computes `mentionUserContext: Record<string,string>`
+  the server-side display-permission change) now also computes `mentionUserContext: Record<string,string>`
   (id → name, scanning both the bridge and any child-table comment
   sources) and returns it alongside `canViewUserProfile`.
 - `api_detail_route.ts.jinja2`: the REST GET route (consumed
@@ -282,7 +282,7 @@ avoid). Fixed as part of this cmd, since it blocks the literal ask
 - `page_view.tsx.jinja2` / `form_view.tsx.jinja2`: thread
   `canViewUserProfile`/`mentionUserContext` from
   `get{Parent}DetailPageData()` through the page component to `FormView`
-  props. Neither was wired at all before this cmd — cmd_522b only added
+  props. Neither was wired at all before this — the server-side display-permission change only added
   the field to the return value, per its own interface-contract note;
   nothing downstream ever read it.
 
@@ -297,7 +297,7 @@ independent of mentions entirely. This is a `types.ts.jinja2`-wide gap
 repo's own schema never uses a real x-bridge relation. Fixed by applying
 the identical two-step normalization `build_context.py` already does.
 
-### cmd_532: creator include fix and gate-blind-spot confirmation
+### Creator-include fix and gate-blind-spot confirmation
 
 Both loops that build `_mentionUserIds` (the "who was the creator or an
 `@mention` in this comment thread" set, in `getters.ts.jinja2` and
@@ -357,9 +357,9 @@ attempt was made to classify all of them as covered/dead (that needs
 branch-coverage instrumentation across the schemas actually used in CI,
 not a manual audit), but the count alone rules out "this is a one-off."
 
-### cmd_535: the fixture gate, implemented
+### The fixture gate, implemented
 
-cmd_532's recommendation above was implemented as-is: `npm run
+The creator-include fix's recommendation above was implemented as-is: `npm run
 test:mention-gate` (`scripts/check_mention_gate_fixture.sh`), wired into
 both the Gate SoT (`.claude/commands/update-generator.md` step 3) and CI
 (`.github/workflows/ci.yml`'s `mention-gate-fixture` job, no path filter —
@@ -371,7 +371,7 @@ needed.
 
 **What it covers.** One branch: `named_constants and has_commentable` in
 both `getters.ts.jinja2` (`get{Parent}DetailPageData()`) and
-`api_detail_route.ts.jinja2` (`GET` handler) -- the exact branch cmd_532
+`api_detail_route.ts.jinja2` (`GET` handler) -- the exact branch the creator-include fix
 found broken. The fixture (`code_generator/tests/fixtures/mention_gate/`)
 defines one minimal entity, `mention_gate_item`, wired to `commentable` via
 an explicit `x-relationship: {type: one-to-one_bridge, target: commentable,
@@ -385,7 +385,7 @@ is literally `one-to-one_bridge`; plain `one-to-one` is treated as a
 *selector* OTO (picker UI, no auto-create, no nested children). That doc
 section itself may be stale/simplified -- worth a follow-up to verify against
 a real bridge consumer if one is ever built for real product use; not fixed
-here (out of cmd_535's scope, which is the gate, not the doc).
+here (out of the fixture-gate work's scope, which is the gate, not the doc).
 
 **What it does NOT cover, disclosed honestly (do not read this fixture as
 "the mention/commentable code is now safe" -- it is not):**
@@ -394,14 +394,14 @@ here (out of cmd_535's scope, which is the gate, not the doc).
   `getters.ts.jinja2` (a second, direct-child comment path, independent of
   `has_commentable`) -- same file, different branch, not exercised by this
   fixture. A second small fixture entity using that shape would close this;
-  not built here (the cmd_535 task instructions named only the
+  not built here (the fixture-gate work's task instructions named only the
   `has_commentable` branch as in-scope).
 - Everything else in the ~700 `{% if %}` / 228 single-identifier-condition
-  count from cmd_532's measurement above. This fixture lights up on the
-  order of 2 of those (the two call sites cmd_532 fixed); the other ~698 are
+  count from the creator-include fix's measurement above. This fixture lights up on the
+  order of 2 of those (the two call sites the creator-include fix fixed); the other ~698 are
   exactly as dark as they were before this cmd. No coverage-measurement
   tooling was built to track this precisely (explicitly out of scope for
-  cmd_535) -- the count is a rough scale indicator, not an audited number.
+  the fixture-gate work) -- the count is a rough scale indicator, not an audited number.
 - Prisma-level runtime correctness (actual query execution, DB constraints,
   Prisma migration validity) -- this gate only ever runs `tsc --noEmit`
   against a Prisma Client generated from an isolated fixture schema. It
@@ -421,8 +421,8 @@ here (out of cmd_535's scope, which is the gate, not the doc).
   catch (a shim mismatch shows up as a spurious tsc error unrelated to any
   real regression, which is itself a signal to re-sync the shim).
 - Consumer (proj_c-style) schemas wholesale -- explicitly out of scope for
-  cmd_535 per its task instructions (a candidate for a future cmd, not built
-  here). cmd_532 measured that running this repo's own `generate-code`
+  the fixture-gate work per its task instructions (a candidate for future work, not built
+  here). The creator-include fix measured that running this repo's own `generate-code`
   against a real copy of a consumer's full `json_schema.yaml` currently
   fails schema validation outright (4 pre-existing, unrelated errors) -- a
   periodic full-consumer-schema run remains a reasonable second tier once
@@ -461,27 +461,27 @@ procedure is:
    confirm a non-zero exit and a real `tsc` error pointing at the reverted
    line, then restore the fix and confirm green again. Do not skip this --
    an unverified gate is exactly the "mechanism exists but nobody watches
-   it" failure mode flagged in cmd_482.
+   it" failure mode flagged in an earlier retrospective.
 6. Update the "What it covers" / "What it does NOT cover" lists above so
    the next reader gets an honest, current picture -- this document rots
    fast if left as a one-time snapshot.
 
-### Resolved by cmd_538: comment-compose mention picker
+### Resolved: comment-compose mention picker
 
 Previously deferred (see history below): the comment "write a
 comment"/"edit comment" textareas inside `CommentListWrapper` rendered a
 plain `TextField`, not `MentionInput` — typing `@` while composing a
-comment never opened the picker. cmd_538 wired it: `CommentListWrapper`
+comment never opened the picker. The comment-compose wiring fix wired it: `CommentListWrapper`
 grows an optional `searchUsers` prop (both the compose box and the
 per-comment edit box use `MentionInput` when it's passed), and
 `form_upsert.tsx.jinja2` passes `searchMentionUserOptions` down alongside
 `canViewUserProfile`/`mentionUserContext` (previously threaded only to
-`form_view.tsx.jinja2`'s read-only path). See "cmd_538" below for the full
+`form_view.tsx.jinja2`'s read-only path). See the section below for the full
 account, including two real defects the required live-browser behavioral
 test surfaced along the way.
 
 <details>
-<summary>Original deferred-scope note (pre-cmd_538, kept for history)</summary>
+<summary>Original deferred-scope note (kept for history)</summary>
 
 This was a deliberate scope cut, not an oversight: the design doc's
 implementation-plan table listed `MentionText` wiring for
@@ -494,7 +494,7 @@ annotation-driven hook for "make the comment box itself mention-aware."
 
 </details>
 
-### cmd_538: comment-compose wiring implemented; two real defects found and fixed
+### Comment-compose wiring implemented; two real defects found and fixed
 
 **Symptom reported (2026-08-03, proj_c production)**: notifications worked,
 but typing `@` in a comment produced no candidate suggestions, and stored
@@ -505,13 +505,13 @@ mentions never rendered as links.
 marker already present in stored text — never the picker UI. So a working
 notification alongside a non-functional picker is fully consistent with
 the marker having been inserted by a route that bypasses the picker (most
-likely: editing the entity's own `x-mention` field via cmd_522c's
+likely: editing the entity's own `x-mention` field via the client-UI follow-up's
 already-wired path, or hand-typing the marker with knowledge of its
 format) — not evidence against the "compose box has no entry point"
 diagnosis. Confirmed by reading `lib/mention/search.ts` / `lib/_notifier.ts`:
 neither has any code path that depends on `MentionInput`.
 
-**Fix**: see "Resolved by cmd_538" above.
+**Fix**: see "Resolved: comment-compose mention picker" above.
 
 **Two additional real defects found while building the required
 behavioral test** (candidate appears → select → marker inserted → link
@@ -535,7 +535,7 @@ live dev server — not a direct-DB-insert shortcut):
    `mention_search.ts.jinja2`, `MentionInput.tsx`'s `MentionSearchFn` type
    and its one caller, and `MentionInput.test.tsx`'s mocks accordingly.
    **Not fixed here (flagged, out of scope)**: `lib/*/getters.ts.jinja2`'s
-   `searchXxxOptions()` — the cmd_516 pattern this mention-search function
+   `searchXxxOptions()` — the established Option B pattern this mention-search function
    was explicitly modeled on — uses the *identical*
    `Object.assign([], { permissionDenied: true })` trick, and is presumed
    to share the same bug for every entity's FK-autocomplete
@@ -586,18 +586,18 @@ Fixed to match the established convention.
 **Verification**: the standard-generated spec for a temporary fixture
 entity (`mention_probe_item`: commentable one-to-one bridge,
 `x-mention: true` on `comment.message`; reverted before this PR per the
-usual fixture convention — see "cmd_535") ran 15/15 green, including
+usual fixture convention — see "the fixture-gate work") ran 15/15 green, including
 `3.1b` (full live-browser candidate search → select → marker insertion →
 link render → notification delivery, no DB-insert shortcut) and `8.1`
 (permission-denied graceful degradation, now genuinely reachable end to
 end).
 
 **Scope note**: (a) the compose-box wiring itself was a known, explicitly
-deferred scope cut from cmd_522c, not a regression — see the collapsed
+deferred scope cut from the client-UI follow-up, not a regression — see the collapsed
 note above. (b) The two contract-shape defects (RSC serialization,
 OTO-bridge test-gate asymmetry) are genuine pre-existing defects that had
 never been exercised end-to-end until this cmd's behavioral test forced a
-live-browser round trip; cmd_535's type-check-only fixture gate could not
+live-browser round trip; the fixture-gate work's type-check-only fixture gate could not
 have caught either, since it never runs a browser.
 
 ### Tests
@@ -607,12 +607,12 @@ have caught either, since it never runs a browser.
 | `components/_standard/MentionInput.test.tsx` (7 tests) | `test:vitest` (mandatory) | Trigger detection, dropdown open/search/debounce, marker insertion + caret, email-like `@` non-trigger, `permissionDenied` message, disabled/required passthrough. Actually executes — no schema/DB dependency, unlike the Cypress items below. |
 | `components/_standard/MentionText.test.tsx` (5 tests) | `test:vitest` (mandatory) | Plain text passthrough, link vs chip by `canViewUserProfile`, deleted-user fallback, multiple interleaved mentions. Actually executes. |
 | `code_generator/tests/test_mention_ui_wiring.py` (6 tests) | `pytest` (mandatory) | `form_view_context()`'s `renderMessage` wiring, `form_upsert_context()`'s `mention_fields` → `MentionInput` wiring, `context.py`'s new `comment_has_mention` flag — all via fixture schemas (same convention as `test_bridge_migration.py`/`test_mention_notifications.py`), true/false paired for each. |
-| `test_spec.cy.ts.jinja2` additions (mention insert+link-render scenario "3.1"/dedicated cross-user "3.1b" notification scenario; a dedicated "8.1" `permissionDenied` graceful-degradation spec) | Not in mandatory gate (non-API UI spec) | Same structural limitation as M1/M2: gated on `comment_has_mention`, which is false for every entity in this repo's own schema, so it never executes as part of this repo's own gate. Unlike the cmd_535-era state, this is no longer just compile-checked: cmd_538 ran all 15 generated tests (including 3.1/3.1b/8.1) green against a temporary fixture entity with a real live browser, proving the scenarios actually pass, not just render. Ready for the next schema that adopts a commentable/child comment thread with `x-mention` to exercise for real. |
+| `test_spec.cy.ts.jinja2` additions (mention insert+link-render scenario "3.1"/dedicated cross-user "3.1b" notification scenario; a dedicated "8.1" `permissionDenied` graceful-degradation spec) | Not in mandatory gate (non-API UI spec) | Same structural limitation as M1/M2: gated on `comment_has_mention`, which is false for every entity in this repo's own schema, so it never executes as part of this repo's own gate. Unlike the state before the fixture-gate work, this is no longer just compile-checked: the comment-compose wiring fix ran all 15 generated tests (including 3.1/3.1b/8.1) green against a temporary fixture entity with a real live browser, proving the scenarios actually pass, not just render. Ready for the next schema that adopts a commentable/child comment thread with `x-mention` to exercise for real. |
 
 Entity-name independence re-verified for the client UI: this repo's own
 `json_schema.yaml` has `comment.message: x-mention: true` (so
 `_has_any_mention` is true, `lib/mention/parser.ts`/`search.ts` are
-generated — pre-existing from cmd_522b) but zero entities wire a
+generated — pre-existing from the server-side display-permission change) but zero entities wire a
 `commentable`/child comment relation to it, so `comment_has_mention` and
 `mention_fields` are false/empty everywhere. A full `test:e2e:build` run
 confirms zero occurrences of `MentionInput`/`MentionText`/

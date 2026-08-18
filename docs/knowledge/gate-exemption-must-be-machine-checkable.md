@@ -23,7 +23,7 @@ only as a red CI job on an otherwise-complete PR.
 
 This is the third occurrence of "gate that diverges from CI" in this repo:
 
-1. **cmd_489, occurrence 1** (`4617bb7`): the `unit-tests` CI job ran
+1. **Occurrence 1** (`4617bb7`): the `unit-tests` CI job ran
    `npm ci` then `db:generate` then `npm test`, but never `generate-code`
    -- so a tracked unit test whose subject imports generator-emitted code
    failed in CI (module not found) even though it was correct. The gate
@@ -31,13 +31,13 @@ This is the third occurrence of "gate that diverges from CI" in this repo:
    steps run in sequence; the actual job config didn't. See
    `troubleshooting.md` section 2.4 for the fix (dependency injection
    instead of static import of generated code) and the CI job correction.
-2. **cmd_489, occurrence 2** (`d08e3b9`): the same CI job invoked
+2. **Occurrence 2** (`d08e3b9`): the same CI job invoked
    `npm test` (bare vitest, watch-mode script name) while the gate matrix
    documented the canonical command as `npm run test:vitest`. Functionally
    equivalent in this repo's non-interactive CI runner, but the command
    string CI actually ran and the command string the docs told a
    human/agent to run had drifted apart.
-3. **cmd_498** (this doc): `update-generator.md`'s Completion gate carried
+3. **Occurrence 3** (this doc): `update-generator.md`'s Completion gate carried
    a line stating that the vitest step is skipped because component code
    is unchanged, unless explicitly modified. A prior change normalizing
    enum casing changed `components/_standard/ApprovalSection.tsx` and

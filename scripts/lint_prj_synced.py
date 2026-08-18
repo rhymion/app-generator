@@ -35,7 +35,7 @@ to be treated as red. Silently linting nothing without ever having
 measured anything is still the worse failure mode this script exists
 to avoid -- a gate that can go green without prj:sync ever actually
 running is a bug class this repo has hit before (candidate (i)'s
-naive invocation in subtask_664b linted 0 files and exited 0 without
+naive invocation in an earlier investigation linted 0 files and exited 0 without
 prj:sync running against a real ../prj at all; this script exists
 partly to avoid ever reproducing that shape here). The distinction
 is: did prj:sync observe and report on a real ../prj (pass, whatever
@@ -45,7 +45,7 @@ Unlike this generator's own `lint` script, this script does not cap
 the ESLint warning count (no --max-warnings). It only fails on ESLint
 errors, or on the zero-files fail-closed check above. Warnings are
 printed for visibility but do not block the gate -- this mirrors the
-original (a) investigation (subtask_664b), which measured "exit 0, 0
+original (a) investigation, which measured "exit 0, 0
 errors, N warnings" as success. This generator's own `--max-warnings 20`
 ceiling was calibrated for this repo's own small, stable template
 surface; a consumer's prj/ content is expected to grow over time as

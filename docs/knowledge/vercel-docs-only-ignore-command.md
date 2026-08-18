@@ -1,6 +1,6 @@
-# Vercel docs-only Ignored Build Step (cmd_728)
+# Vercel docs-only Ignored Build Step
 
-Lord's ruling (cmd_720): adopt a docs-only build skip for the three
+Lord's ruling: adopt a docs-only build skip for the three
 consumer Vercel projects (app-template/"app-generator-sample",
 inventory-app, insurance-app). This doc records what was actually
 implemented and, more importantly, the empirically-measured Vercel
@@ -58,7 +58,7 @@ branches/PRs, closed/deleted after measurement):
   and dashboard), with the GitHub commit status still `success`
   (description `Canceled by Ignored Build Step`) -- visible and
   positive, not a silent absence, matching the same visibility
-  requirement the CI-side design (cmd_721/725) already established for
+  requirement the CI-side design already established (in an earlier change) for
   a different reason.
 - `VERCEL_GIT_PREVIOUS_SHA` is empty on a branch's first-ever
   deployment (measured on a disposable throwaway branch) -- the
@@ -77,7 +77,7 @@ branches/PRs, closed/deleted after measurement):
   `VERCEL_GIT_PREVIOUS_SHA` as the diff base (fail closed / build if
   empty or not resolvable in this shallow clone), then
   `git diff --quiet` against the base with the same excluded-path list
-  used by this repo's own CI `detect-changes` job (cmd_725): `docs/**`,
+  used by this repo's own CI `detect-changes` job: `docs/**`,
   `README.md`, `README_ja.md`, `CHANGELOG.md`, `AGENTS.md`, `CLAUDE.md`,
   `LICENSE`. Exit 0 (docs-only) to skip, non-zero to build.
 - **`app-generator/vercel-ignore.json`** -- a tiny stub,
@@ -116,7 +116,7 @@ branches/PRs, closed/deleted after measurement):
 
 ### The `docs/consumer-commands/**` carve-out does not apply here
 
-cmd_725's CI-side design excludes `docs/consumer-commands/**` from its
+That same CI-side design excludes `docs/consumer-commands/**` from its
 own docs-only exemption, because that directory holds the canonical
 CI/gate templates distributed to every consumer -- editing it changes
 what every consumer's *own CI* runs, which is a real (non-docs) change
@@ -132,7 +132,7 @@ the three consumers are).
 
 ## Deviation from the original design ask, flagged explicitly
 
-The task instructions (cmd_728) required the canonical source to be
+The original task instructions required the canonical source to be
 `app-generator/vercel.json` alone, with **no** vercel.json-shaped file
 at any consumer's root, citing a prior incident
 (`app-template-vercel-json-must-not-exist`) where a full root

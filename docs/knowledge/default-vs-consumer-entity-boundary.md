@@ -49,7 +49,7 @@ Consumer-specific Cypress task registrations belong in the consuming project's o
 `prj/cypress/support/project-tasks.ts` (that file's own header comment says as much), never
 hardcoded into the shared `cypress.config.ts`.
 
-## cmd_488 findings (2026-07-29)
+## Findings (2026-07-29)
 
 - `code_generator/helpers/schema_helpers.py` (`get_approval_lines_props`,
   `get_splittable_bridge_field`): `purchase_order`/`receiving_receipt` appear only in docstring
@@ -67,7 +67,7 @@ hardcoded into the shared `cypress.config.ts`.
   description with no enumerated entity names.
 - `cypress.config.ts`: 9 hardcoded task registrations (`db:seedReservationInventory` etc.)
   imported `./cypress/support/purchase_order/reservation_helper` unconditionally — same class of
-  violation as the `scripts/seed-tenant.ts` `leave_request` block removed in cmd_478, and already
+  violation as the `scripts/seed-tenant.ts` `leave_request` block removed earlier, and already
   flagged on the dashboard as a follow-up from that cmd. Consolidated into this cmd (see report)
   and removed from `cypress.config.ts`. **Companion action required** in `app-template`
   (out of scope here — this repo's `app-template` scan was read-only): add the 9 equivalent

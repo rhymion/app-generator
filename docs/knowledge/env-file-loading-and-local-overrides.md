@@ -1,4 +1,4 @@
-# Env File Loading Paths and the Scope of `.local` Overrides (cmd_503)
+# Env File Loading Paths and the Scope of `.local` Overrides
 
 **Status: Adopted**
 **Date: 2026-07-31**
@@ -115,7 +115,7 @@ shell session, but it is a workaround for that session only — it does not
 change what a fresh shell (or CI) resolves, so the `.local`-file fix above
 remains the durable mechanism for anyone who isn't manually exporting.
 
-## Verification performed (subtask_503a)
+## Verification performed
 
 - `.env.test.local`-only variable (`COMPOSE_PROJECT_NAME`) confirmed absent
   from `docker compose ... config` output before the fix (single

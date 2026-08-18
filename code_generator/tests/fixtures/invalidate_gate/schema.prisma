@@ -1,5 +1,5 @@
 // Self-contained fixture Prisma schema for the invalidate-gate check
-// (subtask_564c / cmd_564). NOT the project's real prisma/schema.prisma --
+// (cmd_564). NOT the project's real prisma/schema.prisma --
 // this file exists only to run a minimal `widget` (x-generate.invalidate.
 // enabled: true) and `gadget` (no invalidate) pair of standalone entities
 // through the real build_user_schema.py -> generate.py pipeline in
@@ -8,7 +8,7 @@
 // -> getters.ts.jinja2), not just at the build_context()-unit-test level.
 //
 // Modeled on code_generator/tests/fixtures/mention_gate/schema.prisma's
-// self-contained-fixture pattern (subtask_535a/cmd_535).
+// self-contained-fixture pattern (cmd_535).
 
 generator client {
   provider = "prisma-client"

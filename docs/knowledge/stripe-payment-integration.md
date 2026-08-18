@@ -1,4 +1,4 @@
-# cmd_706: Stripe payment integration — `x-payment` opt-in write-once stubs
+# Stripe payment integration — `x-payment` opt-in write-once stubs
 
 **Status: Implemented (generator side only)**
 **Date: 2026-08-16**

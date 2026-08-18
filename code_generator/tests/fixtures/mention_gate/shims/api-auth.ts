@@ -1,5 +1,5 @@
 // Fixture-only stand-in for @/lib/api-auth -- see lib/authz.ts in this same
-// directory for why (subtask_535a mention-gate check).
+// directory for why (see the mention-gate check).
 import { NextRequest, NextResponse } from 'next/server';
 import type { RichPermissions, Operation, ItemContext } from '@/lib/authz';
 

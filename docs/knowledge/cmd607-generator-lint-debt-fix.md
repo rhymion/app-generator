@@ -4,10 +4,10 @@
 
 `npm run lint` (`eslint --max-warnings 20`) is clean at HEAD (generated files are gitignored — see
 `.gitignore`'s `cypress/e2e/*.cy.ts`/`app/api/*/` entries — so CI's `Lint` job, which runs `npm ci &&
-npm run lint` with **no** `generate-code` step (fixed order confirmed cmd_600), only ever lints
+npm run lint` with **no** `generate-code` step (fixed order confirmed by an earlier investigation), only ever lints
 hand-written source). But `npm run generate-code && npm run lint` — the order the local mandatory
-gate actually uses — surfaced 83 warnings (0 errors) as of 2026-08-07/08 (cmd_600 aside; re-measured
-today after cmd_602/603 landed on `develop`, still 83). Nobody had ever counted them because nothing
+gate actually uses — surfaced 83 warnings (0 errors) as of 2026-08-07/08 (that investigation aside; re-measured
+today after a couple of follow-up fixes landed on `develop`, still 83). Nobody had ever counted them because nothing
 in CI or the local gate's `--max-warnings 20` failed on them (they're spread thin enough per rule that
 no single file crossed the CLI's own per-run cap in isolation, and the CLI counts total warnings
 across the whole run, so pre-existing headroom absorbed them).
@@ -52,12 +52,12 @@ the same bug wearing different clothes:
    equals reference count, both 1, in every one). Removed the import line — no conditional needed,
    it was never used anywhere in the file.
    >
-   > **Correction (cmd_621, 2026-08-09)**: this judgment was correct for the template snapshot at
+   > **Correction (a later fix, 2026-08-09)**: this judgment was correct for the template snapshot at
    > the time, but wrong in general — `import_label_expr` is a *string built in Python*
    > (`build_context.py`, via `build_label_expression()`) and spliced into the template through
    > `{{ spec.import_label_expr }}`. A static read of the `.jinja2` source can never see whether that
    > string calls `formatLabelValue()`; it depends entirely on the target entity's labelField shape at
-   > generation time. cmd_613 (labelField composition, landed after this fix) made composite
+   > generation time. A later change (labelField composition, landed after this fix) made composite
    > labelFields able to include date/time-formatted segments, and `import_label_expr` started
    > calling `formatLabelValue()` for such entities (real case: proj_g `goods_receipt_line`,
    > labelField `[product.code, lot_number, expiration_date]` — broke PR#16's TS build with "Cannot
@@ -105,8 +105,8 @@ the same bug wearing different clothes:
 
 4. **Two hand-written files with ordinary stale imports** — `cypress/e2e/audit_log.cy.ts` and
    `cypress/support/audit_log/helper.ts` both declare themselves "Handwritten test spec/helper — not
-   auto-generated" in their own header comments (`audit_log` has no schema entity, confirmed cmd_554/
-   cmd_566 — the SoT-vs-generated-output skill's grep-generate.py test applies: neither
+   auto-generated" in their own header comments (`audit_log` has no schema entity, confirmed in an
+   earlier pair of investigations — the SoT-vs-generated-output skill's grep-generate.py test applies: neither
    file's path is written by `generate.py`). `getDataGridRowCount` (spec) and `ALL_ENTITIES` (helper)
    were imported but never used. These are **not** generator/template debt — ordinary dead-import
    cleanup, edited directly, safe from being clobbered by `generate-code`.
@@ -117,7 +117,7 @@ Two more warnings didn't fit the "add one `{% if %}`" pattern used above, becaus
 which the binding is actually used is scattered across many independent, unrelated Jinja branches
 within a single ~1300-line template (`test_spec.cy.ts.jinja2`):
 
-- **`exactRe()` helper** (cmd_592's self-ref-dep exact-match anchor) is *defined* whenever an entity
+- **`exactRe()` helper** (an earlier task's self-ref-dep exact-match anchor) is *defined* whenever an entity
   has self-ref deps (`has_self_ref_deps`), but it's only *called* under several independent
   per-relation conditions (`after_create_id_is_expr`, non-empty `flatten_test_rels`, specific
   datagrid-FK-child relation loops, etc.) that don't all coincide for every entity with self-ref deps.

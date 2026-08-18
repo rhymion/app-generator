@@ -279,7 +279,7 @@ API routes are **not** locale-prefixed — they stay at `app/api/[entity]/`:
 api_dir = out / 'app' / 'api' / parent
 ```
 
-### `messages/*.json` are append-only, never generator-truncated (cmd_560)
+### `messages/*.json` are append-only, never generator-truncated
 
 `code_generator/generators_i18n.py::update_i18n_and_config` (called at the end
 of every `generate-code` run) treats every `messages/*.json` file as

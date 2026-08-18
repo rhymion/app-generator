@@ -1,4 +1,4 @@
-# Unauthenticated Page Redirect (cmd_525)
+# Unauthenticated Page Redirect
 
 `proxy.ts` (Next.js 16's rename of `middleware.ts`) sends unauthenticated
 requests for protected *pages* to `/login` before the page ever renders,
@@ -47,7 +47,7 @@ header on any of them).
 
 ## Redirect-back (`?redirect=`)
 
-Before cmd_525, an unauthenticated visit to any protected page always
+Previously, an unauthenticated visit to any protected page always
 landed the user on the login page with `/` as the only post-login
 destination — mid-task navigation was lost. `proxy.ts` now appends the
 originally-requested path (and its query string) as `?redirect=` on the
@@ -71,7 +71,7 @@ validate the param before ever assigning it to `window.location.href`:
   (`/\evil.com`, which WHATWG URL parsing treats the same as `//evil.com`)
   in one check, rather than a growing list of string patterns.
 - Anything rejected falls back to `/` — the same default as before
-  cmd_525 existed.
+  this feature existed.
 
 `proxy.ts` itself also runs the requested path through `safeRedirectPath()`
 before writing it into the `/login` URL, for defense in depth — though

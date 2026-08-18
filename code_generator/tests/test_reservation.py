@@ -1150,7 +1150,7 @@ class TestItemModeOverlapAvailability:
 # creates the row (with its allocatedField already set, e.g. a user-picked
 # room) *before* reserve*Core runs in the same transaction, so the overlap
 # check finds its own just-created row as a false self-conflict — real-DB
-# reproduction (subtask_603a report) showed this manifests as either a
+# reproduction (an earlier report) showed this manifests as either a
 # silent reassignment to a different candidate (multiple matching candidates)
 # or InsufficientPoolCapacityError (single matching candidate) for the
 # overlap-availability branch, since that branch's try/catch swallows the

@@ -53,13 +53,13 @@ reject, and excluded from the UPDATE `SET` clause, exactly like any other readon
 The field always gets the authenticated actor's id. Any value a client submits for it — via the
 REST API body or a server action's `FormData` — is discarded entirely; the field isn't even a
 service parameter (`build_context.py` excludes it from `parent_prop_infos`). This is the original
-(cmd_556) design: **"receive nothing, decide server-side, write actorId."**
+design: **"receive nothing, decide server-side, write actorId."**
 
 ### Dict form: `{source: actor, override_permission: <Operation>}`
 
 Same default behavior, but an actor holding `override_permission` (one of `lib/authz.ts`'s
 `Operation` values — `create` | `read` | `update` | `delete` | `import`) may supply an explicit
-value that is honored as-is. This is the cmd_565 delegation revision, motivated by the case
+value that is honored as-is. This is a later delegation revision, motivated by the case
 where an admin needs to file a leave request *for* someone else, not only for themselves.
 
 The three behaviors this produces on **create**:
@@ -89,7 +89,7 @@ author can declare any of the five — the choice is theirs, not fixed by the ge
 ### `_server_value_overrides`: don't discard silently
 
 γ still writes a value the client didn't ask for. Per the "don't silently discard" precedent
-(cmd_530), the REST create response carries an optional flag:
+(established earlier), the REST create response carries an optional flag:
 
 ```json
 { "id": "...", "_server_value_overrides": { "applicant_id": "overridden" } }
@@ -113,7 +113,7 @@ on a subordinate's behalf), but `leave_request` is a **consumer-domain entity** 
 must not become, part of this generator's own shipped `code_generator/json_schema.yaml`. See
 [[default-vs-consumer-entity-boundary]]: `leave_request` is exactly the kind of entity name that
 doc already lists as a consumer's own domain concept, previously and deliberately removed from
-this repo's shipped artifacts (cmd_478, cmd_488). The declaration above is illustrative — a
+this repo's shipped artifacts. The declaration above is illustrative — a
 consuming project's own `prj/code_generator/json_schema.yaml` is where it would actually live.
 `code_generator/tests/test_server_value_fields.py` uses the same example as an in-process pytest
 fixture (never a shipped schema entity), matching that doc's explicit allowance for domain names
@@ -157,7 +157,7 @@ not yet root-caused.
 `x-server-value` fields are automatically readonly, but *plain* `x-readonly` / `x-readonly-fields`
 fields (no `x-server-value` involved) have their own, stricter rule on create: PUT's AP-3=B
 compares a submitted value against the *persisted* row and rejects a mismatch — but CREATE has no
-persisted row to compare against, so before cmd_565 a plain read-only field's client-submitted
+persisted row to compare against, so before this delegation revision a plain read-only field's client-submitted
 value on create flowed straight into the database, unguarded, via both the REST route and the
 create+update server action. Both now hard-reject any client-submitted value for such a field on
 create (`400` / thrown error respectively) — there is no legitimate value to fall back to the way

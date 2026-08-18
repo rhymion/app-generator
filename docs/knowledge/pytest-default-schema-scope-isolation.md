@@ -1,4 +1,4 @@
-# pytest Default-Schema Scope Isolation (cmd_492)
+# pytest Default-Schema Scope Isolation
 
 ## The problem
 
@@ -27,7 +27,7 @@ the consumer project. Neither the generator nor the consumer is actually broken 
 simply pointed at the wrong file for what it claims to verify.
 
 This surfaced as a reported PR failure that reproduced with app-template's consumer data
-overlaid but not on a plain app-generator checkout (cmd_492).
+overlaid but not on a plain app-generator checkout.
 
 ## The fix: fail loud, not silent, not confusing
 

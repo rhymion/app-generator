@@ -9,7 +9,7 @@ against an unchanged schema is not guaranteed to produce the same result
 twice, and a project bootstrapping for the first time (before that output
 file exists or is complete) can diverge from every run after it.
 
-## The defect (cmd_507)
+## The defect
 
 Cypress spec generation needs to know the *displayed* label for enum
 values (e.g. the nativeEnum member `pie` renders as `Pie` in the UI) so

@@ -88,7 +88,7 @@ code without changing anything in the database:
   succeeding. No schema change — this only bites a deployment whose client or
   test code depended on the old (permissive) cross-org behavior.
 - **`db:seed-tenant` requires `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` under
-  `NODE_ENV=production` (cmd_504)** — every production-equivalent
+  `NODE_ENV=production`** — every production-equivalent
   provisioning path (`vercel-build`, `build:full`, GCP's `gcp-seed.sh`) now
   fails fast at seed time unless both env vars are set, instead of silently
   seeding the well-known `admin@example.com`/`password123` default and a

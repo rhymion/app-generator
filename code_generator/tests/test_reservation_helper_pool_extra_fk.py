@@ -8,7 +8,7 @@ FK on the pool entity (e.g. inventory.location_id, added 2026-08-06 alongside
 product_id) was silently omitted from createPool()'s prisma.<pool>.create()
 call, so the generated helper's Prisma call failed at seed time with a
 missing-required-column error — reproduced live against proj_c's
-purchase_order/inventory (subtask_602a report has the file:line trace).
+purchase_order/inventory (an earlier report has the file:line trace).
 
 This suite injects a deviation (a pool entity with a second required FK,
 itself carrying its own required FK — a two-level transitive chain) into a

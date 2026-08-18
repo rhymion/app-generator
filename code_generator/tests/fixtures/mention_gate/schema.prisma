@@ -1,5 +1,5 @@
-// Self-contained fixture Prisma schema for the mention-gate check
-// (subtask_535a). NOT the project's real prisma/schema.prisma — this file
+// Self-contained fixture Prisma schema for the mention-gate check.
+// NOT the project's real prisma/schema.prisma — this file
 // exists only to give the fixture json_schema.yaml enough real Prisma models
 // (commentable/comment/reaction/user + one minimal commentable consumer
 // entity) to run through the actual build_user_schema.py -> generate.py ->
