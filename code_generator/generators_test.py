@@ -721,6 +721,53 @@ def get_entity_fk_deps(model_name: str, schema: dict, deps: list[dict]) -> list[
     ]
 
 
+def split_same_target_fk_deps(
+    model_name: str,
+    relationships: list[dict],
+    deps: list[dict],
+    entity_fk_deps: list[dict],
+) -> tuple[list[dict], list[dict], dict[str, list], dict[str, list]]:
+    """Split same-target deps into prop-stem deps when multiple FK fields point
+    to the same target (e.g. insured_party_id + insurer_party_id both -> party).
+
+    Without this, every FK field pointing at the same target collapses onto a
+    single dep var (e.g. `deps.party`), so generated test code renders the SAME
+    record for every such field instead of one distinct record per FK — a
+    crash (ReferenceError from a duplicate `let party = ...` declaration) in
+    contexts that declare deps as local variables, or a silent
+    every-FK-points-to-the-same-row data bug in contexts (like api_spec_context)
+    that read deps off an object instead.
+
+    Returns (deps, entity_fk_deps, target_to_fk_rels, multi_fk_targets) — the
+    two dict return values let callers that need them (e.g. helper_context's
+    single-FK non-standard prop name aliasing) reuse the same relationship
+    grouping instead of recomputing it.
+    """
+    target_to_fk_rels: dict[str, list] = {}
+    for r in relationships:
+        if (r['target'] not in ('user', model_name)
+                and r['prop_name'] not in ('updater_id', 'assignee_id')):
+            target_to_fk_rels.setdefault(r['target'], []).append(r)
+    multi_fk_targets = {t: rels for t, rels in target_to_fk_rels.items() if len(rels) > 1}
+    for target, fk_rels in multi_fk_targets.items():
+        # Capture original dep's fk_deps before removing it — split prop-stem
+        # deps must inherit them so create() calls include required FK columns.
+        _orig_dep = next((d for d in deps if d['target'] == target), None)
+        _orig_fk_deps = _orig_dep.get('fk_deps', []) if _orig_dep else []
+        # Remove the single target-based dep and its entity_fk_deps entries
+        deps = [d for d in deps if d['target'] != target]
+        entity_fk_deps = [d for d in entity_fk_deps if d['dep_var_name'] != to_camel_case(target)]
+        # Add per-prop-stem deps and entity_fk_deps entries
+        for r in fk_rels:
+            prop_stem = re.sub(r'_id$', '', r['prop_name'])
+            var_name = to_camel_case(prop_stem)
+            dep_title = to_title_case(prop_stem)
+            if not any(d['var_name'] == var_name for d in deps):
+                deps.append({'target': target, 'var_name': var_name, 'title': dep_title, 'fk_deps': _orig_fk_deps})
+            entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
+    return deps, entity_fk_deps, target_to_fk_rels, multi_fk_targets
+
+
 def _entity_has_updater_id(entity_name: str, schema: dict) -> bool:
     """True if the entity has an updater_id field in the Prisma schema.
 
@@ -1962,30 +2009,9 @@ def helper_context(
     # Mirrors user_account handling: each FK field gets its own dep with a prop-stem var name.
     # e.g. approver_role_id + requestor_role_id → both point to 'role'
     # → creates 'approverRole' dep and 'requestorRole' dep instead of a single 'role' dep.
-    target_to_fk_rels: dict[str, list] = {}
-    for r in relationships:
-        if (r['target'] not in ('user', model_name)
-                and r['prop_name'] not in ('updater_id', 'assignee_id')):
-            target_to_fk_rels.setdefault(r['target'], []).append(r)
-    multi_fk_targets = {t: rels for t, rels in target_to_fk_rels.items() if len(rels) > 1}
-    for target, fk_rels in multi_fk_targets.items():
-        # Capture original dep's fk_deps before removing it — split prop-stem
-        # deps must inherit them so create() calls include required FK columns.
-        _orig_dep = next((d for d in deps if d['target'] == target), None)
-        _orig_fk_deps = _orig_dep.get('fk_deps', []) if _orig_dep else []
-        # Remove the single target-based dep and its entity_fk_deps entries
-        deps = [d for d in deps if d['target'] != target]
-        entity_fk_deps = [d for d in entity_fk_deps if d['dep_var_name'] != to_camel_case(target)]
-        # Add per-prop-stem deps and entity_fk_deps entries
-        for r in fk_rels:
-            prop_stem = re.sub(r'_id$', '', r['prop_name'])
-            var_name = to_camel_case(prop_stem)
-            # Local to this dep entry — must not shadow the entity-level `title`
-            # (used later for the approval-role names in this same function).
-            dep_title = to_title_case(prop_stem)
-            if not any(d['var_name'] == var_name for d in deps):
-                deps.append({'target': target, 'var_name': var_name, 'title': dep_title, 'fk_deps': _orig_fk_deps})
-            entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
+    deps, entity_fk_deps, target_to_fk_rels, multi_fk_targets = split_same_target_fk_deps(
+        model_name, relationships, deps, entity_fk_deps,
+    )
 
     # Handle single-FK non-standard prop names (e.g. work_creator_id → creator).
     # When prop_stem != target name, rename the dep's var_name/title to prop_stem-based
@@ -3380,7 +3406,7 @@ def spec_context(
             primary_required_fk or (non_autocomplete_required[0] if non_autocomplete_required else required_field_metas[0]),
         )
         fields_to_fill_5_1 = [f for f in required_field_metas if f['prop_name'] != field_to_skip['prop_name']]
-        fail_create_5_1 = {'fill_cmds': gen_fill_commands(fields_to_fill_5_1, title, I, dep_search_info=dep_search_info)}
+        fail_create_5_1 = {'fill_cmds': gen_fill_commands(fields_to_fill_5_1, title, I, fk_dep_vars, dep_search_info=dep_search_info)}
 
     # Section 5.2: missing scalar required child field; 5.3: missing FK required child field
     fail_create_5_2_scalar = None
@@ -3402,7 +3428,7 @@ def spec_context(
                 'title': child_title,
                 'partial_obj': ('{ ' + ', '.join(entries) + ' }') if entries else None,
                 'fk_fields': gen_child_datagrid_fk_fields(fk_required, schema),
-                'fill_cmds': gen_fill_commands(required_field_metas, title, I, dep_search_info=dep_search_info),
+                'fill_cmds': gen_fill_commands(required_field_metas, title, I, fk_dep_vars, dep_search_info=dep_search_info),
             }
 
         # 5.3: add child with all scalar fields filled but no FK selection
@@ -3411,7 +3437,7 @@ def spec_context(
             fail_create_5_2_fk = {
                 'title': child_title,
                 'partial_obj': ('{ ' + ', '.join(entries) + ' }') if entries else None,
-                'fill_cmds': gen_fill_commands(required_field_metas, title, I, dep_search_info=dep_search_info),
+                'fill_cmds': gen_fill_commands(required_field_metas, title, I, fk_dep_vars, dep_search_info=dep_search_info),
             }
 
     # Section 6.1: clear a required field
@@ -3864,6 +3890,11 @@ def api_spec_context(
 
     deps = resolve_dependencies(model, schema)
     entity_fk_deps = get_entity_fk_deps(model, schema, deps)
+    # Same fix as helper_context: without this, multiple FK fields pointing at
+    # the same target (e.g. insured_party_id + insurer_party_id -> party) all
+    # resolve to the same dep var, so the generated POST/PUT bodies below wire
+    # every such field to the SAME created record instead of distinct ones.
+    deps, entity_fk_deps, _, _ = split_same_target_fk_deps(model, relationships, deps, entity_fk_deps)
 
     child_metas = analyze_children(children, schema, model)
     api_child_metas = [c for c in child_metas if c['render_type'] != 'file']
