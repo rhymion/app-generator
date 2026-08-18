@@ -20,6 +20,25 @@ This is a **generate-schema** task. Read CLAUDE.md before starting.
   with extra force in fast-track mode, where no confirmation
   step catches a missed key.
 
+Traps that actually cost time in a real fast-track run (measured from
+a full ER-diagram-only session, not guessed):
+
+- FK to an embedded entity (one with `x-generate` disabled) breaks the
+  build if required — promote the target to a standalone entity first.
+- A required one-to-one FK can make the generator emit a guard variable
+  name that doesn't match its selector variable name — prefer optional.
+- Adding a comment-bridge entity can fail `check:generated` (the
+  allowlist for its generated files lives in the generator's own
+  package, consumers can't edit it) — avoid unless already accounted for.
+- Two FKs on the same entity pointing at the same target entity can
+  collide in generated Cypress test-helper variable names — give the
+  JSON schema fields distinct names.
+- Reset the test DB (`docker compose down -v` before the next
+  `test:e2e:build`) after every schema change — a stale DB produces
+  confusing, unrelated-looking failures.
+- Run long commands (`test:e2e:build` etc.) in the background with a
+  wait-loop — foreground execution hits typical CLI time limits.
+
 Minimum docs to read before starting:
 - `docs/knowledge/prisma-schema-conventions.md`
 - `docs/knowledge/schema-yaml-configuration.md`
