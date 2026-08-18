@@ -16,6 +16,7 @@ from pathlib import Path
 
 from helpers.naming import to_camel_case, to_title_case
 from helpers.schema_helpers import filter_fields
+from nav_config import build_nav_config, upsert_nav_group_i18n
 
 # The locale whose messages/*.json values ARE the schema-computed defaults
 # (see i18n/routing.ts defaultLocale). Every other locale file's newly-added
@@ -294,29 +295,89 @@ def _update_json(path: Path, additions: dict[str, dict[str, str]]) -> tuple[bool
 
 
 # ---------------------------------------------------------------------------
+# messages/*.json — Nav.groups.<slug> upsert (nested, unlike the flat
+# Fields/EntityLabel/Nav sections `_update_json` handles)
+# ---------------------------------------------------------------------------
+
+def _update_nav_group_i18n_file(path: Path, groups: list) -> tuple[bool, list[str]]:
+    """Upsert messages['Nav']['groups'][slug] for every nav group — never
+    overwrites an existing value (see nav_config.upsert_nav_group_i18n).
+    Returns (changed, added_slugs)."""
+    if not groups:
+        return False, []
+
+    with open(path, encoding='utf-8') as f:
+        messages = json.load(f)
+
+    changed = False
+    added: list[str] = []
+    for group in groups:
+        if upsert_nav_group_i18n(messages, group['slug'], group['label']):
+            changed = True
+            added.append(group['slug'])
+
+    if changed:
+        # Keep Nav.groups sorted the same way _update_json sorts other sections.
+        messages['Nav']['groups'] = dict(sorted(messages['Nav']['groups'].items(), key=lambda x: x[0].lower()))
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(messages, f, indent=2, ensure_ascii=False)
+            f.write('\n')
+
+    return changed, added
+
+
+# ---------------------------------------------------------------------------
 # site-config.ts updater
 # ---------------------------------------------------------------------------
 
-def _update_site_config(path: Path, nav_entities: list) -> bool:
+def _update_site_config(path: Path, nav_entities: list, nav_config: dict) -> bool:
     content = path.read_text(encoding='utf-8')
 
     existing_hrefs = set(re.findall(r'href:\s*"(/[^"]*)"', content))
+    entity_group = nav_config['entity_group']
 
-    new_lines = []
+    new_link_lines = []
     for entity in nav_entities:
         href = f'/{entity["parent"]}'
-        if href not in existing_hrefs:
-            label = to_title_case(entity['parent'])
-            new_lines.append(f'    {{ label: "{label}", href: "{href}" }},')
+        if href in existing_hrefs:
+            continue
+        label = to_title_case(entity['parent'])
+        group_info = entity_group.get(entity['model'])
+        if group_info:
+            new_link_lines.append(
+                f'    {{ label: "{label}", href: "{href}", '
+                f'group: "{group_info["group"]}", order: {group_info["order"]} }},'
+            )
+        else:
+            new_link_lines.append(f'    {{ label: "{label}", href: "{href}" }},')
 
-    if not new_lines:
+    existing_group_slugs = set(re.findall(r'slug:\s*"([^"]*)"', content))
+    new_group_lines = []
+    for group in nav_config['groups']:
+        if group['slug'] in existing_group_slugs:
+            continue
+        fields = [f'slug: "{group["slug"]}"', f'labelKey: "groups.{group["slug"]}"', f'order: {group["order"]}']
+        if group.get('icon'):
+            fields.append(f'icon: "{group["icon"]}"')
+        if group.get('parent'):
+            fields.append(f'parent: "{group["parent"]}"')
+        new_group_lines.append(f'    {{ {", ".join(fields)} }},')
+
+    if not new_link_lines and not new_group_lines:
         return False
 
-    insertion = '\n'.join(new_lines)
-    content = content.replace(
-        '] satisfies NavLink[]',
-        f'{insertion}\n  ] satisfies NavLink[]',
-    )
+    if new_link_lines:
+        insertion = '\n'.join(new_link_lines)
+        content = content.replace(
+            '] satisfies NavLink[]',
+            f'{insertion}\n  ] satisfies NavLink[]',
+        )
+    if new_group_lines:
+        insertion = '\n'.join(new_group_lines)
+        content = content.replace(
+            '] satisfies NavGroup[]',
+            f'{insertion}\n  ] satisfies NavGroup[]',
+        )
     path.write_text(content, encoding='utf-8')
     return True
 
@@ -384,6 +445,11 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
     # Field keys across all entities
     field_keys = _collect_field_keys(entities, schema)
 
+    # Nested sidebar navigation groups (x-nav.parent / x-nav-groups). Raises
+    # NavValidationError (fail-closed) for a cycle, excess depth, or unknown
+    # icon name — propagates to the caller, aborting generation.
+    nav_config = build_nav_config(entities, schema)
+
     # nativeEnum option keys (one section per Prisma enum / x-enum-namespace)
     native_enum_ns = _collect_native_enum_namespaces(schema)
 
@@ -414,6 +480,12 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
             **namespace_sections,
         }
         changed, added_keys = _update_json(lang_file, additions)
+
+        nav_groups_changed, added_group_slugs = _update_nav_group_i18n_file(lang_file, nav_config['groups'])
+        if added_group_slugs:
+            added_keys.setdefault('Nav', []).extend(f'groups.{slug}' for slug in added_group_slugs)
+        changed = changed or nav_groups_changed
+
         status = 'Updated' if changed else 'No changes'
         print(f'  {status}: {lang_file.relative_to(output_dir)}')
         if lang_file.name != _SOURCE_LOCALE_FILENAME and added_keys:
@@ -428,7 +500,7 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
     # --- lib/site-config.ts ---
     site_config = output_dir / 'lib' / 'site-config.ts'
     if site_config.exists():
-        changed = _update_site_config(site_config, nav_entities)
+        changed = _update_site_config(site_config, nav_entities, nav_config)
         status = 'Updated' if changed else 'No changes'
         print(f'  {status}: {site_config.relative_to(output_dir)}')
 

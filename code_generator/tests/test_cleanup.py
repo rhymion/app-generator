@@ -208,7 +208,8 @@ def test_clean_appended_files_never_touches_messages_json(tmp_path: Path) -> Non
         'generate_config': {'list': True}, 'children': [],
     }
 
-    cleanup._clean_appended_files(tmp_path, [entity])
+    schema = {'definitions': {'widget': {}}}
+    cleanup._clean_appended_files(tmp_path, [entity], schema)
 
     assert ja_path.read_text(encoding='utf-8') == ja_content, (
         'messages/ja.json must be byte-for-byte unchanged by cleanup — '
