@@ -5,6 +5,21 @@ argument-hint: <model or schema change description>
 
 This is a **generate-schema** task. Read CLAUDE.md before starting.
 
+## Key rules (read first)
+
+- The resulting schema does not have to match any ER diagram or
+  external design document verbatim. Shaping the schema around
+  what the generator actually supports (relationship types,
+  `x-*` extension keys, generated code paths) is a legitimate
+  design choice, not a deviation that needs excusing.
+- Before treating a generator limitation as a reason to reshape
+  the schema, check whether an existing `x-*` key (see
+  `docs/knowledge/schema-yaml-configuration.md`) already covers
+  the case. Built-in keys are the default, proactive choice even
+  when the task description doesn't name them — this applies
+  with extra force in fast-track mode, where no confirmation
+  step catches a missed key.
+
 Minimum docs to read before starting:
 - `docs/knowledge/prisma-schema-conventions.md`
 - `docs/knowledge/schema-yaml-configuration.md`
@@ -18,18 +33,61 @@ Task: $ARGUMENTS
 - Create Prisma schema first, then create JSON schema.
 - If the user requests a model similar to a built-in model (comment, attachment, etc.),
   first confirm whether the built-in model can be used instead.
-- The resulting schema does not have to match any ER diagram or
-  external design document verbatim. Shaping the schema around
-  what the generator actually supports (relationship types,
-  `x-*` extension keys, generated code paths) is a legitimate
-  design choice, not a deviation that needs excusing.
-- Before treating a generator limitation as a reason to reshape
-  the schema, check whether an existing `x-*` key (see
-  `docs/knowledge/schema-yaml-configuration.md`) already covers
-  the case. Built-in keys are the default, proactive choice even
-  when the task description doesn't name them — this applies
-  with extra force in fast-track mode, where no confirmation
-  step catches a missed key.
+
+## Examples of `x-*` key usage (from proj_c)
+
+Short, annotated excerpts from a real 51-entity consumer schema
+(`app-template`), not full copies. Use these as a shape to imitate,
+not a schema to paste in.
+
+Hide an internal/bridge entity from the generated UI and API entirely:
+
+```yaml
+approvable:
+  x-generate:
+    list: false
+    view: false
+    new: false
+    edit: false
+    delete: false
+    invalidate: false
+    api: false
+    test: false
+```
+<!-- why: this entity exists only to be referenced by other entities'
+     approval wiring — it has no screens or CRUD of its own. -->
+
+Resolve an FK autocomplete/column label from a related field (or a
+composite of fields) instead of the target's raw id:
+
+```yaml
+fields:
+  approval_flow_id:
+    x-relationship:
+      labelField: [entity_name, approver_role.name]
+```
+<!-- why: a bare id is meaningless to a user; labelField lets the
+     dropdown/column show a human-readable, possibly composite name. -->
+
+Mark which field(s) uniquely identify a row for CSV import matching:
+
+```yaml
+role:
+  x-import-key: [name]
+```
+<!-- why: without x-import-key an entity is export-only — import is
+     blocked (see the key's own description block for the phase split). -->
+
+Lock system-managed fields so generated forms can't edit them:
+
+```yaml
+inventory:
+  x-readonly-fields:
+    - quantity
+    - reserved_quantity
+```
+<!-- why: these fields are maintained by transaction/reservation logic,
+     not by direct user edits — the form should show, not accept, them. -->
 
 ## Common rules
 
