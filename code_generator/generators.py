@@ -1216,8 +1216,8 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
     this function returns. In that case this function must touch approvable
     *nothing at all* — claim inventory and link the ledger bridge FK only.
     Creating approval_request(s) here too would double them (and double the
-    notification) against the one afterCreate already makes (cmd_734/
-    subtask_733b otsui_2 — two earlier attempts at this fix each introduced
+    notification) against the one afterCreate already makes (cmd_734,
+    otsui_2 — two earlier attempts at this fix each introduced
     a different bug: removing the bridge entirely broke `next build`
     because a plain FK renders a real Autocomplete pointing at `approvable`,
     which has no generated getters.ts to import; keeping the bridge but
@@ -3126,7 +3126,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # every other category below — without this, an x-readonly relation field renders BOTH
     # a fully-interactive AppFieldRelation (unfiltered) AND a duplicate readonly display
     # (readonly display, edit-mode only), defeating the readonly annotation entirely on
-    # the interactive copy (cmd_355 subtask_355b finding; cmd_477e inventory_movement.
+    # the interactive copy (cmd_355 finding; cmd_477e inventory_movement.
     # from_inventory_id: the unfiltered required AppFieldRelation blocked every UI-driven
     # create via native "please fill out this field" validation since the field is never
     # user-fillable per x-readonly's documented contract).
@@ -5035,8 +5035,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         # doesn't include. Without this, such a call site was reflected in
         # neither the parent's own date_time_props/flatten_needs_datetime nor
         # the 'DateTimeWrapper' substring fallback, so it silently bypassed
-        # this gate and produced an unimported `dayjs` reference (cmd_704,
-        # subtask_702b [2-c]).
+        # this gate and produced an unimported `dayjs` reference (cmd_704
+        # [2-c]).
         'has_datetime_props':       bool(date_time_props) or flatten_needs_datetime or 'DateTimeWrapper' in _rendered_body_text or 'dayjs(' in child_grid_setup,
         'has_image_props':          bool(image_props),
         'has_number_props':         bool(number_props) or flatten_needs_number_field,

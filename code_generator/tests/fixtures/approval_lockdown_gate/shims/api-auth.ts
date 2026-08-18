@@ -1,5 +1,5 @@
 // Fixture-only stand-in for @/lib/api-auth -- see shims/authz.ts in this
-// same directory for why (subtask_705a decimal-gate check).
+// same directory for why (see the decimal-gate check).
 import { NextRequest, NextResponse } from 'next/server';
 import type { RichPermissions, Operation, ItemContext } from '@/lib/authz';
 

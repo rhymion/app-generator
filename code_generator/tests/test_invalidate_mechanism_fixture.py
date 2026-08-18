@@ -7,7 +7,7 @@ This repo's own json_schema.yaml has no `location` entity (it's a
 proj_c/proj_g-only concept -- cmd_562's own report notes the same gap), so
 the mechanism proof uses a small, self-contained fixture pair instead,
 modeled on code_generator/tests/fixtures/mention_gate's pattern
-(subtask_535a/cmd_535): `widget` (x-generate.invalidate.enabled: true) must
+(cmd_535): `widget` (x-generate.invalidate.enabled: true) must
 gain the filter, `gadget` (no invalidate config) must not.
 """
 from pathlib import Path

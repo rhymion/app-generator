@@ -1244,7 +1244,7 @@ class TestImportFkSpecsScreenEditableGeneralization:
         """cmd_548 (option 甲): a composite/dotted labelField has no single
         lookup field, but it IS import-resolvable by matching the whole
         rendered label text against a pre-built label→id map — see
-        subtask_547a design + is_composite/import_label_expr/prisma_include
+        the earlier design + is_composite/import_label_expr/prisma_include
         below."""
         ctx = build_context(self._entity(), self._schema())
         specs = self._specs_by_result_col(ctx)
@@ -1470,7 +1470,7 @@ class TestImportKeySpecsLookupEntityFilterByOrg:
 
 
 # ---------------------------------------------------------------------------
-# cmd_548 (subtask_547a design, option ko): composite/dotted labelField FKs
+# cmd_548 (per the earlier design, option ko): composite/dotted labelField FKs
 # become importable via full-label-text matching. Org isolation must apply
 # to the composite candidate-row map exactly like it does to the simple
 # dotted-FK lookup above — an org-scoped lookup entity must be filtered, a

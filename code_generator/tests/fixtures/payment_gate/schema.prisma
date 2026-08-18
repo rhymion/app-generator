@@ -1,5 +1,5 @@
-// Self-contained fixture Prisma schema for the payment-gate check
-// (subtask_706_stripe_generator_stub_implementation). NOT the project's
+// Self-contained fixture Prisma schema for the payment-gate check.
+// NOT the project's
 // real prisma/schema.prisma -- this file exists only to run a minimal
 // `paid_widget` (x-payment: true) and `plain_widget` (no x-payment) pair
 // of standalone entities through the real build_user_schema.py ->

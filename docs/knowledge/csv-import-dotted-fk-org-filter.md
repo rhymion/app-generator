@@ -105,7 +105,7 @@ schema (e.g. an app with an `organization_id` FK on a real entity). The before/a
 demonstration for this fix was therefore done against a temporary, worktree-local schema
 addition (giving `permission` and `dashboard` a synthetic `organization_id` relation and a
 `dashboard.name` dotted key) — reverted before the final commit, evidence preserved in the
-subtask_521b report — while the permanent, CI-enforced regression coverage is the
+an earlier investigation report — while the permanent, CI-enforced regression coverage is the
 `build_context_test.py` unit test below, since this generator's own mandatory e2e gate cannot
 exercise `should_filter_by_org` end-to-end until a *consuming* project's org-scoped schema does.
 

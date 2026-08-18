@@ -172,7 +172,7 @@ describe('Testing Approval Flow pages and their behavior (hand-written port, cmd
     // helper.ts) — this test has only ever exercised an unchanged save.
     // Kept as a regression guard for that path; the misleading title is a
     // pre-existing generator-side issue, out of scope here (see
-    // subtask_660a report).
+    // an earlier report).
     it('3.2 removes optional data and child items', () => {
       seedApprovalFlowRowsFull(1).then((_records) => {
         cy.visit('/en/approval_flow');

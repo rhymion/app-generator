@@ -8,7 +8,7 @@ substituted the 'name' default for it.
 cmd_563 made `labelField` mandatory everywhere, at the cost of ~30 call
 sites, 8 schema declarations that were purely decorative (the target
 already had `name`), and a documented consumer migration for downstream
-projects that this cmd retires as unnecessary (see subtask_571a report
+projects that this cmd retires as unnecessary (see an earlier report
 item 4). The actual, narrower concern was whether a declaration meant for
 display purposes was being repurposed for a non-display use elsewhere --
 a separate, still-open question this file does not attempt to resolve.
@@ -166,7 +166,7 @@ class TestSingleRelationshipDefaultResolution:
 #
 # Note: this check only ever covered `many-to-many`, not `one-to-many` --
 # that asymmetry predates cmd_563 and is unchanged by this revert; closing
-# it is out of scope here (see subtask_571a report item 4).
+# it is out of scope here (see an earlier report item 4).
 # ---------------------------------------------------------------------------
 
 def _schema_x_relationships(rel_type: str, rel_info: dict, target_has_name: bool = True) -> dict:

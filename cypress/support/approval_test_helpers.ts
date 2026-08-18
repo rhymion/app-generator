@@ -28,7 +28,7 @@ export async function getPendingApprovalRequest(approvable_id: string) {
  * produces for a real entity (all flows' requests created together at
  * entity-creation time, before any of them are actionable except the
  * first). `entity_name: 'user'` is an arbitrary label (default-schema-safe,
- * same convention as subtask_539a's setupApprovalNotificationFixture) —
+ * same convention as the earlier setupApprovalNotificationFixture) —
  * this fixture never touches a real `user`-entity approvable bridge.
  */
 export async function setupMultiStageApprovalFixture() {

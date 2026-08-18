@@ -1639,7 +1639,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # is None) used to be excluded here entirely — there's no single lookup
     # field to resolve a CSV cell back to. They're now import-resolvable via
     # full-label-text matching (is_composite=True; see
-    # option_ko_label_match design, subtask_547a): the pre-built
+    # option_ko_label_match design): the pre-built
     # label→id map (import_label_expr/prisma_include, computed above with
     # the same helper/inputs as the export label_expr) is matched against
     # the whole CSV cell instead of a single scalar field. Non-editable
@@ -2191,7 +2191,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # _autocomplete_rel_jsx() already uses for the field's label.
     #
     # `init_var` is pre-computed here rather than rebuilt from `target` in
-    # the template (cmd_704, subtask_702b [2-a]): parent_rels_raw entries
+    # the template (cmd_704 [2-a]): parent_rels_raw entries
     # are destructured in page_new.tsx.jinja2's Promise.all as
     # `initial{Target}s`, but selector_oto_rels entries are destructured as
     # `initialAvailable{Target}s` — a naming split the template can't see if

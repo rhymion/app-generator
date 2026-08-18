@@ -19,7 +19,7 @@ N=20, PASS" as part of introducing the ratchet ceiling, running the full
 Completion gate in the order the gate doc specified at the time
 (`test:e2e:build` — which runs `generate-code` — several steps before
 `npm run lint`). Later gate runs on later commits (cmd_567, PR #279;
-subtask_594, cmd_600) measured the *same style* of gate run and got 93,
+cmd_600) measured the *same style* of gate run and got 93,
 then 82-83, warnings — reported as a "15→93 regression" and escalated as
 cmd_600 to find the offending commit via bisection.
 
@@ -108,7 +108,7 @@ The post-generate-code warning count (93 at `c10b1b1a`/`c78bfef3`, ~82-83
 currently) is real generated-code lint debt — genuinely unused
 `deps`/`records` callback parameters and similar in generated Cypress
 specs/helpers (see `lint-warning-ceiling-ratchet.md` "Known remaining
-warnings" and the `subtask_567a` addendum report's cost estimate for fixing
+warnings" and an addendum report's cost estimate for fixing
 it at the generator/template level, entity-by-entity). No CI job and, as of
 this fix, no local gate step checks that population at all — it is
 invisible to automation. Raising the current `N=20` ceiling to

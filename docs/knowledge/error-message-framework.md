@@ -1,6 +1,6 @@
 # Error Message Framework
 
-**Status**: Design — approved (cmd_695, 2026-08-14); Implementation: cmd_695 (subtask_695b)
+**Status**: Design — approved (cmd_695, 2026-08-14); Implementation: cmd_695
 **Scope**: All generated entities in app-generator-2
 **Implementation cmd**: cmd_695
 

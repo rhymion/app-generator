@@ -127,7 +127,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   code comments documenting that they chose `Int`-cents specifically because the generator
   didn't support `Decimal` — direct evidence of the gap this change closes, though migrating
   either consumer to `Decimal` is a separate, unstarted decision.
-- **Fixed two generator defects confirmed real by deviation-injection reproduction (cmd_704, subtask_702b):**
+- **Fixed two generator defects confirmed real by deviation-injection reproduction (cmd_704):**
   - A required one-to-one selector FK (`x-relationship: {type: one-to-one, ...}` on a field listed in
     the entity's `required`) made the generated `page_new.tsx` unbuildable. `build_context.py`'s
     `required_relation_fields` (the cmd_516 Option B permission-guard list) merged entries from
@@ -163,7 +163,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
     that already has its own `date-time` field, which already satisfied `has_datetime_props` before this
     fix, so the second defect was also not live-exposed there either — confirmed by direct inspection of
     each consumer's schema, not by regenerating their code.
-- **Added a `test:oto-mandatory-gate` fixture gate (subtask_705c) closing a regression-coverage hole in
+- **Added a `test:oto-mandatory-gate` fixture gate closing a regression-coverage hole in
   the required-one-to-one-selector fix above.** The `test_form_upsert.py` unit tests added for that fix
   call `build_context.py`'s functions directly; nothing in this repo's own `generate-code`/build (the
   `test:e2e:build` gate), nor in any currently known consumer schema (`app-template`/proj_c,

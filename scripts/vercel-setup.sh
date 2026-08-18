@@ -77,7 +77,7 @@ run() {
 
 # `echo "KEY=val" >> file` silently concatenates onto the last line instead of
 # starting a new one when the file doesn't already end in a newline (found
-# live during this script's development — see report subtask_298a). Call this
+# live during this script's development — see an earlier report). Call this
 # before any such append to _ENV_FILE.
 _ensure_trailing_newline() {
   local _f="$1"
@@ -285,11 +285,11 @@ for b in json.load(sys.stdin).get('branches', []):
     # _shell_dquote_escape in vercel-env.sh — protects against `set -a;
     # source` at vercel-env.sh L19+ misparsing an unquoted `&` as the
     # background-job control operator on the *next* run, truncating the var —
-    # subtask_301a). Separately, sed's replacement text also treats a literal
+    # see an earlier report). Separately, sed's replacement text also treats a literal
     # `&` as "whole match" and needs its own escaping so the value is written
     # verbatim instead of re-embedding the match on every run (found live:
     # 16x accumulated duplication across repeated executions — report
-    # subtask_298a CF-1). These are two distinct escaping passes for two
+    # an earlier report, CF-1). These are two distinct escaping passes for two
     # distinct consumers (source-time vs. sed-write-time) — both still
     # required, applied via _sed_replacement_escape on top of the already
     # shell-escaped value.
@@ -306,7 +306,7 @@ for b in json.load(sys.stdin).get('branches', []):
   # not re-parsed as shell syntax (found live: eval turned the export into a
   # backgrounded subshell at `&channel_binding=require`, leaving the in-memory
   # var empty even though .env.production.local was written correctly — see
-  # report subtask_299a CF-5).
+  # an earlier report, CF-5).
   export "${var_pooled}=${pooled_url}"
   export "${var_unpooled}=${direct_url}"
   echo "  Set ${var_pooled} and ${var_unpooled}"
@@ -631,9 +631,9 @@ vercel_env_inject production
 vercel_env_inject preview
 
 # Remove any stale PRISMA_DATABASE_URL (Accelerate era) from Vercel project env.
-# Root cause (subtask_440a): a leftover .env.production.local PRISMA_DATABASE_URL
+# Root cause: a leftover .env.production.local PRISMA_DATABASE_URL
 # forces lib/prisma.ts onto the dead Accelerate/db.prisma.io branch, hiding the
-# Neon DATABASE_URL injected above. `.vercelignore` (subtask_440) stops new local
+# Neon DATABASE_URL injected above. `.vercelignore` stops new local
 # files from being uploaded, but this cleanup is what removes an already-set
 # Vercel project env var on repeated vercel-setup.sh runs — idempotent via
 # `|| true` since `vercel env rm` errors when the var is already absent.

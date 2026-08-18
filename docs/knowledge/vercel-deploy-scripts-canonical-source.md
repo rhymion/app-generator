@@ -10,7 +10,7 @@ must not be merged into one file).
 
 Before cmd_711, three consumer repos (app-template / inventory-app /
 insurance-app) each carried their own independent copy of these files.
-Investigation (subtask_711c23) found the five files byte-identical
+Investigation found the five files byte-identical
 across all three consumers, and the env template differing only by
 `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` (present in inventory-app and
 insurance-app, missing in app-template — a real gap in app-template,

@@ -18,7 +18,7 @@ ordering is correct for a consumer:
   for reasons entirely disconnected from what was actually changed.
 
 **Fix (cmd_683, 2026-08-13, a decision on the two candidates the
-`subtask_664b` investigation report compared)**:
+earlier investigation report compared)**:
 `scripts/lint_prj_synced.py` (wired up as `npm run lint:prj`) runs
 `prj:sync`, takes prj_sync.py's own `copied`/`merged` stdout lines as
 the list of what was just synced (never re-derives that list by
@@ -72,8 +72,8 @@ failure mode, and only one of them is actually a bug.
 The distinction now driving the gate: did `prj:sync` observe and report
 on a real `../prj` (pass, whatever it found), or did it fail to observe
 one at all (fail)? This still mirrors this repo's own "no silent green"
-principle applied to the earlier candidate (i) investigation
-(`subtask_664b`): its naive invocation (`../prj/**` passed directly to
+principle applied to the earlier candidate (i) investigation:
+its naive invocation (`../prj/**` passed directly to
 ESLint with this repo's `cwd`) hit ESLint's `--config`-implies-fixed-
 base-path behavior and reported `File ignored because outside of base
 path` for every file — 0 files linted, exit 0, without `prj:sync` ever
@@ -106,7 +106,7 @@ Verified directly, three scenarios:
 
 `lint:prj` does not pass `--max-warnings` to ESLint — it only fails on
 ESLint errors (or the zero-files check above), matching what
-`subtask_664b`'s own investigation measured as success ("exit 0, 0
+that earlier investigation measured as success ("exit 0, 0
 errors, N warnings"). This repo's own `--max-warnings 20` was calibrated
 for this repo's own small, stable template surface and copied verbatim
 into a consumer's plain `npm run lint` delegate before this fix — but a

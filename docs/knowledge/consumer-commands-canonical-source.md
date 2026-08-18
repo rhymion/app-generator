@@ -23,7 +23,7 @@ separate `docs/consumer-commands/` location for consistency.
 
 Unlike the vercel scripts (byte-identical across all three consumers) or
 `investigate.md` (fully generic, no consumer-specific content),
-cmd_711's investigation (subtask_711c23) found these three files contain
+cmd_711's investigation found these three files contain
 a mix of genuinely shared procedure text and genuinely consumer-specific
 measured facts (current `prj/` file counts, verification results tied to
 a specific commit, and in `generate-schema.md`'s case a real divergence

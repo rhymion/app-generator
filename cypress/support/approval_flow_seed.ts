@@ -124,7 +124,7 @@ export function seedApprovalFlowRowsFull(length: number) {
 // entity_name 'user' with whatever the caller subsequently creates/edits
 // with Entity Name = 'User' — this is why the ORIGINAL generated 2.2/3.1
 // tests never actually exercised a cross-entity_name link (verified by
-// reading the pre-cmd_661 helper.ts; see subtask_660a/661a reports).
+// reading the pre-cmd_661 helper.ts; see the earlier investigation reports).
 //
 // The precededBy candidate uses its OWN role (Test Approver Role C),
 // distinct from `approverRole`/`deps.role` — callers create/select their

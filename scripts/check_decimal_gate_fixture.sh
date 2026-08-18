@@ -1,5 +1,5 @@
 #!/bin/bash
-# Decimal-gate fixture check (subtask_705a / cmd_705).
+# Decimal-gate fixture check (cmd_705).
 #
 # Runs a small, self-contained fixture entity (a required + a nullable
 # Decimal column, each with an explicit @db.Decimal(p, s) scale) through the

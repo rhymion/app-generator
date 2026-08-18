@@ -1,12 +1,12 @@
 // Self-contained fixture Prisma schema for the decimal-gate check
-// (subtask_705a / cmd_705). NOT the project's real prisma/schema.prisma --
+// (cmd_705). NOT the project's real prisma/schema.prisma --
 // this file exists only to give the fixture json_schema.yaml enough real
 // Prisma models (user + one entity with Decimal columns) to run through the
 // actual build_user_schema.py -> generate.py -> tsc pipeline in isolation.
 // Mirrors the structure of tests/fixtures/mention_gate/schema.prisma.
 //
 // This repo's own json_schema.yaml has zero Decimal-typed fields (confirmed
-// by grep, subtask_705a report), so test:e2e:build's own tsc pass never
+// by grep), so test:e2e:build's own tsc pass never
 // compiles the Decimal-specific branches (schema_deriver.py's Decimal->string
 // mapping, getters.ts.jinja2's decimal_display_columns serialization,
 // form_upsert_context's decimal_props rendering, form_validation.ts /
@@ -62,7 +62,7 @@ model decimal_gate_item {
 // Decimal -- the coverage gap this entity exists to close is that
 // getters.ts.jinja2's decimal_display_columns only stringified an entity's
 // OWN scalar Decimal columns, never a Decimal column reached through an
-// embedded relation (see subtask_711b's discovery in proj_g: asn_line
+// embedded relation (see an earlier discovery in proj_g: asn_line
 // embeds purchase_order_line, whose unit_price is Decimal; purchase_order
 // embeds a to-many list of purchase_order_line for the same reason).
 model decimal_gate_wrapper {

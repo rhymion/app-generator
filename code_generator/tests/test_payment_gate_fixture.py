@@ -1,5 +1,5 @@
 """
-subtask_706_stripe_generator_stub_implementation: proves the x-payment
+This test suite proves the x-payment
 write-once stub mechanism (lib/stripe.ts, app/api/payment/checkout/route.ts,
 app/api/webhooks/stripe/route.ts) actually fires end-to-end through the real
 build_user_schema.py -> generate.py pipeline, not just at a unit-test level.

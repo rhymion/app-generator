@@ -26,7 +26,7 @@ _ENV_FILE="${_SCRIPT_DIR}/../.env.production.local"
 # as real shell syntax. An unquoted value containing `&` is parsed by bash as
 # the background-job control operator, silently truncating/unsetting the var
 # on the *next* source of this file (confirmed live with a Neon connection
-# string's trailing `&channel_binding=require` — see report subtask_301a
+# string's trailing `&channel_binding=require` — see an earlier report
 # CF-1/CF-5-adjacent finding). Fix: every write to _ENV_FILE wraps its value in
 # double quotes (`KEY="value"`), which makes bash treat `&` (and whitespace,
 # `#`, etc.) as a literal character during source. Double quotes still let `$`

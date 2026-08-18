@@ -1,5 +1,5 @@
-// Fixture-only stand-in for @/lib/_notifier (cmd_538, extending the
-// subtask_535a mention-gate check to cover FormUpsert.tsx / actions.ts).
+// Fixture-only stand-in for @/lib/_notifier (cmd_538, extending
+// the mention-gate check to cover FormUpsert.tsx / actions.ts).
 // The comment-actions code (_build_comment_actions/_build_comment_actions_
 // bridge) calls notify() unconditionally whenever a comment thread exists --
 // only pulled into this gate's compile graph now that actions.ts (imported

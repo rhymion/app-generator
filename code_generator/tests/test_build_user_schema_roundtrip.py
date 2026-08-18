@@ -309,7 +309,7 @@ def test_phase_a_golden_diff_zero():
 
 
 # ---------------------------------------------------------------------------
-# json_schema_internal.yaml merge (cmd_438 Batch3, subtask_438i)
+# json_schema_internal.yaml merge (cmd_438 Batch3)
 # ---------------------------------------------------------------------------
 
 def test_merge_internal_definitions_fills_missing_entity(tmp_path):

@@ -1,7 +1,7 @@
 # Dependency Bump Acceptance Criteria
 
 **Status: Adopted**
-**Author: the design reviewer (subtask_459b_process_gap)**
+**Author: the design reviewer**
 **Date: 2026-07-26**
 
 ---
@@ -15,7 +15,7 @@ lockfile. CI uses `npm ci`, which validates lockfile structural completeness;
 the corruption is invisible locally until CI runs.
 
 Two incidents of this failure pattern occurred within one week on the same
-project (cmd_442→cmd_443, subtask_457j_i2_fix→cmd_459). A process-level
+project (cmd_442→cmd_443, Incident 2→cmd_459). A process-level
 rule is required to prevent recurrence.
 
 **Update (2026-07-29, cmd_483): a third incident occurred with the Rule
@@ -131,18 +131,18 @@ esbuild, napi-rs stack).
   (see the Repair Procedure section below)
 - **Repair task**: cmd_443
 
-### Incident 2: subtask_457j_i2_fix → cmd_459 (2026-07-26)
+### Incident 2 → cmd_459 (2026-07-26)
 
 - **Package bumped**: `postcss` 8.5.15 → 8.5.23
 - **Failure mode**: `package-lock.json` lockfile corruption after postcss update
 - **Detection**: CI all-red (all checks failing)
 - **AC at the time**: `npm audit` only — `npm ci` not listed in acceptance
   criteria for the bump subtask
-- **Hotfix task**: cmd_459 subtask_459a (parallel dispatch)
+- **Hotfix task**: cmd_459 (parallel dispatch)
 
 ### Incident 3: cmd_482 → cmd_483 (2026-07-29)
 
-- **Change**: cmd_482 (subtask_482a, PR #199) resolved 5 dev-only npm
+- **Change**: cmd_482 (PR #199) resolved 5 dev-only npm
   audit high-severity CVEs via `npm audit fix` (non-force) plus two
   scoped `package.json` `overrides` edits (minimatch pin, npm-run-all →
   npm-run-all2 swap).
@@ -292,7 +292,7 @@ undetected, because the existing `audit` job's `npm audit --omit=dev
 design (see the job's own inline comment in `ci.yml`), and dev-only
 findings were otherwise expected to be caught by Dependabot — a mechanism
 that, at the time, was itself broken for a different reason (see
-`doreen/subtask_481a_dependabot_ci_missing_secret_fix`). The result: a
+an internal working branch tracking that fix). The result: a
 class of finding with no active detection path.
 
 Several options were weighed (blocking the existing gate on all scopes,
@@ -300,7 +300,7 @@ lowering the blocking threshold to `moderate`, a time-boxed exception
 list, status quo). The adopted design **keeps the existing blocking gate
 unchanged** and adds a **non-blocking, full-scope companion job** instead
 of widening what blocks merge. Full reasoning and the options considered
-are captured in the subtask_482a design record for this task.
+are captured in the corresponding design record for this task.
 
 ### The design
 
@@ -310,8 +310,8 @@ are captured in the subtask_482a design record for this task.
    block a PR under this job, by design — dev tooling ships to CI runners
    and contributor machines, not to the deployed product.
 
-2. **Non-blocking gate (`audit-full-scope` job) — new, added in cmd_482
-   subtask_482b.** Runs `npm audit --audit-level=high` (no `--omit=dev`,
+2. **Non-blocking gate (`audit-full-scope` job) — new, added in cmd_482.**
+   Runs `npm audit --audit-level=high` (no `--omit=dev`,
    so it covers the full tree including devDependencies) in its own job,
    with `continue-on-error: true` on the audit step. A finding here never
    fails the job or the workflow run — it exists purely as a visibility
@@ -333,7 +333,7 @@ are captured in the subtask_482a design record for this task.
      hand.
 
    Verification that this job structure genuinely never fails CI (not
-   just "should" by convention) is captured in the subtask_482b
+   just "should" by convention) is captured in the corresponding
    implementation record: a known high/critical-severity dependency was
    deliberately installed in an isolated worktree, the real `npm audit
    --audit-level=high --json` command was confirmed to exit non-zero

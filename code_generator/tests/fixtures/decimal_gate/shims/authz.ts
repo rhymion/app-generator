@@ -1,4 +1,4 @@
-// Fixture-only stand-in for @/lib/authz (subtask_705a decimal-gate check).
+// Fixture-only stand-in for @/lib/authz (decimal-gate check).
 // Public type/function *signatures* copied verbatim from the real
 // lib/authz.ts so generated getters.ts/service_validation.ts/route.ts
 // type-check against the real contract -- but the real file itself is not

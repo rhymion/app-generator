@@ -1,5 +1,5 @@
 // Fixture-only stand-in for @/lib/organization/getters_associated (cmd_538,
-// extending the subtask_535a mention-gate check to cover FormUpsert.tsx).
+// extending the mention-gate check to cover FormUpsert.tsx).
 // lib/mention/search.ts (schema-global, generated whenever any field has
 // x-mention: true) imports getAssociatedOrganizations() unconditionally for
 // its org-scoped candidate filtering -- only pulled into this gate's
