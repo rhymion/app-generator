@@ -76,7 +76,7 @@ if `VERCEL` is set and `DIRECT_URL` is not, config loading throws instead of
 silently falling back. Everywhere else (`VERCEL` unset), the fallback is
 silent and correct, because there's nothing to route around.
 
-## Setting `DIRECT_URL` on Vercel (superseded — see the cmd_657 follow-up below)
+## Setting `DIRECT_URL` on Vercel (superseded — see the follow-up notes below)
 
 **This section originally described a manual, dashboard-only step. That is
 superseded (cmd_657 follow-up, 2026-08-12).** All Vercel setup for this
