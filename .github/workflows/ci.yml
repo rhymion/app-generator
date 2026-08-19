@@ -26,10 +26,10 @@ jobs:
         # is a hole, not an exemption"). Only e2e-tests below is gated on
         # this job's output via needs:+if: (cmd_725: lint/unit-tests/audit/
         # audit-full-scope/pytest/mention-gate-fixture/decimal-gate-fixture/
-        # oto-mandatory-gate-fixture/approval-lockdown-gate-fixture keep
-        # running unconditionally — e2e-tests is the dominant cost (~57-60
-        # min per cmd_719) and the other nine stay as a safety net against a
-        # path-judgment mistake here). Not a
+        # oto-mandatory-gate-fixture/approval-lockdown-gate-fixture/
+        # payment-gate-fixture keep running unconditionally — e2e-tests is
+        # the dominant cost (~57-60 min per cmd_719) and the other ten stay
+        # as a safety net against a path-judgment mistake here). Not a
         # top-level `paths-ignore:` trigger filter — that would make the
         # workflow (and its checks) not run at all for a docs-only push/PR,
         # indistinguishable in the PR Checks list from the check never
@@ -383,3 +383,33 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - run: npm run test:approval-lockdown-gate
+
+  payment-gate-fixture:
+    name: Payment Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_753: a small fixture entity (x-payment: true) run through the real
+    # generate-code -> tsc pipeline, catching regressions in the write-once
+    # Stripe integration stub templates (stripe_lib_stub.ts.jinja2,
+    # stripe_checkout_route_stub.ts.jinja2, stripe_webhook_route_stub.ts.
+    # jinja2) -- including a stale Stripe SDK apiVersion literal, the exact
+    # drift that motivated this gate (the stub pinned a literal that the
+    # installed `stripe` SDK's own type no longer accepted). A branch this
+    # repo's own generate-code/build (the e2e-tests job) never compiles,
+    # because no entity in this repo's own json_schema.yaml declares
+    # x-payment: true. No path filter, same as unit-tests/pytest/
+    # mention-gate-fixture/decimal-gate-fixture/oto-mandatory-gate-fixture/
+    # approval-lockdown-gate-fixture above, per docs/knowledge/gate-
+    # exemption-must-be-machine-checkable.md. See
+    # scripts/check_payment_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:payment-gate

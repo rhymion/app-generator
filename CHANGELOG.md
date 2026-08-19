@@ -6,6 +6,26 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Internal
+- **Removed the hardcoded Stripe `apiVersion` literal from the
+  `x-payment` write-once `lib/stripe.ts` stub, and added a required
+  `payment-gate-fixture` CI check.** The stub used to pin
+  `apiVersion: '2025-03-31.basil'`; the installed `stripe` SDK's own
+  TypeScript type for that field is a single literal baked into
+  whatever SDK version is actually installed, and it changes on every
+  SDK bump (including patch bumps within the same `^` range) -- so a
+  hardcoded literal there inevitably goes stale and breaks `next build`
+  in any consumer that declares `x-payment: true`. The stub now omits
+  the field, which the SDK's own source confirms is behaviorally
+  identical to pinning the current version (`props.apiVersion ||
+  DEFAULT_API_VERSION`), without the stale-literal hazard. This went
+  undetected because no entity in this repo's own default schema
+  declares `x-payment: true`, so no existing gate ever type-checked the
+  stub's generated content -- `npm run test:payment-gate` closes that
+  gap by running the `x-payment` fixture through the real
+  `build_user_schema.py` → `generate.py` → `tsc --noEmit` pipeline, and
+  is now a required, unconditional CI job alongside the mention/decimal/
+  OTO-mandatory/approval-lockdown gate fixtures. See
+  `docs/knowledge/stripe-payment-integration.md`.
 - **Added a docs-only Vercel build skip for the three consumer
   projects.** `scripts/vercel-ignore-check.sh` (canonical
   logic) + `vercel-ignore.json` (a tiny stub `ignoreCommand`) in this

@@ -73,14 +73,30 @@ paths rather than silently no-op-ing. Test keys (`sk_test_...`) are
 obtained from the Stripe Dashboard; webhook secrets for local dev via
 `stripe listen --forward-to localhost:<port>/api/webhooks/stripe`.
 
-## API version note (verified 2026-08-16)
+## API version note (updated 2026-08-19: literal pin removed)
 
-`lib/stripe.ts`'s stub pins `apiVersion: '2025-03-31.basil'`. As of this
-writing, a locally cached third-party API doc snapshot (recommended
-version 22.2.0, last updated 2026-05-29) still shows the older
-`2025-02-24` in its examples and does not cover the `2025-03-31` changes
-below — those were confirmed instead via a live docs.stripe.com read.
-Re-verify before relying on either source if picking this up much later:
+`lib/stripe.ts`'s stub used to pin `apiVersion: '2025-03-31.basil'` as a
+hardcoded literal. This broke `next build` in any consumer that declared
+`x-payment: true`: the `stripe` npm package's own TypeScript type for
+`apiVersion` (`LatestApiVersion`) is a single fixed literal baked into
+whatever SDK version is actually installed, and it changes on every SDK
+bump -- including patch bumps within the same `^22.x` caret range, not
+just major-version jumps. A hardcoded literal in the stub inevitably goes
+stale against a moving type, with nothing catching it because this repo's
+own default schema never exercises `x-payment` (see Verification below).
+
+The fix removes the `apiVersion` field entirely rather than updating the
+literal to whatever is current today -- replacing one literal with a
+newer one is the same defect restated, not a fix. Confirmed via the
+installed SDK's own source (`stripe.core.js`): when `apiVersion` is
+omitted, the constructor falls back to `DEFAULT_API_VERSION`, the exact
+same SDK-baked-in value the type otherwise demands as a literal
+(`props.apiVersion || DEFAULT_API_VERSION`) -- so omitting the field is
+behaviorally identical to pinning the SDK's current version, minus the
+stale-literal hazard. If a consumer needs to pin an older API version on
+purpose (e.g. mid-migration), pass `apiVersion` explicitly in their own
+hand-edit of the write-once `lib/stripe.ts` stub -- this generator no
+longer does so by default.
 
 - `subscription.current_period_start/end` is deprecated → use
   `subscription_item.billing_period.start/end` (irrelevant to the
@@ -106,10 +122,23 @@ Re-verify before relying on either source if picking this up much later:
   (using `code_generator/tests/fixtures/invalidate_gate/`, which declares
   no `x-payment` key anywhere, as the negative control)
 
+That test proves the stubs are *written* -- it does not type-check them.
+`npm run test:payment-gate` (`scripts/check_payment_gate_fixture.sh`) runs
+the same `payment_gate` fixture through the full
+`build_user_schema.py` → `generate.py` → `tsc --noEmit` pipeline and
+type-checks the actual generated `lib/stripe.ts` / checkout route /
+webhook route content against whatever `stripe` SDK version is installed
+-- this is what catches an `apiVersion` literal going stale (see the API
+version note above) and any future change to the installed SDK's types
+that the stub content no longer satisfies. It is a required, unconditional
+CI job (`payment-gate-fixture`), same as the mention/decimal/OTO-mandatory/
+approval-lockdown gate fixtures.
+
 This repo's own `json_schema.yaml` declares no `x-payment` entity by
 default, so the stubs are never emitted by this repo's own
 `test:e2e:build`/`test:e2e:cy:api` gate runs — by design (opt-in, not a
-default-schema feature). The `stripe` npm package (`^22.5.0`) was added
+default-schema feature) -- `test:payment-gate` above exists specifically
+to cover that gap. The `stripe` npm package (`^22.5.0`) was added
 as a runtime dependency since `lib/stripe.ts` imports it unconditionally
 once written.
 

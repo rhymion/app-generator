@@ -13,6 +13,13 @@ if (!process.env.STRIPE_SECRET_KEY) {
   );
 }
 
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: '2025-03-31.basil',
-});
+// cmd_753: no `apiVersion` pin here on purpose. The stripe SDK's own type
+// (`LatestApiVersion`, a fixed literal baked into whatever SDK version is
+// installed) drifts on every SDK bump, including patch bumps within the
+// same `^` caret range -- a hardcoded literal here goes stale silently and
+// breaks `tsc`. Omitting the field is not "no version pinning": the SDK
+// falls back to that exact same baked-in literal at runtime
+// (`props.apiVersion || DEFAULT_API_VERSION` in stripe's own source), so
+// behavior is identical -- only the stale-literal type-check hazard is
+// gone. See scripts/check_payment_gate_fixture.sh for the regression gate.
+export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
