@@ -32,6 +32,26 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `vitest` 473 passed; all four fixture gates; `test:e2e:build`; `check:generated`;
   `test:e2e:cy:api` 240/240; `test:e2e:cy:ui` 190/190; `npm audit` 0 vulnerabilities; `pip-audit`
   0 vulnerabilities).
+- **Removed the hardcoded Stripe `apiVersion` literal from the
+  `x-payment` write-once `lib/stripe.ts` stub, and added a required
+  `payment-gate-fixture` CI check.** The stub used to pin
+  `apiVersion: '2025-03-31.basil'`; the installed `stripe` SDK's own
+  TypeScript type for that field is a single literal baked into
+  whatever SDK version is actually installed, and it changes on every
+  SDK bump (including patch bumps within the same `^` range) -- so a
+  hardcoded literal there inevitably goes stale and breaks `next build`
+  in any consumer that declares `x-payment: true`. The stub now omits
+  the field, which the SDK's own source confirms is behaviorally
+  identical to pinning the current version (`props.apiVersion ||
+  DEFAULT_API_VERSION`), without the stale-literal hazard. This went
+  undetected because no entity in this repo's own default schema
+  declares `x-payment: true`, so no existing gate ever type-checked the
+  stub's generated content -- `npm run test:payment-gate` closes that
+  gap by running the `x-payment` fixture through the real
+  `build_user_schema.py` → `generate.py` → `tsc --noEmit` pipeline, and
+  is now a required, unconditional CI job alongside the mention/decimal/
+  OTO-mandatory/approval-lockdown gate fixtures. See
+  `docs/knowledge/stripe-payment-integration.md`.
 - **Added a docs-only Vercel build skip for the three consumer
   projects.** `scripts/vercel-ignore-check.sh` (canonical
   logic) + `vercel-ignore.json` (a tiny stub `ignoreCommand`) in this
@@ -1355,6 +1375,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Repo-wide grep for `receiving_confirm`/`ReceivingConfirmForm` across `code_generator/`,
   `json_schema.yaml`/`json_schema_internal.yaml`, and both consumer submodule checkouts
   (`app-template`, `app-template-4`) returns zero hits after this change.
+- **Generated-test Decimal values were a fixed literal, overflowing narrow `@db.Decimal(p, s)` columns**:
+  every Decimal test-value call site in `code_generator/generators_test.py` (`prisma_value`,
+  `cypress_create_value`, `cypress_edit_value`, `api_value`, `_get_dep_populate_fields`,
+  `_get_dep_extra_required_fields`) planted the same fixed literal (`'10.00'`, `'150.00'`,
+  `'250.00'`, ...) regardless of the column's declared precision/scale. A narrow column such as
+  `Decimal(5, 4)` rejected `'10.00'` outright with a Postgres "numeric field overflow", taking
+  every other generated test in the same spec file down with it — discovered via a real schema
+  with 36 tests failing this way. Values are now derived from the column's own `x-decimal-scale` /
+  `x-decimal-precision` (`schema_deriver.py`, auto-reflected from the Prisma schema), including
+  the all-fractional edge case (`Decimal(4, 4)`, no headroom for a nonzero integer digit).
+  Verified against a real Postgres `numeric(5,4)` column that the old literal reproduces the
+  reported overflow and the new derived value inserts successfully.
 
 ## [3.0.0] - 2026-07-30
 
