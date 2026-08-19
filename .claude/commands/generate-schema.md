@@ -25,14 +25,6 @@ a full ER-diagram-only session, not guessed):
 
 - FK to an embedded entity (one with `x-generate` disabled) breaks the
   build if required — promote the target to a standalone entity first.
-- A required one-to-one FK can make the generator emit a guard variable
-  name that doesn't match its selector variable name — prefer optional.
-- Adding a comment-bridge entity can fail `check:generated` (the
-  allowlist for its generated files lives in the generator's own
-  package, consumers can't edit it) — avoid unless already accounted for.
-- Two FKs on the same entity pointing at the same target entity can
-  collide in generated Cypress test-helper variable names — give the
-  JSON schema fields distinct names.
 - Reset the test DB (`docker compose down -v` before the next
   `test:e2e:build`) after every schema change — a stale DB produces
   confusing, unrelated-looking failures.
