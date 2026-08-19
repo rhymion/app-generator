@@ -445,20 +445,22 @@ def chart_context(ctx: dict, schema: dict) -> dict:
             continue
         actual = _get_actual_type(prop)
         enum_vals = prop.get('enum')
-        if actual == 'string' and prop.get('format') == 'date-time':
-            # A required DateTime column other than the chart's own
-            # start/end pair (excluded above, and stringified inline in
-            # chart_getters.ts.jinja2's header). Prisma returns a `Date`
-            # instance here, not a string, even though this column's
-            # resolved JSON-schema type is "string" -- the same "raw Prisma
-            # value into a field this interface types as `string`" mismatch
-            # PR#389 fixed for Decimal. Serialize it the same way
-            # start_field/end_field already are, rather than assigning the
-            # raw Date and reintroducing that bug class for a different type.
-            extra_fields.append({'name': field_name, 'ts_type': 'string'})
-            extra_selects.append(f'{field_name}: (item.{field_name} as Date).toISOString(),')
-            if not tooltip_prop:
-                tooltip_prop = f'item.{field_name}'
+        if actual == 'string' and prop.get('format') in ('date', 'date-time', 'time'):
+            # Deliberately excluded from the chart projection, whichever of
+            # date/date-time/time the column resolves to -- not just
+            # 'date-time' (a required 'date' column left half-excluded would
+            # otherwise fall to the plain-string branch below and receive a
+            # raw Prisma `Date` into a field typed `string`, the same TS2322
+            # class PR#389/#390 already fixed for Decimal, just unfixed for
+            # this format). page_chart.tsx is an async server component, so
+            # formatting a DateTime here would render it in the server's
+            # timezone, not the client's local time our display convention
+            # requires; correct display needs the formatting done
+            # client-side in GanttChart via lib/_format.ts's
+            # formatLabelValue, which is out of this task's scope. start_field
+            # /end_field already carry the chart's time information, so
+            # little is lost by dropping this column from the tooltip.
+            continue
         elif actual == 'string':
             extra_fields.append({'name': field_name, 'ts_type': 'string'})
             if prop.get('_prisma_decimal_type'):

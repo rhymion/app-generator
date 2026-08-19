@@ -37,7 +37,7 @@ Run in this order:
 6. `npm run test:oto-mandatory-gate` — required one-to-one selector fixture generate-code → tsc check (see below)
 7. `npm run test:oto-decimal-gate` — one-to-one selector target with a Decimal column fixture generate-code → tsc check (see below)
 8. `npm run test:chart-decimal-gate` — x-display.chart with a required Decimal column fixture generate-code → tsc check (see below)
-9. `npm run test:chart-scalar-gate` — x-display.chart with a required plain Int column and a required non-start/end DateTime column fixture generate-code → tsc check (see below)
+9. `npm run test:chart-scalar-gate` — x-display.chart with a required plain Int column and two required non-start/end DateTime columns (`format: date-time` and `format: date`) fixture generate-code → tsc check (see below)
 10. `npm run test:approval-lockdown-gate` — x-approval value-lockdown fixture generate-code → tsc check (see below)
 11. `npm run test:payment-gate` — x-payment fixture generate-code → tsc check (see below)
 12. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
@@ -185,24 +185,34 @@ header for the new-fixture-vs-extend rationale and
 **Step 9 (`test:chart-scalar-gate`)**: runs a sixth, unrelated small
 fixture entity pair (`chart_scalar_gate_row`, the chart's `row_by` target,
 and `chart_scalar_gate_item`, which declares `x-display.chart` and carries
-a REQUIRED plain Int column, a REQUIRED DateTime column other than
-`start_time`/`end_time`, and a REQUIRED Boolean column) through the same
-`build_user_schema.py` → `generate.py` → `tsc --noEmit` pipeline and
-type-checks the generated `chart-getters.ts` + `chart/page.tsx` — the two
-branches `chart_context()` (`generators.py`) used to get wrong: a required
-plain Int/Float column was dropped from the chart projection entirely (no
-interface field, no tooltip candidate, no documented reason — an asymmetry
-with a required string column, which was projected), and a required
-DateTime column other than the chart's own start/end pair was assigned
+a REQUIRED plain Int column, two REQUIRED DateTime columns other than
+`start_time`/`end_time` (one `format: date-time`, one `format: date`), and
+a REQUIRED Boolean column) through the same `build_user_schema.py` →
+`generate.py` → `tsc --noEmit` pipeline, type-checks the generated
+`chart-getters.ts` + `chart/page.tsx`, and greps the generated interface to
+prove the excluded columns are actually absent (a green `tsc` run alone
+does not prove a column was dropped from the projection). Covers two
+branches `chart_context()` (`generators.py`) has gotten wrong across two
+rounds: a required plain Int/Float column was dropped from the chart
+projection entirely (no interface field, no tooltip candidate, no
+documented reason — an asymmetry with a required string column, which was
+projected; fixed first), and a required DateTime column was assigned
 straight off the raw Prisma row into a field the generated
 `{Parent}ForChart` interface types as `string` — the same "raw Prisma
 value into a field typed `string`" `TS2322` class step 8 fixed for
-Decimal, just for a different type. The fixture's required Boolean column
-also proves that type is deliberately excluded from the projection (no
-interface field), not a silent drop. Distinct from step 8
-(`test:chart-decimal-gate`, the chart's required-Decimal-column branch —
-unrelated code path, and not extended by this fixture to keep this
-fixture's build/type-check independent of that one's own scope and
+Decimal, just for a different type (fixed second, and that fix itself only
+checked `format == 'date-time'`, so a required `format: date` column fell
+through to the plain-string branch and kept the exact same bug — the
+`format: date` column in this fixture exists specifically to close that
+gap). Every DateTime column, whatever its format, is now excluded from the
+chart projection entirely (client-side formatting is needed for correct
+local-time display, out of the generator's scope here; start_field/
+end_field already carry the chart's time information). The fixture's
+required Boolean column also proves that type is deliberately excluded
+from the projection (no interface field), not a silent drop. Distinct from
+step 8 (`test:chart-decimal-gate`, the chart's required-Decimal-column
+branch — unrelated code path, and not extended by this fixture to keep
+this fixture's build/type-check independent of that one's own scope and
 history). This repo's own `json_schema.yaml` has no entity combining
 `x-display.chart` with a required Int/Float or extra required DateTime
 column, so none of this is ever compiled by step 12 otherwise. ~5s. See

@@ -1388,11 +1388,18 @@ generated `{Entity}ForChart` type, by resolved type:
 | Field type | Projected? | As |
 |---|---|---|
 | String (plain or a nativeEnum) | Yes | `string` |
-| DateTime | Yes | `string` (ISO 8601, same as `start_time`/`end_time`) |
+| DateTime (any `format`: `date-time`, `date`, or `time`) | No | — |
 | Decimal | Yes | `string` (precision-preserving — see §15 Prisma type alignment) |
 | Int (or a numeric enum with no string labels) | Yes | `number` |
 | A numeric enum with string labels | Yes | `number`, tooltip shows the label |
 | Boolean | No | — |
+
+DateTime columns are never shown in the chart tooltip, regardless of `format`.
+`page_chart.tsx` is an async server component, so formatting a DateTime there
+would render it in the server's timezone rather than the client's local time.
+If a chart consumer needs a DateTime value in the tooltip, format it
+client-side in `GanttChart` using `lib/_format.ts`'s `formatLabelValue` —
+do not project it from the getter.
 
 Of the projected fields, only the **first one in the entity's field declaration order**
 becomes the Gantt-item tooltip. Declaring a new required field ahead of the field a chart

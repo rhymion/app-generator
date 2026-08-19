@@ -3,22 +3,31 @@
 #
 # Runs a small, self-contained fixture entity pair (chart_scalar_gate_row,
 # the chart's row_by target, and chart_scalar_gate_item, which declares
-# x-display.chart and carries a REQUIRED plain Int column, a REQUIRED
-# DateTime column other than start_time/end_time, and a REQUIRED Boolean
-# column) through the real build_user_schema.py -> generate.py -> tsc
-# pipeline and type-checks the generated chart-getters.ts and
-# chart/page.tsx.
+# x-display.chart and carries a REQUIRED plain Int column, two REQUIRED
+# DateTime columns other than start_time/end_time (one `format: date-time`,
+# one `format: date`), and a REQUIRED Boolean column) through the real
+# build_user_schema.py -> generate.py -> tsc pipeline, type-checks the
+# generated chart-getters.ts and chart/page.tsx, and greps the generated
+# interface to prove the excluded columns are actually absent (a green tsc
+# run alone does not prove a column was dropped -- it would also pass if
+# the column were silently kept and correctly typed).
 #
 # Why this exists: chart_context() (generators.py) used to silently drop a
 # required plain Int/Float column from the chart projection entirely (no
 # tooltip, no interface field, and no documented reason -- an asymmetry
 # with a string column, which was projected), and separately assigned a
-# required DateTime column other than start_time/end_time straight off the
-# raw Prisma row into a field the generated {Parent}ForChart interface
-# types as `string` -- the same "raw Prisma value into a field typed
-# `string`" TS2322 class PR#389 fixed for Decimal, just for a different
-# type, and never caught because no fixture combined x-display.chart with
-# an extra required DateTime column. This fixture also carries a required
+# required DateTime column straight off the raw Prisma row into a field
+# the generated {Parent}ForChart interface types as `string` -- the same
+# "raw Prisma value into a field typed `string`" TS2322 class PR#389 fixed
+# for Decimal, just for a different type. That serialize-in-place fix
+# (PR#390) only checked `format == 'date-time'`, so a required
+# `format: date` column fell through to the plain-string branch and kept
+# the exact same raw-Date-into-`string`-field bug -- never caught because
+# no fixture combined x-display.chart with a `format: date` column. The
+# generator now excludes every DateTime column (date-time/date/time alike)
+# from the chart projection entirely: correct display needs client-side
+# formatting (out of scope here), and start_field/end_field already carry
+# the chart's time information. This fixture also carries a required
 # Boolean column to prove it is deliberately excluded from the projection
 # (no interface field, no tooltip reference) rather than silently
 # type-checking into something wrong.
@@ -97,6 +106,28 @@ if [ "$tsc_status" -ne 0 ]; then
   echo "(chart_getters.ts.jinja2) no longer handles a required Int/DateTime" >&2
   echo "column correctly in the generated {Parent}ForChart interface." >&2
   exit "$tsc_status"
+fi
+
+echo "-- asserting excluded columns are actually absent from the generated interface --"
+GETTERS_FILE="$OUT_DIR/lib/chart_scalar_gate_item/chart-getters.ts"
+if [ ! -f "$GETTERS_FILE" ]; then
+  echo "chart-scalar-gate fixture check FAILED -- expected generated file not found: $GETTERS_FILE" >&2
+  exit 1
+fi
+# A green tsc run alone does not prove logged_at/logged_date/is_flagged were
+# dropped from the projection -- it would pass just as well if they were
+# kept and correctly typed. Grep the generated output directly.
+if grep -qE '\blogged_at\b|\blogged_date\b|\bis_flagged\b' "$GETTERS_FILE"; then
+  echo "chart-scalar-gate fixture check FAILED -- $GETTERS_FILE still" >&2
+  echo "references logged_at/logged_date/is_flagged; these must be" >&2
+  echo "excluded from the chart projection entirely (DateTime regardless" >&2
+  echo "of format, and Boolean)." >&2
+  exit 1
+fi
+if ! grep -q 'item_count' "$GETTERS_FILE"; then
+  echo "chart-scalar-gate fixture check FAILED -- $GETTERS_FILE does not" >&2
+  echo "project the required plain Int column (item_count)." >&2
+  exit 1
 fi
 
 exit 0

@@ -4,8 +4,10 @@
 // through the actual build_user_schema.py -> generate.py -> tsc pipeline
 // in isolation, exercising the branches this gate exists to catch:
 // get{Parent}sForChart (chart_getters.ts.jinja2) returning a required
-// plain Int column, a required DateTime column other than start_time/
-// end_time, and a required Boolean column. Mirrors the structure of
+// plain Int column and two required DateTime columns other than
+// start_time/end_time (one `format: date-time`, one `format: date` --
+// both must be excluded from the chart projection, not just the
+// date-time one), and a required Boolean column. Mirrors the structure of
 // tests/fixtures/chart_decimal_gate/schema.prisma.
 
 generator client {
@@ -45,10 +47,12 @@ model chart_scalar_gate_row {
 }
 
 // The entity this fixture exists for: x-display.chart declared, with a
-// REQUIRED plain Int column (item_count), a REQUIRED DateTime column other
-// than start_time/end_time (logged_at), and a REQUIRED Boolean column
-// (is_flagged) -- the exact shape that drives get{Parent}sForChart in
-// chart_getters.ts.jinja2.
+// REQUIRED plain Int column (item_count), two REQUIRED DateTime columns
+// other than start_time/end_time (logged_at = format: date-time,
+// logged_date = format: date -- json_schema.yaml layers the format
+// override on top of this same Prisma type), and a REQUIRED Boolean
+// column (is_flagged) -- the exact shape that drives get{Parent}sForChart
+// in chart_getters.ts.jinja2.
 model chart_scalar_gate_item {
   id                       String                @id @default(cuid())
   name                     String
@@ -58,6 +62,7 @@ model chart_scalar_gate_item {
   end_time                 DateTime
   item_count               Int
   logged_at                DateTime
+  logged_date              DateTime
   is_flagged               Boolean
   created_at               DateTime              @default(now()) @db.Timestamptz(0)
   updated_at               DateTime              @updatedAt @db.Timestamptz(0)

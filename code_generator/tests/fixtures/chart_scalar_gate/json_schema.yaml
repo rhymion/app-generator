@@ -8,16 +8,16 @@ format-version: 3.0
 # branches chart_context() (generators.py) now resolves for the chart
 # projection: a plain required Int scalar (previously dropped from the
 # projection entirely -- neither the interface nor the tooltip could ever
-# show it, with no documented reason), a required DateTime column other
-# than the chart's own start/end pair (previously assigned to the
-# generated interface's `string` field as a raw `Date` instance -- the
-# same TS2322 class PR#389 fixed for Decimal, just never caught because no
-# fixture combined x-display.chart with an extra required DateTime
-# column), and a required Boolean column (to prove it is deliberately
-# excluded from the projection rather than silently type-checking into
-# something wrong). Kept as a separate fixture, not an extension of
-# chart_decimal_gate, to keep this fixture's build/type-check green
-# independent of chart_decimal_gate's own scope and history.
+# show it, with no documented reason), two required DateTime columns other
+# than start_time/end_time -- one with `format: date-time` (logged_at) and
+# one with `format: date` (logged_date) -- and a required Boolean column
+# (is_flagged). All DateTime columns, regardless of format, must be
+# excluded from the projection entirely (no interface field, no tooltip
+# reference, no raw Prisma `Date` assigned into a field typed `string`);
+# the Boolean column must be excluded the same way. Kept as a separate
+# fixture, not an extension of chart_decimal_gate, to keep this fixture's
+# build/type-check green independent of chart_decimal_gate's own scope and
+# history.
 
 definitions:
   user:
@@ -50,10 +50,11 @@ definitions:
       name: {}
 
   # The entity this fixture exists to exercise: x-display.chart declared,
-  # with a REQUIRED plain Int column (item_count), a REQUIRED DateTime
-  # column other than start_time/end_time (logged_at), and a REQUIRED
-  # Boolean column (is_flagged) -- so get{Parent}sForChart
-  # (chart_getters.ts.jinja2) and {Parent}ForChart must handle all three.
+  # with a REQUIRED plain Int column (item_count), two REQUIRED DateTime
+  # columns other than start_time/end_time (logged_at = format: date-time,
+  # logged_date = format: date), and a REQUIRED Boolean column
+  # (is_flagged) -- so get{Parent}sForChart (chart_getters.ts.jinja2) and
+  # {Parent}ForChart must handle all of these correctly.
   # `view: true` is the only core x-generate flag left on -- extract_entities()
   # (generate_types.py) skips any entity whose list/view/new/edit/delete/api
   # flags are ALL explicitly False (treated as a pure internal model), which
@@ -86,8 +87,11 @@ definitions:
       item_count: {}
       logged_at:
         format: date-time
+      logged_date:
+        format: date
       is_flagged: {}
     required:
       - item_count
       - logged_at
+      - logged_date
       - is_flagged
