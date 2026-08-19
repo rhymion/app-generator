@@ -14,6 +14,11 @@ import { search{{ target | pascal_case }}Options } from '@/lib/{{ target }}/gett
 {% endfor %}
 {% for oto in selector_oto_rels %}
 import { getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pascal }} } from '@/lib/{{ parent }}/getters';
+{% if oto.target == 'organization' %}
+import { searchAssociatedOrganizationOptions } from '@/lib/organization/getters_associated';
+{% else %}
+import { search{{ oto.target | pascal_case }}Options } from '@/lib/{{ oto.target }}/getters';
+{% endif %}
 {% endfor %}
 import { get{{ parent_pascal }}NewPageAccessCheck } from '@/lib/{{ parent }}/getters';
 
@@ -90,5 +95,5 @@ async function {{ parent_pascal }}NewContent() {
     {{ child.property_name }}: [],
 {% endfor %}
   };
-  return <FormUpsert src={src} isEdit={false} permissions={userPermissions}{% for target in selection_targets %} initial{{ target | pascal_case }}s={ initial{{ target | pascal_case }}s } initial{{ target | pascal_case }}sPermissionDenied={Boolean((initial{{ target | pascal_case }}s as { permissionDenied?: boolean } | undefined)?.permissionDenied)} search{{ target | pascal_case }}Options={ {% if target == 'organization' %}searchAssociatedOrganizationOptions{% else %}search{{ target | pascal_case }}Options{% endif %} }{% endfor %}{% for oto in selector_oto_rels %} initial{{ oto.target | pascal_case }}s={ initialAvailable{{ oto.target | pascal_case }}s } initial{{ oto.target | pascal_case }}sPermissionDenied={Boolean((initialAvailable{{ oto.target | pascal_case }}s as { permissionDenied?: boolean } | undefined)?.permissionDenied)}{% endfor %}{% if bridge_child_ir %} initialParentType={_initialParentType} initialParentId={_initialParentId}{% endif %} />;
+  return <FormUpsert src={src} isEdit={false} permissions={userPermissions}{% for target in selection_targets %} initial{{ target | pascal_case }}s={ initial{{ target | pascal_case }}s } initial{{ target | pascal_case }}sPermissionDenied={Boolean((initial{{ target | pascal_case }}s as { permissionDenied?: boolean } | undefined)?.permissionDenied)} search{{ target | pascal_case }}Options={ {% if target == 'organization' %}searchAssociatedOrganizationOptions{% else %}search{{ target | pascal_case }}Options{% endif %} }{% endfor %}{% for oto in selector_oto_rels %} initial{{ oto.target | pascal_case }}s={ initialAvailable{{ oto.target | pascal_case }}s } initial{{ oto.target | pascal_case }}sPermissionDenied={Boolean((initialAvailable{{ oto.target | pascal_case }}s as { permissionDenied?: boolean } | undefined)?.permissionDenied)} search{{ oto.target | pascal_case }}Options={ {% if oto.target == 'organization' %}searchAssociatedOrganizationOptions{% else %}search{{ oto.target | pascal_case }}Options{% endif %} }{% endfor %}{% if bridge_child_ir %} initialParentType={_initialParentType} initialParentId={_initialParentId}{% endif %} />;
 }

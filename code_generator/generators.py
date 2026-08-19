@@ -143,6 +143,7 @@ def _readonly_display_field(
     result = {
         'jsx': '', 'ns_hooks': [], 'opt_setups': [],
         'uses_format_label_value': False, 'use_dayjs': False,
+        'uses_decimal_format': False,
     }
     fk = to_camel_case(p)
     rel = rel_by_prop.get(p)
@@ -238,6 +239,16 @@ def _readonly_display_field(
         result['jsx'] = (
             f"{indent}<AppFieldText\n{indent}  label={{tf('{fk}')}}\n"
             f"{indent}  value={{{state_name}.find(o => o.value === src.{p})?.label ?? ''}}\n"
+            f"{indent}  readOnly\n{indent}/>"
+        )
+        return result
+
+    decimal_scale = prop.get('x-decimal-scale')
+    if actual == 'string' and decimal_scale is not None:
+        result['uses_decimal_format'] = True
+        result['jsx'] = (
+            f"{indent}<AppFieldText\n{indent}  label={{tf('{fk}')}}\n"
+            f"{indent}  value={{formatDecimalDisplay(src.{p}, {int(decimal_scale)})}}\n"
             f"{indent}  readOnly\n{indent}/>"
         )
         return result
@@ -613,6 +624,9 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
     # Set when any list-page formatting expression invokes formatLabelValue —
     # the generated page_list.tsx must then import it from '@/lib/_format'.
     list_uses_format_label_value = False
+    # Set when any list-page formatting expression invokes formatDecimalDisplay —
+    # the generated page_list.tsx must then import it from '@/lib/_decimal'.
+    list_uses_decimal_format = False
 
     def add_formatting(field_name: str, expr: str) -> None:
         if field_name in formatting_keys:
@@ -636,6 +650,11 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
         # the expression already short-circuit via ?., so we just need to
         # evaluate the expression. formatLabelValue handles nullish itself.
         return built['expression']
+
+    def _decimal_expr_for(field_name: str, scale: int) -> str:
+        nonlocal list_uses_decimal_format
+        list_uses_decimal_format = True
+        return f"formatDecimalDisplay(item.{field_name}, {int(scale)})"
 
     if xdisplay_table:
         fields_code_parts = []
@@ -671,6 +690,8 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                     if not any(e['var_name'] == var_name for e in enum_ns_list):
                         enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries, 'is_native_enum': False})
                     add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
+                elif actual == 'string' and prop.get('x-decimal-scale') is not None:
+                    add_formatting(field_name, _decimal_expr_for(field_name, prop['x-decimal-scale']))
 
             if config.get('primary'):
                 primary_field = field_name
@@ -713,6 +734,8 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                 if not any(e['var_name'] == var_name for e in enum_ns_list):
                     enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries, 'is_native_enum': False})
                 add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
+            elif actual == 'string' and prop.get('x-decimal-scale') is not None:
+                add_formatting(field_name, _decimal_expr_for(field_name, prop['x-decimal-scale']))
 
     needs_formatting = bool(formatting_entries)
     formatted_var    = f'formatted{parent_pascal}s'
@@ -732,6 +755,7 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
         'needs_tf':           bool(xdisplay_table),
         'needs_tc':           has_chart,
         'list_uses_format_label_value': list_uses_format_label_value,
+        'list_uses_decimal_format': list_uses_decimal_format,
     }
 
 
@@ -2567,6 +2591,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
     needs_datetime_imports = False
     needs_entity_autocomplete_cell = False
     uses_format_label_value = False
+    uses_decimal_format = False
     column_children = []
 
     for child_raw in non_comment_ch:
@@ -2711,6 +2736,14 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                         f"      valueSetter: (value: any, row: any) => ({{ ...row, {key}: value === '' ? null : value }})"
                     )
                 columns.append(f"    {{ field: '{key}', headerName: t('{header_camel}'), width: 150, editable: editable, type: 'singleSelect' as const, valueOptions: [{value_opts}]{extra} }},")
+            elif actual == 'string' and prop.get('x-decimal-scale') is not None:
+                uses_decimal_format = True
+                _scale = int(prop['x-decimal-scale'])
+                columns.append(
+                    f"    {{ field: '{key}', headerName: t('{header_camel}'), width: {width}, editable: editable,\n"
+                    f"      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n"
+                    f"      valueFormatter: (value: any) => formatDecimalDisplay(value, {_scale}) }},"
+                )
             else:
                 columns.append(f"    {{ field: '{key}', headerName: t('{header_camel}'), width: {width}, editable: editable }},")
 
@@ -2731,6 +2764,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
         'needs_datetime_imports': needs_datetime_imports,
         'needs_entity_autocomplete_cell': needs_entity_autocomplete_cell,
         'uses_format_label_value': uses_format_label_value,
+        'uses_decimal_format': uses_decimal_format,
     }
 
 
@@ -2751,6 +2785,9 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     # Set when any read-only TextField value uses formatLabelValue — the
     # generated FormView must then import it.
     uses_format_label_value = False
+    # Set when any read-only TextField value uses formatDecimalDisplay — the
+    # generated FormView must then import it.
+    uses_decimal_format = False
 
     rel_by_prop = {r['prop_name']: r for r in ctx['parent_rels_raw']}
     # Add selector OTO rels to rel_by_prop so they display like many-to-one (label + view link)
@@ -2852,6 +2889,8 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
             jsx_by_field[p] = built['jsx']
             if built['uses_format_label_value']:
                 uses_format_label_value = True
+            if built['uses_decimal_format']:
+                uses_decimal_format = True
             enum_ns_hooks.extend(built['ns_hooks'])
             enum_opt_setups.extend(built['opt_setups'])
 
@@ -2862,6 +2901,8 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         jsx_by_field[p] = built['jsx']
         if built['use_dayjs']:
             use_dayjs = True
+        if built['uses_decimal_format']:
+            uses_decimal_format = True
         enum_ns_hooks.extend(built['ns_hooks'])
         enum_opt_setups.extend(built['opt_setups'])
 
@@ -3149,6 +3190,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         'custom_view_imports':    custom_view_imports,
         'use_dayjs':              use_dayjs,
         'uses_format_label_value': uses_format_label_value,
+        'uses_decimal_format':    uses_decimal_format,
         'uses_app_field_boolean': uses_app_field_boolean,
     }
 
@@ -3218,6 +3260,9 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # Set when any autocomplete option / FormView label uses formatLabelValue —
     # the generated component must then `import { formatLabelValue } from '@/lib/_format';`.
     uses_format_label_value = False
+    # Set when any readonly field uses formatDecimalDisplay — the generated
+    # component must then `import { formatDecimalDisplay } from '@/lib/_decimal';`.
+    uses_decimal_format = False
 
     # mention_fields (cmd_522c): this entity's own text fields annotated
     # x-mention: true render via <MentionInput> (picker + @[user_id:<id>]
@@ -3783,6 +3828,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         enum_opt_setups.extend(_ro_built['opt_setups'])
         if _ro_built['uses_format_label_value']:
             uses_format_label_value = True
+        if _ro_built['uses_decimal_format']:
+            uses_decimal_format = True
         jsx_by_field[_ro_fn] = (
             f"      {{isEdit && (\n"
             f"{_ro_built['jsx']}\n"
@@ -5108,6 +5155,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'has_flatten_accordion_upsert': has_flatten_accordion_upsert,
         'flatten_edit_sections':    '\n'.join(flatten_edit_section_parts),
         'uses_format_label_value':  uses_format_label_value,
+        'uses_decimal_format':      uses_decimal_format,
         'has_box_import':           has_box_import,
         'uses_app_field_text':      uses_app_field_text,
         'uses_app_field_boolean':   uses_app_field_boolean,
