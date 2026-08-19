@@ -55,8 +55,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   projected as `number` with no stringification needed (unlike Decimal,
   which round-trips through decimal.js specifically to avoid float
   rounding error -- 2026-08-15's Decimal-as-string ruling), and a
-  DateTime column is serialized with the same `.toISOString()` the
-  chart's own start/end fields already use. A required Boolean column is
+  DateTime column (any `format`: `date-time`, `date`, or `time`) is now
+  excluded from the projection entirely, not serialized -- correct
+  local-time display needs client-side formatting, out of this fix's
+  scope, and `start_time`/`end_time` already carry the chart's time
+  information. A required Boolean column is
   now explicitly excluded (not a silent drop -- a bare true/false carries
   little context in a Gantt-row tooltip), and a required column whose
   resolved type isn't one of the above now fails generation loudly rather
