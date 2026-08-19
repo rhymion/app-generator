@@ -386,6 +386,37 @@ jobs:
       - run: pip install -r requirements.txt
       - run: npm run test:oto-decimal-gate
 
+  chart-decimal-gate-fixture:
+    name: Chart Decimal Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_755[1]: a small fixture entity pair (chart_decimal_gate_row, the
+    # chart's row_by target, and chart_decimal_gate_item, which declares
+    # x-display.chart and carries a REQUIRED Decimal column) run through
+    # the real generate-code -> tsc pipeline, catching regressions in
+    # get{Parent}sForChart (chart_getters.ts.jinja2), which used to assign
+    # a required Decimal column straight off the raw Prisma row into a
+    # field the generated {Parent}ForChart interface types as `string` --
+    # a TS2322 at the chart-getters.ts/chart/page.tsx call site. A branch
+    # this repo's own generate-code/build (the e2e-tests job) never
+    # compiles, because no entity in this repo's own json_schema.yaml
+    # combines x-display.chart with a required Decimal column. No path
+    # filter, same as unit-tests/pytest/mention-gate-fixture/
+    # decimal-gate-fixture/oto-mandatory-gate-fixture/oto-decimal-gate-fixture
+    # above, per docs/knowledge/gate-exemption-must-be-machine-checkable.md.
+    # See scripts/check_chart_decimal_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:chart-decimal-gate
+
   approval-lockdown-gate-fixture:
     name: Approval Lockdown Gate Fixture Check
     runs-on: ubuntu-latest

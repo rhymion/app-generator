@@ -6,6 +6,34 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Internal
+- **Fixed the Gantt-chart getter not serializing a required Decimal column,
+  added a required `chart-decimal-gate-fixture` CI check, and corrected a
+  doc section that had documented the resulting workaround as intended
+  behavior.** `get{Parent}sForChart` (`chart_getters.ts.jinja2`), generated
+  only when `x-display.chart` is declared, assigned a required Decimal
+  column straight off the raw Prisma row (`{{ field }}: item.{{ field }},`)
+  into a field the generated `{Parent}ForChart` interface types as `string`
+  (`chart_context()` in `generators.py` resolves a Decimal column's
+  JSON-schema type as `string`, per its `_prisma_decimal_type` marker
+  (`schema_deriver.py`) -- but the raw row value is a `Prisma.Decimal`
+  instance) -- a `TS2322` at
+  build time. A production consumer schema had worked around this by
+  marking two Decimal columns nullable (nullable columns are dropped from
+  the chart projection entirely by `chart_context()`'s
+  `field_name not in required: continue`, so the type mismatch never
+  arose), and a doc section had documented that workaround as correct,
+  intentional behavior rather than as a generator defect being routed
+  around. The getter now stringifies a Decimal column the same way
+  `getters.ts`'s `decimal_display_columns` does for an entity's own
+  columns (a null-safe `.toString()`), matching every other Decimal
+  crossing the Server-to-Client Component boundary. This went undetected
+  because no entity in this repo's own default schema combines
+  `x-display.chart` with a required Decimal column, so no existing gate
+  ever type-checked this getter against one -- `npm run
+  test:chart-decimal-gate` closes that gap the same way
+  `test:decimal-gate`/`test:oto-decimal-gate` do for their own dark
+  branches, and is now a required, unconditional CI job alongside them.
+  See `.claude/commands/update-generator.md` Completion gate step 8.
 - **Fixed a one-to-one selector's "available options" getter not
   serializing the target entity's Decimal columns, and added a required
   `oto-decimal-gate-fixture` CI check.**
