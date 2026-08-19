@@ -120,6 +120,11 @@ code_generator/.generated/
 # code_generator/tests/fixtures/oto_decimal_gate/ on every run.
 .generated-oto-decimal-gate/
 
+# chart-decimal-gate fixture check (cmd_755[1]) scratch output —
+# scripts/check_chart_decimal_gate_fixture.sh regenerates this from
+# code_generator/tests/fixtures/chart_decimal_gate/ on every run.
+.generated-chart-decimal-gate/
+
 # sample data
 custom/
 memory/

@@ -447,7 +447,19 @@ def chart_context(ctx: dict, schema: dict) -> dict:
         enum_vals = prop.get('enum')
         if actual == 'string':
             extra_fields.append({'name': field_name, 'ts_type': 'string'})
-            extra_selects.append(f'{field_name}: item.{field_name},')
+            if prop.get('_prisma_decimal_type'):
+                # Decimal columns arrive from Prisma as decimal.js instances,
+                # not a plain string -- stringify here the same way
+                # getters.ts's decimal_display_columns does for an entity's
+                # own Decimal columns (build_context.py), rather than
+                # assigning the raw instance into a field this interface
+                # types as `string`.
+                extra_selects.append(
+                    f'{field_name}: item.{field_name} !== null && item.{field_name} !== undefined '
+                    f'? item.{field_name}.toString() : item.{field_name},'
+                )
+            else:
+                extra_selects.append(f'{field_name}: item.{field_name},')
             if not tooltip_prop:
                 tooltip_prop = f'item.{field_name}'
         elif actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):

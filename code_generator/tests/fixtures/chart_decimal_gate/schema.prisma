@@ -1,0 +1,70 @@
+// Self-contained fixture Prisma schema for the chart-decimal-gate check
+// (cmd_755[1]). NOT the project's real prisma/schema.prisma --
+// this file exists only to give the fixture json_schema.yaml enough real
+// Prisma models to run through the actual build_user_schema.py ->
+// generate.py -> tsc pipeline in isolation, exercising the branch this
+// gate was added to catch: get{Parent}sForChart (chart_getters.ts.jinja2)
+// returning a required Decimal column's raw Prisma.Decimal value straight
+// into a field typed `string` on the generated {Parent}ForChart interface.
+// Mirrors the structure of tests/fixtures/oto_decimal_gate/schema.prisma.
+
+generator client {
+  provider = "prisma-client"
+  output   = "./.generated-client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model user {
+  id            String                    @id @default(cuid())
+  name          String
+  email         String                    @unique
+  created_items chart_decimal_gate_item[] @relation("ChartDecimalGateItemCreator")
+  updated_items chart_decimal_gate_item[] @relation("ChartDecimalGateItemUpdater")
+  created_rows  chart_decimal_gate_row[]  @relation("ChartDecimalGateRowCreator")
+  updated_rows  chart_decimal_gate_row[]  @relation("ChartDecimalGateRowUpdater")
+}
+
+// The chart's `row_by` target -- one Gantt row per unique value, picked via
+// a plain many-to-one FK (the same shape any consumer schema's chart
+// row_by target has, e.g. proj_h's claim_event -> claim).
+model chart_decimal_gate_row {
+  id         String                    @id @default(cuid())
+  name       String
+  items      chart_decimal_gate_item[]
+  created_at DateTime                  @default(now()) @db.Timestamptz(0)
+  updated_at DateTime                  @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user                      @relation("ChartDecimalGateRowCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user                      @relation("ChartDecimalGateRowUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// The entity this fixture exists for: x-display.chart declared, with a
+// REQUIRED Decimal column (amount, explicit @db.Decimal(p, s) scale) --
+// the exact shape that drives get{Parent}sForChart in
+// chart_getters.ts.jinja2, which used to assign `item.amount` (a
+// Prisma.Decimal instance) straight into a field the generated
+// {Parent}ForChart interface types as `string`.
+model chart_decimal_gate_item {
+  id                        String                 @id @default(cuid())
+  name                      String
+  chart_decimal_gate_row_id String
+  chart_decimal_gate_row    chart_decimal_gate_row @relation(fields: [chart_decimal_gate_row_id], references: [id])
+  start_time                DateTime
+  end_time                  DateTime
+  amount                    Decimal                @db.Decimal(10, 2)
+  created_at                DateTime               @default(now()) @db.Timestamptz(0)
+  updated_at                DateTime               @updatedAt @db.Timestamptz(0)
+  creator_id                String
+  creator                   user                   @relation("ChartDecimalGateItemCreator", fields: [creator_id], references: [id])
+  updater_id                String
+  updater                   user                   @relation("ChartDecimalGateItemUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+  @@index([chart_decimal_gate_row_id])
+}
