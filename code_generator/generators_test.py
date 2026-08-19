@@ -358,6 +358,72 @@ def _seed_path_part(
     return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
 
 
+# ---------------------------------------------------------------------------
+# Decimal test-value derivation (cmd_754)
+# ---------------------------------------------------------------------------
+#
+# Every Decimal test-value call site below used to plant a fixed literal
+# ('10.00', '150.00', '250.00' ...) regardless of the column's declared
+# `@db.Decimal(precision, scale)`. A narrow column such as Decimal(5, 4)
+# (one integer digit, four fractional digits) rejects '10.00' outright with
+# a numeric field overflow, and took every test in the same spec file down
+# with it. These helpers derive a value from the column's own precision/
+# scale instead, so the value is always safe regardless of how tight the
+# declared bounds are.
+
+def _decimal_scale_and_force_zero(prop: dict) -> tuple[int, bool]:
+    """(scale, force_zero_integer_part) for a `_prisma_decimal_type` prop.
+
+    scale comes from x-decimal-scale (schema_deriver, auto-reflected from
+    `@db.Decimal(p, s)`), defaulting to 2 when unknown (matches the decimal
+    places every pre-fix literal used). force_zero_integer_part is True only
+    when precision is known and leaves no room for a nonzero leading digit
+    (precision - scale <= 0, e.g. Decimal(4, 4) -- the value must be < 1). A
+    single leading digit (0-9) is otherwise always safe: precision > scale is
+    the normal case, and an unknown precision keeps the same generous
+    assumption every Decimal branch already made before this fix.
+    """
+    scale = prop.get('x-decimal-scale')
+    scale = scale if scale is not None else 2
+    precision = prop.get('x-decimal-precision')
+    force_zero = precision is not None and (precision - scale) <= 0
+    return scale, force_zero
+
+
+def _decimal_literal(n: int, scale: int, force_zero_int: bool) -> str:
+    """Render a Decimal(precision, scale)-safe bare numeric string for a
+    small distinguishing digit `n` (0-9), without quotes."""
+    if force_zero_int:
+        int_part, frac_n = '0', n
+    else:
+        int_part, frac_n = str(n), 0
+    if scale <= 0:
+        return int_part
+    frac = str(frac_n).zfill(scale)[-scale:]
+    return f'{int_part}.{frac}'
+
+
+def _decimal_ts_expr(index_expr: str, scale: int, force_zero_int: bool) -> str:
+    """TS expression for a Decimal-safe value that varies with `index_expr`.
+
+    `index_expr` is a raw TS expression (e.g. `i`) or a literal base-10
+    integer string, in which case the value is computed at generation time
+    instead of emitting a runtime expression. The runtime form cycles the
+    distinguishing digit through 1-9 (`(index_expr % 9) + 1`) so it stays
+    safe no matter how large the loop index grows.
+    """
+    if index_expr.lstrip('-').isdigit():
+        return f"'{_decimal_literal(int(index_expr), scale, force_zero_int)}'"
+    digit_expr = f'(({index_expr} % 9) + 1)'
+    if force_zero_int:
+        if scale <= 0:
+            return "'0'"
+        return '`0.${String(' + digit_expr + ").padStart(" + str(scale) + ", '0')}`"
+    if scale <= 0:
+        return f'`${{{digit_expr}}}`'
+    return f'`${{{digit_expr}}}.{"0" * scale}`'
+
+
 def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dict, is_self_ref: bool = False) -> list[dict]:
     """Compute extra_required_fields for a dep record in populateDependencies.
 
@@ -459,10 +525,13 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             # below and got a non-numeric placeholder, which Prisma's
             # Decimal column rejects outright ("invalid digit found in
             # string. Expected decimal String."). Discovered via proj_g's
-            # Int-cents→Decimal migration (cmd_711f).
-            val = "'10.00'"
-            val_unique = '`${i * 10}.00`'
-            val_second = "'20.00'"
+            # Int-cents→Decimal migration (cmd_711f). The value itself is
+            # derived from the column's declared precision/scale (cmd_754) —
+            # a fixed '10.00' overflows a narrow column like Decimal(5, 4).
+            _scale, _force_zero = _decimal_scale_and_force_zero(prop)
+            val = f"'{_decimal_literal(1, _scale, _force_zero)}'"
+            val_unique = _decimal_ts_expr('i', _scale, _force_zero)
+            val_second = f"'{_decimal_literal(2, _scale, _force_zero)}'"
         elif actual == 'string':
             field_title = to_title_case(prop_name)
             # Deterministic, human-readable values. Dep-helper-call collisions
@@ -612,12 +681,14 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
             val_unique = 'new Date(2025, 0, i).toISOString()'
             val_second = 'new Date(2025, 0, 2).toISOString()'
         elif actual == 'string' and prop.get('_prisma_decimal_type'):
-            # See the matching branch in _get_dep_populate_fields (cmd_711f)
-            # for why: decimal columns are exposed as JSON type "string"
-            # (cmd_705) and reject a non-numeric placeholder.
-            val = "'10.00'"
-            val_unique = '`${i * 10}.00`'
-            val_second = "'20.00'"
+            # See the matching branch in _get_dep_populate_fields (cmd_711f,
+            # cmd_754) for why: decimal columns are exposed as JSON type
+            # "string" (cmd_705) and reject a non-numeric placeholder, and
+            # the value must fit the column's declared precision/scale.
+            _scale, _force_zero = _decimal_scale_and_force_zero(prop)
+            val = f"'{_decimal_literal(1, _scale, _force_zero)}'"
+            val_unique = _decimal_ts_expr('i', _scale, _force_zero)
+            val_second = f"'{_decimal_literal(2, _scale, _force_zero)}'"
         elif actual == 'string':
             field_title = to_title_case(prop_name)
             val = f"'Test {field_title} A'"
@@ -958,6 +1029,8 @@ def get_field_metas(
             'min': None,
             'max': None,
             'entity_options': None,
+            'decimal_scale': None,
+            'decimal_force_zero_int': False,
         }
 
         rel = next((r for r in relationships if r['prop_name'] == prop_name), None)
@@ -1050,12 +1123,17 @@ def get_field_metas(
             # Prisma's Decimal column rejects outright
             # ("invalid digit found in string. Expected decimal String.").
             # Discovered via proj_g's Int-cents→Decimal migration
-            # (cmd_711f).
+            # (cmd_711f). decimal_scale/decimal_force_zero_int (cmd_754) let
+            # the value generators below derive a value that fits the
+            # column's declared precision/scale instead of a fixed literal.
+            _scale, _force_zero = _decimal_scale_and_force_zero(prop)
             metas.append({
                 **base,
                 'label': to_title_case(prop_name),
                 'category': 'decimal',
                 'required': prop_name in required_fields,
+                'decimal_scale': _scale,
+                'decimal_force_zero_int': _force_zero,
             })
         else:
             metas.append({
@@ -1185,8 +1263,10 @@ def prisma_value(field: dict, index: str, entity_title: str) -> str:
         # Decimal columns need a valid decimal-format string (cmd_705:
         # exposed as JSON type "string"), not the 'text' category's
         # human-readable placeholder — Prisma's Decimal column rejects
-        # anything that doesn't parse as a number (cmd_711f).
-        return f'`${{{index} * 10}}.00`'
+        # anything that doesn't parse as a number (cmd_711f). The value is
+        # derived from the column's declared precision/scale (cmd_754) so it
+        # never overflows a narrow column like Decimal(5, 4).
+        return _decimal_ts_expr(index, field.get('decimal_scale', 2), field.get('decimal_force_zero_int', False))
 
     elif cat == 'entity_select':
         options = field.get('entity_options') or []
@@ -1245,8 +1325,9 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
 
     elif cat == 'decimal':
         # Plain numeric-format string typed into the AppFieldText decimal
-        # input — same reasoning as prisma_value's 'decimal' branch (cmd_711f).
-        return '150.00'
+        # input — same reasoning as prisma_value's 'decimal' branch (cmd_711f,
+        # cmd_754).
+        return _decimal_literal(1, field.get('decimal_scale', 2), field.get('decimal_force_zero_int', False))
 
     elif cat == 'entity_select':
         options = field.get('entity_options') or []
@@ -1312,8 +1393,9 @@ def cypress_edit_value(field: dict, entity_title: str, approval_locked_values: d
         return f'Updated {field["label"]}'
 
     elif cat == 'decimal':
-        # Distinct from cypress_create_value's 'decimal' value (cmd_711f).
-        return '250.00'
+        # Distinct from cypress_create_value's 'decimal' value (cmd_711f,
+        # cmd_754).
+        return _decimal_literal(2, field.get('decimal_scale', 2), field.get('decimal_force_zero_int', False))
 
     elif cat == 'entity_select':
         options = field.get('entity_options') or []
@@ -1379,8 +1461,9 @@ def api_value(field: dict, entity_title: str) -> str:
     elif cat == 'decimal':
         # Quoted decimal string literal — the API JSON contract for a
         # Decimal field is a string too (cmd_705), same reasoning as
-        # prisma_value/cypress_create_value's 'decimal' branches (cmd_711f).
-        return "'150.00'"
+        # prisma_value/cypress_create_value's 'decimal' branches (cmd_711f,
+        # cmd_754).
+        return f"'{_decimal_literal(1, field.get('decimal_scale', 2), field.get('decimal_force_zero_int', False))}'"
 
     elif cat == 'entity_select':
         options = field.get('entity_options') or []
