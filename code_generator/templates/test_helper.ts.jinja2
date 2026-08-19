@@ -16,7 +16,7 @@ async function getTestUser() {
   return testUser;
 }
 
-{% if primary_fk_dep and not primary_fk_dep.is_user_account and primary_fk_dep.extra_required_fields %}
+{% if (primary_fk_dep and not primary_fk_dep.is_user_account and primary_fk_dep.extra_required_fields) or (extra_oto_fk_deps | selectattr('extra_required_fields') | list) %}
 // cmd_620 (Option β, full isolation): monotonic per-call index shared by
 // populate{{ pascal }}Data and populate{{ pascal }}FullData. Persists for the life
 // of the Cypress plugin (Node) process, so it stays unique across every call
@@ -555,10 +555,10 @@ export async function populate{{ pascal }}Data(length: number) {
 {% elif needs_deps_in_populate %}
   const deps = await populate{{ pascal }}Dependencies();
 {% endif %}
-{% if primary_fk_dep and not primary_fk_dep.is_user_account and primary_fk_dep.extra_required_fields %}
+{% if (primary_fk_dep and not primary_fk_dep.is_user_account and primary_fk_dep.extra_required_fields) or (extra_oto_fk_deps | selectattr('extra_required_fields') | list) %}
   // cmd_620 (Option β, full isolation): each populate{{ pascal }}Data/FullData
-  // call gets its own slice of the primary FK dep's namespace (callIndex), so
-  // two calls in the same test — or a hand-written spec calling this helper
+  // call gets its own slice of the per-iteration FK dep's namespace (callIndex),
+  // so two calls in the same test — or a hand-written spec calling this helper
   // more than once — never resolve to the same underlying row.
   const callIndex = _{{ pascal }}CallSeq++;
 {% endif %}
@@ -599,6 +599,30 @@ export async function populate{{ pascal }}Data(length: number) {
     });
 {% endif %}
 {% endif %}
+{% for oto in extra_oto_fk_deps %}
+{% for fk in oto.internal_fk_deps %}
+    const {{ oto.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
+    // cmd_760: a one-to-one FK accepts at most one referencing row — give every
+    // loop iteration its own fresh {{ oto.target }} instead of the single shared
+    // populate{{ pascal }}Dependencies() instance (deps.{{ oto.var_name }}), which
+    // would trip {{ oto.target }}'s own uniqueness on the 2nd create().
+    const {{ oto.var_name }}Item = await prisma.{{ oto.target }}.create({
+      data: {
+{% for fk in oto.internal_fk_deps %}
+        {{ fk.prop_name }}: {{ oto.var_name }}{{ fk.var_name | pascal_case }}.id,
+{% endfor %}
+{% for ef in oto.extra_required_fields %}
+        {{ ef.prop_name }}: {{ ef.prisma_val_unique }},
+{% endfor %}
+{% for fk in oto.fk_deps %}
+        {{ fk.prop_name }}: deps.{{ fk.dep_var_name }}.id,
+{% endfor %}
+        creator_id: testUser.id,
+        updater_id: testUser.id,
+      },
+    });
+{% endfor %}
 {% for fk in internal_fk_deps %}
     const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
@@ -609,7 +633,7 @@ export async function populate{{ pascal }}Data(length: number) {
 {% endfor %}
 {% for field in required_fields_prisma %}
 {% if field.category == 'autocomplete' and field.dep_var_name %}
-{% if primary_fk_dep and field.dep_var_name == primary_fk_dep.var_name %}
+{% if (primary_fk_dep and field.dep_var_name == primary_fk_dep.var_name) or field.dep_var_name in extra_oto_fk_dep_vars %}
         {{ field.prop_name }}: {{ field.dep_var_name }}Item.id,
 {% else %}
         {{ field.prop_name }}: deps.{{ field.dep_var_name }}.id,
@@ -689,7 +713,7 @@ export async function populate{{ pascal }}FullData(length: number) {
 {% if needs_deps_in_populate_full %}
   const deps = await populate{{ pascal }}Dependencies();
 {% endif %}
-{% if primary_fk_dep and not primary_fk_dep.is_user_account and primary_fk_dep.extra_required_fields %}
+{% if (primary_fk_dep and not primary_fk_dep.is_user_account and primary_fk_dep.extra_required_fields) or (extra_oto_fk_deps | selectattr('extra_required_fields') | list) %}
   // cmd_620 (Option β) — see populate{{ pascal }}Data for the rationale. Shares
   // the same counter as populate{{ pascal }}Data so the two functions can never
   // hand out the same callIndex to a caller within one test.
@@ -730,6 +754,29 @@ export async function populate{{ pascal }}FullData(length: number) {
     });
 {% endif %}
 {% endif %}
+{% for oto in extra_oto_fk_deps %}
+{% for fk in oto.internal_fk_deps %}
+    const {{ oto.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
+    // cmd_760: see populate{{ pascal }}Data for the rationale — a fresh
+    // {{ oto.target }} per iteration, not the shared populate{{ pascal }}Dependencies()
+    // instance (deps.{{ oto.var_name }}).
+    const {{ oto.var_name }}Item = await prisma.{{ oto.target }}.create({
+      data: {
+{% for fk in oto.internal_fk_deps %}
+        {{ fk.prop_name }}: {{ oto.var_name }}{{ fk.var_name | pascal_case }}.id,
+{% endfor %}
+{% for ef in oto.extra_required_fields %}
+        {{ ef.prop_name }}: {{ ef.prisma_val_unique }},
+{% endfor %}
+{% for fk in oto.fk_deps %}
+        {{ fk.prop_name }}: deps.{{ fk.dep_var_name }}.id,
+{% endfor %}
+        creator_id: testUser.id,
+        updater_id: testUser.id,
+      },
+    });
+{% endfor %}
 {% for fk in internal_fk_deps %}
     const {{ fk.var_name }}Item = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
@@ -740,7 +787,7 @@ export async function populate{{ pascal }}FullData(length: number) {
 {% endfor %}
 {% for field in all_fields_prisma %}
 {% if field.category == 'autocomplete' and field.dep_var_name %}
-{% if primary_fk_dep and field.dep_var_name == primary_fk_dep.var_name %}
+{% if (primary_fk_dep and field.dep_var_name == primary_fk_dep.var_name) or field.dep_var_name in extra_oto_fk_dep_vars %}
         {{ field.prop_name }}: {{ field.dep_var_name }}Item.id,
 {% else %}
         {{ field.prop_name }}: deps.{{ field.dep_var_name }}.id,

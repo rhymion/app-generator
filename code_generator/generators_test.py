@@ -1068,6 +1068,7 @@ def get_field_metas(
             'entity_options': None,
             'decimal_scale': None,
             'decimal_force_zero_int': False,
+            'max_length': prop.get('maxLength'),
         }
 
         rel = next((r for r in relationships if r['prop_name'] == prop_name), None)
@@ -1279,6 +1280,20 @@ def analyze_children(children: list, schema: dict, parent_model_name: str) -> li
 # Test data value generators
 # ---------------------------------------------------------------------------
 
+def _clip_to_max_length(value: str, max_len: int | None, tail: str) -> str:
+    """Fit a Cypress-typed text value inside a JSON-schema `maxLength`.
+
+    The rendered <AppFieldText> carries the same maxLength as an HTML
+    input attribute, so cy.type() silently truncates anything longer —
+    an unclipped value makes the fill differ from the checkField
+    assertion. Keep `maxLength - 1` chars of the intended value and use
+    the last slot for a distinguishing tail char (create vs. edit).
+    """
+    if max_len is None or len(value) <= max_len:
+        return value
+    return value[:max(0, max_len - 1)] + tail
+
+
 def prisma_value(field: dict, index: str, entity_title: str) -> str:
     """Generate a TypeScript expression for Prisma test data."""
     cat = field['category']
@@ -1355,10 +1370,12 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
 
     if cat == 'text':
         if prop_name == 'name':
-            return f'Test {entity_title}'
-        if field.get('enum_values'):
-            return field['enum_values'][0]
-        return f'Test {field["label"]}'
+            val = f'Test {entity_title}'
+        elif field.get('enum_values'):
+            val = field['enum_values'][0]
+        else:
+            val = f'Test {field["label"]}'
+        return _clip_to_max_length(val, field.get('max_length'), '1')
 
     elif cat == 'decimal':
         # Plain numeric-format string typed into the AppFieldText decimal
@@ -1423,11 +1440,14 @@ def cypress_edit_value(field: dict, entity_title: str, approval_locked_values: d
 
     if cat == 'text':
         if prop_name == 'name':
-            return f'Updated {entity_title}'
-        enum_values = [v for v in (field.get('enum_values') or []) if v not in _locked]
-        if enum_values:
-            return enum_values[1] if len(enum_values) > 1 else enum_values[0]
-        return f'Updated {field["label"]}'
+            val = f'Updated {entity_title}'
+        else:
+            enum_values = [v for v in (field.get('enum_values') or []) if v not in _locked]
+            if enum_values:
+                val = enum_values[1] if len(enum_values) > 1 else enum_values[0]
+            else:
+                val = f'Updated {field["label"]}'
+        return _clip_to_max_length(val, field.get('max_length'), '2')
 
     elif cat == 'decimal':
         # Distinct from cypress_create_value's 'decimal' value (cmd_711f,
@@ -2644,6 +2664,38 @@ def helper_context(
                 if _pfk_field:
                     required_fields_prisma.append(_pfk_field)
 
+    # Required one-to-one FKs other than the primary display FK (cmd_760): a
+    # one-to-one relationship allows at most one row per target, so every test
+    # row the populate loop creates needs its OWN fresh target record — reusing
+    # the single shared `deps.<var>` row across loop iterations trips the
+    # target's own uniqueness on the 2nd create() (e.g. underwriting_case's
+    # `application_id`: each application accepts only one case). Mirrors
+    # primary_fk_dep's per-iteration create, kept as a separate list so entities
+    # without a secondary one-to-one FK (the overwhelming majority) render
+    # byte-identical output to before this change.
+    _oto_required_props = {
+        prop_name for prop_name, prop in (parent_def.get('properties') or {}).items()
+        if prop_name in required_fields
+        and (prop.get('x-relationship') or {}).get('type') == 'one-to-one'
+    }
+    extra_oto_fk_deps = []
+    _seen_oto_vars = set()
+    for _prop_name in _oto_required_props:
+        _fk = next((f for f in entity_fk_deps if f['prop_name'] == _prop_name), None)
+        if not _fk:
+            continue
+        _var = _fk['dep_var_name']
+        if primary_fk_dep is not None and _var == primary_fk_dep['var_name']:
+            continue  # already handled by the primary-FK per-iteration block
+        if _var in _seen_oto_vars:
+            continue
+        _dep = next((d for d in enriched_deps if d['var_name'] == _var), None)
+        if _dep is None or _dep['target'] == 'user':
+            continue
+        _seen_oto_vars.add(_var)
+        extra_oto_fk_deps.append(_dep)
+    extra_oto_fk_dep_vars = {d['var_name'] for d in extra_oto_fk_deps}
+
     # x-ledger-source pool FK(s) (poolIdField / fromPoolIdField / toPoolIdField)
     # are usually schema-optional — the real pool target is often resolved after
     # creation (e.g. via a split action) — so they're excluded from
@@ -2667,15 +2719,19 @@ def helper_context(
     primary_fk_is_ua = primary_fk_dep is not None and primary_fk_dep.get('is_user_account', False)
     primary_fk_ua_dep_var = primary_fk_dep_var if primary_fk_is_ua else None
     non_primary_ua_dep_fields = [f for f in ua_dep_fields if f['dep_var_name'] != primary_fk_ua_dep_var]
+    _per_iteration_dep_vars = {primary_fk_dep_var} | extra_oto_fk_dep_vars
     needs_deps_in_populate = (
         bool(non_primary_ua_dep_fields)
         or any(
-            f['category'] == 'autocomplete' and f['dep_var_name'] and f['dep_var_name'] != primary_fk_dep_var
+            f['category'] == 'autocomplete' and f['dep_var_name'] and f['dep_var_name'] not in _per_iteration_dep_vars
             for f in required_fields_prisma
         )
-        # Also needed when the primary FK dep itself has FK deps (e.g. patient_rel needs patient + clinic).
-        # Without this, the template generates deps.X.id references without defining deps.
+        # Also needed when the primary FK dep, or an extra one-to-one FK dep,
+        # itself has FK deps (e.g. patient_rel needs patient + clinic; application
+        # needs product_version + applicant_party). Without this, the template
+        # generates deps.X.id references without defining deps.
         or bool(primary_fk_dep and primary_fk_dep.get('fk_deps'))
+        or any(bool(d.get('fk_deps')) for d in extra_oto_fk_deps)
     )
     # populateFullData also needs deps when there are any UA FK fields or optional FK fields
     needs_deps_in_populate_full = bool(ua_dep_fields_full) or any(
@@ -2850,6 +2906,8 @@ def helper_context(
         'datagrid_children': enriched_datagrid_children,
         'comment_children': enriched_comment_children,
         'primary_fk_dep': primary_fk_dep,
+        'extra_oto_fk_deps': extra_oto_fk_deps,
+        'extra_oto_fk_dep_vars': sorted(extra_oto_fk_dep_vars),
         'internal_fk_deps': internal_fk_deps,
         'has_approvable': has_approvable,
         'flatten_test_rels': flatten_test_rels,
