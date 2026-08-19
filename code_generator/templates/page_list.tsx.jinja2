@@ -17,6 +17,9 @@ import { DEFAULT_PAGE_SIZE{% if needs_formatting %}, type PageOpts{% endif %} } 
 {% if list_uses_format_label_value %}
 import { formatLabelValue } from '@/lib/_format';
 {% endif %}
+{% if list_uses_decimal_format %}
+import { formatDecimalDisplay } from '@/lib/_decimal';
+{% endif %}
 import AppListToolbar from '@/components/ui/layout/AppListToolbar';
 {% if can_api and can_list and can_export %}
 import ExportCsvButton from '@/components/_standard/ExportCsvButton';

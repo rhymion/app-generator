@@ -6,6 +6,41 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Internal
+- **Fixed two generated-app defects surfaced by UI e2e testing (not caught
+  by the mandatory API e2e gate): Decimal fields displaying with dropped
+  trailing zeros, and optional one-to-one selector FK autocompletes losing
+  every candidate once the user types.** (1) Read-only Decimal display
+  (detail-page fields, edit-mode readonly fields, the top-level list page,
+  and DataGrid child columns) rendered `Decimal.toString()` verbatim
+  (`"1"` instead of the declared-scale `"1.00"`) — none of these four
+  display sites padded to `x-decimal-scale`, only the edit-mode input field
+  did. Added `formatDecimalDisplay()` (`lib/_decimal.ts`, string-based
+  padding — never routes through `Number()`, which would reintroduce the
+  float rounding `Decimal` exists to avoid) and wired it into
+  `_readonly_display_field()`, `page_list_context()`, and
+  `column_def_context()`. (2) A selector one-to-one FK autocomplete (`type:
+  one-to-one` in `x-relationship`, e.g. an optional FK to an entity with its
+  own list/view/new/edit pages) showed its initial candidate list correctly
+  (`getAvailable{Target}sFor{Parent}()`, passed via `initial{Target}s`) but
+  returned zero results as soon as the user typed: `page_new.tsx.jinja2` /
+  `page_edit.tsx.jinja2` never imported or passed a `search{Target}Options`
+  prop for selector one-to-one relation targets (only for regular
+  many-to-one FK targets), so `FormUpsert.tsx`'s generated search callback
+  (`searchXOptions?.(query, includeIds) ?? []`) always resolved to an empty
+  array once the optional-chained call hit an unpassed `undefined` prop.
+  Both pages now import and pass it, mirroring the existing many-to-one
+  wiring. Neither fix changes behavior for a schema with zero Decimal
+  fields / zero selector one-to-one relations — this repo's own
+  `code_generator/json_schema.yaml` has neither, so its own e2e suite
+  cannot exercise either branch; verified instead via the
+  `decimal_gate` / `oto_decimal_gate` / `oto_mandatory_gate` fixture
+  pipelines (`build_user_schema.py` → `generate.py` → `prisma generate` →
+  `tsc`, all exit 0) and the full `code_generator` pytest suite (1375
+  passed, 1 pre-existing unrelated skip). The FK-autocomplete filtering
+  root cause was found and fixed within the time budget; a labelField that
+  itself resolves to a Decimal column (`build_label_expression()` in
+  `code_generator/helpers/label_field.py`) is a narrower, unaddressed edge
+  case — noted, not silently dropped.
 - **Fixed the generated Stripe integration stubs (`lib/stripe.ts`,
   `app/api/webhooks/stripe/route.ts`) throwing at module top level when a
   required Stripe env var was unset, which failed the production `next
