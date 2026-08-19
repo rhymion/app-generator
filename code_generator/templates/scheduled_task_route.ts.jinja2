@@ -1,0 +1,43 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { requireDualAuth, handleApiError, ApiError } from '@/lib/api-auth';
+import { TASK_REGISTRY } from '@/lib/scheduled-tasks/registry';
+
+// GENERATED — do not edit. One route for every x-scheduled-task entry
+// (cmd_750/subtask_741a) — entity count never changes this file; new tasks
+// register into TASK_REGISTRY (lib/scheduled-tasks/registry.ts) instead.
+//
+// Auth: Vercel Cron's own `Authorization: Bearer $CRON_SECRET` convention
+// when CRON_SECRET is configured, else the existing dual-auth (X-API-Key or
+// session cookie) so the task can also be triggered manually or from a
+// non-Vercel scheduler.
+//
+// actorId: always the dedicated scheduled-task service account
+// (SCHEDULED_TASK_ACTOR_ID) — never the caller's own identity — so every
+// scheduled write attributes to the same system actor regardless of which
+// credential triggered the run.
+export async function POST(req: NextRequest, { params }: { params: Promise<{ task: string }> }) {
+  try {
+    const cronSecret = process.env.CRON_SECRET;
+    const authHeader = req.headers.get('Authorization');
+    const isCronAuth = !!cronSecret && authHeader === `Bearer ${cronSecret}`;
+    if (!isCronAuth) {
+      await requireDualAuth(req);
+    }
+
+    const systemActorId = process.env.SCHEDULED_TASK_ACTOR_ID;
+    if (!systemActorId) {
+      throw new ApiError(500, 'SCHEDULED_TASK_ACTOR_ID is not configured.');
+    }
+
+    const { task } = await params;
+    const run = TASK_REGISTRY[task];
+    if (!run) {
+      throw new ApiError(404, `Unknown scheduled task: ${task}`);
+    }
+
+    await run(systemActorId);
+    return NextResponse.json({ ok: true, task });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

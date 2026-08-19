@@ -1660,6 +1660,70 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _render(env, 'service_after_reject_stub.ts.jinja2', ent),
             )
             print(f"  Rejection stub → lib/{ent['snake_name']}/service_after_reject.ts")
+
+    # --- Scheduled tasks (lib/{entity}/service_scheduled.ts + lib/scheduled-tasks/
+    #     registry.ts + app/api/scheduled-tasks/[task]/route.ts) ---
+    #
+    # cmd_750 / subtask_741a design: a generic recurring-execution mechanism, not an
+    # expires_at-specific one. Any entity may declare `x-scheduled-task` to register a
+    # filtered row-scan + per-row handler call under a task_id; expires_at-based release
+    # is its first user, not a special case baked into the generator. Unlike the approval
+    # dispatch above, there is no parent feature gate — the key stands on its own.
+    scheduled_task_entities = []
+    _scheduled_task_ids_seen = {}
+    for def_key, def_val in defs.items():
+        if not def_key.startswith('__'):
+            continue
+        x_scheduled = def_val.get('x-scheduled-task')
+        if not x_scheduled:
+            continue
+        def_key = def_key[2:]
+        task_id = x_scheduled['task_id']
+        if task_id in _scheduled_task_ids_seen:
+            raise ValueError(
+                f"x-scheduled-task: task_id {task_id!r} is declared by both "
+                f"{_scheduled_task_ids_seen[task_id]!r} and {def_key!r} — task_id "
+                f"must be unique across the schema (it doubles as the registry key "
+                f"and the /api/scheduled-tasks/[task] URL segment)."
+            )
+        _scheduled_task_ids_seen[task_id] = def_key
+        xfilter = x_scheduled.get('filter') or {}
+        scheduled_task_entities.append({
+            'snake_name': def_key,
+            'pascal_name': to_pascal_case(def_key),
+            'task_id': task_id,
+            'handler': x_scheduled['handler'],
+            'interval': x_scheduled.get('interval', ''),
+            'expires_at_before_now': bool(xfilter.get('expires_at_before_now', False)),
+            'status_in': xfilter.get('status_in') or [],
+        })
+
+    for ent in scheduled_task_entities:
+        _write(
+            out / 'lib' / ent['snake_name'] / 'service_scheduled.ts',
+            _render(env, 'service_scheduled.ts.jinja2', ent),
+        )
+        print(f"  Scheduled task → lib/{ent['snake_name']}/service_scheduled.ts (task_id={ent['task_id']})")
+        _write_stub(
+            out / 'lib' / ent['snake_name'] / 'service_scheduled_handler.ts',
+            _render(env, 'service_scheduled_handler_stub.ts.jinja2', ent),
+        )
+        print(f"  Scheduled task handler stub → lib/{ent['snake_name']}/service_scheduled_handler.ts")
+
+    # Always emitted (mirrors resolve_target.ts / on_approved_dispatch.ts above) —
+    # a fixed, entity-count-independent pair. New tasks register into
+    # TASK_REGISTRY; this route itself never changes.
+    _write(
+        out / 'lib' / 'scheduled-tasks' / 'registry.ts',
+        _render(env, 'scheduled_task_registry.ts.jinja2', {'scheduled_task_entities': scheduled_task_entities}),
+    )
+    print(f'  Scheduled task registry → lib/scheduled-tasks/registry.ts ({len(scheduled_task_entities)} task(s))')
+    _write(
+        out / 'app' / 'api' / 'scheduled-tasks' / '[task]' / 'route.ts',
+        _render(env, 'scheduled_task_route.ts.jinja2', {}),
+    )
+    print('  Scheduled task dispatcher route → app/api/scheduled-tasks/[task]/route.ts')
+
     # --- Search templates (lib/search/helpers.ts + app/api/search/route.ts) ---
     # DP-3: default_scope from x-generator.search.default_scope.
     #   'opt_in' (default) — only entities with x-generate.search: true are searchable
