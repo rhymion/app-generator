@@ -43,6 +43,7 @@
     "test:oto-mandatory-gate": "bash scripts/check_oto_mandatory_gate_fixture.sh",
     "test:oto-decimal-gate": "bash scripts/check_oto_decimal_gate_fixture.sh",
     "test:chart-decimal-gate": "bash scripts/check_chart_decimal_gate_fixture.sh",
+    "test:chart-scalar-gate": "bash scripts/check_chart_scalar_gate_fixture.sh",
     "test:payment-gate": "bash scripts/check_payment_gate_fixture.sh",
     "test:approval-lockdown-gate": "bash scripts/check_approval_lockdown_gate_fixture.sh",
     "start": "node scripts/run-next-start.js",
