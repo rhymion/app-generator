@@ -31,6 +31,29 @@ same-target ones) that they previously omitted.
 
 Per the injected-fixture verification convention: render the actual jinja2
 templates, don't just assert context dicts look right.
+
+Regression tests for a follow-up fix: the split above only rewrote the
+split model's own entity_fk_deps, but a different, unrelated dep can
+independently carry its own FK to the same collapsed target -- e.g.
+`claim` depends on `policy` (via `policy_id`), and `policy` itself has a
+`party_id` FK to `party`. resolve_dependencies() builds policy's dep
+object with `fk_deps: [{'prop_name': 'party_id', 'dep_var_name': 'party'}]`
+before the split ever runs. Once the split removes the bare `party` dep
+(replacing it with `insuredParty`/`insurerParty`), that reference pointed
+at a variable that no longer exists anywhere in `deps` --
+`_dep_lookup_columns()` still emits it verbatim, so the rendered helper.ts
+contains `party_id: party.id` with no `const party = ...` declaration
+anywhere in the file (confirmed via a pre-fix manual repro of this exact
+fixture, rendering the real jinja2 template -- see
+TestIndirectDepStaleReference below). This is a ReferenceError at test-run
+time, not a compile error, since TS `const` declarations for other deps
+exist under different names.
+
+The fix repoints any such stale nested fk_deps reference at the first
+split dep for that target, and inserts the split deps back at the
+position the removed bare dep occupied (not appended to the end) so a dep
+like `policy` that depends on one of them is declared afterward, not
+before.
 """
 import os
 
@@ -217,3 +240,115 @@ class TestSpecContextFailCreateSectionsMultiFk:
         # fail_create_5_1's fill_cmds end up empty rather than the section
         # being absent entirely.
         assert ctx['fail_create_5_1']['fill_cmds'] == []
+
+
+def _indirect_schema() -> dict:
+    """claim -> {insured_party, insurer_party} both -> party (multi-FK split
+    target) AND claim -> policy -> party (an unrelated, indirect dep that
+    independently references the same collapsed target)."""
+    return {
+        'definitions': {
+            'party': _party_def(),
+            'policy': {
+                'type': 'object',
+                'required': ['id', 'name', 'party_id'],
+                'properties': {
+                    'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'},
+                    'name': {'type': 'string'},
+                    'party_id': {
+                        'type': 'string',
+                        'x-relationship': {'type': 'many-to-one', 'target': 'party', 'labelField': 'name'},
+                    },
+                },
+            },
+            'claim': {
+                'type': 'object',
+                'required': ['id', 'insured_party_id', 'insurer_party_id', 'policy_id'],
+                'properties': {
+                    'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'},
+                    'insured_party_id': {
+                        'type': 'string',
+                        'x-relationship': {'type': 'many-to-one', 'target': 'party', 'labelField': 'name'},
+                    },
+                    'insurer_party_id': {
+                        'type': 'string',
+                        'x-relationship': {'type': 'many-to-one', 'target': 'party', 'labelField': 'name'},
+                    },
+                    'policy_id': {
+                        'type': 'string',
+                        'x-relationship': {'type': 'many-to-one', 'target': 'policy', 'labelField': 'name'},
+                    },
+                },
+            },
+            'claim_detail': {'allOf': [{'$ref': '#/definitions/claim'}]},
+        },
+    }
+
+
+class TestSplitSameTargetFkDepsIndirectDep:
+    """Unit-level: an unrelated dep's own nested fk_deps must be repointed,
+    not left dangling on the removed bare-target var."""
+
+    def test_other_deps_stale_fk_deps_repointed(self):
+        from generators_test import resolve_dependencies, get_entity_fk_deps, get_parent_relationships
+        from build_context import _raw_def
+        schema = _indirect_schema()
+        model_def = _raw_def('claim', schema)
+        relationships = get_parent_relationships(model_def, schema)
+        deps = resolve_dependencies('claim', schema)
+        entity_fk_deps = get_entity_fk_deps('claim', schema, deps)
+        # Pre-split: policy's own fk_deps references the bare 'party' var.
+        policy_dep = next(d for d in deps if d['target'] == 'policy')
+        assert policy_dep['fk_deps'] == [{'prop_name': 'party_id', 'dep_var_name': 'party'}]
+
+        split_deps, _, _, multi_fk_targets = split_same_target_fk_deps(
+            'claim', relationships, deps, entity_fk_deps,
+        )
+        assert 'party' in multi_fk_targets
+        # No dep named 'party' should survive the split.
+        assert 'party' not in {d['var_name'] for d in split_deps}
+        split_policy_dep = next(d for d in split_deps if d['target'] == 'policy')
+        # The stale reference must be repointed at one of the real split deps,
+        # never left as the now-nonexistent bare 'party'.
+        assert split_policy_dep['fk_deps'][0]['dep_var_name'] in ('insuredParty', 'insurerParty')
+
+    def test_split_deps_inserted_before_dependent_deps(self):
+        """The split deps (insuredParty/insurerParty) must be declared before
+        `policy`, which depends on one of them -- not appended after it."""
+        from generators_test import resolve_dependencies, get_entity_fk_deps, get_parent_relationships
+        from build_context import _raw_def
+        schema = _indirect_schema()
+        model_def = _raw_def('claim', schema)
+        relationships = get_parent_relationships(model_def, schema)
+        deps = resolve_dependencies('claim', schema)
+        entity_fk_deps = get_entity_fk_deps('claim', schema, deps)
+        split_deps, _, _, _ = split_same_target_fk_deps('claim', relationships, deps, entity_fk_deps)
+        var_names = [d['var_name'] for d in split_deps]
+        policy_index = var_names.index('policy')
+        fk_dep_var = split_deps[policy_index]['fk_deps'][0]['dep_var_name']
+        assert var_names.index(fk_dep_var) < policy_index
+
+
+class TestHelperContextIndirectDepNoDanglingReference:
+    def test_rendered_helper_has_no_undeclared_bare_target_reference(self):
+        """Confirmed live-broken pre-fix (subtask_754a): the rendered
+        helper.ts referenced a bare `party.id` inside policy's create() call
+        with no `const party = ...` declaration anywhere in the file --
+        the split had removed it in favor of insuredParty/insurerParty, but
+        never updated policy's own fk_deps entry pointing at it."""
+        ctx = helper_context('claim', [], _indirect_schema(), 'claim', 'claim_detail', _GEN_CFG)
+        tmpl = _template_env().get_template('test_helper.ts.jinja2')
+        code = tmpl.render(**ctx)
+        assert 'party_id: party.id' not in code
+        assert 'const party ' not in code
+        assert 'const party=' not in code
+        # The FK must resolve to one of the real, declared split records.
+        assert (
+            'party_id: insuredParty.id' in code
+            or 'party_id: insurerParty.id' in code
+        )
+        # And that declaration must actually precede its use.
+        used_var = 'insuredParty' if 'party_id: insuredParty.id' in code else 'insurerParty'
+        declare_idx = code.index(f'const {used_var} =')
+        use_idx = code.index(f'party_id: {used_var}.id')
+        assert declare_idx < use_idx

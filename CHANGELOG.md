@@ -30,6 +30,36 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `test:oto-mandatory-gate` do for their own dark branches, and is now a
   required, unconditional CI job alongside them. See
   `.claude/commands/update-generator.md` Completion gate step 7.
+- **`split_same_target_fk_deps()`'s same-target multi-FK fix (multiple FK fields on one entity
+  pointing at the same target, e.g. `claim.insured_party_id` / `claim.insurer_party_id` both
+  `-> party`) only rewrote the split model's own `entity_fk_deps`, leaving an unrelated dep's own
+  nested `fk_deps` entry pointing at the now-removed bare-target var** (found via a real-world
+  schema run: a `claim -> policy -> party` chain, where `policy` independently has its own
+  `party_id` FK). `resolve_dependencies()` builds `policy`'s dep object with
+  `fk_deps: [{'prop_name': 'party_id', 'dep_var_name': 'party'}]` before the split ever runs;
+  once the split replaced the bare `party` dep with `insuredParty`/`insurerParty`, that reference
+  pointed at a variable that no longer existed anywhere in `deps`, so `helper_context()`'s
+  `_dep_lookup_columns()` still emitted it verbatim — the rendered `cypress/support/<entity>/
+  helper.ts` contained `party_id: party.id` with no `const party = ...` declaration anywhere in
+  the file (a `ReferenceError` at test-run time, not a compile error, since other deps' `const`
+  declarations exist under different names). Also fixed a related ordering bug: the split deps
+  were appended to the end of `deps` instead of being inserted at the position the removed bare
+  dep occupied, so a dependent dep like `policy` could render *before* the split dep it now
+  references. Fixed by repointing any stale nested `fk_deps` reference at the first split dep for
+  that target (any one is a real, already-created record, so it satisfies the FK regardless of
+  which of the model's own fields the split was keyed on) and inserting the split deps back at
+  the original position. Added `TestSplitSameTargetFkDepsIndirectDep` and
+  `TestHelperContextIndirectDepNoDanglingReference` to
+  `code_generator/tests/test_multi_fk_same_target_var_collision.py`, confirmed to fail against
+  the pre-fix code (`party_id: party.id` present, no `const party` declaration) and pass against
+  the fix. Removes the workaround trap note added for this same defect just before this fix
+  landed (this repo's own default schema has no same-target multi-FK entity, so the trap note
+  documented a real, then-still-open gap for consumer schemas) — the defect is now fully closed
+  for both the direct split-model case and the indirect other-dep case, so the trap no longer
+  applies. Verified: full mandatory gate green (`lint`; `pytest` 1371 passed, 0 skipped;
+  `vitest` 473 passed; all four fixture gates; `test:e2e:build`; `check:generated`;
+  `test:e2e:cy:api` 240/240; `test:e2e:cy:ui` 190/190; `npm audit` 0 vulnerabilities; `pip-audit`
+  0 vulnerabilities).
 - **Removed the hardcoded Stripe `apiVersion` literal from the
   `x-payment` write-once `lib/stripe.ts` stub, and added a required
   `payment-gate-fixture` CI check.** The stub used to pin
@@ -1373,6 +1403,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Repo-wide grep for `receiving_confirm`/`ReceivingConfirmForm` across `code_generator/`,
   `json_schema.yaml`/`json_schema_internal.yaml`, and both consumer submodule checkouts
   (`app-template`, `app-template-4`) returns zero hits after this change.
+- **Generated-test Decimal values were a fixed literal, overflowing narrow `@db.Decimal(p, s)` columns**:
+  every Decimal test-value call site in `code_generator/generators_test.py` (`prisma_value`,
+  `cypress_create_value`, `cypress_edit_value`, `api_value`, `_get_dep_populate_fields`,
+  `_get_dep_extra_required_fields`) planted the same fixed literal (`'10.00'`, `'150.00'`,
+  `'250.00'`, ...) regardless of the column's declared precision/scale. A narrow column such as
+  `Decimal(5, 4)` rejected `'10.00'` outright with a Postgres "numeric field overflow", taking
+  every other generated test in the same spec file down with it — discovered via a real schema
+  with 36 tests failing this way. Values are now derived from the column's own `x-decimal-scale` /
+  `x-decimal-precision` (`schema_deriver.py`, auto-reflected from the Prisma schema), including
+  the all-fractional edge case (`Decimal(4, 4)`, no headroom for a nonzero integer digit).
+  Verified against a real Postgres `numeric(5,4)` column that the old literal reproduces the
+  reported overflow and the new derived value inserts successfully.
 
 ## [3.0.0] - 2026-07-30
 
