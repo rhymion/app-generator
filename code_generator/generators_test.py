@@ -742,6 +742,22 @@ def split_same_target_fk_deps(
     two dict return values let callers that need them (e.g. helper_context's
     single-FK non-standard prop name aliasing) reuse the same relationship
     grouping instead of recomputing it.
+
+    A dep unrelated to model_name can itself carry a `fk_deps` entry that
+    points at the same target (e.g. `policy` is a dep of `claim` and has its
+    own `party_id` FK, so `policy`'s dep object has
+    `fk_deps: [{'prop_name': 'party_id', 'dep_var_name': 'party'}]`,
+    built by resolve_dependencies() before this function ever runs). Once the
+    bare `party` dep is removed above, that reference is left dangling — no
+    dep with var_name 'party' exists any more, so a lookup-column renderer
+    like helper_context's `_dep_lookup_columns` emits a bare, undeclared
+    `party.id`. Repoint any such stale reference at the first split dep for
+    that target; any one of them is a real, already-created record, so it
+    satisfies the FK regardless of which of model_name's own fields the
+    split was keyed on. The split deps are also inserted at the position the
+    removed bare dep occupied (not appended) so a dep like `policy`, whose
+    own creation must come after its FK targets, still renders in a valid
+    declaration order.
     """
     target_to_fk_rels: dict[str, list] = {}
     for r in relationships:
@@ -750,21 +766,42 @@ def split_same_target_fk_deps(
             target_to_fk_rels.setdefault(r['target'], []).append(r)
     multi_fk_targets = {t: rels for t, rels in target_to_fk_rels.items() if len(rels) > 1}
     for target, fk_rels in multi_fk_targets.items():
-        # Capture original dep's fk_deps before removing it — split prop-stem
-        # deps must inherit them so create() calls include required FK columns.
-        _orig_dep = next((d for d in deps if d['target'] == target), None)
+        # Capture original dep's fk_deps and position before removing it —
+        # split prop-stem deps must inherit the fk_deps so create() calls
+        # include required FK columns, and the position so they're inserted
+        # back where the bare dep was (not appended after later deps that
+        # may depend on them).
+        orig_index = next((i for i, d in enumerate(deps) if d['target'] == target), len(deps))
+        _orig_dep = deps[orig_index] if orig_index < len(deps) else None
         _orig_fk_deps = _orig_dep.get('fk_deps', []) if _orig_dep else []
+        old_var = to_camel_case(target)
         # Remove the single target-based dep and its entity_fk_deps entries
         deps = [d for d in deps if d['target'] != target]
-        entity_fk_deps = [d for d in entity_fk_deps if d['dep_var_name'] != to_camel_case(target)]
-        # Add per-prop-stem deps and entity_fk_deps entries
+        entity_fk_deps = [d for d in entity_fk_deps if d['dep_var_name'] != old_var]
+        # Build per-prop-stem deps and entity_fk_deps entries
+        new_deps: list[dict] = []
+        new_var_names: list[str] = []
         for r in fk_rels:
             prop_stem = re.sub(r'_id$', '', r['prop_name'])
             var_name = to_camel_case(prop_stem)
             dep_title = to_title_case(prop_stem)
-            if not any(d['var_name'] == var_name for d in deps):
-                deps.append({'target': target, 'var_name': var_name, 'title': dep_title, 'fk_deps': _orig_fk_deps})
+            if not any(d['var_name'] == var_name for d in deps) and not any(d['var_name'] == var_name for d in new_deps):
+                new_deps.append({'target': target, 'var_name': var_name, 'title': dep_title, 'fk_deps': _orig_fk_deps})
             entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
+            new_var_names.append(var_name)
+        insert_at = min(orig_index, len(deps))
+        deps[insert_at:insert_at] = new_deps
+        # Rewrite any OTHER dep's stale reference to the now-removed bare
+        # target var. new_deps themselves are excluded (their fk_deps is the
+        # inherited _orig_fk_deps, which can't reference their own target).
+        fallback_var = new_var_names[0] if new_var_names else old_var
+        new_dep_ids = {id(d) for d in new_deps}
+        for dep in deps:
+            if id(dep) in new_dep_ids:
+                continue
+            for nested_fk in dep.get('fk_deps') or []:
+                if nested_fk.get('dep_var_name') == old_var:
+                    nested_fk['dep_var_name'] = fallback_var
     return deps, entity_fk_deps, target_to_fk_rels, multi_fk_targets
 
 
