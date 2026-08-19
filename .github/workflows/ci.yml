@@ -354,6 +354,38 @@ jobs:
       - run: pip install -r requirements.txt
       - run: npm run test:oto-mandatory-gate
 
+  oto-decimal-gate-fixture:
+    name: OTO Decimal Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_754[2]: a small fixture entity pair (oto_decimal_gate_target, a
+    # one-to-one selector target carrying a Decimal column, and
+    # oto_decimal_gate_item, whose FK to it is a nullable
+    # `type: one-to-one` selector) run through the real generate-code ->
+    # tsc pipeline, catching regressions in
+    # `getAvailable{Target}sFor{Parent}` (getters.ts.jinja2), which used to
+    # return the target's raw Prisma rows unconditionally -- a Decimal
+    # column on the target hit TS2322 at the page_new.tsx/page_edit.tsx
+    # call site (a Client Component prop typed against the generated,
+    # Decimal-as-string interface). A branch this repo's own generate-code/
+    # build (the e2e-tests job) never compiles, because no entity in this
+    # repo's own json_schema.yaml has a one-to-one selector FK at all. No
+    # path filter, same as unit-tests/pytest/mention-gate-fixture/
+    # decimal-gate-fixture/oto-mandatory-gate-fixture above, per
+    # docs/knowledge/gate-exemption-must-be-machine-checkable.md. See
+    # scripts/check_oto_decimal_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:oto-decimal-gate
+
   approval-lockdown-gate-fixture:
     name: Approval Lockdown Gate Fixture Check
     runs-on: ubuntu-latest
