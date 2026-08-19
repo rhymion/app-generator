@@ -36,12 +36,13 @@ Run in this order:
 5. `npm run test:decimal-gate` — fixture-schema generate-code → tsc check (see below)
 6. `npm run test:oto-mandatory-gate` — required one-to-one selector fixture generate-code → tsc check (see below)
 7. `npm run test:approval-lockdown-gate` — x-approval value-lockdown fixture generate-code → tsc check (see below)
-8. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
-9. `npm run check:generated`  — generated code matches templates/schema
-10. `npm run test:e2e:cy:api`  — API Cypress specs only
-11. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop + mobile)
-12. `npm audit --omit=dev --audit-level=high`
-13. `pip-audit -r requirements.txt`
+8. `npm run test:payment-gate` — x-payment fixture generate-code → tsc check (see below)
+9. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
+10. `npm run check:generated`  — generated code matches templates/schema
+11. `npm run test:e2e:cy:api`  — API Cypress specs only
+12. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop + mobile)
+13. `npm audit --omit=dev --audit-level=high`
+14. `pip-audit -r requirements.txt`
 
 **Step 1 (`npm run lint`) must run on a checkout where `generate-code` has
 not yet run** — that is what CI's `Lint` job actually checks (`npm ci && npm
@@ -69,10 +70,10 @@ number CI can never reproduce. Running lint first (matching CI's exact
 condition) makes local and CI agree on the same count by construction; see
 `docs/knowledge/lint-gate-must-match-ci-precondition.md`.
 
-Steps 2, 3, 4, 5, 6, and 7 run unconditionally, with no "unchanged" exemption: CI's
+Steps 2, 3, 4, 5, 6, 7, and 8 run unconditionally, with no "unchanged" exemption: CI's
 `unit-tests` (`npm run test:vitest`), `pytest` (Python Generator Tests),
 `mention-gate-fixture`, `decimal-gate-fixture`, `oto-mandatory-gate-fixture`,
-and `approval-lockdown-gate-fixture`
+`approval-lockdown-gate-fixture`, and `payment-gate-fixture`
 jobs run on every push/PR to `main`/`master` with no path filter, so a local
 gate that conditionally skips any of them can go green while CI goes red on
 the same commit. This exact gap caused PR #218's Unit Tests job to fail after
@@ -103,7 +104,7 @@ throwing), `FormUpsert.tsx` (the `AppFieldText`-based decimal input
 rendering), `form_validation.ts`/`service_validation.ts` (the
 `DECIMAL_FIELDS` numeric-format check), and the CSV import route (the
 `'decimal'` `ts_type` coercion). This repo's own `json_schema.yaml` has zero
-Decimal-typed fields, so none of these branches are ever compiled by step 8
+Decimal-typed fields, so none of these branches are ever compiled by step 9
 otherwise. ~6s. See `scripts/check_decimal_gate_fixture.sh`.
 
 **Step 6 (`test:oto-mandatory-gate`, cmd_704 [2-a])**: runs a
@@ -116,7 +117,7 @@ found broken (`build_context.py`'s `required_relation_fields` rebuilt a
 single `initial{Target}s` name in `page_new.tsx.jinja2` for both
 `parent_rels_raw` and `selector_oto_rels` entries, but the latter actually
 destructures as `initialAvailable{Target}s`), and that this repo's own
-`test:e2e:build` (step 8) can never catch because no entity in this repo's
+`test:e2e:build` (step 9) can never catch because no entity in this repo's
 own `json_schema.yaml` — nor any currently known consumer schema — has a
 required one-to-one selector FK. ~5s. A separate fixture from
 `test:mention-gate` rather than an extension of it: unrelated branch, kept
@@ -140,8 +141,28 @@ generated output (`APPROVAL_LOCKED_FIELDS`, the locked value, and
 `disabled: true`), since `tsc` alone would pass just as well on an entity
 whose locked-value branch silently didn't render. This repo's own
 `json_schema.yaml` declares no `x-approval` entity, so none of these
-branches are ever compiled by step 8 otherwise. ~6s. See
+branches are ever compiled by step 9 otherwise. ~6s. See
 `scripts/check_approval_lockdown_gate_fixture.sh`.
+
+**Step 8 (`test:payment-gate`)**: same shape as steps 4-7, for the
+write-once Stripe integration stubs (`lib/stripe.ts`,
+`app/api/payment/checkout/route.ts`, `app/api/webhooks/stripe/route.ts`)
+emitted when a fixture entity declares `x-payment: true`. Exists because
+`code_generator/tests/test_payment_gate_fixture.py` only proves the stubs
+are *written* — it never proves the written TypeScript actually
+type-checks, and this repo's own `test:e2e:build` (step 9) never compiles
+these stubs either, because no entity in this repo's own `json_schema.yaml`
+declares `x-payment: true`. That gap is exactly how a stale Stripe SDK
+`apiVersion` literal (hardcoded in `stripe_lib_stub.ts.jinja2`) shipped
+undetected and broke `next build` in any consumer that actually declared
+`x-payment: true` — the literal drifts on every `stripe` SDK bump,
+including patch bumps within the same `^` caret range, because the SDK's
+own `LatestApiVersion` type is baked fresh into each published version. The
+fix removes the literal rather than replacing it with a newer one (a
+`props.apiVersion || DEFAULT_API_VERSION` fallback in the SDK's own source
+makes omission behaviorally identical to pinning the current version,
+without a stale literal to go stale again). ~4-6s. See
+`scripts/check_payment_gate_fixture.sh`.
 
 ## Debug priority
 
