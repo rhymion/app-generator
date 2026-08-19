@@ -1919,6 +1919,12 @@ x-display:
 The referenced fields must exist on the model. The generator validates this and reports an error
 if the field is missing.
 
+If a chart field is **nullable** in the Prisma schema, the generated component interface types it
+as `string | null` (for `Decimal`) or `T | null`, and the selector page passes raw Prisma rows
+directly — so the chart value is nullable in both the type and the runtime value. This is
+correct behaviour when the field is intentionally not set for some rows (e.g., an amount field
+on an event entity that is recorded before the corresponding invoice or claim arrives).
+
 ---
 
 ### 15.7 CUID pattern and nullable FK handling
