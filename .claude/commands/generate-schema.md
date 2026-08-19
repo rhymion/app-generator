@@ -25,14 +25,28 @@ a full ER-diagram-only session, not guessed):
 
 - FK to an embedded entity (one with `x-generate` disabled) breaks the
   build if required — promote the target to a standalone entity first.
-- A required one-to-one FK can make the generator emit a guard variable
-  name that doesn't match its selector variable name — prefer optional.
-- Adding a comment-bridge entity can fail `check:generated` (the
-  allowlist for its generated files lives in the generator's own
-  package, consumers can't edit it) — avoid unless already accounted for.
-- Two FKs on the same entity pointing at the same target entity can
-  collide in generated Cypress test-helper variable names — give the
-  JSON schema fields distinct names.
+- A required one-to-one FK used to make the generator emit a guard
+  variable name that didn't match its selector variable name — fixed
+  2026-08-15 (commit 5c790173 + ad844f06). Regression-guarded by the
+  `test:oto-mandatory-gate` CI fixture job (no path filter). Re-verified
+  live 2026-08-19 against develop tip fa01789a: the fixture's generated
+  `page_new.tsx` type-checks clean (`tsc` exit 0). No longer a trap.
+- Adding a comment-bridge entity used to fail `check:generated` — fixed
+  2026-08-15 (commit 018eb21b + eb148d0b, dedicated `lib/comment/service.ts`
+  / `lib/reaction/service.ts` service layer). Regression-guarded by
+  `code_generator/tests/test_check_generated_comment_reaction_service.py`
+  (part of the mandatory `pytest` CI job, no path filter). Re-verified
+  live 2026-08-19 against develop tip fa01789a: `check_generated.py`
+  reports `OK` against a real generated tree with a commentable-wired
+  entity. No longer a trap.
+- Two FKs on the same entity pointing at the same target entity used to
+  collide in generated Cypress test-helper variable names — fixed by
+  PR #382 (merged 2026-08-19, same-target FK dep splitting in
+  `api_spec_context()`/`spec_context()`). Regression-guarded by
+  `code_generator/tests/test_multi_fk_same_target_var_collision.py`
+  (part of the mandatory `pytest` CI job, no path filter). Re-verified
+  live 2026-08-19 against develop tip fa01789a: 8/8 pass, rendering the
+  actual jinja2 templates. No longer a trap.
 - Reset the test DB (`docker compose down -v` before the next
   `test:e2e:build`) after every schema change — a stale DB produces
   confusing, unrelated-looking failures.
