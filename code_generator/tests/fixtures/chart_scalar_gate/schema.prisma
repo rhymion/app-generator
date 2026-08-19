@@ -1,0 +1,71 @@
+// Self-contained fixture Prisma schema for the chart-scalar-gate check.
+// NOT the project's real prisma/schema.prisma -- this file exists only to
+// give the fixture json_schema.yaml enough real Prisma models to run
+// through the actual build_user_schema.py -> generate.py -> tsc pipeline
+// in isolation, exercising the branches this gate exists to catch:
+// get{Parent}sForChart (chart_getters.ts.jinja2) returning a required
+// plain Int column, a required DateTime column other than start_time/
+// end_time, and a required Boolean column. Mirrors the structure of
+// tests/fixtures/chart_decimal_gate/schema.prisma.
+
+generator client {
+  provider = "prisma-client"
+  output   = "./.generated-client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model user {
+  id            String                   @id @default(cuid())
+  name          String
+  email         String                   @unique
+  created_items chart_scalar_gate_item[] @relation("ChartScalarGateItemCreator")
+  updated_items chart_scalar_gate_item[] @relation("ChartScalarGateItemUpdater")
+  created_rows  chart_scalar_gate_row[]  @relation("ChartScalarGateRowCreator")
+  updated_rows  chart_scalar_gate_row[]  @relation("ChartScalarGateRowUpdater")
+}
+
+// The chart's `row_by` target -- one Gantt row per unique value, picked via
+// a plain many-to-one FK (the same shape any consumer schema's chart
+// row_by target has).
+model chart_scalar_gate_row {
+  id         String                   @id @default(cuid())
+  name       String
+  items      chart_scalar_gate_item[]
+  created_at DateTime                 @default(now()) @db.Timestamptz(0)
+  updated_at DateTime                 @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user                     @relation("ChartScalarGateRowCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user                     @relation("ChartScalarGateRowUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// The entity this fixture exists for: x-display.chart declared, with a
+// REQUIRED plain Int column (item_count), a REQUIRED DateTime column other
+// than start_time/end_time (logged_at), and a REQUIRED Boolean column
+// (is_flagged) -- the exact shape that drives get{Parent}sForChart in
+// chart_getters.ts.jinja2.
+model chart_scalar_gate_item {
+  id                       String                @id @default(cuid())
+  name                     String
+  chart_scalar_gate_row_id String
+  chart_scalar_gate_row    chart_scalar_gate_row @relation(fields: [chart_scalar_gate_row_id], references: [id])
+  start_time               DateTime
+  end_time                 DateTime
+  item_count               Int
+  logged_at                DateTime
+  is_flagged               Boolean
+  created_at               DateTime              @default(now()) @db.Timestamptz(0)
+  updated_at               DateTime              @updatedAt @db.Timestamptz(0)
+  creator_id               String
+  creator                  user                  @relation("ChartScalarGateItemCreator", fields: [creator_id], references: [id])
+  updater_id               String
+  updater                  user                  @relation("ChartScalarGateItemUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+  @@index([chart_scalar_gate_row_id])
+}

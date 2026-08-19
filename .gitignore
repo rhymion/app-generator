@@ -125,6 +125,11 @@ code_generator/.generated/
 # code_generator/tests/fixtures/chart_decimal_gate/ on every run.
 .generated-chart-decimal-gate/
 
+# chart-scalar-gate fixture check scratch output —
+# scripts/check_chart_scalar_gate_fixture.sh regenerates this from
+# code_generator/tests/fixtures/chart_scalar_gate/ on every run.
+.generated-chart-scalar-gate/
+
 # sample data
 custom/
 memory/

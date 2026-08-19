@@ -1,0 +1,93 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+format-version: 3.0
+
+# Fixture design note: a NEW fixture, not an extension of chart_decimal_gate
+# (code_generator/tests/fixtures/chart_decimal_gate/), which exercises
+# get{Parent}sForChart (chart_getters.ts.jinja2)'s handling of a REQUIRED
+# Decimal column specifically (PR#389). This fixture exercises the other
+# branches chart_context() (generators.py) now resolves for the chart
+# projection: a plain required Int scalar (previously dropped from the
+# projection entirely -- neither the interface nor the tooltip could ever
+# show it, with no documented reason), a required DateTime column other
+# than the chart's own start/end pair (previously assigned to the
+# generated interface's `string` field as a raw `Date` instance -- the
+# same TS2322 class PR#389 fixed for Decimal, just never caught because no
+# fixture combined x-display.chart with an extra required DateTime
+# column), and a required Boolean column (to prove it is deliberately
+# excluded from the projection rather than silently type-checking into
+# something wrong). Kept as a separate fixture, not an extension of
+# chart_decimal_gate, to keep this fixture's build/type-check green
+# independent of chart_decimal_gate's own scope and history.
+
+definitions:
+  user:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name: {}
+      email: {}
+
+  # The chart's row_by target -- no pages of its own needed; only exists to
+  # be picked via chart_scalar_gate_item's many-to-one FK.
+  chart_scalar_gate_row:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name: {}
+
+  # The entity this fixture exists to exercise: x-display.chart declared,
+  # with a REQUIRED plain Int column (item_count), a REQUIRED DateTime
+  # column other than start_time/end_time (logged_at), and a REQUIRED
+  # Boolean column (is_flagged) -- so get{Parent}sForChart
+  # (chart_getters.ts.jinja2) and {Parent}ForChart must handle all three.
+  # `view: true` is the only core x-generate flag left on -- extract_entities()
+  # (generate_types.py) skips any entity whose list/view/new/edit/delete/api
+  # flags are ALL explicitly False (treated as a pure internal model), which
+  # would drop this entity -- and with it the chart pages -- from generation
+  # entirely.
+  chart_scalar_gate_item:
+    x-generate:
+      list: false
+      view: true
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    x-display:
+      chart:
+        span: week
+        row_by: chart_scalar_gate_row
+    fields:
+      name: {}
+      chart_scalar_gate_row_id:
+        x-relationship:
+          target: chart_scalar_gate_row
+          labelField: name
+      start_time:
+        format: date-time
+      end_time:
+        format: date-time
+      item_count: {}
+      logged_at:
+        format: date-time
+      is_flagged: {}
+    required:
+      - item_count
+      - logged_at
+      - is_flagged

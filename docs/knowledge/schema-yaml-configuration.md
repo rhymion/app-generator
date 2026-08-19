@@ -1380,6 +1380,25 @@ The entity must have `start_time` and `end_time` fields.
 - `lib/{entity}/chart-getters.ts` — query that builds `GanttItem[]`
 - `app/[locale]/{entity}/chart/page.tsx` — page wrapping `<GanttChart>`
 
+**Which fields end up on the chart, and which one becomes the tooltip:** every other
+**required** field on the entity (i.e. not nullable, and not the FK/`start_time`/`end_time`/
+`id`/`created_at`/`updated_at`/`creator_id` fields already covered above) is projected onto the
+generated `{Entity}ForChart` type, by resolved type:
+
+| Field type | Projected? | As |
+|---|---|---|
+| String (plain or a nativeEnum) | Yes | `string` |
+| DateTime | Yes | `string` (ISO 8601, same as `start_time`/`end_time`) |
+| Decimal | Yes | `string` (precision-preserving — see §15 Prisma type alignment) |
+| Int (or a numeric enum with no string labels) | Yes | `number` |
+| A numeric enum with string labels | Yes | `number`, tooltip shows the label |
+| Boolean | No | — |
+
+Of the projected fields, only the **first one in the entity's field declaration order**
+becomes the Gantt-item tooltip. Declaring a new required field ahead of the field a chart
+consumer currently relies on for its tooltip changes which one wins — check declaration order
+when adding a required field to a charted entity.
+
 ### Combining table and chart
 
 | `x-display` config | List page | Chart page |

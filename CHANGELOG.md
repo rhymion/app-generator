@@ -34,6 +34,52 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `test:decimal-gate`/`test:oto-decimal-gate` do for their own dark
   branches, and is now a required, unconditional CI job alongside them.
   See `.claude/commands/update-generator.md` Completion gate step 8.
+- **Extended the Gantt-chart projection to a required plain Int/Float
+  scalar and a required DateTime column other than the chart's own
+  start/end pair, and added a required `chart-scalar-gate-fixture` CI
+  check.** `chart_context()` (`generators.py`) previously projected onto
+  the generated `{Parent}ForChart` interface only a required string
+  column, or a required int/number enum with string labels -- a required
+  plain Int (or Float, if a future Prisma type addition ever supports it;
+  today only Int reaches this branch, since `schema_deriver.py`'s
+  `_SCALAR_JSON_TYPE` has no `Float` entry) was silently dropped from the
+  projection entirely, with no interface field and no chance of becoming
+  the Gantt tooltip -- an undocumented asymmetry with a required string
+  column, which was projected. Separately, a required DateTime column
+  other than `start_time`/`end_time` was assigned straight off the raw
+  Prisma row into a field the generated interface types as `string` -- a
+  `Date` instance isn't a string, the same `TS2322` class the previous
+  entry fixed for Decimal, just for a different type, and never caught
+  because no fixture combined `x-display.chart` with an extra required
+  DateTime column. Both are now handled: a plain Int/Float column is
+  projected as `number` with no stringification needed (unlike Decimal,
+  which round-trips through decimal.js specifically to avoid float
+  rounding error -- 2026-08-15's Decimal-as-string ruling), and a
+  DateTime column is serialized with the same `.toISOString()` the
+  chart's own start/end fields already use. A required Boolean column is
+  now explicitly excluded (not a silent drop -- a bare true/false carries
+  little context in a Gantt-row tooltip), and a required column whose
+  resolved type isn't one of the above now fails generation loudly rather
+  than vanishing from the projection. BigInt needs no handling here
+  either: `schema_deriver.py`'s `_SCALAR_JSON_TYPE` has no `BigInt` entry,
+  so a BigInt column is already rejected during schema derivation, long
+  before it could reach this function. Only the first projected field, in
+  the entity's field declaration order, becomes the Gantt tooltip --
+  unchanged from before this change, and unaffected by it for the one
+  known consumer schema with `x-display.chart` (its own required-string
+  tooltip field is still declared first). This went undetected because no
+  entity in this repo's own default schema combines `x-display.chart`
+  with a required Int/Float or extra required DateTime column, so no
+  existing gate ever type-checked these branches -- `npm run
+  test:chart-scalar-gate` closes that gap the same way
+  `test:chart-decimal-gate` does for its own dark branch, kept as a
+  separate fixture (not an extension of `chart_decimal_gate`) to keep
+  each fixture's build/type-check independent of the other's scope and
+  history, and is now a required, unconditional CI job alongside it. The
+  chart configuration section of `docs/knowledge/schema-yaml-configuration.md`
+  now documents, per field type, what is projected onto the chart and
+  which one becomes the tooltip. See `.claude/commands/update-generator.md`
+  Completion gate step 9.
 - **Fixed a one-to-one selector's "available options" getter not
   serializing the target entity's Decimal columns, and added a required
   `oto-decimal-gate-fixture` CI check.**

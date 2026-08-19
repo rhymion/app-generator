@@ -417,6 +417,42 @@ jobs:
       - run: pip install -r requirements.txt
       - run: npm run test:chart-decimal-gate
 
+  chart-scalar-gate-fixture:
+    name: Chart Scalar Gate Fixture Check
+    runs-on: ubuntu-latest
+    # A small fixture entity pair (chart_scalar_gate_row, the chart's
+    # row_by target, and chart_scalar_gate_item, which declares
+    # x-display.chart and carries a REQUIRED plain Int column, a REQUIRED
+    # DateTime column other than start_time/end_time, and a REQUIRED
+    # Boolean column) run through the real generate-code -> tsc pipeline,
+    # catching regressions in chart_context() (generators.py): a required
+    # plain Int/Float column silently dropped from the chart projection
+    # entirely, and a required DateTime column other than start_time/
+    # end_time assigned straight off the raw Prisma row into a field the
+    # generated {Parent}ForChart interface types as `string` -- the same
+    # TS2322 class the chart-decimal-gate job above catches for Decimal,
+    # just for a different type. A branch this repo's own generate-code/
+    # build (the e2e-tests job) never compiles, because no entity in this
+    # repo's own json_schema.yaml combines x-display.chart with a required
+    # Int/Float or extra required DateTime column. No path filter, same as
+    # unit-tests/pytest/mention-gate-fixture/decimal-gate-fixture/
+    # oto-mandatory-gate-fixture/oto-decimal-gate-fixture/
+    # chart-decimal-gate-fixture above, per
+    # docs/knowledge/gate-exemption-must-be-machine-checkable.md.
+    # See scripts/check_chart_scalar_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:chart-scalar-gate
+
   approval-lockdown-gate-fixture:
     name: Approval Lockdown Gate Fixture Check
     runs-on: ubuntu-latest

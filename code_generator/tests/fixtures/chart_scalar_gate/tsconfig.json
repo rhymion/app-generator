@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/lib/chart_scalar_gate_item/*": ["./lib/chart_scalar_gate_item/*"],
+      "@/components/chart_scalar_gate_item/*": ["./components/chart_scalar_gate_item/*"],
+      "@/lib/chart_scalar_gate_row/*": ["./lib/chart_scalar_gate_row/*"],
+      "@/components/chart_scalar_gate_row/*": ["./components/chart_scalar_gate_row/*"],
+      "@/lib/prisma": ["./lib/prisma.ts"],
+      "@/lib/authz": ["./lib/authz.ts"],
+      "@/app/generated/prisma/client": ["./prisma/.generated-client/client"],
+      "@/*": ["../*"]
+    }
+  },
+  "include": [
+    "lib/chart_scalar_gate_item/chart-getters.ts",
+    "app/[locale]/chart_scalar_gate_item/chart/page.tsx"
+  ],
+  "exclude": ["node_modules"]
+}

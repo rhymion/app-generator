@@ -445,7 +445,21 @@ def chart_context(ctx: dict, schema: dict) -> dict:
             continue
         actual = _get_actual_type(prop)
         enum_vals = prop.get('enum')
-        if actual == 'string':
+        if actual == 'string' and prop.get('format') == 'date-time':
+            # A required DateTime column other than the chart's own
+            # start/end pair (excluded above, and stringified inline in
+            # chart_getters.ts.jinja2's header). Prisma returns a `Date`
+            # instance here, not a string, even though this column's
+            # resolved JSON-schema type is "string" -- the same "raw Prisma
+            # value into a field this interface types as `string`" mismatch
+            # PR#389 fixed for Decimal. Serialize it the same way
+            # start_field/end_field already are, rather than assigning the
+            # raw Date and reintroducing that bug class for a different type.
+            extra_fields.append({'name': field_name, 'ts_type': 'string'})
+            extra_selects.append(f'{field_name}: (item.{field_name} as Date).toISOString(),')
+            if not tooltip_prop:
+                tooltip_prop = f'item.{field_name}'
+        elif actual == 'string':
             extra_fields.append({'name': field_name, 'ts_type': 'string'})
             if prop.get('_prisma_decimal_type'):
                 # Decimal columns arrive from Prisma as decimal.js instances,
@@ -453,7 +467,7 @@ def chart_context(ctx: dict, schema: dict) -> dict:
                 # getters.ts's decimal_display_columns does for an entity's
                 # own Decimal columns (build_context.py), rather than
                 # assigning the raw instance into a field this interface
-                # types as `string`.
+                # types as `string`. (PR#389 -- untouched here.)
                 extra_selects.append(
                     f'{field_name}: item.{field_name} !== null && item.{field_name} !== undefined '
                     f'? item.{field_name}.toString() : item.{field_name},'
@@ -468,6 +482,42 @@ def chart_context(ctx: dict, schema: dict) -> dict:
             if not tooltip_prop:
                 labels = ', '.join(f"'{v}'" for v in enum_vals)
                 tooltip_prop = f"([{labels}] as const)[item.{field_name} as number] ?? String(item.{field_name})"
+        elif actual in ('integer', 'number'):
+            # A plain Int/Float scalar (also covers a numeric enum with no
+            # string labels, e.g. an ordinal-only legacy int-enum -- falls
+            # through the branch above since `_has_string_labels` is False,
+            # and is shown here as its raw ordinal). Prisma returns a native
+            # JS `number` for Int (and for Float, if this generator ever
+            # supports it -- it currently does not: schema_deriver.py's
+            # `_SCALAR_JSON_TYPE` has no `Float` entry, so this branch is
+            # reached only via `Int` today), so no stringification is needed
+            # here, unlike Decimal (which round-trips through decimal.js
+            # specifically to avoid float rounding error, not because
+            # numbers in general are unsafe). BigInt is likewise absent from
+            # `_SCALAR_JSON_TYPE` -- a BigInt column is rejected with a
+            # SchemaDivergenceError during Stage-4 derivation, long before it
+            # could ever reach this function, so no BigInt branch is needed
+            # here either: it is already fail-closed, upstream.
+            extra_fields.append({'name': field_name, 'ts_type': 'number'})
+            extra_selects.append(f'{field_name}: item.{field_name},')
+            if not tooltip_prop:
+                tooltip_prop = f'String(item.{field_name})'
+        elif actual == 'boolean':
+            # Deliberately excluded from the chart projection, not a silent
+            # unknown-type drop -- a bare true/false carries little context
+            # in a Gantt-row tooltip, and mapping it to a human-readable
+            # Yes/No would mean inventing a new x-* schema key absent a
+            # concrete need. Revisit if a consumer schema actually asks for
+            # this.
+            continue
+        else:
+            # Fail-closed: a required column whose resolved JSON-schema type
+            # isn't one of the above must fail generation loudly, not vanish
+            # silently from the chart projection.
+            raise ValueError(
+                f"chart_context: entity '{model}' field '{field_name}' has "
+                f"unhandled scalar type '{actual!r}' for the chart projection"
+            )
 
     # parseFnBody per span
     if span == 'week':
