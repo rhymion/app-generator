@@ -6,6 +6,30 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Internal
+- **Fixed a one-to-one selector's "available options" getter not
+  serializing the target entity's Decimal columns, and added a required
+  `oto-decimal-gate-fixture` CI check.**
+  `getAvailable{Target}sFor{Parent}` (`getters.ts.jinja2`) returned the
+  target's raw Prisma rows unconditionally, unlike `search{Parent}Options`
+  (`decimal_display_columns` `.toString()` override) and
+  `relationship_mapping` (`deepStringifyDecimals` wrap for an embedded
+  relation) elsewhere in the same file. A one-to-one selector whose
+  target entity carried a Decimal column hit `TS2322` at build time,
+  because the raw rows were handed straight to a Client Component prop
+  (`initialAvailable{Target}s`, consumed by `page_new.tsx`/
+  `page_edit.tsx`) typed against the generated (Decimal-as-string)
+  interface. The getter now wraps its return with `deepStringifyDecimals`
+  when the target carries a Decimal column at any depth (own column or an
+  embedded relation, via the same `_entity_decimal_deep` check
+  `relationship_mapping` already uses), matching every other Decimal
+  crossing the Server-to-Client Component boundary in this file. This
+  went undetected because no entity in this repo's own default schema has
+  a one-to-one selector FK at all, so no existing gate ever type-checked
+  this getter against a Decimal-bearing target -- `npm run
+  test:oto-decimal-gate` closes that gap the same way `test:decimal-gate`/
+  `test:oto-mandatory-gate` do for their own dark branches, and is now a
+  required, unconditional CI job alongside them. See
+  `.claude/commands/update-generator.md` Completion gate step 7.
 - **`split_same_target_fk_deps()`'s same-target multi-FK fix (multiple FK fields on one entity
   pointing at the same target, e.g. `claim.insured_party_id` / `claim.insurer_party_id` both
   `-> party`) only rewrote the split model's own `entity_fk_deps`, leaving an unrelated dep's own

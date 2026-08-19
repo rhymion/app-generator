@@ -35,14 +35,15 @@ Run in this order:
 4. `npm run test:mention-gate` — fixture-schema generate-code → tsc check (see below)
 5. `npm run test:decimal-gate` — fixture-schema generate-code → tsc check (see below)
 6. `npm run test:oto-mandatory-gate` — required one-to-one selector fixture generate-code → tsc check (see below)
-7. `npm run test:approval-lockdown-gate` — x-approval value-lockdown fixture generate-code → tsc check (see below)
-8. `npm run test:payment-gate` — x-payment fixture generate-code → tsc check (see below)
-9. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
-10. `npm run check:generated`  — generated code matches templates/schema
-11. `npm run test:e2e:cy:api`  — API Cypress specs only
-12. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop + mobile)
-13. `npm audit --omit=dev --audit-level=high`
-14. `pip-audit -r requirements.txt`
+7. `npm run test:oto-decimal-gate` — one-to-one selector target with a Decimal column fixture generate-code → tsc check (see below)
+8. `npm run test:approval-lockdown-gate` — x-approval value-lockdown fixture generate-code → tsc check (see below)
+9. `npm run test:payment-gate` — x-payment fixture generate-code → tsc check (see below)
+10. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
+11. `npm run check:generated`  — generated code matches templates/schema
+12. `npm run test:e2e:cy:api`  — API Cypress specs only
+13. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop + mobile)
+14. `npm audit --omit=dev --audit-level=high`
+15. `pip-audit -r requirements.txt`
 
 **Step 1 (`npm run lint`) must run on a checkout where `generate-code` has
 not yet run** — that is what CI's `Lint` job actually checks (`npm ci && npm
@@ -70,10 +71,11 @@ number CI can never reproduce. Running lint first (matching CI's exact
 condition) makes local and CI agree on the same count by construction; see
 `docs/knowledge/lint-gate-must-match-ci-precondition.md`.
 
-Steps 2, 3, 4, 5, 6, 7, and 8 run unconditionally, with no "unchanged" exemption: CI's
+Steps 2, 3, 4, 5, 6, 7, 8, and 9 run unconditionally, with no "unchanged" exemption: CI's
 `unit-tests` (`npm run test:vitest`), `pytest` (Python Generator Tests),
 `mention-gate-fixture`, `decimal-gate-fixture`, `oto-mandatory-gate-fixture`,
-`approval-lockdown-gate-fixture`, and `payment-gate-fixture`
+`oto-decimal-gate-fixture`, `approval-lockdown-gate-fixture`, and
+`payment-gate-fixture`
 jobs run on every push/PR to `main`/`master` with no path filter, so a local
 gate that conditionally skips any of them can go green while CI goes red on
 the same commit. This exact gap caused PR #218's Unit Tests job to fail after
@@ -86,7 +88,7 @@ entity (commentable + comment + `x-mention: true`) through the real
 type-checks just the two generated files that carry the
 `named_constants and has_commentable` branch — the branch cmd_532 found
 broken (`c.creator_id` read off a comment type that only ever declares
-`c.creator?.id`), and that this repo's own `test:e2e:build` (step 6) can
+`c.creator?.id`), and that this repo's own `test:e2e:build` (step 10) can
 never catch because no entity in this repo's own `json_schema.yaml` wires a
 `commentable` relation. ~4s. See `docs/knowledge/mention-system.md`
 "cmd_532: creator include fix and gate-blind-spot confirmation" and
@@ -104,7 +106,7 @@ throwing), `FormUpsert.tsx` (the `AppFieldText`-based decimal input
 rendering), `form_validation.ts`/`service_validation.ts` (the
 `DECIMAL_FIELDS` numeric-format check), and the CSV import route (the
 `'decimal'` `ts_type` coercion). This repo's own `json_schema.yaml` has zero
-Decimal-typed fields, so none of these branches are ever compiled by step 9
+Decimal-typed fields, so none of these branches are ever compiled by step 10
 otherwise. ~6s. See `scripts/check_decimal_gate_fixture.sh`.
 
 **Step 6 (`test:oto-mandatory-gate`, cmd_704 [2-a])**: runs a
@@ -117,7 +119,7 @@ found broken (`build_context.py`'s `required_relation_fields` rebuilt a
 single `initial{Target}s` name in `page_new.tsx.jinja2` for both
 `parent_rels_raw` and `selector_oto_rels` entries, but the latter actually
 destructures as `initialAvailable{Target}s`), and that this repo's own
-`test:e2e:build` (step 9) can never catch because no entity in this repo's
+`test:e2e:build` (step 10) can never catch because no entity in this repo's
 own `json_schema.yaml` — nor any currently known consumer schema — has a
 required one-to-one selector FK. ~5s. A separate fixture from
 `test:mention-gate` rather than an extension of it: unrelated branch, kept
@@ -126,7 +128,33 @@ legible per fixture. See
 the extend-vs-new-fixture rationale and
 `scripts/check_oto_mandatory_gate_fixture.sh` for the check itself.
 
-**Step 7 (`test:approval-lockdown-gate`, cmd_732)**: a fourth, unrelated
+**Step 7 (`test:oto-decimal-gate`, cmd_754[2])**: runs a fourth, unrelated
+small fixture entity pair (`oto_decimal_gate_target`, a one-to-one selector
+target carrying a Decimal column, and `oto_decimal_gate_item`, whose FK to
+it is a nullable `type: one-to-one` selector) through the same
+`build_user_schema.py` → `generate.py` → `tsc --noEmit` pipeline and
+type-checks the generated `page_new.tsx` + `page_edit.tsx` + `getters.ts`
+— the branch cmd_754 found broken:
+`getAvailable{Target}sFor{Parent}` (getters.ts.jinja2), the one-to-one
+selector's "available options" getter, returned the target's raw Prisma
+rows unconditionally, unlike `search{Parent}Options`
+(`decimal_display_columns` `.toString()` override) and
+`relationship_mapping` (`deepStringifyDecimals` wrap for an embedded
+relation) — neither of which this getter is. A Decimal column on the
+selector's target hit `TS2322` at the `page_new.tsx`/`page_edit.tsx` call
+site, where the raw rows are handed straight to a Client Component prop
+typed against the generated (Decimal-as-string) interface. Distinct from
+step 6 (`test:oto-mandatory-gate`, the required-selector init-var naming
+branch — unrelated) and step 5 (`test:decimal-gate`, an entity's own
+columns / an *embedded* relation's Decimal columns — not the OTO
+selector's separate `getAvailable...` getter). This repo's own
+`json_schema.yaml` has no one-to-one selector FK at all, so none of this is
+ever compiled by step 10 otherwise. ~7s. See
+`code_generator/tests/fixtures/oto_decimal_gate/json_schema.yaml`'s header
+for the new-fixture-vs-extend rationale and
+`scripts/check_oto_decimal_gate_fixture.sh` for the check itself.
+
+**Step 8 (`test:approval-lockdown-gate`, cmd_732)**: a fifth, unrelated
 small fixture entity (`approval_lockdown_gate_item`, a nativeEnum `status`
 field with `x-approval.on_approved`/`on_rejected.set_fields` declared on
 it) run through the same `build_user_schema.py` → `generate.py` → `tsc
@@ -141,16 +169,16 @@ generated output (`APPROVAL_LOCKED_FIELDS`, the locked value, and
 `disabled: true`), since `tsc` alone would pass just as well on an entity
 whose locked-value branch silently didn't render. This repo's own
 `json_schema.yaml` declares no `x-approval` entity, so none of these
-branches are ever compiled by step 9 otherwise. ~6s. See
+branches are ever compiled by step 10 otherwise. ~6s. See
 `scripts/check_approval_lockdown_gate_fixture.sh`.
 
-**Step 8 (`test:payment-gate`)**: same shape as steps 4-7, for the
+**Step 9 (`test:payment-gate`)**: same shape as steps 4-8, for the
 write-once Stripe integration stubs (`lib/stripe.ts`,
 `app/api/payment/checkout/route.ts`, `app/api/webhooks/stripe/route.ts`)
 emitted when a fixture entity declares `x-payment: true`. Exists because
 `code_generator/tests/test_payment_gate_fixture.py` only proves the stubs
 are *written* — it never proves the written TypeScript actually
-type-checks, and this repo's own `test:e2e:build` (step 9) never compiles
+type-checks, and this repo's own `test:e2e:build` (step 10) never compiles
 these stubs either, because no entity in this repo's own `json_schema.yaml`
 declares `x-payment: true`. That gap is exactly how a stale Stripe SDK
 `apiVersion` literal (hardcoded in `stripe_lib_stub.ts.jinja2`) shipped

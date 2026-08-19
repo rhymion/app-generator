@@ -115,6 +115,11 @@ code_generator/.generated/
 # code_generator/tests/fixtures/payment_gate/ on every run.
 .generated-payment-gate/
 
+# oto-decimal-gate fixture check (cmd_754[2]) scratch output —
+# scripts/check_oto_decimal_gate_fixture.sh regenerates this from
+# code_generator/tests/fixtures/oto_decimal_gate/ on every run.
+.generated-oto-decimal-gate/
+
 # sample data
 custom/
 memory/

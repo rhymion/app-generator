@@ -29,7 +29,7 @@ import { filterListQuery } from '@/lib/{{ parent }}/list_filter';
 import { formatLabelValue } from '@/lib/_format';
 {% endif %}
 {% if decimal_deep_relations or relationship_mapping_needs_decimal_helper %}
-import { deepStringifyDecimals } from '@/lib/_decimal';
+import { deepStringifyDecimals{% if selector_oto_rels | selectattr('available_needs_decimal') | list %}, type DeepStringifyDecimals{% endif %} } from '@/lib/_decimal';
 {% endif %}
 
 // Allow-lists for sort/filter — anything not in here is silently dropped at
@@ -513,7 +513,7 @@ export async function getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pa
 ) {
   const { permissions } = await getModelPermissions('{{ oto.target }}');
   if (!permissions.read) {
-    return [] as unknown as Awaited<ReturnType<typeof prisma.{{ oto.target }}.findMany>> & { permissionDenied: true };
+    return [] as unknown as {% if oto.available_needs_decimal %}DeepStringifyDecimals<Awaited<ReturnType<typeof prisma.{{ oto.target }}.findMany>>>{% else %}Awaited<ReturnType<typeof prisma.{{ oto.target }}.findMany>>{% endif %} & { permissionDenied: true };
   }
   const takenTargets = await prisma.{{ model }}.findMany({
     where: {
@@ -528,7 +528,7 @@ export async function getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pa
     .map(r => r.{{ oto.prop_name }})
     .filter((id): id is string => id !== null);
   const safeLimit = Math.min(Math.max(Math.floor(limit) || 50, 1), 200);
-  return prisma.{{ oto.target }}.findMany({
+  const rows = await prisma.{{ oto.target }}.findMany({
     where: takenIds.length > 0 ? { id: { notIn: takenIds } } : {},
     take: safeLimit,
     // Order by id — the target's "natural" label column varies per entity, and
@@ -541,6 +541,15 @@ export async function getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pa
     include: { {{ oto.available_include }} },
 {% endif %}
   });
+{% if oto.available_needs_decimal %}
+  // {{ oto.target }} carries a Decimal column (own or embedded), and these
+  // rows are handed straight to a Client Component prop typed against the
+  // generated interface (Decimal as string) — mirrors the relation_mapping
+  // stringify done for {{ oto.target }} embeds elsewhere in this file.
+  return deepStringifyDecimals(rows);
+{% else %}
+  return rows;
+{% endif %}
 }
 {% endfor %}
 

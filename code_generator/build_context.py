@@ -2776,6 +2776,14 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     for r in selector_oto_rels:
         target = r.get('target', '')
         label_field = r.get('label_field')
+        # getAvailableXxxsForYyy (getters.ts.jinja2) returns raw
+        # `prisma.{target}.findMany(...)` rows straight to a Client Component
+        # prop typed against the generated (Decimal-as-string) interface —
+        # unlike search{Parent}Options/relationship_mapping, it never
+        # stringified Decimal columns, so a Decimal-bearing OTO selector
+        # target (own column, or one reached through an embedded relation
+        # via available_include below) hit TS2322 at build time.
+        r['available_needs_decimal'] = bool(target) and _entity_decimal_deep(target, schema)
         if not target or not label_field:
             r['available_include'] = ''
             continue
