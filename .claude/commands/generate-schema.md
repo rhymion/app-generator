@@ -25,6 +25,14 @@ a full ER-diagram-only session, not guessed):
 
 - FK to an embedded entity (one with `x-generate` disabled) breaks the
   build if required — promote the target to a standalone entity first.
+- Two FKs on the same entity that both point at the **same target entity**
+  still collide in generated Cypress test-helper variable names. PR #382
+  split the direct-dep variable names, but `fk_deps[].dep_var_name` for
+  sibling deps is not yet rewritten — `cypress/support/*/helper.ts` can
+  emit a bare `{target}.id` reference with no corresponding `let`
+  declaration. Workaround: keep such FKs as many-to-one with a Prisma
+  `@unique` constraint for 1:1 semantics rather than a true `one-to-one`
+  relationship. Full generator fix is in progress (PR pending).
 - Reset the test DB (`docker compose down -v` before the next
   `test:e2e:build`) after every schema change — a stale DB produces
   confusing, unrelated-looking failures.
