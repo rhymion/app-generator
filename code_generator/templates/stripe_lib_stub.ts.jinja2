@@ -5,21 +5,42 @@
 // STRIPE_SECRET_KEY must not silently boot with payment routes half-broken.
 import Stripe from 'stripe';
 
-if (!process.env.STRIPE_SECRET_KEY) {
-  throw new Error(
-    'STRIPE_SECRET_KEY is not set. Add it to .env.local (dev) or your ' +
-    "deployment platform's env vars (prod). Use a test key (sk_test_...) " +
-    'from https://dashboard.stripe.com/test/apikeys.'
-  );
+// cmd_758: the client is built lazily behind a Proxy, not at module load.
+// Next.js evaluates every route module (regardless of the HTTP methods it
+// exports) while collecting page data during `next build` -- a top-level
+// `throw` here used to fail the production build itself whenever
+// STRIPE_SECRET_KEY was unset (e.g. every Vercel Preview deploy). Deferring
+// construction to first property access keeps the exact same fail-closed
+// behavior (still throws if the key is missing -- just at request time,
+// not at build/import time), and callers keep using `stripe.<method>(...)`
+// unchanged since the Proxy forwards to the real client transparently.
+function createStripeClient(): Stripe {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    throw new Error(
+      'STRIPE_SECRET_KEY is not set. Add it to .env.local (dev) or your ' +
+      "deployment platform's env vars (prod). Use a test key (sk_test_...) " +
+      'from https://dashboard.stripe.com/test/apikeys.'
+    );
+  }
+  // cmd_753: no `apiVersion` pin here on purpose. The stripe SDK's own type
+  // (`LatestApiVersion`, a fixed literal baked into whatever SDK version is
+  // installed) drifts on every SDK bump, including patch bumps within the
+  // same `^` caret range -- a hardcoded literal here goes stale silently and
+  // breaks `tsc`. Omitting the field is not "no version pinning": the SDK
+  // falls back to that exact same baked-in literal at runtime
+  // (`props.apiVersion || DEFAULT_API_VERSION` in stripe's own source), so
+  // behavior is identical -- only the stale-literal type-check hazard is
+  // gone. See scripts/check_payment_gate_fixture.sh for the regression gate.
+  return new Stripe(process.env.STRIPE_SECRET_KEY);
 }
 
-// cmd_753: no `apiVersion` pin here on purpose. The stripe SDK's own type
-// (`LatestApiVersion`, a fixed literal baked into whatever SDK version is
-// installed) drifts on every SDK bump, including patch bumps within the
-// same `^` caret range -- a hardcoded literal here goes stale silently and
-// breaks `tsc`. Omitting the field is not "no version pinning": the SDK
-// falls back to that exact same baked-in literal at runtime
-// (`props.apiVersion || DEFAULT_API_VERSION` in stripe's own source), so
-// behavior is identical -- only the stale-literal type-check hazard is
-// gone. See scripts/check_payment_gate_fixture.sh for the regression gate.
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+let _stripe: Stripe | undefined;
+
+export const stripe = new Proxy({} as Stripe, {
+  get(_target, prop, _receiver) {
+    if (!_stripe) {
+      _stripe = createStripeClient();
+    }
+    return Reflect.get(_stripe as object, prop, _stripe);
+  },
+});

@@ -17,15 +17,24 @@ import { NextResponse } from 'next/server';
 import type Stripe from 'stripe';
 import { stripe } from '@/lib/stripe';
 
-if (!process.env.STRIPE_WEBHOOK_SECRET) {
-  throw new Error(
-    'STRIPE_WEBHOOK_SECRET is not set. Generate one with `stripe listen` ' +
-    '(dev) or the Stripe Dashboard webhook settings (prod), then add it to ' +
-    '.env.local / your deployment env vars.'
-  );
-}
-
 export async function POST(req: Request) {
+  // cmd_758: checked inside the handler, not at module top level. Next.js
+  // evaluates every route module while collecting page data during
+  // `next build`, regardless of which HTTP methods it exports -- a
+  // top-level `throw` here used to fail the production build itself
+  // whenever STRIPE_WEBHOOK_SECRET was unset (e.g. every Vercel Preview
+  // deploy). Fail-closed behavior is unchanged: this still throws before
+  // any webhook event is processed if the secret is missing -- only the
+  // timing moves from build/import time to request time.
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!webhookSecret) {
+    throw new Error(
+      'STRIPE_WEBHOOK_SECRET is not set. Generate one with `stripe listen` ' +
+      '(dev) or the Stripe Dashboard webhook settings (prod), then add it to ' +
+      '.env.local / your deployment env vars.'
+    );
+  }
+
   const signature = req.headers.get('stripe-signature');
   if (!signature) {
     return NextResponse.json({ error: 'Missing stripe-signature header' }, { status: 400 });
@@ -38,7 +47,7 @@ export async function POST(req: Request) {
 
   let event: Stripe.Event;
   try {
-    event = stripe.webhooks.constructEvent(payload, signature, process.env.STRIPE_WEBHOOK_SECRET!);
+    event = stripe.webhooks.constructEvent(payload, signature, webhookSecret);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(

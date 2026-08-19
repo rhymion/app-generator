@@ -6,6 +6,24 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Internal
+- **Fixed the generated Stripe integration stubs (`lib/stripe.ts`,
+  `app/api/webhooks/stripe/route.ts`) throwing at module top level when a
+  required Stripe env var was unset, which failed the production `next
+  build` itself (not just the route at request time) in any consumer with
+  `x-payment: true` declared.** Next.js evaluates every route module while
+  collecting page data during `next build`, regardless of the HTTP methods
+  it exports, so importing the `POST`-only checkout route pulled in
+  `lib/stripe.ts`'s top-level `throw` — meaning any deploy without
+  `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` configured (a preview
+  deploy, for example) failed the build outright. Both checks now defer to
+  first use: `lib/stripe.ts` exports its Stripe client lazily behind a
+  `Proxy` (constructed on first property access, so import alone never
+  throws), and the webhook route's secret check moved from module scope
+  into its `POST` handler. Fail-closed behavior is unchanged in
+  substance — using either code path without the required key still
+  throws immediately with the same message — only the timing moved from
+  build/import time to request time. See
+  `docs/knowledge/stripe-payment-integration.md` "Lazy construction note".
 - **Fixed the Gantt-chart getter not serializing a required Decimal column,
   added a required `chart-decimal-gate-fixture` CI check, and corrected a
   doc section that had documented the resulting workaround as intended

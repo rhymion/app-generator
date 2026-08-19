@@ -71,8 +71,36 @@ def test_stripe_lib_stub_is_fail_closed_on_missing_secret_key(tmp_path):
 def test_webhook_route_stub_is_fail_closed_on_missing_webhook_secret(tmp_path):
     out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
     content = (out / 'app' / 'api' / 'webhooks' / 'stripe' / 'route.ts').read_text()
-    assert "if (!process.env.STRIPE_WEBHOOK_SECRET)" in content
+    assert "if (!webhookSecret)" in content
     assert 'throw new Error(' in content
+
+
+def test_webhook_route_stub_checks_secret_inside_handler_not_at_module_top(tmp_path):
+    # cmd_758: a module-top-level throw is evaluated by `next build`'s page
+    # data collection for every route regardless of HTTP method, and used to
+    # fail the production build whenever STRIPE_WEBHOOK_SECRET was unset
+    # (e.g. every Vercel Preview deploy). The check must live inside POST().
+    out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
+    content = (out / 'app' / 'api' / 'webhooks' / 'stripe' / 'route.ts').read_text()
+    handler_start = content.index('export async function POST')
+    secret_check = content.index('if (!webhookSecret)')
+    assert secret_check > handler_start, (
+        'STRIPE_WEBHOOK_SECRET check must be inside the POST handler, not at module top level'
+    )
+
+
+def test_stripe_lib_stub_does_not_throw_at_module_evaluation(tmp_path):
+    # cmd_758: the old stub threw at module top level (`if
+    # (!process.env.STRIPE_SECRET_KEY) { throw ... }` outside any function),
+    # which `next build` evaluates for every route during page data
+    # collection. The Stripe client must now be constructed lazily (e.g.
+    # behind a function or Proxy) so import alone never throws.
+    out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
+    content = (out / 'lib' / 'stripe.ts').read_text()
+    export_line = next(line for line in content.splitlines() if line.startswith('export const stripe'))
+    assert 'new Stripe(' not in export_line, (
+        'the exported `stripe` client must not be constructed eagerly at module scope'
+    )
 
 
 def test_stub_write_once_does_not_overwrite_existing_file(tmp_path):
