@@ -1349,6 +1349,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Repo-wide grep for `receiving_confirm`/`ReceivingConfirmForm` across `code_generator/`,
   `json_schema.yaml`/`json_schema_internal.yaml`, and both consumer submodule checkouts
   (`app-template`, `app-template-4`) returns zero hits after this change.
+- **Generated-test Decimal values were a fixed literal, overflowing narrow `@db.Decimal(p, s)` columns**:
+  every Decimal test-value call site in `code_generator/generators_test.py` (`prisma_value`,
+  `cypress_create_value`, `cypress_edit_value`, `api_value`, `_get_dep_populate_fields`,
+  `_get_dep_extra_required_fields`) planted the same fixed literal (`'10.00'`, `'150.00'`,
+  `'250.00'`, ...) regardless of the column's declared precision/scale. A narrow column such as
+  `Decimal(5, 4)` rejected `'10.00'` outright with a Postgres "numeric field overflow", taking
+  every other generated test in the same spec file down with it — discovered via a real schema
+  with 36 tests failing this way. Values are now derived from the column's own `x-decimal-scale` /
+  `x-decimal-precision` (`schema_deriver.py`, auto-reflected from the Prisma schema), including
+  the all-fractional edge case (`Decimal(4, 4)`, no headroom for a nonzero integer digit).
+  Verified against a real Postgres `numeric(5,4)` column that the old literal reproduces the
+  reported overflow and the new derived value inserts successfully.
 
 ## [3.0.0] - 2026-07-30
 

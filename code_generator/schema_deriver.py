@@ -363,6 +363,13 @@ def derive_property(
             # rounding-error) axis gets a UI-level error instead of an opaque
             # Prisma write failure.
             prop["x-decimal-scale"] = pf.decimal_scale
+        if pf.decimal_precision is not None:
+            # Auto-reflected alongside x-decimal-scale (cmd_754): lets
+            # generated-test value builders (generators_test.py) derive a
+            # value that actually fits `@db.Decimal(p, s)` instead of a fixed
+            # literal like '10.00', which overflows a narrow column such as
+            # Decimal(5, 4).
+            prop["x-decimal-precision"] = pf.decimal_precision
 
     fk_target = model.fk_target(field_name)
     if fk_target is not None and not user_field_overrides.get("_no_fk_pattern"):
