@@ -1,4 +1,4 @@
-import type { Prisma } from '@/app/generated/prisma/client';
+import { Prisma } from '@/app/generated/prisma/client';
 
 /**
  * Recursively maps every `Prisma.Decimal` occurrence inside `T` to `string`
@@ -29,32 +29,13 @@ export type DeepStringifyDecimals<T> = T extends Prisma.Decimal
  * React cannot serialize. Apply this to any embedded relation value (or
  * relation array) whose target entity carries a Decimal column, at any
  * nesting depth.
- */
-/**
- * Pads a Decimal's string form (from `.toString()`, e.g. "1" or "1.5") out
- * to `scale` fractional digits (e.g. "1.00", "1.50") for display.
  *
- * String-based, not `Number()`-based: `Decimal.toString()` exists precisely
- * to avoid float rounding, and running the result through `Number()` here
- * would reintroduce the same precision loss for large values. Truncates
- * (never rounds) if the input already carries more fractional digits than
- * `scale` — data should already conform to the declared scale, so this only
- * guards against pathological input.
+ * Kept in this module (not `_decimal_format.ts`) because `instanceof
+ * Prisma.Decimal` needs `Prisma` imported as a *value* — this file is
+ * server-only for exactly that reason. `formatDecimalDisplay` has no such
+ * need and lives in `_decimal_format.ts` instead, so client components can
+ * import it without pulling the Node.js Prisma client into their bundle.
  */
-export function formatDecimalDisplay(
-  value: string | number | null | undefined,
-  scale: number
-): string {
-  if (value === null || value === undefined || value === '') return '';
-  const str = String(value);
-  const negative = str.startsWith('-');
-  const unsigned = negative ? str.slice(1) : str;
-  const [intPart, fracPart = ''] = unsigned.split('.');
-  const paddedFrac = (fracPart + '0'.repeat(scale)).slice(0, scale);
-  const result = scale > 0 ? `${intPart}.${paddedFrac}` : intPart;
-  return negative ? `-${result}` : result;
-}
-
 export function deepStringifyDecimals<T>(value: T): DeepStringifyDecimals<T> {
   if (value instanceof Prisma.Decimal) {
     return value.toString() as DeepStringifyDecimals<T>;

@@ -6,6 +6,35 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Internal
+- **Fixed `lib/_decimal.ts` pulling the Node.js Prisma client into every
+  client-side bundle, and corrected a follow-up fix attempt that broke a
+  different line in the same file.** The Decimal-display fix below wired
+  `formatDecimalDisplay` into four client-side templates
+  (`form_view.tsx.jinja2`, `form_upsert.tsx.jinja2`, `column_def.tsx.jinja2`,
+  `page_list.tsx.jinja2`) while defining it in `lib/_decimal.ts` alongside
+  `deepStringifyDecimals` (which needs `Prisma` imported as a *value* for its
+  `instanceof Prisma.Decimal` check) — pulling the whole Prisma client into
+  every consumer app's client bundle, surfacing as `TurbopackInternalError`
+  on any consumer schema with an actual Decimal field. A first fix attempt
+  changed the import to `import type { Prisma }`, which broke
+  `deepStringifyDecimals`'s own `instanceof` check in the same file
+  (`error TS1361: 'Prisma' cannot be used as a value because it was
+  imported using 'import type'`) — the type-only import can't satisfy a
+  value-level check that genuinely needs it. The real fix splits the
+  module: `formatDecimalDisplay` (Prisma-free) moved to a new
+  `lib/_decimal_format.ts`; `deepStringifyDecimals`/`DeepStringifyDecimals`
+  stay in `lib/_decimal.ts` with the value import restored. The four client
+  templates now import `formatDecimalDisplay` from `_decimal_format.ts`
+  directly, never through `_decimal.ts` (a re-export barrel would still
+  pull `_decimal.ts`'s own top-level Prisma import into the bundle).
+  Verified with a real `next build` (not just `tsc --noEmit`, which cannot
+  see this class of client/server boundary defect at all — see
+  `docs/knowledge/decimal-client-server-boundary-gate-limitation.md`):
+  reproduced the exact reported `TS1361` failure with the broken import
+  restored, confirmed the fix builds clean, and confirmed the fix breaks
+  again without it. No existing gate (this repo's own default schema has
+  zero Decimal fields) exercises this path automatically; the doc above
+  records why and gives the manual verification recipe for next time.
 - **Fixed two generated-app defects surfaced by UI e2e testing (not caught
   by the mandatory API e2e gate): Decimal fields displaying with dropped
   trailing zeros, and optional one-to-one selector FK autocompletes losing
