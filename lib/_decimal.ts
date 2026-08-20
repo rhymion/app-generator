@@ -1,4 +1,4 @@
-import { Prisma } from '@/app/generated/prisma/client';
+import type { Prisma } from '@/app/generated/prisma/client';
 
 /**
  * Recursively maps every `Prisma.Decimal` occurrence inside `T` to `string`
