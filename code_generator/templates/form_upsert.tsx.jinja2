@@ -17,7 +17,7 @@ import { AppFormFieldWrapper } from '@/components/ui';
 import { formatLabelValue } from '@/lib/_format';
 {% endif %}
 {% if uses_decimal_format %}
-import { formatDecimalDisplay } from '@/lib/_decimal';
+import { formatDecimalDisplay } from '@/lib/_decimal_format';
 {% endif %}
 import { upsert{{ parent_pascal }}{% if can_delete %}, remove{{ parent_pascal }}{% endif %}{% if can_invalidate %}, invalidate{{ parent_pascal }}{% endif %}{% if has_comment_children %}, add{{ parent_pascal }}Comment, update{{ parent_pascal }}Comment, delete{{ parent_pascal }}Comment{% if named_constants %}, toggle{{ parent_pascal }}CommentReaction{% endif %}{% endif %} } from '@/lib/{{ parent }}/actions';
 {% if has_comment_children and named_constants %}

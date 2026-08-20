@@ -625,7 +625,9 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
     # the generated page_list.tsx must then import it from '@/lib/_format'.
     list_uses_format_label_value = False
     # Set when any list-page formatting expression invokes formatDecimalDisplay —
-    # the generated page_list.tsx must then import it from '@/lib/_decimal'.
+    # the generated page_list.tsx must then import it from '@/lib/_decimal_format'
+    # (Prisma-free — page_list.tsx is a client-bundle-adjacent module, never
+    # '@/lib/_decimal' itself, which imports the Node.js Prisma client as a value).
     list_uses_decimal_format = False
 
     def add_formatting(field_name: str, expr: str) -> None:
@@ -3261,7 +3263,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # the generated component must then `import { formatLabelValue } from '@/lib/_format';`.
     uses_format_label_value = False
     # Set when any readonly field uses formatDecimalDisplay — the generated
-    # component must then `import { formatDecimalDisplay } from '@/lib/_decimal';`.
+    # component must then
+    # `import { formatDecimalDisplay } from '@/lib/_decimal_format';` (Prisma-free
+    # — never '@/lib/_decimal' itself, which imports the Node.js Prisma client
+    # as a value and would pull it into a 'use client' component's bundle).
     uses_decimal_format = False
 
     # mention_fields (cmd_522c): this entity's own text fields annotated
