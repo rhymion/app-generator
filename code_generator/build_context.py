@@ -186,7 +186,8 @@ def _dedupe_ordered(items):
 # Form data extraction  (actions.ts / api routes)
 # ---------------------------------------------------------------------------
 
-def _build_form_data_gets(prop_infos: list[dict]) -> str:
+def _build_form_data_gets(prop_infos: list[dict], required_props: set | None = None) -> str:
+    required_props = required_props or set()
     lines = []
     for p in prop_infos:
         prop     = p['prop']
@@ -203,10 +204,43 @@ def _build_form_data_gets(prop_infos: list[dict]) -> str:
                     f"  const {var_name}Str = data.get('{prop}') as string | null;\n"
                     f"  const {var_name} = {var_name}Str ? new Date({var_name}Str) : null;"
                 )
-            else:
+            elif prop in required_props:
+                # Non-nullable + required: '' (an untouched-then-cleared
+                # field -- form_data_sets emits `?.toISOString() || ''`)
+                # turns into `new Date('')` == Invalid Date -- but
+                # isMissingValue() (service_validation.ts) already treats
+                # any Date failing isNaN(.getTime()) as missing, so
+                # REQUIRED_FIELDS cleanly rejects this with an AppError
+                # before it ever reaches Prisma. Left as the original
+                # unconditional construction: the service function's
+                # parameter type is plain `Date` (get_ts_type for a
+                # non-nullable date), so this must never become a
+                # `Date | null` expression.
                 lines.append(
                     f"  const {var_name}Str = data.get('{prop}') as string;\n"
                     f"  const {var_name} = new Date({var_name}Str);"
+                )
+            else:
+                # Non-nullable + NOT required: schema_deriver only omits a
+                # non-nullable field from `required:` when it carries a
+                # Prisma @default(...) (static or dynamic now()) --
+                # _default_value's has_db_default reasoning. Unlike the
+                # required case above, there is no REQUIRED_FIELDS check to
+                # rely on, so an Invalid Date here would reach Prisma raw
+                # and crash it (the required-*child*-row equivalent of this
+                # bug reaches this same failure a different way -- see
+                # `service.ts.jinja2`'s catch-all below; this parent-field
+                # branch was latent but unconfirmed by any failing spec --
+                # fixed here defensively, mirroring the Decimal case above).
+                # Falls back to the schema default (or "now") so the
+                # column stays legally NOT NULL, keeping the const's type
+                # plain `Date` throughout, matching the non-nullable
+                # parameter type.
+                date_fallback = f"new Date('{defn['default']}')" if 'default' in defn else 'new Date()'
+                lines.append(
+                    f"  const {var_name}Str = data.get('{prop}') as string;\n"
+                    f"  const {var_name}Raw = {var_name}Str ? new Date({var_name}Str) : null;\n"
+                    f"  const {var_name} = {var_name}Raw && !isNaN({var_name}Raw.getTime()) ? {var_name}Raw : {date_fallback};"
                 )
         elif actual == 'boolean':
             lines.append(f"  const {var_name} = data.get('{prop}') === 'true';")
@@ -228,6 +262,39 @@ def _build_form_data_gets(prop_infos: list[dict]) -> str:
             # narrower type the service layer now expects (cmd_446 pilot).
             suffix = ' | null' if nullable else ''
             lines.append(f"  const {var_name} = data.get('{prop}') as {get_ts_type(defn)}{suffix};")
+        elif actual == 'string' and defn.get('_prisma_decimal_type'):
+            # Decimal fields are exposed as JSON type "string", but
+            # an untouched/cleared field submits '' via FormData -- passed
+            # straight through, that reaches Prisma as the literal string ''
+            # and fails with "Failed to parse empty string. Expected decimal
+            # String." This is a product-code defect, not a test defect --
+            # clearing an optional numeric field is a normal user action.
+            if nullable:
+                # A nullable Decimal column legally accepts null for "cleared".
+                lines.append(f"  const {var_name} = (data.get('{prop}') as string | null) || null;")
+            elif prop in required_props:
+                # Non-nullable + required: '' already fails REQUIRED_FIELDS/
+                # isMissingValue (service_validation.ts) cleanly -- no
+                # fallback needed, and none is safe here: the service
+                # function's parameter type is plain `string`
+                # (get_ts_type for a non-nullable Decimal), so this must
+                # never become a `string | null` expression (a regression
+                # caught by test:decimal-gate's required-column branch:
+                # TS2345 assigning `string | null` to `string`).
+                lines.append(f"  const {var_name} = data.get('{prop}') as string;")
+            else:
+                # Non-nullable + NOT required: schema_deriver only omits a
+                # non-nullable field from `required:` when it carries a
+                # Prisma @default(...) (_default_value's has_db_default
+                # reasoning) -- client-clearable, with no REQUIRED_FIELDS
+                # check to catch it, so '' must fall back to a legal
+                # Decimal string here instead of reaching Prisma raw. Uses
+                # the schema default when declared, else '0' (always a
+                # valid Decimal literal) -- never `null`, for the same
+                # non-nullable-parameter-type reason as the required branch.
+                default_val = defn.get('default')
+                fallback = f"'{default_val}'" if default_val is not None else "'0'"
+                lines.append(f"  const {var_name} = (data.get('{prop}') as string) || {fallback};")
         else:
             suffix = ' | null' if nullable else ''
             lines.append(f"  const {var_name} = data.get('{prop}') as string{suffix};")
@@ -2073,7 +2140,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     )
 
     # Form data gets (for actions / API POST)
-    form_data_gets = _build_form_data_gets(parent_prop_infos)
+    form_data_gets = _build_form_data_gets(parent_prop_infos, set(model_def.get('required') or []))
 
     # Children (full analysis)
     children_data    = _build_child_data(children_raw, model, schema, parent_rels_raw)
