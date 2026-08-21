@@ -6,6 +6,36 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Internal
+- **Fixed generated UI e2e tests asserting a placeholder string
+  (`'Test {Label} 1'`) instead of the actual enum value for entities whose
+  `x-display.table` primary (list-row/card-title) field is a string or
+  Prisma nativeEnum column** (category `string_enum` in
+  `code_generator/generators_test.py`). The primary-field priority chain in
+  `spec_context()` had explicit branches for `entity_select`, integer
+  `enum`, and `number`/`decimal` primaries, but none for `string_enum` — it
+  fell through to the generic text-field fallback, which generates a value
+  the enum column can never actually hold, so every list/DataGrid-row
+  lookup keyed on it (`1.2`/`1.3`/`3.x`/`4.x`/`6.x`) failed. A second,
+  related gap in the same function's 3.3 ("edits with mixed changes")
+  primary-edit-command dispatch used `cy.clearAndFillField` (a plain-text
+  command) for the same category instead of
+  `cy.clearAutocomplete`/`cy.selectAutocomplete` (how the field is actually
+  rendered — matching `gen_fill_command`/`gen_clear_command`'s existing
+  fallback for this category everywhere else). Both gaps are fixed by
+  reusing the same `cypress_create_value`/`cypress_edit_value` functions the
+  generic per-field fill/assert commands already use for `string_enum`, so
+  the primary-field assertions match exactly what the form writes and the
+  list/card actually renders. Verified end-to-end against a real consumer
+  schema (`agent_hierarchy.hierarchy_type`, a Prisma nativeEnum primary):
+  before the fix, `agent_hierarchy.cy.ts` failed at `3.3` asserting the
+  literal placeholder; after the fix, all 13 desktop + 9 mobile
+  `agent_hierarchy` tests pass. Two new unit tests
+  (`code_generator/tests/test_e2e_context.py`) cover both gaps with a
+  minimal fixture and fail without the fix. No entity in this repo's own
+  default schema, nor in the app-template or inventory-app consumer
+  schemas checked at the time of this fix, currently has a `string_enum`
+  primary field, so this path was previously untested by any existing
+  gate.
 - **Fixed `lib/_decimal.ts` pulling the Node.js Prisma client into every
   client-side bundle, and corrected a follow-up fix attempt that broke a
   different line in the same file.** The Decimal-display fix below wired

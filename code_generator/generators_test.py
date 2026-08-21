@@ -3264,6 +3264,31 @@ def spec_context(
             check_field_label = lbl
             check_field_value_1 = list_id_1
             check_field_updated = list_id_updated
+        elif prim_meta.get('category') == 'string_enum':
+            # String/native enum primary (e.g. agent_hierarchy.hierarchy_type).
+            # The list/card shows the translated label (generators.py's
+            # page_list_context builds a `{var}Labels` map for this exact
+            # field) — not the raw enum DB value, and not the generic
+            # 'Test {Label} 1' placeholder the fallback branch below would
+            # otherwise produce (that placeholder can never appear on screen:
+            # an enum column only ever holds one of its declared values).
+            # Reuse cypress_create_value/cypress_edit_value — the same
+            # functions the generic per-field fill/assert commands already
+            # use for this category — so the primary-field list/card
+            # assertions match exactly what the form writes and the list
+            # actually renders.
+            list_id_1 = cypress_create_value(prim_meta, title)
+            list_id_is_unique = False
+            after_create_id = list_id_1
+            after_create_id_is_expr = False
+            primary_dep_var_for_list = None
+            list_id_updated = cypress_edit_value(prim_meta, title, _approval_locked_values) or list_id_1
+            has_edit_primary = True
+            edit_field_label = lbl
+            edit_update_value = list_id_updated
+            check_field_label = lbl
+            check_field_value_1 = list_id_1
+            check_field_updated = list_id_updated
         elif prim_meta.get('category') in ('number', 'decimal'):
             # 'decimal' (cmd_711f): same shape as 'number' — cypress_create_value/
             # cypress_edit_value already return valid numeric-format strings for it.
@@ -3525,8 +3550,8 @@ def spec_context(
         prim_edit_meta = next(
             (f for f in fields if f.get('label') == edit_field_label), None
         )
-        if prim_edit_meta and prim_edit_meta.get('category') in ('entity_select', 'autocomplete', 'enum'):
-            if prim_edit_meta.get('category') == 'enum':
+        if prim_edit_meta and prim_edit_meta.get('category') in ('entity_select', 'autocomplete', 'enum', 'string_enum'):
+            if prim_edit_meta.get('category') in ('enum', 'string_enum'):
                 # In edit mode the enum Autocomplete already has a value selected;
                 # clear it first so selectAutocomplete can open the dropdown cleanly.
                 edit_primary_cmd = (
