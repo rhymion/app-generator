@@ -8,7 +8,7 @@ import Link from '@mui/material/Link';
 import { useTranslations } from 'next-intl';
 import EditableListWrapper, { EditableListWrapperItem } from './EditableListWrapper';
 import OrderedEditableListWrapper from './OrderedEditableListWrapper';
-import { setAttachmentsForBridge } from '@/lib/attachment/actions';
+import { setAttachmentsForBridge } from '@/lib/attachment/bridge_actions';
 import type { ModelPermissions } from '@/lib/authz';
 
 const TYPE_IMAGE = 'image';

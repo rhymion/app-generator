@@ -396,14 +396,22 @@ def build_attachable_owners(schema: dict) -> list[dict]:
 
 
 def attachment_type_ts(schema: dict) -> str:
-    """TS type for the `type` param of lib/attachment/actions.ts's
+    """TS type for the `type` param of lib/attachment/bridge_actions.ts's
     setAttachmentsForBridge(). Mirrors attachment.type's actual field type
     (plain `number` by default, or the nativeEnum literal union once
     attachment.type has been migrated to a Prisma enum) so the hand-off
     from the generic bridge action to `prisma.attachment.create/findMany`
     type-checks without a cast.
+
+    Uses _raw_def(), not a bare `schema['definitions']['attachment']`
+    lookup (subtask_769d): once `attachment` is independently generated
+    (x-generate, needed for the OTO-selector "otsu" FK pattern), its
+    resolved definitions entry becomes an `allOf: [$ref: '#/definitions/
+    __attachment']` indirection rather than inlining `properties`
+    directly -- the bare lookup silently found nothing and fell back to
+    the wrong `'number'` default.
     """
-    prop = ((schema.get('definitions') or {}).get('attachment') or {}).get('properties', {}).get('type')
+    prop = (_raw_def('attachment', schema).get('properties') or {}).get('type')
     if not prop:
         return 'number'
     return get_ts_type(prop)
