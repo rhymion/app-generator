@@ -347,6 +347,23 @@ def _seed_path_part(
             # is_user_account row's label assertion unfindable (cmd_625b/625g).
             return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title} A'
         return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
+    if prop_type == 'string' and isinstance(label_prop.get('enum'), list) and label_prop['enum']:
+        # A bare string-enum labelField segment (e.g.
+        # claim_event.event_type in claim_line's [claim.claim_no,
+        # event_type]) is never explicitly set by the populate helper that
+        # creates this row when it's optional (schema_deriver only omits a
+        # non-nullable field from `required:` when a Prisma @default(...)
+        # backs it — mirrors _build_form_data_gets' has_db_default
+        # reasoning in build_context.py) -- the row reads back whichever
+        # value the DB default assigned, NOT a fabricated 'Test <Field> A'
+        # placeholder this branch previously always returned regardless of
+        # type. When required (no default), the populate helper must set
+        # some explicit value; every enum-value generator in this file
+        # (prisma_value's 'string_enum' branch et al.) uses the first
+        # declared member as that value by convention. Prefer the schema
+        # default when declared, else the first enum member, so this
+        # matches whichever of those two the row actually holds.
+        return label_prop.get('default') or label_prop['enum'][0]
     if prop_type == 'string':
         title = to_title_case(final_field)
         return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
@@ -1094,7 +1111,29 @@ def get_field_metas(
         fmt = prop.get('format')
 
         if prop_type == 'string' and fmt == 'uri':
-            continue  # image/file field — skip
+            # image/file field: an optional (nullable) one is legitimately
+            # skippable — no attachment is a valid state. A non-nullable one
+            # is a required column with no other value source; omitting it
+            # from every test-data generator (populate helpers especially)
+            # leaves the column unset and Prisma rejects the whole create()
+            # with a NOT NULL violation before the test under it ever runs
+            # (e.g. claim_document.file_uri — a required child of claim).
+            # Give it a 'text' meta carrying format:'uri' so the
+            # existing api_value() uri branch (already written for this,
+            # previously dead code since this field never reached it) and
+            # the prisma_value()/cypress_*_value() uri branches added below
+            # generate a URL-shaped placeholder instead of skipping it.
+            prop_is_nullable = isinstance(prop_type_raw, list) and 'null' in prop_type_raw
+            if prop_is_nullable:
+                continue
+            metas.append({
+                **base,
+                'label': to_title_case(prop_name),
+                'category': 'text',
+                'required': prop_name in required_fields,
+                'format': fmt,
+            })
+            continue
         elif prop_type == 'string' and fmt in ('date', 'date-time', 'time'):
             metas.append({
                 **base,
@@ -1300,6 +1339,13 @@ def prisma_value(field: dict, index: str, entity_title: str) -> str:
     prop_name = field['prop_name']
 
     if cat == 'text':
+        if field.get('format') == 'uri':
+            # A URL-shaped placeholder, not the generic
+            # 'Test <label>' text — a required uri column (e.g.
+            # claim_document.file_uri) is otherwise inserted via the DB
+            # populate helper, which has no browser/AppFieldText in the
+            # loop to justify a human-readable placeholder.
+            return f'`https://example.com/test-{prop_name}-${{{index}}}`'
         if prop_name == 'name':
             return f'`{entity_title} ${{{index}}}`'
         if prop_name == 'email':
@@ -1369,6 +1415,8 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
     prop_name = field['prop_name']
 
     if cat == 'text':
+        if field.get('format') == 'uri':
+            return f'https://example.com/test-{prop_name}-1'
         if prop_name == 'name':
             val = f'Test {entity_title}'
         elif field.get('enum_values'):
@@ -1439,6 +1487,8 @@ def cypress_edit_value(field: dict, entity_title: str, approval_locked_values: d
     _locked = set((approval_locked_values or {}).get(prop_name) or [])
 
     if cat == 'text':
+        if field.get('format') == 'uri':
+            return f'https://example.com/test-{prop_name}-2'
         if prop_name == 'name':
             val = f'Updated {entity_title}'
         else:
@@ -1825,6 +1875,25 @@ def gen_child_datagrid_fk_fields(fields: list, schema: dict | None = None) -> li
             label_code = f'deps.{to_camel_case(stem)}.id'
         elif isinstance(dep_label_field, list) and schema is not None:
             raw = _seed_relation_label_value(dep_target, dep_label_field, False, schema)
+            label_code = f"'{raw}'"
+        elif dep_label_field and dep_label_field != 'name' and schema is not None:
+            # A non-'name'/non-'id' scalar labelField (e.g.
+            # agent_appointment.product_version_id → labelField
+            # 'regulatory_filing_no') fell through to the generic
+            # entity-name literal below ('Test Product Version A'), which
+            # never matches the dropdown option text the UI actually
+            # renders (the target's real labelField value, 'Test
+            # Regulatory Filing No A') — selectDataGridSingleSelect then
+            # times out with no match. The dependency helper's own name
+            # mapping (deps.<x>.name aliasing) already gets this right for
+            # the *parent* form's autocomplete; only this child-datagrid
+            # singleSelect value generator was still hardcoded to the
+            # entity-name shape. _seed_relation_label_value is the same
+            # resolver the list-labelField branch above (and the parent
+            # form's own expected-label computation) already trusts.
+            raw = _seed_relation_label_value(
+                dep_target, dep_label_field, f.get('dep_label_field_is_date', False), schema,
+            )
             label_code = f"'{raw}'"
         else:
             label_code = f"'Test {to_title_case(stem)} A'"
@@ -3672,6 +3741,22 @@ def spec_context(
             fail_edit_6_2 = {
                 'child_pascal': to_pascal_case(test_child['child']['name']),
                 'field_prop_name': child_field_to_clear['prop_name'],
+                # A DataGrid child date/date-time/time column
+                # (generators.py's column_def codegen) has no renderEditCell
+                # override -- editing goes through the browser's native
+                # datetime-local/date/time input (unlike the top-level
+                # form's DateTimeWrapper, which accepts keyboard-sectioned
+                # typing and clearDateTime()'s "Clear" button -- neither
+                # exists here). Cypress's own .type() validates its argument
+                # against these native input types and rejects a key-action
+                # sequence like '{selectall}{backspace}' outright
+                # (CypressError: "requires a valid datetime... You passed:
+                # {selectAll}{Backspace}"), which is a different failure
+                # from the original crash coverage_master 6.2 was measured
+                # against but blocks it just the same. .clear() is
+                # Cypress's own supported way to empty a native date/time
+                # input.
+                'field_is_datetime': child_field_to_clear['category'] == 'datetime',
             }
 
     # Count records pre-created by db:seed + db:grantAllPermissions.

@@ -60,7 +60,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.task('db:populate{{ pascal }}', 1);
       cy.visit('/en/{{ parent }}');
       cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-      cy.contains('{{ list_id_1 }}').scrollIntoView().should('be.visible');
+      cy.contains(exactRe('{{ list_id_1 }}')).scrollIntoView().should('be.visible');
       getDataGridTotalRowCount().should('eq', {{ seed_count + 1 }});
     });
 
@@ -68,7 +68,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.task('db:populate{{ pascal }}', 3);
       cy.visit('/en/{{ parent }}');
       cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-      cy.contains('{{ list_id_1 }}').scrollIntoView().should('be.visible');
+      cy.contains(exactRe('{{ list_id_1 }}')).scrollIntoView().should('be.visible');
       // Use aria-rowcount for the total (getDataGridRowCount counts only virtualised DOM rows)
       getDataGridTotalRowCount().should('eq', {{ seed_count + 3 }});
     });
@@ -114,7 +114,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if after_create_id_is_expr %}
 {{ I }}cy.contains('.MuiDataGrid-cell', exactRe(deps.{{ primary_dep_var_for_list }}.name)).scrollIntoView().should('be.visible');
 {% else %}
-{{ I }}cy.contains('{{ after_create_id }}').scrollIntoView().should('be.visible');
+{{ I }}cy.contains(exactRe('{{ after_create_id }}')).scrollIntoView().should('be.visible');
 {% endif %}
 {% endif %}
 {% if can_view and can_list %}
@@ -124,10 +124,17 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}cy.contains('.MuiDataGrid-cell', exactRe(deps.{{ primary_dep_var_for_list }}.name)).scrollIntoView().should('be.visible');
 {{ I }}cy.contains('.MuiDataGrid-cell', exactRe(deps.{{ primary_dep_var_for_list }}.name)).find('a').first().click();
 {% elif not list_id_is_unique %}
+{{ I }}// list_id_1/after_create_id may not uniquely identify this row (e.g.
+{{ I }}// an entity_select primary whose value repeats across seed rows --
+{{ I }}// permission's 'Name' is the resource type, not a unique per-record
+{{ I }}// label) -- the record was just created via this UI form
+{{ I }}// (no populate-helper id available), so position is the only signal:
+{{ I }}// it sorts to the bottom of the (ascending, freshly-scrolled) grid,
+{{ I }}// same assumption 2.2's identical branch below already relies on.
 {{ I }}cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-{{ I }}cy.contains('.MuiDataGrid-row', '{{ after_create_id }}').find('a').first().click();
+{{ I }}cy.get('.MuiDataGrid-row').last().find('a').first().click();
 {% else %}
-{{ I }}cy.contains('{{ after_create_id }}').click();
+{{ I }}cy.contains(exactRe('{{ after_create_id }}')).click();
 {% endif %}
 {{ I }}cy.url().should('include', '/{{ parent }}/view');
 {% for cmd in required_assert_cmds_no_bool %}
@@ -198,7 +205,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if after_create_id_is_expr %}
 {{ I }}cy.contains('.MuiDataGrid-cell', exactRe(deps.{{ primary_dep_var_for_list }}.name)).scrollIntoView().should('be.visible');
 {% else %}
-{{ I }}cy.contains('{{ after_create_id }}').scrollIntoView().should('be.visible');
+{{ I }}cy.contains(exactRe('{{ after_create_id }}')).scrollIntoView().should('be.visible');
 {% endif %}
 {% endif %}
 {% if can_view and can_list %}
@@ -211,7 +218,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {{ I }}cy.get('.MuiDataGrid-row').last().find('a').first().click();
 {% else %}
-{{ I }}cy.contains('{{ after_create_id }}').click();
+{{ I }}cy.contains(exactRe('{{ after_create_id }}')).click();
 {% endif %}
 {{ I }}cy.url().should('include', '/{{ parent }}/view');
 {% for cmd in all_assert_cmds_no_bool %}
@@ -249,7 +256,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if list_id_is_unique %}
         cy.visit('/en/{{ parent }}');
         cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-        cy.contains('{{ list_id_1 }}').click();
+        cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
         {# list_id_1 ('{{ list_id_1 }}') is not guaranteed unique in the DB —
            a self-ref m2m dep (cmd_646) or another row can share the same
@@ -331,13 +338,13 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.url().should('not.include', '/{{ parent }}/');
 {% if can_list %}
         cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-        cy.contains('{{ list_id_1 }}').scrollIntoView().should('be.visible');
+        cy.contains(exactRe('{{ list_id_1 }}')).scrollIntoView().should('be.visible');
 {% endif %}
 {% if can_view %}
         // Verify on view page
 {% if can_list %}
 {% if list_id_is_unique %}
-        cy.contains('{{ list_id_1 }}').click();
+        cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
         {# See the entry-navigation comment above — list_id_1 may not be
            unique, so navigate straight to the known id instead. #}
@@ -409,9 +416,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.visit('/en/{{ parent }}');
         cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if list_id_is_unique %}
-        cy.contains('{{ list_id_1 }}').click();
+        cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
-        cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+        cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
 {% endif %}
         cy.get('a[aria-label="Edit"]').click();
 {% elif can_list %}
@@ -443,7 +450,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.url().should('not.include', '/{{ parent }}/');
 {% if can_list %}
         cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-        cy.contains('{{ list_id_1 }}').scrollIntoView().should('be.visible');
+        cy.contains(exactRe('{{ list_id_1 }}')).scrollIntoView().should('be.visible');
 {% endif %}
       });
     });
@@ -462,7 +469,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% elif can_list and can_view %}
         cy.visit('/en/{{ parent }}');
         cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-        cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+        cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
         cy.get('a[aria-label="Edit"]').click();
 {% elif can_list %}
         cy.visit('/en/{{ parent }}');
@@ -484,7 +491,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.url().should('include', '/{{ parent }}');
         cy.url().should('not.include', '/{{ parent }}/');
 {% if can_list and list_id_is_unique %}
-        cy.contains('{{ list_id_updated }}').scrollIntoView().should('be.visible');
+        cy.contains(exactRe('{{ list_id_updated }}')).scrollIntoView().should('be.visible');
 {% endif %}
 {% if can_view and can_list %}
         // Verify on view page
@@ -493,7 +500,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
         // range issues (the renamed value may be beyond the initial viewport).
         cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
 {% else %}
-        cy.contains('{{ list_id_updated }}').click();
+        cy.contains(exactRe('{{ list_id_updated }}')).click();
 {% endif %}
         cy.url().should('include', '/{{ parent }}/view');
 {% if not check_field_skip %}
@@ -536,7 +543,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.get('div').find('button[aria-label="Delete Selected"]').first().click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
 {% if list_id_is_unique %}
-      cy.contains('{{ list_id_1 }}').should('not.exist');
+      cy.contains(exactRe('{{ list_id_1 }}')).should('not.exist');
 {% endif %}
       getDataGridTotalRowCount().should('eq', 1);
 {% else %}
@@ -562,7 +569,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.get('div').find('button[aria-label="Delete Selected"]').first().click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
 {% if list_id_is_unique %}
-      cy.contains('{{ list_id_1 }}').should('not.exist');
+      cy.contains(exactRe('{{ list_id_1 }}')).should('not.exist');
 {% endif %}
       getDataGridTotalRowCount().should('eq', 1);
 {% else %}
@@ -594,9 +601,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.visit('/en/{{ parent }}');
       cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if list_id_is_unique %}
-      cy.contains('{{ list_id_1 }}').click();
+      cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
-      cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+      cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
 {% endif %}
       cy.get('a[aria-label="Edit"]').click();
 {% else %}
@@ -611,7 +618,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.url().should('include', '/{{ parent }}');
       cy.url().should('not.include', '/{{ parent }}/');
 {% if list_id_is_unique %}
-      cy.contains('{{ list_id_1 }}').should('not.exist');
+      cy.contains(exactRe('{{ list_id_1 }}')).should('not.exist');
 {% endif %}
 {% else %}
       cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
@@ -711,9 +718,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.visit('/en/{{ parent }}');
       cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if list_id_is_unique %}
-      cy.contains('{{ list_id_1 }}').click();
+      cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
-      cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+      cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
 {% endif %}
       cy.get('a[aria-label="Edit"]').click();
 {% else %}
@@ -748,9 +755,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.visit('/en/{{ parent }}');
         cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if list_id_is_unique %}
-        cy.contains('{{ list_id_1 }}').click();
+        cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
-        cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+        cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
 {% endif %}
         cy.get('a[aria-label="Edit"]').click();
 {% elif can_list %}
@@ -767,7 +774,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.get('form').should('be.visible');
         cy.get('div[role="row"][data-rowindex="0"]').should('be.visible');
         cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="{{ fail_edit_6_2.field_prop_name }}"]').dblclick();
+{% if fail_edit_6_2.field_is_datetime %}
+        cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="{{ fail_edit_6_2.field_prop_name }}"] input').should('be.visible').clear();
+{% else %}
         cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="{{ fail_edit_6_2.field_prop_name }}"] input').should('be.visible').type('{selectall}{backspace}');
+{% endif %}
         cy.get('p').first().click(); // Click outside to commit the edit, as some cells may have async validation that prevents Enter key from working.
         cy.clickButton('Save');
         cy.url().should('include', '/{{ parent }}/edit');
@@ -851,9 +862,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.visit('/en/{{ parent }}');
           cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if list_id_is_unique %}
-          cy.contains('{{ list_id_1 }}').click();
+          cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
-          cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+          cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
 {% endif %}
           cy.get('a[aria-label="Edit"]').click();
 {% elif can_view %}
@@ -890,9 +901,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.visit('/en/{{ parent }}');
           cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if list_id_is_unique %}
-          cy.contains('{{ list_id_1 }}').click();
+          cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
-          cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+          cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
 {% endif %}
           cy.get('a[aria-label="Edit"]').click();
 {% elif can_view %}
@@ -927,9 +938,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.visit('/en/{{ parent }}');
           cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if list_id_is_unique %}
-          cy.contains('{{ list_id_1 }}').click();
+          cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
-          cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+          cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
 {% endif %}
           cy.get('a[aria-label="Edit"]').click();
 {% elif can_view %}
@@ -1003,9 +1014,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.visit('/en/{{ parent }}');
           cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if list_id_is_unique %}
-          cy.contains('{{ list_id_1 }}').click();
+          cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
-          cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+          cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
 {% endif %}
           cy.get('a[aria-label="Edit"]').click();
 {% elif can_view %}
@@ -1055,7 +1066,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.contains('.MuiDataGrid-cell', exactRe(deps.{{ primary_dep_var_for_list }}.name)).find('a').first().click();
 {% endif %}
 {% else %}
-          cy.contains('{{ after_create_id }}').click();
+          cy.contains(exactRe('{{ after_create_id }}')).click();
 {% endif %}
           cy.url().should('include', '/{{ parent }}/view');
           // Requestor is in requestorRole → both flows apply → 2 approval_requests
@@ -1084,7 +1095,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.contains('.MuiDataGrid-cell', exactRe(deps.{{ primary_dep_var_for_list }}.name)).find('a').first().click();
 {% endif %}
 {% else %}
-          cy.contains('{{ after_create_id }}').click();
+          cy.contains(exactRe('{{ after_create_id }}')).click();
 {% endif %}
           cy.url().should('include', '/{{ parent }}/view');
           // noRoleUser not in requestorRole → only flowWithoutRole applies → 1 approval_request

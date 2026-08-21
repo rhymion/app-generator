@@ -6,6 +6,73 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Internal
+- **Fixed a Decimal/date field crashing the write when a user cleared it,
+  for any non-nullable-but-not-required column** (`build_context.py`'s
+  `_build_form_data_gets()`). An untouched-then-cleared field submits `''`
+  via `FormData`; a bare `data.get(prop) as string` cast passed that
+  straight to Prisma, which rejected an empty Decimal outright
+  (`Failed to parse empty string. Expected decimal String.`) and an empty
+  date as `Invalid Date`. This is a product-code defect, not a test defect
+  — clearing an optional numeric or date field is an ordinary user action.
+  Now falls back to the field's schema default (or `'0'`/`new Date()` when
+  no default is declared) for the non-required case; a genuinely required
+  field's empty submission is left alone, since it already fails the
+  existing `REQUIRED_FIELDS`/`isMissingValue` check in
+  `service_validation.ts` cleanly. Separately, DataGrid child rows had **no
+  validation of their own at all** — `validateOnAdd`/`validateOnUpdate`
+  only ever checked the parent's fields — so a cleared required child date
+  reached Prisma raw and threw an uncaught `PrismaClientValidationError`.
+  `service.ts.jinja2`'s shared create/update catch block now wraps
+  `PrismaClientValidationError`/`PrismaClientKnownRequestError` (beyond the
+  existing `P2002` case) as a clean `AppError('VALIDATION', ...)`. See
+  `docs/knowledge/decimal-and-date-empty-string-clear-crash.md`.
+- **Fixed several generated UI e2e test gaps surfaced by testing a large
+  real-world consumer schema end-to-end**, all in `generators_test.py` /
+  `label_field.py` / `test_spec.cy.ts.jinja2` / `test_spec_mobile.cy.ts.jinja2`:
+  - A row/card lookup keyed on an entity's primary display value used a
+    plain substring `cy.contains(text)` — if another visible cell (a
+    different column, a dependency row, or another record sharing the same
+    primary value) happened to contain that text as a substring, the wrong
+    element got clicked and the test failed with a URL/assertion mismatch
+    instead of navigating correctly. Broadened the existing exact-match
+    helper (previously only applied to self-referential-FK primaries) to
+    every such lookup across both the desktop and mobile spec templates.
+    Where the primary value isn't reliably unique at all (e.g. an
+    `entity_select` primary whose value is shared across many rows), the
+    just-created record is now found by grid position instead of by text.
+  - A child DataGrid's FK single-select value generator used the target
+    entity's own name (`'Test {Entity} A'`) instead of the FK's declared
+    `labelField`, so it never matched the dropdown option the UI actually
+    renders when `labelField` isn't `'name'`.
+  - A non-nullable `format: uri` field was unconditionally skipped when
+    generating populate-helper test data, leaving the column unset and
+    failing every required-child-entity insert that carried one.
+  - A composite `labelField` mixing a database-searchable segment with a
+    string-enum segment (e.g. `[claim.claim_no, event_type]`) typed the
+    enum's raw value into the autocomplete search box, but the server's
+    `searchXxxOptions()` deliberately never searches enum fields (their
+    displayed label is translated; their stored value isn't) — the search
+    query's own enum token could never match anything, so the autocomplete
+    permanently showed no candidates. The Cypress-typed search string now
+    excludes non-searchable segments, matching what the server actually
+    queries.
+  - A bare string-enum `labelField` segment whose value comes from a
+    Prisma column default (omitted from the populate helper's own
+    `create()` call, since it's not required) computed a fabricated
+    placeholder as its expected UI value instead of the schema's declared
+    default / first enum member — breaking any assertion or exact-match
+    lookup built from it.
+  - A DataGrid child date/time cell's "clear a required field" test step
+    used `.type('{selectall}{backspace}')`, which Cypress rejects outright
+    for a native `datetime-local` input (no `renderEditCell` override
+    exists for DataGrid date columns, unlike the top-level form's
+    `DateTimeWrapper`). Now uses `.clear()` for that field category.
+
+  Verified end-to-end against a 68-entity real-world consumer schema:
+  before the fixes, 14 of that schema's generated UI e2e specs failed;
+  after, all 14 pass individually, the schema's remaining 80 specs (desktop
+  + mobile) show no new failures, and this repo's own full e2e suite
+  (`test:e2e:cy:api` + `test:e2e:cy:ui`, desktop + mobile) stays green.
 - **Fixed generated UI e2e tests asserting a placeholder string
   (`'Test {Label} 1'`) instead of the actual enum value for entities whose
   `x-display.table` primary (list-row/card-title) field is a string or

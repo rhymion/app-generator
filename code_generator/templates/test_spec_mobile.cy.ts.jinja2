@@ -14,6 +14,15 @@ import { TEST_CREDENTIALS } from '../../support/test-credentials';
 
 const MOBILE = { width: 375, height: 667 }; // iPhone SE
 
+// A card's primary/title text isn't always unique across seed + populated
+// rows (e.g. permission's 'Name' is a resource type shared by many rows) --
+// cy.contains() is substring-based on top of that, so an unscoped
+// '{{ list_id_1 }}' can tap the wrong card (mirrors the desktop spec's
+// identical exactRe()).
+function exactRe(text: string): RegExp {
+  return new RegExp('^' + text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$');
+}
+
 describe('Testing {{ title }} pages and their behavior [mobile]', () => {
   beforeEach(() => {
     cy.viewport(MOBILE.width, MOBILE.height);
@@ -51,7 +60,7 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
     it('1.2 renders one card per item with the primary value as title', () => {
       cy.task('db:populate{{ pascal }}', 1);
       cy.visit('/en/{{ parent }}');
-      cy.contains('{{ list_id_1 }}').should('be.visible');
+      cy.contains(exactRe('{{ list_id_1 }}')).should('be.visible');
       cy.get('input[type="checkbox"][aria-label^="Select "]').should('have.length', {{ seed_count + 1 }});
     });
 
@@ -65,7 +74,7 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
 {% if can_view %}
       cy.task('db:populate{{ pascal }}', 1);
       cy.visit('/en/{{ parent }}');
-      cy.contains('{{ list_id_1 }}').click();
+      cy.contains(exactRe('{{ list_id_1 }}')).click();
       cy.url().should('include', '/{{ parent }}/view');
 {% else %}
       // {{ parent }} has can_view = false — view route is not generated.

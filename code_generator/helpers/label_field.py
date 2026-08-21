@@ -118,6 +118,7 @@ def resolve_label_paths(label_field, target: str, schema: dict) -> list[dict]:
         final_format = None
         final_is_number = False
         final_enum_labels = None
+        final_is_string_enum = False
 
         for i, seg in enumerate(segments):
             cursor_props = _entity_props(cursor_entity, schema)
@@ -138,6 +139,25 @@ def resolve_label_paths(label_field, target: str, schema: dict) -> list[dict]:
                     _ftype = next((t for t in _ftype if t != 'null'), None)
                 final_is_number = _ftype in ('integer', 'number') and final_format is None
                 final_enum_labels = _string_enum_labels(final_prop.get('enum')) if final_is_number else None
+                # A string-typed enum final segment (e.g.
+                # claim_event.event_type) renders its raw stored value in the
+                # full label (correct -- that IS the display value), but
+                # derive_searchable_relation_fields/derive_cross_entity_
+                # searchable_fields (schema_helpers.py) deliberately exclude
+                # enum fields from searchXxxOptions()'s query (an enum's
+                # screen label is translated while its stored value is not).
+                # build_string_only_label_expression below existed
+                # to keep the Cypress-typed search string in sync with what
+                # the server actually searches, but its docstring's claimed
+                # "date/enum/number" exclusion never checked enum at all for
+                # STRING-typed enums (only numeric-enum, via final_is_number)
+                # -- so a composite labelField mixing a searchable segment
+                # with a string-enum segment (e.g. [claim.claim_no,
+                # event_type]) typed the enum's raw value as a mandatory
+                # AND-token no server-side field ever matches, so the
+                # autocomplete always showed "No options" (claim_line 2.x,
+                # commission_entry 2.x/5.x).
+                final_is_string_enum = _ftype == 'string' and isinstance(final_prop.get('enum'), list)
             else:
                 if seg not in cursor_rels:
                     avail = sorted(cursor_rels.keys())
@@ -156,6 +176,7 @@ def resolve_label_paths(label_field, target: str, schema: dict) -> list[dict]:
             'final_format': final_format,
             'final_is_number': final_is_number,
             'final_enum_labels': final_enum_labels,
+            'final_is_string_enum': final_is_string_enum,
             'relation_chain': relation_chain,
         })
     return out
@@ -299,10 +320,13 @@ def build_string_only_label_expression(
     """TS expression producing a label composed of STRING-TYPE segments only.
 
     Excludes segments whose final field has a format in `_DATE_FORMATS`
-    (date, date-time, time) or is numeric (`final_is_number`). The result is
-    the search string a Cypress test should TYPE into an autocomplete input —
-    it omits date/enum/number display fragments that the server can't search
-    (search{{Entity}}Options only queries string fields).
+    (date, date-time, time), is numeric (`final_is_number`), or is a
+    string-typed enum (`final_is_string_enum`). The result is the search
+    string a Cypress test should TYPE into an autocomplete input — it omits
+    date/enum/number display fragments that the server can't search
+    (search{{Entity}}Options only queries string fields; see
+    derive_searchable_relation_fields/derive_cross_entity_searchable_fields
+    in schema_helpers.py, which apply this same enum exclusion server-side).
 
     Returns '' if ALL segments are non-string — the caller must fall back to
     the full label expression (or another strategy).
@@ -313,6 +337,7 @@ def build_string_only_label_expression(
         for r in resolved
         if r['final_format'] not in _DATE_FORMATS
         and not r.get('final_is_number', False)
+        and not r.get('final_is_string_enum', False)
     ]
     if not string_parts:
         return ''

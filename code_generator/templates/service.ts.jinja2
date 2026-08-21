@@ -86,6 +86,20 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
       throw new AppError('CONFLICT', 'Unique constraint violation', p2002Field(e.meta));
     }
+    // Child-row (DataGrid nested create/update) fields carry no
+    // validateOnAdd/validateOnUpdate coverage of their own --
+    // an invalid or missing required value there (e.g. a cleared required
+    // date) reaches Prisma raw and throws PrismaClientValidationError
+    // (bad argument type/shape) rather than an AppError. Left unguarded,
+    // this is an uncaught exception, not a graceful "<field> is required"
+    // rejection. Same treatment for the parent-field edge this generator
+    // cannot fully prevent client-side either (a malformed value slipping
+    // past the browser). P2002 is handled above; every other
+    // PrismaClientKnownRequestError code below is likewise a bad-input
+    // shape (FK/type/constraint), not a server bug.
+    if (e instanceof Prisma.PrismaClientValidationError || e instanceof Prisma.PrismaClientKnownRequestError) {
+      throw new AppError('VALIDATION', 'One or more fields have an invalid value');
+    }
     throw e;
   }
 {% if has_assignee_id %}
@@ -196,6 +210,20 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
       throw new AppError('CONFLICT', 'Unique constraint violation', p2002Field(e.meta));
+    }
+    // Child-row (DataGrid nested create/update) fields carry no
+    // validateOnAdd/validateOnUpdate coverage of their own --
+    // an invalid or missing required value there (e.g. a cleared required
+    // date) reaches Prisma raw and throws PrismaClientValidationError
+    // (bad argument type/shape) rather than an AppError. Left unguarded,
+    // this is an uncaught exception, not a graceful "<field> is required"
+    // rejection. Same treatment for the parent-field edge this generator
+    // cannot fully prevent client-side either (a malformed value slipping
+    // past the browser). P2002 is handled above; every other
+    // PrismaClientKnownRequestError code below is likewise a bad-input
+    // shape (FK/type/constraint), not a server bug.
+    if (e instanceof Prisma.PrismaClientValidationError || e instanceof Prisma.PrismaClientKnownRequestError) {
+      throw new AppError('VALIDATION', 'One or more fields have an invalid value');
     }
     throw e;
   }
