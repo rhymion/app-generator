@@ -528,3 +528,68 @@ def test_spec_context_is_user_account_primary_label_excludes_callindex_prefix():
     )
     assert ctx["list_id_1"] == "Test User 1"
     assert ctx["check_field_value_1"] == "Test User 1"
+
+
+def _string_enum_primary_schema() -> dict:
+    """A minimal entity whose x-display.table primary field is a plain
+    string with a JSON-schema `enum:` (category 'string_enum' -- the same
+    category a Prisma nativeEnum column like agent_hierarchy.hierarchy_type
+    resolves to; see schema_deriver.derive_property's
+    `_prisma_native_enum_type` marker, which schema_deriver.py adds on top
+    of this same base shape)."""
+    return {
+        "definitions": {
+            "task_item": {
+                "type": "object",
+                "required": ["id", "status"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "status": {"type": "string", "enum": ["pending", "done"]},
+                },
+                "x-display": {
+                    "table": [
+                        {"status": {"primary": True}},
+                    ],
+                },
+            },
+            "task_item_detail": {
+                "allOf": [{"$ref": "#/definitions/task_item"}],
+            },
+        },
+    }
+
+
+def test_spec_context_string_enum_primary_uses_enum_value_not_placeholder():
+    """cmd_768: a string/native-enum primary field must assert one of its
+    actual declared enum values, not the generic 'Test {Label} 1'
+    placeholder the fallback (non-enum, non-FK, non-name) branch produces --
+    a placeholder an enum column can never actually hold, since it only ever
+    stores one of its declared members. Before this fix, `prim_meta.get(
+    'category') == 'string_enum'` matched no branch in the primary-field
+    priority chain and fell straight through to that fallback, so every
+    list/DataGrid-row lookup keyed on it (1.2/1.3/3.x/4.x/6.x) failed
+    against the real rendered value."""
+    ctx = spec_context(
+        "task_item", [], _string_enum_primary_schema(), "task_item", "task_item_detail",
+        _entity("task_item")["generate_config"],
+    )
+    assert ctx["list_id_1"] == "pending"
+    assert ctx["list_id_is_unique"] is False
+    assert ctx["after_create_id"] == "pending"
+    assert ctx["list_id_updated"] == "done"
+
+
+def test_spec_context_string_enum_primary_edit_uses_select_autocomplete():
+    """The 3.3 mixed-changes edit must drive the field as an
+    Autocomplete/Select (clearAutocomplete + selectAutocomplete) -- matching
+    how gen_fill_command/gen_clear_command already render this exact
+    category everywhere else -- not cy.clearAndFillField (a plain-text-input
+    command the field's actual widget never responds to)."""
+    ctx = spec_context(
+        "task_item", [], _string_enum_primary_schema(), "task_item", "task_item_detail",
+        _entity("task_item")["generate_config"],
+    )
+    assert ctx["edit_primary_cmd"] == (
+        "        cy.clearAutocomplete('Status');\n"
+        "        cy.selectAutocomplete('Status', 'done');"
+    )
