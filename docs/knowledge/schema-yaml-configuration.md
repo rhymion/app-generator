@@ -493,7 +493,8 @@ under the field's `fields:` override.
 | `format: date-time` | Renders MUI X DateTimePicker |
 | `format: date` | Renders MUI X DatePicker |
 | `format: time` | Renders MUI X TimePicker |
-| `format: uri` | Renders image preview or link |
+| `format: uri` | Renders image preview or link (see `x-uri-kind` below) |
+| `x-uri-kind: image` \| `link` | Only meaningful on a `format: uri` field. Default `image`: renders `ImageUpload` (create/edit) and an image preview (view/list). `link`: renders a plain URL text input (create/edit, `type="url"`) and a clickable external link (`AppFieldExternalLink`, view/list) instead. |
 | `format: regex` | Hint that the value is a regex; rendered as text input |
 | `default` | Pre-fills the field in new form. **Not** auto-derived from Prisma's `@default(...)` even when one exists — the legacy schema sometimes omitted it even where Prisma had a default, so its presence is always a deliberate, user-authored `fields:` entry. |
 

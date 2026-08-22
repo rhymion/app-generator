@@ -23,6 +23,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   needs a rebuild, not just an env var edit, to pick up a change). See
   `docs/knowledge/noindex-default-and-branding-env-vars.md`.
 
+### Fixed
+- **`x-uri-kind: link` fields were silently absent from the create/edit
+  form.** A `format: uri` field declared `x-uri-kind: link` was categorized
+  correctly by the generator's field-typing logic, and its read-only display
+  (view page, list, DataGrid) already rendered as a clickable external link,
+  but no input was ever rendered for it in the create/edit form — the field
+  could never be set through the UI, and on every edit of an existing
+  record the missing form value let the update path silently overwrite
+  (erase) any existing value. Also fixed the same field's read-only display
+  inside the edit form (when marked `x-readonly`) and the view page: both
+  rendered an image widget instead of a link. See
+  `docs/knowledge/schema-yaml-configuration.md` (`x-uri-kind`) and
+  `docs/knowledge/readonly-field-form-rendering.md`.
+
 ### Internal
 - **Fixed a silent output-path collision between the polymorphic attachable-bridge
   actions and a standard per-entity CRUD actions file when `attachment` is

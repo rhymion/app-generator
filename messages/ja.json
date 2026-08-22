@@ -92,6 +92,7 @@
     "role": "ロール",
     "roles": "ロール",
     "seriesField": "系列項目",
+    "sourceUrl": "参照元URL",
     "stackMode": "積み上げモード",
     "status": "ステータス",
     "targetId": "Target Id",

@@ -315,6 +315,7 @@ model attachment {
 model dashboard {
   id         String             @id @default(cuid())
   name       String
+  source_url String?
   widgets    dashboard_widget[]
   created_at DateTime           @default(now()) @db.Timestamptz(0)
   updated_at DateTime           @updatedAt @db.Timestamptz(0)
