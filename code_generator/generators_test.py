@@ -143,7 +143,7 @@ from helpers.label_field import (
     build_label_expression, render_prisma_include, resolve_label_paths, relation_chain_targets,
     build_string_only_label_expression,
 )
-from build_context import _get_entity_options, _raw_def, is_forced_required_field
+from build_context import _get_entity_options, _raw_def, is_forced_required_field, get_uri_kind
 from generate_types import extract_entities
 
 
@@ -1132,6 +1132,13 @@ def get_field_metas(
                 'category': 'text',
                 'required': prop_name in required_fields,
                 'format': fmt,
+                # 'image' kind (the default) renders via ImageUpload (create/edit,
+                # a labeled TextField -- cy.fillField works) but ImageDisplay on
+                # the view page (a bare <img>, no <label>/<input> at all) -- a
+                # view-page cy.checkField() can never find a matching element for
+                # it. 'link' kind is a distinct, currently-unrendered category
+                # (tracked separately) and isn't reachable here in practice.
+                'view_display_uncheckable': get_uri_kind(prop) != 'link',
             })
             continue
         elif prop_type == 'string' and fmt in ('date', 'date-time', 'time'):
@@ -1718,6 +1725,8 @@ def gen_assert_commands(
     for field in fields:
         if field.get('readonly'):
             continue  # read-only fields aren't filled, so don't assert the edited value
+        if field.get('view_display_uncheckable'):
+            continue  # rendered read-only via a bare, unlabeled display widget -- no checkField target exists
         if field['category'] == 'autocomplete':
             dep_target = field.get('dep_target')
             if dep_target:

@@ -3594,9 +3594,18 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
     # Image fields
     for p in image_props:
+        fk     = _tf(p)
         sn     = safe_var_name(p)
         setter = _setter(sn)
-        jsx_by_field[p] = f"      <ImageUpload\n        value={{{sn}}}\n        onChange={{set{setter}}}\n      />"
+        # ImageUpload's own `label` prop is an i18n KEY it translates itself
+        # (`tf(label)` inside the component, default 'imageUrl') -- unlike
+        # sibling fields above whose `label={tf('{fk}')}` passes already-
+        # translated text. Passing the field's own key here (not a `tf(...)`
+        # call) is what actually varies the rendered label per field --
+        # omitting it left every image field silently labelled "Image Url"
+        # regardless of its real name, breaking any UI lookup keyed on the
+        # field's real label.
+        jsx_by_field[p] = f"      <ImageUpload\n        value={{{sn}}}\n        onChange={{set{setter}}}\n        label={{'{fk}'}}\n      />"
 
     # Boolean fields
     for p in boolean_props:
