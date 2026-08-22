@@ -50,6 +50,23 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `x-scheduled-task` entities (Vercel's per-project cron-job limit, all
   plans) at generate time, instead of letting `vercel.json` reach Vercel
   with an unsupported count.
+- **`scripts/vercel-env.sh` documented `NEXT_PUBLIC_APP_TITLE`/
+  `NEXT_PUBLIC_APP_COPYRIGHT` but never actually injected either one into
+  Vercel** — `vercel_env_inject` only ever called `inject_var` for
+  `CRON_SECRET` and the other operational vars, silently leaving the two
+  branding vars unset on every Vercel deploy regardless of what a consumer
+  put in `.env.production.local`. Both are now injected the same way,
+  alongside a note that (like all `NEXT_PUBLIC_` vars) a value change only
+  takes effect on the next build. `.env.vercel.production.local.example`
+  gained the matching entries. `docs/knowledge/scheduled-task-operations.md`
+  gained a correction: an unset `CRON_SECRET` only blocks Vercel Cron's own
+  request, it does not gate manual invocation — any authenticated user can
+  call the route regardless of `CRON_SECRET`, which the doc previously did
+  not call out — plus the GCP-side placement for all three vars (`CRON_SECRET`
+  via Secret Manager mirrors `AUTH_SECRET`; the two branding vars need a
+  Docker build-arg path that does not exist yet, since `--set-env-vars` at
+  deploy time is too late for a `NEXT_PUBLIC_` var already baked into the
+  built client bundle).
 - Added `docs/knowledge/scheduled-task-operations.md` — the Vercel and GCP
   operational guide for this mechanism (HTTP method, `CRON_SECRET`, cron
   limits, the system-actor account, and how to tell whether a scheduled

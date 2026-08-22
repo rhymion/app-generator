@@ -126,8 +126,16 @@ VERCEL_ORG_ID="${VERCEL_ORG_ID:-}"
 GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}"
 GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-}"
 BLOB_READ_WRITE_TOKEN="${BLOB_READ_WRITE_TOKEN:-}"
+# NEXT_PUBLIC_APP_TITLE / NEXT_PUBLIC_APP_COPYRIGHT (cmd_782/783): optional
+# branding overrides, not secrets — see lib/site-config.ts and
+# docs/knowledge/noindex-default-and-branding-env-vars.md. Both are
+# NEXT_PUBLIC_-prefixed, so Next.js inlines them into the client bundle at
+# *build* time: injecting them here only takes effect on Vercel's next
+# build, not on the current running deployment.
+NEXT_PUBLIC_APP_TITLE="${NEXT_PUBLIC_APP_TITLE:-}"
+NEXT_PUBLIC_APP_COPYRIGHT="${NEXT_PUBLIC_APP_COPYRIGHT:-}"
 
-export REDIS_URL VERCEL_PROJECT_NAME VERCEL_ORG_ID GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET BLOB_READ_WRITE_TOKEN
+export REDIS_URL VERCEL_PROJECT_NAME VERCEL_ORG_ID GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET BLOB_READ_WRITE_TOKEN NEXT_PUBLIC_APP_TITLE NEXT_PUBLIC_APP_COPYRIGHT
 
 # ── inject_var: upsert one Vercel env var, never echoing the secret value ────
 # Usage: inject_var NAME VALUE TARGET
@@ -220,6 +228,15 @@ vercel_env_inject() {
   # unconditionally (cmd_692/cmd_711/cmd_712). See .env.example for the
   # branch this flips in lib/prisma.ts.
   inject_var USE_NEON_ADAPTER "true" "$target"
+  # NEXT_PUBLIC_APP_TITLE / NEXT_PUBLIC_APP_COPYRIGHT: optional branding
+  # overrides (cmd_782/783). Unlike every other var injected above, these are
+  # NOT read at request time — Next.js inlines NEXT_PUBLIC_ vars into the
+  # client bundle at build time, so a value change here has no effect until
+  # the next build (redeploy the same build picks up nothing; push a new
+  # commit or trigger a rebuild). See
+  # docs/knowledge/noindex-default-and-branding-env-vars.md.
+  inject_var NEXT_PUBLIC_APP_TITLE "$NEXT_PUBLIC_APP_TITLE" "$target"
+  inject_var NEXT_PUBLIC_APP_COPYRIGHT "$NEXT_PUBLIC_APP_COPYRIGHT" "$target"
   # inject_var NODE_ENV "production" "$target"
   echo "=== Injection complete for ${target}. Trigger a redeploy for changes to take effect. ==="
 }

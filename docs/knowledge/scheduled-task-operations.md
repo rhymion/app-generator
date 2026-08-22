@@ -108,7 +108,38 @@ generate or set this for you** — `scripts/vercel-env.sh` now does
 
 If `CRON_SECRET` is unset, an unauthenticated Vercel Cron request falls
 through to `requireDualAuth`, which will reject it (no session cookie, no
-`X-API-Key`) — a visible 401 in the logs, not a silent no-op.
+`X-API-Key`) — a visible 401 in the logs, not a silent no-op. That is the
+*only* thing `CRON_SECRET` being unset breaks: Vercel Cron itself can no
+longer fire the route.
+
+**Separate, more important gap `CRON_SECRET` does not close** (confirmed by
+reading `handleScheduledTask` in
+`code_generator/templates/scheduled_task_route.ts.jinja2` and
+`requireDualAuth`/`resolveActorId` in `lib/api-auth.ts`): the route has no
+authorization check beyond "is the caller authenticated at all."
+`requireDualAuth` accepts *any* valid session cookie or `X-API-Key` — it
+does not check role, permission, or that the caller is any kind of admin.
+And the `isCronAuth` check only ever *adds* an alternate way in; it never
+removes the `requireDualAuth` fallback, even when `CRON_SECRET` is set and
+correctly configured. So **any authenticated user of the generated app —
+not just admins, regardless of whether `CRON_SECRET` is set — can manually
+`GET`/`POST /api/scheduled-tasks/<task_id>` at any time**, and the handler
+runs immediately, attributed to the fixed system actor. In other words:
+"works without `CRON_SECRET` being set, but any signed-in user can call
+it" — and setting `CRON_SECRET` does not close that path either, it only
+adds Vercel's own automated trigger as a second way in. This is a real
+authorization gap for a future task to close (e.g. requiring a specific
+permission/role in `handleScheduledTask` before dispatching to
+`TASK_REGISTRY`) — flagged here so it is not silently assumed closed by
+`CRON_SECRET` alone.
+
+`CRON_SECRET` is one of three env vars canonically injected via
+`scripts/vercel-env.sh`'s `vercel_env_inject` (alongside
+`NEXT_PUBLIC_APP_TITLE`/`NEXT_PUBLIC_APP_COPYRIGHT`, unrelated branding
+vars — see `docs/knowledge/noindex-default-and-branding-env-vars.md`). The
+full injected-var list lives in `.env.vercel.production.local.example`;
+local-dev defaults live in `.env.example`. Both are kept in sync with
+`scripts/vercel-env.sh` by hand — this doc does not duplicate that list.
 
 ### Who does a scheduled write belong to
 
@@ -187,6 +218,47 @@ check doesn't distinguish caller platform.
 
 Adding real Cloud Scheduler automation (parallel to `vercel-setup.sh`'s
 `vercel.json` write) is a natural follow-up, not yet scoped.
+
+### Where the three canonical env vars go under GCP
+
+The Vercel path canonically injects three env vars via `scripts/vercel-env.sh`:
+`CRON_SECRET`, `NEXT_PUBLIC_APP_TITLE`, `NEXT_PUBLIC_APP_COPYRIGHT` (the
+latter two are branding, not scheduled-task-specific — see
+`docs/knowledge/noindex-default-and-branding-env-vars.md`). The GCP path has
+no equivalent automation for any of the three yet, but they don't all belong
+in the same place:
+
+- **`CRON_SECRET`** is a secret and follows the same pattern as `AUTH_SECRET`
+  in `scripts/gcp-setup.sh` Step 5 (`upsert_secret` into GCP Secret Manager)
+  and `scripts/gcp-deploy.sh`'s `--set-secrets` flag on `gcloud run deploy` —
+  a **runtime** value, read by `process.env.CRON_SECRET` when a request
+  arrives, so injecting it at deploy time is sufficient. Not yet wired into
+  either script.
+- **`NEXT_PUBLIC_APP_TITLE`/`NEXT_PUBLIC_APP_COPYRIGHT` are a different kind
+  of variable and can't follow the same path.** Next.js inlines
+  `NEXT_PUBLIC_` vars into the client bundle at **build** time. On Vercel,
+  the platform's own build step already has the project's env vars
+  available, so injecting them once via `vercel env add` is enough. On GCP,
+  the build is a local `docker build` (`scripts/gcp-deploy.sh` Step 1) with
+  no `ARG`/`--build-arg` wiring for these two vars in either
+  `code_generator/templates/Dockerfile.jinja2` or `gcp-deploy.sh` today —
+  confirmed by reading both. Setting them via `gcloud run deploy
+  --set-env-vars` would have no effect: that only sets the *running
+  container's* environment, which is too late — the client bundle is already
+  built by then, with both vars inlined as unset (empty), same as if they'd
+  never been configured at all. Making this work on GCP needs
+  `ARG NEXT_PUBLIC_APP_TITLE` / `ARG NEXT_PUBLIC_APP_COPYRIGHT` plus matching
+  `ENV` lines added to the Dockerfile template ahead of the `npm run build`
+  step, and `--build-arg` passed from `gcp-deploy.sh`'s `docker build` calls.
+  **Not yet implemented** — a natural follow-up, same "not yet scoped" status
+  as the Cloud Scheduler automation above, not something this task's env-var
+  canonicalization implements.
+
+Both paths still agree on what each var *means* and on the fact that
+`NEXT_PUBLIC_APP_TITLE`/`NEXT_PUBLIC_APP_COPYRIGHT` are build-time-only on
+either platform — only the mechanics of getting them into that build differ
+(Vercel: platform env var, picked up automatically; GCP: would need a Docker
+build arg, not yet wired).
 
 ## Sources
 
