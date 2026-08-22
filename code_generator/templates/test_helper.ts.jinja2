@@ -906,6 +906,15 @@ export async function setup{{ pascal }}ApprovalFlow() {
   const { hashPassword } = require('../test-credentials');
   const testUser = await getTestUser();
   const hashedPw = await hashPassword('test-password');
+{% set ua_deps = deps | selectattr('has_user_accounts') | list %}
+{% if ua_deps %}
+  // {{ model_name }} is scoped by a membership dependency (e.g. organization)
+  // — the record's FK autocomplete and the record's own read-scope both
+  // filter by membership, so the synthetic approval-flow users below must be
+  // members too, or they can neither pick the dependency on the create form
+  // nor view/approve the record afterward (cmd_770).
+  const approvalFlowDeps = await populate{{ pascal }}Dependencies();
+{% endif %}
 
   const requestorRole = await prisma.role.create({
     data: { name: 'Test {{ title }} Requestor Role', creator_id: testUser.id, updater_id: testUser.id },
@@ -982,6 +991,22 @@ export async function setup{{ pascal }}ApprovalFlow() {
       roles: { connect: [{ id: basicRole.id }] },
     },
   });
+{% if ua_deps %}
+
+  // Grant membership in every membership-scoped dependency so the create
+  // form's FK autocomplete resolves and the created record stays visible to
+  // each of these users afterward (cmd_770).
+  await Promise.all(
+    [requestorUser, approverUser, noRoleUser].flatMap(user => [
+{% for dep in ua_deps %}
+      prisma.{{ dep.target }}.update({
+        where: { id: approvalFlowDeps.{{ dep.var_name }}.id },
+        data: { users: { connect: [{ id: user.id }] } },
+      }),
+{% endfor %}
+    ])
+  );
+{% endif %}
 
   const flowWithRole = await prisma.approval_flow.create({
     data: {
@@ -1019,6 +1044,11 @@ export async function setup{{ pascal }}OrderedApprovalFlow() {
   const { hashPassword } = require('../test-credentials');
   const testUser = await getTestUser();
   const hashedPw = await hashPassword('test-password');
+{% if ua_deps %}
+  // See setup{{ pascal }}ApprovalFlow() above (cmd_770): membership-scoped
+  // dependency, so the ordered-approval users below need membership too.
+  const approvalFlowDeps = await populate{{ pascal }}Dependencies();
+{% endif %}
 
   const approverRole1 = await prisma.role.create({
     data: { name: 'Test {{ title }} Ordered Approver Role 1', creator_id: testUser.id, updater_id: testUser.id },
@@ -1070,6 +1100,19 @@ export async function setup{{ pascal }}OrderedApprovalFlow() {
       roles: { connect: [{ id: approverRole2.id }] },
     },
   });
+{% if ua_deps %}
+
+  await Promise.all(
+    [approverUser1, approverUser2].flatMap(user => [
+{% for dep in ua_deps %}
+      prisma.{{ dep.target }}.update({
+        where: { id: approvalFlowDeps.{{ dep.var_name }}.id },
+        data: { users: { connect: [{ id: user.id }] } },
+      }),
+{% endfor %}
+    ])
+  );
+{% endif %}
 
   const flow1 = await prisma.approval_flow.create({
     data: {

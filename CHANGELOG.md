@@ -6,6 +6,27 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Internal
+- **Fixed the generated `setup<Entity>ApprovalFlow()`/`setup<Entity>OrderedApprovalFlow()`
+  test helper never granting its synthetic requestor/approver/no-role test
+  users membership in a membership-scoped dependency** (`test_helper.ts.jinja2`).
+  For an approval-flow entity whose schema also declares a required/optional
+  FK to a membership-scoped entity (e.g. `organization`, detected the same
+  way `populate<Entity>Dependencies()` already detects it —
+  `x-relationships.users` → `has_user_accounts`), the synthetic users never
+  belonged to any such dependency. Their create-form's FK autocomplete for
+  that dependency then always returned zero candidates (membership-scoped
+  search filters by membership) and the generated approval-flow tests
+  (`7.1`/`7.2`/`7.4`/`7.6`/`7.7`/`7.8`) could never submit or view the
+  record — reported against a real-world consumer schema (`claim`/
+  `endorsement`/`payout`, approval-role-gated `7.2` failing). Both helpers
+  now call `populate<Entity>Dependencies()` up front and grant each
+  synthetic user membership in every such dependency, mirroring the
+  membership grant `populate<Entity>Dependencies()` already gives the
+  default test user. Verified against a fresh fixture entity added to the
+  app-template regression fortress (`maintenance_ticket`, org-scoped +
+  approval-flow): the fortress's `7.1`/`7.2`/`7.4`/`7.6`/`7.7`/`7.8` were
+  red before this fix (autocomplete stuck on "No options") and green after,
+  both desktop (`21/21`) and API (`45/45`) specs.
 - **Fixed a Decimal/date field crashing the write when a user cleared it,
   for any non-nullable-but-not-required column** (`build_context.py`'s
   `_build_form_data_gets()`). An untouched-then-cleared field submits `''`
