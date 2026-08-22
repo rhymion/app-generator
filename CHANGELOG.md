@@ -6,6 +6,30 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Internal
+- **Fixed a silent output-path collision between the polymorphic attachable-bridge
+  actions and a standard per-entity CRUD actions file when `attachment` is
+  independently generated** (`generate.py`, `generators.py`). Once a consumer
+  schema adds an `x-generate` block to the `attachment` entity itself (needed
+  to target it with a standard OTO-selector FK from another entity), two
+  independent writers previously both targeted `lib/attachment/actions.ts` —
+  the always-on bridge actions template and the standard per-entity actions
+  file — and whichever ran last silently clobbered the other's exports,
+  breaking `components/_standard/AttachmentSection.tsx`'s import of
+  `setAttachmentsForBridge`. The bridge actions output now lives at
+  `lib/attachment/bridge_actions.ts`, a path that can never collide.
+  Also fixed `attachment_type_ts()` resolving the `attachment` entity via a
+  bare `schema['definitions']` lookup, which silently missed the
+  `allOf`/`$ref` indirection an independently-generated `attachment` gets
+  and fell back to the wrong hardcoded `'number'` type. No consumer
+  currently sets `x-generate` on `attachment`, so existing schema output is
+  behaviorally unaffected other than the file rename. Verified via lint,
+  `test:pytest`, `test:vitest`, all 8 fixture gates, a full `test:e2e:build`
+  against an isolated DB, and — for the specific pattern this unblocks (a
+  standard OTO FK to an independently-generated `attachment` entity with
+  nullable `creator_id`/`updater_id` for bridge-created rows) — an isolated
+  scratch entity pair proving `tsc --noEmit` passes end-to-end across the
+  whole app, both mandatory Cypress gates (`test:e2e:cy:api` 240/240,
+  `test:e2e:cy:ui` 190/190, zero skips), `npm audit`, and `pip-audit`.
 - **Fixed the generated `setup<Entity>ApprovalFlow()`/`setup<Entity>OrderedApprovalFlow()`
   test helper never granting its synthetic requestor/approver/no-role test
   users membership in a membership-scoped dependency** (`test_helper.ts.jinja2`).
