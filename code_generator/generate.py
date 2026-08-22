@@ -1320,24 +1320,27 @@ def generate(schema_path: str, output_dir: str) -> None:
         )
         print('  Dashboard aggregate route → app/api/dashboard/aggregate/route.ts')
 
-    # --- Attachment bridge actions (lib/attachment/actions.ts) ---
+    # --- Attachment bridge actions (lib/attachment/bridge_actions.ts) ---
     #
-    # Emitted whenever at least one base entity owns the `attachable` bridge
-    # (has `attachable_id` with x-relationship.target: attachable). Each
-    # owner contributes a select branch + a revalidate-paths block, mirroring
-    # the polymorphic bridge pattern used by `commentable` and `approvable`.
-    # When no owner exists the file is left out and cleanup.py removes any
-    # stale copy from a previous schema.
+    # Always emitted (subtask_769d): components/_standard/AttachmentSection.tsx
+    # unconditionally imports `setAttachmentsForBridge` from this module
+    # regardless of schema, so the file must exist even with zero owners.
+    # Lives at a path distinct from `lib/attachment/actions.ts` (the
+    # standard per-entity CRUD actions file) so the two never collide when
+    # `attachment` is *also* independently generated (x-generate on the
+    # `attachment` entity itself, needed for the OTO-selector "otsu" FK
+    # pattern) -- prior to this rename both writers targeted
+    # `lib/attachment/actions.ts`, and whichever ran later silently clobbered
+    # the other's exports (see subtask_769d report for the reproduction).
     attachable_owners = build_attachable_owners(schema)
-    if True:
-        _write(
-            out / 'lib' / 'attachment' / 'actions.ts',
-            _render(env, 'attachment_actions.ts.jinja2', {
-                'owners': attachable_owners,
-                'type_ts': attachment_type_ts(schema),
-            }),
-        )
-        print(f'  Attachment bridge actions → lib/attachment/actions.ts ({len(attachable_owners)} owners)')
+    _write(
+        out / 'lib' / 'attachment' / 'bridge_actions.ts',
+        _render(env, 'attachment_actions.ts.jinja2', {
+            'owners': attachable_owners,
+            'type_ts': attachment_type_ts(schema),
+        }),
+    )
+    print(f'  Attachment bridge actions → lib/attachment/bridge_actions.ts ({len(attachable_owners)} owners)')
 
     # --- Named constants (lib/reaction_constants.ts) ---
     # named_constants was pre-computed before the entity loop
