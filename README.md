@@ -434,6 +434,12 @@ Running `build:full` locally requires `.env.production` and `.env.production.loc
 
 **Vercel** is the default deployment target — no configuration needed.
 
+**Search-engine indexing is blocked by default.** Generated apps are
+primarily internal tools, and a Vercel *production* deployment gets no
+automatic crawler protection (unlike a preview deployment). `lib/site-config.ts`'s
+`seo.noindex` defaults to `true`; set it to `false` to allow indexing. See
+[docs/knowledge/noindex-default-and-branding-env-vars.md](docs/knowledge/noindex-default-and-branding-env-vars.md).
+
 **GCP Cloud Run** is opt-in via the `x-cloud` annotation in `code_generator/json_schema.yaml` (commented out by default). It only activates when both `enabled: true` and `provider: gcp` are set explicitly; without it, generated output is unaffected.
 
 When enabled, `generate-code` additionally emits:

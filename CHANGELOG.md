@@ -5,6 +5,24 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Generated apps now default to blocking search-engine indexing.** Generated
+  apps are primarily internal tools, and a Vercel production deployment (unlike
+  a preview deployment) gets no automatic crawler protection. `app/layout.tsx`
+  now sets `<meta name="robots" content="noindex,...">` unless
+  `lib/site-config.ts`'s `seo.noindex` is explicitly set to `false` — and
+  because the default flipped, an app whose `seo` block (or just `noindex`
+  within it) is missing entirely is *also* noindexed, not indexed. See
+  `docs/knowledge/noindex-default-and-branding-env-vars.md` for the mechanism,
+  why `robots.txt` `Disallow` was rejected, and consumer-impact notes.
+
+### Added
+- **`NEXT_PUBLIC_APP_TITLE` / `NEXT_PUBLIC_APP_COPYRIGHT`** — optional env vars
+  in `lib/site-config.ts` for overriding the app title and footer copyright
+  text without touching the file. Both are inlined at build time (Vercel
+  needs a rebuild, not just an env var edit, to pick up a change). See
+  `docs/knowledge/noindex-default-and-branding-env-vars.md`.
+
 ### Internal
 - **Fixed the generated `setup<Entity>ApprovalFlow()`/`setup<Entity>OrderedApprovalFlow()`
   test helper never granting its synthetic requestor/approver/no-role test
