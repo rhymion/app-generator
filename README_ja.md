@@ -416,6 +416,14 @@ Next.js は `NODE_ENV` に基づいて環境ファイルを自動的に読み込
 
 **Vercel** がデフォルトのデプロイ先です — 設定不要です。
 
+**検索エンジンへのインデックスはデフォルトでブロックされます。** 生成される
+アプリは主に社内向けツールであり、Vercel の *production* デプロイは
+preview デプロイと異なり自動的なクローラー保護を受けません。
+`lib/site-config.ts` の `seo.noindex` はデフォルトで `true` です。
+インデックスを許可するには `false` に設定してください。詳細は
+[docs/knowledge/noindex-default-and-branding-env-vars.md](docs/knowledge/noindex-default-and-branding-env-vars.md)
+を参照。
+
 **GCP Cloud Run** は `code_generator/json_schema.yaml` の `x-cloud` アノテーションによるオプトインです（デフォルトでコメントアウト）。`enabled: true` と `provider: gcp` の両方を明示指定した場合のみ有効化され、未指定であれば生成物に影響はありません。
 
 有効化すると、`generate-code` は追加で以下を生成します:
