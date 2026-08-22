@@ -26,6 +26,24 @@ function scopedGet(selector: string, childTitle?: string) {
 }
 
 /**
+ * Click somewhere outside the DataGrid to blur/commit an in-progress cell
+ * edit (cmd_776). Every FormUpsert page embedding a DataGrid child renders
+ * exactly one `<h1>{title}</h1>` page heading via FormWithChildGrid — a
+ * plain, non-interactive element that exists on every such page regardless
+ * of which fields the parent form declares. This used to be `cy.get('p').
+ * first().click()`, which grabbed the *first* `<p>` anywhere in the DOM in
+ * document order; when a field on the same form renders via ImageUpload,
+ * that component wraps its whole `TextField` (whose MUI helper text is a
+ * `<p>`) in a `<label htmlFor="image-upload-button">`, so clicking that
+ * helper-text `<p>` — if it happened to sort before any other `<p>` on the
+ * page — delegated to the hidden file input and opened the browser's file
+ * picker.
+ */
+function clickOutsideToCommit() {
+  cy.get('h1').first().click();
+}
+
+/**
  * Get a DataGrid row by index
  * @param rowIndex - 0-based row index
  * @param childTitle - Optional: scope to the embedded child DataGrid whose
@@ -79,7 +97,7 @@ export function editDataGridCell(
     input.type('{selectall}' + String(value));
   }
   if (submit) {
-    cy.get('p').first().click(); // Click outside to commit the edit, as some cells may have async validation that prevents Enter key from working.
+    clickOutsideToCommit();
     // input.type('{enter}');
   }
 }
@@ -130,7 +148,7 @@ export function fillDataGridRow(
     if (typeof value === 'boolean') {
       toggleDataGridCheckbox(rowIndex, field, value, childTitle);
       if (isLast && submitLast) {
-        cy.get('p').first().click(); // Click outside to commit the edit, as some cells may have async validation that prevents Enter key from working.
+        clickOutsideToCommit();
         // getDataGridCell(rowIndex, field).find('input').type('{enter}');
       }
     } else {
