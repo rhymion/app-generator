@@ -23,6 +23,38 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   needs a rebuild, not just an env var edit, to pick up a change). See
   `docs/knowledge/noindex-default-and-branding-env-vars.md`.
 
+### Fixed
+- **The `x-scheduled-task` mechanism's generated route only ever exported
+  `POST`, but Vercel Cron always invokes with `GET`** — any declared
+  schedule would 405 on every real Vercel Cron invocation and silently
+  never run (no exception, no red gate). The route now exports both `GET`
+  and `POST`.
+- **`vercel.json`'s `crons` array is now written automatically by
+  `generate.py`** from each entity's `x-scheduled-task` declaration, instead
+  of the previous "copy this into `prj/vercel.json` by hand" convention —
+  which was itself unsafe: `npm run prj:sync` would copy a hand-placed
+  `prj/vercel.json` back over the generator's own file verbatim on every
+  sync. `prj_sync.py` now skips `vercel.json` entirely. Only the `crons` key
+  is generator-owned; `framework`/`buildCommand`/`regions` and any other
+  hand-added key are preserved untouched.
+- **`SCHEDULED_TASK_ACTOR_ID`, an environment variable a human had to set by
+  hand, is replaced by a fixed-email lookup** (`lib/scheduled-tasks/
+  system-actor.ts`) resolved against a system-actor account `scripts/
+  seed-tenant.ts` now seeds unconditionally. The env var design returned
+  HTTP 500 on every single scheduled-task invocation until someone
+  remembered to set it, with nothing surfacing the omission before the
+  first scheduled run actually happened; the account seeded by
+  `db:seed-tenant` is already guaranteed to exist before that can occur, on
+  both the Vercel and GCP deploy paths.
+- `validate.py` now rejects a schema declaring more than 100
+  `x-scheduled-task` entities (Vercel's per-project cron-job limit, all
+  plans) at generate time, instead of letting `vercel.json` reach Vercel
+  with an unsupported count.
+- Added `docs/knowledge/scheduled-task-operations.md` — the Vercel and GCP
+  operational guide for this mechanism (HTTP method, `CRON_SECRET`, cron
+  limits, the system-actor account, and how to tell whether a scheduled
+  task is actually firing).
+
 ### Internal
 - **Fixed a silent output-path collision between the polymorphic attachable-bridge
   actions and a standard per-entity CRUD actions file when `attachment` is

@@ -3,9 +3,11 @@
 // (GENERATED ONCE — safe to edit); this file only selects rows and dispatches.
 //
 // x-scheduled-task: {{ task_id }}
-// Recommended Vercel Cron schedule: {{ interval }}
-// Add to prj/vercel.json (generators never write vercel.json themselves):
-//   { "crons": [{ "path": "/api/scheduled-tasks/{{ task_id }}", "schedule": "{{ interval }}" }] }
+// Vercel Cron schedule: {{ interval }}
+// vercel.json's `crons` entry for this task is written automatically by
+// generate.py from this declaration (cmd_781) — do not hand-edit vercel.json
+// or place a copy under prj/vercel.json (prj:sync skips that file entirely
+// so a stale consumer copy can never overwrite the generator's own write).
 
 import type { PrismaClient } from '@/app/generated/prisma/client';
 import prisma from '@/lib/prisma';

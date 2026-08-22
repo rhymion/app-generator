@@ -89,6 +89,29 @@ if [[ -z "${AUTH_SECRET:-}" ]]; then
   export AUTH_SECRET
 fi
 
+# CRON_SECRET (cmd_781): generate-once-persist, same pattern as AUTH_SECRET
+# above. Secures app/api/scheduled-tasks/[task]/route.ts — Vercel sends it
+# back as `Authorization: Bearer $CRON_SECRET` on every Cron Job invocation
+# once it's set on the project, but Vercel never generates/sets it itself.
+# Harmless to inject even when the schema declares no x-scheduled-task
+# entity (mirrors AUTH_SECRET's unconditional injection).
+if [[ -z "${CRON_SECRET:-}" ]]; then
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "[DRY-RUN] CRON_SECRET not set — will generate with openssl rand -base64 32 and save to .env.production.local at runtime"
+    CRON_SECRET="<DRY_RUN_CRON_SECRET>"
+  else
+    CRON_SECRET=$(openssl rand -base64 32)
+    _CRON_SECRET_ESCAPED="$(_shell_dquote_escape "${CRON_SECRET}")"
+    if grep -q "^CRON_SECRET=" "${_ENV_FILE}" 2>/dev/null; then
+      sed -i "s|^CRON_SECRET=.*|CRON_SECRET=\"$(_sed_replacement_escape "${_CRON_SECRET_ESCAPED}")\"|" "${_ENV_FILE}"
+    else
+      echo "CRON_SECRET=\"${_CRON_SECRET_ESCAPED}\"" >> "${_ENV_FILE}"
+    fi
+    echo "[INFO] CRON_SECRET generated and saved to .env.production.local"
+  fi
+  export CRON_SECRET
+fi
+
 # Required variables — abort with a clear message if missing (skip hard-fail in DRY_RUN
 # so the syntax/flow of a fresh checkout can still be exercised end-to-end).
 if [[ "$DRY_RUN" != "true" ]]; then
@@ -183,6 +206,7 @@ vercel_env_inject() {
   # docs/knowledge/prisma-direct-vs-pooled-connection.md.
   inject_var DIRECT_URL "$direct_url" "$target"
   inject_var AUTH_SECRET "$AUTH_SECRET" "$target"
+  inject_var CRON_SECRET "$CRON_SECRET" "$target"
   inject_var REDIS_URL "$REDIS_URL" "$target"
   inject_var BLOB_READ_WRITE_TOKEN "$BLOB_READ_WRITE_TOKEN" "$target"
   inject_var GOOGLE_CLIENT_ID "$GOOGLE_CLIENT_ID" "$target"

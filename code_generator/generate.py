@@ -458,6 +458,54 @@ def _write(path: Path, content: str) -> None:
     print(f'  Wrote {path}')
 
 
+_VERCEL_JSON_DEFAULTS = {
+    '$schema': 'https://openapi.vercel.sh/vercel.json',
+    'framework': 'nextjs',
+    'buildCommand': 'npm run vercel-build',
+    'regions': ['sin1'],
+}
+
+
+def _write_vercel_json_crons(path: Path, scheduled_task_entities: list) -> None:
+    """Write vercel.json's `crons` array from x-scheduled-task declarations
+    (cmd_781) — the only generator-owned key in this otherwise hand-authored
+    file. Every other key (framework/buildCommand/regions/...) is read back
+    verbatim and left untouched. `crons` is fully replaced, not merged, each
+    run, so a task_id removed from the schema also disappears from
+    vercel.json — same "no orphaned entries" contract as
+    lib/scheduled-tasks/registry.ts. Not routed through `_write`/`_manifest`:
+    unlike registry.ts, this file's other keys are meant to be hand-edited —
+    the file has no "GENERATED — do not edit" contract as a whole, only this
+    one key does.
+    """
+    if path.exists():
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+    else:
+        data = dict(_VERCEL_JSON_DEFAULTS)
+
+    crons = [
+        {'path': f"/api/scheduled-tasks/{ent['task_id']}", 'schedule': ent['interval']}
+        for ent in scheduled_task_entities
+        if ent.get('interval')
+    ]
+
+    if crons:
+        changed = data.get('crons') != crons
+        data['crons'] = crons
+    else:
+        changed = 'crons' in data
+        data.pop('crons', None)
+
+    if changed or not path.exists():
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write('\n')
+        print(f'  Wrote {path} (crons: {len(crons)})')
+    else:
+        print(f'  Skipped (up to date) {path} (crons: {len(crons)})')
+
+
 def _write_stub(path: Path, content: str) -> None:
     """Write stub only if file does not already exist (user may have customized).
 
@@ -1726,6 +1774,13 @@ def generate(schema_path: str, output_dir: str) -> None:
         _render(env, 'scheduled_task_route.ts.jinja2', {}),
     )
     print('  Scheduled task dispatcher route → app/api/scheduled-tasks/[task]/route.ts')
+
+    # vercel.json `crons` (cmd_781) — Vercel-only; GCP (x-cloud:gcp) uses
+    # Cloud Scheduler instead and never reads vercel.json for this.
+    if cloud_enabled and cloud_provider == 'gcp':
+        print('  Skipped vercel.json crons (x-cloud:gcp — see docs/knowledge/scheduled-task-operations.md)')
+    else:
+        _write_vercel_json_crons(out / 'vercel.json', scheduled_task_entities)
 
     # --- Search templates (lib/search/helpers.ts + app/api/search/route.ts) ---
     # DP-3: default_scope from x-generator.search.default_scope.

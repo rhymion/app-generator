@@ -1666,9 +1666,9 @@ def validate_schema(schema: dict) -> None:
         if not isinstance(interval, str) or not interval:
             errors.append(
                 f"Definition '{def_key}': x-scheduled-task.interval is required and must be "
-                f"a non-empty cron expression string (informational only — generators never "
-                f"write vercel.json; it is surfaced in the generated file's header comment "
-                f"for the consumer to copy into prj/vercel.json)."
+                f"a non-empty cron expression string in the format Vercel's `crons[].schedule` "
+                f"accepts (cmd_781) — generate.py writes it verbatim into vercel.json's `crons` "
+                f"array for this task's /api/scheduled-tasks/{{task_id}} path."
             )
 
         xfilter = xsched.get('filter')
@@ -1713,6 +1713,26 @@ def validate_schema(schema: dict) -> None:
                 f"expires_at_before_now/status_in (an empty filter would select every row "
                 f"on every run)."
             )
+
+    # Vercel's per-project cron-job limit is 100, unchanged across Hobby/Pro/
+    # Enterprise (last confirmed 2026-07-15 —
+    # https://vercel.com/docs/cron-jobs/usage-and-pricing). generate.py writes
+    # one `crons` entry per x-scheduled-task entity into vercel.json, so a
+    # schema that declares more than that must fail here — loudly, at
+    # generate time — rather than silently emitting a vercel.json Vercel
+    # would reject at deploy (cmd_781 AC5: no silent drop). GCP deployments
+    # (x-cloud.provider: gcp) don't write vercel.json crons at all — see
+    # generate.py's `_write_vercel_json_crons` — so the limit doesn't apply
+    # there.
+    _x_cloud = schema.get('x-cloud') or {}
+    _cloud_provider = _x_cloud.get('provider', '') if _x_cloud.get('enabled') else ''
+    if _cloud_provider != 'gcp' and len(_scheduled_task_ids) > 100:
+        errors.append(
+            f"{len(_scheduled_task_ids)} x-scheduled-task entities declared, exceeding "
+            f"Vercel's 100-cron-jobs-per-project limit (all plans, "
+            f"docs/knowledge/scheduled-task-operations.md). Reduce the number of "
+            f"distinct task_ids, or dispatch multiple filters from within one handler."
+        )
 
     # -----------------------------------------------------------------------
     # Report

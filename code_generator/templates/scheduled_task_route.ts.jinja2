@@ -1,21 +1,43 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDualAuth, handleApiError, ApiError } from '@/lib/api-auth';
 import { TASK_REGISTRY } from '@/lib/scheduled-tasks/registry';
+import { SCHEDULED_TASK_ACTOR_EMAIL } from '@/lib/scheduled-tasks/system-actor';
+import prisma from '@/lib/prisma';
 
 // GENERATED — do not edit. One route for every x-scheduled-task entry
 // (cmd_750/subtask_741a) — entity count never changes this file; new tasks
 // register into TASK_REGISTRY (lib/scheduled-tasks/registry.ts) instead.
+//
+// HTTP method: both GET and POST are accepted and behave identically.
+// Vercel Cron always invokes with GET, never POST (confirmed against
+// Vercel's own docs, 2026-08-22 — vercel.com/docs/cron-jobs "How cron jobs
+// work" and .../cron-jobs/manage-cron-jobs "Securing cron jobs"; cmd_781 —
+// this route used to export POST only, which Vercel Cron could never have
+// invoked: every declared schedule would have silently never fired, one of
+// cmd_491's failure shapes recurring). GCP's Cloud Scheduler HTTP target
+// lets the operator pick either method when the job is created, and no
+// generator automation provisions that job yet (see
+// docs/knowledge/scheduled-task-operations.md) — both methods are kept open
+// so neither deploy path is forced into the other's convention.
 //
 // Auth: Vercel Cron's own `Authorization: Bearer $CRON_SECRET` convention
 // when CRON_SECRET is configured, else the existing dual-auth (X-API-Key or
 // session cookie) so the task can also be triggered manually or from a
 // non-Vercel scheduler.
 //
-// actorId: always the dedicated scheduled-task service account
-// (SCHEDULED_TASK_ACTOR_ID) — never the caller's own identity — so every
-// scheduled write attributes to the same system actor regardless of which
-// credential triggered the run.
-export async function POST(req: NextRequest, { params }: { params: Promise<{ task: string }> }) {
+// actorId: always the dedicated scheduled-task system account, looked up by
+// its fixed email (SCHEDULED_TASK_ACTOR_EMAIL) — never the caller's own
+// identity — so every scheduled write attributes to the same system actor
+// regardless of which credential triggered the run. That account is
+// upserted by scripts/seed-tenant.ts (db:seed-tenant), which already runs
+// on every setup/deploy path (cmd_781 — replaces the former
+// SCHEDULED_TASK_ACTOR_ID env var: that design 500'd on every single
+// invocation until a human remembered to set it, and nothing surfaced the
+// omission before the first scheduled run actually happened).
+async function handleScheduledTask(
+  req: NextRequest,
+  { params }: { params: Promise<{ task: string }> },
+) {
   try {
     const cronSecret = process.env.CRON_SECRET;
     const authHeader = req.headers.get('Authorization');
@@ -24,9 +46,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tas
       await requireDualAuth(req);
     }
 
-    const systemActorId = process.env.SCHEDULED_TASK_ACTOR_ID;
-    if (!systemActorId) {
-      throw new ApiError(500, 'SCHEDULED_TASK_ACTOR_ID is not configured.');
+    const systemActor = await prisma.user.findUnique({
+      where: { email: SCHEDULED_TASK_ACTOR_EMAIL },
+      select: { id: true },
+    });
+    if (!systemActor) {
+      throw new ApiError(
+        500,
+        `Scheduled-task system actor not found (expected a user seeded with ` +
+          `email ${SCHEDULED_TASK_ACTOR_EMAIL} by db:seed-tenant).`,
+      );
     }
 
     const { task } = await params;
@@ -35,9 +64,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tas
       throw new ApiError(404, `Unknown scheduled task: ${task}`);
     }
 
-    await run(systemActorId);
+    await run(systemActor.id);
     return NextResponse.json({ ok: true, task });
   } catch (error) {
     return handleApiError(error);
   }
 }
+
+export const GET = handleScheduledTask;
+export const POST = handleScheduledTask;
