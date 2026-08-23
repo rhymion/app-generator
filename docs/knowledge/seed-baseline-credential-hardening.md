@@ -1,8 +1,8 @@
-# seed-tenant.ts Credential Hardening
+# seed-baseline.ts Credential Hardening
 
 ## Problem
 
-`scripts/seed-tenant.ts` (`npm run db:seed-tenant`) is a required step of
+`scripts/seed-baseline.ts` (`npm run db:seed-baseline`) is a required step of
 every provisioning path — `vercel-build`, `build:full`, and GCP's
 `scripts/gcp-seed.sh` (via the `app-migrate` Cloud Run Job) all run it. Before
 this change it unconditionally created:
@@ -14,13 +14,13 @@ this change it unconditionally created:
 Any deployment provisioned without a separate step to rotate them ships with
 a publicly known admin login and API key.
 
-The upsert always uses `update: {}`, so re-running `db:seed-tenant` against
+The upsert always uses `update: {}`, so re-running `db:seed-baseline` against
 an existing database never overwrites a password/api_key that was already
 rotated by hand — the risk is entirely in the *first* provisioning run.
 
 ## Fix: env-gated credentials, fail-fast, random api_key
 
-`scripts/seed-tenant-credentials.ts` resolves the admin email/password/
+`scripts/seed-baseline-credentials.ts` resolves the admin email/password/
 api_key. The branch is `NODE_ENV`, not a separate opt-in flag — see the
 docstring on `requiresExplicitCredentials()` for why every
 production-equivalent entry point already sets `NODE_ENV=production` and
@@ -47,7 +47,7 @@ every test/dev entry point does not, so no call site needed to change:
 
 The credential-resolution logic lives in a hand-written module with no
 import of the generated Prisma client (or anything else
-`code_generator/generate.py` emits), so `scripts/seed-tenant-credentials.
+`code_generator/generate.py` emits), so `scripts/seed-baseline-credentials.
 test.ts` runs unit-tested with vitest in a checkout that has never run
 `npm run generate-code` — same DI rationale as `lib/approval_request/
 actions_core.ts` (see `docs/knowledge/troubleshooting.md` §2.4).
@@ -75,7 +75,7 @@ supplied by the operator; it is always generated.
   `app-seed-admin-email`/`app-seed-admin-password` Secret Manager secrets;
   `gcp-deploy.sh`'s `app-migrate` Job (Step 2) attaches both alongside
   `DATABASE_URL` so they're present in the container `scripts/gcp-seed.sh`
-  later repoints at `npm run db:seed-tenant`. `NODE_ENV=production` is
+  later repoints at `npm run db:seed-baseline`. `NODE_ENV=production` is
   already baked into that image via `ENV NODE_ENV=production` in the
   Dockerfile (both `builder` and `runner` stages), so no separate env-var
   wiring was needed for the `NODE_ENV` gate itself — only for the two new
@@ -106,7 +106,7 @@ immediately:
    update it directly:
    ```sql
    -- Generate a bcrypt hash for the new password out-of-band (10 rounds,
-   -- matching scripts/seed-tenant.ts), then:
+   -- matching scripts/seed-baseline.ts), then:
    UPDATE "user" SET password = '<new-bcrypt-hash>' WHERE email = 'admin@example.com';
    ```
 2. **Rotate the api_key.** Any client holding the known
@@ -142,9 +142,9 @@ not just its credentials.
 
 ## Fixed permission enumeration
 
-`scripts/seed-tenant.ts` grants the `Administrator` role full CRUD on a
+`scripts/seed-baseline.ts` grants the `Administrator` role full CRUD on a
 **fixed list** of 8 entities plus read-only `audit_log` — see
-`docs/knowledge/authorization-default-deny.md` §"seed-tenant.ts Role" for
+`docs/knowledge/authorization-default-deny.md` §"seed-baseline.ts Role" for
 the exact list and the "Adding Tests for a New Entity" section explaining
 why consumer/project-specific entities must never be added to this shared
 generator-owned script.
@@ -173,7 +173,7 @@ fixed is a separate, unscoped decision. In practice this means:
 > development / verification tool. Do not run it in production without
 > deliberate opt-in.
 
-The section above is unchanged and remains correct: `seed-tenant.ts` keeps
+The section above is unchanged and remains correct: `seed-baseline.ts` keeps
 its fixed, least-privilege enumeration. Separately, `code-generator` now
 derives the full "independent entity" population of the project schema (the
 same criteria `cypress/support/db-helpers.ts`'s deletion-order helper uses,
@@ -198,7 +198,7 @@ mechanism, different population, different actor.
 
 | Script | Purpose | When to run |
 |---|---|---|
-| `seed-tenant.ts` | Minimum privilege for production use | Every `npm run db:seed-tenant` |
+| `seed-baseline.ts` | Minimum privilege for production use | Every `npm run db:seed-baseline` |
 | `scripts/grant-all-permissions.ts` | Full permission for development / verification | Manually, `npm run db:grant-all-permissions` |
 
 Safeguards:
@@ -208,7 +208,7 @@ Safeguards:
   `NODE_ENV=production`.
 - **`audit_log` / `mfa_recovery_code` excluded**: never granted write
   access; `audit_log` stays read-only regardless (its permission row is
-  managed by `seed-tenant.ts`'s own dedicated upsert, untouched by this
+  managed by `seed-baseline.ts`'s own dedicated upsert, untouched by this
   script). This exclusion is layered: the generated entity list already
   structurally excludes both (neither is a schema-defined entity — see
   `seed_entities_context()` in `code_generator/generators.py`), and this
@@ -217,12 +217,12 @@ Safeguards:
 
 If the minimum-privilege boundary changes in a future release,
 `grantAllPermissions()` is exported (not just a CLI) so it could be wired
-into `seed-tenant.ts` with a single import + call — that integration is
+into `seed-baseline.ts` with a single import + call — that integration is
 not made today.
 
 ## `Creator` / `Assignee` roles
 
-`seed-tenant.ts` also seeds two special, item-scoped roles resolved by name
+`seed-baseline.ts` also seeds two special, item-scoped roles resolved by name
 in `lib/authz.ts` (`SPECIAL_ROLE_NAMES`). Neither requires an explicit
 per-user role *connection* — every user implicitly qualifies for whichever
 applies to a given row (`creator_id === userId` / `assignee_id === userId`),

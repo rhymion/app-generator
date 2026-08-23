@@ -13,7 +13,7 @@ at merge time via CI.
 
 Required, in this order:
 
-1. `npm run test:e2e:build` — prj:sync + docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
+1. `npm run test:e2e:build` — prj:sync + docker:up:test + generate-code + db:push + db:generate + db:seed-baseline + build
 2. `npm run lint` — must run after step 1, not before (see below for why)
 3. `npm run test:e2e:cy:api` — API Cypress specs only (mandatory dev-time gate)
 4. `npm --prefix app-generator audit --omit=dev --audit-level=high` — production-dependency vulnerability scan

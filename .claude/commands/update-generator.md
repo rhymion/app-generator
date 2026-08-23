@@ -40,7 +40,7 @@ Run in this order:
 9. `npm run test:chart-scalar-gate` — x-display.chart with a required plain Int column and two required non-start/end DateTime columns (`format: date-time` and `format: date`) fixture generate-code → tsc check (see below)
 10. `npm run test:approval-lockdown-gate` — x-approval value-lockdown fixture generate-code → tsc check (see below)
 11. `npm run test:payment-gate` — x-payment fixture generate-code → tsc check (see below)
-12. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
+12. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-baseline + build
 13. `npm run check:generated`  — generated code matches templates/schema
 14. `npm run test:e2e:cy:api`  — API Cypress specs only
 15. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop + mobile)

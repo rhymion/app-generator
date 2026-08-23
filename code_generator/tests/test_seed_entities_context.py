@@ -1,13 +1,13 @@
 """
 Tests for seed_entities_context() (code_generator/generators.py) — the
 "independent entity" list consumed by scripts/grant-all-permissions.ts (a
-dev/verification tool; NOT scripts/seed-tenant.ts, whose fixed enumeration
+dev/verification tool; NOT scripts/seed-baseline.ts, whose fixed enumeration
 is unchanged).
 
 audit_log is the highest-risk entity here: if it ever leaked into the
 generated SEED_ENTITIES list, grant-all-permissions.ts would silently grant
 full CRUD on it, defeating its read-only design (see
-docs/knowledge/seed-tenant-credential-hardening.md).
+docs/knowledge/seed-baseline-credential-hardening.md).
 
 Protection is layered:
   1. structural — audit_log is never a schema['definitions'] key at all

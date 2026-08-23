@@ -58,7 +58,7 @@ Use `/generate-schema` slash command. In Codex, use `.codex/prompts/generate-sch
 
 Gate:
 
-1. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
+1. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-baseline + build
 2. `npm run check:generated` — validates generator-emitted output (run after generate-code inside step 1)
 3. `npm run test:e2e:cy:api` — API Cypress specs only
 4. `npm run lint`
@@ -144,7 +144,7 @@ Gate: none. Cite findings with `file:line` references.
 
 Gate commands:
 - **pytest**: `npm run test:pytest`
-- **build**: `npm run test:e2e:build` (docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build)
+- **build**: `npm run test:e2e:build` (docker:up:test + generate-code + db:push + db:generate + db:seed-baseline + build)
 - **check:generated**: `npm run check:generated` (run after generate-code; see below)
 - **component test**: `npm run test`
 - **e2e API**: `npm run test:e2e:cy:api`

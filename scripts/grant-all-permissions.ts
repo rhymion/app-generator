@@ -13,11 +13,11 @@
  *   audit_log / mfa_recovery_code are always excluded — they remain
  *   read-only regardless of what SEED_ENTITIES contains.
  *
- * `scripts/seed-tenant.ts` intentionally does NOT do this: it follows the
+ * `scripts/seed-baseline.ts` intentionally does NOT do this: it follows the
  * principle of least privilege, and this script's function is exported
- * (not just a CLI) so it could be wired into seed-tenant.ts with a single
+ * (not just a CLI) so it could be wired into seed-baseline.ts with a single
  * import + call if that boundary is ever revisited — see
- * docs/knowledge/seed-tenant-credential-hardening.md.
+ * docs/knowledge/seed-baseline-credential-hardening.md.
  */
 import path from 'node:path';
 import { loadEnvConfig } from '@next/env';
@@ -43,7 +43,7 @@ export async function grantAllPermissions(
 
   const adminRole = await client.role.findFirst({ where: { name: 'Administrator' } });
   if (!adminRole) {
-    throw new Error('Administrator role not found. Run db:seed-tenant first.');
+    throw new Error('Administrator role not found. Run db:seed-baseline first.');
   }
 
   const dryRun = process.env.DRY_RUN === 'true';

@@ -184,7 +184,7 @@ expected response status to equal 403 but got 401
 
 **Diagnosis checklist**:
 
-1. **`TEST_API_KEY` not seeded**: `cypress/support/test-credentials.ts` defines `TEST_CREDENTIALS`. The `db:seed` task (`scripts/seed.ts`) must write `TEST_CREDENTIALS.apiKey` to the test user's `user.api_key`. Run `npm run migrate:reset:test` to re-seed.
+1. **`TEST_API_KEY` not seeded**: `cypress/support/test-credentials.ts` defines `TEST_CREDENTIALS`. The `cy.task('db:seed')` task (`cypress/support/db-helpers.ts`) must write `TEST_CREDENTIALS.apiKey` to the test user's `user.api_key`. Run `npm run migrate:reset:test` to re-seed.
 
 2. **`db:createLimitedApiUser(modelName)` task missing**: Test 7.1/7.2 uses `cy.task('db:createLimitedApiUser', 'my_entity')`. This task must be registered in `cypress/support/generated-tasks.ts`. Re-run `npm run generate-code` to regenerate the task registry.
 
@@ -397,7 +397,7 @@ The database itself is missing inside the container. This happens after `docker:
 npm run docker:down:dev
 npm run docker:up:dev
 npm run migrate:dev     # recreates DB schema
-npm run db:seed         # seed initial data
+npm run db:seed-baseline
 ```
 
 ### 4.2 `docker compose` startup problems

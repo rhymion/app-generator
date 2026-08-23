@@ -105,12 +105,12 @@ if [[ "$DRY_RUN" != "true" ]]; then
 fi
 
 # ── Seed ─────────────────────────────────────────────────────────────────
-echo "[Seed] Running db:seed-tenant against ${_ENV_LABEL} DB..."
+echo "[Seed] Running db:seed-baseline against ${_ENV_LABEL} DB..."
 if [[ "$DRY_RUN" == "true" ]]; then
-  echo "[DRY-RUN] DATABASE_URL=<redacted> npm --prefix app-generator run db:seed-tenant"
+  echo "[DRY-RUN] DATABASE_URL=<redacted> npm --prefix app-generator run db:seed-baseline"
 else
   DATABASE_URL="${_DB_URL}" \
-    npm --prefix "${ROOT}/app-generator" run db:seed-tenant
+    npm --prefix "${ROOT}/app-generator" run db:seed-baseline
 fi
 echo "  OK: ${_ENV_LABEL} seed complete."
 echo ""

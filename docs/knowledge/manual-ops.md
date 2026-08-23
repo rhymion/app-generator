@@ -67,7 +67,7 @@ gcloud projects describe $PROJECT_ID --format='value(projectNumber)'
 For a fresh Vercel provisioning (new project, not yet deployed), `app-template/scripts/vercel-setup.sh`
 must be run before the first `vercel deploy`. It handles migration and seeding for both
 environments so no separate manual seed step is needed: Step 4 seeds the production DB
-and Step 5.5 seeds the staging DB (`db:seed-tenant`, idempotent). Skipping this step
+and Step 5.5 seeds the staging DB (`db:seed-baseline`, idempotent). Skipping this step
 leaves the staging DB without a default tenant/admin user, making the first preview
 deploy unusable for manual testing. See `app-template/docs/vercel-automation-design.md`
 §5 for the full step-by-step breakdown.

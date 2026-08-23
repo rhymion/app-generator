@@ -17,7 +17,7 @@ land on the *same* backend connection. A transaction-mode PgBouncer pooler —
 Neon's default, and what fronts `DATABASE_URL` here — does not guarantee
 that: different transactions can be routed to different backend connections.
 Nothing has broken from this yet (migration history here is short, and
-`seed-tenant`'s plain sequential `INSERT`s never depended on session-scoped
+`seed-baseline`'s plain sequential `INSERT`s never depended on session-scoped
 locking in the first place — that a seed script runs fine over a pooler says
 nothing about whether a lock-taking migration will), but the risk grows with
 every migration added.

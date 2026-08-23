@@ -1,14 +1,14 @@
 // Hand-written, generator-independent admin-credential resolution for
-// scripts/seed-tenant.ts. Split out so it can be unit-tested without a
+// scripts/seed-baseline.ts. Split out so it can be unit-tested without a
 // running database or a generated Prisma client (see
-// docs/knowledge/seed-tenant-credential-hardening.md).
+// docs/knowledge/seed-baseline-credential-hardening.md).
 import * as crypto from 'node:crypto';
 
 export const DEFAULT_ADMIN_EMAIL = 'admin@example.com';
 export const DEFAULT_ADMIN_PASSWORD = 'password123';
 // Fixed test/dev api_key. Not referenced by value anywhere else in the repo
 // (cypress/support/test-credentials.ts's TEST_API_KEY is a separate,
-// unrelated constant) — kept stable only so repeated local `db:seed-tenant`
+// unrelated constant) — kept stable only so repeated local `db:seed-baseline`
 // runs are easy to eyeball in psql/studio, not because any spec asserts it.
 export const DEFAULT_ADMIN_API_KEY =
   'mk_78d1e51a47f40912f5a1787367e3f7f6ed17c314590eac84edc5b3f785a527b1';
@@ -20,7 +20,7 @@ export interface AdminCredentials {
 }
 
 /**
- * Gate for whether seed-tenant must source admin credentials from env
+ * Gate for whether seed-baseline must source admin credentials from env
  * instead of falling back to the fixed test/dev defaults.
  *
  * NODE_ENV is the axis (not a separate opt-in flag) because every
@@ -40,7 +40,7 @@ export function requiresExplicitCredentials(nodeEnv: string | undefined): boolea
 }
 
 /**
- * Resolves the admin email/password/api_key seed-tenant will upsert.
+ * Resolves the admin email/password/api_key seed-baseline will upsert.
  *
  * - NODE_ENV=production: SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD are
  *   mandatory (fail-fast if either is missing/empty — never silently fall
@@ -65,10 +65,10 @@ export function resolveAdminCredentials(env: NodeJS.ProcessEnv): AdminCredential
   if (!password) missing.push('SEED_ADMIN_PASSWORD');
   if (missing.length > 0) {
     throw new Error(
-      `db:seed-tenant refuses to run with NODE_ENV=production without ${missing.join(' and ')} set. ` +
+      `db:seed-baseline refuses to run with NODE_ENV=production without ${missing.join(' and ')} set. ` +
         'Seeding the known default credentials (admin@example.com/password123) into a production ' +
         'database is not allowed. Set the missing variable(s) before provisioning — see ' +
-        'docs/knowledge/seed-tenant-credential-hardening.md.'
+        'docs/knowledge/seed-baseline-credential-hardening.md.'
     );
   }
 

@@ -109,10 +109,10 @@ _MIGRATE_JOB_FLAGS=(
   --service-account="${SA_EMAIL}"
   --set-cloudsql-instances="${CLOUD_SQL_CONNECTION_NAME}"
   # SEED_ADMIN_EMAIL/PASSWORD are only read when this Job is temporarily
-  # repointed at `npm run db:seed-tenant` by scripts/gcp-seed.sh — harmless
+  # repointed at `npm run db:seed-baseline` by scripts/gcp-seed.sh — harmless
   # while the Job runs its normal `prisma migrate deploy` command. Attached
   # here (not in gcp-seed.sh) so the Job's env/secrets stay fully declared
-  # by this one deploy step. See docs/knowledge/seed-tenant-credential-hardening.md.
+  # by this one deploy step. See docs/knowledge/seed-baseline-credential-hardening.md.
   --set-secrets="DATABASE_URL=app-database-url:latest,SEED_ADMIN_EMAIL=app-seed-admin-email:latest,SEED_ADMIN_PASSWORD=app-seed-admin-password:latest"
   --command="npx"
   --args="prisma,migrate,deploy"

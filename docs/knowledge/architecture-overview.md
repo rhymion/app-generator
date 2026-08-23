@@ -108,8 +108,7 @@ app-generator/
 │   ├── schema.prisma         Authoritative DB schema (hand-written)
 │   └── migrations/           Prisma migration history
 ├── scripts/                  Utility scripts
-│   ├── seed.ts               DB seeding
-│   ├── seed-tenant.ts        Tenant-specific seeding
+│   ├── seed-baseline.ts      Baseline data seeding
 │   ├── run-next-dev.js       Dev server launcher
 │   └── migrations/           SQL migration helpers
 ├── cypress/                  E2E tests (generated + hand-written)

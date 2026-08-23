@@ -213,7 +213,7 @@ After installing dependencies, a single command starts the database, generates c
 npm run dev:full
 ```
 
-`dev:full` runs: `docker:up:dev` → `generate-code` → `migrate:dev` → `db:generate` → `db:seed-tenant` → `dev`
+`dev:full` runs: `docker:up:dev` → `generate-code` → `migrate:dev` → `db:generate` → `db:seed-baseline` → `dev`
 
 For a production build:
 
@@ -221,7 +221,7 @@ For a production build:
 npm run build:full
 ```
 
-`build:full` runs: `docker:up:prod` → `generate-code` → `migrate:deploy` → `db:generate` → `db:seed-tenant` → `build`
+`build:full` runs: `docker:up:prod` → `generate-code` → `migrate:deploy` → `db:generate` → `db:seed-baseline` → `build`
 
 > **Important**: Before running `build:full` for the first time, run `dev:full` at least once. `dev:full` uses `migrate:dev` to create Prisma migration files; `build:full` uses `migrate:deploy` which only applies existing ones.
 
@@ -236,7 +236,7 @@ npm run docker:up:dev    # starts postgres-dev (port 5433, DB: my_next_dev)
 ### Generate Code, Push Schema, and Seed
 
 ```bash
-npm run setup            # generate-code → db:push → db:generate → db:seed-tenant
+npm run setup            # generate-code → db:push → db:generate → db:seed-baseline
 ```
 
 ### Start the Development Server
@@ -297,7 +297,7 @@ See [docs/knowledge/appendix/inventory-reservation-split.md](docs/knowledge/appe
 
 **Role-based access control** is defined per-model in the schema. The `authz.ts` module enforces per-model CRUD permissions on every request.
 
-**Default-deny**: new users start with zero permissions. An Administrator must explicitly assign roles to grant access. The `Administrator` role (seeded by `seed-tenant.ts`) grants full CRUD on all entities. See [docs/knowledge/authorization-default-deny.md](docs/knowledge/authorization-default-deny.md) for the permission model and test classification rules.
+**Default-deny**: new users start with zero permissions. An Administrator must explicitly assign roles to grant access. The `Administrator` role (seeded by `seed-baseline.ts`) grants full CRUD on all entities. See [docs/knowledge/authorization-default-deny.md](docs/knowledge/authorization-default-deny.md) for the permission model and test classification rules.
 
 **Unauthenticated page requests** are redirected to `/login` by `proxy.ts` before any page renders, and the user is sent back to their original destination after signing in (open-redirect protected — off-site `redirect` values are rejected). API routes are unaffected and continue returning JSON `401`/`404`. See [docs/knowledge/unauthenticated-page-redirect.md](docs/knowledge/unauthenticated-page-redirect.md).
 
@@ -374,7 +374,7 @@ npm run lint
 ### E2E Tests — Full Pipeline
 
 ```bash
-npm run test:e2e:build   # docker:up:test runs automatically; generate-code + db:push + db:generate + db:seed-tenant + build
+npm run test:e2e:build   # docker:up:test runs automatically; generate-code + db:push + db:generate + db:seed-baseline + build
 npm run test:e2e:cy:api  # API-only Cypress specs
 npm run test:e2e         # full Cypress suite (build + start + run)
 npm run docker:down:test # stop the test database when done
@@ -507,8 +507,7 @@ app-generator/
 │   ├── schema.prisma         Authoritative DB schema (hand-written)
 │   └── migrations/           Prisma migration history
 ├── scripts/                  Utility scripts
-│   ├── seed.ts               DB seeding
-│   ├── seed-tenant.ts        Tenant-specific seeding
+│   ├── seed-baseline.ts      Baseline data seeding
 │   └── run-next-dev.js       Dev server launcher
 ├── cypress/                  E2E tests
 │   ├── e2e/                  Generated per-entity specs + hand-written flow tests

@@ -87,7 +87,7 @@ code without changing anything in the database:
   (API routes return `404`; session-action paths no-op silently) instead of
   succeeding. No schema change — this only bites a deployment whose client or
   test code depended on the old (permissive) cross-org behavior.
-- **`db:seed-tenant` requires `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` under
+- **`db:seed-baseline` requires `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` under
   `NODE_ENV=production`** — every production-equivalent
   provisioning path (`vercel-build`, `build:full`, GCP's `gcp-seed.sh`) now
   fails fast at seed time unless both env vars are set, instead of silently
@@ -95,7 +95,7 @@ code without changing anything in the database:
   fixed `api_key` literal. Set both before your next production provisioning
   run; `api_key` is generated automatically and printed once to stdout. If a
   deployment was already provisioned with the old defaults, see
-  [docs/knowledge/seed-tenant-credential-hardening.md](docs/knowledge/seed-tenant-credential-hardening.md)
+  [docs/knowledge/seed-baseline-credential-hardening.md](docs/knowledge/seed-baseline-credential-hardening.md)
   for the remediation runbook (rotate password/api_key, or create a fresh
   admin and disable the default one). `test`/`development` provisioning is
   unaffected.

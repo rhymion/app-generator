@@ -348,7 +348,7 @@ worktree (easiest to demonstrate — confirmed 6 entities with callSeq, 11
 specs previously failing).
 
 **Prerequisites.** Working test environment: `docker compose up -d --wait`,
-`npm run db:push`, `npm run db:generate`, `npm run db:seed-tenant`.
+`npm run db:push`, `npm run db:generate`, `npm run db:seed-baseline`.
 
 **Case A — Full spec run (regression baseline)**
 

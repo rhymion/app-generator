@@ -23,9 +23,9 @@ A user's effective permissions are computed by:
 Special roles `Creator` and `Assignee` are resolved at item level: they only grant
 `read`/`update`/`delete` on items the user owns or is assigned to, never `create`.
 
-## seed-tenant.ts Role
+## seed-baseline.ts Role
 
-`scripts/seed-tenant.ts` seeds an `Administrator` role with full CRUD on 8 entities:
+`scripts/seed-baseline.ts` seeds an `Administrator` role with full CRUD on 8 entities:
 
 ```
 user, role, organization, permission, setting,
@@ -39,7 +39,7 @@ This is a **fixed enumeration, not schema-derived**: consumer-added entities
 seeded `Administrator` role starts with zero permissions on them until an
 admin explicitly grants them via the Permissions UI — a deliberate
 least-privilege-by-default boundary, not a bug. See
-`docs/knowledge/seed-tenant-credential-hardening.md` §"Fixed permission
+`docs/knowledge/seed-baseline-credential-hardening.md` §"Fixed permission
 enumeration" for the full rationale, plus that doc's credential-hardening
 change (production provisioning now requires `SEED_ADMIN_EMAIL`/
 `SEED_ADMIN_PASSWORD` and mints a random `api_key`, instead of the fixed
@@ -76,11 +76,11 @@ When adding a new **default** entity to `code_generator/json_schema.yaml` (app-g
 generator's own baseline schema):
 
 1. Add the entity name to `ALL_ENTITIES` in `cypress/support/db-helpers.ts`.
-2. Also add it to `scripts/seed-tenant.ts` entities array.
+2. Also add it to `scripts/seed-baseline.ts` entities array.
 3. For new Cypress normal-flow tests: use `cy.task('db:grantAllPermissions')` in `beforeEach`.
 
 Consumer/project-specific entities (defined in a consuming project's own `prj/code_generator/
-json_schema.yaml`, e.g. `leave_request`) must **not** be added to `scripts/seed-tenant.ts` —
+json_schema.yaml`, e.g. `leave_request`) must **not** be added to `scripts/seed-baseline.ts` —
 that file is generator-owned and shared by every consumer. Project-specific fixture data
 belongs in the consuming project's own test helpers/tasks (see `prj/cypress/support/
 project-tasks.ts`), not the shared seed script.

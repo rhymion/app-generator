@@ -166,8 +166,8 @@ hand, so watch for it.
 
 Since `setting` is a proxied view of `user` and uses `creator_id` as its self-only filter (see
 above), that filter only means "is this my own account" if `creator_id` equals `id` on every real
-user row. All four user-creation call sites (`lib/auth/create-user.ts`,
-`app/api/auth/register/route.ts`, `scripts/seed-tenant.ts`, `scripts/seed.ts`) generate the id up
+user row. All three user-creation call sites (`lib/auth/create-user.ts`,
+`app/api/auth/register/route.ts`, `scripts/seed-baseline.ts`) generate the id up
 front and pass it as both `id` and `creator_id`.
 
 A database `CHECK (creator_id = id)` constraint was considered and rejected: two existing test

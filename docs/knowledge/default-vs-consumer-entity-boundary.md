@@ -38,7 +38,7 @@ every consumer, not one consumer's business domain: `audit_log`, `mfa_recovery_c
 Anything else (`purchase_order`, `receiving_receipt`, `leave_request`, `inventory`, `location`,
 etc.) is a consumer's own domain entity, defined in that consumer's `prj/code_generator/
 json_schema.yaml`. See also [[authorization-default-deny]] `## Adding Tests for a New Entity` for
-the `scripts/seed-tenant.ts` instance of this same rule.
+the `scripts/seed-baseline.ts` instance of this same rule.
 
 ## Established extension point for consumer-specific test infrastructure
 
@@ -67,7 +67,7 @@ hardcoded into the shared `cypress.config.ts`.
   description with no enumerated entity names.
 - `cypress.config.ts`: 9 hardcoded task registrations (`db:seedReservationInventory` etc.)
   imported `./cypress/support/purchase_order/reservation_helper` unconditionally — same class of
-  violation as the `scripts/seed-tenant.ts` `leave_request` block removed earlier, and already
+  violation as the `scripts/seed-baseline.ts` `leave_request` block removed earlier, and already
   flagged on the dashboard as a follow-up from that cmd. Consolidated into this cmd (see report)
   and removed from `cypress.config.ts`. **Companion action required** in `app-template`
   (out of scope here — this repo's `app-template` scan was read-only): add the 9 equivalent

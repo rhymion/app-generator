@@ -6,7 +6,7 @@ import { PrismaClient } from '@/app/generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg'
 import * as bcrypt from 'bcryptjs';
 import { createId } from "@paralleldrive/cuid2";
-import { resolveAdminCredentials, requiresExplicitCredentials } from './seed-tenant-credentials';
+import { resolveAdminCredentials, requiresExplicitCredentials } from './seed-baseline-credentials';
 import { pinSslModeVerifyFull } from '../lib/db-url';
 import { SCHEDULED_TASK_ACTOR_EMAIL } from '../lib/scheduled-tasks/system-actor';
 
@@ -50,18 +50,18 @@ async function main() {
   });
 
   // ── Admin user ────────────────────────────────────────────────────────────
-  // Created here so db:seed-tenant is sufficient for tests requiring a
+  // Created here so db:seed-baseline is sufficient for tests requiring a
   // sign-in with admin@example.com. Future default permission of 'none'
   // means the admin must exist before general seeding adds any other data.
   //
-  // Credentials come from resolveAdminCredentials (scripts/seed-tenant-credentials.ts):
+  // Credentials come from resolveAdminCredentials (scripts/seed-baseline-credentials.ts):
   // under NODE_ENV=production it fail-fasts unless SEED_ADMIN_EMAIL/
   // SEED_ADMIN_PASSWORD are set and always mints a fresh random api_key —
   // app-generator is a public repo, so the well-known admin@example.com/
   // password123/mk_78d1e51a... literal must never land in a real deployment.
   // Every other NODE_ENV (test, development, ...) keeps those exact defaults
   // unchanged, since cypress specs and vitest fixtures are pinned to them.
-  // See docs/knowledge/seed-tenant-credential-hardening.md.
+  // See docs/knowledge/seed-baseline-credential-hardening.md.
   const credentials = resolveAdminCredentials(process.env);
   const hashedPassword = await bcrypt.hash(credentials.password, 10);
   const adminId = createId();
@@ -94,7 +94,7 @@ async function main() {
   // call) happened to trigger the run. Looked up by this fixed, well-known
   // email rather than an env-var-configured user id: there is nothing to
   // separately capture and set as a deployment secret, and the account
-  // exists as soon as this already-mandatory db:seed-tenant step has run —
+  // exists as soon as this already-mandatory db:seed-baseline step has run —
   // on both the Vercel and GCP deploy paths, and before any scheduled task
   // could ever fire. No password/api_key: this account never signs in or
   // calls the API as itself, only referenced by id for creator_id/
@@ -135,7 +135,7 @@ async function main() {
   // of the default schema (e.g. purchase_order, shift) never appears here,
   // so the Administrator role gets zero permissions on it until an admin
   // grants them via the Permissions UI. This is a deliberate design
-  // boundary, not a bug — see docs/knowledge/seed-tenant-credential-hardening.md
+  // boundary, not a bug — see docs/knowledge/seed-baseline-credential-hardening.md
   // §"Fixed permission enumeration".
   const entities = [
     'user', 'role', 'organization', 'permission', 'setting',

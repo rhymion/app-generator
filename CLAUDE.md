@@ -97,7 +97,7 @@ Use `/investigate` slash command.
 
 Gate commands:
 - **pytest**: `npm run test:pytest`
-- **build**: `npm run test:e2e:build` (docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build)
+- **build**: `npm run test:e2e:build` (docker:up:test + generate-code + db:push + db:generate + db:seed-baseline + build)
 - **component test**: `npm run test`
 - **e2e API**: `npm run test:e2e:cy:api`
 - **eslint**: `npm run lint`

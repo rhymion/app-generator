@@ -6,12 +6,12 @@ import {
   requiresExplicitCredentials,
   resolveAdminCredentials,
   generateApiKey,
-} from './seed-tenant-credentials';
+} from './seed-baseline-credentials';
 
 // cmd_504: pure, hand-written module — imports neither the generated Prisma
 // client nor anything else code_generator/generate.py emits, so this test
 // runs unchanged in a checkout that has never run `npm run generate-code`.
-// See docs/knowledge/seed-tenant-credential-hardening.md.
+// See docs/knowledge/seed-baseline-credential-hardening.md.
 
 describe('requiresExplicitCredentials', () => {
   it('is true only for NODE_ENV=production', () => {
