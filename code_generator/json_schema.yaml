@@ -475,9 +475,6 @@ definitions:
             width: 200
     fields:
       name: {}
-      source_url:
-        format: uri
-        x-uri-kind: link
     required:
       - widgets
     properties:
