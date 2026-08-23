@@ -20,6 +20,7 @@ from helpers.schema_helpers import (
     resolve_ledger_domain,
     get_entity_properties,
 )
+from build_context import get_uri_kind
 
 
 def _raw_def(entity_name: str, schema: dict) -> dict:
@@ -196,7 +197,10 @@ def _readonly_display_field(
         return result
 
     if actual == 'string' and fmt == 'uri':
-        result['jsx'] = f"{indent}<ImageDisplay url={{src.{p}}} alt={{tf('{fk}')}} />"
+        if get_uri_kind(prop) == 'link':
+            result['jsx'] = f"{indent}<AppFieldExternalLink label={{tf('{fk}')}} href={{src.{p}}} />"
+        else:
+            result['jsx'] = f"{indent}<ImageDisplay url={{src.{p}}} alt={{tf('{fk}')}} />"
         return result
 
     if actual == 'boolean':
@@ -2835,6 +2839,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
 
     date_time_flds     = []
     image_flds         = []
+    link_uri_flds      = []
     boolean_flds       = []
     enum_integer_flds  = []
     enum_native_flds   = []
@@ -2849,7 +2854,10 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         if actual == 'string' and fmt in ('date', 'date-time', 'time'):
             date_time_flds.append(p)
         elif actual == 'string' and fmt == 'uri':
-            image_flds.append(p)
+            if get_uri_kind(prop) == 'link':
+                link_uri_flds.append(p)
+            else:
+                image_flds.append(p)
         elif actual == 'boolean':
             boolean_flds.append(p)
         elif actual in ('integer', 'number') and isinstance(prop.get('enum'), list):
@@ -2861,6 +2869,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
 
     needs_datetime_wrapper = bool(date_time_flds)
     needs_image_display    = bool(image_flds)
+    needs_link_display     = bool(link_uri_flds)
 
     def _tf(p: str):
         return to_camel_case(p)
@@ -2915,6 +2924,13 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
             uses_decimal_format = True
         enum_ns_hooks.extend(built['ns_hooks'])
         enum_opt_setups.extend(built['opt_setups'])
+
+    # x-uri-kind: link fields — a plain external link, not an image (the
+    # template already carries a `needs_link_display`-gated
+    # AppFieldExternalLink import; this is what actually populates it).
+    for p in link_uri_flds:
+        fk = _tf(p)
+        jsx_by_field[p] = f"      <AppFieldExternalLink label={{tf('{fk}')}} href={{src.{p}}} />"
 
     # Custom view fields
     for p in custom_view_props:
@@ -3183,6 +3199,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     return {
         'needs_datetime_wrapper': needs_datetime_wrapper,
         'needs_image_display':    needs_image_display,
+        'needs_link_display':     needs_link_display,
         'has_rel_links':          has_rel_links,
         'needs_accordion':        needs_accordion,
         'has_comment_children':   has_comment_children,
@@ -3296,6 +3313,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     decimal_props        = [p for p in cats.get('decimal', []) if p not in readonly_field_names]
     date_time_props      = [p for p in cats['date_time']      if p not in readonly_field_names]
     image_props          = [p for p in cats['image']          if p not in readonly_field_names]
+    link_uri_props       = [p for p in cats.get('link_uri', []) if p not in readonly_field_names]
     boolean_props        = [p for p in cats['boolean']        if p not in readonly_field_names]
     enum_int_props       = [p for p in cats['enum_integer']   if p not in readonly_field_names]
     enum_str_props       = [p for p in cats.get('enum_string', [])  if p not in readonly_field_names]
@@ -3327,7 +3345,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     text_refs = '\n'.join(f"  const {p}Ref = useRef<HTMLInputElement>(null);" for p in text_props)
     number_refs = '\n'.join(f"  const {p}Ref = useRef<HTMLInputElement>(null);" for p in number_props)
     decimal_refs = '\n'.join(f"  const {p}Ref = useRef<HTMLInputElement>(null);" for p in decimal_props)
-    parent_refs = '\n'.join(filter(None, [text_refs, number_refs, decimal_refs]))
+    link_uri_refs = '\n'.join(f"  const {p}Ref = useRef<HTMLInputElement>(null);" for p in link_uri_props)
+    parent_refs = '\n'.join(filter(None, [text_refs, number_refs, decimal_refs, link_uri_refs]))
 
     _bridge_child_ir = ctx.get('bridge_child_ir')
     if _bridge_child_ir:
@@ -3614,6 +3633,31 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         # regardless of its real name, breaking any UI lookup keyed on the
         # field's real label.
         jsx_by_field[p] = f"      <ImageUpload\n        value={{{sn}}}\n        onChange={{set{setter}}}\n        label={{'{fk}'}}\n      />"
+
+    # x-uri-kind: link fields — rendered as a plain URL-typed text input
+    # (uncontrolled ref, same pattern as text_props), NOT the ImageUpload
+    # widget image_props gets: the display side (AppFieldExternalLink /
+    # DataGrid link cell) already treats these as a plain external URL, not
+    # an uploadable image, so the input side must match (cmd_771).
+    for p in link_uri_props:
+        prop    = filtered_props[p]
+        fk      = _tf(p)
+        req     = p in (model_def.get('required') or [])
+        max_len = prop.get('maxLength')
+        slot_str = f'\n        maxLength={{{max_len}}}' if max_len is not None else ''
+        _link_width_cols = _ui_width_cols(prop)
+        if _link_width_cols:
+            has_box_import = True
+        _link_jsx = (
+            f"      <AppFieldText\n"
+            f"        label={{tf('{fk}')}}\n"
+            f"        inputRef={{{p}Ref}}\n"
+            f"        defaultValue={{src.{p} || ''}}\n"
+            f"        {'required' if req else ''}{slot_str}\n"
+            f"        slotProps={{{{ htmlInput: {{ type: 'url' }} }}}}\n"
+            f"      />"
+        )
+        jsx_by_field[p] = _maybe_box_wrap(_link_jsx, _link_width_cols)
 
     # Boolean fields
     for p in boolean_props:
@@ -3913,6 +3957,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             dt_ds_parts.append(f"    formData.set('{p}', {sn}?.toISOString() || '');")
     dt_ds = '\n'.join(dt_ds_parts)
     img_ds   = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in image_props)
+    link_uri_ds = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in link_uri_props)
     mention_ds = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in mention_props)
     def _rel_fds_line(r: dict) -> str:
         var = safe_var_name(r['prop_name'])
@@ -3944,7 +3989,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             return f"    formData.set('{p}', {safe_var_name(p)}.toString());"
         return f"    formData.set('{p}', {safe_var_name(p)});"
     cust_ds  = '\n'.join(_custom_form_data_line(p) for p in custom_upsert_props)
-    parent_form_data_sets = '\n'.join(filter(None, [text_ds, mention_ds, entity_select_ds, rel_ds, num_ds, decimal_ds, enum_ds, enum_str_ds, bool_ds, dt_ds, img_ds, cust_ds]))
+    parent_form_data_sets = '\n'.join(filter(None, [text_ds, mention_ds, entity_select_ds, rel_ds, num_ds, decimal_ds, enum_ds, enum_str_ds, bool_ds, dt_ds, img_ds, link_uri_ds, cust_ds]))
 
     # ---- Children analysis ----
     # Use the pre-filtered embedded_ch from build_context (passed as non_comment_ch in ctx).
@@ -4724,6 +4769,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in text_props)
     validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in number_props)
     validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in decimal_props)
+    validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in link_uri_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in date_time_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in image_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in mention_props)

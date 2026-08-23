@@ -54,6 +54,16 @@ import gated on a new `uses_image_display` flag (same text-search pattern as
 `uses_app_field_text`/`uses_app_field_relation`) — a readonly-only
 image field has no other path that would pull the import in.
 
+**Later fix:** `_readonly_display_field()`'s `format: uri` branch was
+unconditional — it rendered `ImageDisplay` for any uri field regardless of
+`x-uri-kind`, so an `x-uri-kind: link` field marked readonly (either via
+`x-readonly-fields` here, or as a plain non-editable field on `FormView`)
+rendered an `<img>` tag pointed at an arbitrary URL instead of a clickable
+link. Fixed by branching on `get_uri_kind(prop)`: `link` renders
+`AppFieldExternalLink`, everything else keeps `ImageDisplay`. See
+`code_generator/tests/test_form_upsert.py`'s
+`TestUriKindLinkFieldReadonlyInFormUpsert`.
+
 ## Fail-closed validation: `x-readonly-fields` must resolve to a real property
 
 `build_context.py` collects `x-readonly-fields` (entity-level) and unions it
