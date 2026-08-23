@@ -68,6 +68,24 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/noindex-default-and-branding-env-vars.md`.
 
 ### Fixed
+- **`lib/attachment/direct_actions.ts` (the direct-attachment FK server action) was
+  emitted unconditionally, breaking `tsc`/`next build` for every consumer regardless
+  of whether they used the feature.** The file always creates a standalone
+  `attachment` row with `attachable_id: null`, which only type-checks when
+  `attachment.attachable_id` is nullable in `prisma/schema.prisma` — a manual
+  Prisma-alignment prerequisite this repo's own root `prisma/schema.prisma` already
+  has, but that no other project's `prisma/schema.prisma` had ever been asked to
+  apply, since none of them declare a `type: direct` field. Because `next build`'s
+  TypeScript check type-checks every `.ts` file under `lib/` regardless of whether
+  anything imports it, the file broke `tsc` for a project with zero `type: direct`
+  fields the moment it picked up a recent generator update, with no schema change of
+  its own required to trigger it. `generate.py` now emits
+  `lib/attachment/direct_actions.ts` only when at least one entity actually declares
+  `x-relationship: {target: attachment, type: direct}`, and separately validates the
+  `attachable_id`-nullable prerequisite (with an actionable error message) whenever
+  an entity does use the feature, instead of leaving it to surface later as a `tsc`
+  error deep inside a generated file. See `docs/knowledge/schema-yaml-configuration.md`
+  ("Direct Attachment FK").
 - **`x-uri-kind: link` fields were silently absent from the create/edit
   form.** A `format: uri` field declared `x-uri-kind: link` was categorized
   correctly by the generator's field-typing logic, and its read-only display

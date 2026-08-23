@@ -15,6 +15,7 @@ from helpers.label_field import resolve_label_paths
 from helpers.schema_helpers import (
     get_parent_relationships, get_internal_bridge_fk_prop_names,
     get_entity_properties, get_entity_required, get_self_only_flags,
+    schema_has_direct_attachment_fk,
 )
 from schema_deriver import parse_prisma_schema
 
@@ -219,6 +220,56 @@ def validate_self_only_creator_id_columns(schema: dict, prisma_schema_path: str 
         raise SchemaValidationError(
             f"x-self-only validation failed — {len(errors)} entity(ies) missing "
             f"a creator_id column:\n\n{bullet_list}\n"
+        )
+
+
+_ATTACHABLE_ID_NULLABLE = re.compile(r'^\s*attachable_id\s+String\?\s*$', re.MULTILINE)
+
+
+def validate_direct_attachment_prerequisite(schema: dict, prisma_schema_path: str | Path) -> None:
+    """Verify the Prisma-schema prerequisite for `x-relationship: {target:
+    attachment, type: direct}` is met before generate() writes any code that
+    depends on it.
+
+    `docs/knowledge/schema-yaml-configuration.md` ("Direct Attachment FK")
+    documents `attachment.attachable_id` as needing to be nullable
+    (`onDelete: SetNull`) once ANY entity adopts this feature — a hand-applied
+    prisma/schema.prisma edit, like every other x-relationship convention on
+    that page, not something the generator writes itself (subtask_788b:
+    lib/attachment/direct_actions.ts is now only emitted when this condition
+    is true, so this check and that gate agree on the same trigger). Only
+    checked when the schema actually uses the feature — a consumer that
+    doesn't is never asked to touch prisma/schema.prisma's built-in
+    `attachment` model. Without this, a consumer adopting the feature without
+    having applied the prerequisite found out only via a `tsc` TS2322 deep
+    inside the generated `lib/attachment/direct_actions.ts` (subtask_788b's
+    own root cause) — this catches it here, at generate time, with an
+    actionable message instead.
+    """
+    if not schema_has_direct_attachment_fk(schema):
+        return
+
+    path = Path(prisma_schema_path)
+    if not path.exists():
+        raise SchemaValidationError(
+            f"Prisma schema not found at {path} — required for direct-attachment "
+            f"FK validation."
+        )
+    model_bodies = dict(_iter_model_blocks(path.read_text()))
+    body = model_bodies.get('attachment')
+    if body is None or not _ATTACHABLE_ID_NULLABLE.search(body):
+        raise SchemaValidationError(
+            "Direct-attachment FK validation failed — an entity declares "
+            "`x-relationship: {target: attachment, type: direct}`, but "
+            "prisma/schema.prisma's `attachment` model does not have a "
+            "nullable `attachable_id`. A direct-attachment FK creates an "
+            "attachment row with no bridge owner, so attachable_id must be "
+            "nullable. Add to the `attachment` model:\n\n"
+            "  attachable_id String?\n"
+            "  attachable    attachable? @relation(fields: [attachable_id], "
+            "references: [id], onDelete: SetNull)\n\n"
+            "See docs/knowledge/schema-yaml-configuration.md \"Direct "
+            "Attachment FK\"."
         )
 
 

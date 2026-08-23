@@ -837,6 +837,16 @@ model some_entity {
 `attachment.attachable_id` is nullable (`onDelete: SetNull`) -- a direct-attachment FK creates
 an attachment row with no bridge owner at all, so `attachable_id` stays permanently null for
 that row's whole life; that is the normal, permanent state, not a transient one pending cleanup.
+This is a manual `prisma/schema.prisma` edit you must apply *before* declaring the first
+`type: direct` field, the same as every other Prisma-alignment note on this page --
+`generate.py` does not write it for you. `generate.py` does check for it: it fails the build with
+an explicit message if any entity declares `type: direct` while `attachment.attachable_id` is
+still non-nullable (`validate_direct_attachment_prerequisite`), and it never emits
+`lib/attachment/direct_actions.ts` (or requires this prerequisite at all) unless at least one
+entity actually uses the feature -- a consumer that hasn't adopted `type: direct` anywhere is
+never asked to touch the `attachment` model (subtask_788b; the file used to be emitted
+unconditionally and broke every consumer's `tsc` build regardless of whether they used the
+feature, see CHANGELOG).
 
 Implementation-internals notes from when this feature was built (why the generator's TS-type
 resolution for `attachment.type` must read the raw entity definition rather than the plain

@@ -67,10 +67,12 @@ npx prisma generate --schema="$OUT_DIR/prisma/schema.prisma" >/tmp/direct_attach
 
 # Fixture-only shims for stable, entity-independent shared libs that the
 # generated files import. See fixtures/direct_attachment_gate/shims/ for the
-# source of truth. lib/attachment/direct_actions.ts is NOT shimmed --
-# generate.py always emits it (unconditionally, like bridge_actions.ts), so
-# this run's own output at $OUT_DIR/lib/attachment/direct_actions.ts is the
-# real thing the fixture's tsconfig.json paths entry points at.
+# source of truth. lib/attachment/direct_actions.ts is NOT shimmed -- this
+# fixture's own entity declares a direct-attachment FK, so generate.py emits
+# the real file (subtask_788b: generate.py now only emits it when at least
+# one entity in the schema actually uses the feature), and this run's own
+# output at $OUT_DIR/lib/attachment/direct_actions.ts is the real thing the
+# fixture's tsconfig.json paths entry points at.
 cp "$FIXTURE_DIR/shims/prisma.ts" "$OUT_DIR/lib/prisma.ts"
 cp "$FIXTURE_DIR/shims/authz.ts" "$OUT_DIR/lib/authz.ts"
 cp "$FIXTURE_DIR/tsconfig.json" "$OUT_DIR/tsconfig.json"
