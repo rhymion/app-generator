@@ -35,6 +35,7 @@ from helpers.schema_helpers import get_entity_properties
 from helpers.schema_helpers import get_self_only_flags
 from helpers.schema_helpers import get_parent_relationships
 from helpers.schema_helpers import resolve_set_fields as _resolve_set_fields
+from helpers.schema_helpers import schema_has_direct_attachment_fk
 from generators import (
     chart_context,
     page_list_context,
@@ -62,6 +63,7 @@ from generators_i18n import (
 from validate import (
     validate_schema, validate_prisma_indexes,
     validate_self_only_creator_id_columns, validate_defaults_cross_schema,
+    validate_direct_attachment_prerequisite,
     SchemaValidationError,
 )
 from generators_doc import build_doc_entity_context, build_doc_index_context, convert_md_to_mdx
@@ -727,6 +729,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         validate_prisma_indexes(Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_self_only_creator_id_columns(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_defaults_cross_schema(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
+        validate_direct_attachment_prerequisite(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
     except SchemaValidationError as exc:
         print(f'\n{exc}', file=sys.stderr)
         sys.exit(1)
@@ -1392,15 +1395,30 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     # --- Direct-attachment FK server action (lib/attachment/direct_actions.ts) ---
     #
-    # Always emitted (cmd_788, mirrors bridge_actions.ts above): SingleAttachmentUpload
-    # unconditionally imports createDirectAttachment regardless of schema.
-    _write(
-        out / 'lib' / 'attachment' / 'direct_actions.ts',
-        _render(env, 'direct_attachment_actions.ts.jinja2', {
-            'type_ts': attachment_type_ts(schema),
-        }),
-    )
-    print('  Direct-attachment FK action → lib/attachment/direct_actions.ts')
+    # Only emitted when at least one entity declares an
+    # `x-relationship: {target: attachment, type: direct}` FK (subtask_788b, fixing
+    # a cmd_788 regression). Unlike lib/attachment/bridge_actions.ts above -- which
+    # components/_standard/AttachmentSection.tsx really does unconditionally import,
+    # so it must always exist -- nothing in this repo's hand-written components
+    # statically imports createDirectAttachment; SingleAttachmentUpload.tsx takes it
+    # as an injected `createAttachment` prop specifically so it stays import-free
+    # (see its own docstring), and the only static importer is the GENERATED
+    # per-entity FormUpsert.tsx for an entity that actually has a direct-attachment
+    # field. Emitting this file unconditionally made every consumer's `tsc` build
+    # depend on `attachment.attachable_id` being nullable in their prisma/
+    # schema.prisma -- the documented Prisma-alignment prerequisite for this feature
+    # (docs/knowledge/schema-yaml-configuration.md "Direct Attachment FK") -- even
+    # for a consumer that declares zero `type: direct` fields and so was never told
+    # to apply it: proj_c/proj_g/proj_h all failed `tsc` with TS2322 on this exact
+    # file despite none of them using the feature.
+    if schema_has_direct_attachment_fk(schema):
+        _write(
+            out / 'lib' / 'attachment' / 'direct_actions.ts',
+            _render(env, 'direct_attachment_actions.ts.jinja2', {
+                'type_ts': attachment_type_ts(schema),
+            }),
+        )
+        print('  Direct-attachment FK action → lib/attachment/direct_actions.ts')
 
     # --- Named constants (lib/reaction_constants.ts) ---
     # named_constants was pre-computed before the entity loop

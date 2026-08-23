@@ -987,6 +987,25 @@ def get_direct_attachment_fk_props(parent_def: dict) -> list[dict]:
     return result
 
 
+def schema_has_direct_attachment_fk(schema: dict) -> bool:
+    """True if any entity in the schema declares a direct-attachment FK
+    (`x-relationship: {target: attachment, type: direct}`, cmd_788).
+
+    Walks the raw (`__`-prefixed) entities directly -- same scope as
+    get_direct_attachment_fk_props()'s per-entity callers -- since FK
+    properties always live on the raw entity, never the bare view. Shared by
+    generate.py (whether to emit lib/attachment/direct_actions.ts at all,
+    subtask_788b) and validate.py (whether to require the
+    attachment.attachable_id Prisma-alignment prerequisite) so the two never
+    drift onto different triggers.
+    """
+    return any(
+        get_direct_attachment_fk_props(defn)
+        for name, defn in (schema.get('definitions') or {}).items()
+        if name.startswith('__') and isinstance(defn, dict)
+    )
+
+
 def find_fk_derivation_path(parent: str, parent_def: dict, target_q: str, schema: dict) -> dict | None:
     """Walk the parent's m2o/o2o FKs to find a way to derive a value of target_q's id.
 
