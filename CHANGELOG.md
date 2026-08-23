@@ -17,6 +17,23 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   why `robots.txt` `Disallow` was rejected, and consumer-impact notes.
 
 ### Added
+- **`x-relationship: { target: attachment, type: direct }`** — a new field
+  declaration for a single-file FK (a profile picture, a signed contract):
+  the entity holds its own `{field}_id` pointing at exactly one `attachment`
+  row, nullable or required, rendered via a new `SingleAttachmentUpload`
+  form widget (create/edit) and `SingleAttachmentDisplay` (view). Unlike the
+  existing `attachable_id` bridge (multiple files) and the one-to-one
+  selector pattern (a target with its own pages), `attachment` here has no
+  list/view/new/edit pages of its own. `attachment.attachable_id` is now
+  nullable (`onDelete: SetNull`) to allow this — a direct-attachment FK
+  creates an attachment row with no bridge owner at all. See
+  `docs/knowledge/schema-yaml-configuration.md` (Direct Attachment FK).
+- **`x-uri-kind: file`** — a third `format: uri` field kind alongside
+  `image` and `link`: like `image`, the field still uploads through
+  `/api/upload` and stores a plain URL string, but displays as a download
+  link/icon instead of an `<img>` once set (for a non-image uploaded file,
+  e.g. a URL-stored document). Shares the same `SingleAttachmentUpload` /
+  `SingleAttachmentDisplay` components as the direct-attachment FK above.
 - **`NEXT_PUBLIC_APP_TITLE` / `NEXT_PUBLIC_APP_COPYRIGHT`** — optional env vars
   in `lib/site-config.ts` for overriding the app title and footer copyright
   text without touching the file. Both are inlined at build time (Vercel

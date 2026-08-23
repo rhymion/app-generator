@@ -46,6 +46,7 @@
     "test:chart-scalar-gate": "bash scripts/check_chart_scalar_gate_fixture.sh",
     "test:payment-gate": "bash scripts/check_payment_gate_fixture.sh",
     "test:approval-lockdown-gate": "bash scripts/check_approval_lockdown_gate_fixture.sh",
+    "test:direct-attachment-gate": "bash scripts/check_direct_attachment_gate_fixture.sh",
     "start": "node scripts/run-next-start.js",
     "test": "vitest",
     "test:coverage": "vitest --coverage",
