@@ -12,3 +12,15 @@
 // declare the key), so generate.py never writes it, unlike its sibling
 // lib/scheduled-tasks/registry.ts.
 export const SCHEDULED_TASK_ACTOR_EMAIL = 'scheduled-task-actor@internal.local';
+
+// Dedicated role gating manual (non-`CRON_SECRET`) calls to the generated
+// `/api/scheduled-tasks/[task]` route (cmd_787) — see
+// `lib/api-auth.ts`'s `requireScheduledTaskRole`. Kept here (framework-free,
+// no `next/server` import) rather than in lib/api-auth.ts itself so
+// scripts/seed-baseline.ts — a plain Node script, not a Next.js request
+// handler — can import it without pulling in Next's server runtime.
+// scripts/seed-baseline.ts seeds this role with zero members by default: an
+// operator must explicitly grant it via the Role management UI before any
+// account can trigger a scheduled task outside of Vercel Cron's own
+// `CRON_SECRET` path.
+export const SCHEDULED_TASK_ROLE_NAME = 'ScheduledTaskRunner';

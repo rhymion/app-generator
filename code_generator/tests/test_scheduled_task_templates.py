@@ -173,6 +173,17 @@ class TestRouteTemplate:
         # replaces" comment -- what must be gone is any functional read of it.
         assert 'process.env.SCHEDULED_TASK_ACTOR_ID' not in rendered
 
+    def test_manual_trigger_requires_dedicated_role_not_bare_dual_auth(self):
+        """cmd_787: the non-CRON_SECRET path must go through
+        requireScheduledTaskRole (dual-auth PLUS a dedicated role check), not
+        bare requireDualAuth -- the earlier version let any authenticated
+        user or X-API-Key holder trigger a scheduled task, with no role or
+        permission check at all."""
+        rendered = _ENV.get_template('scheduled_task_route.ts.jinja2').render()
+        assert "from '@/lib/api-auth'" in rendered
+        assert 'requireScheduledTaskRole' in rendered
+        assert 'await requireDualAuth(' not in rendered
+
 
 class TestBuildUserSchemaKeySurvival:
     """Regression test for a real bug caught during the out-of-band consumer

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireDualAuth, handleApiError, ApiError } from '@/lib/api-auth';
+import { requireScheduledTaskRole, handleApiError, ApiError } from '@/lib/api-auth';
 import { TASK_REGISTRY } from '@/lib/scheduled-tasks/registry';
 import { SCHEDULED_TASK_ACTOR_EMAIL } from '@/lib/scheduled-tasks/system-actor';
 import prisma from '@/lib/prisma';
@@ -21,9 +21,13 @@ import prisma from '@/lib/prisma';
 // so neither deploy path is forced into the other's convention.
 //
 // Auth: Vercel Cron's own `Authorization: Bearer $CRON_SECRET` convention
-// when CRON_SECRET is configured, else the existing dual-auth (X-API-Key or
-// session cookie) so the task can also be triggered manually or from a
-// non-Vercel scheduler.
+// when CRON_SECRET is configured, else `requireScheduledTaskRole` (cmd_787)
+// — dual-auth (X-API-Key or session cookie) PLUS membership in the
+// dedicated `ScheduledTaskRunner` role (see `lib/api-auth.ts`). Any other
+// authenticated user, including an Administrator, is rejected with 403 —
+// an earlier version fell through to plain dual-auth with no role check at
+// all, letting any signed-in user or API-key holder trigger a scheduled
+// task on demand (see docs/knowledge/scheduled-task-operations.md).
 //
 // actorId: always the dedicated scheduled-task system account, looked up by
 // its fixed email (SCHEDULED_TASK_ACTOR_EMAIL) — never the caller's own
@@ -43,7 +47,7 @@ async function handleScheduledTask(
     const authHeader = req.headers.get('Authorization');
     const isCronAuth = !!cronSecret && authHeader === `Bearer ${cronSecret}`;
     if (!isCronAuth) {
-      await requireDualAuth(req);
+      await requireScheduledTaskRole(req);
     }
 
     const systemActor = await prisma.user.findUnique({

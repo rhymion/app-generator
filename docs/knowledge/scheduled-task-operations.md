@@ -98,40 +98,35 @@ old, silent-failure symptom above.
 
 Optional but recommended. When set on the Vercel project, Vercel
 automatically sends `Authorization: Bearer $CRON_SECRET` on every Cron Job
-invocation; the route compares it and skips the normal dual-auth
-(`X-API-Key`/session cookie) check when it matches. **Vercel does not
-generate or set this for you** — `scripts/vercel-env.sh` now does
-(generate-once-persist into `.env.production.local`, injected via
-`vercel_env_inject`, mirroring `AUTH_SECRET`'s existing pattern), so running
-`scripts/vercel-setup.sh` is enough; no separate manual step. See
-`.env.example`/`.env.vercel.production.local.example`.
+invocation; the route compares it and skips the `requireScheduledTaskRole`
+check (below) when it matches. **Vercel does not generate or set this for
+you** — `scripts/vercel-env.sh` now does (generate-once-persist into
+`.env.production.local`, injected via `vercel_env_inject`, mirroring
+`AUTH_SECRET`'s existing pattern), so running `scripts/vercel-setup.sh` is
+enough; no separate manual step. See `.env.example`/
+`.env.vercel.production.local.example`.
 
 If `CRON_SECRET` is unset, an unauthenticated Vercel Cron request falls
-through to `requireDualAuth`, which will reject it (no session cookie, no
-`X-API-Key`) — a visible 401 in the logs, not a silent no-op. That is the
-*only* thing `CRON_SECRET` being unset breaks: Vercel Cron itself can no
-longer fire the route.
+through to `requireScheduledTaskRole`, which will reject it (no session
+cookie, no `X-API-Key`) — a visible 401 in the logs, not a silent no-op.
+That is the *only* thing `CRON_SECRET` being unset breaks: Vercel Cron
+itself can no longer fire the route.
 
-**Separate, more important gap `CRON_SECRET` does not close** (confirmed by
-reading `handleScheduledTask` in
-`code_generator/templates/scheduled_task_route.ts.jinja2` and
-`requireDualAuth`/`resolveActorId` in `lib/api-auth.ts`): the route has no
-authorization check beyond "is the caller authenticated at all."
-`requireDualAuth` accepts *any* valid session cookie or `X-API-Key` — it
-does not check role, permission, or that the caller is any kind of admin.
-And the `isCronAuth` check only ever *adds* an alternate way in; it never
-removes the `requireDualAuth` fallback, even when `CRON_SECRET` is set and
-correctly configured. So **any authenticated user of the generated app —
-not just admins, regardless of whether `CRON_SECRET` is set — can manually
-`GET`/`POST /api/scheduled-tasks/<task_id>` at any time**, and the handler
-runs immediately, attributed to the fixed system actor. In other words:
-"works without `CRON_SECRET` being set, but any signed-in user can call
-it" — and setting `CRON_SECRET` does not close that path either, it only
-adds Vercel's own automated trigger as a second way in. This is a real
-authorization gap for a future task to close (e.g. requiring a specific
-permission/role in `handleScheduledTask` before dispatching to
-`TASK_REGISTRY`) — flagged here so it is not silently assumed closed by
-`CRON_SECRET` alone.
+### Manual triggers require the `ScheduledTaskRunner` role
+
+The non-`CRON_SECRET` path is gated by `requireScheduledTaskRole`
+(`lib/api-auth.ts`), not plain `requireDualAuth`: it resolves the caller via
+dual-auth (`X-API-Key`/session cookie) exactly as before, then additionally
+requires membership in the dedicated `ScheduledTaskRunner` role
+(`lib/scheduled-tasks/system-actor.ts`'s `SCHEDULED_TASK_ROLE_NAME`) — a
+401 for no/invalid credential, a 403 for an authenticated caller who lacks
+the role. `scripts/seed-baseline.ts` seeds this role unconditionally but
+with **zero members**, not even the admin account — a fresh deployment
+rejects every manual trigger attempt until an operator explicitly grants
+the role to a specific account via the Role management UI. This is
+narrower than "any Administrator passes": the role is purpose-built for
+this one mechanism and is not implied by any other role, including
+Administrator.
 
 `CRON_SECRET` is one of three env vars canonically injected via
 `scripts/vercel-env.sh`'s `vercel_env_inject` (alongside
