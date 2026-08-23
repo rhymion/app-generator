@@ -80,6 +80,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   rendered an image widget instead of a link. See
   `docs/knowledge/schema-yaml-configuration.md` (`x-uri-kind`) and
   `docs/knowledge/readonly-field-form-rendering.md`.
+- **The list page's DataGrid never actually rendered an `x-uri-kind: link`
+  field as a link.** Contrary to the previous entry above, "list, DataGrid"
+  was not already correct: the list-page column config never carried a
+  `uriKind` attribute at all (only a parent-embedded `BridgeGrid` did), so a
+  link-kind field listed in `x-display.table` rendered as a plain string on
+  the list page. The list page now passes the same `uriKind: 'link'`
+  attribute a `BridgeGrid` already did, so both read-only grids agree. An
+  `x-uri-kind: image` field is unaffected by this fix and still never draws
+  an image inside any DataGrid cell — list page, `BridgeGrid`, or an inline
+  editable child DataGrid — by design; only the single-record view page
+  shows an image preview. See `docs/knowledge/schema-yaml-configuration.md`
+  (`x-uri-kind`).
 - **The `x-scheduled-task` mechanism's generated route only ever exported
   `POST`, but Vercel Cron always invokes with `GET`** — any declared
   schedule would 405 on every real Vercel Cron invocation and silently

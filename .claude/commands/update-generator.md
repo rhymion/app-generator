@@ -41,12 +41,13 @@ Run in this order:
 10. `npm run test:approval-lockdown-gate` — x-approval value-lockdown fixture generate-code → tsc check (see below)
 11. `npm run test:payment-gate` — x-payment fixture generate-code → tsc check (see below)
 12. `npm run test:direct-attachment-gate` — x-relationship type:direct FK fixture generate-code → tsc check (see below)
-13. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
-14. `npm run check:generated`  — generated code matches templates/schema
-15. `npm run test:e2e:cy:api`  — API Cypress specs only
-16. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop + mobile)
-17. `npm audit --omit=dev --audit-level=high`
-18. `pip-audit -r requirements.txt`
+13. `npm run test:uri-kind-gate` — x-uri-kind list-page/editable-child-DataGrid fixture generate-code → tsc check (see below)
+14. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
+15. `npm run check:generated`  — generated code matches templates/schema
+16. `npm run test:e2e:cy:api`  — API Cypress specs only
+17. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop + mobile)
+18. `npm audit --omit=dev --audit-level=high`
+19. `pip-audit -r requirements.txt`
 
 **Step 1 (`npm run lint`) must run on a checkout where `generate-code` has
 not yet run** — that is what CI's `Lint` job actually checks (`npm ci && npm
@@ -74,12 +75,13 @@ number CI can never reproduce. Running lint first (matching CI's exact
 condition) makes local and CI agree on the same count by construction; see
 `docs/knowledge/lint-gate-must-match-ci-precondition.md`.
 
-Steps 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, and 12 run unconditionally, with no "unchanged" exemption: CI's
+Steps 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, and 13 run unconditionally, with no "unchanged" exemption: CI's
 `unit-tests` (`npm run test:vitest`), `pytest` (Python Generator Tests),
 `mention-gate-fixture`, `decimal-gate-fixture`, `oto-mandatory-gate-fixture`,
 `oto-decimal-gate-fixture`, `chart-decimal-gate-fixture`,
 `chart-scalar-gate-fixture`, `approval-lockdown-gate-fixture`,
-`payment-gate-fixture`, and `direct-attachment-gate-fixture`
+`payment-gate-fixture`, `direct-attachment-gate-fixture`, and
+`uri-kind-gate-fixture`
 jobs run on every push/PR to `main`/`master` with no path filter, so a local
 gate that conditionally skips any of them can go green while CI goes red on
 the same commit. This exact gap caused PR #218's Unit Tests job to fail after
@@ -92,7 +94,7 @@ entity (commentable + comment + `x-mention: true`) through the real
 type-checks just the two generated files that carry the
 `named_constants and has_commentable` branch — the branch cmd_532 found
 broken (`c.creator_id` read off a comment type that only ever declares
-`c.creator?.id`), and that this repo's own `test:e2e:build` (step 13) can
+`c.creator?.id`), and that this repo's own `test:e2e:build` (step 14) can
 never catch because no entity in this repo's own `json_schema.yaml` wires a
 `commentable` relation. ~4s. See `docs/knowledge/mention-system.md`
 "cmd_532: creator include fix and gate-blind-spot confirmation" and
@@ -110,7 +112,7 @@ throwing), `FormUpsert.tsx` (the `AppFieldText`-based decimal input
 rendering), `form_validation.ts`/`service_validation.ts` (the
 `DECIMAL_FIELDS` numeric-format check), and the CSV import route (the
 `'decimal'` `ts_type` coercion). This repo's own `json_schema.yaml` has zero
-Decimal-typed fields, so none of these branches are ever compiled by step 13
+Decimal-typed fields, so none of these branches are ever compiled by step 14
 otherwise. ~6s. See `scripts/check_decimal_gate_fixture.sh`.
 
 **Step 6 (`test:oto-mandatory-gate`, cmd_704 [2-a])**: runs a
@@ -123,7 +125,7 @@ found broken (`build_context.py`'s `required_relation_fields` rebuilt a
 single `initial{Target}s` name in `page_new.tsx.jinja2` for both
 `parent_rels_raw` and `selector_oto_rels` entries, but the latter actually
 destructures as `initialAvailable{Target}s`), and that this repo's own
-`test:e2e:build` (step 13) can never catch because no entity in this repo's
+`test:e2e:build` (step 14) can never catch because no entity in this repo's
 own `json_schema.yaml` — nor any currently known consumer schema — has a
 required one-to-one selector FK. ~5s. A separate fixture from
 `test:mention-gate` rather than an extension of it: unrelated branch, kept
@@ -153,7 +155,7 @@ branch — unrelated) and step 5 (`test:decimal-gate`, an entity's own
 columns / an *embedded* relation's Decimal columns — not the OTO
 selector's separate `getAvailable...` getter). This repo's own
 `json_schema.yaml` has no one-to-one selector FK at all, so none of this is
-ever compiled by step 13 otherwise. ~7s. See
+ever compiled by step 14 otherwise. ~7s. See
 `code_generator/tests/fixtures/oto_decimal_gate/json_schema.yaml`'s header
 for the new-fixture-vs-extend rationale and
 `scripts/check_oto_decimal_gate_fixture.sh` for the check itself.
@@ -177,7 +179,7 @@ per cmd_705's `_prisma_decimal_type` marker, but the raw row value is a
 (`test:oto-decimal-gate`, a one-to-one selector's separate
 `getAvailable...` getter — unrelated code path). This repo's own
 `json_schema.yaml` has no entity combining `x-display.chart` with a
-required Decimal column, so none of this is ever compiled by step 13
+required Decimal column, so none of this is ever compiled by step 14
 otherwise. ~5s. See
 `code_generator/tests/fixtures/chart_decimal_gate/json_schema.yaml`'s
 header for the new-fixture-vs-extend rationale and
@@ -216,7 +218,7 @@ branch — unrelated code path, and not extended by this fixture to keep
 this fixture's build/type-check independent of that one's own scope and
 history). This repo's own `json_schema.yaml` has no entity combining
 `x-display.chart` with a required Int/Float or extra required DateTime
-column, so none of this is ever compiled by step 13 otherwise. ~5s. See
+column, so none of this is ever compiled by step 14 otherwise. ~5s. See
 `code_generator/tests/fixtures/chart_scalar_gate/json_schema.yaml`'s
 header for the new-fixture-vs-extend rationale and
 `scripts/check_chart_scalar_gate_fixture.sh` for the check itself.
@@ -236,7 +238,7 @@ generated output (`APPROVAL_LOCKED_FIELDS`, the locked value, and
 `disabled: true`), since `tsc` alone would pass just as well on an entity
 whose locked-value branch silently didn't render. This repo's own
 `json_schema.yaml` declares no `x-approval` entity, so none of these
-branches are ever compiled by step 13 otherwise. ~6s. See
+branches are ever compiled by step 14 otherwise. ~6s. See
 `scripts/check_approval_lockdown_gate_fixture.sh`.
 
 **Step 11 (`test:payment-gate`)**: same shape as steps 4-10, for the
@@ -245,7 +247,7 @@ write-once Stripe integration stubs (`lib/stripe.ts`,
 emitted when a fixture entity declares `x-payment: true`. Exists because
 `code_generator/tests/test_payment_gate_fixture.py` only proves the stubs
 are *written* — it never proves the written TypeScript actually
-type-checks, and this repo's own `test:e2e:build` (step 13) never compiles
+type-checks, and this repo's own `test:e2e:build` (step 14) never compiles
 these stubs either, because no entity in this repo's own `json_schema.yaml`
 declares `x-payment: true`. That gap is exactly how a stale Stripe SDK
 `apiVersion` literal (hardcoded in `stripe_lib_stub.ts.jinja2`) shipped
@@ -269,7 +271,7 @@ run through the same `build_user_schema.py` → `generate.py` → `tsc
 `getters.ts` (`get{Parent}Detail`'s decrypt/strip pass for
 `encrypted_original_name`/`name_iv` — the direct-attachment analogue of the
 existing `has_attachable` treatment, cmd_356). A brand-new feature this
-repo's own `test:e2e:build` (step 13) never compiles, because no entity in
+repo's own `test:e2e:build` (step 14) never compiles, because no entity in
 this repo's own `json_schema.yaml` declares `x-relationship.type: direct`,
 and neither does any currently known consumer schema. Deliberately narrow:
 does NOT cover a direct-attachment field rendered as a DataGrid child cell
@@ -278,6 +280,26 @@ does NOT cover a direct-attachment field rendered as a DataGrid child cell
 transitively, via the same two components' `mode='fk'` import — grow this
 fixture, or add a sibling one, if that branch needs its own coverage).
 ~5-7s. See `scripts/check_direct_attachment_gate_fixture.sh`.
+
+**Step 13 (`test:uri-kind-gate`, cmd_792)**: a ninth, unrelated fixture
+parent/child pair (`uri_kind_gate_wrapper` / `uri_kind_gate_item`) run
+through the same `build_user_schema.py` → `generate.py` → `tsc --noEmit`
+pipeline, type-checking `app/[locale]/uri_kind_gate_wrapper/page.tsx`
+(`page_list_context`'s list-page `ResponsiveListClient`/`DataGridClient`
+`uriKind: 'link'` wiring for a `format: uri`/`x-uri-kind: link` field
+listed in `x-display.table`) and
+`components/uri_kind_gate_wrapper/column_def.tsx` (`column_def_context`'s
+editable child DataGrid, which has no uri/image branch at all — both
+`link` and the default `image` kind fall through to a plain editable text
+cell, a deliberate cmd_792 decision: a URL is a legitimate thing to type
+into an editable cell, unlike an image, which is why images are never
+drawn inside any grid cell in this codebase — that restriction applies to
+*drawing* an image, not to disabling editing of a uri-typed column). This
+repo's own `json_schema.yaml` has two `format: uri` fields (`user.image`,
+`attachment.path`), but neither is ever listed in an `x-display.table`
+column set nor embedded as a one-to-many child's column, so this repo's
+own `test:e2e:build` (step 14) never compiles either branch. ~4-5s. See
+`scripts/check_uri_kind_gate_fixture.sh`.
 
 ## Debug priority
 

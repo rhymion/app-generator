@@ -1,0 +1,73 @@
+// Self-contained fixture Prisma schema for the uri-kind-gate check
+// (cmd_792). NOT the project's real prisma/schema.prisma --
+// this file exists only to give the fixture json_schema.yaml enough real
+// Prisma models (user + a parent/child pair) to run through the actual
+// build_user_schema.py -> generate.py -> tsc pipeline in isolation.
+// Mirrors the structure of tests/fixtures/decimal_gate/schema.prisma.
+//
+// This repo's own json_schema.yaml has two format:uri fields (user.image,
+// attachment.path) but neither is ever (a) listed in an x-display.table
+// column set rendered by the list-page DataGrid, nor (b) a column of a
+// one-to-many child embedded in a parent's editable DataGrid -- so
+// test:e2e:build's own tsc pass never compiles either branch. This fixture
+// exists so a future change to page_list_context's (list-page DataGrid) or
+// column_def_context's (editable child DataGrid) uri handling can't
+// silently regress unnoticed.
+
+generator client {
+  provider = "prisma-client"
+  output   = "./.generated-client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model user {
+  id       String @id @default(cuid())
+  name     String
+  email    String @unique
+  created_items uri_kind_gate_item[] @relation("UriKindGateItemCreator")
+  updated_items uri_kind_gate_item[] @relation("UriKindGateItemUpdater")
+  created_wrappers uri_kind_gate_wrapper[] @relation("UriKindGateWrapperCreator")
+  updated_wrappers uri_kind_gate_wrapper[] @relation("UriKindGateWrapperUpdater")
+}
+
+// The child entity: embedded into uri_kind_gate_wrapper's editable DataGrid
+// (column_def_context, cmd_792 path (iii)). link_field is x-uri-kind: link;
+// image_field is the format:uri default (image kind) -- exercises both
+// kinds falling through column_def_context's generic `else` branch.
+model uri_kind_gate_item {
+  id          String   @id @default(cuid())
+  name        String
+  link_field  String
+  image_field String
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user     @relation("UriKindGateItemCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user     @relation("UriKindGateItemUpdater", fields: [updater_id], references: [id])
+  wrapper_id  String?
+  wrapper     uri_kind_gate_wrapper? @relation("UriKindGateWrapperLines", fields: [wrapper_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+  @@index([wrapper_id])
+}
+
+// The parent entity: its own link_field is listed in x-display.table,
+// exercising page_list_context's list-page DataGrid (cmd_792 path (ii)).
+model uri_kind_gate_wrapper {
+  id         String   @id @default(cuid())
+  name       String
+  link_field String
+  lines      uri_kind_gate_item[] @relation("UriKindGateWrapperLines")
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("UriKindGateWrapperCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("UriKindGateWrapperUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
