@@ -158,10 +158,19 @@ def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
 
             rel = prop.get('x-relationship', {})
             rel_type = rel.get('type')
-            if rel_type in ('many-to-one', 'one-to-one'):
-                # FK field (regular m2o or selector o2o): strip _id suffix for the
-                # display key. Generated FormUpsert/FormView use tf('<base>') as the
-                # picker label (e.g. medicine.prev_id → tf('prev')).
+            if rel_type in ('many-to-one', 'one-to-one', 'direct'):
+                # FK field (regular m2o, selector o2o, or direct-attachment):
+                # strip _id suffix for the display key. Generated FormUpsert/
+                # FormView use tf('<base>') as the picker/upload label (e.g.
+                # medicine.prev_id → tf('prev'); product.warranty_card_id →
+                # tf('warrantyCard'), see SingleAttachmentUpload's `label`
+                # prop wiring in generators.py). Direct-attachment FKs are
+                # deliberately excluded from get_parent_relationships()
+                # (schema_helpers.get_direct_attachment_fk_props's docstring)
+                # but still need the same stripped-suffix key here, or the
+                # unstripped 'warrantyCardId' key gets emitted instead and
+                # tf('warrantyCard') falls back to rendering the raw
+                # namespaced key string in the UI.
                 base = prop_name[:-3] if prop_name.endswith('_id') else prop_name
                 key = to_camel_case(base)
                 label = to_title_case(base)

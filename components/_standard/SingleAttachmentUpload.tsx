@@ -127,7 +127,15 @@ export default function SingleAttachmentUpload(props: SingleAttachmentUploadProp
 
   return (
     <div style={{ margin: '16px 0' }}>
-      <input accept={accept} style={{ display: 'none' }} id={inputId} type="file" onChange={handleFileUpload} disabled={uploading} />
+      <input
+        accept={accept}
+        style={{ display: 'none' }}
+        id={inputId}
+        data-testid={`${inputId}-file`}
+        type="file"
+        onChange={handleFileUpload}
+        disabled={uploading}
+      />
       {/* The Remove button is a SIBLING of this <label>, never a descendant --
           a clickable nested inside a <label for=...> forwards its click to
           the hidden file input (the same defect class cmd_776(4)'s
@@ -143,6 +151,7 @@ export default function SingleAttachmentUpload(props: SingleAttachmentUploadProp
             helperText={error || helperText}
             error={!!error}
             slotProps={{
+              htmlInput: { 'data-testid': `${inputId}-value` },
               input: {
                 readOnly: true,
                 endAdornment: (
