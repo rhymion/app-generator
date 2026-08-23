@@ -89,6 +89,29 @@ if [[ -z "${AUTH_SECRET:-}" ]]; then
   export AUTH_SECRET
 fi
 
+# CRON_SECRET (cmd_781): generate-once-persist, same pattern as AUTH_SECRET
+# above. Secures app/api/scheduled-tasks/[task]/route.ts — Vercel sends it
+# back as `Authorization: Bearer $CRON_SECRET` on every Cron Job invocation
+# once it's set on the project, but Vercel never generates/sets it itself.
+# Harmless to inject even when the schema declares no x-scheduled-task
+# entity (mirrors AUTH_SECRET's unconditional injection).
+if [[ -z "${CRON_SECRET:-}" ]]; then
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "[DRY-RUN] CRON_SECRET not set — will generate with openssl rand -base64 32 and save to .env.production.local at runtime"
+    CRON_SECRET="<DRY_RUN_CRON_SECRET>"
+  else
+    CRON_SECRET=$(openssl rand -base64 32)
+    _CRON_SECRET_ESCAPED="$(_shell_dquote_escape "${CRON_SECRET}")"
+    if grep -q "^CRON_SECRET=" "${_ENV_FILE}" 2>/dev/null; then
+      sed -i "s|^CRON_SECRET=.*|CRON_SECRET=\"$(_sed_replacement_escape "${_CRON_SECRET_ESCAPED}")\"|" "${_ENV_FILE}"
+    else
+      echo "CRON_SECRET=\"${_CRON_SECRET_ESCAPED}\"" >> "${_ENV_FILE}"
+    fi
+    echo "[INFO] CRON_SECRET generated and saved to .env.production.local"
+  fi
+  export CRON_SECRET
+fi
+
 # Required variables — abort with a clear message if missing (skip hard-fail in DRY_RUN
 # so the syntax/flow of a fresh checkout can still be exercised end-to-end).
 if [[ "$DRY_RUN" != "true" ]]; then
@@ -103,8 +126,16 @@ VERCEL_ORG_ID="${VERCEL_ORG_ID:-}"
 GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}"
 GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-}"
 BLOB_READ_WRITE_TOKEN="${BLOB_READ_WRITE_TOKEN:-}"
+# NEXT_PUBLIC_APP_TITLE / NEXT_PUBLIC_APP_COPYRIGHT (cmd_782/783): optional
+# branding overrides, not secrets — see lib/site-config.ts and
+# docs/knowledge/noindex-default-and-branding-env-vars.md. Both are
+# NEXT_PUBLIC_-prefixed, so Next.js inlines them into the client bundle at
+# *build* time: injecting them here only takes effect on Vercel's next
+# build, not on the current running deployment.
+NEXT_PUBLIC_APP_TITLE="${NEXT_PUBLIC_APP_TITLE:-}"
+NEXT_PUBLIC_APP_COPYRIGHT="${NEXT_PUBLIC_APP_COPYRIGHT:-}"
 
-export REDIS_URL VERCEL_PROJECT_NAME VERCEL_ORG_ID GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET BLOB_READ_WRITE_TOKEN
+export REDIS_URL VERCEL_PROJECT_NAME VERCEL_ORG_ID GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET BLOB_READ_WRITE_TOKEN NEXT_PUBLIC_APP_TITLE NEXT_PUBLIC_APP_COPYRIGHT
 
 # ── inject_var: upsert one Vercel env var, never echoing the secret value ────
 # Usage: inject_var NAME VALUE TARGET
@@ -183,6 +214,7 @@ vercel_env_inject() {
   # docs/knowledge/prisma-direct-vs-pooled-connection.md.
   inject_var DIRECT_URL "$direct_url" "$target"
   inject_var AUTH_SECRET "$AUTH_SECRET" "$target"
+  inject_var CRON_SECRET "$CRON_SECRET" "$target"
   inject_var REDIS_URL "$REDIS_URL" "$target"
   inject_var BLOB_READ_WRITE_TOKEN "$BLOB_READ_WRITE_TOKEN" "$target"
   inject_var GOOGLE_CLIENT_ID "$GOOGLE_CLIENT_ID" "$target"
@@ -196,6 +228,15 @@ vercel_env_inject() {
   # unconditionally (cmd_692/cmd_711/cmd_712). See .env.example for the
   # branch this flips in lib/prisma.ts.
   inject_var USE_NEON_ADAPTER "true" "$target"
+  # NEXT_PUBLIC_APP_TITLE / NEXT_PUBLIC_APP_COPYRIGHT: optional branding
+  # overrides (cmd_782/783). Unlike every other var injected above, these are
+  # NOT read at request time — Next.js inlines NEXT_PUBLIC_ vars into the
+  # client bundle at build time, so a value change here has no effect until
+  # the next build (redeploy the same build picks up nothing; push a new
+  # commit or trigger a rebuild). See
+  # docs/knowledge/noindex-default-and-branding-env-vars.md.
+  inject_var NEXT_PUBLIC_APP_TITLE "$NEXT_PUBLIC_APP_TITLE" "$target"
+  inject_var NEXT_PUBLIC_APP_COPYRIGHT "$NEXT_PUBLIC_APP_COPYRIGHT" "$target"
   # inject_var NODE_ENV "production" "$target"
   echo "=== Injection complete for ${target}. Trigger a redeploy for changes to take effect. ==="
 }
