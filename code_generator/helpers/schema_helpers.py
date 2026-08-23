@@ -949,6 +949,44 @@ def get_parent_relationships(parent_def: dict, schema: dict | None = None) -> li
     return result
 
 
+def get_direct_attachment_fk_props(parent_def: dict) -> list[dict]:
+    """Returns direct-attachment FK metadata: fields declaring
+    `x-relationship: { target: attachment, type: direct }` (cmd_788/subtask_780a乙).
+
+    Deliberately separate from get_parent_relationships() (which only matches
+    `type in ('many-to-one', 'one-to-one')`): a direct-attachment FK is NOT a
+    selectable relation — its target (`attachment`) has no list/view/new/edit
+    pages of its own, and the field is rendered as a file-upload widget
+    (SingleAttachmentUpload), never an EntityAutocomplete. Keeping it off
+    get_parent_relationships' return value means it stays out of every
+    autocomplete-specific code path (search{Target}Options, CSV export/import
+    FK-label flattening, dashboard chart groupable fields) for free — none of
+    those switch on x-relationship.type == 'direct', so an unrecognized type
+    silently falls through and the field is excluded, matching how those
+    subsystems already treat `attachment` as a non-selectable internal model.
+
+    Each entry: {prop_name, relation_name, required}. `relation_name` is
+    `prop_name` with a trailing `_id` stripped (e.g. `profile_picture_id` ->
+    `profile_picture`), matching the Prisma relation-field naming convention
+    used elsewhere in this generator (get_parent_relationships' callers strip
+    `_id` the same way).
+    """
+    props = parent_def.get('properties', {})
+    required = set(parent_def.get('required') or [])
+    result = []
+    for prop_name, prop in props.items():
+        rel = prop.get('x-relationship')
+        if not rel or rel.get('type') != 'direct' or rel.get('target') != 'attachment':
+            continue
+        relation_name = prop_name.removesuffix('_id') if prop_name.endswith('_id') else prop_name
+        result.append({
+            'prop_name': prop_name,
+            'relation_name': relation_name,
+            'required': prop_name in required,
+        })
+    return result
+
+
 def find_fk_derivation_path(parent: str, parent_def: dict, target_q: str, schema: dict) -> dict | None:
     """Walk the parent's m2o/o2o FKs to find a way to derive a value of target_q's id.
 

@@ -305,8 +305,15 @@ model attachment {
   path                   String
   encrypted_original_name String?
   name_iv                String?
-  attachable_id          String
-  attachable             attachable @relation(fields: [attachable_id], references: [id], onDelete: Cascade)
+  // Nullable (cmd_788): a direct-attachment FK (x-relationship type:direct,
+  // e.g. some_entity.attachment_id -> attachment.id) creates an attachment
+  // row with no attachable bridge owner at all -- attachable_id stays null
+  // for that row's whole life. onDelete: SetNull (not Cascade) because a
+  // null attachable_id is a normal, permanent state here, not a transient
+  // one pending cleanup: deleting the attachable bridge row must not cascade
+  // into deleting an attachment that a direct FK might still reference.
+  attachable_id          String?
+  attachable             attachable? @relation(fields: [attachable_id], references: [id], onDelete: SetNull)
   created_at             DateTime   @default(now()) @db.Timestamptz(0)
   updated_at             DateTime   @updatedAt @db.Timestamptz(0)
   @@index([attachable_id])

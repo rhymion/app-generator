@@ -21,6 +21,9 @@ export type {{ parent | pascal_case }} = {
 {% for rel in parent_rels %}
   {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
 {% endfor %}
+{% for dar in direct_attachment_rels %}
+  {{ dar.relation_name }}?: { id: string; name: string; path: string; type: {{ attachment_type_ts }} } | null;
+{% endfor %}
 {% for oto in one_to_one_rels %}
   {{ oto.relation_name }}?: {
     id: string;
@@ -192,6 +195,9 @@ export type FormViewProps = Readonly<{
 {% if not rel.is_m2o %}
     {{ rel.prop_name }}?: {{ rel.target | pascal_case }} | null;
 {% endif %}
+{% endfor %}
+{% for dar in direct_attachment_rels %}
+    {{ dar.relation_name }}?: { id: string; name: string; path: string; type: {{ attachment_type_ts }} } | null;
 {% endfor %}
     created_at?: string | Date;
     updated_at?: string | Date;

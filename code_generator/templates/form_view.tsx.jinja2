@@ -23,6 +23,9 @@ import ImageDisplay from '@/components/_standard/ImageDisplay';
 {% if needs_link_display %}
 import AppFieldExternalLink from '@/components/_standard/AppFieldExternalLink';
 {% endif %}
+{% if needs_single_attachment_display %}
+import SingleAttachmentDisplay from '@/components/_standard/SingleAttachmentDisplay';
+{% endif %}
 {% if uses_format_label_value %}
 import { formatLabelValue } from '@/lib/_format';
 {% endif %}

@@ -54,6 +54,15 @@ import ImageUpload from '@/components/_standard/ImageUpload';
 {% if uses_image_display %}
 import ImageDisplay from '@/components/_standard/ImageDisplay';
 {% endif %}
+{% if has_single_attachment_upload %}
+import SingleAttachmentUpload from '@/components/_standard/SingleAttachmentUpload';
+{% endif %}
+{% if has_direct_attachment_fk %}
+import { createDirectAttachment } from '@/lib/attachment/direct_actions';
+{% endif %}
+{% if uses_single_attachment_display %}
+import SingleAttachmentDisplay from '@/components/_standard/SingleAttachmentDisplay';
+{% endif %}
 {% if custom_upsert_imports %}
 {{ custom_upsert_imports }}
 {% endif %}

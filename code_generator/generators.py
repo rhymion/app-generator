@@ -125,6 +125,7 @@ def _readonly_display_field(
     schema: dict | None,
     seen_ns: set,
     indent: str = "      ",
+    direct_attachment_by_prop: dict | None = None,
 ) -> dict:
     """Build the read-only display JSX for property `p`, dispatching on its
     relation/type exactly like FormView renders every one of its fields
@@ -140,6 +141,14 @@ def _readonly_display_field(
     uses_format_label_value (bool), use_dayjs (bool). `seen_ns` is mutated
     to dedupe `useTranslations` hooks — pass the same set across every field
     rendered into one file.
+
+    `direct_attachment_by_prop` (cmd_788): prop_name -> {relation_name} for
+    fields declaring x-relationship type:direct. form_view_context's own
+    per-category loops never reach this branch (direct_attachment_flds is
+    rendered directly there, before this function is even called for those
+    fields) — this only matters for form_upsert_context's x-readonly-fields
+    loop, which calls this function generically for any field regardless of
+    category.
     """
     result = {
         'jsx': '', 'ns_hooks': [], 'opt_setups': [],
@@ -147,6 +156,21 @@ def _readonly_display_field(
         'uses_decimal_format': False,
     }
     fk = to_camel_case(p)
+
+    _dar = (direct_attachment_by_prop or {}).get(p)
+    if _dar:
+        rel_name = _dar['relation_name']
+        _dar_fk = to_camel_case(rel_name)
+        result['jsx'] = (
+            f"{indent}<SingleAttachmentDisplay\n"
+            f"{indent}  url={{src.{rel_name}?.path ?? null}}\n"
+            f"{indent}  name={{src.{rel_name}?.name ?? null}}\n"
+            f"{indent}  kind={{src.{rel_name}?.type ?? 'file'}}\n"
+            f"{indent}  alt={{tf('{_dar_fk}')}}\n"
+            f"{indent}/>"
+        )
+        return result
+
     rel = rel_by_prop.get(p)
 
     if rel:
@@ -197,8 +221,11 @@ def _readonly_display_field(
         return result
 
     if actual == 'string' and fmt == 'uri':
-        if get_uri_kind(prop) == 'link':
+        _kind = get_uri_kind(prop)
+        if _kind == 'link':
             result['jsx'] = f"{indent}<AppFieldExternalLink label={{tf('{fk}')}} href={{src.{p}}} />"
+        elif _kind == 'file':
+            result['jsx'] = f"{indent}<SingleAttachmentDisplay url={{src.{p}}} kind=\"file\" alt={{tf('{fk}')}} />"
         else:
             result['jsx'] = f"{indent}<ImageDisplay url={{src.{p}}} alt={{tf('{fk}')}} />"
         return result
@@ -2817,6 +2844,12 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     one_to_one_fk_props = {r['prop_name'] for r in ctx.get('one_to_one_rels', [])}
     flatten_rels_raw = ctx.get('flatten_rels', [])
     flatten_m2o_fk_props = ctx.get('flatten_m2o_fk_props', set())
+    # Direct-attachment FK rels (cmd_788): rendered via SingleAttachmentDisplay
+    # below, never as a plain FK TextField or an EntityAutocomplete -- see
+    # get_direct_attachment_fk_props()'s docstring for why they are kept out
+    # of rel_by_prop/parent_rels entirely.
+    direct_attachment_rels = ctx.get('direct_attachment_rels', [])
+    direct_attachment_by_prop = {r['prop_name']: r for r in direct_attachment_rels}
     # Unrelated *able_id technical FKs with no x-relationship (e.g.
     # inventory_transactionable_id) are system-managed internal bridge FKs —
     # mirrors the same exclusion in column_def_context.
@@ -2824,7 +2857,11 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         k for k in filtered_props
         if k.endswith('able_id') and not filtered_props[k].get('x-relationship')
     }
-    # m2o flatten FK props are rendered as accordion sections, not plain FK TextFields
+    # m2o flatten FK props are rendered as accordion sections, not plain FK TextFields.
+    # Direct-attachment FK props (x-relationship type:direct) stay IN parent_props
+    # (unlike one_to_one_fk_props/flatten_m2o_fk_props) so they take part in the
+    # normal x-display.form / schema-order placement below -- the classification
+    # loop diverts them to SingleAttachmentDisplay before any generic branch.
     EXCLUDE = (
         {'id', 'created_at', 'updated_at', 'creator_id'}
         | one_to_one_fk_props | flatten_m2o_fk_props | bridge_fk_no_rel_props
@@ -2840,13 +2877,18 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     date_time_flds     = []
     image_flds         = []
     link_uri_flds      = []
+    file_uri_flds      = []
     boolean_flds       = []
     enum_integer_flds  = []
     enum_native_flds   = []
     other_flds         = []
 
+    direct_attachment_flds = []
     for p in parent_props:
         if p in custom_view_props:
+            continue
+        if p in direct_attachment_by_prop:
+            direct_attachment_flds.append(p)
             continue
         prop   = filtered_props[p]
         actual = _get_actual_type(prop)
@@ -2854,8 +2896,11 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         if actual == 'string' and fmt in ('date', 'date-time', 'time'):
             date_time_flds.append(p)
         elif actual == 'string' and fmt == 'uri':
-            if get_uri_kind(prop) == 'link':
+            _kind = get_uri_kind(prop)
+            if _kind == 'link':
                 link_uri_flds.append(p)
+            elif _kind == 'file':
+                file_uri_flds.append(p)
             else:
                 image_flds.append(p)
         elif actual == 'boolean':
@@ -2870,6 +2915,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     needs_datetime_wrapper = bool(date_time_flds)
     needs_image_display    = bool(image_flds)
     needs_link_display     = bool(link_uri_flds)
+    needs_single_attachment_display = bool(file_uri_flds) or bool(direct_attachment_rels)
 
     def _tf(p: str):
         return to_camel_case(p)
@@ -2931,6 +2977,30 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     for p in link_uri_flds:
         fk = _tf(p)
         jsx_by_field[p] = f"      <AppFieldExternalLink label={{tf('{fk}')}} href={{src.{p}}} />"
+
+    # x-uri-kind: file fields (cmd_776(3)) — a plain uploaded file (not an
+    # image): SingleAttachmentDisplay renders a download link, not an <img>.
+    for p in file_uri_flds:
+        fk = _tf(p)
+        jsx_by_field[p] = (
+            f"      <SingleAttachmentDisplay url={{src.{p}}} kind=\"file\" alt={{tf('{fk}')}} />"
+        )
+
+    # Direct-attachment FK fields (cmd_788): x-relationship type:direct.
+    # src.{relation_name} is the included attachment row (name/path/type,
+    # already decrypted/stripped by get{{ parent_pascal }}Detail — see
+    # getters.ts.jinja2), never the raw {{prop_name}} FK id.
+    for p in direct_attachment_flds:
+        rel_name = direct_attachment_by_prop[p]['relation_name']
+        fk = _tf(rel_name)
+        jsx_by_field[p] = (
+            f"      <SingleAttachmentDisplay\n"
+            f"        url={{src.{rel_name}?.path ?? null}}\n"
+            f"        name={{src.{rel_name}?.name ?? null}}\n"
+            f"        kind={{src.{rel_name}?.type ?? 'file'}}\n"
+            f"        alt={{tf('{fk}')}}\n"
+            f"      />"
+        )
 
     # Custom view fields
     for p in custom_view_props:
@@ -3200,6 +3270,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         'needs_datetime_wrapper': needs_datetime_wrapper,
         'needs_image_display':    needs_image_display,
         'needs_link_display':     needs_link_display,
+        'needs_single_attachment_display': needs_single_attachment_display,
         'has_rel_links':          has_rel_links,
         'needs_accordion':        needs_accordion,
         'has_comment_children':   has_comment_children,
@@ -3277,6 +3348,18 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         if r['prop_name'] not in selector_oto_prop_names and r['prop_name'] not in readonly_field_names
     ]
     selector_oto_rels = [r for r in selector_oto_rels if r['prop_name'] not in readonly_field_names]
+
+    # Direct-attachment FK rels (cmd_788): the UNFILTERED-by-readonly map is
+    # kept for the x-readonly-fields branch below (same reason rel_by_prop
+    # above is built unfiltered); the readonly-excluded list/map drives the
+    # interactive SingleAttachmentUpload widget loop further down.
+    direct_attachment_by_prop_all = {r['prop_name']: r for r in ctx.get('direct_attachment_rels', [])}
+    direct_attachment_rels = [
+        r for r in ctx.get('direct_attachment_rels', []) if r['prop_name'] not in readonly_field_names
+    ]
+    direct_attachment_by_prop = {r['prop_name']: r for r in direct_attachment_rels}
+    attachment_type_ts = ctx.get('attachment_type_ts', 'number')
+
     children_raw  = ctx['children_raw']
     can_delete    = ctx['can_delete']
     selection_targets = ctx['selection_targets']
@@ -3314,6 +3397,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     date_time_props      = [p for p in cats['date_time']      if p not in readonly_field_names]
     image_props          = [p for p in cats['image']          if p not in readonly_field_names]
     link_uri_props       = [p for p in cats.get('link_uri', []) if p not in readonly_field_names]
+    file_uri_props       = [p for p in cats.get('file_uri', []) if p not in readonly_field_names]
     boolean_props        = [p for p in cats['boolean']        if p not in readonly_field_names]
     enum_int_props       = [p for p in cats['enum_integer']   if p not in readonly_field_names]
     enum_str_props       = [p for p in cats.get('enum_string', [])  if p not in readonly_field_names]
@@ -3395,6 +3479,25 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} || '');"
         for p in image_props
     )
+    # x-uri-kind: file fields (cmd_776(3)) — same controlled-string state
+    # shape as image_props; SingleAttachmentUpload (mode='url', kind='file')
+    # just renders the download-link/icon display instead of an <img>.
+    file_uri_states = '\n'.join(
+        f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} || '');"
+        for p in file_uri_props
+    )
+    # Direct-attachment FK fields (cmd_788): state holds the CURRENT
+    # attachment descriptor (id/name/path/type), not just the FK id --
+    # SingleAttachmentUpload needs name/path/type to render the existing
+    # file, and createDirectAttachment (lib/attachment/direct_actions.ts)
+    # returns the same descriptor shape after a new upload, so onChange can
+    # replace this state directly with no extra round trip.
+    direct_attachment_states = '\n'.join(
+        f"  const [{safe_var_name(r['relation_name'])}, set{_setter(safe_var_name(r['relation_name']))}]"
+        f" = useState<{{ id: string; name: string; path: string; type: {attachment_type_ts} }} | null>"
+        f"(src.{r['relation_name']} ?? null);"
+        for r in direct_attachment_rels
+    )
     mention_states = '\n'.join(
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} ?? '');"
         for p in mention_props
@@ -3435,7 +3538,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string | null>(src.{p} || null);"
         for p in entity_select_props
     )
-    all_states = '\n'.join(filter(None, [dt_states, img_states, mention_states, bool_states, enum_states, enum_str_states, rel_states, custom_states, entity_select_states]))
+    all_states = '\n'.join(filter(None, [dt_states, img_states, file_uri_states, direct_attachment_states, mention_states, bool_states, enum_states, enum_str_states, rel_states, custom_states, entity_select_states]))
 
     # ---- Form fields (JSX) ----
     def _tf(p):
@@ -3633,6 +3736,46 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         # regardless of its real name, breaking any UI lookup keyed on the
         # field's real label.
         jsx_by_field[p] = f"      <ImageUpload\n        value={{{sn}}}\n        onChange={{set{setter}}}\n        label={{'{fk}'}}\n      />"
+
+    # x-uri-kind: file fields (cmd_776(3)) — SingleAttachmentUpload in
+    # mode='url', kind='file': same upload flow as ImageUpload (still a
+    # plain URL-string field, uploaded via /api/upload) but displays a
+    # download link/icon instead of an <img> once uploaded.
+    for p in file_uri_props:
+        fk     = _tf(p)
+        sn     = safe_var_name(p)
+        setter = _setter(sn)
+        jsx_by_field[p] = (
+            f"      <SingleAttachmentUpload\n"
+            f"        mode=\"url\"\n"
+            f"        kind=\"file\"\n"
+            f"        value={{{sn}}}\n"
+            f"        onChange={{set{setter}}}\n"
+            f"        label={{'{fk}'}}\n"
+            f"      />"
+        )
+
+    # Direct-attachment FK fields (cmd_788): x-relationship type:direct.
+    # SingleAttachmentUpload in mode='fk': uploads via /api/upload, then
+    # createDirectAttachment() (lib/attachment/direct_actions.ts) creates
+    # the attachment row and returns its {id, name, path, type} -- onChange
+    # replaces the whole descriptor. The submitted form field carries only
+    # the id (see direct_attachment_ds below), the same convention every
+    # other FK field already uses.
+    for r in direct_attachment_rels:
+        prop_name = r['prop_name']
+        fk = _tf(r['relation_name'])
+        sn = safe_var_name(r['relation_name'])
+        setter = _setter(sn)
+        jsx_by_field[prop_name] = (
+            f"      <SingleAttachmentUpload\n"
+            f"        mode=\"fk\"\n"
+            f"        value={{{sn}}}\n"
+            f"        onChange={{set{setter}}}\n"
+            f"        createAttachment={{createDirectAttachment}}\n"
+            f"        label={{'{fk}'}}\n"
+            f"      />"
+        )
 
     # x-uri-kind: link fields — rendered as a plain URL-typed text input
     # (uncontrolled ref, same pattern as text_props), NOT the ImageUpload
@@ -3888,7 +4031,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         if _ro_fn not in filtered_props:
             continue
         _ro_built = _readonly_display_field(
-            _ro_fn, filtered_props, rel_by_prop, schema, enum_ns_set, indent="        "
+            _ro_fn, filtered_props, rel_by_prop, schema, enum_ns_set, indent="        ",
+            direct_attachment_by_prop=direct_attachment_by_prop_all,
         )
         enum_ns_hooks.extend(_ro_built['ns_hooks'])
         enum_opt_setups.extend(_ro_built['opt_setups'])
@@ -3958,7 +4102,19 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     dt_ds = '\n'.join(dt_ds_parts)
     img_ds   = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in image_props)
     link_uri_ds = '\n'.join(f"    formData.set('{p}', {p}Ref.current?.value || '');" for p in link_uri_props)
+    file_uri_ds = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in file_uri_props)
     mention_ds = '\n'.join(f"    formData.set('{p}', {safe_var_name(p)});" for p in mention_props)
+    def _direct_attachment_fds_line(r: dict) -> str:
+        # Submits only the id -- the entity's own service.ts/actions.ts write
+        # path treats {{ prop_name }} as a plain scalar FK column already
+        # (parent_prop_infos in build_context.py includes it generically, no
+        # generator change needed there -- see get_direct_attachment_fk_props'
+        # docstring). Same optional/required convention as _rel_fds_line above.
+        var = safe_var_name(r['relation_name'])
+        if not r.get('required'):
+            return f"    if ({var}) formData.set('{r['prop_name']}', {var}.id);"
+        return f"    formData.set('{r['prop_name']}', {var}?.id || '');"
+    direct_attachment_ds = '\n'.join(_direct_attachment_fds_line(r) for r in direct_attachment_rels)
     def _rel_fds_line(r: dict) -> str:
         var = safe_var_name(r['prop_name'])
         # parent_rels_raw entries carry a 'required' key; selector_oto_rels entries carry 'nullable'.
@@ -3989,7 +4145,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             return f"    formData.set('{p}', {safe_var_name(p)}.toString());"
         return f"    formData.set('{p}', {safe_var_name(p)});"
     cust_ds  = '\n'.join(_custom_form_data_line(p) for p in custom_upsert_props)
-    parent_form_data_sets = '\n'.join(filter(None, [text_ds, mention_ds, entity_select_ds, rel_ds, num_ds, decimal_ds, enum_ds, enum_str_ds, bool_ds, dt_ds, img_ds, link_uri_ds, cust_ds]))
+    parent_form_data_sets = '\n'.join(filter(None, [text_ds, mention_ds, entity_select_ds, rel_ds, num_ds, decimal_ds, enum_ds, enum_str_ds, bool_ds, dt_ds, img_ds, link_uri_ds, file_uri_ds, direct_attachment_ds, cust_ds]))
 
     # ---- Children analysis ----
     # Use the pre-filtered embedded_ch from build_context (passed as non_comment_ch in ctx).
@@ -4772,9 +4928,17 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     validation_entry_lines.extend(f"    {p}: {p}Ref.current?.value || ''," for p in link_uri_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in date_time_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in image_props)
+    validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in file_uri_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in mention_props)
     validation_entry_lines.extend(f"    {r['prop_name']}: {safe_var_name(r['prop_name'])}," for r in parent_rels_raw)
     validation_entry_lines.extend(f"    {r['prop_name']}: {safe_var_name(r['prop_name'])}," for r in selector_oto_rels)
+    # Direct-attachment FK: validate against the id (not the whole state
+    # object -- an object is never "missing" to _is_missing_value's None/''
+    # check in validation_context.py, which would silently defeat required
+    # validation for every direct-attachment field).
+    validation_entry_lines.extend(
+        f"    {r['prop_name']}: {safe_var_name(r['relation_name'])}?.id ?? null," for r in direct_attachment_rels
+    )
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in boolean_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in enum_int_props)
     validation_entry_lines.extend(f"    {p}: {safe_var_name(p)}," for p in enum_str_props)
@@ -5218,6 +5382,9 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         # [2-c]).
         'has_datetime_props':       bool(date_time_props) or flatten_needs_datetime or 'DateTimeWrapper' in _rendered_body_text or 'dayjs(' in child_grid_setup,
         'has_image_props':          bool(image_props),
+        'has_single_attachment_upload': bool(file_uri_props) or bool(direct_attachment_rels),
+        'has_direct_attachment_fk': bool(direct_attachment_rels),
+        'uses_single_attachment_display': 'SingleAttachmentDisplay' in _rendered_body_text,
         'has_number_props':         bool(number_props) or flatten_needs_number_field,
         'has_boolean_props':        bool(boolean_props) or flatten_needs_boolean,
         'has_flatten_accordion_upsert': has_flatten_accordion_upsert,

@@ -17,6 +17,7 @@ from helpers.schema_helpers import (
     get_detail_ref_rels,
     get_flatten_rels,
     get_entity_properties,
+    get_direct_attachment_fk_props,
 )
 from helpers.bridge_direction import collect_parent_bridge_fk_props
 
@@ -92,6 +93,16 @@ class FlattenRelInfo:
 
 
 @dataclass
+class DirectAttachmentRelInfo:
+    """A field declaring `x-relationship: { target: attachment, type: direct }`
+    (cmd_788). `attachment` has no generated pascal-case type (it is never
+    independently generated), so FormViewProps.src inlines the attachment
+    row's shape here rather than referencing `{{ target | pascal_case }}`
+    like parent_rels does."""
+    relation_name: str       # Prisma relation name, e.g. "profile_picture"
+
+
+@dataclass
 class EntityContext:
     parent: str
     model: str
@@ -112,6 +123,8 @@ class EntityContext:
     is_bridge_child: bool = False              # entity declares new-form x-bridge (parent-context create)
     reaction_value_type: str = 'number'        # runtime type of the reaction 'type' constant (see generate_types.extract_named_constants)
     comment_has_mention: bool = False          # this entity's comment thread supports @mention (cmd_522) — gates FormViewProps.canViewUserProfile/mentionUserContext
+    direct_attachment_rels: list[DirectAttachmentRelInfo] = ()  # x-relationship type:direct FK -> attachment (cmd_788)
+    attachment_type_ts: str = 'number'         # TS type of attachment.type, shared by every direct_attachment_rels entry
 
 
 # ---------------------------------------------------------------------------
@@ -163,8 +176,18 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     # Int-with-magic-numbers x-internal fields, or the nativeEnum literal union
     # once reaction.type has been migrated to a Prisma enum — cmd_446 Class A).
     # Needed by types.ts.jinja2's CommentReactionSummary/reactionCounts/myReactionTypes.
-    from generators import reaction_type_ts
+    from generators import reaction_type_ts, attachment_type_ts
     _reaction_value_type = reaction_type_ts(schema)
+
+    # Direct-attachment FK rels (cmd_788): x-relationship type:direct fields.
+    # merged_def isn't built yet at this point, so use model_def directly --
+    # get_direct_attachment_fk_props only reads properties/required, both
+    # already present on model_def before the filtered_props merge below.
+    _direct_attachment_rels = [
+        DirectAttachmentRelInfo(relation_name=r['relation_name'])
+        for r in get_direct_attachment_fk_props(model_def)
+    ]
+    _attachment_type_ts = attachment_type_ts(schema) if _direct_attachment_rels else 'number'
 
     # Many-to-one relationships on parent (using filtered props)
     merged_def = {**model_def, 'properties': filtered_props}
@@ -562,4 +585,6 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         is_bridge_child=isinstance(_x_bridge, dict),
         reaction_value_type=_reaction_value_type,
         comment_has_mention=comment_has_mention,
+        direct_attachment_rels=_direct_attachment_rels,
+        attachment_type_ts=_attachment_type_ts,
     )

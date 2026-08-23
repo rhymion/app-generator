@@ -512,3 +512,33 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - run: npm run test:payment-gate
+
+  direct-attachment-gate-fixture:
+    name: Direct Attachment Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_788: a small fixture entity (direct_attachment_gate_item, with a
+    # nullable and a REQUIRED x-relationship: { target: attachment, type:
+    # direct } FK field) run through the real generate-code -> tsc pipeline,
+    # catching regressions in the SingleAttachmentUpload/
+    # SingleAttachmentDisplay generation branches (form_upsert_context/
+    # form_view_context in generators.py, the decrypt/strip pass in
+    # getters.ts.jinja2, and the inline attachment shape in types.ts.jinja2)
+    # -- a brand-new feature this repo's own generate-code/build (the
+    # e2e-tests job) never compiles, because no entity in this repo's own
+    # json_schema.yaml declares x-relationship.type: direct, and neither
+    # does any currently known consumer schema. No path filter, same as
+    # unit-tests/pytest/mention-gate-fixture/oto-mandatory-gate-fixture/
+    # payment-gate-fixture above, per docs/knowledge/gate-exemption-must-be-
+    # machine-checkable.md. See scripts/check_direct_attachment_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:direct-attachment-gate
