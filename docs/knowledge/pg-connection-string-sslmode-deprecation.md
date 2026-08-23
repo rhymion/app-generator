@@ -1,8 +1,8 @@
-# Why `db:seed-tenant` warned about SSL modes, and why pinning `sslmode=verify-full` fixes it for good
+# Why `db:seed-baseline` warned about SSL modes, and why pinning `sslmode=verify-full` fixes it for good
 
 ## The warning
 
-Running `db:seed-tenant` against a Vercel/Neon database printed:
+Running `db:seed-baseline` against a Vercel/Neon database printed:
 
 ```
 (node:...) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and
@@ -36,7 +36,7 @@ between them changes runtime TLS behavior right now.
 
 ## Two entry points affected
 
-`db:seed-tenant` (`scripts/seed-tenant.ts`) and the app's runtime Prisma
+`db:seed-baseline` (`scripts/seed-baseline.ts`) and the app's runtime Prisma
 client (`lib/prisma.ts`) both build a `PrismaPg` adapter from
 `DIRECT_URL`/`DATABASE_URL`, so both go through this same parser. `prisma
 migrate deploy` (the `vercel-build` step, `prisma.config.ts`) does **not** —
@@ -66,7 +66,7 @@ sites, not to migrations.
 `lib/db-url.ts` exports `pinSslModeVerifyFull(rawUrl)`, a pure string
 transform: if `sslmode` is `prefer`, `require`, or `verify-ca`, rewrite it to
 `verify-full`; otherwise return the URL unchanged (a no-op for local/CI
-Postgres URLs, which have no `sslmode` param at all). Both `scripts/seed-tenant.ts`
+Postgres URLs, which have no `sslmode` param at all). Both `scripts/seed-baseline.ts`
 and `lib/prisma.ts` apply it to the connection string right before
 constructing the `PrismaPg` adapter.
 

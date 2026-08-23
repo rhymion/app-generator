@@ -67,14 +67,14 @@ fi
 : "${UPSTASH_EMAIL:?UPSTASH_EMAIL is required — set in .env.production.local}"
 : "${UPSTASH_API_KEY:?UPSTASH_API_KEY is required — set in .env.production.local}"
 # SEED_ADMIN_EMAIL/PASSWORD: the bootstrap admin login scripts/gcp-seed.sh's
-# app-migrate Job creates via `npm run db:seed-tenant` (NODE_ENV=production,
+# app-migrate Job creates via `npm run db:seed-baseline` (NODE_ENV=production,
 # baked into the Dockerfile). Required, not generated — these represent an
 # operator's actual admin login, not a random secret — same as
-# UPSTASH_EMAIL/UPSTASH_API_KEY above. Without this, seed-tenant.ts's own
-# fail-fast guard (scripts/seed-tenant-credentials.ts) would reject every
-# `gcp-seed.sh` run. See docs/knowledge/seed-tenant-credential-hardening.md.
-: "${SEED_ADMIN_EMAIL:?SEED_ADMIN_EMAIL is required — set in .env.production.local (bootstrap admin login; see docs/knowledge/seed-tenant-credential-hardening.md)}"
-: "${SEED_ADMIN_PASSWORD:?SEED_ADMIN_PASSWORD is required — set in .env.production.local (bootstrap admin login; see docs/knowledge/seed-tenant-credential-hardening.md)}"
+# UPSTASH_EMAIL/UPSTASH_API_KEY above. Without this, seed-baseline.ts's own
+# fail-fast guard (scripts/seed-baseline-credentials.ts) would reject every
+# `gcp-seed.sh` run. See docs/knowledge/seed-baseline-credential-hardening.md.
+: "${SEED_ADMIN_EMAIL:?SEED_ADMIN_EMAIL is required — set in .env.production.local (bootstrap admin login; see docs/knowledge/seed-baseline-credential-hardening.md)}"
+: "${SEED_ADMIN_PASSWORD:?SEED_ADMIN_PASSWORD is required — set in .env.production.local (bootstrap admin login; see docs/knowledge/seed-baseline-credential-hardening.md)}"
 
 # Optional: needed for Step 5 Accelerate secret (obtained via the manual
 # Prisma Accelerate step printed by gcp-setup.sh Step 3, if used)

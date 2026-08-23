@@ -118,7 +118,7 @@ Run in this order:
 1. `npm run lint`            — **must run before any of the generate-code steps below** (see note)
 2. `npm run test:pytest`      — Python unit tests for code generator
 3. `npm run test:vitest`     — vitest unit/component tests
-4. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
+4. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-baseline + build
 5. `npm run check:generated` — generated code matches templates/schema
 6. `npm run test:e2e:cy:api` — API Cypress specs only
 7. `npm audit --omit=dev --audit-level=high`

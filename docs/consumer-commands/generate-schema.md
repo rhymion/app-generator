@@ -102,7 +102,7 @@ Required, in this order:
    measure the full generated codebase).
 2. `npm run test:e2e:build` — prj:sync (idempotent re-run; safe — step 1
    already did the same copy) + docker:up:test + generate-code + db:push +
-   db:generate + db:seed-tenant + build
+   db:generate + db:seed-baseline + build
 3. `npm --prefix app-generator run check:generated` — generated code matches templates/schema
 4. `npm run test:e2e:cy:api` — API Cypress specs only (mandatory dev-time gate)
 5. `npm --prefix app-generator audit --omit=dev --audit-level=high` — production-dependency vulnerability scan

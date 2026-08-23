@@ -9,10 +9,10 @@ import path from "node:path";
  * itself) uses `creator_id` as its unconditional ownership filter — the
  * SAME column every other x-self-only entity uses. That only reads as "is
  * this my own account's settings" if `creator_id` equals `id` on every real
- * user row. All 4 production/seed user-creation paths already generate a
+ * user row. All 3 production/seed user-creation paths already generate a
  * cuid up front and use it for both `id` and `creator_id`
  * (lib/auth/create-user.ts, app/api/auth/register/route.ts,
- * scripts/seed-tenant.ts, scripts/seed.ts) — this test is a structural gate
+ * scripts/seed-baseline.ts) — this test is a structural gate
  * against that silently regressing, since "be careful" is not a mechanism.
  *
  * A DB-level `CHECK (creator_id = id)` constraint was considered and
@@ -135,8 +135,7 @@ describe("user.creator_id self-reference structural gate (cmd_536 §零.五)", (
     const files = new Set(sites.map((s) => s.file));
     expect(files.has("lib/auth/create-user.ts")).toBe(true);
     expect(files.has("app/api/auth/register/route.ts")).toBe(true);
-    expect(files.has("scripts/seed-tenant.ts")).toBe(true);
-    expect(files.has("scripts/seed.ts")).toBe(true);
+    expect(files.has("scripts/seed-baseline.ts")).toBe(true);
   });
 
   it("every non-allowlisted prisma.user.create/upsert call sets creator_id to the same identifier as id", () => {

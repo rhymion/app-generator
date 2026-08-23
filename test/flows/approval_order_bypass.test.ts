@@ -15,7 +15,7 @@
 // sets up) via the actual generator-emitted collaborators
 // (resolve_target.ts / on_approved_dispatch.ts / on_rejected_dispatch.ts),
 // so it requires `generate-code` + `db:push` + `db:generate` +
-// `db:seed-tenant` to have already run against the isolated worktree's test
+// `db:seed-baseline` to have already run against the isolated worktree's test
 // DB. Only the session/cookie identity boundary is mocked (@/lib/authz) —
 // NextAuth's request-scoped cookie resolution has no meaning in a bare
 // Node process and is not what this test is verifying. See

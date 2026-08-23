@@ -23,7 +23,7 @@ file — defeating the purpose of the `.local` convention for that variable.
 | `scripts/run-next-dev.js` | `@next/env` `loadEnvConfig()` | Yes |
 | `scripts/run-next-start.js` | `@next/env` `loadEnvConfig()` | Yes |
 | `scripts/run-e2e.js` | `@next/env` `loadEnvConfig()` | Yes |
-| `scripts/seed.ts`, `scripts/seed-tenant.ts` | `@next/env` `loadEnvConfig()` | Yes |
+| `scripts/seed-baseline.ts` | `@next/env` `loadEnvConfig()` | Yes |
 | `next build` / `next dev` / `next start` (invoked directly, outside the scripts above) | Next.js's own internal `@next/env` call | Yes — same rule, see the NODE_ENV trap below |
 | `npm run docker:up:test` / `docker:down:test` / `docker:up:dev` / `docker:down:dev` / `docker:up:prod` / `docker:down:prod` | `docker compose --env-file` (was: single file) | **Fixed in this cmd** — now layers `.local` when present |
 | `npm run pretest:e2e:cy:api` | same `docker compose --env-file` path as above | **Fixed in this cmd** (now routed through the same wrapper) |

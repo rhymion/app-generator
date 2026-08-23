@@ -15,7 +15,7 @@ across all three consumers, and the env template differing only by
 `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` (present in inventory-app and
 insurance-app, missing in app-template — a real gap in app-template,
 not legitimate divergence; both vars are read by this repo's own
-`scripts/seed-tenant-credentials.ts`). No app-generator-side original
+`scripts/seed-baseline-credentials.ts`). No app-generator-side original
 of these files existed — they were promoted here from the consumers'
 duplicated copies (permitted under an established judging pattern: three
 consumers wanting the same thing is itself the signal to canonicalize,

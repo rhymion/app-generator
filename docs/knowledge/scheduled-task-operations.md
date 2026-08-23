@@ -33,7 +33,7 @@ touches them):
 - `lib/scheduled-tasks/system-actor.ts` — the fixed lookup email for the
   scheduled-task system actor (see "Who does a scheduled write belong to"
   below).
-- `scripts/seed-tenant.ts` — upserts that system-actor user.
+- `scripts/seed-baseline.ts` — upserts that system-actor user.
 
 ## Nothing calls this unless something outside the repo calls it
 
@@ -154,8 +154,8 @@ to an existing user's id — undocumented in `.env.example`, absent from
 `vercel-setup.sh`/`vercel-env.sh`, and returning HTTP 500 on **every single
 invocation** until someone remembered to set it, with no signal that it was
 missing before the first scheduled run actually happened. The fixed-email
-lookup removes that step entirely: `scripts/seed-tenant.ts` (the
-`db:seed-tenant` npm script) upserts this account unconditionally — the
+lookup removes that step entirely: `scripts/seed-baseline.ts` (the
+`db:seed-baseline` npm script) upserts this account unconditionally — the
 same script that is already a mandatory step on every setup/deploy path
 (`vercel-seed.sh`, `gcp-seed.sh`, the `test:e2e:*` scripts, `setup`,
 `build:full`, `dev:full`) — so the account exists before any scheduled task

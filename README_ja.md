@@ -194,7 +194,7 @@ openssl rand -base64 32
 npm run dev:full
 ```
 
-`dev:full` の実行順序: `docker:up:dev` → `generate-code` → `migrate:dev` → `db:generate` → `db:seed-tenant` → `dev`
+`dev:full` の実行順序: `docker:up:dev` → `generate-code` → `migrate:dev` → `db:generate` → `db:seed-baseline` → `dev`
 
 本番ビルドの場合:
 
@@ -202,7 +202,7 @@ npm run dev:full
 npm run build:full
 ```
 
-`build:full` の実行順序: `docker:up:prod` → `generate-code` → `migrate:deploy` → `db:generate` → `db:seed-tenant` → `build`
+`build:full` の実行順序: `docker:up:prod` → `generate-code` → `migrate:deploy` → `db:generate` → `db:seed-baseline` → `build`
 
 > **重要**: `build:full` を初めて実行する前に、`dev:full` を少なくとも一度実行してください。`dev:full` は `migrate:dev` を使用して Prisma マイグレーションファイルを作成します。`build:full` が使用する `migrate:deploy` は既存のマイグレーションファイルを適用するだけです。
 
@@ -217,7 +217,7 @@ npm run docker:up:dev    # postgres-dev を起動（ポート 5433、DB: my_next
 ### コード生成・スキーマ反映・シーディング
 
 ```bash
-npm run setup            # generate-code → db:push → db:generate → db:seed-tenant
+npm run setup            # generate-code → db:push → db:generate → db:seed-baseline
 ```
 
 ### 開発サーバーの起動
@@ -278,7 +278,7 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 
 **ロールベースアクセス制御**はスキーマでモデルごとに定義されます。`authz.ts` モジュールがすべてのリクエストに対してモデルごとの CRUD 権限を強制します。
 
-**デフォルト拒否**: 新規ユーザーは権限ゼロで開始します。Administrator が明示的にロールを割り当てることで初めてアクセスが許可されます。`seed-tenant.ts` によってシードされる `Administrator` ロールはすべてのエンティティに対して完全な CRUD 権限を付与します。詳細は [docs/knowledge/authorization-default-deny.md](docs/knowledge/authorization-default-deny.md) を参照してください。
+**デフォルト拒否**: 新規ユーザーは権限ゼロで開始します。Administrator が明示的にロールを割り当てることで初めてアクセスが許可されます。`seed-baseline.ts` によってシードされる `Administrator` ロールはすべてのエンティティに対して完全な CRUD 権限を付与します。詳細は [docs/knowledge/authorization-default-deny.md](docs/knowledge/authorization-default-deny.md) を参照してください。
 
 **未認証のページリクエスト**は、ページが描画される前に `proxy.ts` によって `/login` へリダイレクトされ、サインイン後は元のページへ戻ります(オープンリダイレクト対策済み — サイト外の `redirect` 値は拒否されます)。API ルートは影響を受けず、従来どおり JSON の `401`/`404` を返します。詳細は [docs/knowledge/unauthenticated-page-redirect.md](docs/knowledge/unauthenticated-page-redirect.md) を参照してください。
 
@@ -356,7 +356,7 @@ npm run lint
 ### E2E テスト — フルパイプライン
 
 ```bash
-npm run test:e2e:build   # docker:up:test は自動起動; generate-code + db:push + db:generate + db:seed-tenant + build
+npm run test:e2e:build   # docker:up:test は自動起動; generate-code + db:push + db:generate + db:seed-baseline + build
 npm run test:e2e:cy:api  # API のみの Cypress スペック
 npm run test:e2e         # Cypress フルスイート（build + start + run）
 npm run docker:down:test # テスト終了後にテスト用データベースを停止
@@ -490,8 +490,7 @@ app-generator/
 │   ├── schema.prisma         正式な DB スキーマ（手書き）
 │   └── migrations/           Prisma マイグレーション履歴
 ├── scripts/                  ユーティリティスクリプト
-│   ├── seed.ts               DB シーディング
-│   ├── seed-tenant.ts        テナント固有シーディング
+│   ├── seed-baseline.ts      ベースラインデータのシーディング
 │   └── run-next-dev.js       開発サーバー起動スクリプト
 ├── cypress/                  E2E テスト
 │   ├── e2e/                  エンティティごとに生成されたスペック + 手書きフローテスト

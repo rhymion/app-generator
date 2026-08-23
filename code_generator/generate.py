@@ -2157,7 +2157,7 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     # --- scripts/generated/seed-entities.ts ---
     # Consumed by scripts/grant-all-permissions.ts (dev/verification tool),
-    # not by scripts/seed-tenant.ts — see seed_entities_context() docstring.
+    # not by scripts/seed-baseline.ts — see seed_entities_context() docstring.
     print('\nGenerating seed-entities.ts...')
     seed_ctx = seed_entities_context(schema)
     _write(out / 'scripts' / 'generated' / 'seed-entities.ts',

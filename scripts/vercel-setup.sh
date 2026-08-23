@@ -10,7 +10,7 @@
 # separate, later stages:
 #   scripts/vercel-deploy.sh [--prod]   — first deploy, creates the schema
 #   scripts/vercel-seed.sh   [--prod]   — bootstrap tenant/admin data
-# (cmd_691 — this script used to also run migrate:deploy/db:seed-tenant here,
+# (cmd_691 — this script used to also run migrate:deploy/db:seed-baseline here,
 # as Steps 3/4/5/5.5; removed because vercel-build already runs
 # migrate:deploy on every deploy (see §18 of docs/vercel-automation-design.md),
 # making a second, earlier owner here redundant, and because seeding before

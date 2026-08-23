@@ -33,7 +33,7 @@ export async function getPendingApprovalRequest(approvable_id: string) {
  */
 export async function setupMultiStageApprovalFixture() {
   const testUser = await prisma.user.findUnique({ where: { email: TEST_CREDENTIALS.email } });
-  if (!testUser) throw new Error('Test user not found. Make sure db:seed-tenant has run first.');
+  if (!testUser) throw new Error('Test user not found. Make sure db:seed-baseline has run first.');
 
   const hashedPassword = await getTestPasswordHash();
 

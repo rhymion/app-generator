@@ -29,7 +29,7 @@ import prisma from '@/lib/prisma';
 // its fixed email (SCHEDULED_TASK_ACTOR_EMAIL) — never the caller's own
 // identity — so every scheduled write attributes to the same system actor
 // regardless of which credential triggered the run. That account is
-// upserted by scripts/seed-tenant.ts (db:seed-tenant), which already runs
+// upserted by scripts/seed-baseline.ts (db:seed-baseline), which already runs
 // on every setup/deploy path (cmd_781 — replaces the former
 // SCHEDULED_TASK_ACTOR_ID env var: that design 500'd on every single
 // invocation until a human remembered to set it, and nothing surfaced the
@@ -54,7 +54,7 @@ async function handleScheduledTask(
       throw new ApiError(
         500,
         `Scheduled-task system actor not found (expected a user seeded with ` +
-          `email ${SCHEDULED_TASK_ACTOR_EMAIL} by db:seed-tenant).`,
+          `email ${SCHEDULED_TASK_ACTOR_EMAIL} by db:seed-baseline).`,
       );
     }
 

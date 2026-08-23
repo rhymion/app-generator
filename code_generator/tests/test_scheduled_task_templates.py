@@ -165,7 +165,7 @@ class TestRouteTemplate:
         """cmd_781: SCHEDULED_TASK_ACTOR_ID (an env var a human had to set,
         500ing on every run until they did) is replaced by a DB lookup keyed
         on a fixed, well-known email -- the account is seeded unconditionally
-        by db:seed-tenant, so there is nothing to separately configure."""
+        by db:seed-baseline, so there is nothing to separately configure."""
         rendered = _ENV.get_template('scheduled_task_route.ts.jinja2').render()
         assert "from '@/lib/scheduled-tasks/system-actor'" in rendered
         assert 'SCHEDULED_TASK_ACTOR_EMAIL' in rendered
