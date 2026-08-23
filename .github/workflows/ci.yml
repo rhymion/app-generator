@@ -27,7 +27,8 @@ jobs:
         # this job's output via needs:+if: (cmd_725: lint/unit-tests/audit/
         # audit-full-scope/pytest/mention-gate-fixture/decimal-gate-fixture/
         # oto-mandatory-gate-fixture/approval-lockdown-gate-fixture/
-        # payment-gate-fixture keep running unconditionally — e2e-tests is
+        # payment-gate-fixture/uri-kind-gate-fixture keep running
+        # unconditionally — e2e-tests is
         # the dominant cost (~57-60 min per cmd_719) and the other ten stay
         # as a safety net against a path-judgment mistake here). Not a
         # top-level `paths-ignore:` trigger filter — that would make the
@@ -542,3 +543,34 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - run: npm run test:direct-attachment-gate
+
+  uri-kind-gate-fixture:
+    name: Uri Kind Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_792: a small fixture parent/child pair (uri_kind_gate_wrapper /
+    # uri_kind_gate_item) run through the real generate-code -> tsc
+    # pipeline, catching regressions in page_list_context's list-page
+    # DataGrid uriKind wiring (generators.py) and confirming
+    # column_def_context's editable child DataGrid deliberately leaves
+    # both uri kinds as a plain editable text cell (no image/link branch
+    # at all -- a cmd_792 decision, not an oversight). A branch this
+    # repo's own generate-code/build (the e2e-tests job) never compiles,
+    # because neither of this repo's own two format:uri fields
+    # (user.image, attachment.path) is ever listed in an x-display.table
+    # column set or embedded as a one-to-many child's column. No path
+    # filter, same as unit-tests/pytest/mention-gate-fixture/decimal-
+    # gate-fixture/approval-lockdown-gate-fixture above, per
+    # docs/knowledge/gate-exemption-must-be-machine-checkable.md. See
+    # scripts/check_uri_kind_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:uri-kind-gate

@@ -137,6 +137,11 @@ code_generator/.generated/
 # running the update-generator gate for cmd_781 — unrelated to that task.)
 .generated-approval-lockdown-gate/
 
+# uri-kind-gate fixture check (cmd_792) scratch output —
+# scripts/check_uri_kind_gate_fixture.sh regenerates this from
+# code_generator/tests/fixtures/uri_kind_gate/ on every run.
+.generated-uri-kind-gate/
+
 # sample data
 custom/
 memory/

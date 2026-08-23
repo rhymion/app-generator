@@ -744,7 +744,13 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
 
             fmt = model_props[field_name].get('format') if field_name in model_props else None
             format_attr = f", format: '{fmt}'" if fmt in ('date-time', 'date', 'time') else ''
-            fields_code_parts.append(f"          {{ field: '{field_name}', headerName: tf('{field_key}'), width: {width}{format_attr} }}")
+            # x-uri-kind: link fields render as a clickable external link,
+            # mirroring BridgeGrid's own uriKind wiring (generate.py) so the
+            # two ResponsiveListClient-based grids agree (cmd_792). image-kind
+            # uri fields are deliberately left as plain text here — this repo
+            # draws uri images nowhere inside a grid cell (cmd_792 ruling).
+            uri_kind_attr = ", uriKind: 'link'" if get_uri_kind(model_props.get(field_name, {})) == 'link' else ''
+            fields_code_parts.append(f"          {{ field: '{field_name}', headerName: tf('{field_key}'), width: {width}{format_attr}{uri_kind_attr} }}")
 
         display_fields_code = ',\n'.join(fields_code_parts)
 
