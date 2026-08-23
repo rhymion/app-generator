@@ -130,6 +130,13 @@ code_generator/.generated/
 # code_generator/tests/fixtures/chart_scalar_gate/ on every run.
 .generated-chart-scalar-gate/
 
+# approval-lockdown-gate fixture check (cmd_732) scratch output —
+# scripts/check_approval_lockdown_gate_fixture.sh regenerates this from
+# code_generator/tests/fixtures/approval_lockdown_gate/ on every run.
+# (pre-existing gap alongside its seven siblings above, noticed while
+# running the update-generator gate for cmd_781 — unrelated to that task.)
+.generated-approval-lockdown-gate/
+
 # sample data
 custom/
 memory/
@@ -166,6 +173,7 @@ lib/dashboard/types.ts
 !lib/compliance/**
 !lib/mention/**
 !lib/legal/**
+!lib/scheduled-tasks/system-actor.ts
 
 # ── app/[locale]/ ──
 app/\[locale\]/*/

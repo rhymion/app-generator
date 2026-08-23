@@ -8,6 +8,7 @@ import * as bcrypt from 'bcryptjs';
 import { createId } from "@paralleldrive/cuid2";
 import { resolveAdminCredentials, requiresExplicitCredentials } from './seed-tenant-credentials';
 import { pinSslModeVerifyFull } from '../lib/db-url';
+import { SCHEDULED_TASK_ACTOR_EMAIL } from '../lib/scheduled-tasks/system-actor';
 
 const rawConnectionString = process.env.DIRECT_URL || process.env.DATABASE_URL;
 if (!rawConnectionString) {
@@ -85,6 +86,33 @@ async function main() {
   if (requiresExplicitCredentials(process.env.NODE_ENV)) {
     console.log(`Admin api_key (store this now — it is not shown again): ${admin.api_key}`);
   }
+
+  // ── Scheduled-task system actor (cmd_781) ─────────────────────────────────
+  // Every x-scheduled-task run (app/api/scheduled-tasks/[task]/route.ts)
+  // attributes its writes to this one dedicated account — never to whichever
+  // credential (Vercel Cron's CRON_SECRET, or a manual X-API-Key/session
+  // call) happened to trigger the run. Looked up by this fixed, well-known
+  // email rather than an env-var-configured user id: there is nothing to
+  // separately capture and set as a deployment secret, and the account
+  // exists as soon as this already-mandatory db:seed-tenant step has run —
+  // on both the Vercel and GCP deploy paths, and before any scheduled task
+  // could ever fire. No password/api_key: this account never signs in or
+  // calls the API as itself, only referenced by id for creator_id/
+  // updater_id attribution. Seeded unconditionally (even when the schema
+  // declares no x-scheduled-task entity) to keep this script schema-
+  // agnostic, matching the admin/tenant bootstrap above.
+  const scheduledTaskActorId = createId();
+  await prisma.user.upsert({
+    where: { email: SCHEDULED_TASK_ACTOR_EMAIL },
+    update: {},
+    create: {
+      id: scheduledTaskActorId,
+      creator_id: scheduledTaskActorId,
+      updater_id: scheduledTaskActorId,
+      email: SCHEDULED_TASK_ACTOR_EMAIL,
+      name: 'Scheduled Task System',
+    },
+  });
 
   // ── Administrator role + full CRUD permissions ────────────────────────────
   let adminRole = await prisma.role.findFirst({ where: { name: 'Administrator' } });

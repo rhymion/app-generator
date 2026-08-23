@@ -172,3 +172,50 @@ class TestFilterShapeAndFieldExistence:
         with pytest.raises(SchemaValidationError) as exc_info:
             validate_schema(schema)
         assert 'status_in' in str(exc_info.value)
+
+
+class TestVercelCronCountLimit:
+    """cmd_781 AC5: Vercel's 100-cron-jobs-per-project limit (all plans,
+    docs/knowledge/scheduled-task-operations.md) must fail generation loudly
+    -- not silently truncate vercel.json's `crons` array at deploy time."""
+
+    @staticmethod
+    def _many_entities_schema(count: int, x_cloud: dict | None = None) -> dict:
+        defs = {}
+        for i in range(count):
+            defs[f'widget_{i}'] = {
+                'properties': {
+                    'name': {'type': 'string'},
+                    'status': {'type': 'string', 'enum': ['pending', 'active']},
+                },
+                'x-scheduled-task': {
+                    'task_id': f'widget_{i}_timeout',
+                    'filter': {'status_in': ['pending']},
+                    'handler': 'afterTimeout',
+                    'interval': '0 * * * *',
+                },
+            }
+        schema = {'definitions': defs}
+        if x_cloud is not None:
+            schema['x-cloud'] = x_cloud
+        return schema
+
+    def test_101_entities_rejected(self):
+        schema = self._many_entities_schema(101)
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        msg = str(exc_info.value)
+        assert '100' in msg
+        assert '101' in msg
+
+    def test_100_entities_passes(self):
+        schema = self._many_entities_schema(100)
+        validate_schema(schema)  # must not raise
+
+    def test_101_entities_under_gcp_cloud_passes(self):
+        """GCP deployments don't write vercel.json crons at all (Cloud
+        Scheduler instead) -- the Vercel-specific limit must not apply."""
+        schema = self._many_entities_schema(
+            101, x_cloud={'enabled': True, 'provider': 'gcp'},
+        )
+        validate_schema(schema)  # must not raise

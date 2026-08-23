@@ -23,6 +23,55 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   needs a rebuild, not just an env var edit, to pick up a change). See
   `docs/knowledge/noindex-default-and-branding-env-vars.md`.
 
+### Fixed
+- **The `x-scheduled-task` mechanism's generated route only ever exported
+  `POST`, but Vercel Cron always invokes with `GET`** — any declared
+  schedule would 405 on every real Vercel Cron invocation and silently
+  never run (no exception, no red gate). The route now exports both `GET`
+  and `POST`.
+- **`vercel.json`'s `crons` array is now written automatically by
+  `generate.py`** from each entity's `x-scheduled-task` declaration, instead
+  of the previous "copy this into `prj/vercel.json` by hand" convention —
+  which was itself unsafe: `npm run prj:sync` would copy a hand-placed
+  `prj/vercel.json` back over the generator's own file verbatim on every
+  sync. `prj_sync.py` now skips `vercel.json` entirely. Only the `crons` key
+  is generator-owned; `framework`/`buildCommand`/`regions` and any other
+  hand-added key are preserved untouched.
+- **`SCHEDULED_TASK_ACTOR_ID`, an environment variable a human had to set by
+  hand, is replaced by a fixed-email lookup** (`lib/scheduled-tasks/
+  system-actor.ts`) resolved against a system-actor account `scripts/
+  seed-tenant.ts` now seeds unconditionally. The env var design returned
+  HTTP 500 on every single scheduled-task invocation until someone
+  remembered to set it, with nothing surfacing the omission before the
+  first scheduled run actually happened; the account seeded by
+  `db:seed-tenant` is already guaranteed to exist before that can occur, on
+  both the Vercel and GCP deploy paths.
+- `validate.py` now rejects a schema declaring more than 100
+  `x-scheduled-task` entities (Vercel's per-project cron-job limit, all
+  plans) at generate time, instead of letting `vercel.json` reach Vercel
+  with an unsupported count.
+- **`scripts/vercel-env.sh` documented `NEXT_PUBLIC_APP_TITLE`/
+  `NEXT_PUBLIC_APP_COPYRIGHT` but never actually injected either one into
+  Vercel** — `vercel_env_inject` only ever called `inject_var` for
+  `CRON_SECRET` and the other operational vars, silently leaving the two
+  branding vars unset on every Vercel deploy regardless of what a consumer
+  put in `.env.production.local`. Both are now injected the same way,
+  alongside a note that (like all `NEXT_PUBLIC_` vars) a value change only
+  takes effect on the next build. `.env.vercel.production.local.example`
+  gained the matching entries. `docs/knowledge/scheduled-task-operations.md`
+  gained a correction: an unset `CRON_SECRET` only blocks Vercel Cron's own
+  request, it does not gate manual invocation — any authenticated user can
+  call the route regardless of `CRON_SECRET`, which the doc previously did
+  not call out — plus the GCP-side placement for all three vars (`CRON_SECRET`
+  via Secret Manager mirrors `AUTH_SECRET`; the two branding vars need a
+  Docker build-arg path that does not exist yet, since `--set-env-vars` at
+  deploy time is too late for a `NEXT_PUBLIC_` var already baked into the
+  built client bundle).
+- Added `docs/knowledge/scheduled-task-operations.md` — the Vercel and GCP
+  operational guide for this mechanism (HTTP method, `CRON_SECRET`, cron
+  limits, the system-actor account, and how to tell whether a scheduled
+  task is actually firing).
+
 ### Internal
 - **Fixed a silent output-path collision between the polymorphic attachable-bridge
   actions and a standard per-entity CRUD actions file when `attachment` is

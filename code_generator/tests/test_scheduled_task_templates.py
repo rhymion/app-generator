@@ -151,7 +151,27 @@ class TestRouteTemplate:
         assert "from '@/lib/scheduled-tasks/registry'" in rendered
         assert 'TASK_REGISTRY[task]' in rendered
         assert 'CRON_SECRET' in rendered
-        assert 'SCHEDULED_TASK_ACTOR_ID' in rendered
+
+    def test_both_get_and_post_exported(self):
+        """cmd_781: Vercel Cron always invokes with GET (confirmed against
+        Vercel's own docs) -- a POST-only route would 405 on every real
+        invocation and every schedule would silently never fire. POST stays
+        open too, for GCP Cloud Scheduler / manual triggers."""
+        rendered = _ENV.get_template('scheduled_task_route.ts.jinja2').render()
+        assert 'export const GET = handleScheduledTask' in rendered
+        assert 'export const POST = handleScheduledTask' in rendered
+
+    def test_actor_looked_up_by_fixed_email_not_env_var(self):
+        """cmd_781: SCHEDULED_TASK_ACTOR_ID (an env var a human had to set,
+        500ing on every run until they did) is replaced by a DB lookup keyed
+        on a fixed, well-known email -- the account is seeded unconditionally
+        by db:seed-tenant, so there is nothing to separately configure."""
+        rendered = _ENV.get_template('scheduled_task_route.ts.jinja2').render()
+        assert "from '@/lib/scheduled-tasks/system-actor'" in rendered
+        assert 'SCHEDULED_TASK_ACTOR_EMAIL' in rendered
+        # The old env var name may still appear in a "here's what this
+        # replaces" comment -- what must be gone is any functional read of it.
+        assert 'process.env.SCHEDULED_TASK_ACTOR_ID' not in rendered
 
 
 class TestBuildUserSchemaKeySurvival:

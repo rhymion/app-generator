@@ -82,6 +82,14 @@ def prj_sync(prj_dir: Path, dst_dir: Path) -> None:
 
         if rel.parts[0] == "messages" and src_file.suffix == ".json":
             _sync_messages_json(src_file, dst_file, rel)
+        elif rel == Path("vercel.json"):
+            # cmd_781: vercel.json's `crons` key is now written by generate.py
+            # from x-scheduled-task declarations. A prj/vercel.json copy
+            # (the pre-cmd_781 convention) would verbatim-overwrite that
+            # generated key on every sync, silently reverting it to whatever
+            # was true when the consumer last copied the file — remove
+            # prj/vercel.json; it is no longer needed or read.
+            print(f"prj:sync: SKIPPED {rel} (generator-owned since cmd_781 — remove this file from prj/)")
         else:
             shutil.copy2(src_file, dst_file)
             print(f"prj:sync: copied {rel}")
