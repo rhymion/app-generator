@@ -5,6 +5,23 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+- **Any authenticated user could manually trigger a scheduled task, not just
+  an authorized operator**: the generated `/api/scheduled-tasks/[task]`
+  route's non-`CRON_SECRET` path called plain `requireDualAuth`, which
+  accepts any valid session cookie or `X-API-Key` with no role or
+  permission check at all — reproduced against a real database (an
+  `admin@example.com` API-key call succeeded with 200 before the fix). The
+  route now calls a new `requireScheduledTaskRole` (`lib/api-auth.ts`),
+  which additionally requires membership in a new dedicated
+  `ScheduledTaskRunner` role — including for the Administrator account,
+  which is rejected with 403 unless separately granted the role.
+  `scripts/seed-baseline.ts` seeds this role unconditionally with **zero
+  members**; an operator must explicitly grant it via the Role management
+  UI before any account can trigger a scheduled task outside of Vercel
+  Cron's own `CRON_SECRET` path (confirmed still working unchanged after
+  the fix). See `docs/knowledge/scheduled-task-operations.md`.
+
 ### Removed
 - **`scripts/seed.ts` (`npm run db:seed`)** — unused ITS (issue-tracking-system)
   sample-data script. Not referenced by any npm script, prisma seed hook, or

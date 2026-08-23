@@ -3,6 +3,7 @@ import prisma from '@/lib/prisma';
 import { requirePermission, getSessionUserId, type RichPermissions, type Operation, type ItemContext } from '@/lib/authz';
 import { TtlLruCache } from '@/lib/_ttl_lru';
 import { AppError, type ErrorCode } from '@/lib/_errors';
+import { SCHEDULED_TASK_ROLE_NAME } from '@/lib/scheduled-tasks/system-actor';
 
 export class ApiError extends Error {
   constructor(
@@ -110,6 +111,21 @@ export async function resolveActorId(request: NextRequest): Promise<string | nul
 export async function requireDualAuth(request: NextRequest): Promise<{ userId: string }> {
   const userId = await resolveActorId(request);
   if (!userId) throw new ApiError(401, 'Authentication required. Provide X-API-Key header or sign in.');
+  return { userId };
+}
+
+/** Same dual-auth resolution as {@link requireDualAuth}, plus a check that
+ * the resolved caller holds {@link SCHEDULED_TASK_ROLE_NAME}. Throws
+ * ApiError(401) for no/invalid credential (same as requireDualAuth) or
+ * ApiError(403) when authenticated but not a member of the dedicated role. */
+export async function requireScheduledTaskRole(request: NextRequest): Promise<{ userId: string }> {
+  const { userId } = await requireDualAuth(request);
+  const roleCount = await prisma.role.count({
+    where: { name: SCHEDULED_TASK_ROLE_NAME, users: { some: { id: userId } } },
+  });
+  if (roleCount === 0) {
+    throw new ApiError(403, `Scheduled task access requires the '${SCHEDULED_TASK_ROLE_NAME}' role.`);
+  }
   return { userId };
 }
 

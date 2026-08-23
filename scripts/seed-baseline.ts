@@ -8,7 +8,7 @@ import * as bcrypt from 'bcryptjs';
 import { createId } from "@paralleldrive/cuid2";
 import { resolveAdminCredentials, requiresExplicitCredentials } from './seed-baseline-credentials';
 import { pinSslModeVerifyFull } from '../lib/db-url';
-import { SCHEDULED_TASK_ACTOR_EMAIL } from '../lib/scheduled-tasks/system-actor';
+import { SCHEDULED_TASK_ACTOR_EMAIL, SCHEDULED_TASK_ROLE_NAME } from '../lib/scheduled-tasks/system-actor';
 
 const rawConnectionString = process.env.DIRECT_URL || process.env.DATABASE_URL;
 if (!rawConnectionString) {
@@ -225,6 +225,28 @@ async function main() {
     assigneeRole = await prisma.role.create({
       data: {
         name: 'Assignee',
+        creator_id: admin.id,
+        updater_id: admin.id,
+      },
+    });
+  }
+
+  // ── ScheduledTaskRunner role (cmd_787) ─────────────────────────────────────
+  // Gates manual (non-CRON_SECRET) calls to the generated
+  // /api/scheduled-tasks/[task] route — see lib/api-auth.ts's
+  // requireScheduledTaskRole. Seeded with zero members, same as Assignee
+  // above: a signed-in user (any role, including Administrator) is rejected
+  // by default, and an operator must explicitly grant this role via the
+  // Role management UI before that account can trigger a scheduled task
+  // outside of Vercel Cron's own CRON_SECRET path. Deliberately not granted
+  // to the scheduled-task system actor itself (has no password/api_key, so
+  // it could never authenticate to call its own route anyway) or to the
+  // admin account — a dedicated role only, not "any admin passes."
+  let scheduledTaskRunnerRole = await prisma.role.findFirst({ where: { name: SCHEDULED_TASK_ROLE_NAME } });
+  if (!scheduledTaskRunnerRole) {
+    scheduledTaskRunnerRole = await prisma.role.create({
+      data: {
+        name: SCHEDULED_TASK_ROLE_NAME,
         creator_id: admin.id,
         updater_id: admin.id,
       },
