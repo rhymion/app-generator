@@ -17,7 +17,7 @@ import { trySelfOnlyAdminBypass } from '@/lib/self_only';
 {% if non_creator_virtual_columns %}
 import { resolveVirtualColumns } from '@/lib/{{ parent }}/virtual_resolvers';
 {% endif %}
-{% if has_attachable %}
+{% if has_attachable or direct_attachment_rels %}
 import { decryptFileName } from '@/lib/compliance/attachment_name_crypto';
 {% endif %}
 {% if comment_has_mention %}
@@ -174,6 +174,36 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
     }),
   } : {{ parent_camel }}.{{ attachable_rel_name }};
 {% endif %}
+{% for dar in direct_attachment_rels %}
+  // {{ dar.relation_name }}: a direct-attachment FK (x-relationship type: direct).
+  // encrypted_original_name/name_iv are Prisma-only columns pulled in by the
+  // `{{ dar.relation_name }}: true` include -- decrypt to the display name and
+  // strip both fields here for the same reason as {{ attachable_rel_name if has_attachable else 'the attachable bridge' }}
+  // above (cmd_356): the ciphertext/IV must never cross into FormView/
+  // FormUpsert (client components) via the `src` prop.
+  //
+  // Built via an IIFE (not `let x = ...; if (x) { x = {...} }`) so the
+  // stripped-shape return value's type is inferred fresh rather than having
+  // to satisfy the wider raw-include type `{{ dar.relation_name }}` was
+  // first assigned from (which still requires encrypted_original_name/
+  // name_iv) -- a `let` reassignment there is a real type error, not just a
+  // style choice.
+  const _{{ dar.relation_name }} = ((raw: typeof {{ parent_camel }}.{{ dar.relation_name }}) => {
+    if (!raw) return raw;
+    const { encrypted_original_name, name_iv: _name_iv, ...rest } = raw;
+    let displayName = rest.name;
+    if (encrypted_original_name) {
+      try {
+        displayName = decryptFileName(encrypted_original_name);
+      } catch (e) {
+        // Legacy/rotated-key records: fall back to the stored (UUID) name
+        // rather than throwing and breaking the whole detail page.
+        console.warn('attachment name decrypt failed:', e instanceof Error ? e.message : e);
+      }
+    }
+    return { ...rest, name: displayName };
+  })({{ parent_camel }}.{{ dar.relation_name }});
+{% endfor %}
   return {
     ...{{ parent_camel }},
 {% for rel in reverse_oto_rels if rel.relation_name != rel.prop_name %}
@@ -188,6 +218,9 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
 {% if has_attachable %}
     {{ attachable_rel_name }}: _{{ attachable_rel_name }},
 {% endif %}
+{% for dar in direct_attachment_rels %}
+    {{ dar.relation_name }}: _{{ dar.relation_name }},
+{% endfor %}
 {% for dtcol in datetime_display_columns %}
     {{ dtcol }}: {{ parent_camel }}.{{ dtcol }}
       ? {{ parent_camel }}.{{ dtcol }}.toISOString().replace('T', ' ').slice(0, 19)

@@ -1,0 +1,52 @@
+// AUTO-GENERATED - DO NOT EDIT
+// Server action backing SingleAttachmentUpload's mode='fk' path (x-relationship
+// type:direct FK -> attachment, cmd_788). Always emitted (like
+// lib/attachment/bridge_actions.ts): components/_standard/SingleAttachmentUpload.tsx
+// unconditionally imports createDirectAttachment regardless of schema, so the
+// file must exist even when no entity declares a direct-attachment FK.
+'use server';
+
+import { getSessionUserIdOrThrow } from '@/lib/authz';
+import prisma from '@/lib/prisma';
+import { encryptFileName } from '@/lib/compliance/attachment_name_crypto';
+
+export type DirectAttachment = {
+  id: string;
+  name: string;
+  path: string;
+  type: {{ type_ts }};
+};
+
+/**
+ * Creates a standalone attachment row (attachable_id: null) for the
+ * direct-FK path. Any authenticated user may call this -- it mirrors
+ * /api/upload's own auth bar (a session, no finer-grained permission),
+ * since the row is not yet linked to any entity; the entity's own
+ * create/update permission check is what actually gates persisting the
+ * link (the returned id is only submitted as a plain FormData value, the
+ * same as every other FK field).
+ *
+ * The original file name is encrypted at rest the same way the polymorphic
+ * attachable bridge does (lib/attachment/bridge_actions.ts) -- `name`
+ * returned here is the plaintext original name handed back to the caller
+ * for immediate display, never the stored UUID/ciphertext.
+ */
+export async function createDirectAttachment(
+  name: string,
+  path: string,
+  type: {{ type_ts }},
+): Promise<DirectAttachment> {
+  await getSessionUserIdOrThrow();
+  const encrypted = encryptFileName(name);
+  const attachment = await prisma.attachment.create({
+    data: {
+      attachable_id: null,
+      type,
+      name: encrypted.uuid,
+      encrypted_original_name: encrypted.encryptedName,
+      name_iv: encrypted.iv,
+      path,
+    },
+  });
+  return { id: attachment.id, name, path: attachment.path, type };
+}

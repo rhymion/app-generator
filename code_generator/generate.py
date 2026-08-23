@@ -1390,6 +1390,18 @@ def generate(schema_path: str, output_dir: str) -> None:
     )
     print(f'  Attachment bridge actions → lib/attachment/bridge_actions.ts ({len(attachable_owners)} owners)')
 
+    # --- Direct-attachment FK server action (lib/attachment/direct_actions.ts) ---
+    #
+    # Always emitted (cmd_788, mirrors bridge_actions.ts above): SingleAttachmentUpload
+    # unconditionally imports createDirectAttachment regardless of schema.
+    _write(
+        out / 'lib' / 'attachment' / 'direct_actions.ts',
+        _render(env, 'direct_attachment_actions.ts.jinja2', {
+            'type_ts': attachment_type_ts(schema),
+        }),
+    )
+    print('  Direct-attachment FK action → lib/attachment/direct_actions.ts')
+
     # --- Named constants (lib/reaction_constants.ts) ---
     # named_constants was pre-computed before the entity loop
     if named_constants:

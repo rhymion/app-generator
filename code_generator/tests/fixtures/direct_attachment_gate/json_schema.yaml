@@ -1,0 +1,99 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+format-version: 3.0
+
+# Fixture design note (cmd_788): a NEW fixture, not an extension of any
+# existing one -- x-relationship: { target: attachment, type: direct } is an
+# unrelated dark branch from every other gate fixture's schema-shape
+# concern (OTO selectors, Decimal columns, chart projections, approval
+# lockdown, payment stubs). This repo's own json_schema.yaml declares zero
+# fields with x-relationship.type: direct (the feature is brand new), so
+# test:e2e:build (this repo's own generate-code + tsc build, step 12 of the
+# update-generator completion gate) never compiles any of the branches this
+# fixture exercises -- see docs/knowledge/mention-system.md "Fixture gate:
+# how to grow it" for why a fixture-schema + tsc gate exists for this class
+# of gap.
+#
+# Covers: FormUpsert.tsx (SingleAttachmentUpload mode='fk' interactive
+# widget, both a nullable and a REQUIRED direct-attachment field -- the
+# latter exercises client_required_fields' generic parent_prop_infos-driven
+# required check plus form_upsert_context's own onChange-must-carry-an-id
+# submission path), page_view.tsx/FormView.tsx (SingleAttachmentDisplay
+# readonly rendering via src.{relation_name}), getters.ts
+# (get{Parent}Detail's decrypt/strip pass for encrypted_original_name/
+# name_iv -- the direct-attachment analogue of the existing has_attachable
+# treatment, cmd_356), and types.ts (FormViewProps.src's inline attachment
+# shape for each relation_name).
+
+definitions:
+  user:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name: {}
+      email: {}
+      image: {}
+
+  # Internal marker entity -- never independently generated (x-generate all
+  # false), matching this repo's own code_generator/json_schema.yaml
+  # attachment stub exactly (same enum shape) so attachment_type_ts()
+  # resolves to the real nativeEnum literal union, not the 'number' fallback.
+  attachment:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      type:
+        enum:
+          - image
+          - file
+          - video
+          - audio
+        _required: true
+      order:
+        default: 0
+      name: {}
+      path:
+        format: uri
+      attachable_id: {}
+
+  # The entity this fixture exists to exercise: a can_new/can_edit/can_view
+  # entity with TWO direct-attachment FK fields -- one nullable
+  # (profile_picture_id) and one REQUIRED (contract_file_id) -- so both the
+  # optional and required submission/validation branches compile and are
+  # exercised.
+  direct_attachment_gate_item:
+    x-generate:
+      list: false
+      view: true
+      new: true
+      edit: true
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name: {}
+      profile_picture_id:
+        x-relationship:
+          target: attachment
+          type: direct
+      contract_file_id:
+        x-relationship:
+          target: attachment
+          type: direct
+    required:
+      - name
+      - contract_file_id

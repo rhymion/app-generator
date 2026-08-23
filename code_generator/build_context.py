@@ -20,6 +20,7 @@ from helpers.schema_helpers import (
     get_internal_bridge_fk_prop_names,
     get_entity_properties, get_self_only_flags,
     derive_approval_locked_values,
+    get_direct_attachment_fk_props,
 )
 from helpers.label_field import build_label_expression, render_prisma_include
 from helpers.bridge_direction import (
@@ -104,12 +105,21 @@ def _get_actual_type(defn: dict) -> str | None:
 
 
 def get_uri_kind(prop: dict) -> str | None:
-    """Return the uri kind for a format:uri property. Default is 'image'."""
+    """Return the uri kind for a format:uri property. Default is 'image'.
+
+    'file' (cmd_776(3)/subtask_780a乙) is a URL-string field like 'image' —
+    still uploaded via /api/upload and stored as a plain string, not an
+    attachment FK — but for a non-image file (e.g. proj_h's file_uri): the
+    upload widget must not render it as an <img>. Rendered via the same
+    SingleAttachmentUpload component (mode='url', kind='file') that the
+    x-relationship: {target: attachment, type: direct} FK path (mode='fk')
+    also uses, per the殿-approved common-component design in subtask_780a.
+    """
     if prop.get('format') != 'uri':
         return None
     kind = prop.get('x-uri-kind', 'image')
-    if kind not in ('image', 'link'):
-        raise ValueError(f"x-uri-kind must be 'image' or 'link', got: {kind!r}")
+    if kind not in ('image', 'link', 'file'):
+        raise ValueError(f"x-uri-kind must be 'image', 'link', or 'file', got: {kind!r}")
     return kind
 
 
@@ -869,9 +879,11 @@ def _int_enum_option(v, i: int) -> str:
 
 def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
                             generate_config: dict,
-                            one_to_one_fk_props: set | None = None) -> dict:
+                            one_to_one_fk_props: set | None = None,
+                            direct_attachment_fk_props: set | None = None) -> dict:
     rel_prop_names = {r['prop_name'] for r in parent_rels_raw}
     _oto_fk = one_to_one_fk_props or set()
+    _direct_attachment_fk = direct_attachment_fk_props or set()
     # Exclude *able_id FKs with no x-relationship (system-managed internal bridge FKs,
     # e.g. inventory_transactionable_id). Mirrors form_view_context's bridge_fk_no_rel_props.
     _bridge_fk_no_rel = {
@@ -883,6 +895,7 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
         k for k in filtered_props
         if k not in _EXCLUDE_ID_TS and k != 'id'
         and k not in rel_prop_names and k not in _oto_fk and k not in _bridge_fk_no_rel
+        and k not in _direct_attachment_fk
     ]
 
     custom_upsert = []
@@ -893,6 +906,7 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
     enum_string   = []
     image         = []
     link_uri      = []
+    file_uri      = []
     boolean       = []
     entity_select = []
     text          = []
@@ -914,8 +928,11 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
         elif actual == 'boolean':
             boolean.append(p)
         elif actual == 'string' and fmt == 'uri':
-            if get_uri_kind(defn) == 'link':
+            _kind = get_uri_kind(defn)
+            if _kind == 'link':
                 link_uri.append(p)
+            elif _kind == 'file':
+                file_uri.append(p)
             else:
                 image.append(p)
         elif actual == 'string' and defn.get('x-entity-select'):
@@ -939,6 +956,7 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
         'enum_string': enum_string,
         'image': image,
         'link_uri': link_uri,
+        'file_uri': file_uri,
         'boolean': boolean,
         'entity_select': entity_select,
         'text': text,
@@ -1270,6 +1288,14 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     auto_create_oto_rels = [r for r in one_to_one_rels if not r['is_selector']]
     selector_oto_rels    = [r for r in one_to_one_rels if r['is_selector']]
     oto_prop_names = {r['prop_name'] for r in one_to_one_rels}
+
+    # Direct-attachment FK rels (cmd_788/subtask_780a乙): `x-relationship:
+    # { target: attachment, type: direct }` fields. Deliberately NOT folded
+    # into parent_rels_raw/one_to_one_rels — see
+    # get_direct_attachment_fk_props()'s docstring for why keeping it a
+    # separate list is what excludes it from every autocomplete-specific
+    # code path for free.
+    direct_attachment_rels = get_direct_attachment_fk_props(merged_def)
 
     # Bridge child IR: new-form x-bridge on this entity (as child), with parent targets.
     # Used by child forms to render parent-entity autocomplete and by service to
@@ -2167,7 +2193,20 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # nativeEnum literal union once attachment.type has been migrated to a
     # Prisma enum) -- mirrors the field's real type in the decrypt/strip
     # cast above so it doesn't silently drift from lib/attachment/actions.ts.
-    attachment_type_prop = ((schema.get('definitions') or {}).get('attachment') or {}).get('properties', {}).get('type')
+    #
+    # _raw_def(), not a bare schema['definitions']['attachment'] lookup
+    # (cmd_788, same class of gap generators.py's own module-level
+    # attachment_type_ts() docstring documents fixing at its call site for
+    # subtask_769d): post build_user_schema.py, `attachment`'s definitions
+    # entry is `allOf: [$ref: '#/definitions/__attachment']` (Stage 4's
+    # standard indirection -- not specific to x-generate:true), so the bare
+    # `.get('properties')` lookup here silently returned {} and this always
+    # fell back to the 'number' default in every real run, not just an
+    # x-generate:true one. Only surfaced now because cmd_788's
+    # SingleAttachmentFk union type-checks this value strictly, where the
+    # pre-existing `as unknown as Array<...>` cast on the has_attachable
+    # decrypt/strip block above silently absorbed the same wrong value.
+    attachment_type_prop = (_raw_def('attachment', schema).get('properties') or {}).get('type')
     attachment_type_ts = get_ts_type(attachment_type_prop) if attachment_type_prop else 'number'
     # Embedded children: exclude independent list children (have own pages; shown read-only here).
     # Non-independent mandatory-FK list children (no own page) are embedded with full CRUD.
@@ -2303,7 +2342,10 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
 
     # Field categorisation (for FormUpsert / FormView)
     # Use all_oto_fk_props to exclude BOTH auto-create and selector OTO FK props from plain field treatment
-    field_categories = _categorize_form_fields(filtered_props, parent_rels_raw, gen_cfg, all_oto_fk_props)
+    _direct_attachment_fk_props = {r['prop_name'] for r in direct_attachment_rels}
+    field_categories = _categorize_form_fields(
+        filtered_props, parent_rels_raw, gen_cfg, all_oto_fk_props, _direct_attachment_fk_props,
+    )
 
     # Default props (page_new)
     def _default_value(k: str, defn: dict) -> str:
@@ -2607,6 +2649,17 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     include_entries_list = [_include_entry_for_rel(r) for r in parent_rels]
     # Selector OTO rels are included in list so the relation column can be displayed
     include_entries_list.extend(_include_entry_for_rel(r) for r in selector_oto_rels)
+    # NOTE: direct-attachment FK rels (x-relationship type: direct) are
+    # deliberately NOT added here. include_props_list also feeds the
+    # list-page getter, and how a direct-attachment field should render as a
+    # DataGrid child cell is still an open design question (a separate,
+    # not-yet-landed change is tracking it). Pulling the relation into the
+    # list-page include now would leak encrypted_original_name/name_iv into
+    # a query path this change never audited for the strip-before-client
+    # treatment get{Parent}Detail() applies below, and would silently commit
+    # to a list-cell rendering this change deliberately does not decide.
+    # Only include_props_detail (get{Parent}Detail -- FormUpsert/FormView,
+    # the only two surfaces this change targets) gets it, below.
     include_props_list   = ', '.join(include_entries_list)
 
     # searchXxxOptions returns target rows for OTHER entities' autocompletes.
@@ -2862,6 +2915,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         nested = built_avail.get('prisma_include') or {}
         r['available_include'] = render_prisma_include(nested) if nested else ''
 
+    # Direct-attachment FK rels (x-relationship type: direct) only join
+    # get{Parent}Detail's include, not the list-page one -- see the
+    # include_props_list note above for why. get{Parent}Detail (getters.ts.jinja2)
+    # additionally decrypts each relation's encrypted_original_name into a
+    # plain display name and strips encrypted_original_name/name_iv before
+    # the row reaches FormUpsert/FormView, mirroring the existing
+    # has_attachable treatment (cmd_356) -- see direct_attachment_rels in
+    # this function's returned context.
+    detail_direct_attachment_entries = [f"{r['relation_name']}: true" for r in direct_attachment_rels]
+
     include_entries_detail = [
         *child_include_entries,
         *detail_parent_rel_entries,
@@ -2869,6 +2932,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         *detail_selector_oto_entries,
         *reverse_oto_include_entries,
         *flatten_non_m2o_include_entries,
+        *detail_direct_attachment_entries,
         "creator: { select: { id: true, name: true } }",
         "updater: { select: { id: true, name: true } }",
     ]
@@ -3135,6 +3199,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         # One-to-one outbound FK rels
         one_to_one_rels=auto_create_oto_rels,      # auto-create OTO only (for types/service templates)
         selector_oto_rels=selector_oto_rels,        # selector OTO (autocomplete UI, filtered getters)
+        direct_attachment_rels=direct_attachment_rels,  # x-relationship type:direct FK -> attachment (cmd_788)
         reverse_oto_rels=reverse_oto_rels,          # reverse OTO: FK in target pointing back to this model
         flatten_rels=flatten_rels,                  # flatten rels: shown as accordion in detail view
         flatten_m2o_fk_props=flatten_m2o_fk_props, # FK prop names in parent for m2o flatten rels

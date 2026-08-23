@@ -787,6 +787,68 @@ There is no UI affordance today for telling a user which part of a composite/mix
 actually searchable — schema authors should keep this table in mind when choosing `labelField`
 for a relation likely to be searched by autocomplete.
 
+### Direct Attachment FK (`type: direct`) — a single file, not a selectable relation
+
+`x-relationship: { target: attachment, type: direct }` is a distinct marker from every other
+relationship type on this page — declare it when an entity needs to point at exactly one
+uploaded file (a profile picture, a signed contract), not a list of attachments (the existing
+`attachable_id` bridge, section 7.6) and not a selectable relation with its own pages (section 5
+above, section 7.5 one-to-one selector). `attachment` has no list/view/new/edit pages of its
+own; the field renders as a file-upload widget (`SingleAttachmentUpload`), never an
+`EntityAutocomplete`.
+
+```yaml
+some_entity:
+  fields:
+    profile_picture_id:        # nullable -- omit from `required:`
+      x-relationship:
+        target: attachment
+        type: direct
+    contract_file_id:          # required -- a REQUIRED direct-attachment FK is legal
+      x-relationship:
+        target: attachment
+        type: direct
+  required:
+    - contract_file_id
+```
+
+Required-ness comes from the entity's own `required:` list (or Prisma non-nullability), the
+same as every other field on this page -- there is no separate `required` key inside
+`x-relationship` for this type. Do not declare `type: many-to-one` or `type: one-to-one` for a
+field targeting `attachment` -- those types feed the autocomplete-selector machinery
+(`search{Target}Options`, CSV export/import FK-label flattening, dashboard chart groupable
+fields), none of which make sense for a file. `type: direct` is deliberately excluded from all
+of it.
+
+Prisma alignment -- the FK column is nullable-or-required to taste, `@unique` (true 1:1), and
+the relation back to `attachment` uses `onDelete: SetNull` when the column is nullable or
+`onDelete: Restrict` when required (deleting a still-referenced required attachment must not
+silently orphan the row):
+
+```prisma
+model some_entity {
+  profile_picture_id String?     @unique
+  profile_picture    attachment? @relation("SomeEntityProfilePicture", fields: [profile_picture_id], references: [id], onDelete: SetNull)
+  contract_file_id   String      @unique
+  contract_file      attachment  @relation("SomeEntityContractFile", fields: [contract_file_id], references: [id], onDelete: Restrict)
+}
+```
+
+`attachment.attachable_id` is nullable (`onDelete: SetNull`) -- a direct-attachment FK creates
+an attachment row with no bridge owner at all, so `attachable_id` stays permanently null for
+that row's whole life; that is the normal, permanent state, not a transient one pending cleanup.
+
+Implementation-internals notes from when this feature was built (why the generator's TS-type
+resolution for `attachment.type` must read the raw entity definition rather than the plain
+entity properties, the encrypted-filename decrypt/strip pass the generated getter applies
+before the row reaches a client component, why the field's label is derived from the relation
+name rather than the FK column name, and why the upload server action is passed into
+`SingleAttachmentUpload` as a prop instead of imported inside it) are recorded alongside the
+fixture test that exercises this branch
+(`code_generator/tests/fixtures/direct_attachment_gate/`) rather than repeated here. DataGrid
+child-cell rendering of a direct-attachment field is an open design question, not yet landed --
+this page does not cover it.
+
 ---
 
 ## 6. Many-to-Many Relationships (`x-relationships`)
