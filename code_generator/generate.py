@@ -1750,6 +1750,17 @@ def generate(schema_path: str, output_dir: str) -> None:
     # filtered row-scan + per-row handler call under a task_id; expires_at-based release
     # is its first user, not a special case baked into the generator. Unlike the approval
     # dispatch above, there is no parent feature gate — the key stands on its own.
+    #
+    # cmd_790 extends this with a second, entity-agnostic mode: top-level
+    # `x-scheduled-tasks` (plural) registers a task with no row selection at
+    # all -- generate.py calls its handler directly, once, per run. This is
+    # for operations that span many entities/tables or an entire table with
+    # no filter (a full demo-data reset was the motivating case), where the
+    # single-entity, filter-required row scan above does not fit. Both modes
+    # share one task_id/registry-key namespace (`_scheduled_task_ids_seen`)
+    # and feed the same TASK_REGISTRY + vercel.json `crons` array below --
+    # the dispatcher route and registry are unaware which mode produced any
+    # given entry.
     scheduled_task_entities = []
     _scheduled_task_ids_seen = {}
     for def_key, def_val in defs.items():
@@ -1777,6 +1788,8 @@ def generate(schema_path: str, output_dir: str) -> None:
             'interval': x_scheduled.get('interval', ''),
             'expires_at_before_now': bool(xfilter.get('expires_at_before_now', False)),
             'status_in': xfilter.get('status_in') or [],
+            'module_path': def_key,
+            'run_name': to_camel_case(def_key) + 'Run',
         })
 
     for ent in scheduled_task_entities:
@@ -1791,14 +1804,49 @@ def generate(schema_path: str, output_dir: str) -> None:
         )
         print(f"  Scheduled task handler stub → lib/{ent['snake_name']}/service_scheduled_handler.ts")
 
+    # Bulk (entity-agnostic) scheduled tasks — cmd_790.
+    scheduled_task_bulk_entities = []
+    for x_scheduled_bulk in (schema.get('x-scheduled-tasks') or []):
+        task_id = x_scheduled_bulk['task_id']
+        if task_id in _scheduled_task_ids_seen:
+            raise ValueError(
+                f"x-scheduled-tasks: task_id {task_id!r} is also declared by "
+                f"{_scheduled_task_ids_seen[task_id]!r} — task_id must be unique "
+                f"across the schema (entity-level x-scheduled-task and top-level "
+                f"x-scheduled-tasks share one namespace)."
+            )
+        _scheduled_task_ids_seen[task_id] = 'x-scheduled-tasks (bulk, no entity)'
+        module_path = f'scheduled-tasks/{task_id}'
+        scheduled_task_bulk_entities.append({
+            'task_id': task_id,
+            'handler': x_scheduled_bulk['handler'],
+            'interval': x_scheduled_bulk.get('interval', ''),
+            'module_path': module_path,
+            'run_name': to_camel_case(task_id) + 'Run',
+        })
+
+    for ent in scheduled_task_bulk_entities:
+        _write(
+            out / 'lib' / ent['module_path'] / 'service_scheduled.ts',
+            _render(env, 'service_scheduled_bulk.ts.jinja2', ent),
+        )
+        print(f"  Scheduled task (bulk) → lib/{ent['module_path']}/service_scheduled.ts (task_id={ent['task_id']})")
+        _write_stub(
+            out / 'lib' / ent['module_path'] / 'service_scheduled_handler.ts',
+            _render(env, 'service_scheduled_bulk_handler_stub.ts.jinja2', ent),
+        )
+        print(f"  Scheduled task (bulk) handler stub → lib/{ent['module_path']}/service_scheduled_handler.ts")
+
+    all_scheduled_tasks = scheduled_task_entities + scheduled_task_bulk_entities
+
     # Always emitted (mirrors resolve_target.ts / on_approved_dispatch.ts above) —
     # a fixed, entity-count-independent pair. New tasks register into
     # TASK_REGISTRY; this route itself never changes.
     _write(
         out / 'lib' / 'scheduled-tasks' / 'registry.ts',
-        _render(env, 'scheduled_task_registry.ts.jinja2', {'scheduled_task_entities': scheduled_task_entities}),
+        _render(env, 'scheduled_task_registry.ts.jinja2', {'scheduled_task_entities': all_scheduled_tasks}),
     )
-    print(f'  Scheduled task registry → lib/scheduled-tasks/registry.ts ({len(scheduled_task_entities)} task(s))')
+    print(f'  Scheduled task registry → lib/scheduled-tasks/registry.ts ({len(all_scheduled_tasks)} task(s))')
     _write(
         out / 'app' / 'api' / 'scheduled-tasks' / '[task]' / 'route.ts',
         _render(env, 'scheduled_task_route.ts.jinja2', {}),
@@ -1810,7 +1858,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     if cloud_enabled and cloud_provider == 'gcp':
         print('  Skipped vercel.json crons (x-cloud:gcp — see docs/knowledge/scheduled-task-operations.md)')
     else:
-        _write_vercel_json_crons(out / 'vercel.json', scheduled_task_entities)
+        _write_vercel_json_crons(out / 'vercel.json', all_scheduled_tasks)
 
     # --- Search templates (lib/search/helpers.ts + app/api/search/route.ts) ---
     # DP-3: default_scope from x-generator.search.default_scope.

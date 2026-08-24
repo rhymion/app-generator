@@ -1,15 +1,18 @@
-// GENERATED — do not edit (regenerated from all x-scheduled-task
-// declarations on every `generate-code` run). One entry per entity that
-// declares x-scheduled-task; add a new scheduled task by declaring the key
-// on another entity — never by editing this file directly.
+// GENERATED — do not edit (regenerated from every x-scheduled-task /
+// x-scheduled-tasks declaration on every `generate-code` run). One entry
+// per declared task_id, from either mechanism: entity-level
+// `x-scheduled-task` (single-entity, filtered row scan) or top-level
+// `x-scheduled-tasks` (bulk, entity-agnostic, cmd_790). Add a new scheduled
+// task by declaring one of those keys — never by editing this file
+// directly.
 {% for e in scheduled_task_entities %}
-import { run as {{ e.snake_name | camel_case }}Run } from '@/lib/{{ e.snake_name }}/service_scheduled';
+import { run as {{ e.run_name }} } from '@/lib/{{ e.module_path }}/service_scheduled';
 {% endfor %}
 
 export type ScheduledTaskRunner = (systemActorId: string) => Promise<void>;
 
 export const TASK_REGISTRY: Record<string, ScheduledTaskRunner> = {
 {% for e in scheduled_task_entities %}
-  '{{ e.task_id }}': {{ e.snake_name | camel_case }}Run,
+  '{{ e.task_id }}': {{ e.run_name }},
 {% endfor %}
 };

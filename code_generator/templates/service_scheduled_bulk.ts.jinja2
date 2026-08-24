@@ -1,0 +1,26 @@
+// GENERATED — do not edit (regenerated from x-scheduled-tasks on every
+// `generate-code` run). Business logic lives in service_scheduled_handler.ts
+// (GENERATED ONCE — safe to edit); this file only dispatches — bulk mode
+// (top-level `x-scheduled-tasks`, cmd_790) calls the handler directly, once,
+// with no row selection. For a single-entity, filter-driven row scan, use
+// entity-level `x-scheduled-task` instead (service_scheduled.ts.jinja2).
+//
+// x-scheduled-tasks (bulk): {{ task_id }}
+// Vercel Cron schedule: {{ interval }}
+// vercel.json's `crons` entry for this task is written automatically by
+// generate.py from this declaration, same as entity-level tasks (cmd_781) —
+// do not hand-edit vercel.json or place a copy under prj/vercel.json (prj:sync
+// skips that file entirely so a stale consumer copy can never overwrite the
+// generator's own write).
+
+import { {{ handler }} } from './service_scheduled_handler';
+
+/**
+ * Runs the `{{ task_id }}` scheduled task (bulk mode): calls {{ handler }}()
+ * once, with no row selection and no per-row transaction — for operations
+ * that span many entities/tables, or an entire table with no filter, where
+ * a single-entity filtered row scan does not fit.
+ */
+export async function run(systemActorId: string): Promise<void> {
+  await {{ handler }}(systemActorId);
+}

@@ -1,5 +1,6 @@
 """Rendering tests for the x-scheduled-task generic mechanism templates
-(cmd_750 / subtask_741a).
+(cmd_750 / subtask_741a), plus its bulk (entity-agnostic) sibling
+x-scheduled-tasks (cmd_790).
 
 The default schema (json_schema.yaml) declares no x-scheduled-task entity --
 the first user (inventory_reservation) lives in a consumer schema, not this
@@ -12,6 +13,14 @@ AC1 (generic, not expires_at-specific): registry.ts must be able to hold
 more than one task_id -- test_registry_multiple_tasks below pins this.
 AC2 (no duplicated business logic): service_scheduled.ts only ever imports
 and calls the configured handler -- it never inlines business logic itself.
+
+cmd_790 adds a second mode for operations that don't fit a single-entity
+filtered row scan (e.g. a full demo-data reset spanning many tables): a
+top-level, entity-agnostic `x-scheduled-tasks` declaration whose
+service_scheduled.ts calls its handler directly, once, with no row
+selection. TestServiceScheduledBulkTemplate /
+TestServiceScheduledBulkHandlerStubTemplate below cover it; both modes
+share the one registry (TestRegistryTemplate.test_registry_mixes_row_scan_and_bulk_tasks).
 """
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
@@ -46,6 +55,8 @@ _EXPIRE_ENTITY = {
     'interval': '*/15 * * * *',
     'expires_at_before_now': True,
     'status_in': ['pending', 'active'],
+    'module_path': 'inventory_reservation',
+    'run_name': 'inventoryReservationRun',
 }
 
 _TIMEOUT_ENTITY = {
@@ -56,6 +67,16 @@ _TIMEOUT_ENTITY = {
     'interval': '0 * * * *',
     'expires_at_before_now': False,
     'status_in': ['pending'],
+    'module_path': 'approval_request',
+    'run_name': 'approvalRequestRun',
+}
+
+_BULK_DEMO_RESET = {
+    'task_id': 'demo_reset',
+    'handler': 'resetDemo',
+    'interval': '0 3 * * *',
+    'module_path': 'scheduled-tasks/demo_reset',
+    'run_name': 'demoResetRun',
 }
 
 
@@ -117,6 +138,53 @@ class TestServiceScheduledHandlerStubTemplate:
         assert 'afterExpire' not in rendered
 
 
+class TestServiceScheduledBulkTemplate:
+    """cmd_790: bulk mode (top-level x-scheduled-tasks) -- no row selection,
+    the handler is called directly, once, per run."""
+
+    def _render(self, ctx: dict) -> str:
+        return _ENV.get_template('service_scheduled_bulk.ts.jinja2').render(**ctx)
+
+    def test_calls_handler_directly_with_no_row_selection(self):
+        rendered = self._render(_BULK_DEMO_RESET)
+        assert 'await resetDemo(systemActorId)' in rendered
+        assert "from './service_scheduled_handler'" in rendered
+        assert 'findMany' not in rendered
+        assert '$transaction' not in rendered
+
+    def test_no_business_logic_inlined(self):
+        """AC2 (cmd_750/subtask_741a), same contract as the row-scan
+        variant: the dispatch file only imports and calls the handler."""
+        rendered = self._render(_BULK_DEMO_RESET)
+        assert 'export async function resetDemo' not in rendered
+        assert rendered.count('export async function') == 1  # only `run`
+
+    def test_interval_and_task_id_surfaced_in_header_comment(self):
+        rendered = self._render(_BULK_DEMO_RESET)
+        assert 'demo_reset' in rendered
+        assert '0 3 * * *' in rendered
+
+
+class TestServiceScheduledBulkHandlerStubTemplate:
+    def _render(self, ctx: dict) -> str:
+        return _ENV.get_template('service_scheduled_bulk_handler_stub.ts.jinja2').render(**ctx)
+
+    def test_exports_configured_handler_name_with_single_arg(self):
+        rendered = self._render(_BULK_DEMO_RESET)
+        assert 'export async function resetDemo(systemActorId: string): Promise<void> {' in rendered
+
+    def test_generated_once_header_present(self):
+        rendered = self._render(_BULK_DEMO_RESET)
+        assert rendered.startswith('// GENERATED ONCE')
+
+    def test_no_tx_or_entity_id_params(self):
+        """Bulk mode has no row/entity binding -- unlike the row-scan
+        handler stub, there is no `tx`/`entityId` parameter to receive."""
+        rendered = self._render(_BULK_DEMO_RESET)
+        assert 'entityId' not in rendered
+        assert 'tx: Tx' not in rendered
+
+
 class TestRegistryTemplate:
     def _render(self, entities: list) -> str:
         return _ENV.get_template('scheduled_task_registry.ts.jinja2').render(
@@ -140,6 +208,17 @@ class TestRegistryTemplate:
         rendered = self._render([_EXPIRE_ENTITY])
         assert "'inventory_reservation_expire': inventoryReservationRun" in rendered
         assert 'approval_request' not in rendered
+
+    def test_registry_mixes_row_scan_and_bulk_tasks(self):
+        """cmd_790: both mechanisms feed the same registry, keyed uniformly
+        by task_id -- the registry itself is unaware which mode produced
+        any given entry."""
+        rendered = self._render([_EXPIRE_ENTITY, _BULK_DEMO_RESET])
+        assert "'inventory_reservation_expire': inventoryReservationRun" in rendered
+        assert "'demo_reset': demoResetRun" in rendered
+        assert "from '@/lib/inventory_reservation/service_scheduled'" in rendered
+        assert "from '@/lib/scheduled-tasks/demo_reset/service_scheduled'" in rendered
+        assert rendered.count('import { run as') == 2
 
 
 class TestRouteTemplate:
