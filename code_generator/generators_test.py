@@ -127,6 +127,7 @@ from helpers.naming import (
 from helpers.schema_helpers import (
     filter_fields,
     get_parent_relationships,
+    get_direct_attachment_fk_props,
     is_optional_fk_to_parent,
     get_flatten_rels,
     get_splittable_bridge_field,
@@ -2129,6 +2130,18 @@ def helper_context(
     internal_fk_prop_names = {d['prop_name'] for d in internal_fk_deps}
     fields = [f for f in fields if f['prop_name'] not in internal_fk_prop_names]
 
+    # Exclude direct-attachment FK fields (x-relationship type:direct, e.g.
+    # product.warranty_card_id) from the generated CRUD helper the same way:
+    # they render as a file-upload widget (SingleAttachmentUpload), not a
+    # plain scalar column, so treating them as a normal optional field made
+    # populate{{Pascal}}FullData() write a literal test string into an FK
+    # column ("Test Warranty Card Id 1"), violating the FK constraint since
+    # no such attachment row exists. Dedicated file-upload coverage lives in
+    # the hand-written direct_attachment_and_uri_kind_file.cy.ts spec, which
+    # does not go through this generated helper.
+    direct_attachment_prop_names = {d['prop_name'] for d in get_direct_attachment_fk_props(parent_def)}
+    fields = [f for f in fields if f['prop_name'] not in direct_attachment_prop_names]
+
     # cmd_421 Domain 4 (M1): mention field name resolution. Only
     # the commentable-bridge shape is supported here (comment_children direct-FK
     # shape has no populate helper of its own yet — see build_context.py's
@@ -3030,6 +3043,14 @@ def spec_context(
     # Exclude outbound one-to-one FK fields (internal bridge records, not user-facing).
     _internal_fk_prop_names = {d['prop_name'] for d in get_internal_one_to_one_fks(model_name, schema)}
     fields = [f for f in fields if f['prop_name'] not in _internal_fk_prop_names]
+    # Exclude direct-attachment FK fields (x-relationship type:direct) the same
+    # way: they render as a file-upload widget, so cy.fillField()/getFormLabel()
+    # can never find a matching <label> for them ("Expected to find element:
+    # `filter`, but never found it" — the same failure mode already noted above
+    # for x-server-value fields). Dedicated coverage lives in the hand-written
+    # direct_attachment_and_uri_kind_file.cy.ts spec.
+    _direct_attachment_prop_names = {d['prop_name'] for d in get_direct_attachment_fk_props(parent_def)}
+    fields = [f for f in fields if f['prop_name'] not in _direct_attachment_prop_names]
     # Mark read-only fields: kept in `fields` for seed/prisma data, skipped by UI
     # fill/clear/assert commands (the form renders them non-editable).
     _readonly_props = _readonly_field_names(parent_def)
