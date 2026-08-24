@@ -859,6 +859,47 @@ fixture test that exercises this branch
 child-cell rendering of a direct-attachment field is an open design question, not yet landed --
 this page does not cover it.
 
+### Named-constant parent (`constantParent`) — `x-internal` enum entities only
+
+An `x-internal` entity (section 9) that also has an `enum` field (e.g. `reaction.type`) gets an
+exported TypeScript constant -- `{PARENT}_{ENTITY}_TYPES` (`extract_named_constants`,
+`generate_types.py`). When such an entity has one or more non-`user` many-to-one FKs, exactly
+one of them must be marked `constantParent: true` inside its `x-relationship` -- that field's
+target becomes `PARENT`:
+
+```yaml
+reaction:
+  x-internal:
+    page: false
+    embed: false
+    api: custom
+  fields:
+    type:
+      enum: [like, love, laugh, surprised, sad]
+    user_id:
+      x-relationship: {}
+    comment_id:
+      x-relationship:
+        labelField: id
+        constantParent: true   # -> COMMENT_REACTION_TYPES
+```
+
+`constantParent` is never inferred from `fields:`/`properties:` declaration order: a purely
+order-derived pick (the historical behavior -- "the first non-`user` many-to-one FK
+encountered") let an unrelated schema edit rename an already-shipped constant out from under its
+consumers without warning -- adding a second FK field (e.g. `organization_id`) anywhere before
+`comment_id` silently turned `COMMENT_REACTION_TYPES` into `ORGANIZATION_REACTION_TYPES`,
+breaking every hand-written consumer of the old name (the comment-reactions API route, the
+toggle server action). `build_user_schema.py`'s Category-C pass-through carries `constantParent`
+from `json_schema.yaml` straight into the derived schema alongside `type`/`target`/`labelField`,
+same as any other `x-relationship` key.
+
+This is a fail-closed check, not a fallback: `generate.py` raises `SchemaValidationError` at
+generation time if an `x-internal` enum entity has at least one non-`user` many-to-one FK and
+none (or more than one) of them declares `constantParent: true`. An entity with *no* non-`user`
+many-to-one FK at all needs no declaration -- there is no candidate to disambiguate, so the
+constant is named `{ENTITY}_TYPES` (e.g. an entity with only a `user_id` FK, or none).
+
 ---
 
 ## 6. Many-to-Many Relationships (`x-relationships`)

@@ -5,7 +5,9 @@ Covers:
   - extract_entities: x-internal entities are excluded (2 tests)
   - validate_schema:  valid reaction accepted, malformed x-internal/enum rejected (4 tests)
   - build_context:    comment includes contain reactions (3 tests)
-  - extract_named_constants: correct value/label mapping for x-internal integer enums (2 tests)
+  - extract_named_constants: correct value/label mapping for x-internal integer enums,
+    explicit constantParent declaration order-invariance, fail-closed on unmarked/
+    ambiguous candidates (cmd_794) (5 tests)
   - reaction_constants template: rendered TS contains export const (2 tests)  [B1]
   - build_context named_constants: key present in context (2 tests)            [B1]
   - build_context reaction_batch_query: key present for comment entities (3 tests) [B2]
@@ -25,23 +27,31 @@ def _cuid_field() -> dict:
     return {"type": "string", "pattern": "^c[a-z0-9]{24,}$"}
 
 
-def _fk_field(target: str, label: str = "name") -> dict:
+def _fk_field(target: str, label: str = "name", constant_parent: bool = False) -> dict:
+    rel = {"type": "many-to-one", "target": target, "labelField": label}
+    if constant_parent:
+        rel["constantParent"] = True
     return {
         "type": "string",
         "pattern": "^c[a-z0-9]{24,}$",
-        "x-relationship": {"type": "many-to-one", "target": target, "labelField": label},
+        "x-relationship": rel,
     }
 
 
 def _reaction_defn() -> dict:
-    """Minimal valid reaction definition with x-internal."""
+    """Minimal valid reaction definition with x-internal.
+
+    `comment_id` carries `constantParent: True` (cmd_794) — the named-constant
+    parent prefix ('comment', giving `COMMENT_REACTION_TYPES`) is explicit
+    here, not inferred from `properties` declaration order.
+    """
     return {
         "type": "object",
         "required": ["id", "comment_id", "user_id", "type"],
         "x-internal": {"page": False, "embed": False, "api": "custom"},
         "properties": {
             "id": _cuid_field(),
-            "comment_id": _fk_field("comment", label="id"),
+            "comment_id": _fk_field("comment", label="id", constant_parent=True),
             "user_id": _fk_field("user", label="name"),
             "type": {
                 "type": "integer",
@@ -273,6 +283,71 @@ class TestExtractNamedConstants:
             {"value": 4, "label": "Confused"},
         ]
         assert const["items"] == expected
+
+    def test_reaction_constants_const_name_stable_across_declaration_order(self):
+        """cmd_794 deviation injection: adding a second non-user many-to-one FK
+        (`organization_id`) declared *before* `comment_id` must NOT rename the
+        constant — `comment_id` is explicitly marked `constantParent: True`, so
+        the pick no longer depends on `properties` declaration order. Before
+        cmd_794, this exact injection renamed COMMENT_REACTION_TYPES to
+        ORGANIZATION_REACTION_TYPES (see `docstring of generate_types.
+        _resolve_constant_parent`)."""
+        reaction = _reaction_defn()
+        # Rebuild `properties` with organization_id inserted first among the FK
+        # fields (dict insertion order = declaration order for this test).
+        reaction["properties"] = {
+            "id": reaction["properties"]["id"],
+            "organization_id": _fk_field("organization", label="name"),
+            "comment_id": reaction["properties"]["comment_id"],
+            "user_id": reaction["properties"]["user_id"],
+            "type": reaction["properties"]["type"],
+        }
+        schema = {
+            "definitions": {
+                "user": _user_defn(),
+                "comment": _comment_defn(),
+                "organization": _user_defn(),  # any def with an 'id' is enough here
+                "reaction": reaction,
+            }
+        }
+        constants = extract_named_constants(schema)
+        names = [c["const_name"] for c in constants]
+        assert "COMMENT_REACTION_TYPES" in names
+        assert "ORGANIZATION_REACTION_TYPES" not in names
+
+    def test_unmarked_candidate_fk_fails_closed(self):
+        """An x-internal enum entity with a candidate non-user many-to-one FK
+        but no `constantParent: True` declaration must raise, not silently fall
+        back to declaration order (cmd_794 AC4, option 乙)."""
+        reaction = _reaction_defn()
+        reaction["properties"]["comment_id"] = _fk_field("comment", label="id")  # unmark it
+        schema = {
+            "definitions": {
+                "user": _user_defn(),
+                "comment": _comment_defn(),
+                "reaction": reaction,
+            }
+        }
+        with pytest.raises(SchemaValidationError, match="constantParent"):
+            extract_named_constants(schema)
+
+    def test_multiple_marked_candidates_fails_closed(self):
+        """Two FK fields both marked `constantParent: True` on the same entity
+        is an ambiguous declaration and must raise."""
+        reaction = _reaction_defn()
+        reaction["properties"]["organization_id"] = _fk_field(
+            "organization", label="name", constant_parent=True
+        )
+        schema = {
+            "definitions": {
+                "user": _user_defn(),
+                "comment": _comment_defn(),
+                "organization": _user_defn(),
+                "reaction": reaction,
+            }
+        }
+        with pytest.raises(SchemaValidationError, match="constantParent"):
+            extract_named_constants(schema)
 
 
 # ---------------------------------------------------------------------------
