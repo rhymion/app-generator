@@ -5,6 +5,58 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **`user.image` moved from a plain URL string to a direct-attachment FK
+  (`x-relationship: {target: attachment, type: direct}`)** — the profile
+  picture is now an uploaded file tracked as an `attachment` row (giving it
+  the same storage-cleanup inventory every other direct-attachment field
+  gets), not an arbitrary URL string. Consequences:
+  - **OAuth sign-in no longer copies the provider's profile-image URL** into
+    `user.image` (`lib/auth/create-user.ts`) — a user's avatar now comes
+    only from their own upload. The `Session.user` type augmentation
+    (`auth.ts`) no longer carries an `image` field (it would always resolve
+    to `null` under the new shape; nothing in this app read it from the
+    session).
+  - `components/_standard/CommentListWrapper.tsx`'s avatar now resolves the
+    comment creator's uploaded photo through the direct-FK relation
+    (falls back to initials, as before, when absent).
+  - Prisma: `user.image String?` → `user.image_id String? @unique` +
+    `user.image attachment? @relation(...)`. `attachment` gains a
+    back-reference field per direct-attachment declaration
+    (`user_image user? @relation("UserImage")`); a new
+    `validate_direct_attachment_reverse_fields` generate-time check
+    fails closed if a `type: direct` declaration is missing its
+    back-reference. See docs/knowledge/schema-yaml-configuration.md
+    "Direct Attachment FK".
+  - No data migration: pre-customer, no production users to preserve.
+  - `asset.manual_url` (a consumer-schema field with the same
+    misclassification) is out of scope here — tracked as a separate
+    follow-up.
+
+### Fixed
+- **`get_field_metas()` (test generator) mis-categorized a direct-attachment
+  FK field as a plain text column** — the generic optional-field
+  fill/clear/full-data-populate machinery (`test_spec.cy.ts.jinja2`,
+  `cypress/support/{entity}/helper.ts`) tried to type a fake string value
+  into it, which either found no matching form label (`SingleAttachmentUpload`
+  isn't a labeled text input) or violated the FK constraint outright
+  (`populate{Entity}FullData`). Direct-attachment fields are now excluded
+  from this generic machinery, the same way an internal bridge FK already
+  is. Uncovered until now because no entity in this repo's own schema
+  combined `x-relationship: {type: direct}` with `x-generate.test: true`.
+- **i18n key collection for a child table's column headers didn't recognize
+  `type: direct`** (`generators_i18n.py`) — a direct-attachment field
+  reachable as a many-to-many child's column (e.g. `user` as `role`/
+  `organization`'s `users` child) got an unstripped `{field}Id` key instead
+  of the same stripped-suffix key the field's own entity-level label uses,
+  leaving a stray, unreferenced key in `messages/*.json`.
+- **`build_anonymize_user_context()`'s PII-scrub field ordering anchor was a
+  literal field name** (`'image'`) that silently stopped matching once that
+  field was renamed to `image_id` — the Prisma-only fields it inserts
+  (`emailVerified`, `mfa_secret`) would have fallen through to the
+  end-of-object fallback instead of their documented position. Anchor
+  updated to `'image_id'`.
+
 ### Security
 - **Any authenticated user could manually trigger a scheduled task, not just
   an authorized operator**: the generated `/api/scheduled-tasks/[task]`

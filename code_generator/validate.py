@@ -12,10 +12,11 @@ import re
 from pathlib import Path
 
 from helpers.label_field import resolve_label_paths
+from helpers.naming import to_pascal_case
 from helpers.schema_helpers import (
     get_parent_relationships, get_internal_bridge_fk_prop_names,
     get_entity_properties, get_entity_required, get_self_only_flags,
-    schema_has_direct_attachment_fk,
+    get_direct_attachment_fk_props, schema_has_direct_attachment_fk,
 )
 from schema_deriver import parse_prisma_schema
 
@@ -268,6 +269,87 @@ def validate_direct_attachment_prerequisite(schema: dict, prisma_schema_path: st
             "  attachable_id String?\n"
             "  attachable    attachable? @relation(fields: [attachable_id], "
             "references: [id], onDelete: SetNull)\n\n"
+            "See docs/knowledge/schema-yaml-configuration.md \"Direct "
+            "Attachment FK\"."
+        )
+
+
+def validate_direct_attachment_reverse_fields(schema: dict, prisma_schema_path: str | Path) -> None:
+    """Verify that every `x-relationship: {target: attachment, type: direct}`
+    declaration has a matching hand-written back-reference field on
+    prisma/schema.prisma's `attachment` model (cmd_793③).
+
+    A direct-attachment FK is two-sided in Prisma, like any relation: the
+    owning entity gets its own `{field}_id` scalar + relation field (already
+    covered by ordinary Prisma-alignment expectations for any FK), but
+    `attachment` — a single shared internal model every direct-attachment
+    declaration across the whole schema points at — also needs a *named*
+    back-reference field, one per declaring entity+field, or `prisma
+    generate`/`prisma validate` reject the schema outright (a relation must
+    be declared on both sides). Nothing before this check ever verified that
+    second half exists; `validate_direct_attachment_prerequisite` above only
+    checks `attachable_id` nullability, a different (one-time, not
+    per-declaration) prerequisite.
+
+    This intentionally does NOT inject the field, following the pattern
+    `docs/knowledge/schema-yaml-configuration.md` "Direct Attachment FK"
+    already documents for the rest of this feature's Prisma-alignment
+    prerequisites: `generate.py` doesn't write to `prisma/schema.prisma`
+    except bridge injection (`inject_bridge_into_schema`) — a materially
+    different mechanism because a bridge's own model is entirely
+    generator-owned, whereas `attachment` is a hand-maintained shared model
+    a consumer may have customized in ways an automatic append could
+    conflict with. Fail-closed with an actionable message instead, matching
+    every other direct-attachment Prisma-alignment check on this page.
+
+    Naming convention (see docs/knowledge/schema-yaml-configuration.md):
+    field `{entity}_{relation_name}`, type `{entity}?`, `@relation("...")`
+    present (its exact contents are Prisma's own two-sided-match problem,
+    not re-validated here).
+    """
+    declarations = []
+    for name, defn in (schema.get('definitions') or {}).items():
+        if not name.startswith('__') or not isinstance(defn, dict):
+            continue
+        entity = name.removeprefix('__')
+        for dar in get_direct_attachment_fk_props(defn):
+            declarations.append((entity, dar['relation_name']))
+
+    if not declarations:
+        return
+
+    path = Path(prisma_schema_path)
+    if not path.exists():
+        raise SchemaValidationError(
+            f"Prisma schema not found at {path} — required for direct-attachment "
+            f"FK validation."
+        )
+    model_bodies = dict(_iter_model_blocks(path.read_text()))
+    body = model_bodies.get('attachment') or ''
+
+    missing = []
+    for entity, relation_name in declarations:
+        field_name = f"{entity}_{relation_name}"
+        pattern = re.compile(
+            rf'^\s*{re.escape(field_name)}\s+{re.escape(entity)}\?', re.MULTILINE
+        )
+        if not pattern.search(body):
+            missing.append((entity, relation_name, field_name))
+
+    if missing:
+        examples = "\n\n".join(
+            f"  # {entity}.{relation_name}\n"
+            f"  {field_name:<22} {entity}? @relation(\"{to_pascal_case(entity)}{to_pascal_case(relation_name)}\")"
+            for entity, relation_name, field_name in missing
+        )
+        raise SchemaValidationError(
+            "Direct-attachment FK reverse-field validation failed — the "
+            "following `x-relationship: {target: attachment, type: direct}` "
+            "declarations have no matching back-reference field on "
+            "prisma/schema.prisma's `attachment` model:\n\n"
+            + ", ".join(f"{e}.{r}" for e, r, _ in missing) + "\n\n"
+            "Add to the `attachment` model (one line per declaration):\n\n"
+            + examples + "\n\n"
             "See docs/knowledge/schema-yaml-configuration.md \"Direct "
             "Attachment FK\"."
         )

@@ -24,7 +24,6 @@ function makePrisma(): CreateUserPrismaClient & {
         email: data.email,
         name: data.name,
         emailVerified: data.emailVerified,
-        image: data.image,
         tenant_id: data.tenant_id,
       })),
     },
@@ -43,7 +42,6 @@ describe("createTenantBoundUser (1.2 adapter shim)", () => {
       email: "new@example.com",
       name: "New User",
       emailVerified: null,
-      image: null,
     } as never);
 
     expect(prisma.user.create).toHaveBeenCalledTimes(1);
@@ -72,7 +70,6 @@ describe("createTenantBoundUser (1.2 adapter shim)", () => {
       email: "shape@example.com",
       name: "Shape",
       emailVerified: null,
-      image: null,
     } as never);
 
     expect(result).toEqual({
@@ -80,7 +77,6 @@ describe("createTenantBoundUser (1.2 adapter shim)", () => {
       email: "shape@example.com",
       name: "Shape",
       emailVerified: null,
-      image: null,
     });
     expect(result).not.toHaveProperty("tenant_id");
   });

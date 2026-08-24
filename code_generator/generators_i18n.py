@@ -215,7 +215,17 @@ def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
                     continue
                 cp_rel = cp_prop.get('x-relationship', {})
                 cp_rel_type = cp_rel.get('type')
-                if cp_rel_type in ('many-to-one', 'one-to-one'):
+                if cp_rel_type in ('many-to-one', 'one-to-one', 'direct'):
+                    # 'direct' (cmd_793): a direct-attachment FK carries the
+                    # same stripped-suffix key convention as an m2o/o2o FK
+                    # here (see the entity-level loop above for why) -- a
+                    # child table's column header must match whatever label
+                    # key the field actually renders under elsewhere, and
+                    # this loop otherwise falls through to the unstripped
+                    # 'imageId' key below, which nothing else in the
+                    # generated output ever looks up (MISSING_MESSAGE risk
+                    # if a future column ever renders it, and stray noise in
+                    # messages/*.json until then).
                     base = cp_name[:-3] if cp_name.endswith('_id') else cp_name
                     keys.setdefault(to_camel_case(base), to_title_case(base))
                 elif cp_rel_type == 'one-to-one_bridge':

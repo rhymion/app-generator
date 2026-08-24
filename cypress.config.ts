@@ -144,7 +144,7 @@ export default defineConfig({
           });
           return JSON.parse(JSON.stringify({ commentId: comment.id, userId: testUser.id }));
         },
-        async 'db:createUserWithName'(params: { name: string; image?: string | null }) {
+        async 'db:createUserWithName'(params: { name: string }) {
           // Creates a user row with a caller-chosen (possibly duplicate) name,
           // owned by the session test user. Used by CSV import tests to set up
           // natural-key match scenarios (cmd_328).
@@ -161,8 +161,31 @@ export default defineConfig({
               updater_id: testUser.id,
               email: `${newUserId}@example.com`,
               name: params.name,
-              image: params.image ?? null,
               password: 'not_needed',
+            },
+          });
+          return JSON.parse(JSON.stringify(record));
+        },
+        async 'db:createOrganizationWithName'(params: { name: string; description?: string | null }) {
+          // Creates an organization row with a caller-chosen name/description,
+          // owned by the session test user. `organization` is the CSV
+          // import/export test vehicle for a plain, freely-settable string
+          // column (cmd_793: `user.image` moved to a direct-attachment FK and
+          // is no longer such a column — see cypress/e2e/api/user_import.cy.ts
+          // and cypress/e2e/api/round_trip.cy.ts).
+          const { prisma } = require('./cypress/support/db-helpers');
+          const { TEST_CREDENTIALS } = require('./cypress/support/test-credentials');
+          const { createId } = require('@paralleldrive/cuid2');
+          const testUser = await prisma.user.findUnique({ where: { email: TEST_CREDENTIALS.email } });
+          if (!testUser) throw new Error('Test user not found. Run db:seed first.');
+          const newOrgId = createId();
+          const record = await prisma.organization.create({
+            data: {
+              id: newOrgId,
+              creator_id: testUser.id,
+              updater_id: testUser.id,
+              name: params.name,
+              description: params.description ?? null,
             },
           });
           return JSON.parse(JSON.stringify(record));

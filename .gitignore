@@ -142,6 +142,13 @@ code_generator/.generated/
 # code_generator/tests/fixtures/uri_kind_gate/ on every run.
 .generated-uri-kind-gate/
 
+# direct-attachment-gate fixture check (cmd_788) scratch output —
+# scripts/check_direct_attachment_gate_fixture.sh regenerates this from
+# code_generator/tests/fixtures/direct_attachment_gate/ on every run.
+# (pre-existing gap alongside its siblings above, noticed while running the
+# update-generator gate for the user.image direct-FK migration.)
+.generated-direct-attachment-gate/
+
 # sample data
 custom/
 memory/

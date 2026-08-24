@@ -29,7 +29,11 @@ export type CommentItem = {
   creator?: {
     id: string;
     name: string;
-    image?: string | null;
+    // The creator's avatar now comes from a direct-attachment FK
+    // (`user.image_id` -> attachment) instead of a plain URL column —
+    // only `path` is needed here, so callers select just that nested
+    // field rather than the full attachment row.
+    image?: { path: string } | null;
   } | null;
   reactionCounts?: Array<{ type: string | number; count: number }>;
   myReactionTypes?: (string | number)[];
@@ -125,7 +129,7 @@ function CommentItemComponent({ comment, canDelete, onUpdate, onDelete, reaction
   };
 
   const creatorName = comment.creator?.name ?? 'Unknown';
-  const avatarSrc = comment.creator?.image ?? undefined;
+  const avatarSrc = comment.creator?.image?.path ?? undefined;
   const wasEdited =
     comment.created_at &&
     comment.updated_at &&

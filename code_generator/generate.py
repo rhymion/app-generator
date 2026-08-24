@@ -64,6 +64,7 @@ from validate import (
     validate_schema, validate_prisma_indexes,
     validate_self_only_creator_id_columns, validate_defaults_cross_schema,
     validate_direct_attachment_prerequisite,
+    validate_direct_attachment_reverse_fields,
     SchemaValidationError,
 )
 from generators_doc import build_doc_entity_context, build_doc_index_context, convert_md_to_mdx
@@ -730,6 +731,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         validate_self_only_creator_id_columns(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_defaults_cross_schema(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_direct_attachment_prerequisite(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
+        validate_direct_attachment_reverse_fields(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
     except SchemaValidationError as exc:
         print(f'\n{exc}', file=sys.stderr)
         sys.exit(1)

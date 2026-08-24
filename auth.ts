@@ -502,11 +502,19 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth(aut
 // augmentation is only needed for the credentials (JWT-strategy) branch.
 declare module "next-auth" {
   interface Session {
+    // `image` is intentionally absent here. `user.image` is now a
+    // direct-attachment FK (`image_id` -> attachment); createUser no
+    // longer copies the OAuth provider's avatar URL into it (see
+    // lib/auth/create-user.ts), so a session-level `image` string would
+    // always be null. Nothing in this app reads `session.user.image` —
+    // the one avatar consumer, CommentListWrapper, reads the attachment
+    // relation off a Prisma query result, not the session. A caller that
+    // needs the signed-in user's own avatar reads the direct-FK relation
+    // off the `user`/`setting` entity data, like any other field.
     user: {
       id: string;
       name?: string | null;
       email?: string | null;
-      image?: string | null;
     };
     /** True when the first factor succeeded (OAuth or credentials) but a
      *  required MFA code has not yet been verified this session. See the

@@ -39,7 +39,7 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
           email: placeholderEmail,
           password: null,
           api_key: null,
-          image: null,
+          image_id: null,
           emailVerified: null,
           mfa_secret: null,
           mfa_enabled: false,

@@ -24,11 +24,34 @@ model user {
   id        String    @id @default(cuid())
   name      String
   email     String    @unique
-  image     String?
+  image_id  String?     @unique
+  image     attachment? @relation("UserImage", fields: [image_id], references: [id], onDelete: SetNull)
   comments  comment[] @relation("CommentCreator")
   reactions reaction[] @relation("ReactionUser")
   created_items mention_gate_item[] @relation("MentionGateItemCreator")
   updated_items mention_gate_item[] @relation("MentionGateItemUpdater")
+}
+
+// Minimal stand-ins for this repo's own `attachable`/`attachment` models --
+// only what the generated `comments: { include: { creator: { select: {
+// ..., image: { select: { path: true } } } } } } }` query (build_context.py)
+// needs to type-check against `user.image` being a direct-attachment FK
+// relation, same shape change as the real schema (user.image ->
+// user.image_id), plus the nullable `attachable_id` that
+// validate_direct_attachment_prerequisite requires once any entity declares
+// `type: direct`.
+model attachable {
+  id          String       @id @default(cuid())
+  attachments attachment[]
+}
+
+model attachment {
+  id            String      @id @default(cuid())
+  path          String
+  attachable_id String?
+  attachable    attachable? @relation(fields: [attachable_id], references: [id], onDelete: SetNull)
+  user_image    user?       @relation("UserImage")
+  @@index([attachable_id])
 }
 
 model commentable {

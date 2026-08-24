@@ -1066,7 +1066,28 @@ def get_field_metas(
         pn for pn in filtered
         if pn.endswith('able_id') and pn not in _rel_prop_names
     }
-    exclude_keys = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | _bridge_fk_keys
+    # Exclude direct-attachment FKs (x-relationship.type: direct, cmd_788):
+    # rendered as SingleAttachmentUpload, not a plain labeled text/select
+    # input, so the generic label-driven fill/clear commands this function
+    # feeds (getFormLabel + cy.fillField) can never find a matching element
+    # for one, and the generic string/number placeholder value generators
+    # this same meta would otherwise drive (populate{Parent}FullData etc.)
+    # produce a fake string that violates the column's real FK constraint.
+    # Deliberately separate from get_parent_relationships()-backed
+    # `relationships` above for the same reason get_direct_attachment_fk_props()
+    # itself stays out of that list -- see its docstring. Uncovered by any
+    # test today (cmd_793): the field simply never appears in fill/clear/
+    # full-data commands, the same way an m2m self-ref child or an internal
+    # bridge FK is already handled by this function.
+    _direct_attachment_fk_keys = {
+        pn for pn, prop in filtered.items()
+        if isinstance(prop, dict)
+        and (prop.get('x-relationship') or {}).get('type') == 'direct'
+    }
+    exclude_keys = (
+        {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'}
+        | _bridge_fk_keys | _direct_attachment_fk_keys
+    )
     metas = []
 
     for prop_name, prop in filtered.items():

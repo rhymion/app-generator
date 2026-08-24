@@ -1035,7 +1035,7 @@ def build_anonymize_user_context(schema: dict) -> dict:
     the pii_data_block string (pre-formatted TypeScript lines for the data: {} block).
 
     Fields not in json_schema but present in schema.prisma (emailVerified, mfa_secret)
-    are hardcoded after 'image' to match the canonical scrub order.
+    are hardcoded after 'image_id' to match the canonical scrub order.
 
     Returns:
         has_pii_user: bool — True when the user entity has at least one x-pii field.
@@ -1080,14 +1080,18 @@ def build_anonymize_user_context(schema: dict) -> dict:
         return {'has_pii_user': False, 'pii_data_block': '', 'pii_fields': []}
 
     # Build the data block lines (10-space indent matches `data: {` nesting in template).
-    # Prisma-only fields (emailVerified, mfa_secret) are inserted after 'image' to
-    # match the canonical hand-written order.
+    # Prisma-only fields (emailVerified, mfa_secret) are inserted after
+    # 'image_id' to match the canonical hand-written order (cmd_793: this
+    # anchor used to be 'image', back when it was a plain string column --
+    # renamed alongside the field itself when it became a direct-attachment
+    # FK, or this insertion point silently falls through to the
+    # end-of-loop fallback below instead).
     INDENT = '          '
     lines = []
     prisma_only_inserted = False
     for f in pii_fields:
         lines.append(f"{INDENT}{f['name']}: {f['scrub_value']},")
-        if f['name'] == 'image' and not prisma_only_inserted:
+        if f['name'] == 'image_id' and not prisma_only_inserted:
             lines.append(f"{INDENT}emailVerified: null,")
             lines.append(f"{INDENT}mfa_secret: null,")
             prisma_only_inserted = True
@@ -2737,7 +2741,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         cdef     = _raw_def(cn, schema)
         if out_type == 'comments':
             child_include_entries.append(
-                f"{prop}: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }},"
+                f"{prop}: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: {{ select: {{ path: true }} }} }} }},"
                 f" reactions: {{ select: {{ type: true, user_id: true }} }} }},"
                 f" orderBy: {{ created_at: 'asc' }} }}"
             )
@@ -2842,7 +2846,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                     if c.get('child_name') == 'comment':
                         _rxn = ", reactions: true" if has_reactions else ""
                         nested_parts.append(
-                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }}{_rxn} }},"
+                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: {{ select: {{ path: true }} }} }} }}{_rxn} }},"
                             f" orderBy: {{ created_at: 'asc' }} }}"
                         )
                     else:
@@ -2852,7 +2856,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                     if c.get('child_name') == 'comment':
                         _rxn = ", reactions: true" if has_reactions else ""
                         nested_parts.append(
-                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }}{_rxn} }},"
+                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: {{ select: {{ path: true }} }} }} }}{_rxn} }},"
                             f" orderBy: {{ created_at: 'asc' }} }}"
                         )
                     else:

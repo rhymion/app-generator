@@ -131,7 +131,7 @@ entity:
 
 ### user entity: hidden Prisma-required fields
 
-`user_detail.x-generate.fields = [name, image, roles]` omits `email`, but Prisma requires it
+`user_detail.x-generate.fields = [name, image_id, roles]` omits `email`, but Prisma requires it
 (NOT NULL + UNIQUE). The generator's `helper_context()` now computes `extra_prisma_fields` —
 required schema fields not in the UI fields list — and includes them in `prisma.create()` data
 for populate helpers. For `user`, this adds:

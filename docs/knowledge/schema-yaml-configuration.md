@@ -834,15 +834,34 @@ model some_entity {
 }
 ```
 
+Every direct-attachment FK is a two-sided Prisma relation, like any other: `attachment` -- a
+single shared internal model every `type: direct` declaration across the whole schema points
+at -- also needs a matching back-reference field, one per declaring entity+field, named
+`{entity}_{relation_name}` with type `{entity}?` (always optional on this side, even when the
+forward FK is required -- an attachment row can exist with nothing pointing at it yet):
+
+```prisma
+model attachment {
+  # ... existing fields ...
+  some_entity_profile_picture some_entity? @relation("SomeEntityProfilePicture")
+  some_entity_contract_file   some_entity? @relation("SomeEntityContractFile")
+}
+```
+
 `attachment.attachable_id` is nullable (`onDelete: SetNull`) -- a direct-attachment FK creates
 an attachment row with no bridge owner at all, so `attachable_id` stays permanently null for
 that row's whole life; that is the normal, permanent state, not a transient one pending cleanup.
-This is a manual `prisma/schema.prisma` edit you must apply *before* declaring the first
-`type: direct` field, the same as every other Prisma-alignment note on this page --
-`generate.py` does not write it for you. `generate.py` does check for it: it fails the build with
-an explicit message if any entity declares `type: direct` while `attachment.attachable_id` is
-still non-nullable (`validate_direct_attachment_prerequisite`), and it never emits
-`lib/attachment/direct_actions.ts` (or requires this prerequisite at all) unless at least one
+Both this and the back-reference field above are manual `prisma/schema.prisma` edits you must
+apply *before* declaring the first `type: direct` field, the same as every other
+Prisma-alignment note on this page -- `generate.py` does not write either for you (unlike a
+bridge model's own FKs, which `inject_bridge_into_schema` does inject: a bridge's model is
+entirely generator-owned, `attachment` is a hand-maintained shared model a consumer may have
+customized, so an automatic append here could conflict with that). `generate.py` does check for
+both: it fails the build with an explicit message if any entity declares `type: direct` while
+`attachment.attachable_id` is still non-nullable (`validate_direct_attachment_prerequisite`) or
+while any declaration's back-reference field is missing
+(`validate_direct_attachment_reverse_fields`), and it never emits
+`lib/attachment/direct_actions.ts` (or requires either prerequisite at all) unless at least one
 entity actually uses the feature -- a consumer that hasn't adopted `type: direct` anywhere is
 never asked to touch the `attachment` model (subtask_788b; the file used to be emitted
 unconditionally and broke every consumer's `tsc` build regardless of whether they used the
