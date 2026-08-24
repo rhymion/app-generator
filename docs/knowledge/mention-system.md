@@ -387,6 +387,18 @@ section itself may be stale/simplified -- worth a follow-up to verify against
 a real bridge consumer if one is ever built for real product use; not fixed
 here (out of the fixture-gate work's scope, which is the gate, not the doc).
 
+A sibling fixture, `code_generator/tests/fixtures/mention_gate_plain_image/`
+(`npm run test:mention-gate-plain-image`), covers the same `has_commentable`
+branch with one field changed: its `user.image` stays a plain `format: uri`
+string column instead of a direct-attachment FK (`image_id`). This repo's
+own demo schema (and this fixture's original `mention_gate_item` entity)
+both use the FK shape, so neither ever type-checked the plain-string select
+`build_context.py`'s comment/mention creator avatar select also has to
+produce for schemas that haven't adopted `type: direct` for `user.image` --
+a real consumer schema hit exactly that gap. See
+`docs/knowledge/schema-yaml-configuration.md` "user.image and the
+comment/mention creator avatar" for the fix.
+
 **What it does NOT cover, disclosed honestly (do not read this fixture as
 "the mention/commentable code is now safe" -- it is not):**
 

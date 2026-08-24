@@ -29,11 +29,11 @@ export type CommentItem = {
   creator?: {
     id: string;
     name: string;
-    // The creator's avatar now comes from a direct-attachment FK
-    // (`user.image_id` -> attachment) instead of a plain URL column —
-    // only `path` is needed here, so callers select just that nested
-    // field rather than the full attachment row.
-    image?: { path: string } | null;
+    // The creator's avatar is a direct-attachment FK (`user.image_id` ->
+    // attachment, only `path` selected) on schemas that have adopted it,
+    // but still a plain URL string column on schemas that haven't -- this
+    // static component is shared by both, so it accepts either shape.
+    image?: { path: string } | string | null;
   } | null;
   reactionCounts?: Array<{ type: string | number; count: number }>;
   myReactionTypes?: (string | number)[];
@@ -129,7 +129,8 @@ function CommentItemComponent({ comment, canDelete, onUpdate, onDelete, reaction
   };
 
   const creatorName = comment.creator?.name ?? 'Unknown';
-  const avatarSrc = comment.creator?.image?.path ?? undefined;
+  const creatorImage = comment.creator?.image;
+  const avatarSrc = (typeof creatorImage === 'string' ? creatorImage : creatorImage?.path) ?? undefined;
   const wasEdited =
     comment.created_at &&
     comment.updated_at &&

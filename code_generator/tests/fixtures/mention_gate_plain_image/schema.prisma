@@ -1,0 +1,80 @@
+// Self-contained fixture Prisma schema for the mention-gate-plain-image
+// check (cmd_803) -- sibling of ../mention_gate/schema.prisma with
+// user.image left as a plain string column (no direct-attachment FK).
+// See json_schema.yaml's header for why this fixture exists.
+
+generator client {
+  provider = "prisma-client"
+  output   = "./.generated-client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model user {
+  id        String    @id @default(cuid())
+  name      String
+  email     String    @unique
+  image     String?
+  comments  comment[] @relation("CommentCreator")
+  reactions reaction[] @relation("ReactionUser")
+  created_items mention_gate_plain_image_item[] @relation("MentionGatePlainImageItemCreator")
+  updated_items mention_gate_plain_image_item[] @relation("MentionGatePlainImageItemUpdater")
+}
+
+model commentable {
+  id        String    @id @default(cuid())
+  comments  comment[]
+  mention_gate_plain_image_item mention_gate_plain_image_item?
+}
+
+model comment {
+  id             String      @id @default(cuid())
+  message        String
+  commentable_id String
+  commentable    commentable @relation(fields: [commentable_id], references: [id], onDelete: Cascade)
+  reactions      reaction[]
+  created_at     DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user @relation("CommentCreator", fields: [creator_id], references: [id])
+  @@index([creator_id])
+  @@index([commentable_id])
+}
+
+enum ReactionType {
+  like
+  love
+  laugh
+  surprised
+  sad
+}
+
+model reaction {
+  id         String       @id @default(cuid())
+  type       ReactionType
+  user_id    String
+  user       user         @relation("ReactionUser", fields: [user_id], references: [id])
+  comment_id String
+  comment    comment      @relation(fields: [comment_id], references: [id], onDelete: Cascade)
+  @@unique([comment_id, user_id, type])
+  @@index([user_id])
+  @@index([comment_id])
+}
+
+model mention_gate_plain_image_item {
+  id             String      @id @default(cuid())
+  name           String
+  commentable_id String      @unique
+  commentable    commentable @relation(fields: [commentable_id], references: [id], onDelete: Cascade)
+  created_at     DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user        @relation("MentionGatePlainImageItemCreator", fields: [creator_id], references: [id])
+  updater_id     String
+  updater        user        @relation("MentionGatePlainImageItemUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+  @@index([commentable_id])
+}
