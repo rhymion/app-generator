@@ -56,6 +56,22 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   (`emailVerified`, `mfa_secret`) would have fallen through to the
   end-of-object fallback instead of their documented position. Anchor
   updated to `'image_id'`.
+- **The comment/mention creator avatar select in `build_context.py`
+  unconditionally assumed `user.image` is a direct-attachment FK** (the
+  shape this repo's own schema now uses) — a consumer schema that declares
+  `x-mention: true` while `user.image` is still a plain `format: uri`
+  string column (`type: direct` is opt-in per schema, not a repo-wide
+  migration) failed to build (`TS2322`/`TS2551`) the moment it picked up the
+  FK-shaped select. The select now branches on the consuming schema's own
+  `user` entity; `types.ts.jinja2`'s three affected branches and the
+  shared, non-templated `components/_standard/CommentListWrapper.tsx` now
+  type `creator.image` as `{ path: string } | string | null` to match
+  either shape. A new sibling fixture,
+  `code_generator/tests/fixtures/mention_gate_plain_image/`
+  (`npm run test:mention-gate-plain-image`), exercises the plain-string
+  branch the original `mention_gate` fixture's own FK-shaped `user.image_id`
+  never covered. See docs/knowledge/schema-yaml-configuration.md "user.image
+  and the comment/mention creator avatar".
 
 ### Security
 - **Any authenticated user could manually trigger a scheduled task, not just

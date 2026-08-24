@@ -101,6 +101,11 @@ code_generator/.generated/
 # regenerates this from code_generator/tests/fixtures/mention_gate/ on every run.
 .generated-mention-gate/
 
+# mention-gate-plain-image fixture check (cmd_803) scratch output —
+# scripts/check_mention_gate_plain_image_fixture.sh regenerates this from
+# code_generator/tests/fixtures/mention_gate_plain_image/ on every run.
+.generated-mention-gate-plain-image/
+
 # decimal-gate fixture check (cmd_705) scratch output — scripts/check_decimal_gate_fixture.sh
 # regenerates this from code_generator/tests/fixtures/decimal_gate/ on every run.
 .generated-decimal-gate/

@@ -878,6 +878,24 @@ fixture test that exercises this branch
 child-cell rendering of a direct-attachment field is an open design question, not yet landed --
 this page does not cover it.
 
+**`user.image` and the comment/mention creator avatar**: this repo's own demo schema moved
+`user.image` to a direct-attachment FK (`image_id`), but a consumer schema that still declares
+`user.image` as a plain `format: uri` string is equally valid -- `type: direct` is opt-in per
+schema, not a repo-wide migration. `build_context.py`'s comment/mention creator avatar select
+(the `x-mention`/`commentable` include for `comments: { creator: { select: { ..., image } } }
+}`) branches on the *consuming* schema's own `user` entity
+(`get_direct_attachment_fk_props(_raw_def('user', schema))`) rather than assuming the FK shape
+unconditionally -- a schema without the FK gets a plain `image: true` scalar select, one with it
+gets `image: { select: { path: true } }`. `types.ts.jinja2`'s three `child.child_name ==
+'comment'` / `output_type == 'comments'` branches type `creator.image` as the permissive `{
+path: string } | string | null` union to match either shape without needing that same
+schema-conditional branch threaded into the template. The shared, non-templated
+`components/_standard/CommentListWrapper.tsx` mirrors that same union and derives `avatarSrc`
+with a `typeof` check, since a static `_standard` component cannot itself branch per consumer
+schema. Growing `code_generator/tests/fixtures/mention_gate/` with a second, plain-string
+`user.image` variant (its current fixture only exercises the FK-shaped branch) is tracked as a
+follow-up rather than done here.
+
 ### Named-constant parent (`constantParent`) — `x-internal` enum entities only
 
 An `x-internal` entity (section 9) that also has an `enum` field (e.g. `reaction.type`) gets an

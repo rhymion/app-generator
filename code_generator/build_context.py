@@ -2746,6 +2746,19 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     _merge_include(search_include_dict, consumer_includes)
     search_include_props_list = render_prisma_include(search_include_dict)
 
+    # Comment/mention creator avatar select (cmd_803): `user.image` is a
+    # direct-attachment FK (x-relationship type:direct) in schemas that have
+    # adopted it, but still a plain `format: uri` string column in schemas
+    # that haven't. The two need different Prisma select shapes — a relation
+    # select vs a scalar `true` — or the mismatched one fails to build
+    # (TS2322/TS2551). Branch on the *consuming* schema's own `user` entity
+    # rather than assuming the shape unconditionally.
+    _creator_avatar_select = (
+        "image: { select: { path: true } }"
+        if any(r['relation_name'] == 'image' for r in get_direct_attachment_fk_props(_raw_def('user', schema)))
+        else "image: true"
+    )
+
     child_include_entries = []
     for c in children_raw:
         cn       = c['name']
@@ -2754,7 +2767,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         cdef     = _raw_def(cn, schema)
         if out_type == 'comments':
             child_include_entries.append(
-                f"{prop}: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: {{ select: {{ path: true }} }} }} }},"
+                f"{prop}: {{ include: {{ creator: {{ select: {{ id: true, name: true, {_creator_avatar_select} }} }},"
                 f" reactions: {{ select: {{ type: true, user_id: true }} }} }},"
                 f" orderBy: {{ created_at: 'asc' }} }}"
             )
@@ -2859,7 +2872,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                     if c.get('child_name') == 'comment':
                         _rxn = ", reactions: true" if has_reactions else ""
                         nested_parts.append(
-                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: {{ select: {{ path: true }} }} }} }}{_rxn} }},"
+                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, {_creator_avatar_select} }} }}{_rxn} }},"
                             f" orderBy: {{ created_at: 'asc' }} }}"
                         )
                     else:
@@ -2869,7 +2882,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                     if c.get('child_name') == 'comment':
                         _rxn = ", reactions: true" if has_reactions else ""
                         nested_parts.append(
-                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: {{ select: {{ path: true }} }} }} }}{_rxn} }},"
+                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, {_creator_avatar_select} }} }}{_rxn} }},"
                             f" orderBy: {{ created_at: 'asc' }} }}"
                         )
                     else:

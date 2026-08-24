@@ -25,7 +25,8 @@ jobs:
         # message or PR text (cmd_498: "a condition the machine doesn't see
         # is a hole, not an exemption"). Only e2e-tests below is gated on
         # this job's output via needs:+if: (cmd_725: lint/unit-tests/audit/
-        # audit-full-scope/pytest/mention-gate-fixture/decimal-gate-fixture/
+        # audit-full-scope/pytest/mention-gate-fixture/
+        # mention-gate-plain-image-fixture/decimal-gate-fixture/
         # oto-mandatory-gate-fixture/approval-lockdown-gate-fixture/
         # payment-gate-fixture/uri-kind-gate-fixture keep running
         # unconditionally — e2e-tests is
@@ -299,6 +300,34 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - run: npm run test:mention-gate
+
+  mention-gate-plain-image-fixture:
+    name: Mention Gate Plain-Image Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_803: sibling of mention-gate-fixture above with `user.image` left
+    # as a plain `format: uri` string column instead of a direct-attachment
+    # FK (`image_id`) -- mention-gate-fixture's own `user.image_id` is
+    # FK-shaped, so it only ever type-checked one of the two Prisma select
+    # shapes build_context.py's comment/mention creator avatar select can
+    # produce. A consumer schema with `x-mention: true` and a plain-string
+    # `user.image` is equally valid and was, until this fixture existed,
+    # never exercised by this repo's own gates -- exactly how a consumer
+    # (not this repo) first hit the break. No path filter, same rationale as
+    # mention-gate-fixture above. See
+    # docs/knowledge/schema-yaml-configuration.md "user.image and the
+    # comment/mention creator avatar".
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:mention-gate-plain-image
 
   decimal-gate-fixture:
     name: Decimal Gate Fixture Check
