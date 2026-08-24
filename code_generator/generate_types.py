@@ -23,6 +23,7 @@ from jinja2 import Environment, FileSystemLoader
 from helpers.naming import to_pascal_case, to_camel_case
 from helpers.schema_helpers import get_entity_properties
 from context import build_entity_context
+from validate import SchemaValidationError
 
 
 # ---------------------------------------------------------------------------
@@ -250,12 +251,60 @@ def generate_types_for_schema(schema_path: str, output_dir: str) -> None:
         print(f'  Wrote {out_path}')
 
 
+def _resolve_constant_parent(entity_name: str, props: dict) -> str | None:
+    """Resolve the named-constant parent prefix for `entity_name` from an
+    explicit `x-relationship: {constantParent: true}` declaration (cmd_794).
+
+    The parent is never inferred from field declaration order: whichever
+    non-user many-to-one FK field is marked `constantParent: true` wins,
+    regardless of where it sits in `fields:`/`properties:`. This is
+    deliberate — a purely order-derived pick let an unrelated schema edit
+    (inserting another FK field earlier) silently rename an already-shipped
+    constant (`COMMENT_REACTION_TYPES` → `ORGANIZATION_REACTION_TYPES` when
+    `organization_id` was declared before `comment_id` on `reaction`).
+
+    Returns None when the entity has no non-user many-to-one FK at all (no
+    ambiguity is possible, so `{ENTITY}_TYPES` is used as-is). Raises
+    SchemaValidationError (fail-closed) when at least one such FK exists but
+    none, or more than one, is marked `constantParent: true` — a silent
+    order-derived fallback is exactly the bug this exists to prevent.
+    """
+    candidates = []
+    marked = []
+    for prop_name, prop_def in props.items():
+        rel = prop_def.get('x-relationship', {})
+        if rel.get('type') == 'many-to-one' and rel.get('target') not in ('user',):
+            candidates.append((prop_name, rel['target']))
+            if rel.get('constantParent'):
+                marked.append((prop_name, rel['target']))
+
+    if len(marked) > 1:
+        names = ', '.join(p for p, _ in marked)
+        raise SchemaValidationError(
+            f"entity '{entity_name}': multiple x-relationship fields ({names}) "
+            f"declare constantParent: true — exactly one is allowed per entity"
+        )
+    if candidates and not marked:
+        names = ', '.join(p for p, _ in candidates)
+        raise SchemaValidationError(
+            f"entity '{entity_name}' is x-internal with an enum field and "
+            f"{len(candidates)} candidate many-to-one FK field(s) ({names}) but "
+            f"none declares x-relationship: {{constantParent: true}}. The "
+            f"named-constant parent prefix must be declared explicitly, not "
+            f"inferred from field order — mark exactly one of these fields' "
+            f"x-relationship with `constantParent: true`."
+        )
+    return marked[0][1] if marked else None
+
+
 def extract_named_constants(schema: dict) -> list[dict]:
     """Extract named constants from x-internal entities with enum fields.
 
     Returns a list of {const_name, entity_name, prop_name, value_type, items: [{value, label}]}.
-    Naming: {PARENT}_{ENTITY}_TYPES where PARENT is the first non-user FK target,
-    or {ENTITY}_TYPES when no suitable parent FK is found.
+    Naming: {PARENT}_{ENTITY}_TYPES where PARENT is the target of the field
+    explicitly marked `x-relationship: {constantParent: true}` (see
+    `_resolve_constant_parent`), or {ENTITY}_TYPES when the entity has no
+    non-user many-to-one FK at all.
 
     Accepts both plain-integer enum fields (legacy Int-with-magic-numbers) and
     Prisma nativeEnum (string) fields (cmd_446 Class A) — a field that used to
@@ -276,21 +325,20 @@ def extract_named_constants(schema: dict) -> list[dict]:
 
         props = get_entity_properties(entity_name, schema)
 
-        # Derive parent prefix from the first non-user many-to-one FK
-        parent_name = None
-        for prop_name, prop_def in props.items():
-            rel = prop_def.get('x-relationship', {})
-            if rel.get('type') == 'many-to-one' and rel.get('target') not in ('user',):
-                parent_name = rel['target']
-                break
+        enum_props = [
+            (prop_name, prop_def)
+            for prop_name, prop_def in props.items()
+            if prop_def.get('type') in ('integer', 'string')
+            and isinstance(prop_def.get('enum'), list)
+        ]
+        if not enum_props:
+            continue
 
-        for prop_name, prop_def in props.items():
+        parent_name = _resolve_constant_parent(entity_name, props)
+
+        for prop_name, prop_def in enum_props:
             prop_type = prop_def.get('type')
-            if prop_type not in ('integer', 'string'):
-                continue
             enum_vals = prop_def.get('enum')
-            if not isinstance(enum_vals, list):
-                continue
 
             if parent_name:
                 const_name = f"{parent_name.upper()}_{entity_name.upper()}_TYPES"

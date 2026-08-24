@@ -95,6 +95,7 @@ definitions:
       comment_id:
         x-relationship:
           labelField: id
+          constantParent: true
 
   # The one entity this fixture exists to exercise: a minimal commentable
   # consumer, per docs/knowledge/appendix/comment-bridge.md §17.2 -- with the

@@ -94,6 +94,26 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/scheduled-task-operations.md`.
 
 ### Fixed
+- **An `x-internal` entity's named-constant parent prefix (e.g.
+  `COMMENT_REACTION_TYPES`) was derived from `fields:`/`properties:`
+  declaration order** — `extract_named_constants` (`generate_types.py`)
+  picked the first non-`user` many-to-one FK it encountered while walking
+  the entity's properties, so an unrelated schema edit (declaring another
+  FK field earlier) could silently rename an already-shipped constant:
+  adding `organization_id` anywhere before `comment_id` on `reaction`
+  turned `COMMENT_REACTION_TYPES` into `ORGANIZATION_REACTION_TYPES`,
+  breaking every hand-written consumer of the old name (the
+  comment-reactions API route, the toggle server action). The parent is
+  now resolved from an explicit `x-relationship: {constantParent: true}`
+  declaration instead — order-independent by construction — and
+  `generate.py` fails closed (`SchemaValidationError`) at generation time
+  if an `x-internal` enum entity has a candidate non-`user` many-to-one FK
+  but none (or more than one) is marked `constantParent: true`, rather
+  than silently falling back to order. `reaction.comment_id` (the only
+  entity in this repo's own schema this applies to) now carries the
+  declaration; `COMMENT_REACTION_TYPES` is unchanged. See
+  `docs/knowledge/schema-yaml-configuration.md` ("Named-constant parent
+  (`constantParent`)").
 - **`lib/attachment/direct_actions.ts` (the direct-attachment FK server action) was
   emitted unconditionally, breaking `tsc`/`next build` for every consumer regardless
   of whether they used the feature.** The file always creates a standalone

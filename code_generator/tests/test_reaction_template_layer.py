@@ -35,11 +35,14 @@ def _cuid_field() -> dict:
     return {"type": "string", "pattern": "^c[a-z0-9]{24,}$"}
 
 
-def _fk_field(target: str, label: str = "name") -> dict:
+def _fk_field(target: str, label: str = "name", constant_parent: bool = False) -> dict:
+    rel = {"type": "many-to-one", "target": target, "labelField": label}
+    if constant_parent:
+        rel["constantParent"] = True
     return {
         "type": "string",
         "pattern": "^c[a-z0-9]{24,}$",
-        "x-relationship": {"type": "many-to-one", "target": target, "labelField": label},
+        "x-relationship": rel,
     }
 
 
@@ -50,7 +53,7 @@ def _reaction_defn() -> dict:
         "x-internal": {"page": False, "embed": False, "api": "custom"},
         "properties": {
             "id": _cuid_field(),
-            "comment_id": _fk_field("comment", label="id"),
+            "comment_id": _fk_field("comment", label="id", constant_parent=True),
             "user_id": _fk_field("user", label="name"),
             "type": {
                 "type": "integer",
