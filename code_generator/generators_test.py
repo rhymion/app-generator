@@ -4497,17 +4497,25 @@ def api_spec_context(
     # Excludes self-referential relations (target == model): granting the test
     # actor full CRUD on this entity would also grant read on the "denied"
     # target in that case, defeating the scenario.
-    # Excludes relations targeting 'organization' (cmd_576): the fixture this
-    # test relies on (db:createApiUserWithPermission) builds an actor with RBAC
-    # permission on the parent entity but zero organization memberships. For
-    # a normal FK target, membership is irrelevant and the PUT reaches the row.
-    # For target == 'organization', cmd_515's should_filter_by_org existence
-    # lookup (getAssociatedOrganizations, scoped by actual membership — not by
-    # any RBAC permission row) rejects the PUT outright with 404 before the FK
-    # is ever evaluated. That is org isolation working correctly, not FK
-    # read-permission graceful degradation, so this scenario must not be
-    # asserted as "the field is preserved" — see the org-isolation-boundary
-    # rejection test below instead.
+    # Excludes relations targeting 'organization' (cmd_576, reconfirmed cmd_799):
+    # the fixture this test relies on (db:createApiUserWithPermission) builds an
+    # actor with RBAC permission on the parent entity but no read permission on
+    # the FK's target model — that mismatch (permission row present for the
+    # parent, absent for the target) is what the graceful-degradation feature
+    # (docs/knowledge/fk-read-permission-graceful-degradation.md) actually
+    # reacts to. `organization_id`'s existence check is a different mechanism
+    # entirely: cmd_515's should_filter_by_org lookup (getAssociatedOrganizations,
+    # scoped by actual membership, not by any RBAC permission row). As of
+    # cmd_799 the fixture also enrolls the actor in the target row's own
+    # organization (should_filter_by_org entities only) so that mismatch alone
+    # doesn't 404 the request before reaching the scenario a *non*-organization
+    # fk_preservation_relation is meant to test — but that does not make
+    # 'organization' itself a valid choice for this relation: omitting
+    # organization_id from the PUT body and asserting it's "preserved" would
+    # still be exercising the membership-scoped existence filter, not the
+    # RBAC-read-permission graceful-degradation path this test is named for.
+    # See the org-isolation-boundary rejection test (G3) below for that
+    # mechanism's own coverage instead.
     _fk_preservation_relation = next(
         (r for r in relationships if r['required'] and r['target'] not in (model, 'organization')), None,
     )

@@ -522,10 +522,20 @@ describe('API: {{ title }}', () => {
         // {{ fk_preservation_relation.target }} — defaults to deny (getModelPermissions:
         // "no rows = deny all"), reproducing the exact actor the UI's
         // AppFieldRelation permissionDenied branch is for.
+{% if should_filter_by_org %}
+        // cmd_799: also enrolled in the row's own organization — org
+        // isolation (getAssociatedOrganizations-scoped) must not 404 this
+        // actor before the FK-preservation scenario under test is reached;
+        // membership, not organization-entity read permission, is what
+        // reaching an org-scoped row requires.
+{% endif %}
         cy.task<string>('db:createApiUserWithPermission', {
           entityName: '{{ parent }}',
           flags: { create: true, read: true, update: true, delete: true },
           label: 'fk_read_denied',
+{% if should_filter_by_org %}
+          organizationId: original.organization_id,
+{% endif %}
         }).then((restrictedKey) => {
           cy.request({
             method: 'PUT',
@@ -564,6 +574,9 @@ describe('API: {{ title }}', () => {
           entityName: '{{ parent }}',
           flags: { create: true, read: true, update: true, delete: true },
           label: 'fk_read_denied_get',
+{% if should_filter_by_org %}
+          organizationId: original.organization_id,
+{% endif %}
         }).then((restrictedKey) => {
           cy.request({ url: API_BASE, headers: { 'X-API-Key': restrictedKey } })
             .then((listRes) => {
