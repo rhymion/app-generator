@@ -6,6 +6,13 @@ is not enough by itself for anything to actually run — this doc is the
 operational half: what generate.py produces, what has to be true outside
 the repo for it to fire, and how to tell whether it's actually firing.
 
+There is a second, entity-agnostic mode — top-level `x-scheduled-tasks`
+(plural) — for operations that don't fit a single-entity filtered row scan.
+See "Bulk mode" below; everything else on this page (the route, auth,
+`CRON_SECRET`, the system actor, the Vercel/GCP mechanics) applies
+identically to both modes, since they share one dispatcher route and one
+registry.
+
 ## What gets generated
 
 For every entity that declares `x-scheduled-task`:
@@ -18,11 +25,23 @@ For every entity that declares `x-scheduled-task`:
   hand-edit). The actual side effect. Ships as a `// TODO` stub; nothing
   happens until this is filled in.
 
-Fixed, entity-count-independent (regenerated every run regardless of how
-many entities declare the key):
+For every top-level `x-scheduled-tasks` (bulk) entry:
 
-- `lib/scheduled-tasks/registry.ts` — maps every declared `task_id` to its
-  entity's `run()` function.
+- `lib/scheduled-tasks/{task_id}/service_scheduled.ts` — regenerated every
+  `generate-code` run. No row selection: calls the configured handler once,
+  directly, with the system actor id.
+- `lib/scheduled-tasks/{task_id}/service_scheduled_handler.ts` — **GENERATED
+  ONCE** (safe to hand-edit). Ships as a `// TODO` stub; nothing happens
+  until this is filled in — same write-once contract as the row-scan
+  handler stub above, just with a `(systemActorId)` signature instead of
+  `(tx, entityId, systemActorId)` (no row/transaction to hand it).
+
+Fixed, task-count-independent (regenerated every run regardless of how many
+tasks — either mode — declare a key):
+
+- `lib/scheduled-tasks/registry.ts` — maps every declared `task_id`, from
+  either mechanism, to its `run()` function. The registry and the route
+  below are unaware which mode produced any given entry.
 - `app/api/scheduled-tasks/[task]/route.ts` — the one HTTP endpoint that
   dispatches to `TASK_REGISTRY[task]`.
 - `vercel.json`'s `crons` array (Vercel path only — see below).
@@ -34,6 +53,54 @@ touches them):
   scheduled-task system actor (see "Who does a scheduled write belong to"
   below).
 - `scripts/seed-baseline.ts` — upserts that system-actor user.
+
+## Bulk mode (`x-scheduled-tasks`, top-level)
+
+Entity-level `x-scheduled-task` requires a `filter` (`expires_at_before_now`
+and/or `status_in`) and always scans exactly one entity's rows. That doesn't
+fit an operation that spans many entities/tables, or an entire table with no
+filter at all — a full demo-data reset was the motivating case (see
+`docs/knowledge/seed-demo-data.md` in a consumer schema that declares one).
+`x-scheduled-tasks` is a top-level, plural sibling key for exactly that
+shape:
+
+```yaml
+x-scheduled-tasks:
+  - task_id: demo_reset
+    handler: resetDemo
+    interval: "0 3 * * *"
+```
+
+No `filter` key — bulk mode never selects rows itself; `validate.py` rejects
+one if present, precisely because it would silently do nothing (there is no
+row scan to apply it to). If a bulk task genuinely needs to filter
+something, do that filtering inside the handler itself.
+
+`handler` is still a plain TypeScript identifier — the exported function
+name in `lib/scheduled-tasks/<task_id>/service_scheduled_handler.ts` — but
+its signature is `(systemActorId: string) => Promise<void>`, not
+`(tx, entityId, systemActorId)`: there is no matched row and no per-row
+transaction to hand it.
+
+**Business logic still lives outside the generator.** The generated
+`service_scheduled.ts` for a bulk task does nothing but import and call the
+configured handler — the dispatch file never inlines business logic itself,
+same contract as the row-scan variant. The hand-edited handler stub is the
+thin layer a consumer wires up; if the actual work already exists elsewhere
+(a standalone script, a Server Action), the stub should import and call
+that, not reimplement it:
+
+```ts
+export async function resetDemo(systemActorId: string): Promise<void> {
+  const { main } = await import('@/scripts/reset-demo');
+  await main();
+}
+```
+
+**Namespace and limits are shared with entity-level tasks.** `task_id` must
+be unique across both mechanisms (one registry key, one URL segment); the
+Vercel 100-cron-jobs-per-project limit below counts entity-level and
+top-level tasks together, not as two separate budgets.
 
 ## Nothing calls this unless something outside the repo calls it
 

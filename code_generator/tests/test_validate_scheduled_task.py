@@ -219,3 +219,135 @@ class TestVercelCronCountLimit:
             101, x_cloud={'enabled': True, 'provider': 'gcp'},
         )
         validate_schema(schema)  # must not raise
+
+    def test_limit_counts_bulk_and_entity_level_together(self):
+        """The 100-cron limit is a single shared budget: one entity-level
+        task plus 100 bulk tasks (101 total) must be rejected."""
+        schema = self._many_entities_schema(1)
+        schema['x-scheduled-tasks'] = [
+            {'task_id': f'bulk_{i}', 'handler': 'runBulk', 'interval': '0 3 * * *'}
+            for i in range(100)
+        ]
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        msg = str(exc_info.value)
+        assert '100' in msg
+        assert '101' in msg
+
+
+_VALID_BULK = {
+    'task_id': 'demo_reset',
+    'handler': 'resetDemo',
+    'interval': '0 3 * * *',
+}
+
+
+class TestBulkScheduledTasksValidDeclarationPasses:
+    """x-scheduled-tasks (cmd_790): top-level, entity-agnostic bulk mode --
+    no row selection, no `filter`, calls its handler once per run."""
+
+    def test_valid_bulk_task_passes(self):
+        schema = {'definitions': {}, 'x-scheduled-tasks': [dict(_VALID_BULK)]}
+        validate_schema(schema)  # must not raise
+
+    def test_multiple_bulk_tasks_pass(self):
+        schema = {
+            'definitions': {},
+            'x-scheduled-tasks': [
+                dict(_VALID_BULK),
+                dict(_VALID_BULK, task_id='nightly_cleanup', handler='nightlyCleanup'),
+            ],
+        }
+        validate_schema(schema)  # must not raise
+
+    def test_absent_key_passes(self):
+        schema = {'definitions': {'widget': {'properties': {'name': {'type': 'string'}}}}}
+        validate_schema(schema)  # must not raise (no x-scheduled-tasks at all)
+
+    def test_bulk_and_entity_level_coexist(self):
+        schema = _schema('widget', _VALID_EXPIRES, extra_props={'expires_at': {'type': 'string'}})
+        schema['x-scheduled-tasks'] = [dict(_VALID_BULK)]
+        validate_schema(schema)  # must not raise
+
+
+class TestBulkScheduledTasksShapeAndRequiredFields:
+    def test_not_a_list_rejected(self):
+        schema = {'definitions': {}, 'x-scheduled-tasks': {'task_id': 'demo_reset'}}
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        assert 'x-scheduled-tasks' in str(exc_info.value)
+
+    def test_item_not_a_mapping_rejected(self):
+        schema = {'definitions': {}, 'x-scheduled-tasks': ['demo_reset']}
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        assert 'x-scheduled-tasks[0]' in str(exc_info.value)
+
+    def test_missing_task_id_rejected(self):
+        bad = dict(_VALID_BULK)
+        del bad['task_id']
+        schema = {'definitions': {}, 'x-scheduled-tasks': [bad]}
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        assert 'task_id' in str(exc_info.value)
+
+    def test_missing_handler_rejected(self):
+        bad = dict(_VALID_BULK)
+        del bad['handler']
+        schema = {'definitions': {}, 'x-scheduled-tasks': [bad]}
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        assert 'handler' in str(exc_info.value)
+
+    def test_handler_not_valid_identifier_rejected(self):
+        bad = dict(_VALID_BULK, handler='not a valid identifier')
+        schema = {'definitions': {}, 'x-scheduled-tasks': [bad]}
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        assert 'handler' in str(exc_info.value)
+
+    def test_missing_interval_rejected(self):
+        bad = dict(_VALID_BULK)
+        del bad['interval']
+        schema = {'definitions': {}, 'x-scheduled-tasks': [bad]}
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        assert 'interval' in str(exc_info.value)
+
+    def test_filter_key_rejected(self):
+        """Bulk mode has no row selection -- `filter` is an entity-level-only
+        concept and must not be silently accepted/ignored here."""
+        bad = dict(_VALID_BULK, filter={'status_in': ['pending']})
+        schema = {'definitions': {}, 'x-scheduled-tasks': [bad]}
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        msg = str(exc_info.value)
+        assert 'filter' in msg
+        assert 'unknown key' in msg
+
+
+class TestBulkScheduledTasksTaskIdNamespaceSharedWithEntityLevel:
+    def test_duplicate_task_id_within_bulk_list_rejected(self):
+        schema = {
+            'definitions': {},
+            'x-scheduled-tasks': [
+                dict(_VALID_BULK),
+                dict(_VALID_BULK, handler='otherHandler'),
+            ],
+        }
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        assert 'demo_reset' in str(exc_info.value)
+
+    def test_duplicate_task_id_against_entity_level_rejected(self):
+        """cmd_790: entity-level x-scheduled-task and top-level
+        x-scheduled-tasks share one task_id namespace (both feed the same
+        TASK_REGISTRY / /api/scheduled-tasks/[task] route)."""
+        schema = _schema(
+            'widget', dict(_VALID_EXPIRES, task_id='shared_task'),
+            extra_props={'expires_at': {'type': 'string'}},
+        )
+        schema['x-scheduled-tasks'] = [dict(_VALID_BULK, task_id='shared_task')]
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        assert 'shared_task' in str(exc_info.value)

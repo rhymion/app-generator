@@ -83,6 +83,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   text without touching the file. Both are inlined at build time (Vercel
   needs a rebuild, not just an env var edit, to pick up a change). See
   `docs/knowledge/noindex-default-and-branding-env-vars.md`.
+- **`x-scheduled-tasks`** (top-level, plural) — a bulk, entity-agnostic
+  sibling of `x-scheduled-task`: registers a recurring task with no row
+  selection at all, for operations that span many entities/tables or an
+  entire table with no filter (a full demo-data reset was the motivating
+  case), where the existing single-entity filtered row scan doesn't fit.
+  Shares one task_id namespace, one `TASK_REGISTRY`, and one `vercel.json`
+  `crons` array with entity-level `x-scheduled-task` — both are dispatched
+  through the same `/api/scheduled-tasks/[task]` route. See "Bulk mode" in
+  `docs/knowledge/scheduled-task-operations.md`.
 
 ### Fixed
 - **`lib/attachment/direct_actions.ts` (the direct-attachment FK server action) was

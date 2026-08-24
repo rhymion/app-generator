@@ -404,9 +404,12 @@ def _compute_export_visibility(def_key: str, defn: dict, defs: dict) -> tuple[se
 def validate_schema(schema: dict) -> None:
     """Validate *schema* and raise SchemaValidationError listing all problems."""
     defs = schema.get('definitions', {})
-    if not defs:
+    if not defs and not schema.get('x-scheduled-tasks'):
         # Schema uses a format without 'definitions' (e.g. OpenAPI components) —
-        # nothing to validate at this level.
+        # nothing to validate at this level. x-scheduled-tasks (cmd_790) is the
+        # one top-level, entity-agnostic key that still needs validating even
+        # when 'definitions' is empty/absent, so it is excepted from this
+        # early return.
         return
     errors = []
 
@@ -1765,13 +1768,95 @@ def validate_schema(schema: dict) -> None:
                 f"on every run)."
             )
 
+    # -----------------------------------------------------------------------
+    # 15.5. x-scheduled-tasks: top-level, entity-agnostic bulk validation
+    #       (cmd_790)
+    # -----------------------------------------------------------------------
+    #
+    # Entity-level x-scheduled-task (above) is a single-entity, filter-required
+    # row scan -- it has no shape for an operation that spans many entities or
+    # an entire table with no filter (e.g. a full demo-data reset). This
+    # top-level, plural sibling key registers a task that isn't bound to any
+    # entity's rows at all: generate.py calls its handler directly, once, per
+    # run, with no row selection. It shares one task_id/registry-key namespace
+    # with entity-level x-scheduled-task (`_scheduled_task_ids` below), since
+    # both dispatch through the same TASK_REGISTRY and
+    # /api/scheduled-tasks/[task] route.
+    _bulk_scheduled_tasks = schema.get('x-scheduled-tasks')
+    if _bulk_scheduled_tasks is not None:
+        if not isinstance(_bulk_scheduled_tasks, list):
+            errors.append(
+                f"x-scheduled-tasks must be a list, got "
+                f"{type(_bulk_scheduled_tasks).__name__}."
+            )
+            _bulk_scheduled_tasks = []
+
+        _ALLOWED_BULK_SCHEDULED_TASK_KEYS = {'task_id', 'handler', 'interval'}
+        for i, item in enumerate(_bulk_scheduled_tasks):
+            loc = f"x-scheduled-tasks[{i}]"
+            if not isinstance(item, dict):
+                errors.append(f"{loc}: must be a mapping, got {type(item).__name__}.")
+                continue
+
+            unknown_keys = set(item) - _ALLOWED_BULK_SCHEDULED_TASK_KEYS
+            if unknown_keys:
+                errors.append(
+                    f"{loc}: unknown key(s) {sorted(unknown_keys)!r} -- bulk tasks "
+                    f"(x-scheduled-tasks, top-level) take no `filter`; that concept "
+                    f"belongs to entity-level x-scheduled-task's single-row-scan "
+                    f"design. Bulk mode calls its handler directly, once, with no "
+                    f"row selection -- put any filtering the handler needs inside "
+                    f"the handler itself."
+                )
+
+            task_id = item.get('task_id')
+            if not isinstance(task_id, str) or not task_id:
+                errors.append(
+                    f"{loc}.task_id is required and must be a non-empty string (it "
+                    f"doubles as the registry key and the "
+                    f"/api/scheduled-tasks/[task] URL segment -- shared namespace "
+                    f"with entity-level x-scheduled-task)."
+                )
+            else:
+                prior_owner = _scheduled_task_ids.get(task_id)
+                if prior_owner:
+                    errors.append(
+                        f"{loc}.task_id {task_id!r} is also declared by "
+                        f"{prior_owner!r} -- task_id must be unique across the "
+                        f"schema (entity-level x-scheduled-task and top-level "
+                        f"x-scheduled-tasks share one namespace)."
+                    )
+                else:
+                    _scheduled_task_ids[task_id] = f'{loc} (bulk, no entity)'
+
+            handler = item.get('handler')
+            if not isinstance(handler, str) or not re.match(r'^[A-Za-z_$][A-Za-z0-9_$]*$', handler):
+                errors.append(
+                    f"{loc}.handler is required and must be a valid TypeScript "
+                    f"identifier (the exported function name in "
+                    f"lib/scheduled-tasks/<task_id>/service_scheduled_handler.ts), "
+                    f"got {handler!r}."
+                )
+
+            interval = item.get('interval')
+            if not isinstance(interval, str) or not interval:
+                errors.append(
+                    f"{loc}.interval is required and must be a non-empty cron "
+                    f"expression string in the format Vercel's `crons[].schedule` "
+                    f"accepts (cmd_781) -- generate.py writes it verbatim into "
+                    f"vercel.json's `crons` array for this task's "
+                    f"/api/scheduled-tasks/{{task_id}} path."
+                )
+
     # Vercel's per-project cron-job limit is 100, unchanged across Hobby/Pro/
     # Enterprise (last confirmed 2026-07-15 —
     # https://vercel.com/docs/cron-jobs/usage-and-pricing). generate.py writes
-    # one `crons` entry per x-scheduled-task entity into vercel.json, so a
-    # schema that declares more than that must fail here — loudly, at
-    # generate time — rather than silently emitting a vercel.json Vercel
-    # would reject at deploy (cmd_781 AC5: no silent drop). GCP deployments
+    # one `crons` entry per declared task_id (entity-level x-scheduled-task
+    # AND top-level x-scheduled-tasks both count -- one shared TASK_REGISTRY,
+    # one shared vercel.json `crons` array) into vercel.json, so a schema that
+    # declares more than that must fail here — loudly, at generate time —
+    # rather than silently emitting a vercel.json Vercel would reject at
+    # deploy (cmd_781 AC5: no silent drop). GCP deployments
     # (x-cloud.provider: gcp) don't write vercel.json crons at all — see
     # generate.py's `_write_vercel_json_crons` — so the limit doesn't apply
     # there.
@@ -1779,7 +1864,8 @@ def validate_schema(schema: dict) -> None:
     _cloud_provider = _x_cloud.get('provider', '') if _x_cloud.get('enabled') else ''
     if _cloud_provider != 'gcp' and len(_scheduled_task_ids) > 100:
         errors.append(
-            f"{len(_scheduled_task_ids)} x-scheduled-task entities declared, exceeding "
+            f"{len(_scheduled_task_ids)} scheduled task_id(s) declared (entity-level "
+            f"x-scheduled-task + top-level x-scheduled-tasks combined), exceeding "
             f"Vercel's 100-cron-jobs-per-project limit (all plans, "
             f"docs/knowledge/scheduled-task-operations.md). Reduce the number of "
             f"distinct task_ids, or dispatch multiple filters from within one handler."
