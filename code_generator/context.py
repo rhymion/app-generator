@@ -18,6 +18,7 @@ from helpers.schema_helpers import (
     get_flatten_rels,
     get_entity_properties,
     get_direct_attachment_fk_props,
+    is_write_only_prop,
 )
 from helpers.bridge_direction import collect_parent_bridge_fk_props
 
@@ -196,6 +197,12 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     required_set = set(model_def.get('required') or [])
     parent_fields = []
     for k, v in filtered_props.items():
+        # write-only fields (password, api_key, ... — see is_write_only_prop())
+        # never reach the client: get{{Parent}}Detail() (getters.ts.jinja2)
+        # strips them from its returned object (cmd_801), so the TS type
+        # this object is assigned to must not declare them either.
+        if is_write_only_prop(v):
+            continue
         ts_type = get_ts_type(v)
         # Fields not in required and without a JSON schema default are nullable in Prisma
         # (generated as optional columns with no DB default). Reflect this in TypeScript
@@ -257,8 +264,17 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
 
     # All OTO FK props are excluded from form_view_fields — the selector OTO rels will be
     # displayed through parent_rels (like many-to-one), and auto-create OTO via nested includes
+    # write-only fields (password, api_key, ... — see is_write_only_prop())
+    # are declared optional here rather than excluded: get{{Parent}}Detail()
+    # (getters.ts.jinja2, cmd_801) never populates them on the read path, so
+    # FormView.tsx (which no longer renders them at all — see
+    # form_view_context()'s write_only_props skip) never sees a value. But
+    # FormUpsertProps intersects this same `src` type below, and
+    # FormUpsert.tsx legitimately reads `src.password ?? ''` as the initial
+    # (always-blank) value for its password-change input -- the field must
+    # stay in the type, just as optional/possibly-undefined.
     form_view_fields = [
-        FieldInfo(k, get_ts_type(v, for_view_props=True))
+        FieldInfo(k, get_ts_type(v, for_view_props=True), optional=is_write_only_prop(v))
         for k, v in filtered_props.items()
         if k not in _TIMESTAMP_FIELDS and k not in _all_oto_prop_names
     ]

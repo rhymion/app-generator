@@ -17,6 +17,7 @@ from helpers.schema_helpers import (
     get_parent_relationships, get_internal_bridge_fk_prop_names,
     get_entity_properties, get_entity_required, get_self_only_flags,
     get_direct_attachment_fk_props, schema_has_direct_attachment_fk,
+    is_write_only_prop,
 )
 from schema_deriver import parse_prisma_schema
 
@@ -465,6 +466,7 @@ def _compute_export_visibility(def_key: str, defn: dict, defs: dict) -> tuple[se
         and f not in fk_prop_names
         and f in props
         and _is_export_scalar_type(props[f])
+        and not is_write_only_prop(props[f])  # cmd_801: credential material, never exported
     }
     # DP-1 UNION (build_context.py): non-dotted x-import-key fields already in
     # the view-visible allowlist are unioned in, mirrored here so this
