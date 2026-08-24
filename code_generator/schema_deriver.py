@@ -427,9 +427,17 @@ def _derive_relationship(model: PrismaModel, field_name: str, fk_target, user_re
     # all (e.g. "one-to-one_bridge" for internal bridge tables) -- that is
     # genuine Category C content, not a derivable fact to cross-check, so
     # an explicit `type` is used as-is rather than validated.
-    rel = {"type": user_rel.get("type", "many-to-one"), "target": fk_target}
-    label_field = user_rel.get("labelField", "name")  # DP-R4-1: default 'name'
-    rel["labelField"] = label_field
+    rel_type = user_rel.get("type", "many-to-one")
+    rel = {"type": rel_type, "target": fk_target}
+    # DP-R4-1: default labelField 'name' -- but only for a selectable
+    # relation. A direct-attachment FK (`type: direct`) points at
+    # `attachment`, which has no list/view page and thus no label to
+    # resolve (get_direct_attachment_fk_props() never reads labelField);
+    # defaulting one in here would silently attach a meaningless key that
+    # no downstream code consumes.
+    if rel_type != "direct":
+        label_field = user_rel.get("labelField", "name")
+        rel["labelField"] = label_field
     for key, value in user_rel.items():
         if key in ("target", "type", "labelField"):
             continue

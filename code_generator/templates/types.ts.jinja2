@@ -51,7 +51,7 @@ export type {{ parent | pascal_case }} = {
 {% elif child.child_name == 'comment' %}
       created_at?: string | Date | null;
       updated_at?: string | Date | null;
-      creator?: { id: string; name: string; image?: string | null } | null;
+      creator?: { id: string; name: string; image?: { path: string } | null } | null;
       reactionCounts: Array<{ type: {{ reaction_value_type }}; count: number }>;
       myReactionTypes: ({{ reaction_value_type }})[];
 {% else %}
@@ -101,7 +101,7 @@ export type {{ child.name | pascal_case }} = {
 {% if child.output_type == 'comments' %}
   created_at?: string | Date | null;
   updated_at?: string | Date | null;
-  creator?: { id: string; name: string; image?: string | null } | null;
+  creator?: { id: string; name: string; image?: { path: string } | null } | null;
   reactionCounts: Array<{ type: {{ reaction_value_type }}; count: number }>;
   myReactionTypes: ({{ reaction_value_type }})[];
 {% endif %}
@@ -176,7 +176,7 @@ export type FormViewProps = Readonly<{
 {% elif child.child_name == 'comment' %}
         created_at?: string | Date | null;
         updated_at?: string | Date | null;
-        creator?: { id: string; name: string; image?: string | null } | null;
+        creator?: { id: string; name: string; image?: { path: string } | null } | null;
         reactionCounts: Array<{ type: {{ reaction_value_type }}; count: number }>;
         myReactionTypes: ({{ reaction_value_type }})[];
 {% else %}

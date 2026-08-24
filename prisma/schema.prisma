@@ -53,7 +53,13 @@ model user {
   email                     String              @unique
   password                  String?
   api_key                   String?
-  image                     String?
+  // Direct-attachment FK (cmd_793): the user's own uploaded avatar.
+  // Nullable/SetNull, matching every other optional direct-attachment FK on
+  // this page (docs/knowledge/schema-yaml-configuration.md "Direct
+  // Attachment FK") -- no longer populated from an OAuth provider's profile
+  // image (see lib/auth/create-user.ts).
+  image_id                  String?             @unique
+  image                     attachment?         @relation("UserImage", fields: [image_id], references: [id], onDelete: SetNull)
   emailVerified             DateTime?
   // 1.2: every user belongs to exactly one tenant. The `@default("default")`
   // matches the bootstrap tenant id seeded by scripts/seed-its.ts and the
@@ -314,6 +320,14 @@ model attachment {
   // into deleting an attachment that a direct FK might still reference.
   attachable_id          String?
   attachable             attachable? @relation(fields: [attachable_id], references: [id], onDelete: SetNull)
+  // Direct-attachment FK back-references (cmd_793): one per entity+field
+  // declaring `x-relationship: { target: attachment, type: direct }`.
+  // Naming convention: field `{entity}_{relation_name}`, type `{entity}?`,
+  // `@relation("{Entity}{RelationName}")` matching the owning side's
+  // relation name -- see docs/knowledge/schema-yaml-configuration.md
+  // "Direct Attachment FK". These are hand-written, not generator-injected
+  // (validate_direct_attachment_reverse_fields checks them at generate time).
+  user_image             user?      @relation("UserImage")
   created_at             DateTime   @default(now()) @db.Timestamptz(0)
   updated_at             DateTime   @updatedAt @db.Timestamptz(0)
   @@index([attachable_id])

@@ -53,7 +53,23 @@ definitions:
     fields:
       name: {}
       email: {}
-      image: {}
+      image_id:
+        x-relationship:
+          target: attachment
+          type: direct
+  attachment:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      path:
+        format: uri
   commentable:
     x-generate:
       list: false

@@ -295,8 +295,9 @@ cell, a deliberate cmd_792 decision: a URL is a legitimate thing to type
 into an editable cell, unlike an image, which is why images are never
 drawn inside any grid cell in this codebase — that restriction applies to
 *drawing* an image, not to disabling editing of a uri-typed column). This
-repo's own `json_schema.yaml` has two `format: uri` fields (`user.image`,
-`attachment.path`), but neither is ever listed in an `x-display.table`
+repo's own `json_schema.yaml` has one `format: uri` field (`attachment.path`
+— `user.image` moved to a direct-attachment FK), and it is never listed in
+an `x-display.table`
 column set nor embedded as a one-to-many child's column, so this repo's
 own `test:e2e:build` (step 14) never compiles either branch. ~4-5s. See
 `scripts/check_uri_kind_gate_fixture.sh`.

@@ -77,6 +77,25 @@ const eslintConfig = defineConfig([
     // every scripts/check_oto_mandatory_gate_fixture.sh run, gitignored,
     // never part of the shipped product.
     ".generated-oto-mandatory-gate/**",
+    // The rest of the fixture-gate scratch outputs (same shape as the two
+    // above — rebuilt by their own scripts/check_*_gate_fixture.sh,
+    // gitignored, never part of the shipped product). Missing here meant
+    // `npm run lint` picked up whatever gate fixtures had last been run
+    // locally, in violation of the gate's own "must match CI's Lint job
+    // precondition" rule (see .claude/commands/update-generator.md's
+    // Step 1 note) — noticed while running the gate for the user.image
+    // direct-FK migration, unrelated to that change itself.
+    ".generated-decimal-gate/**",
+    ".generated-oto-decimal-gate/**",
+    ".generated-chart-decimal-gate/**",
+    ".generated-chart-scalar-gate/**",
+    ".generated-approval-lockdown-gate/**",
+    ".generated-payment-gate/**",
+    ".generated-direct-attachment-gate/**",
+    ".generated-uri-kind-gate/**",
+    // Local Python virtualenv (code_generator/tests pytest deps) — never
+    // part of the shipped product, and not every contributor even has one.
+    ".venv/**",
   ]),
 ]);
 

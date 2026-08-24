@@ -93,11 +93,14 @@ definitions:
         x-custom-component:
           target:
             - upsert
-      image:
+      image_id:
         type:
           - string
           - 'null'
-        format: uri
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: direct
+          target: attachment
         x-pii: indirect
       mfa_enabled:
         type: boolean
@@ -129,7 +132,7 @@ definitions:
       search: false
       fields:
         - name
-        - image
+        - image_id
         - roles
     x-relationships:
       roles:
@@ -165,7 +168,7 @@ definitions:
       fields:
         - name
         - email
-        - image
+        - image_id
         - password
         - api_key
         - mfa_enabled
