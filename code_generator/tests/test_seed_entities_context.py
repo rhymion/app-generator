@@ -175,3 +175,82 @@ def test_x_bridge_target_excluded() -> None:
     ctx = seed_entities_context(schema)
     assert 'widget_tag' not in ctx['seed_entity_names']
     assert 'widget' in ctx['seed_entity_names']
+
+
+def test_self_only_admin_bypass_proxy_view_excluded() -> None:
+    """A 'setting'-shaped proxy view stays excluded via x-self-only
+    admin_bypass, not via a blanket proxy-view exclusion (cmd_813)."""
+    schema = _minimal_schema({
+        'setting': {
+            'x-generate': {
+                'list': False, 'view': True, 'new': False, 'edit': True,
+                'delete': False, 'api': True, 'test': False,
+            },
+            'x-self-only': {'admin_bypass': True},
+            'allOf': [{'$ref': '#/definitions/user'}],
+        },
+    })
+    ctx = seed_entities_context(schema)
+    assert 'setting' not in ctx['seed_entity_names']
+
+
+def test_proxy_view_without_self_only_now_included() -> None:
+    """A proxy view with no self-only declaration of its own (e.g. a demo
+    fixture like 'setting1') now gets its own grant -- requirePermission()
+    checks the view's own route name, not the shared model, so excluding
+    every proxy view left it permanently ungranted."""
+    schema = _minimal_schema({
+        'setting1': {
+            'x-generate': {
+                'list': True, 'view': True, 'new': True, 'edit': True,
+                'delete': True, 'api': True, 'test': True,
+            },
+            'allOf': [{'$ref': '#/definitions/user'}],
+        },
+    })
+    ctx = seed_entities_context(schema)
+    assert 'setting1' in ctx['seed_entity_names']
+    assert 'user' in ctx['seed_entity_names']
+
+
+def test_two_proxy_views_sharing_model_both_included_independently() -> None:
+    """setting1/setting2-shaped case: two proxy views sharing one model
+    each get their own grant, since permission checks are keyed to each
+    view's own route name."""
+    schema = _minimal_schema({
+        'setting1': {
+            'x-generate': {
+                'list': True, 'view': True, 'new': True, 'edit': True,
+                'delete': True, 'api': True, 'test': True,
+            },
+            'allOf': [{'$ref': '#/definitions/user'}],
+        },
+        'setting2': {
+            'x-generate': {
+                'list': True, 'view': True, 'new': False, 'edit': False,
+                'delete': False, 'api': False, 'test': True,
+            },
+            'allOf': [{'$ref': '#/definitions/user'}],
+        },
+    })
+    ctx = seed_entities_context(schema)
+    assert 'setting1' in ctx['seed_entity_names']
+    assert 'setting2' in ctx['seed_entity_names']
+
+
+def test_self_only_without_admin_bypass_not_excluded() -> None:
+    """x-self-only: true (admin_bypass defaults False) must NOT be
+    excluded -- excluding it would deny Administrator access outright,
+    since no bypass path exists to fall back on."""
+    schema = _minimal_schema({
+        'setting1': {
+            'x-generate': {
+                'list': True, 'view': True, 'new': True, 'edit': True,
+                'delete': True, 'api': True, 'test': True,
+            },
+            'x-self-only': True,
+            'allOf': [{'$ref': '#/definitions/user'}],
+        },
+    })
+    ctx = seed_entities_context(schema)
+    assert 'setting1' in ctx['seed_entity_names']

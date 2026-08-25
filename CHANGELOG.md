@@ -34,6 +34,44 @@ and this project adheres to Semantic Versioning (https://semver.org/).
     follow-up.
 
 ### Fixed
+- **A proxy view (`parent != model`, e.g. a schema entity that `allOf`-wraps
+  another entity instead of its own Prisma model) with `x-generate.list:
+  true` never got a sidebar link, even though its list page, API route,
+  getters, and search were already generated and working.** Three gates
+  were all keyed on `parent == model`, which is false for every proxy view
+  regardless of which one:
+  - `generators_i18n.py`'s `nav_entities` filter — now just
+    `generate_config.list`; a proxy view that should stay hidden opts out
+    via its own `x-generate.list: false`.
+  - `nav_config.py`'s `entity_group` — was keyed on `model`, so two proxy
+    views sharing one model were forced into the same nav group/order.
+    Now keyed on `parent` (the view/route name), and `x-nav` itself
+    resolves at the view unit first (falling back to the raw model's
+    `x-nav` when the view declares none of its own) — two proxy views
+    sharing a model can now sit in independent nav groups/orders.
+  - `generators.py`'s `seed_entities_context()` (drives
+    `scripts/generated/seed-entities.ts`, consumed by
+    `grant-all-permissions.ts`) required a direct `id` property, which
+    structurally excludes every proxy view. `requirePermission()` checks
+    each entity's own route name, not the underlying model, so this left
+    every proxy view's own route permanently ungranted. Now excludes only
+    an entity actually declaring `x-self-only: {admin_bypass: true}` (the
+    framework's own `setting` is the only one that currently does) —
+    schema-driven, not name- or structure-based.
+
+  `cleanup.py:624` kept its own separate, narrower `parent == model` copy
+  of this same predicate, unintentionally — see the follow-up fix below.
+- **`cleanup.py` failed to retract a proxy view's sidebar nav entry**,
+  leaving a dead link (pointing at a page `cleanup` had itself just
+  deleted) after teardown. Root cause: `cleanup.py`'s own
+  `_clean_appended_files` kept a separate literal copy of the
+  `nav_entities` filter above, narrower (`parent == model`) than the one
+  `generators_i18n.py` used to add the entry in the first place — a
+  proxy view's entry was added but never selected for removal. Fixed by
+  extracting the filter into a single `nav_config.nav_list_entities()`
+  function that both sides now call; `parent == model` entities' existing
+  cleanup behavior (e.g. `/user`, `/role`) is unchanged.
+  See docs/knowledge/proxy-view-nav-and-permission-scope.md.
 - **`GET /api/user/{id}` leaked the password hash and raw `api_key`** —
   `write_only_field_names`/`write_only_props` (`build_context.py`,
   `generators.py`) were computed from `filtered_props` (the subset narrowed

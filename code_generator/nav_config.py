@@ -54,24 +54,29 @@ def _raw_def(entity_name: str, schema: dict) -> dict:
 def _entity_nav(entity: dict, schema: dict) -> dict | None:
     """Return this entity's `x-nav` dict, or None.
 
-    build_user_schema.py's Stage-4 raw/view split moves entity-level
-    annotations (x-nav included, see its `_ENTITY_LEVEL_DATA_KEYS`) onto
-    the raw ('__'-prefixed) entity, not the view — so this must resolve
-    the raw entity the same way every other entity-level annotation reader
-    in the generator does (build_context.py's own `_raw_def`), not gate on
-    entity['model'] != entity['parent'] (that condition is about proxy
-    views like 'setting', unrelated to whether a raw/view split happened,
-    and false for the common case of a paired entity whose model name
-    equals its own parent — which silently dropped x-nav for exactly that
-    case, cmd_744 proj_c verification). The definition_key lookup remains
-    as a fallback for hand-authored schemas (e.g. this module's own pytest
-    fixtures) that declare x-nav directly under the bare entity key with
-    no raw/view split at all.
+    Resolved at VIEW unit first (cmd_813 ①): `entity['definition_key']`
+    (e.g. 'setting1') is the entry a proxy view's own x-nav would live on
+    — proxy views are a pass-through in build_user_schema.py (never go
+    through the raw/view split), so a declaration placed directly under
+    the view's own definitions key lets two proxy views sharing one model
+    (e.g. 'setting1'/'setting2', both model 'xxxxx_xxxxx') sit in
+    different nav groups/orders independently.
+
+    Falls back to the raw model's x-nav (cmd_744 proj_c verification) when
+    the view has no explicit declaration of its own — build_user_schema.py's
+    Stage-4 raw/view split moves entity-level annotations (x-nav included,
+    see its `_ENTITY_LEVEL_DATA_KEYS`) onto the raw ('__'-prefixed) entity
+    for the common paired-entity case (e.g. 'role'), not the view, so this
+    must resolve the raw entity the same way every other entity-level
+    annotation reader in the generator does (build_context.py's own
+    `_raw_def`). Do not drop this fallback: without it, every ordinary
+    (non-proxy) entity's x-nav — which lives on the raw entity, not the
+    view — would silently stop resolving.
     """
-    x_nav = _raw_def(entity['model'], schema).get('x-nav')
+    def_key = entity.get('definition_key') or entity.get('model')
+    x_nav = schema.get('definitions', {}).get(def_key, {}).get('x-nav')
     if not x_nav:
-        def_key = entity.get('definition_key') or entity.get('model')
-        x_nav = schema.get('definitions', {}).get(def_key, {}).get('x-nav')
+        x_nav = _raw_def(entity['model'], schema).get('x-nav')
     return x_nav if isinstance(x_nav, dict) else None
 
 
@@ -124,6 +129,25 @@ def _chain_to_root(slug: str, group_defs: dict[str, dict]) -> list[str]:
     return list(reversed(chain))
 
 
+def nav_list_entities(entities: list) -> list:
+    """Entities that appear in the sidebar nav: any entity with a list page,
+    including a proxy view (parent != model, e.g. a demo fixture like
+    'setting1' sharing a model with 'setting2') — cmd_813. The real entity
+    is already generated (list page, API, getters, search); the door was
+    the only thing missing. A proxy view that should stay hidden opts out
+    via its own `x-generate.list: false` (the exception lives on the
+    declaring side, not baked into the generator by entity name).
+
+    Single source of truth for both the generate side
+    (generators_i18n.update_i18n_and_config, which adds nav entries) and
+    the cleanup side (cleanup.clean_appended_files, which removes them).
+    Before cmd_817 each kept its own literal copy of this filter; #419
+    loosened the generate side only, so cleanup silently stopped retracting
+    nav entries it had itself created for a proxy view — see cmd_817.
+    """
+    return [e for e in entities if e['generate_config'].get('list', True)]
+
+
 def build_nav_config(entities: list, schema: dict) -> dict:
     """
     Parse `x-nav.parent`/`x-nav.order` off every entity plus the optional
@@ -134,8 +158,14 @@ def build_nav_config(entities: list, schema: dict) -> dict:
           'groups': [
               {'slug', 'label', 'i18n_key', 'order', 'icon', 'parent'}, ...
           ],   # every group referenced by an entity or declared in x-nav-groups
-          'entity_group': {model_name: {'group': slug, 'order': int}},
+          'entity_group': {parent_name: {'group': slug, 'order': int}},
         }
+
+    `entity_group` is keyed by `entity['parent']` (the view/route name,
+    cmd_813 ①), not `entity['model']` — so two proxy views sharing one
+    model (e.g. 'setting1'/'setting2', both model 'xxxxx_xxxxx') can sit
+    in different groups/orders independently instead of being forced into
+    whichever one happened to be resolved last.
 
     Raises NavValidationError for a cycle, excess depth, or unknown icon name.
     """
@@ -155,7 +185,7 @@ def build_nav_config(entities: list, schema: dict) -> dict:
         if not parent_slug:
             continue
         order = x_nav.get('order', _DEFAULT_ORDER)
-        entity_group[entity['model']] = {'group': parent_slug, 'order': order}
+        entity_group[entity['parent']] = {'group': parent_slug, 'order': order}
         referenced_slugs[parent_slug] = referenced_slugs.get(parent_slug, 0) + 1
         child_orders.setdefault(parent_slug, []).append(order)
 

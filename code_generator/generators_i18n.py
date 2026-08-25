@@ -16,7 +16,7 @@ from pathlib import Path
 
 from helpers.naming import to_camel_case, to_title_case
 from helpers.schema_helpers import filter_fields
-from nav_config import build_nav_config, upsert_nav_group_i18n
+from nav_config import build_nav_config, nav_list_entities, upsert_nav_group_i18n
 
 # The locale whose messages/*.json values ARE the schema-computed defaults
 # (see i18n/routing.ts defaultLocale). Every other locale file's newly-added
@@ -361,7 +361,7 @@ def _update_site_config(path: Path, nav_entities: list, nav_config: dict) -> boo
         if href in existing_hrefs:
             continue
         label = to_title_case(entity['parent'])
-        group_info = entity_group.get(entity['model'])
+        group_info = entity_group.get(entity['parent'])
         if group_info:
             new_link_lines.append(
                 f'    {{ label: "{label}", href: "{href}", '
@@ -442,12 +442,9 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
     `entities` — the full list returned by extract_entities().
     `output_dir` — project root (same as passed to generate()).
     """
-    # Entities that appear in the sidebar nav:
-    # must be a "primary" entity (parent == model) with a list page.
-    nav_entities = [
-        e for e in entities
-        if e['parent'] == e['model'] and e['generate_config'].get('list', True)
-    ]
+    # Entities that appear in the sidebar nav — shared with cleanup.py's
+    # own removal pass, see nav_config.nav_list_entities (cmd_817).
+    nav_entities = nav_list_entities(entities)
 
     # EntityLabel keys for all entities (including alternate-model entities like setting*)
     entity_label_entries = {
