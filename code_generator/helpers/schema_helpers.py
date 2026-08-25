@@ -15,6 +15,40 @@ def is_string_prop(prop: dict) -> bool:
     return False
 
 
+def is_write_only_prop(prop: dict) -> bool:
+    """True for a string-typed field the writer has restricted to
+    upsert-only rendering via `x-custom-component` (target includes
+    'upsert' but not 'view') — e.g. password, api_key. The value is
+    credential material, not display data: it must never cross into a
+    read path (view page, API detail/list/export/search response body).
+
+    Scoped to string fields with no declared 'view' target on purpose.
+    A boolean status field like mfa_enabled can *also* be upsert-only at
+    the field level while still needing its live value passed to an
+    entity-level x-custom-components status widget (e.g. MfaToggle) — that
+    field isn't secret material, just routed through a custom control, so
+    it must stay out of this predicate (`is_string_prop` gates it out).
+    A field that declares target: [upsert, view] has an author-provided
+    safe view widget and also falls outside this predicate.
+    """
+    if not is_string_prop(prop):
+        return False
+    xc = prop.get('x-custom-component', {})
+    if not isinstance(xc, dict):
+        return False
+    target = xc.get('target') or []
+    return 'upsert' in target and 'view' not in target
+
+
+def get_write_only_field_names(properties: dict) -> list[str]:
+    """Names of write-only fields (see is_write_only_prop) on this entity,
+    in declaration order."""
+    return [
+        name for name, prop in properties.items()
+        if isinstance(prop, dict) and is_write_only_prop(prop)
+    ]
+
+
 def derive_text_fields(properties: dict) -> list[str]:
     """Auto-derive searchable text fields from entity properties.
 

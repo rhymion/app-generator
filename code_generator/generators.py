@@ -18,6 +18,7 @@ from helpers.schema_helpers import (
     get_detail_properties,
     get_approval_lines_props,
     resolve_ledger_domain,
+    get_write_only_field_names,
 )
 from helpers.label_field import (
     build_label_expression,
@@ -2233,6 +2234,16 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
             'view' in ((filtered_props[p].get('x-custom-component') or {}).get('target') or []))
     ]
 
+    # write_only_props (cmd_810): credential-material fields declared
+    # upsert-only (e.g. password, api_key — see is_write_only_prop()).
+    # Never rendered on the view page at all -- not even as a generic
+    # read-only text field -- so no path here falls through to `other_flds`
+    # and echoes the raw stored secret. get{{Parent}}Detail() (getters.ts.jinja2)
+    # strips these same fields from `src` before this component ever
+    # receives them, so this is belt-and-suspenders against a future field
+    # that reaches FormView some other way.
+    write_only_props = set(get_write_only_field_names(filtered_props))
+
     date_time_flds     = []
     image_flds         = []
     boolean_flds       = []
@@ -2241,6 +2252,8 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
 
     for p in parent_props:
         if p in custom_view_props:
+            continue
+        if p in write_only_props:
             continue
         prop   = filtered_props[p]
         actual = _get_actual_type(prop)

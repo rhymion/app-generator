@@ -76,6 +76,15 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
     return null;
   }
 
+{% if write_only_field_names %}
+  // cmd_810: credential-material fields (password, api_key, ... — see
+  // is_write_only_prop()) never reach a read path. Destructured out here so
+  // the return spread below can never re-leak them, whether via the REST
+  // API JSON response (api_detail_route.ts.jinja2) or the view page's
+  // server data (get{{ parent_pascal }}DetailPageData() below) -- this is the
+  // single choke point both consumers share.
+  const { {% for f in write_only_field_names %}{{ f }}: _{{ f }}, {% endfor %}...{{ parent_camel }}Safe } = {{ parent_camel }};
+{% endif %}
 {% if named_constants and has_commentable %}
   const _commentable = {{ parent_camel }}.{{ commentable_rel_name }} ? {
     ...{{ parent_camel }}.{{ commentable_rel_name }},
@@ -95,7 +104,7 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
   } : {{ parent_camel }}.{{ commentable_rel_name }};
 {% endif %}
   return {
-    ...{{ parent_camel }},
+    ...{% if write_only_field_names %}{{ parent_camel }}Safe{% else %}{{ parent_camel }}{% endif %},
 {% for rel in reverse_oto_rels if rel.relation_name != rel.prop_name %}
     {{ rel.prop_name }}: {{ parent_camel }}.{{ rel.relation_name }},
 {% endfor %}

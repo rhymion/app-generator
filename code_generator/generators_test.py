@@ -67,6 +67,7 @@ from helpers.schema_helpers import (
     get_flatten_rels,
     get_splittable_bridge_field,
     resolve_ledger_domain,
+    is_write_only_prop,
 )
 from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import (
@@ -2846,6 +2847,7 @@ def api_spec_context(
         and f not in _api_fk_prop_names
         and f in model_def.get('properties', {})
         and _is_export_scalar(model_def['properties'][f])
+        and not is_write_only_prop(model_def['properties'][f])  # cmd_810: credential material, never exported
     ]
     # NOTE: x-import-key UNION intentionally not applied — see cmd_324 SA-1.
     export_import_key_fields = [f for f in import_key_fields if f in export_scalar_fields]

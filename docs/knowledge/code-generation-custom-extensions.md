@@ -51,6 +51,25 @@ interface Props { value: string; }
 
 `components/setting/api_key.tsx` — renders the API key with a "Generate" button. The generator references it but never touches it.
 
+### Upsert-only fields are treated as write-only
+
+Omitting `view` from `target` (i.e. `target: [upsert]` only) does more than
+skip the custom view component — the generator treats a **string** field in
+this shape as credential material (`is_write_only_prop()` /
+`get_write_only_field_names()` in `code_generator/helpers/schema_helpers.py`)
+and strips it from every read path: `get{Parent}Detail()`'s returned object
+(so it never reaches the REST API JSON response or the view page's server
+data), the paginated list row mapping, the CSV export allowlist, and the
+sort/filter allowlists. `FormView` also stops rendering it as a generic
+read-only text field. This is why `password`/`api_key` must declare
+`target: [upsert]` (not `[upsert, view]`) if the raw value should never
+leave the server — a field that also declares `view` is assumed to have an
+author-provided safe view widget and is exempt from this stripping.
+
+The predicate is scoped to **string** fields only: a boolean status flag
+that happens to also be upsert-only (e.g. `mfa_enabled`, routed through a
+custom status widget) is not secret material and stays out of scope.
+
 ---
 
 ## 2. Entity-Level Custom Components (`x-custom-components` on `_detail`)

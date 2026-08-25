@@ -16,6 +16,7 @@ from helpers.schema_helpers import (
     is_optional_fk_to_parent, get_parent_fk_props, get_one_to_one_rels,
     get_detail_ref_rels, get_flatten_rels, get_approval_lines_props,
     derive_text_fields, derive_searchable_relation_fields,
+    get_write_only_field_names,
 )
 from helpers.label_field import (
     build_label_expression, render_prisma_include,
@@ -822,6 +823,28 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         }
     filtered_props = filter_fields(model_def.get('properties', {}), gen_cfg.get('fields'))
 
+    # write_only_field_names (cmd_810): credential-material fields (e.g.
+    # password, api_key) that must never leave the server on a read path.
+    # get{{Parent}}Detail() (getters.ts.jinja2) strips these from its
+    # returned object before it reaches either the REST API JSON response
+    # or the view page's server data — see is_write_only_prop()'s docstring
+    # for why this is scoped to string fields with no 'view' target.
+    #
+    # Sourced from model_def's FULL properties (not filtered_props): the
+    # Prisma query behind get{{Parent}}Detail() (below) has no `select` —
+    # it findUnique/findFirst()s the whole row and spreads it — so a
+    # write-only column the entity's own x-generate.fields allowlist
+    # happens to omit (e.g. user.api_key, excluded from `user`'s fields
+    # since cmd_349, or `setting`'s api_key likewise) is STILL present on
+    # the raw Prisma object and would leak if this list only covered
+    # filtered_props. Verified empirically (cmd_810): before this fix
+    # sourced from model_def, GET /api/user/{id} leaked password+api_key
+    # (write_only_field_names was empty — password/api_key aren't in
+    # user's fields list) and GET /api/setting/{id} still leaked api_key
+    # after a filtered_props-sourced fix (api_key isn't in setting's
+    # fields list either, only password is).
+    write_only_field_names = get_write_only_field_names(model_def.get('properties', {}))
+
     # Mention fields: fields annotated with x-mention: true (Phase 2 template generation).
     mention_fields: list[str] = [
         fn for fn, fp in filtered_props.items()
@@ -1072,6 +1095,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         f for f in _export_candidates
         if f not in _SYSTEM_FIELDS
         and f not in _fk_prop_names
+        and f not in write_only_field_names  # cmd_810: credential material, never exported
         and f in model_def.get('properties', {})
         and _is_export_scalar(model_def['properties'][f])
     ]
@@ -1201,7 +1225,10 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # Scalar columns the paginated API/page-list will accept for sort/filter.
     # Always include audit columns. Anything not in this set is silently ignored
     # at request time so external input cannot pick arbitrary Prisma columns.
-    _scalar_props = [k for k, v in filtered_props.items() if _is_scalar_prop(v)]
+    _scalar_props = [
+        k for k, v in filtered_props.items()
+        if _is_scalar_prop(v) and k not in write_only_field_names  # cmd_810: no sort/filter oracle on credential material
+    ]
     for _extra in ('id', 'created_at', 'updated_at', 'creator_id'):
         if _extra not in _scalar_props:
             _scalar_props.append(_extra)
@@ -2010,6 +2037,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         f"    {k}: {parent_camel}.{k},"
         for k in creator_filtered_props
         if k not in _EXCLUDE_FIELDS
+        and k not in write_only_field_names  # cmd_810: list/fetchXxxPage row shape, never credential material
     )
     relationship_mapping = '\n'.join(
         f"    {r['relation_name']}: {parent_camel}.{r['relation_name']},"
@@ -2075,6 +2103,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         parent_camel=parent_camel,
         # Schema / config
         filtered_props=filtered_props,
+        write_only_field_names=write_only_field_names,  # cmd_810
         model_def=model_def,
         gen_cfg=gen_cfg,
         can_create=can_create,

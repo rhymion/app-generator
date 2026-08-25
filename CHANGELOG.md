@@ -3,6 +3,28 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **Write-only fields (`password`, `api_key`) no longer leak on read paths**
+  — `get{Parent}Detail()` (`getters.ts.jinja2`) queries the underlying
+  Prisma model without a `select`, so any string field restricted to
+  upsert-only rendering via `x-custom-component` (target includes `upsert`
+  but not `view`) was previously spread unfiltered into the REST API JSON
+  response (`GET /api/setting/{id}`, `GET /api/user/{id}`), independent of
+  whether the field was rendered on the view page or listed in the entity's
+  `x-generate.fields` allowlist. The view page (`FormView.tsx`) also fell
+  through to a generic read-only text field for these props, echoing the
+  raw stored value (bcrypt hash / API key). Adds
+  `is_write_only_prop()`/`get_write_only_field_names()`
+  (`code_generator/helpers/schema_helpers.py`) as the single predicate now
+  driving every read surface: `get{Parent}Detail`'s returned object, the
+  paginated list row mapping, CSV export allowlist, sort/filter
+  allowlists, and `FormView`'s field classification. Verified red → green
+  via `GET /api/setting/{id}` and `GET /api/user/{id}` response bodies
+  (both entities share the underlying `user` Prisma model). No migration
+  required (generator/template-only change, no schema change).
+
 ## [3.0.0] - 2026-07-07
 
 > Consolidates five feature areas added since 2.0.0: GCP Cloud Run deployment,
