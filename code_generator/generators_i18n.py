@@ -94,7 +94,6 @@ _CUSTOM_COMPONENT_FIELD_KEYS: dict[str, dict[str, str]] = {
         'approvalRequests': 'Approval Requests',
         'message': 'Message',
         'reject': 'Reject',
-        'resubmit': 'Re-submit',
     },
 }
 

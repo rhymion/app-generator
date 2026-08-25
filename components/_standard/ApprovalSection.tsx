@@ -24,12 +24,11 @@ import Collapse from '@mui/material/Collapse';
 import Box from '@mui/material/Box';
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
-import ReplayIcon from '@mui/icons-material/Replay';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { Fragment } from 'react';
 import type { ModelPermissions } from '@/lib/authz';
-import { approveApprovalRequest, rejectApprovalRequest, resubmitApprovalRequest } from '@/lib/approval_request/actions';
+import { approveApprovalRequest, rejectApprovalRequest } from '@/lib/approval_request/actions';
 
 const STATUS_LABELS = ['Pending', 'Approved', 'Rejected', 'TerminalRejected'] as const;
 
@@ -62,16 +61,19 @@ type ApprovalRequest = {
   approval_histories?: ApprovalHistory[];
 };
 
-type Action = 'approve' | 'reject' | 'resubmit';
+type Action = 'approve' | 'reject';
 
 type Props = {
   src: { creator_id?: string | null; approvable?: { id: string; approval_requests: ApprovalRequest[] } | null };
   permissions?: ModelPermissions;
   currentUserRoleIds?: string[];
+  // Unused since resubmit's removal (cmd_818 D1) -- kept in the Props type
+  // because form_view.tsx.jinja2's generic x-custom-components wiring
+  // always passes currentUserId to every view-target component.
   currentUserId?: string | null;
 };
 
-export default function ApprovalSection({ src, currentUserRoleIds, currentUserId }: Props) {
+export default function ApprovalSection({ src, currentUserRoleIds }: Props) {
   const t = useTranslations('Fields');
   const tCommon = useTranslations('Common');
   const tStatus = useTranslations('ApprovalRequestStatus');
@@ -114,15 +116,11 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
     closeDialog();
     startTransition(() => {
       if (action === 'approve') approveApprovalRequest(arId, msg);
-      else if (action === 'reject') rejectApprovalRequest(arId, msg, { reason: reasonText, reasonKind });
-      else resubmitApprovalRequest(arId, msg);
+      else rejectApprovalRequest(arId, msg, { reason: reasonText, reasonKind });
     });
   };
 
-  const dialogTitle =
-    dialog?.action === 'approve' ? t('approve') :
-    dialog?.action === 'reject'  ? t('reject') :
-    t('resubmit');
+  const dialogTitle = dialog?.action === 'approve' ? t('approve') : t('reject');
 
   return (
     <div style={{ marginTop: '1.5rem' }}>
@@ -139,7 +137,6 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
         <TableBody>
           {requests.map((ar) => {
             const approverRoleId = ar.approval_flow?.approver_role_id;
-            const requestorRoleId = ar.approval_flow?.requestor_role_id;
             const precedingFlowIds = ar.approval_flow?.preceded_by?.map((f) => f.id) ?? [];
             const precedingApproved = precedingFlowIds.every(
               (fid) => flowIdToStatus.get(fid) === 'approved',
@@ -148,10 +145,6 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
               && approverRoleId
               && currentUserRoleIds?.includes(approverRoleId)
               && precedingApproved;
-            const canResubmit = ar.status === 'rejected' && (
-              currentUserId === src.creator_id ||
-              (requestorRoleId ? currentUserRoleIds?.includes(requestorRoleId) : false)
-            );
             const histories = ar.approval_histories ?? [];
             const isExpanded = expandedIds.has(ar.id);
 
@@ -183,13 +176,6 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
                           </IconButton>
                         </Tooltip>
                       </>
-                    )}
-                    {canResubmit && (
-                      <Tooltip title={t('resubmit')}>
-                        <IconButton aria-label="Re-submit" color="primary" size="small" onClick={() => openDialog(ar.id, 'resubmit')}>
-                          <ReplayIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
                     )}
                   </TableCell>
                 </TableRow>

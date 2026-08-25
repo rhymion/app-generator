@@ -913,13 +913,6 @@ def generate(schema_path: str, output_dir: str) -> None:
             if can_new or can_edit:
                 val_ctx = {**ctx, **build_validation_context(ctx)}
                 _write(lib_dir / 'service_validation.ts', _render(env, 'service_validation.ts.jinja2', val_ctx))
-            if can_new or ctx.get('bridge_child_ir'):
-                # Bridge children create via parent context (cmd_167 §4), so their
-                # service imports afterCreate — emit the write-once stub for them too.
-                _write_stub(
-                    lib_dir / 'service_after_create.ts',
-                    _render(env, 'service_after_create_stub.ts.jinja2', ctx),
-                )
 
         # --- invalidate handler write-once stub (cmd_583) ---
         # x-generate.invalidate enabled without a configured handler/module:
@@ -1654,10 +1647,17 @@ def generate(schema_path: str, output_dir: str) -> None:
     # with an approvable bridge needs to be resolvable here regardless of
     # whether it declares on_approved, since Trigger #2/#3 notifications
     # fire independently of that config.
+    # cmd_818 GROUP C: one entry per VIEW (not per raw model) — a proxy
+    # view's entity_name is now the view key ('parent'), so resolution
+    # here must be keyed the same way, while the actual Prisma call still
+    # needs the real model. `entities` (extract_entities(), already in
+    # scope) already carries one {parent, model} pair per generated view;
+    # reuse it instead of iterating raw defs directly (which collapses
+    # every view sharing one raw model into a single entry keyed by model
+    # name — exactly the bug this fixes).
     approvable_bridge_entities = []
-    for def_key, def_val in defs.items():
-        if not def_key.startswith('__'):
-            continue
+    for entity in entities:
+        def_val = defs.get(f"__{entity['model']}", {})
         props = def_val.get('properties', {})
         has_approvable_bridge = any(
             isinstance(p, dict)
@@ -1667,7 +1667,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         )
         if not has_approvable_bridge:
             continue
-        approvable_bridge_entities.append(def_key[2:])
+        approvable_bridge_entities.append({'parent': entity['parent'], 'model': entity['model']})
     # Always emitted (mirrors on_approved_dispatch.ts below) — actions.ts
     # imports this unconditionally, so it must exist even with zero entities.
     _write(

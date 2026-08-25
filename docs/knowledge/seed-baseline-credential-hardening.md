@@ -252,32 +252,22 @@ would point at the admin, not at themselves.
 
 `user.x-generate.new` is `false` by default, so this code path is not
 normally reachable — no default create form/route exists for `user`, and
-this is not expected to change in the default schema. If a consumer project
-ever sets it to `true`, add a hand-written `lib/user/service_after_create.ts`
-(the standard write-once customization point, not a generator template
-change — `x-generate.new: true` is a per-project schema edit, and this fix
-is specific to the one entity a project chooses to expose it on):
+this is not expected to change in the default schema.
 
-```ts
-import type { PrismaClient } from '@/app/generated/prisma/client';
-
-type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
-
-export async function afterCreate(
-  tx: unknown,
-  created: Record<string, unknown>,
-  _data: Record<string, unknown>,
-): Promise<void> {
-  const db = tx as Tx;
-  const id = created.id as string;
-  await db.user.update({ where: { id }, data: { creator_id: id } });
-}
-```
-
-Verified against a live database: with this hook, a user created by an
-Administrator ends up with `creator_id === id` and can read/update their own
-`/setting` row; without it, `getModelPermissions('setting', ...)` and the
-`x-self-only` `creator_id` filter both correctly deny access to the row —
-reproducing the exact failure this hook exists to prevent. A hand-written
-hook was tried first and found sufficient; no generator/schema flag (e.g. a
-prospective `x-self-creator-id`) was needed.
+**The write-once `afterCreate` hook this fix used to rely on is retired**
+(approval-request creation, its only other consumer, now emits inline into
+`service.ts.jinja2`'s generated code — see
+`docs/knowledge/appendix/approval-flow.md` §16.4). If a consumer project
+ever sets `user.x-generate.new` to `true`, this self-reference stamp needs
+a different landing spot; the straightforward option is to call
+`db.user.update({ where: { id }, data: { creator_id: id } })` from the
+caller's own code right after `addUser()` returns (it resolves to `{ id }`),
+outside the generated transaction. Verified previously against a live
+database (with the id stamped, a user created by an Administrator can
+read/update their own `/setting` row via `getModelPermissions('setting',
+...)`'s `x-self-only` `creator_id` filter; without it, access is correctly
+denied — reproducing the failure this fix exists to prevent) — that
+verification predates the `afterCreate` retirement and has not been
+re-run against the caller-side approach above. Not a current follow-up
+task, since the trigger condition (`user.new: true`) has never been set on
+any known consumer schema.

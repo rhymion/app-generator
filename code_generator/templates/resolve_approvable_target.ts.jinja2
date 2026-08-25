@@ -10,6 +10,11 @@ type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction'
  * cmd_479: used to build notification links that point at the approvable's
  * own detail page (`/{entityType}/view/{id}`) instead of the
  * approval_request row, which has no view page of its own.
+ *
+ * cmd_818: entityType is approval_flow.entity_name, which is the VIEW key
+ * ('parent') — a proxy view may share its Prisma model with other views,
+ * so the match key and the table queried are no longer always the same
+ * string.
  */
 export async function resolveApprovableTarget(
   {% if entities %}tx{% else %}_tx{% endif %}: Tx,
@@ -17,9 +22,23 @@ export async function resolveApprovableTarget(
   {% if entities %}approvableId{% else %}_approvableId{% endif %}: string,
 ): Promise<{ id: string } | null> {
 {% for entity in entities %}
-  if (entityType === '{{ entity }}') {
-    return tx.{{ entity }}.findFirst({ where: { approvable_id: approvableId }, select: { id: true } });
+  if (entityType === '{{ entity.parent }}') {
+    return tx.{{ entity.model }}.findFirst({ where: { approvable_id: approvableId }, select: { id: true } });
   }
+{% endfor %}
+  return null;
+}
+
+/**
+ * Resolve entityType (approval_flow.entity_name, a view key) to the Prisma
+ * model backing it. cmd_818: on_approved_dispatch.ts/on_rejected_dispatch.ts
+ * key their own per-entity blocks by MODEL (x-approval is a raw-entity-level
+ * declaration, shared by every view over that model) — callers translate
+ * the view-scoped entity_name to a model name with this before dispatching.
+ */
+export function resolveApprovableModel({% if entities %}entityType{% else %}_entityType{% endif %}: string): string | null {
+{% for entity in entities %}
+  if (entityType === '{{ entity.parent }}') return '{{ entity.model }}';
 {% endfor %}
   return null;
 }

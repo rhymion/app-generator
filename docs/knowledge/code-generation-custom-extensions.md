@@ -1,6 +1,12 @@
 # Code Generation: Custom Extension Points
 
-The code generator (under ./code_generator) overwrites most files on every run. To minimize manual re-work while still supporting entity-specific logic, four extension points have been established. Each follows the same principle: the generator produces a boilerplate file that delegates to a separate, user-maintained file that is **never overwritten**.
+The code generator (under ./code_generator) overwrites most files on every run. To minimize manual re-work while still supporting entity-specific logic, extension points have been established. Each follows the same principle: the generator produces a boilerplate file that delegates to a separate, user-maintained file that is **never overwritten**.
+
+A fifth extension point, the post-create hook (`lib/{entity}/service_after_create.ts`, an
+`afterCreate` call inside `service.ts`'s create transaction), is retired — approval-request
+creation, its one real consumer, now emits directly into `service.ts.jinja2`'s generated code
+(see `docs/knowledge/appendix/approval-flow.md` §16.4). A hand-written `service_after_create.ts`
+left over from before the retirement is simply unused; it is no longer imported by anything.
 
 ---
 
@@ -12,7 +18,6 @@ The code generator (under ./code_generator) overwrites most files on every run. 
 | Entity-level custom component | `components/{entity}/{ComponentName}.tsx` | Add a custom widget to the list, view, or edit page |
 | Client-side form validation | `components/{entity}/form_validation.ts` | Real-time validation in FormUpsert |
 | Server-side service validation | `lib/{entity}/service_validation.ts` | Pre-write validation inside DB transactions |
-| Post-create hook | `lib/{entity}/service_after_create.ts` | Run logic inside the create transaction after the record is saved |
 
 ---
 
@@ -317,82 +322,6 @@ The client-side check is UX; the server-side check is the enforcement layer.
 
 ---
 
-## 5. Post-Create Hook (`service_after_create.ts`)
-
-Every entity with `new: true` gets an `afterCreate` call inside the Prisma `$transaction` in `service.ts`, executed after the record is created.
-
-### Generated boilerplate (service.ts)
-
-```ts
-import { afterCreate } from './service_after_create';
-
-export async function addLeaveRequest(...): Promise<{ id: string }> {
-  return await prisma.$transaction(async (tx) => {
-    await validateOnAdd(tx, { ... });
-    const created = await tx.leave_request.create({
-      data: { ..., approvable: { create: {} } },
-      include: { approvable: true },   // present when one-to-one rels exist
-    });
-    await afterCreate(tx, created as Record<string, unknown>, { ...formData });
-    return { id: created.id };
-  });
-}
-```
-
-### Generator behavior
-
-- On first generation: writes a **no-op stub** at `lib/{entity}/service_after_create.ts`.
-- On subsequent runs: stub is **never overwritten** if the file already exists.
-
-### Stub (default)
-
-```ts
-export async function afterCreate(
-  _tx: unknown,
-  _created: Record<string, unknown>,
-  _data: Record<string, unknown>,
-): Promise<void> {}
-```
-
-### Parameters
-
-| Parameter | Type | Description |
-|---|---|---|
-| `tx` | `unknown` | Prisma transaction client (cast internally as needed) |
-| `created` | `Record<string, unknown>` | The created record, including nested one-to-one relations when present (e.g. `created.approvable`) |
-| `data` | `Record<string, unknown>` | The form data passed to the service function (keyed by schema property names) |
-
-### Custom implementation
-
-```ts
-// lib/leave_request/service_after_create.ts
-import type { PrismaClient } from '@/app/generated/prisma';
-
-type Tx = Omit<PrismaClient, '$connect' | ...>;
-
-export async function afterCreate(
-  tx: unknown,
-  created: Record<string, unknown>,
-  _data: Record<string, unknown>,
-): Promise<void> {
-  const approvable = created.approvable as { id: string } | null | undefined;
-  if (!approvable?.id) return;
-
-  const flows = await (tx as Tx).approval_flow.findMany({
-    where: { entity_name: 'leave_request' },
-  });
-  for (const flow of flows) {
-    await (tx as Tx).approval_request.create({
-      data: { approvable_id: approvable.id, approval_flow_id: flow.id, status: 0 },
-    });
-  }
-}
-```
-
-**Note**: `afterCreate` runs inside the same `$transaction` as the parent `create`. Any error thrown will roll back the entire transaction including the parent record.
-
----
-
 ## File Naming Summary
 
 ```
@@ -406,5 +335,4 @@ components/{entity}/
 lib/{entity}/
   service.ts                  ← overwritten by generator
   service_validation.ts       ← stub created once, never overwritten
-  service_after_create.ts     ← stub created once, never overwritten (when new: true)
 ```

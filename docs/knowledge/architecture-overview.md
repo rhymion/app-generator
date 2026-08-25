@@ -38,7 +38,6 @@ The `x-generate` block in the entity definition controls which outputs are activ
 | `lib/{entity}/getters.ts` | `getters.ts.jinja2` | Always |
 | `lib/{entity}/service.ts` | `service.ts.jinja2` | Always |
 | `lib/{entity}/service_validation.ts` | `service_validation.ts.jinja2` | Always |
-| `lib/{entity}/service_after_create.ts` | `service_after_create_stub.ts.jinja2` | **Write-once stub** |
 | `lib/{entity}/actions.ts` | `actions.ts.jinja2` | Always |
 | `lib/{entity}/chart-getters.ts` | `chart_getters.ts.jinja2` | If `has_chart` |
 | `components/{entity}/FormUpsert.tsx` | `form_upsert.tsx.jinja2` | Always |
@@ -137,8 +136,7 @@ will be lost on the next generation run. Put customizations in the designated ex
 
 `generate.py` calls `_write_stub()` for these files, which skips writing if the file already exists:
 
-- `lib/{entity}/service_after_create.ts` — post-create hook; customize here for side effects
-- The stub templates are `service_after_create_stub.ts.jinja2` and `form_validation_stub.ts.jinja2`
+- The stub template is `form_validation_stub.ts.jinja2`
 
 ### Hand-written extension points
 

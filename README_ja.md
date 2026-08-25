@@ -140,7 +140,7 @@ code_generator/json_schema.yaml
         └── templates/*.jinja2   — Jinja2 テンプレート（出力ファイルタイプごと）
 ```
 
-`code_generator/json_schema.yaml` で定義された各エンティティに対して、パイプラインは CRUD ページ、サービス/ゲッターモジュール、API ルート、Cypress テストスペック、エンティティドキュメントを生成します。生成されたファイルは毎回の実行で上書きされます — カスタマイズは指定の拡張ポイント（`lib/{entity}/service_after_create.ts`、`components/_standard/`、`custom/`）に配置してください。
+`code_generator/json_schema.yaml` で定義された各エンティティに対して、パイプラインは CRUD ページ、サービス/ゲッターモジュール、API ルート、Cypress テストスペック、エンティティドキュメントを生成します。生成されたファイルは毎回の実行で上書きされます — カスタマイズは指定の拡張ポイント（`lib/{entity}/service_validation.ts`、`components/_standard/`、`custom/`）に配置してください。
 
 パイプライン全体のリファレンスおよび生成コードと手書きコードの境界については [docs/knowledge/architecture-overview.md](docs/knowledge/architecture-overview.md) を参照してください。
 

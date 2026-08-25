@@ -95,52 +95,59 @@ The generator detects the `one-to-one_bridge` relationship and extends the norma
 4. **`FormView.tsx`** / **`FormUpsert.tsx`** — `ApprovalSection` is rendered at the bottom with
    `src`, `permissions`, `currentUserRoleIds`, and `currentUserId` as props.
 
-### 16.4 Custom hook: `service_after_create.ts`
+### 16.4 Edge-trigger: `x-approval.submit_on`
 
-The generator only creates the `approvable` bridge record. The approval requests themselves are
-created in the `afterCreate` custom hook, emitted as a write-once stub
-(`code_generator/generate.py:603-606`, template
-`code_generator/templates/service_after_create_stub.ts.jinja2`) — generated once, never
-overwritten by a later `generate-code` run, so it's safe to hand-edit:
+`service_after_create.ts`'s write-once `afterCreate` hook is retired. Approval-request creation
+is now emitted directly into `service.ts.jinja2`'s `add{Parent}`/`update{Parent}` (built by
+`generators.py`'s `_build_approval_edge_trigger_create_code`/`_build_approval_edge_trigger_update_code`,
+`code_generator/generators.py`), for any entity with an `approvable` one-to-one_bridge — no
+custom-hook file to hand-edit.
+
+The trigger fires on the **edge** into `x-approval.submit_on`'s target value, not on a level
+check — this is the single point most likely to be gotten wrong (a row that is already at the
+target value and gets an unrelated field edited must **not** re-fire, or a second open flow would
+violate the "at most one pending flow" invariant, below):
+
+- **Create**: the row's initial state counts as an edge from "no row" (null) into whatever
+  `submit_on` requires, so an entity created *already at* the target value fires immediately.
+  No `submit_on` declared: fires unconditionally at create time (the historical default).
+- **Update**: fires only on `previous != target && new === target` — an explicit
+  previous/new comparison, never a bare `if (new === target)`.
+
+Both paths share the same guard against a second open flow:
 
 ```typescript
-// lib/leave_request/service_after_create.ts (code_generator/templates/service_after_create_stub.ts.jinja2:7-64)
-export async function afterCreate(tx, created, _data) {
-  const approvable = created.approvable as { id: string } | null | undefined;
-  if (!approvable?.id) return;
-
-  const creatorId = created.creator_id as string | null | undefined;
-  const db = tx as Tx;
-
-  // Find which roles the creator has
-  let creatorRoleIds: string[] = [];
-  if (creatorId) {
-    const creator = await db.user.findUnique({
-      where: { id: creatorId },
-      select: { roles: { select: { id: true } } },
-    });
-    creatorRoleIds = creator?.roles.map((r) => r.id) ?? [];
-  }
-
-  const flows = await db.approval_flow.findMany({
-    where: { entity_name: 'leave_request' },
+// lib/leave_request/service.ts (generated — add{Parent}, x-approval.submit_on: {status: submitted})
+if (created.status === 'submitted') {
+  const _pendingGuard = await tx.approval_request.findFirst({
+    where: { approvable_id: approvable.id, status: 'pending' },
   });
-
-  for (const flow of flows) {
-    // Skip if creator doesn't have the required requestor role
-    if (flow.requestor_role_id && !creatorRoleIds.includes(flow.requestor_role_id)) continue;
-
-    await db.approval_request.create({
-      data: { approvable_id: approvable.id, approval_flow_id: flow.id, status: 'pending' },
-    });
+  if (!_pendingGuard) {
+    const _creator = await tx.user.findUnique({ where: { id: actorId }, select: { roles: { select: { id: true } } } });
+    const _creatorRoleIds = _creator?.roles.map((r) => r.id) ?? [];
+    const _approvalFlows = await tx.approval_flow.findMany({ where: { entity_name: 'leave_request' } });
+    // ...creates approval_request per matching flow + notifyApprovalRequestCreated, then
+    // stamps approvable.creator_id — same shared block §16.9/§16.10 use
+    // (generators._build_approval_create_block_for_entity).
   }
-  // ...also notifies every approver-role holder per created approval_request
-  // (notifyApprovalRequestCreated) — see the real template for the full body.
 }
 ```
 
-`status` is a string enum value (`'pending'`), not the integer `0` — see §16.7. See
-`code-generation-custom-extensions.md` for the full `service_after_create.ts` extension point.
+```yaml
+leave_request:
+  x-approval:
+    submit_on:
+      status: submitted   # {field: value} — same shape as on_approved/on_rejected.set_fields
+```
+
+`submit_on` is a `{field: value}` mapping (exactly one entry — resolved through the same
+`resolve_set_fields()` legacy-int-enum-label path `on_approved`/`on_rejected.set_fields` use), not
+a bare scalar — kept consistent with the rest of `x-approval`'s field-scoped declarations rather
+than assuming a fixed field name.
+
+**Re-submission** is no longer a dedicated action: it is an ordinary edit of the entity's own
+status field back to `submit_on`'s value (through the normal edit form/API), which fires the
+*update*-time trigger exactly like a first submission fires the *create*-time trigger. See §16.6.
 
 ### 16.5 `approval_flow` configuration
 
@@ -154,33 +161,36 @@ export async function afterCreate(tx, created, _data) {
 | `preceded_by` | M2M self-ref | Other flows that must be Approved before this one becomes actionable |
 
 `entity_name` uses `x-entity-select: true` — a custom field that renders a dropdown listing
-all entity names from the schema.
+all generated entity view keys from the schema.
+
+**`entity_name` is the entity's view key (`parent`), not its Prisma model.** A proxy view can
+carry its own independent set of approval flows even when it shares a model with other views —
+`resolveApprovableTarget`/`resolveApprovableModel` (`lib/approval_request/resolve_target.ts`,
+generated) resolve a view key to the row/model it actually needs; `on_approved_dispatch.ts`/
+`on_rejected_dispatch.ts` stay keyed by model (`x-approval` is a raw-entity-level declaration,
+shared by every view over that model), so `actions_core.ts` translates the view key to a model
+name via `resolveApprovableModel()` before dispatching to either.
 
 ### 16.6 Approval actions
 
 Approval actions live in `lib/approval_request/actions.ts` (a manually maintained file, not
-generated). Three server actions are provided:
+generated). Two server actions are provided:
 
 | Action | Permission check | Result |
 |---|---|---|
 | `approveApprovalRequest(id, message?)` | User must have `approver_role_id`; all `preceded_by` flows for this approvable must already be `approved` (`assertApprovalOrder()`, §16.6.1) | Sets status → `approved`; notifies the entity creator (Trigger #3, §16.9 note below) |
 | `rejectApprovalRequest(id, message?, options?)` | User must have `approver_role_id`; same `assertApprovalOrder()` ordering check as approve | Sets status → `rejected`, or `terminal_rejected` if `isTerminalReject()` says so (§16.11); either way, notifies the entity creator (Trigger #3) with a payload `status` matching the actual outcome |
-| `resubmitApprovalRequest(id, message?)` | Creator or user with `requestor_role_id`; only from `rejected` (not `terminal_rejected`) — ordering does not apply, resubmit is requester-initiated | Sets status → `pending`; re-notifies the approver-role holders (see below) |
 
 Each action creates an `approval_history` row recording `pre_status`, `post_status`, `message`,
 and `creator_id` (the acting user).
 
-**Re-notification on resubmit (an earlier fix)**: `resubmitApprovalRequest()` reuses the existing `approval_request` row (only its
-`status` flips back to `pending`) rather than creating a new one, so the create-path notification
-(`notifyApprovalRequestCreated()`, Trigger #2, §16.4/next section) never re-fired on resubmission
-until this fix — approver-role holders were never told a rejected request needed their attention
-again. Both implementations (`lib/approval_request/actions_core.ts`'s `resubmitApprovalRequest()`
-and the REST route `app/api/approval_request/[id]/resubmit/route.ts`, see the "two independent
-approve/reject implementations" note in `docs/knowledge/notification-triggers.md`) now call
-`notifyApprovalRequestCreated()` again after the status flip, excluding the resubmitter. Separately,
-the Trigger #3 rejection notification's payload `status` field was hard-coded to `'rejected'` even
-for a `terminal_rejected` outcome — the notification always fired either way, but the payload
-misreported the outcome; both REST and server-action paths now report the actual status.
+**There is no dedicated resubmit action or route.** Re-submission after a non-terminal rejection
+is an ordinary edit of the entity's own status field back to `x-approval.submit_on`'s value
+(§16.4) — the same update-time edge trigger a first submission fires at create time creates a
+fresh `approval_request` and notifies the approver-role holders, with no separate code path to
+keep in sync. Separately (still true): the Trigger #3 rejection notification's payload `status`
+field must match the actual outcome (`'rejected'` vs. `'terminal_rejected'`), not a hard-coded
+literal.
 
 **Re-notification when a preceded_by chain advances**: in a multi-stage chain, every
 flow's `approval_request` is created up front when the approvable entity is created (§16.4/16.8),
@@ -305,20 +315,22 @@ one; some call sites (e.g. the approve API route) just hard-code the known liter
 ```
 Admin creates approval_flow { entity_name: 'leave_request', approver_role_id: <roleId> }
 
-User creates leave_request:
+User creates leave_request (status at or entering x-approval.submit_on's value, e.g. 'submitted'):
   service.addLeaveRequest()
     → tx.approvable.create({})            ← pre-created by generator
     → tx.leave_request.create({ approvable_id: approvable.id, ... })
-    → afterCreate(tx, created, data)      ← custom hook
-        → queries approval_flows for entity_name = 'leave_request'
+    → edge-trigger block (generated inline, §16.4) — fires because created.status matches submit_on
+        → _pendingGuard: no open flow already exists for this approvable
+        → queries approval_flows for entity_name = 'leave_request' (the view key)
         → filters by requestor_role_id (if set)
         → creates approval_request { approvable_id, approval_flow_id, status: 'pending' }
 
 View/edit page renders ApprovalSection with:
   - approval_requests with status + approval_flow + approval_histories
   - Approve/Reject buttons (shown if user has approver_role_id AND status='pending' AND preceded_by all 'approved')
-  - Resubmit button (shown if status='rejected' AND user is creator or has requestor_role_id —
-    NOT offered for status='terminal_rejected', see §16.11)
+  - No resubmit button — re-submission after a non-terminal rejection is an ordinary edit of the
+    entity's own status field back to submit_on's value, which fires the same edge-trigger block
+    above via updateLeaveRequest() instead of addLeaveRequest() (see §16.4/§16.6)
 
 Approver clicks Approve:
   approveApprovalRequest(id)
@@ -513,11 +525,20 @@ receiving_receipt_line:
 per entity; generated, `code_generator/generate.py:1186-1215`, template
 `on_rejected_dispatch.ts.jinja2`) — exposes `dispatchOnRejected(tx, entityType, approvableId,
 rejectedByUserId)`, called from the reject path after `approval_request.status` is updated,
-plus `isTerminalReject(entityType)` — a lookup against every entity marked `terminal: true`. Terminal rejection means the UI's Resubmit
-button (§16.8) is not offered for that entity type; a rejection is final rather than
-returning to Pending. For terminal entities, dispatch reuses the same `approvable.approved_at`
-column as the fire-once guard (§16.9) — despite the name, it just means "final event already
-dispatched for this approvable," approve or reject.
+plus `isTerminalReject(entityType)` — a lookup against every entity marked `terminal: true`. For
+terminal entities, dispatch reuses the same `approvable.approved_at` column as the fire-once guard
+(§16.9) — despite the name, it just means "final event already dispatched for this approvable,"
+approve or reject. `on_rejected.set_fields` is expected to move the entity's status to a value
+outside the normal edit flow's reach (e.g. `terminal_rejected`), so re-submission has no
+`submit_on`-value target to edit back into under the intended workflow.
+
+**Known gap**: "terminal reject → no resubmission" is not independently machine-enforced at the
+edge-trigger level (§16.4) the way "at most one open flow" is. The edge trigger's `_pendingGuard`
+only blocks a *second* pending flow — a terminal-rejected approvable has none, so if something
+did set the entity's status back to `submit_on`'s value (a direct API write, or an edit form that
+doesn't otherwise restrict it), a fresh `approval_request` would be created. Closing this
+gap needs either previous-state-aware update validation or a status-field write path restricted to
+the approval flow itself — both deferred design questions, not yet decided.
 
 `emit_hook: true` generates a `service_after_reject.ts` once-stub (same non-overwriting
 convention as `service_after_approve.ts`, §16.9), with signature

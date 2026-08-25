@@ -2,7 +2,7 @@
 
 import { dispatchOnApproved } from '@/lib/approval_request/on_approved_dispatch';
 import { isTerminalReject, dispatchOnRejected } from '@/lib/approval_request/on_rejected_dispatch';
-import { resolveApprovableTarget } from '@/lib/approval_request/resolve_target';
+import { resolveApprovableTarget, resolveApprovableModel } from '@/lib/approval_request/resolve_target';
 import { createApprovalActions } from '@/lib/approval_request/actions_core';
 
 // This is the only place in the approval_request flow that statically
@@ -13,6 +13,7 @@ import { createApprovalActions } from '@/lib/approval_request/actions_core';
 // §2.4.
 const approvalActions = createApprovalActions({
   resolveApprovableTarget,
+  resolveApprovableModel,
   dispatchOnApproved,
   dispatchOnRejected,
   isTerminalReject,
@@ -39,6 +40,3 @@ export async function rejectApprovalRequest(
   return approvalActions.rejectApprovalRequest(id, message, options);
 }
 
-export async function resubmitApprovalRequest(id: string, message?: string): Promise<void> {
-  return approvalActions.resubmitApprovalRequest(id, message);
-}

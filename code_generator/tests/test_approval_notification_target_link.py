@@ -28,6 +28,7 @@ from generators import (
     _build_approval_create_block_for_entity,
     _build_split_approval_inherit_block,
     _build_approval_lines_post_create_code,
+    _build_approval_edge_trigger_create_code,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -140,25 +141,19 @@ def test_approval_lines_post_create_code_resolves_target_before_notify():
 
 
 # ---------------------------------------------------------------------------
-# service_after_create_stub.ts.jinja2 (Trigger #2, top-level single entity)
+# _build_approval_edge_trigger_create_code (cmd_818: replaces the retired
+# service_after_create_stub.ts.jinja2 -- Trigger #2, top-level single entity,
+# now emitted inline into service.ts.jinja2's add{Parent}).
 # ---------------------------------------------------------------------------
 
-def test_stub_template_passes_own_entity_name_and_id():
-    out = _env().get_template('service_after_create_stub.ts.jinja2').render(
-        model='leave_request',
-        one_to_one_rels=[{'target': 'approvable'}],
+def test_edge_trigger_create_passes_own_entity_name_and_id():
+    approvable_rel = {'relation_name': 'approvable', 'prop_name': 'approvable_id'}
+    out = _build_approval_edge_trigger_create_code(
+        approvable_rel, 'leave_request', None, None,
     )
     assert "targetEntityName: 'leave_request'" in out
-    assert 'targetId' in out
-    assert 'created.id' in out
-
-
-def test_stub_template_empty_when_no_approvable_bridge():
-    out = _env().get_template('service_after_create_stub.ts.jinja2').render(
-        model='leave_request',
-        one_to_one_rels=[],
-    )
-    assert 'notifyApprovalRequestCreated' not in out
+    assert 'targetId: created.id' in out
+    assert 'notifyApprovalRequestCreated' in out
 
 
 # ---------------------------------------------------------------------------
@@ -223,12 +218,27 @@ def test_split_route_no_unused_var_when_not_approvable():
 
 def test_resolve_target_template_emits_one_branch_per_entity():
     out = _env().get_template('resolve_approvable_target.ts.jinja2').render(
-        entities=['leave_request', 'receiving_receipt'],
+        entities=[
+            {'parent': 'leave_request', 'model': 'leave_request'},
+            {'parent': 'receiving_receipt', 'model': 'receiving_receipt'},
+        ],
     )
     assert "if (entityType === 'leave_request')" in out
     assert 'tx.leave_request.findFirst({ where: { approvable_id: approvableId }' in out
     assert "if (entityType === 'receiving_receipt')" in out
     assert 'return null;' in out
+
+
+def test_resolve_target_template_uses_parent_key_model_query_when_they_differ():
+    """cmd_818 GROUP C2: a proxy view's entity_name (parent) may differ from
+    its Prisma model -- the match key and the queried table must not be
+    conflated."""
+    out = _env().get_template('resolve_approvable_target.ts.jinja2').render(
+        entities=[{'parent': 'purchase_request_gate', 'model': 'purchase_request'}],
+    )
+    assert "if (entityType === 'purchase_request_gate')" in out
+    assert 'tx.purchase_request.findFirst(' in out
+    assert "if (entityType === 'purchase_request_gate') return 'purchase_request';" in out
 
 
 def test_resolve_target_template_valid_with_zero_entities():

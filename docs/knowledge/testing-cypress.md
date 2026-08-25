@@ -154,10 +154,9 @@ checks is a hole, not an exemption).
 
 **Scope note**: this rule only walks *generated* specs (mirrors the existing
 `raw:*`/`write:direct` rule enumeration — schema entities with `api: true`). It does
-not yet cover proj_b's 5 hand-written `cypress/e2e/api/*.cy.ts` files
+not yet cover proj_b's hand-written `cypress/e2e/api/*.cy.ts` files
 (`import_batch2.cy.ts`, `round_trip.cy.ts`, `user_import.cy.ts`,
-`multi_stage_approval_order_reached.cy.ts`,
-`approval_request_resubmit_notification.cy.ts` — still `cy.login()`-based as of
+`multi_stage_approval_order_reached.cy.ts` — still `cy.login()`-based as of
 this writing, since export/import/approve/reject now accept `X-API-Key` too) or
 proj_c's `prj/`-owned hand-written API specs. Both are tracked as a follow-up (per
 this rule's own classification report); extending this same rule (or a parallel scan) to hand-written
