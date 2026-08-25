@@ -325,3 +325,61 @@ def test_x_nav_survives_raw_view_split_for_paired_entity(tmp_path):
         f"build_nav_config must resolve organization's x-nav via extract_entities' own "
         f"definition_key ({org_entity['definition_key']!r}) / model ({org_entity['model']!r})"
     )
+
+
+# ---------------------------------------------------------------------------
+# cmd_813 ①: x-nav resolved at VIEW unit (proxy views sharing one model can
+# sit in different groups/orders independently), with fallback to the raw
+# model's x-nav when a view declares none of its own.
+# ---------------------------------------------------------------------------
+
+def _proxy_entity(parent: str, model: str) -> dict:
+    return {
+        'parent': parent,
+        'model': model,
+        'definition_key': parent,
+        'children': [],
+        'generate_config': {'list': True},
+    }
+
+
+def test_two_proxy_views_sharing_model_get_independent_groups():
+    """setting1/setting2-shaped case: same model, two views, each with its
+    own x-nav declared directly under its own (pass-through) definitions
+    key — must resolve to two different groups/orders, not collapse onto
+    one shared model-keyed entry (cmd_813 ①, cmd_812 Q4)."""
+    view_a = _proxy_entity('view_a', 'shared_model')
+    view_b = _proxy_entity('view_b', 'shared_model')
+    schema = _schema(definitions={
+        'view_a': {'x-nav': {'parent': 'group_a', 'order': 1}},
+        'view_b': {'x-nav': {'parent': 'group_b', 'order': 5}},
+    })
+    result = build_nav_config([view_a, view_b], schema)
+    assert result['entity_group']['view_a'] == {'group': 'group_a', 'order': 1}
+    assert result['entity_group']['view_b'] == {'group': 'group_b', 'order': 5}
+    assert 'shared_model' not in result['entity_group']
+
+
+def test_proxy_view_without_own_x_nav_falls_back_to_raw_model():
+    """A proxy view with no view-level x-nav of its own still resolves the
+    raw model's x-nav — the fallback cmd_813 ① explicitly requires keeping
+    (do not drop the raw-model reference entirely)."""
+    view = _proxy_entity('view_a', 'shared_model')
+    schema = _schema(definitions={
+        '__shared_model': {'x-nav': {'parent': 'model_group', 'order': 2}},
+        'view_a': {},
+    })
+    result = build_nav_config([view], schema)
+    assert result['entity_group']['view_a'] == {'group': 'model_group', 'order': 2}
+
+
+def test_proxy_view_own_x_nav_overrides_raw_model_x_nav():
+    """When both the view and its raw model declare x-nav, the view-level
+    declaration wins (view unit takes priority; model is the fallback)."""
+    view = _proxy_entity('view_a', 'shared_model')
+    schema = _schema(definitions={
+        '__shared_model': {'x-nav': {'parent': 'model_group', 'order': 2}},
+        'view_a': {'x-nav': {'parent': 'view_group', 'order': 9}},
+    })
+    result = build_nav_config([view], schema)
+    assert result['entity_group']['view_a'] == {'group': 'view_group', 'order': 9}

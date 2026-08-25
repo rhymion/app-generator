@@ -361,7 +361,7 @@ def _update_site_config(path: Path, nav_entities: list, nav_config: dict) -> boo
         if href in existing_hrefs:
             continue
         label = to_title_case(entity['parent'])
-        group_info = entity_group.get(entity['model'])
+        group_info = entity_group.get(entity['parent'])
         if group_info:
             new_link_lines.append(
                 f'    {{ label: "{label}", href: "{href}", '
@@ -442,11 +442,16 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
     `entities` — the full list returned by extract_entities().
     `output_dir` — project root (same as passed to generate()).
     """
-    # Entities that appear in the sidebar nav:
-    # must be a "primary" entity (parent == model) with a list page.
+    # Entities that appear in the sidebar nav: any entity with a list page,
+    # including a proxy view (parent != model, e.g. a demo fixture like
+    # 'setting1' sharing a model with 'setting2') — cmd_813. The real entity
+    # is already generated (list page, API, getters, search); the door was
+    # the only thing missing. A proxy view that should stay hidden opts out
+    # via its own `x-generate.list: false` (the exception lives on the
+    # declaring side, not baked into the generator by entity name).
     nav_entities = [
         e for e in entities
-        if e['parent'] == e['model'] and e['generate_config'].get('list', True)
+        if e['generate_config'].get('list', True)
     ]
 
     # EntityLabel keys for all entities (including alternate-model entities like setting*)

@@ -51,8 +51,11 @@ def _entity(model: str, definition_key: str | None = None) -> dict:
 
 
 def _run_generate(path: Path, entities: list, schema: dict) -> tuple[list, dict]:
+    # Mirrors generators_i18n.update_i18n_and_config()'s nav_entities filter
+    # (cmd_813: any entity with a list page, proxy views included — no
+    # parent == model gate).
     nav_config = build_nav_config(entities, schema)
-    nav_entities = [e for e in entities if e['parent'] == e['model'] and e['generate_config'].get('list', True)]
+    nav_entities = [e for e in entities if e['generate_config'].get('list', True)]
     _update_site_config(path, nav_entities, nav_config)
     return nav_entities, nav_config
 
@@ -115,6 +118,48 @@ def test_grouped_navlink_and_navgroup_roundtrip(tmp_path: Path) -> None:
         'generate -> cleanup -> generate must reproduce byte-for-byte identical output, '
         'including navGroups and the group tag on navLinks'
     )
+
+
+def test_proxy_view_nav_entry_roundtrip(tmp_path: Path) -> None:
+    """cmd_813: a proxy view (parent != model, e.g. a 'setting1'-shaped
+    demo fixture) must get its own sidebar entry and survive the same
+    generate -> cleanup -> generate roundtrip as an ordinary entity."""
+    path = tmp_path / 'site-config.ts'
+    path.write_text(_BASELINE, encoding='utf-8')
+
+    entities = [
+        {
+            'parent': 'view_a', 'model': 'shared_model', 'definition_key': 'view_a',
+            'children': [],
+            'generate_config': {'list': True, 'view': True, 'new': True, 'edit': True, 'delete': True},
+        },
+        {
+            'parent': 'view_b', 'model': 'shared_model', 'definition_key': 'view_b',
+            'children': [],
+            'generate_config': {'list': True, 'view': True, 'new': True, 'edit': True, 'delete': True},
+        },
+    ]
+    schema = {
+        'definitions': {
+            'view_a': {'x-nav': {'parent': 'group_a', 'order': 1}},
+            'view_b': {'x-nav': {'parent': 'group_b', 'order': 2}},
+        },
+    }
+
+    nav_entities, nav_config = _run_generate(path, entities, schema)
+    after_generate_1 = path.read_text(encoding='utf-8')
+    assert '/view_a' in after_generate_1
+    assert '/view_b' in after_generate_1
+    assert 'group: "group_a"' in after_generate_1
+    assert 'group: "group_b"' in after_generate_1
+
+    nav_hrefs = [f'/{e["parent"]}' for e in nav_entities]
+    nav_group_slugs = [g['slug'] for g in nav_config['groups']]
+    cleanup._clean_site_config(path, nav_hrefs, nav_group_slugs)
+    assert path.read_text(encoding='utf-8') == _BASELINE
+
+    _update_site_config(path, nav_entities, nav_config)
+    assert path.read_text(encoding='utf-8') == after_generate_1
 
 
 def test_nested_group_hierarchy_roundtrip(tmp_path: Path) -> None:

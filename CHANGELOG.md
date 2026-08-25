@@ -34,6 +34,36 @@ and this project adheres to Semantic Versioning (https://semver.org/).
     follow-up.
 
 ### Fixed
+- **A proxy view (`parent != model`, e.g. a schema entity that `allOf`-wraps
+  another entity instead of its own Prisma model) with `x-generate.list:
+  true` never got a sidebar link, even though its list page, API route,
+  getters, and search were already generated and working.** Three gates
+  were all keyed on `parent == model`, which is false for every proxy view
+  regardless of which one:
+  - `generators_i18n.py`'s `nav_entities` filter — now just
+    `generate_config.list`; a proxy view that should stay hidden opts out
+    via its own `x-generate.list: false`.
+  - `nav_config.py`'s `entity_group` — was keyed on `model`, so two proxy
+    views sharing one model were forced into the same nav group/order.
+    Now keyed on `parent` (the view/route name), and `x-nav` itself
+    resolves at the view unit first (falling back to the raw model's
+    `x-nav` when the view declares none of its own) — two proxy views
+    sharing a model can now sit in independent nav groups/orders.
+  - `generators.py`'s `seed_entities_context()` (drives
+    `scripts/generated/seed-entities.ts`, consumed by
+    `grant-all-permissions.ts`) required a direct `id` property, which
+    structurally excludes every proxy view. `requirePermission()` checks
+    each entity's own route name, not the underlying model, so this left
+    every proxy view's own route permanently ungranted. Now excludes only
+    an entity actually declaring `x-self-only: {admin_bypass: true}` (the
+    framework's own `setting` is the only one that currently does) —
+    schema-driven, not name- or structure-based.
+
+  `cleanup.py:624`'s own narrower `parent == model` mirror is
+  intentionally left untouched — measured (not inferred) that a proxy
+  view's added nav entry survives a `cleanup.py` run intact, since
+  cleanup's predicate never selects it for removal in the first place.
+  See docs/knowledge/proxy-view-nav-and-permission-scope.md.
 - **`db:createApiUserWithPermission` (test fixture) never enrolled its actor in
   any organization**, so the generated `4.4`/`4.5` FK-read-permission
   graceful-degradation tests (`test_api_spec.cy.ts.jinja2`) 404'd before

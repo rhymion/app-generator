@@ -20,6 +20,7 @@ from helpers.schema_helpers import (
     resolve_ledger_domain,
     get_entity_properties,
     get_write_only_field_names,
+    get_self_only_flags,
 )
 from build_context import get_uri_kind
 
@@ -5442,31 +5443,65 @@ def _seed_entity_is_internal_only(bare_key: str, defs: dict) -> bool:
     return all(x_generate.get(f) is False for f in _SEED_ENTITY_CORE_FLAGS)
 
 
+def _seed_entity_is_self_only_admin_bypass(bare_key: str, defs: dict) -> bool:
+    """True when `bare_key` (or its raw twin) declares
+    `x-self-only: {admin_bypass: true}` (cmd_813 ③) — the schema-driven,
+    entity-name-agnostic reason 'setting' alone is excluded: an
+    Administrator already reaches it via trySelfOnlyAdminBypass()
+    (lib/authz.ts, driven by lib/self_only_admin_bypass_entities.ts), so a
+    redundant grant-all-permissions entry is unnecessary. A proxy view with
+    no such declaration (e.g. a demo fixture like 'setting1') carries no
+    self-only semantics and must NOT be excluded by this check — only
+    entities that actually opt into x-self-only admin_bypass are.
+
+    Two-level lookup, same order build_context.py's per-entity context
+    builder uses for the identical x-self-only declaration: the view/
+    pass-through definitions key first (where a proxy view like 'setting'
+    keeps its own x-self-only, never merged into the shared raw model it
+    proxies), falling back to the raw ('__'-prefixed) entity for the
+    ordinary paired-entity case.
+    """
+    is_self_only, admin_bypass = get_self_only_flags(defs.get(bare_key, {}) or {})
+    if not is_self_only:
+        raw_defn = defs.get(f'__{bare_key}') or defs.get(bare_key) or {}
+        is_self_only, admin_bypass = get_self_only_flags(raw_defn)
+    return is_self_only and admin_bypass
+
+
 def seed_entities_context(schema: dict) -> dict:
     """Build context for scripts/generated/seed-entities.ts.
 
     Derives the "independent entity" population `scripts/grant-all-
     permissions.ts` (a development / verification tool, NOT the production
-    seed) grants full Administrator CRUD on. An entity is independent when
-    it satisfies all of:
+    seed) grants full Administrator CRUD on. requirePermission() (lib/
+    authz.ts, called from actions.ts.jinja2) checks permissions keyed to
+    each entity's own VIEW/route name (`parent`), not the underlying
+    Prisma model — so a proxy view sharing a model with other views (e.g.
+    a demo fixture like 'setting1' sharing a model with 'setting2') needs
+    its own grant; granting only the shared raw model's name would leave
+    every proxy view's own route ungranted.
+
+    An entity name is independent (i.e. gets its own grant) when it
+    satisfies all of:
 
     1. It is a key of schema['definitions'] (not a Python-injected
        system_first table — this structurally excludes audit_log and
        mfa_recovery_code, neither of which is ever a definitions key; see
        db_helpers_context's system_first list for the analogous case).
-    2. It has an 'id' property directly (bare 'entity', or the '__entity'
-       raw twin of a raw/view split pair — the view side proxies id via
-       allOf and never carries it directly, same resolution db_helpers_
-       context uses for its deletion-order base_entities).
+    2. It either has an 'id' property directly (bare 'entity', or the
+       '__entity' raw twin of a raw/view split pair — same resolution
+       db_helpers_context uses for its deletion-order base_entities), OR
+       it is a proxy view (an allOf-wrapper referencing another entity,
+       cmd_813 ③) — the latter is what makes setting1/setting2-shaped
+       demo fixtures newly eligible; a raw '__'-prefixed entity is never
+       itself treated as a proxy view (it IS the id-bearing side).
     3. It is not an x-bridge junction table target (defn.x-bridge.name).
     4. It is not an internal-only marker/bridge-target entity (see
        _seed_entity_is_internal_only above).
-
-    Deliberately excludes 'setting': it is a proxy view of the same
-    underlying user row (allOf: user) and never satisfies condition 2 on
-    its own account. Administrator access to any user's settings already
-    flows through trySelfOnlyAdminBypass() (lib/authz.ts) — a second,
-    redundant grant keyed to 'setting' is unnecessary.
+    5. It does not declare `x-self-only: {admin_bypass: true}` (see
+       _seed_entity_is_self_only_admin_bypass above) — 'setting' is the
+       only entity this currently excludes; a proxy view without that
+       declaration (setting1-8 in the proj_c demo fixtures) is included.
     """
     defs = schema['definitions']
 
@@ -5483,9 +5518,15 @@ def seed_entities_context(schema: dict) -> dict:
         bare_key = key[2:] if key.startswith('__') else key
         if bare_key in xbridge_table_names:
             continue
-        if defn.get('type') != 'object' or 'id' not in defn.get('properties', {}):
+
+        has_direct_id = defn.get('type') == 'object' and 'id' in defn.get('properties', {})
+        is_proxy_view = not has_direct_id and not key.startswith('__') and 'allOf' in defn
+        if not has_direct_id and not is_proxy_view:
             continue
+
         if _seed_entity_is_internal_only(bare_key, defs):
+            continue
+        if _seed_entity_is_self_only_admin_bypass(bare_key, defs):
             continue
         candidates.add(bare_key)
 
