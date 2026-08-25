@@ -67,6 +67,10 @@ type Props = {
   src: { creator_id?: string | null; approvable?: { id: string; approval_requests: ApprovalRequest[] } | null };
   permissions?: ModelPermissions;
   currentUserRoleIds?: string[];
+  // Unused since resubmit's removal (cmd_818 D1) -- kept in the Props type
+  // because form_view.tsx.jinja2's generic x-custom-components wiring
+  // always passes currentUserId to every view-target component.
+  currentUserId?: string | null;
 };
 
 export default function ApprovalSection({ src, currentUserRoleIds }: Props) {
