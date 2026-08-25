@@ -72,6 +72,22 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   function that both sides now call; `parent == model` entities' existing
   cleanup behavior (e.g. `/user`, `/role`) is unchanged.
   See docs/knowledge/proxy-view-nav-and-permission-scope.md.
+- **`GET /api/user/{id}` leaked the password hash and raw `api_key`** —
+  `write_only_field_names`/`write_only_props` (`build_context.py`,
+  `generators.py`) were computed from `filtered_props` (the subset narrowed
+  by an entity's `x-generate.fields` allowlist) instead of the entity's
+  full property set. `get{Parent}Detail()`'s Prisma query has no `select`
+  clause, so it always fetches every column regardless of that allowlist —
+  for an entity whose `fields` list happens to omit a write-only column
+  (this repo's own `user` entity: `fields: [name, image_id, roles]`,
+  `password`/`api_key` excluded), the write-only set computed empty and the
+  unconditional `...user` spread in `getUserDetail()` returned the raw
+  bcrypt hash and API key straight through the REST response body. Both
+  call sites now derive the write-only set from `model_def.get('properties',
+  {})` instead. Confirmed red (leaking) → green (stripped) by curl against
+  `GET /api/user/{id}` and `GET /api/setting/{id}` in an isolated worktree.
+  See docs/knowledge/code-generation-custom-extensions.md "Upsert-only
+  fields are treated as write-only".
 - **`db:createApiUserWithPermission` (test fixture) never enrolled its actor in
   any organization**, so the generated `4.4`/`4.5` FK-read-permission
   graceful-degradation tests (`test_api_spec.cy.ts.jinja2`) 404'd before

@@ -2882,15 +2882,26 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
             'view' in ((filtered_props[p].get('x-custom-component') or {}).get('target') or []))
     ]
 
-    # write_only_props (cmd_801): credential-material fields declared
-    # upsert-only (e.g. password, api_key — see is_write_only_prop()).
-    # Never rendered on the view page at all -- not even as a generic
-    # read-only text field -- so no path here falls through to `other_flds`
-    # and echoes the raw stored secret. get{{Parent}}Detail() (getters.ts.jinja2)
-    # strips these same fields from `src` before this component ever
-    # receives them, so this is belt-and-suspenders against a future field
-    # that reaches FormView some other way.
-    write_only_props = set(get_write_only_field_names(filtered_props))
+    # write_only_props (cmd_801, widened in subtask_810e): credential-material
+    # fields declared upsert-only (e.g. password, api_key — see
+    # is_write_only_prop()). Never rendered on the view page at all -- not
+    # even as a generic read-only text field -- so no path here falls
+    # through to `other_flds` and echoes the raw stored secret.
+    # get{{Parent}}Detail() (getters.ts.jinja2) strips these same fields from
+    # `src` before this component ever receives them, so this is
+    # belt-and-suspenders against a future field that reaches FormView some
+    # other way.
+    #
+    # Computed from model_def's full properties (not filtered_props): an
+    # entity whose x-generate.fields allowlist omits a write-only field
+    # (e.g. this repo's own `user` entity — fields: [name, image_id, roles],
+    # password/api_key excluded) would otherwise make this set empty here,
+    # which is harmless for FormView (the field was never going to render
+    # anyway) but was the same root cause that let getters.ts's read-path
+    # spread leak the raw column when write_only_field_names was computed
+    # the same filtered_props-based way (see build_context.py's
+    # write_only_field_names, the actual leak site fixed alongside this).
+    write_only_props = set(get_write_only_field_names(model_def.get('properties', {})))
 
     date_time_flds     = []
     image_flds         = []
