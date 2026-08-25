@@ -286,7 +286,9 @@ PR upgrading the offending dep first; the rest of the change comes after.
 `npm run check:generated` bans `prisma.$queryRaw` / `prisma.$executeRaw` everywhere in
 generator-emitted files and bans direct `prisma.<model>.{create,update,delete,upsert,
 createMany,updateMany,deleteMany}` calls outside the entity service layer
-(`lib/<entity>/service.ts`, `service_validation.ts`, `service_after_create.ts`).
+(`lib/<entity>/service.ts`, `service_validation.ts`, and `service_after_create.ts` if a
+project has one left over from before that write-once hook's retirement — see
+`docs/knowledge/code-generation-custom-extensions.md`).
 Reads (`findUnique`, `findMany`, …) are unaffected so API routes and server actions can
 still load the row they need to permission-check before delegating to the service.
 Genuine exceptions go in `code_generator/check_generated_allowlist.yaml` with a recorded

@@ -33,34 +33,31 @@ built to notify every user holding the approving role for a newly
 created `approval_request`, excluding the requester and optionally
 scoped to an organization.
 
-For a top-level entity, it is wired into the generated
-`service_after_create_stub.ts.jinja2` afterCreate hook (called once inside
-the entity's `$transaction()`, using `tx` for the role/user lookup reads
-only — `notify()` itself is fire-and-forget and not part of that
-transaction) — `leave_request`/`receiving_receipt` below are illustrative
-example entity names for a consuming schema (this repo's own default
-`json_schema.yaml` declares no entity with a `one-to-one_bridge` to
-`approvable`, so neither actually exists in this repo's own generated
-`lib/`; see `docs/knowledge/appendix/approval-flow.md` §16.2). Wiring a
-new entity's approval flow up to this trigger is a matter of calling
-`notifyApprovalRequestCreated(tx, approvalRequestId, options)` from that
-entity's own `service_after_create.ts` (e.g.
-`lib/leave_request/service_after_create.ts`) once its `approval_request`
-row is created — the same call also appears in the split-action route
-(`code_generator/templates/split_action_route.ts.jinja2`) for
+For a top-level entity, it is wired into the edge-trigger block
+`generators.py` emits directly into `service.ts.jinja2`'s
+`add{Parent}`/`update{Parent}` (called once inside the entity's
+`$transaction()`, using `tx` for the role/user lookup reads only —
+`notify()` itself is fire-and-forget and not part of that transaction) —
+`leave_request`/`receiving_receipt` below are illustrative example entity
+names for a consuming schema (this repo's own default `json_schema.yaml`
+declares no entity with a `one-to-one_bridge` to `approvable`, so neither
+actually exists in this repo's own generated `lib/`; see
+`docs/knowledge/appendix/approval-flow.md` §16.2/§16.4). Wiring a new
+entity's approval flow up to this trigger needs nothing hand-written — any
+entity with the `approvable` bridge gets the edge-trigger block
+automatically; the same underlying call also appears in the split-action
+route (`code_generator/templates/split_action_route.ts.jinja2`) for
 `x-approval-lines` children (§16.10).
 
-**Note**: this trigger also fires on **resubmission** — re-submitting a
-rejected `approval_request` reuses the existing row (only its `status`
-flips back to `pending`) rather than creating a new one, so this trigger
-did not originally re-fire for that transition; approver-role holders were
-never told a rejected request needed their attention again after a
-resubmit. Both `resubmitApprovalRequest()` implementations (the server
-action in `lib/approval_request/actions_core.ts` and the REST route
-`app/api/approval_request/[id]/resubmit/route.ts`) now call
-`notifyApprovalRequestCreated()` again after the status flip, excluding
-the resubmitter. See `docs/knowledge/appendix/approval-flow.md` §16.6 for
-the full before/after.
+**Note**: this trigger also fires on **re-submission** — after a
+non-terminal rejection, editing the entity's own status field back to
+`x-approval.submit_on`'s value fires the same update-time edge trigger a
+first-time submission fires at create time, creating a fresh
+`approval_request` row (not reusing the rejected one) and notifying the
+approver-role holders normally. There is no separate resubmit code path
+to keep in sync with this trigger. See
+`docs/knowledge/appendix/approval-flow.md` §16.4/§16.6 for the full
+mechanism.
 
 ### Link target convention
 
@@ -76,19 +73,26 @@ which entity it belongs to, only the reverse (the target entity holds
 the target entity/row is already known at the call site:
 
 - **Known at call time** (Trigger #2, from any entity's own generated
-  code — the top-level `service_after_create_stub.ts.jinja2`, the
-  x-approval-lines post-create block, and the split-action route):
+  code — the top-level edge-trigger block, the x-approval-lines
+  post-create block, and the split-action route):
   the caller passes `targetEntityName`/`targetId` straight into
   `notifyApprovalRequestCreated()`'s options — no DB lookup needed, the
   entity name is a template-time literal and the row was just created.
 - **Only known at runtime** (Trigger #3, `lib/approval_request/actions.ts`
   approve/reject — a single shared handler for every entity's approval
-  requests): `lib/approval_request/resolve_target.ts` (generated,
-  mirrors `on_approved_dispatch.ts`'s per-entity branch pattern) maps
-  `entity_name + approvable_id -> { id }` via one
-  `tx.{entity}.findFirst({ where: { approvable_id } })` branch per
-  entity declaring an `approvable` bridge. Always emitted, even with
-  zero such entities, since `actions.ts` imports it unconditionally.
+  requests): `lib/approval_request/resolve_target.ts` (generated) maps
+  `entity_name` (a view key) `+ approvable_id -> { id }` via one
+  `tx.{model}.findFirst({ where: { approvable_id } })` branch per view
+  declaring an `approvable` bridge — keyed by view since a proxy view can
+  carry its own approval flows independent of other views sharing its
+  model (`docs/knowledge/appendix/approval-flow.md` §16.5), but querying
+  the row under the real Prisma model. The same module also exports
+  `resolveApprovableModel(entityType)`, which `actions_core.ts` uses to
+  translate the view key to a model name before calling
+  `on_approved_dispatch.ts`/`on_rejected_dispatch.ts` — those stay keyed
+  by model, since `x-approval` is a raw-entity-level declaration shared by
+  every view over that model. Both are always emitted, even with zero
+  such entities, since `actions.ts` imports them unconditionally.
 
 If neither can resolve a target, `href` is omitted (not defaulted to a
 guessed or broken link) — the bell shows a non-clickable notice instead.

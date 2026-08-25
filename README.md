@@ -159,7 +159,7 @@ code_generator/json_schema.yaml
         └── templates/*.jinja2   — Jinja2 templates (one per output file type)
 ```
 
-For each entity defined in `code_generator/json_schema.yaml`, the pipeline generates CRUD pages, service/getter modules, API routes, Cypress test specs, and entity documentation. All generated files are overwritten on each run — customizations belong in the designated extension points (`lib/{entity}/service_after_create.ts`, `components/_standard/`, `custom/`).
+For each entity defined in `code_generator/json_schema.yaml`, the pipeline generates CRUD pages, service/getter modules, API routes, Cypress test specs, and entity documentation. All generated files are overwritten on each run — customizations belong in the designated extension points (`lib/{entity}/service_validation.ts`, `components/_standard/`, `custom/`).
 
 See [docs/knowledge/architecture-overview.md](docs/knowledge/architecture-overview.md) for the full pipeline reference and generated-vs-hand-written boundary documentation.
 

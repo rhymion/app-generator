@@ -6,6 +6,30 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- **Approval-request creation moves off the write-once `afterCreate` hook
+  (`lib/{entity}/service_after_create.ts`, now retired) into an edge-trigger
+  emitted directly into `service.ts.jinja2`'s generated `add{Parent}`/
+  `update{Parent}`.** The trigger fires on the transition into a new
+  `x-approval.submit_on: {field: value}` declaration's target value — at
+  create time from "no row" (unconditionally, if `submit_on` is undeclared —
+  the previous default), and at update time only on an explicit
+  previous-value-differs / new-value-matches edge, never a level check. Both
+  paths share a guard against a second open flow for the same approvable.
+  `approval_flow.entity_name` now resolves through the entity's view key
+  rather than its Prisma model, so a proxy view can carry its own
+  independent approval flows even when it shares a model with other views;
+  `resolve_target.ts`'s resolver and model lookup follow suit, while
+  `on_approved_dispatch.ts`/`on_rejected_dispatch.ts` stay keyed by model
+  (`x-approval` is a raw-entity-level declaration) with the server action
+  translating between the two before dispatching. `resubmitApprovalRequest`
+  (the dedicated server action, REST route, and its `ApprovalSection.tsx`
+  button) is removed — re-submission after a non-terminal rejection is now
+  an ordinary edit of the entity's own status field back to `submit_on`'s
+  value, which fires the same update-time trigger a first submission fires
+  at create time. See `docs/knowledge/appendix/approval-flow.md` §16.4/§16.6
+  for the full mechanism, including a known gap: terminal rejection's
+  "cannot resubmit" is a workflow expectation, not yet independently
+  enforced against a direct status-field write.
 - **`user.image` moved from a plain URL string to a direct-attachment FK
   (`x-relationship: {target: attachment, type: direct}`)** — the profile
   picture is now an uploaded file tracked as an `attachment` row (giving it

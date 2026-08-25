@@ -287,8 +287,10 @@ implementation these helpers were extracted from), `api_export_route.ts.jinja2`,
 `.../reject/route.ts` (via `requireDualAuth`). Everything else under `app/api/<entity>/` is either
 plain API-key-only (`authenticateApiKey`, the entity CRUD/bulk/detail routes — the browser UI
 reaches these through server actions, not this REST surface) or plain session-only
-(`app/api/approval_request/[id]/resubmit/route.ts` is actually API-key-only too, and
-`app/api/notifications/*` is session-only — neither was in that dual-auth rollout's scope).
+(`app/api/notifications/*` is session-only — not in that dual-auth rollout's scope). There is no
+`app/api/approval_request/[id]/resubmit/route.ts` — the dedicated resubmit action/route was
+retired; re-submission is now an ordinary edit through the entity's own routes (see
+`docs/knowledge/appendix/approval-flow.md` §16.4/§16.6).
 
 ### Full API route pattern with permission check
 
