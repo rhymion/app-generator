@@ -51,6 +51,31 @@ interface Props { value: string; }
 
 `components/setting/api_key.tsx` — renders the API key with a "Generate" button. The generator references it but never touches it.
 
+### Upsert-only fields are treated as write-only
+
+A string property whose `x-custom-component.target` includes `upsert` but
+omits `view` (e.g. `password`, `api_key`) is a write-only field:
+`is_write_only_prop()`/`get_write_only_field_names()`
+(`code_generator/helpers/schema_helpers.py`) is the single predicate that
+drives every read path an entity has — `get{Parent}Detail()`
+(`getters.ts.jinja2`) destructures the field out of the raw Prisma row
+before the REST API JSON response or the view page's server data can ever
+see it, and the same field name is excluded from `FormView`, the CSV export
+allowlist, and the sort/filter allowlists.
+
+This predicate must be evaluated against the entity's **full** property set
+(`model_def.get('properties', {})` in `build_context.py`/`generators.py`),
+not `filtered_props` (the subset narrowed by `x-generate.fields`). The
+`get{Parent}Detail()` Prisma query has no `select` clause — it fetches
+every column on the row regardless of `x-generate.fields` — so an entity
+whose `fields` allowlist happens to omit a write-only column (this repo's
+own `user` entity: `fields: [name, image_id, roles]`, password/api_key
+excluded) would otherwise compute an empty write-only set and let the
+unconditional `...{{ parent_camel }}` spread return the raw password hash
+and api_key straight through `GET /api/user/{id}`. Confirmed by curl
+(subtask_810e, 2026-08-25) and fixed by switching both call sites from
+`filtered_props` to `model_def.get('properties', {})`.
+
 ---
 
 ## 2. Entity-Level Custom Components (`x-custom-components` on `_detail`)

@@ -1140,13 +1140,29 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         }
     filtered_props = filter_fields(model_def.get('properties', {}), gen_cfg.get('fields'))
 
-    # write_only_field_names (cmd_801): credential-material fields (e.g.
-    # password, api_key) that must never leave the server on a read path.
-    # get{{Parent}}Detail() (getters.ts.jinja2) strips these from its
-    # returned object before it reaches either the REST API JSON response
-    # or the view page's server data — see is_write_only_prop()'s docstring
-    # for why this is scoped to string fields with no 'view' target.
-    write_only_field_names = get_write_only_field_names(filtered_props)
+    # write_only_field_names (cmd_801, widened in subtask_810e): credential-
+    # material fields (e.g. password, api_key) that must never leave the
+    # server on a read path. get{{Parent}}Detail() (getters.ts.jinja2)
+    # strips these from its returned object before it reaches either the
+    # REST API JSON response or the view page's server data — see
+    # is_write_only_prop()'s docstring for why this is scoped to string
+    # fields with no 'view' target.
+    #
+    # Computed from model_def's full properties, NOT filtered_props: the
+    # Prisma query in get{{Parent}}Detail() (getters.ts.jinja2) has no
+    # `select` clause, so it fetches every column on the row regardless of
+    # x-generate.fields — an entity whose fields allowlist omits a
+    # write-only column (e.g. this repo's own `user` entity: fields:
+    # [name, image_id, roles], password/api_key excluded) made
+    # write_only_field_names compute empty from filtered_props, so the
+    # `{% if write_only_field_names %}` destructure never fired and the
+    # unconditional `...{{ parent_camel }}` spread returned the raw
+    # password hash and api_key straight through GET /api/user/{id}
+    # (subtask_810e, confirmed by curl — verbatim the same root cause
+    # subtask_810d found and fixed for proj_a). filter_fields only trims
+    # what later stages *render*; it was never a safe basis for what a
+    # select-less query has already fetched.
+    write_only_field_names = get_write_only_field_names(model_def.get('properties', {}))
 
     # decimal_field_names: fields backed by a Prisma `Decimal` column
     # (schema_deriver._prisma_decimal_type marker). Prisma Client returns
