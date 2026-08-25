@@ -97,16 +97,20 @@ export default defineConfig({
           });
           return null;
         },
-        // cmd_452: X-API-Key-bearing actor with a custom permission set, NOT
-        // enrolled in any organization — the org-isolation IDOR fixture for
-        // API-route tests (detail GET/PUT/DELETE, list, export).
+        // cmd_452: X-API-Key-bearing actor with a custom permission set for the
+        // org-isolation IDOR fixture (API-route tests: detail GET/PUT/DELETE,
+        // list, export). cmd_799: optional organizationId enrolls the actor in
+        // that one organization, when a test needs "belongs to the row's org
+        // but lacks organization-entity read permission" rather than "belongs
+        // to zero organizations".
         async 'db:createApiUserWithPermission'(params: {
           entityName: string;
           flags: { create?: boolean; read?: boolean; update?: boolean; delete?: boolean; import?: boolean };
           label?: string;
+          organizationId?: string;
         }) {
           const { createApiUserWithPermission } = require('./cypress/support/db-helpers');
-          return await createApiUserWithPermission(params.entityName, params.flags, params.label);
+          return await createApiUserWithPermission(params.entityName, params.flags, params.label, params.organizationId);
         },
         // cmd_520 G3: cross-org isolation fixture — orgA (test user is a
         // member), orgB (test user is not), optionally reassigning an

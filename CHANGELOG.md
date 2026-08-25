@@ -34,6 +34,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
     follow-up.
 
 ### Fixed
+- **`db:createApiUserWithPermission` (test fixture) never enrolled its actor in
+  any organization**, so the generated `4.4`/`4.5` FK-read-permission
+  graceful-degradation tests (`test_api_spec.cy.ts.jinja2`) 404'd before
+  reaching the scenario under test on any `should_filter_by_org` entity whose
+  `organization` relationship is required — the membership-scoped
+  organization-isolation existence check (`api_detail_route.ts.jinja2`)
+  rejected the request first. The fixture now accepts an optional
+  `organizationId` and, for `should_filter_by_org` entities, `4.4`/`4.5` pass
+  the target row's own organization so the actor is a genuine member —
+  reproducing "belongs to the organization but lacks read permission on the
+  `organization` entity itself" rather than "belongs to zero organizations".
+  Cross-organization isolation (`G3.1`-`G3.4`, which already used a separate
+  fixture) is unaffected. See docs/knowledge/fk-read-permission-graceful-
+  degradation.md.
 - **`get_field_metas()` (test generator) mis-categorized a direct-attachment
   FK field as a plain text column** — the generic optional-field
   fill/clear/full-data-populate machinery (`test_spec.cy.ts.jinja2`,

@@ -105,11 +105,19 @@ only a component that silently behaves as if the flag were always unset.
   the reason in row (e) above, `organization_id` is excluded for the reason in row (h). If an
   entity's *only* required non-self relation targets `organization`, no 4.4 test is generated for
   it at all (there is no other FK left to exercise the graceful-degradation scenario against).
-- `cypress/e2e/api/{entity}.cy.ts` also generates `G3.4 PUT by an actor with no organization
-  membership returns 404` for every `should_filter_by_org` entity (independent of which relation,
-  if any, got picked for 4.4) — this is the case row (h) actually asserts: the same
-  `db:createApiUserWithPermission` fixture used for 4.4 (full CRUD, zero org memberships), but the
-  expectation is rejection, not preservation.
+- The `4.4`/`4.5` fixture (`db:createApiUserWithPermission`) grants full CRUD on the entity and no
+  read permission on the FK's target model — that mismatch is what row (h)'s mechanism is not
+  about. For a `should_filter_by_org` entity, the fixture also enrolls the actor in the target
+  row's own organization, so the membership-scoped existence check in row (h) does not itself 404
+  the request before the RBAC-read-permission scenario 4.4/4.5 exist to test is reached — a
+  schema-level "make organization optional" workaround is never required to make these pass.
+  Cross-organization isolation (row (h)'s own mechanism) has its own dedicated coverage: see
+  `G3.1`-`G3.4` below, which use `db:createCrossOrgScenario`, not this fixture.
+- `cypress/e2e/api/{entity}.cy.ts` also generates `G3.1`-`G3.4` (cross-organization isolation) for
+  every `should_filter_by_org` entity, independent of which relation, if any, got picked for 4.4 —
+  via `db:createCrossOrgScenario` (an actor who *is* a member of orgA attempting to reach/create a
+  row in orgB), not `db:createApiUserWithPermission`. Expected response is uniformly 404 (existence
+  hidden). This is the case row (h) actually asserts.
 - `cypress/e2e/api/{entity}.cy.ts` also generates `4.5 returns 200 for GET (list and detail) when
   the acting user cannot read {fk target}` alongside 4.4, in the same
   `db:createApiUserWithPermission`-fixture describe block — proves via `X-API-Key` alone that both
