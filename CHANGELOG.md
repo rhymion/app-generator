@@ -59,10 +59,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
     framework's own `setting` is the only one that currently does) —
     schema-driven, not name- or structure-based.
 
-  `cleanup.py:624`'s own narrower `parent == model` mirror is
-  intentionally left untouched — measured (not inferred) that a proxy
-  view's added nav entry survives a `cleanup.py` run intact, since
-  cleanup's predicate never selects it for removal in the first place.
+  `cleanup.py:624` kept its own separate, narrower `parent == model` copy
+  of this same predicate, unintentionally — see the follow-up fix below.
+- **`cleanup.py` failed to retract a proxy view's sidebar nav entry**,
+  leaving a dead link (pointing at a page `cleanup` had itself just
+  deleted) after teardown. Root cause: `cleanup.py`'s own
+  `_clean_appended_files` kept a separate literal copy of the
+  `nav_entities` filter above, narrower (`parent == model`) than the one
+  `generators_i18n.py` used to add the entry in the first place — a
+  proxy view's entry was added but never selected for removal. Fixed by
+  extracting the filter into a single `nav_config.nav_list_entities()`
+  function that both sides now call; `parent == model` entities' existing
+  cleanup behavior (e.g. `/user`, `/role`) is unchanged.
   See docs/knowledge/proxy-view-nav-and-permission-scope.md.
 - **`db:createApiUserWithPermission` (test fixture) never enrolled its actor in
   any organization**, so the generated `4.4`/`4.5` FK-read-permission

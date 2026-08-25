@@ -25,21 +25,27 @@ hidden (the framework's own `setting`) opts out via its own
 `x-generate.list: false` -- the exception lives on the declaring side,
 not baked into the generator by entity name.
 
-`cleanup.py`'s own `_clean_appended_files` (line ~624) intentionally
-keeps its OWN, narrower `parent == model` mirror of this predicate -- do
-not "fix" it to match. `cleanup.py`'s `_clean_site_config` /
-`_clean_sidebar` delete every href in their **current** nav-entities
-computation from the appended files (it is a revert-to-baseline tool for
-the generate -> cleanup -> generate roundtrip test, not a stale-entry
-pruner -- see its own module docstring). Measured empirically for this
-change (not inferred from reading the code -- see cmd_812's own
-self-correction on exactly this point): a proxy view's sidebar entry,
-once added by `generate.py`, **survives** a `cleanup.py` run intact,
-because cleanup's narrower predicate never selects it for removal. If a
-future change ever makes proxy-view nav entries *disappear* after a
-`generate -> cleanup` cycle (the fix going hollow), align
-`cleanup.py:624`'s predicate then -- not before, and not on inference
-alone.
+**Correction (supersedes the paragraph originally written here):** the
+reasoning above was inverted. `cleanup.py` means "remove what generate
+added" -- `nav_hrefs` is the *removal* set, not a *preservation*
+allowlist (see the module's own opening docstring). Once
+`generators_i18n.py`'s predicate above was loosened to include proxy
+views, `cleanup.py`'s own `_clean_appended_files` (line ~624) kept a
+narrower `parent == model` copy of the *same* predicate -- so a proxy
+view's nav entry that `generate.py` added was never selected for
+removal, and a `cleanup` run left a dead link to a page that had itself
+been deleted. "The entry survives a `generate -> cleanup` cycle" (this
+doc's original empirical finding) was correctly measured but wrongly
+read as evidence of correctness -- for a *removal* tool, survival is the
+failure mode, not proof the predicate is fine.
+
+Fixed: the predicate is no longer duplicated. Both
+`generators_i18n.update_i18n_and_config()` and
+`cleanup._clean_appended_files()` now call the single
+`nav_config.nav_list_entities()` function. `parent == model` entities'
+existing cleanup behavior (e.g. `/user`, `/role`) is unchanged; a proxy
+view's nav entry is now retracted by `cleanup` exactly like an ordinary
+entity's.
 
 ## 2. `x-nav` group/order resolution (`nav_config.py`)
 
