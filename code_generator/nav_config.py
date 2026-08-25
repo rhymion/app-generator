@@ -129,6 +129,25 @@ def _chain_to_root(slug: str, group_defs: dict[str, dict]) -> list[str]:
     return list(reversed(chain))
 
 
+def nav_list_entities(entities: list) -> list:
+    """Entities that appear in the sidebar nav: any entity with a list page,
+    including a proxy view (parent != model, e.g. a demo fixture like
+    'setting1' sharing a model with 'setting2') — cmd_813. The real entity
+    is already generated (list page, API, getters, search); the door was
+    the only thing missing. A proxy view that should stay hidden opts out
+    via its own `x-generate.list: false` (the exception lives on the
+    declaring side, not baked into the generator by entity name).
+
+    Single source of truth for both the generate side
+    (generators_i18n.update_i18n_and_config, which adds nav entries) and
+    the cleanup side (cleanup.clean_appended_files, which removes them).
+    Before cmd_817 each kept its own literal copy of this filter; #419
+    loosened the generate side only, so cleanup silently stopped retracting
+    nav entries it had itself created for a proxy view — see cmd_817.
+    """
+    return [e for e in entities if e['generate_config'].get('list', True)]
+
+
 def build_nav_config(entities: list, schema: dict) -> dict:
     """
     Parse `x-nav.parent`/`x-nav.order` off every entity plus the optional

@@ -49,7 +49,7 @@ import yaml
 
 from generate_types import extract_entities
 from manifest import MANIFEST_FILENAME, sha256_file
-from nav_config import build_nav_config
+from nav_config import build_nav_config, nav_list_entities
 
 _SYSTEM_PROPS = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'}
 
@@ -619,10 +619,10 @@ def _clean_appended_files(out: Path, entities: list, schema: dict) -> None:
     """
     print('\nCleaning appended files...')
 
-    nav_entities = [
-        e for e in entities
-        if e['parent'] == e['model'] and e['generate_config'].get('list', True)
-    ]
+    # Must retract the same nav entries generate added — shared with
+    # generators_i18n.py's own generate-side filter, see
+    # nav_config.nav_list_entities (cmd_817).
+    nav_entities = nav_list_entities(entities)
     nav_hrefs = [f'/{e["parent"]}' for e in nav_entities]
 
     # Nav groups clean by their own rules (independent of nav_entities' list

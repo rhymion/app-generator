@@ -16,7 +16,7 @@ from pathlib import Path
 
 from helpers.naming import to_camel_case, to_title_case
 from helpers.schema_helpers import filter_fields
-from nav_config import build_nav_config, upsert_nav_group_i18n
+from nav_config import build_nav_config, nav_list_entities, upsert_nav_group_i18n
 
 # The locale whose messages/*.json values ARE the schema-computed defaults
 # (see i18n/routing.ts defaultLocale). Every other locale file's newly-added
@@ -442,17 +442,9 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
     `entities` — the full list returned by extract_entities().
     `output_dir` — project root (same as passed to generate()).
     """
-    # Entities that appear in the sidebar nav: any entity with a list page,
-    # including a proxy view (parent != model, e.g. a demo fixture like
-    # 'setting1' sharing a model with 'setting2') — cmd_813. The real entity
-    # is already generated (list page, API, getters, search); the door was
-    # the only thing missing. A proxy view that should stay hidden opts out
-    # via its own `x-generate.list: false` (the exception lives on the
-    # declaring side, not baked into the generator by entity name).
-    nav_entities = [
-        e for e in entities
-        if e['generate_config'].get('list', True)
-    ]
+    # Entities that appear in the sidebar nav — shared with cleanup.py's
+    # own removal pass, see nav_config.nav_list_entities (cmd_817).
+    nav_entities = nav_list_entities(entities)
 
     # EntityLabel keys for all entities (including alternate-model entities like setting*)
     entity_label_entries = {
