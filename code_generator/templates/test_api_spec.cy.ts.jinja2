@@ -1134,90 +1134,13 @@ describe('API: {{ title }}', () => {
     });
   });
 
-  describe('Resubmit (POST /api/approval_request/:id/resubmit)', () => {
-    it('14.1 requestor can resubmit a rejected request', () => {
-      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
-        cy.task<any>('db:populate{{ pascal }}WithRejectedApproval', {
-          creatorId: setup.requestorUser.id,
-          approvalFlowIds: [setup.flowWithRole.id],
-        }).then((data) => {
-          const arId = data.approvalRequests[0].id;
-          cy.request({
-            method: 'POST',
-            url: `/api/approval_request/${arId}/resubmit`,
-            headers: { 'X-API-Key': setup.requestorUser.api_key },
-          }).then((res) => {
-            expect(res.status).to.eq(200);
-            expect(res.body.status).to.eq('pending');
-          });
-        });
-      });
-    });
-
-    it('14.2 non-requestor cannot resubmit (403)', () => {
-      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
-        cy.task<any>('db:populate{{ pascal }}WithRejectedApproval', {
-          creatorId: setup.requestorUser.id,
-          approvalFlowIds: [setup.flowWithRole.id],
-        }).then((data) => {
-          const arId = data.approvalRequests[0].id;
-          cy.request({
-            method: 'POST',
-            url: `/api/approval_request/${arId}/resubmit`,
-            headers: { 'X-API-Key': setup.approverUser.api_key },
-            failOnStatusCode: false,
-          }).then((res) => {
-            expect(res.status).to.eq(403);
-          });
-        });
-      });
-    });
-
-    it('14.3 resubmit with message creates history entry', () => {
-      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
-        cy.task<any>('db:populate{{ pascal }}WithRejectedApproval', {
-          creatorId: setup.requestorUser.id,
-          approvalFlowIds: [setup.flowWithRole.id],
-        }).then((data) => {
-          const arId = data.approvalRequests[0].id;
-          cy.request({
-            method: 'POST',
-            url: `/api/approval_request/${arId}/resubmit`,
-            headers: { 'X-API-Key': setup.requestorUser.api_key },
-            body: { message: 'Updated and resubmitting' },
-          }).then((res) => {
-            expect(res.status).to.eq(200);
-            cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': setup.requestorUser.api_key } })
-              .then((getRes) => {
-                const histories = getRes.body.approvable.approval_requests[0].approval_histories;
-                expect(histories).to.have.length(1);
-                expect(histories[0].message).to.eq('Updated and resubmitting');
-              });
-          });
-        });
-      });
-    });
-  });
-{% if entity_on_rejected_terminal %}
-    it('14.4 terminal_rejected request cannot be re-submitted (400)', () => {
-      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
-        cy.task<any>('db:populate{{ pascal }}WithTerminalRejectedApproval', {
-          creatorId: setup.requestorUser.id,
-          approvalFlowIds: [setup.flowWithRole.id],
-        }).then((data) => {
-          const arId = data.approvalRequests[0].id;
-          cy.request({
-            method: 'POST',
-            url: `/api/approval_request/${arId}/resubmit`,
-            headers: { 'X-API-Key': setup.requestorUser.api_key },
-            failOnStatusCode: false,
-          }).then((res) => {
-            expect(res.status).to.eq(400);
-          });
-        });
-      });
-    });
-{% endif %}
+  // cmd_818 (D1): the dedicated resubmit route/action is retired -- re-
+  // submission is now an ordinary update through the entity's own service
+  // layer (edit the status field back to x-approval.submit_on's target
+  // value), which fires the same update-time edge trigger a first-time
+  // submission fires at create time. See
+  // code_generator/tests/test_approval_edge_trigger.py for that mechanism's
+  // generated-code coverage.
 {% endif %}
 {% if can_list and can_export %}
 

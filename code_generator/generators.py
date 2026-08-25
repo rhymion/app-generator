@@ -21,6 +21,7 @@ from helpers.schema_helpers import (
     get_entity_properties,
     get_write_only_field_names,
     get_self_only_flags,
+    resolve_set_fields,
 )
 from build_context import get_uri_kind
 
@@ -2187,6 +2188,135 @@ def _build_approval_lines_post_create_code(parent_def: dict, model: str, schema:
     return '\n'.join(blocks)
 
 
+def resolve_approval_submit_on(raw_def: dict) -> tuple[str | None, object]:
+    """Resolve x-approval.submit_on to a single (field, value) pair.
+
+    cmd_818 (edge-trigger integration): the field that gates
+    approval_request creation, declared the same shape as
+    on_approved/on_rejected.set_fields (a {field: value} map) rather than a
+    bare scalar, so a legacy int-enum label resolves through the same
+    resolve_set_fields() path the dispatch side already uses. Exactly one
+    entry is expected -- the edge trigger only has meaning for a single
+    field's transition. Returns (None, None) when submit_on is absent.
+    """
+    x_approval = raw_def.get('x-approval') or {}
+    raw = x_approval.get('submit_on') or {}
+    if not raw:
+        return None, None
+    if len(raw) > 1:
+        raise ValueError(
+            f"x-approval.submit_on: expected exactly one field, got {list(raw)}"
+        )
+    entity_props = raw_def.get('properties', {})
+    resolved = resolve_set_fields(entity_props, raw)
+    field = next(iter(resolved))
+    return field, resolved[field]
+
+
+def _ts_literal(value: object) -> str:
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    if isinstance(value, (int, float)):
+        return str(value)
+    return "'" + str(value).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def _build_approval_edge_trigger_create_code(
+    approvable_rel: dict,
+    parent: str,
+    submit_on_field: str | None,
+    submit_on_value: object,
+) -> str:
+    """CREATE-time edge trigger (cmd_818 GROUP A2): the row's initial state
+    counts as an edge from "no row" (null) into whatever submit_on requires
+    -- so a matching initial value fires exactly like a later transition
+    would. No submit_on declared: fires unconditionally (default_behavior_
+    no_submit_on -- the pre-cmd_818 afterCreate behaviour this replaces).
+    The _pendingGuard check enforces the invariant that at most one open
+    flow may exist at a time, identically on both the create and update
+    trigger paths.
+    """
+    approvable_var = approvable_rel['relation_name']
+    inner = _build_approval_create_block_for_entity(
+        approvable_id_expr=f'{approvable_var}.id',
+        actor_id_expr='actorId',
+        flows_var='_approvalFlows',
+        role_ids_var='_creatorRoleIds',
+        tx_var='tx',
+        indent='        ',
+        target_entity_name=parent,
+        target_id_expr='created.id',
+    )
+    body = (
+        f"      const _pendingGuard = await tx.approval_request.findFirst({{\n"
+        f"        where: {{ approvable_id: {approvable_var}.id, status: 'pending' }},\n"
+        f"      }});\n"
+        f"      if (!_pendingGuard) {{\n"
+        f"        const _creator = await tx.user.findUnique({{\n"
+        f"          where: {{ id: actorId }},\n"
+        f"          select: {{ roles: {{ select: {{ id: true }} }} }},\n"
+        f"        }});\n"
+        f"        const _creatorRoleIds = _creator?.roles.map((r) => r.id) ?? [];\n"
+        f"        const _approvalFlows = await tx.approval_flow.findMany({{\n"
+        f"          where: {{ entity_name: '{parent}' }},\n"
+        f"        }});\n"
+        f"{inner}\n"
+        f"      }}"
+    )
+    if submit_on_field is None:
+        # No submit_on declared: unconditional (edge from null -> any).
+        return f"    {{\n{body}\n    }}"
+    cond = f"created.{submit_on_field} === {_ts_literal(submit_on_value)}"
+    return f"    if ({cond}) {{\n{body}\n    }}"
+
+
+def _build_approval_edge_trigger_update_code(
+    approvable_rel: dict,
+    parent: str,
+    model: str,
+    submit_on_field: str,
+    submit_on_value: object,
+) -> str:
+    """UPDATE-time edge trigger (cmd_818 GROUP A2): fires only on the exact
+    transition previous != submit_on -> new === submit_on (an EDGE, not a
+    level check -- a status that is already submit_on and gets some other
+    field edited must NOT re-fire). Only emitted when submit_on is
+    declared -- with no declared target value there is no transition to
+    detect on update (the create-time no-submit_on default has no
+    update-time analogue)."""
+    approvable_fk = approvable_rel['prop_name']
+    inner = _build_approval_create_block_for_entity(
+        approvable_id_expr=f'_prevForTrigger.{approvable_fk}',
+        actor_id_expr='actorId',
+        flows_var='_approvalFlows',
+        role_ids_var='_creatorRoleIds',
+        tx_var='tx',
+        indent='          ',
+        target_entity_name=parent,
+        target_id_expr='id',
+    )
+    lit = _ts_literal(submit_on_value)
+    return (
+        f"    if (_prevForTrigger && _prevForTrigger.{submit_on_field} !== {lit} "
+        f"&& updated.{submit_on_field} === {lit}) {{\n"
+        f"      const _pendingGuard = await tx.approval_request.findFirst({{\n"
+        f"        where: {{ approvable_id: _prevForTrigger.{approvable_fk}, status: 'pending' }},\n"
+        f"      }});\n"
+        f"      if (!_pendingGuard) {{\n"
+        f"        const _creator = await tx.user.findUnique({{\n"
+        f"          where: {{ id: actorId }},\n"
+        f"          select: {{ roles: {{ select: {{ id: true }} }} }},\n"
+        f"        }});\n"
+        f"        const _creatorRoleIds = _creator?.roles.map((r) => r.id) ?? [];\n"
+        f"        const _approvalFlows = await tx.approval_flow.findMany({{\n"
+        f"          where: {{ entity_name: '{parent}' }},\n"
+        f"        }});\n"
+        f"{inner}\n"
+        f"      }}\n"
+        f"    }}"
+    )
+
+
 def service_context(ctx: dict, schema: dict | None = None) -> dict:
     parent                  = ctx['parent']
     parent_def              = _raw_def(parent, schema) if schema else {}
@@ -2213,6 +2343,37 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     has_item_reservation    = bool(reservation_config and reservation_config.get('mode') == 'item')
     has_item_daterange      = has_item_reservation and bool(reservation_config.get('dateRange'))
     server_value_override_fields = ctx.get('server_value_override_fields') or []
+
+    # cmd_818 GROUP A/C: approval_request creation moves from the
+    # write-once afterCreate stub into an edge-trigger block emitted
+    # directly here, firing on both add{Parent} (create) and
+    # update{Parent} (the submit_on transition). has_approvable_bridge is
+    # read off ctx['one_to_one_rels'] (auto-create OTO rels) rather than
+    # parent_def, since a proxy view's raw entity may differ from parent
+    # (_raw_def(parent, ...) resolves the wrong def for those -- the raw
+    # x-approval declaration must be read via model, not parent).
+    approvable_rel = next(
+        (r for r in ctx.get('one_to_one_rels', []) if r.get('target') == 'approvable'),
+        None,
+    )
+    has_approvable_bridge = approvable_rel is not None
+    approval_edge_trigger_create_code = ''
+    approval_edge_trigger_update_code = ''
+    approval_edge_trigger_prev_select_code = ''
+    x_approval_submit_on_field: str | None = None
+    if has_approvable_bridge and can_create:
+        raw_def_by_model = _raw_def(model, schema) if schema else {}
+        x_approval_submit_on_field, x_approval_submit_on_value = resolve_approval_submit_on(raw_def_by_model)
+        approval_edge_trigger_create_code = _build_approval_edge_trigger_create_code(
+            approvable_rel, parent, x_approval_submit_on_field, x_approval_submit_on_value,
+        )
+        if can_update and x_approval_submit_on_field is not None:
+            approval_edge_trigger_prev_select_code = (
+                f"{{ {x_approval_submit_on_field}: true, {approvable_rel['prop_name']}: true }}"
+            )
+            approval_edge_trigger_update_code = _build_approval_edge_trigger_update_code(
+                approvable_rel, parent, model, x_approval_submit_on_field, x_approval_submit_on_value,
+            )
 
     has_non_comment_ch = bool(non_comment_ch)
 
@@ -2568,11 +2729,12 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
             if (can_create or can_update) else ''
         )
         + (f"\nimport {{ assertNoDuplicateReservation }} from './service_validation';" if has_item_daterange and not (can_create or can_update) else '')
-        + (f"\nimport {{ afterCreate }} from './service_after_create';" if can_create else '')
         + (f"\nimport {{ notify }} from '@/lib/_notifier';"
            if has_assignee_id or child_assignee_notify_create_code or child_assignee_notify_update_code else '')
         + (f"\nimport {{ notifyApprovalRequestCreated }} from '@/lib/_notifyApprovalRequest';"
-           if approval_lines_post_create_code or approval_lines_post_update_code or reservation_self_case_notifies else '')
+           if (approval_lines_post_create_code or approval_lines_post_update_code
+               or reservation_self_case_notifies or approval_edge_trigger_create_code
+               or approval_edge_trigger_update_code) else '')
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
         + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/getters_associated';" if should_filter_by_org and (can_create or can_update) else '')
         + (f"\nimport {{ AppError, p2002Field }} from '@/lib/_errors';" if can_create or can_update else '')
@@ -2625,6 +2787,9 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'approval_lines_pre_update_code':     approval_lines_pre_update_code,
         'approval_lines_post_update_code':    approval_lines_post_update_code,
         'should_filter_by_org':               should_filter_by_org,
+        'approval_edge_trigger_create_code':  approval_edge_trigger_create_code,
+        'approval_edge_trigger_update_code':  approval_edge_trigger_update_code,
+        'approval_edge_trigger_prev_select_code': approval_edge_trigger_prev_select_code,
     }
 
 

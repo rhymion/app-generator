@@ -55,13 +55,9 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% if approval_lines_post_create_code %}
 {{ approval_lines_post_create_code }}
 {% endif %}
-{% if one_to_one_spread %}
-    await afterCreate(tx, { ...created, {{ one_to_one_spread }} } as Record<string, unknown>, {
-{% else %}
-    await afterCreate(tx, created as Record<string, unknown>, {
+{% if approval_edge_trigger_create_code %}
+{{ approval_edge_trigger_create_code }}
 {% endif %}
-{{ validation_data_obj }}
-    });
 {% if is_audited %}
     await recordAuditEvent({
       action: '{{ parent }}:create',
@@ -177,6 +173,25 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 {% if approval_lines_pre_update_code %}
 {{ approval_lines_pre_update_code }}
 {% endif %}
+{% if approval_edge_trigger_prev_select_code %}
+    const _prevForTrigger = await tx.{{ model }}.findUnique({
+      where: { id },
+      select: {{ approval_edge_trigger_prev_select_code }},
+    });
+{% endif %}
+{% if approval_edge_trigger_update_code %}
+    const updated = await tx.{{ model }}.update({
+      where: { id },
+      data: {
+        updater_id: actorId,
+{{ parent_data_obj_update }}
+{% if child_nested_update %}
+{{ child_nested_update }}
+{% endif %}
+      },
+    });
+{{ approval_edge_trigger_update_code }}
+{% else %}
     await tx.{{ model }}.update({
       where: { id },
       data: {
@@ -187,6 +202,7 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 {% endif %}
       },
     });
+{% endif %}
 {% if approval_lines_post_update_code %}
 {{ approval_lines_post_update_code }}
 {% endif %}

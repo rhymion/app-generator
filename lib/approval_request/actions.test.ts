@@ -75,21 +75,28 @@ import { assertApprovalOrder } from '@/lib/approval_request/order-check';
 import { createApprovalActions } from './actions_core';
 
 const resolveApprovableTarget = vi.fn();
+// cmd_818: entity_name (approval_flow.entity_name) is now a view key —
+// dispatchOnApproved/dispatchOnRejected/isTerminalReject are keyed by
+// Prisma model instead, so actions_core.ts translates through this first.
+// Every fixture below uses entity_name === model (parent == model), so the
+// default identity mapping keeps existing assertions unchanged.
+const resolveApprovableModel = vi.fn((name: string): string | null => name);
 const dispatchOnApproved = vi.fn();
 const dispatchOnRejected = vi.fn();
 const isTerminalReject = vi.fn(() => false);
 
 const {
-  getApprovalRequestRecipient, approveApprovalRequest, rejectApprovalRequest, resubmitApprovalRequest,
+  getApprovalRequestRecipient, approveApprovalRequest, rejectApprovalRequest,
 } = createApprovalActions({
   resolveApprovableTarget,
+  resolveApprovableModel,
   dispatchOnApproved,
   dispatchOnRejected,
   isTerminalReject,
 });
 
 // Fake tx client shared by every prisma.$transaction(cb) call in
-// approve/reject/resubmit — cb receives this in place of a real transaction.
+// approve/reject — cb receives this in place of a real transaction.
 const fakeTx = {
   approval_request: { update: arUpdate, findUnique, findMany: txArFindMany },
   approval_history: { create: historyCreate },
@@ -105,6 +112,7 @@ beforeEach(() => {
   approvableUpdate.mockReset();
   revalidatePathMock.mockReset();
   resolveApprovableTarget.mockReset();
+  resolveApprovableModel.mockReset().mockImplementation((name: string) => name);
   dispatchOnApproved.mockReset();
   dispatchOnRejected.mockReset();
   isTerminalReject.mockReset().mockReturnValue(false);
@@ -124,37 +132,14 @@ beforeEach(() => {
   notifyApprovalRequestCreatedMock.mockReset();
 });
 
-// cmd_539: resubmitApprovalRequest() reuses the existing approval_request
-// row (only its status changes back to 'pending') instead of creating a
-// new one, so notifyApprovalRequestCreated() — wired only into the
-// *creation* path elsewhere — never re-fired for a resubmission, leaving
-// approver-role holders untold that the request needs their attention
-// again. See cypress/e2e/api/approval_request_resubmit_notification.cy.ts
-// for the delivery-level (real DB, real notification row) proof; this test
-// pins the call-site contract at the unit level.
-describe('resubmitApprovalRequest notifies approvers (cmd_539)', () => {
-  it('calls notifyApprovalRequestCreated with the resolved target and excludes the resubmitter', async () => {
-    findUnique.mockResolvedValue({
-      approvable_id: 'appr-1',
-      approval_flow: {
-        entity_name: 'leave_request',
-        approver_role_id: 'approver-role',
-        requestor_role_id: 'requestor-role',
-      },
-      approvable: { creator_id: 'user-1' },
-      status: 'rejected',
-    });
-    resolveApprovableTarget.mockResolvedValue({ id: 'lr-42' });
-
-    await resubmitApprovalRequest('req-1', 'here is the fix');
-
-    expect(notifyApprovalRequestCreatedMock).toHaveBeenCalledWith(expect.anything(), 'req-1', {
-      excludeUserId: 'user-1',
-      targetEntityName: 'leave_request',
-      targetId: 'lr-42',
-    });
-  });
-});
+// cmd_818 (D1): resubmitApprovalRequest() is retired -- re-submission is no
+// longer a dedicated approval_request status flip. It is now: the entity's
+// own status field is edited back to x-approval.submit_on's target value
+// (an ordinary update through the entity's own service layer), which fires
+// the update-time edge trigger and creates a fresh approval_request. See
+// code_generator/tests/test_approval_edge_trigger.py for that mechanism's
+// coverage. This describe block, and its notifyApprovalRequestCreated-on-
+// resubmit assertion, are gone along with the function.
 
 // cmd_539: the post-transaction Trigger #3 notify() call hard-coded
 // `status: 'rejected'` even when the actual outcome was
@@ -274,7 +259,7 @@ describe('getApprovalRequestRecipient (cmd_479)', () => {
 // cmd_491: revalidatePath('/approval_request') matched no real route (there
 // is no /approval_request page — ApprovalSection.tsx mounts on the target
 // entity's own view/edit pages) and so silently invalidated nothing. These
-// tests pin the fixed behavior: approve/reject/resubmit must revalidate the
+// tests pin the fixed behavior: approve/reject must revalidate the
 // resolved target entity's view AND edit pages, using the same
 // `/[locale]/{entity}/{view|edit}/{id}` + 'page' form the neighboring
 // attachment_actions.ts.jinja2 template already uses for the identical
@@ -326,32 +311,20 @@ describe('revalidatePath targeting (cmd_491)', () => {
     expect(revalidatePathMock).not.toHaveBeenCalledWith('/approval_request');
   });
 
-  it('resubmitApprovalRequest revalidates the target entity view + edit pages', async () => {
-    stubApprovalFlowLookup();
-
-    await resubmitApprovalRequest('req-1');
-
-    expect(revalidatePathMock).toHaveBeenCalledWith('/[locale]/leave_request/view/lr-42', 'page');
-    expect(revalidatePathMock).toHaveBeenCalledWith('/[locale]/leave_request/edit/lr-42', 'page');
-    expect(revalidatePathMock).not.toHaveBeenCalledWith('/approval_request');
-  });
-
   it('skips revalidation when the target cannot be resolved (no approvable bridge)', async () => {
     findUnique.mockResolvedValue({
       approvable_id: null,
       approval_flow: {
         entity_name: 'leave_request',
         approver_role_id: 'approver-role',
-        requestor_role_id: 'requestor-role',
       },
       approvable: null,
       status: 'rejected',
     });
-    // No approvable bridge (creator_id unresolvable) — permission passes via
-    // the requestor-role fallback in assertResubmitPermission instead.
-    vi.mocked(getUserRoleIds).mockResolvedValue(['requestor-role']);
+    arUpdate.mockResolvedValue({ id: 'req-1', status: 'rejected', approvable_id: null });
+    approvableFindUnique.mockResolvedValue(null);
 
-    await resubmitApprovalRequest('req-1');
+    await rejectApprovalRequest('req-1');
 
     expect(revalidatePathMock).not.toHaveBeenCalled();
   });
@@ -489,5 +462,84 @@ describe('assertApprovalOrder gate (cmd_540)', () => {
     );
     expect(assertApprovalOrder).toHaveBeenCalledWith('req-1');
     expect(transactionMock).not.toHaveBeenCalled();
+  });
+});
+
+// cmd_818 (E6): resubmitApprovalRequest is retired along with its
+// dedicated status-flip mechanism (see the D1 comment above).
+describe('resubmitApprovalRequest removal (cmd_818 E6)', () => {
+  it('is not present on the actions object createApprovalActions returns', () => {
+    const actions = createApprovalActions({
+      resolveApprovableTarget, resolveApprovableModel, dispatchOnApproved, dispatchOnRejected, isTerminalReject,
+    });
+    expect('resubmitApprovalRequest' in actions).toBe(false);
+  });
+});
+
+// cmd_818 (GROUP C5): approval_flow.entity_name is a view key; dispatch to
+// on_approved_dispatch/on_rejected_dispatch (keyed by Prisma model, since
+// x-approval is a raw-entity-level declaration shared by every view over
+// that model) must go through resolveApprovableModel's translation first —
+// a proxy view's entity_name and its underlying model are not always the
+// same string.
+describe('entity_name -> model translation before dispatch (cmd_818 GROUP C5)', () => {
+  it('approveApprovalRequest dispatches with the resolved model, not the raw entity_name', async () => {
+    findUnique.mockResolvedValue({
+      approvable_id: 'appr-1',
+      approval_flow: { entity_name: 'purchase_request_gate', approver_role_id: 'approver-role' },
+      approvable: { creator_id: 'creator-1' },
+    });
+    arUpdate.mockResolvedValue({
+      status: 'approved',
+      approvable_id: 'appr-1',
+      approval_flow: { entity_name: 'purchase_request_gate' },
+    });
+    approvableFindUnique.mockResolvedValue({
+      id: 'appr-1',
+      approved_at: null,
+      approval_requests: [{ status: 'approved' }],
+    });
+    resolveApprovableModel.mockImplementation((name: string) =>
+      name === 'purchase_request_gate' ? 'purchase_request' : name);
+    resolveApprovableTarget.mockResolvedValue({ id: 'pr-1' });
+
+    await approveApprovalRequest('req-1');
+
+    expect(dispatchOnApproved).toHaveBeenCalledWith(expect.anything(), 'purchase_request', 'appr-1', 'user-1');
+  });
+
+  it('rejectApprovalRequest resolves isTerminalReject/dispatchOnRejected against the model, not the view key', async () => {
+    findUnique.mockResolvedValue({
+      approvable_id: 'appr-1',
+      approval_flow: { entity_name: 'purchase_request_gate', approver_role_id: 'approver-role' },
+      approvable: { creator_id: 'creator-1' },
+    });
+    arUpdate.mockResolvedValue({ id: 'req-1', status: 'rejected', approvable_id: 'appr-1' });
+    approvableFindUnique.mockResolvedValue({ id: 'appr-1', approved_at: null });
+    resolveApprovableModel.mockImplementation((name: string) =>
+      name === 'purchase_request_gate' ? 'purchase_request' : name);
+    resolveApprovableTarget.mockResolvedValue({ id: 'pr-1' });
+
+    await rejectApprovalRequest('req-1');
+
+    expect(isTerminalReject).toHaveBeenCalledWith('purchase_request');
+    expect(dispatchOnRejected).toHaveBeenCalledWith(expect.anything(), 'purchase_request', 'appr-1', 'user-1');
+  });
+
+  it('skips dispatch when the view key does not resolve to a model', async () => {
+    findUnique.mockResolvedValue({
+      approvable_id: 'appr-1',
+      approval_flow: { entity_name: 'unknown_view', approver_role_id: 'approver-role' },
+      approvable: { creator_id: 'creator-1' },
+    });
+    arUpdate.mockResolvedValue({ id: 'req-1', status: 'rejected', approvable_id: 'appr-1' });
+    approvableFindUnique.mockResolvedValue({ id: 'appr-1', approved_at: null });
+    resolveApprovableModel.mockReturnValue(null);
+    resolveApprovableTarget.mockResolvedValue(null);
+
+    await rejectApprovalRequest('req-1');
+
+    expect(isTerminalReject).not.toHaveBeenCalled();
+    expect(dispatchOnRejected).not.toHaveBeenCalled();
   });
 });
