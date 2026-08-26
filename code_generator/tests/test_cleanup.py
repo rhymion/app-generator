@@ -273,3 +273,34 @@ def test_clean_from_manifest_no_warning_on_stale_manifest(tmp_path: Path, capsys
     mock_sleep.assert_not_called()
     err = capsys.readouterr().err
     assert 'WARNING' not in err
+
+
+def test_clean_from_manifest_skips_allowlisted_path(tmp_path: Path) -> None:
+    """A manifest entry whose path is in HANDWRITTEN_ALLOWLIST is kept even
+    when its on-disk content still hash-matches (subtask_825b, cmd_825):
+    lib/mention/parser.ts and 13 sibling feature files are legitimately
+    written by generate.py (hence manifest-tracked) but are also git-tracked,
+    conditionally-regenerated files — deleting them here left the repo unable
+    to rebuild/test until the next generate-code happened to re-trigger the
+    same schema toggle."""
+    protected_rel = 'lib/mention/parser.ts'
+    protected = tmp_path / protected_rel
+    protected.parent.mkdir(parents=True)
+    content = 'export function parseMentions() {}\n'
+    protected.write_text(content)
+
+    manifest_path = tmp_path / cleanup.MANIFEST_FILENAME
+    old_time = cleanup.time.time() - (cleanup._MANIFEST_FRESH_THRESHOLD_S + 10)
+    manifest_path.write_text(json.dumps({
+        'files': [
+            {'path': protected_rel, 'sha256': cleanup.sha256_file(protected), 'mode': 'overwrite'},
+        ],
+    }))
+    import os
+    os.utime(manifest_path, (old_time, old_time))
+
+    patched_allowlist = frozenset([protected_rel])
+    with patch.object(cleanup, 'HANDWRITTEN_ALLOWLIST', patched_allowlist):
+        cleanup._clean_from_manifest(tmp_path)
+
+    assert protected.exists(), 'Allowlisted manifest entry must not be deleted'
