@@ -26,6 +26,7 @@
   "Errors": {
     "capacityExhausted": "利用可能な容量がありません。別の選択肢をお試しください。",
     "fieldAlreadyLinked": "{field}は既に他のレコードにリンクされています。",
+    "fieldInvalid": "{field}の値が無効か、許可されていません。",
     "fieldRequired": "{field}は必須です。",
     "fkPermissionDenied": "{entity}の選択肢を閲覧する権限がありません。",
     "fkPermissionDeniedHint": "管理者に{entity}の閲覧権限付与を依頼してください。",

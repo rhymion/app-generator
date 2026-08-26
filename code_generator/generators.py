@@ -1013,7 +1013,7 @@ def actions_context(ctx: dict) -> dict:
             f"{indent}  {call_stmt}",
             f"{indent}}} catch (e) {{",
             f"{indent}  if (e instanceof AppError) {{",
-            f"{indent}    return {{ ok: false, errorCode: e.code, field: e.field }} satisfies ActionFailure;",
+            f"{indent}    return {{ ok: false, errorCode: e.code, field: e.field, reason: e.reason }} satisfies ActionFailure;",
             f"{indent}  }}",
         ]
         if has_reservation:
@@ -1045,7 +1045,7 @@ def actions_context(ctx: dict) -> dict:
             f"{block}"
             f"{indent}}} catch (e) {{\n"
             f"{indent}  if (e instanceof AppError) {{\n"
-            f"{indent}    return {{ ok: false, errorCode: e.code, field: e.field }} satisfies ActionFailure;\n"
+            f"{indent}    return {{ ok: false, errorCode: e.code, field: e.field, reason: e.reason }} satisfies ActionFailure;\n"
             f"{indent}  }}\n"
             f"{indent}  throw e;\n"
             f"{indent}}}\n"
@@ -4126,6 +4126,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     #   - {prop}SearchAction    : useCallback that delegates to search{Target}Options and
     #                             remaps full records to {id, label} using the rel's label_field
     #   - {prop}CurrentOption   : useMemo over src.{relation_name} for the resolved label
+    any_ctx_fields = False
     for r in list(parent_rels_raw) + list(selector_oto_rels):
         prop_name     = r['prop_name']
         target        = r['target']
@@ -4152,6 +4153,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         # (the overwhelming majority) is byte-for-byte unchanged.
         ctx_fields = r.get('autocomplete_context_fields') or []
         if ctx_fields:
+            any_ctx_fields = True
             form_values_entries = ', '.join(f'{f}: {safe_var_name(f)}' for f in ctx_fields)
             search_call_args = (
                 f"query, includeIds, 50, "
@@ -4162,25 +4164,64 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             search_call_args = "query, includeIds"
             search_deps = ''
 
-        rel_opt_setups.append(
-            f"  const {initial_var} = useMemo(() => ({prop_initial} ?? []).map((item) => ({{\n"
-            f"    id: item.id,\n"
-            f"    label: {label_built['expression']},\n"
-            f"  }})), [{prop_initial}]);\n"
-            # The page (a Server Component) computes this flag from
-            # initial{Target}s's permissionDenied marker and passes it as its
-            # own boolean prop — a non-index property attached to an array
-            # does not survive the Server-to-Client Component serialization
-            # boundary, so it cannot be read back off {prop_initial} here.
-            f"  const {denied_var} = Boolean({prop_initial}PermissionDenied);\n"
-            f"  const {search_var} = useCallback(async (query: string, includeIds: string[]) => {{\n"
-            f"    const rows = (await {prop_search}?.({search_call_args})) ?? [];\n"
-            f"    return rows.map((item) => ({{ id: item.id, label: {label_built['expression']} }}));\n"
-            f"  }}, [{prop_search}{search_deps}]);\n"
-            f"  const {current_var} = useMemo(() => (\n"
-            f"    src.{rel_name} ? {{ id: src.{rel_name}.id, label: {current_built['expression']} }} : null\n"
-            f"  ), [src.{rel_name}]);"
-        )
+        if ctx_fields:
+            # cmd_830: EntityAutocomplete shows `initialOptions` verbatim
+            # whenever the input is empty (i.e. before the user types a
+            # query) -- see components/_standard/EntityAutocomplete.tsx.
+            # For a context-filtered relation, the static `initial{Target}s`
+            # server fetch has no way to know the sibling context value (it
+            # runs once at page load, before the user has picked anything),
+            # so that default browse list is UNFILTERED even though the
+            # typed-search path (`{search_var}` above) correctly narrows via
+            # filterAutocompleteOptions(). A user could pick an
+            # out-of-context candidate straight from that stale default list
+            # without ever triggering the filter. Re-fetch through the same
+            # context-aware search action (empty query -- searchXOptions
+            # still applies accessAnd + the custom filterAutocompleteOptions
+            # narrowing, just without a text-token restriction) whenever the
+            # context value changes, so the default list is exactly as
+            # narrow as the typed-search results. Seeded from the static
+            # server fetch so the field isn't empty for the one render
+            # before the effect resolves.
+            rel_opt_setups.append(
+                f"  const [{initial_var}, set{_setter(sn)}InitialOptions] = useState(() => ({prop_initial} ?? []).map((item) => ({{\n"
+                f"    id: item.id,\n"
+                f"    label: {label_built['expression']},\n"
+                f"  }})));\n"
+                f"  const {denied_var} = Boolean({prop_initial}PermissionDenied);\n"
+                f"  const {search_var} = useCallback(async (query: string, includeIds: string[]) => {{\n"
+                f"    const rows = (await {prop_search}?.({search_call_args})) ?? [];\n"
+                f"    return rows.map((item) => ({{ id: item.id, label: {label_built['expression']} }}));\n"
+                f"  }}, [{prop_search}{search_deps}]);\n"
+                f"  useEffect(() => {{\n"
+                f"    let cancelled = false;\n"
+                f"    {search_var}('', []).then((rows) => {{ if (!cancelled) set{_setter(sn)}InitialOptions(rows); }});\n"
+                f"    return () => {{ cancelled = true; }};\n"
+                f"  }}, [{search_var}]);\n"
+                f"  const {current_var} = useMemo(() => (\n"
+                f"    src.{rel_name} ? {{ id: src.{rel_name}.id, label: {current_built['expression']} }} : null\n"
+                f"  ), [src.{rel_name}]);"
+            )
+        else:
+            rel_opt_setups.append(
+                f"  const {initial_var} = useMemo(() => ({prop_initial} ?? []).map((item) => ({{\n"
+                f"    id: item.id,\n"
+                f"    label: {label_built['expression']},\n"
+                f"  }})), [{prop_initial}]);\n"
+                # The page (a Server Component) computes this flag from
+                # initial{Target}s's permissionDenied marker and passes it as its
+                # own boolean prop — a non-index property attached to an array
+                # does not survive the Server-to-Client Component serialization
+                # boundary, so it cannot be read back off {prop_initial} here.
+                f"  const {denied_var} = Boolean({prop_initial}PermissionDenied);\n"
+                f"  const {search_var} = useCallback(async (query: string, includeIds: string[]) => {{\n"
+                f"    const rows = (await {prop_search}?.({search_call_args})) ?? [];\n"
+                f"    return rows.map((item) => ({{ id: item.id, label: {label_built['expression']} }}));\n"
+                f"  }}, [{prop_search}{search_deps}]);\n"
+                f"  const {current_var} = useMemo(() => (\n"
+                f"    src.{rel_name} ? {{ id: src.{rel_name}.id, label: {current_built['expression']} }} : null\n"
+                f"  ), [src.{rel_name}]);"
+            )
 
     # Entity select fields (static options embedded in the file)
     entity_select_opt_setups = []
@@ -5534,6 +5575,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # text-search approach as above rather than re-deriving each path's
     # condition (cmd_529).
     uses_use_ref = 'useRef<' in '\n'.join(filter(None, [parent_refs, child_variables, all_states_merged]))
+    # cmd_830: only relations whose FK field declares x-autocomplete-context
+    # get the live-refetch initialOptions treatment (see the rel_opt_setups
+    # loop above), which is the only path that needs useEffect here.
+    uses_use_effect = any_ctx_fields
 
     return {
         'has_mention_fields':       bool(mention_props),
@@ -5592,6 +5637,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'uses_app_field_boolean':   uses_app_field_boolean,
         'uses_use_callback':        uses_use_callback,
         'uses_use_ref':             uses_use_ref,
+        'uses_use_effect':          uses_use_effect,
     }
 
 

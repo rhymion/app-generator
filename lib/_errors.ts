@@ -16,12 +16,27 @@ export type ErrorCode =
   | 'CAPACITY'            // pool / inventory exhausted
   | 'UNKNOWN';            // unexpected internal error
 
+// VALIDATION carries two structurally different failure shapes that must
+// not render as the same user-facing text (cmd_830): 'missing' means the
+// field genuinely has no value (the generated REQUIRED_FIELDS check);
+// 'invalid' means a value IS present but is rejected — wrong format
+// (DECIMAL_FIELDS), a dangling FK (ONE_TO_ONE_RELATIONS "does not exist"),
+// a locked field, or a hand-written service_validation_custom.ts business
+// rule (e.g. "Insured Party is not a party on the claimed policy"). Before
+// this field existed, both cases carried only `code: 'VALIDATION'` and the
+// Server Action transport (getErrorMessage in form_upsert.tsx.jinja2)
+// necessarily collapsed them to the same generic "{field} is required."
+// wording, making a rejected-but-present value indistinguishable from an
+// omitted one. Unused for every other ErrorCode.
+export type ValidationReason = 'missing' | 'invalid';
+
 export class AppError extends Error {
   readonly name = 'AppError';
   constructor(
     public readonly code: ErrorCode,
     message: string,                 // internal debug message — never sent to the UI verbatim
     public readonly field?: string,  // affected form field key (for VALIDATION / CONFLICT)
+    public readonly reason?: ValidationReason,  // VALIDATION only — see ValidationReason
   ) {
     super(message);
   }
@@ -29,7 +44,7 @@ export class AppError extends Error {
 
 // Discriminated union for server action return values.
 export type ActionSuccess = { ok: true };
-export type ActionFailure = { ok: false; errorCode: ErrorCode; field?: string };
+export type ActionFailure = { ok: false; errorCode: ErrorCode; field?: string; reason?: ValidationReason };
 export type ActionResult = ActionSuccess | ActionFailure;
 
 // Extracts the violated column name from a Prisma P2002 error's `meta`

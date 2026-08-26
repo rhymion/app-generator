@@ -1,6 +1,6 @@
 'use client';
 
-import { {% if uses_use_callback %}useCallback, {% endif %}useMemo, {% if uses_use_ref %}useRef, {% endif %}useState } from 'react';
+import { {% if uses_use_callback %}useCallback, {% endif %}{% if uses_use_effect %}useEffect, {% endif %}useMemo, {% if uses_use_ref %}useRef, {% endif %}useState } from 'react';
 import { useRouter } from '@/i18n/navigation';
 import { useTransition } from 'react';
 import { useTranslations } from 'next-intl';
@@ -113,7 +113,7 @@ export default function FormUpsert({{ form_upsert_params }}) {
       case 'SESSION_EXPIRED':   return terr('sessionExpired');
       case 'PERMISSION_DENIED': return terr('permissionDenied');
       case 'NOT_FOUND':         return terr('notFound');
-      case 'VALIDATION':        return err.field ? terr('fieldRequired', { field: err.field }) : terr('unknown');
+      case 'VALIDATION':        return err.field ? (err.reason === 'invalid' ? terr('fieldInvalid', { field: err.field }) : terr('fieldRequired', { field: err.field })) : terr('unknown');
       case 'CONFLICT':          return err.field ? terr('fieldAlreadyLinked', { field: err.field }) : terr('staleMutation');
       case 'CAPACITY':          return terr('capacityExhausted');
       default:                  return terr('unknown');
