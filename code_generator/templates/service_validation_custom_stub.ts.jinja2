@@ -13,6 +13,24 @@
 // child exposes its linked ids as `data.<property_name>: string[]`) —
 // see build_context.py's validation_data_obj for what is exposed.
 //
+// `prevRow` (cmd_834) is the row as it stood BEFORE this write -- the full
+// current record, fetched once in update{{ parent_pascal }}() and reused
+// both for this call and (on entities with an x-approval edge trigger) the
+// approval transition check, so it costs a single findUnique, not two. On
+// create it is always null (there is no previous row to read). Use it to
+// reject a save based on what a field WAS, e.g. "status may not change once
+// it reaches 'closed'" -- something `data` alone (the submitted values)
+// cannot answer. See docs/knowledge/pre-edit-row-handoff-to-custom-validation.md.
+//
+// This predicate runs server-side only -- a UI that wants to disable the
+// field being guarded here (rather than letting the user edit it and only
+// failing on save) should export a second, plain function alongside this
+// one, e.g. a synchronous `forbiddenFieldsFor(prevRow)` returning the field
+// keys this rule currently locks, and call it from both this file and the
+// client form. No such bridge is generated yet (cmd_834 leaves that for
+// whenever the same shape of hand-written rule shows up on more than one
+// entity) -- this note only keeps the door open.
+//
 // Default (unedited) stub is a no-op. Cast `tx` to your own Prisma
 // transaction-client type as needed, e.g.:
 //   import type { PrismaClient } from '@/app/generated/prisma/client';
@@ -21,4 +39,5 @@ export async function validateCustomRules(
   _tx: unknown,
   _data: Record<string, unknown>,
   _currentId: string | null,
+  _prevRow: Record<string, unknown> | null,
 ): Promise<void> {}

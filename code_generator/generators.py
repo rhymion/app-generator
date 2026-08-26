@@ -2313,7 +2313,7 @@ def _build_approval_edge_trigger_update_code(
     terminal entity was silently exploitable before this change."""
     approvable_fk = approvable_rel['prop_name']
     inner = _build_approval_create_block_for_entity(
-        approvable_id_expr=f'_prevForTrigger.{approvable_fk}',
+        approvable_id_expr='_prevApprovableId',
         actor_id_expr='actorId',
         flows_var='_approvalFlows',
         role_ids_var='_creatorRoleIds',
@@ -2325,10 +2325,19 @@ def _build_approval_edge_trigger_update_code(
     lit = _ts_literal(submit_on_value)
     terminal_lit = 'true' if terminal else 'false'
     return (
-        f"    if (_prevForTrigger && _prevForTrigger.{submit_on_field} !== {lit} "
+        f"    if (_prevRow && _prevRow.{submit_on_field} !== {lit} "
         f"&& updated.{submit_on_field} === {lit}) {{\n"
+        # cmd_836: _prevRow widened (cmd_834) from a narrow findUnique select
+        # (which gave this field its exact column type) to
+        # `Record<string, unknown> | null` -- every field read off it now
+        # needs an explicit cast at first use. Caught by app-template's
+        # broader schema (leave_request/maintenance_ticket/
+        # approval_edit_terminal_test), not by this repo's own dogfood
+        # schema, which has no x-approval edge-trigger entity exercising
+        # this exact assignment context.
+        f"      const _prevApprovableId = _prevRow.{approvable_fk} as string;\n"
         f"      const _latestRequest = await tx.approval_request.findFirst({{\n"
-        f"        where: {{ approvable_id: _prevForTrigger.{approvable_fk} }},\n"
+        f"        where: {{ approvable_id: _prevApprovableId }},\n"
         f"        orderBy: {{ created_at: 'desc' }},\n"
         f"      }});\n"
         f"      const _canCreate = (\n"
@@ -2393,7 +2402,6 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     has_approvable_bridge = approvable_rel is not None
     approval_edge_trigger_create_code = ''
     approval_edge_trigger_update_code = ''
-    approval_edge_trigger_prev_select_code = ''
     x_approval_submit_on_field: str | None = None
     if has_approvable_bridge and can_create:
         raw_def_by_model = _raw_def(model, schema) if schema else {}
@@ -2401,10 +2409,13 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         approval_edge_trigger_create_code = _build_approval_edge_trigger_create_code(
             approvable_rel, parent, x_approval_submit_on_field, x_approval_submit_on_value,
         )
+        # cmd_834: the previous-row lookup this update trigger needs
+        # (_prevRow) is now emitted unconditionally by service.ts.jinja2
+        # itself, ahead of validateOnUpdate, for every can_update entity --
+        # not only approvable ones (it also feeds validateCustomRules). No
+        # separate select-scoped fetch is built here anymore; the trigger
+        # code below just reads off that shared full-row fetch.
         if can_update and x_approval_submit_on_field is not None:
-            approval_edge_trigger_prev_select_code = (
-                f"{{ {x_approval_submit_on_field}: true, {approvable_rel['prop_name']}: true }}"
-            )
             x_approval_terminal = bool(
                 (raw_def_by_model.get('x-approval') or {}).get('on_rejected', {}).get('terminal', False)
             )
@@ -2827,7 +2838,6 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'should_filter_by_org':               should_filter_by_org,
         'approval_edge_trigger_create_code':  approval_edge_trigger_create_code,
         'approval_edge_trigger_update_code':  approval_edge_trigger_update_code,
-        'approval_edge_trigger_prev_select_code': approval_edge_trigger_prev_select_code,
     }
 
 

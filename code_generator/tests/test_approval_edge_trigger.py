@@ -278,7 +278,7 @@ class TestUpdateTimeTrigger:
         code = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_schema())[
             'approval_edge_trigger_update_code'
         ]
-        assert "_prevForTrigger.status !== 'submitted'" in code
+        assert "_prevRow.status !== 'submitted'" in code
         assert "updated.status === 'submitted'" in code
 
     def test_positive_predicate_present_on_update_path(self):
@@ -295,14 +295,17 @@ class TestUpdateTimeTrigger:
 
     def test_rendered_update_captures_result_and_prefetches_previous(self):
         rendered = _render_service(_entity('purchase_request', 'purchase_request'), _submit_on_schema())
-        assert 'const _prevForTrigger = await tx.purchase_request.findUnique(' in rendered
+        assert 'const _prevRow = (await tx.purchase_request.findUnique(' in rendered
         assert 'const updated = await tx.purchase_request.update(' in rendered
 
-    def test_no_prefetch_or_capture_when_no_submit_on(self):
-        """A no-submit_on entity must not pay for a prev-state lookup it
-        never uses, and update() stays uncaptured (no unused var)."""
+    def test_prev_row_fetched_but_no_edge_trigger_capture_when_no_submit_on(self):
+        """cmd_834: every can_update entity gets a pre-edit row fetch
+        (_prevRow) regardless of whether it has an approval trigger --
+        it also feeds validateCustomRules. But with no submit_on declared
+        there's no transition to detect, so update() still stays uncaptured
+        (no unused var)."""
         rendered = _render_service(_entity('leave_request', 'leave_request'), _no_submit_on_schema())
-        assert '_prevForTrigger' not in rendered
+        assert 'const _prevRow = (await tx.leave_request.findUnique(' in rendered
         assert 'const updated = await tx.leave_request.update(' not in rendered
         assert 'await tx.leave_request.update(' in rendered
 
