@@ -171,10 +171,33 @@ nothing is generated from it yet.
   full row).
 - `lib/organization/service_validation_custom.ts` (this repo's own dogfood
   app) — a real, minimal regression fixture: an organization's
-  `description`, once set, may not be cleared. Exists specifically to give
+  `description`, if it carries a `PRE_EDIT_ROW_FIXTURE_LOCKED` marker, may
+  not be cleared. Exists specifically to give
   `test/flows/pre_edit_row_custom_validation.test.ts` something real to
   exercise against a live Postgres test DB via the actual generated
   `updateOrganization()` — not merely a type-check.
+
+  The rule is deliberately keyed on that marker rather than "any
+  non-empty description" — the first version of this fixture used the
+  broader form and broke this generated entity's own standard Cypress CRUD
+  spec (`cypress/e2e/organization.cy.ts`'s "3.2 removes optional data and
+  child items"), which always fills every optional field (via
+  `db:populateOrganizationFull`) and then clears it as routine coverage
+  that optional fields really are optional — a UI e2e job caught this on
+  CI (`E2E Tests`, PR #431's first run), not the local API-only gate. Any
+  fixture hung on a real, generated, exercised entity needs to check it
+  isn't colliding with that entity's own generated test suite; a marker
+  value no generated fixture ever produces sidesteps the problem while
+  still genuinely exercising `prevRow`.
+
+  This is also why the local API gate alone had missed it: `npm run
+  test:e2e:cy:api`/`:cy:ui` run against `next start` (a prebuilt server
+  bundle), and the very first local verification pass ran them against a
+  build taken *before* this fixture file was hand-edited — `next start`
+  silently keeps serving the old bundle rather than erroring, so the run
+  looked green while actually never exercising the new rule at all. A
+  rebuild (`next build`) is required after any edit to a write-once stub
+  before trusting a subsequent `next start`-based e2e run's result.
 
 ## Tests
 
@@ -188,12 +211,14 @@ nothing is generated from it yet.
 - `test/flows/pre_edit_row_custom_validation.test.ts` — real-DB proof (not
   a type check) that a save is actually rejected when it violates a rule
   that can only be decided from `prevRow`, and actually allowed when it
-  doesn't: clearing a previously-set `description` is rejected (both via
-  `''` and via `null`), changing it to another non-empty value succeeds,
-  and clearing a description that was never set (no prior value to
-  protect) succeeds.
-- The full UI e2e suite (`npm run test:e2e:cy:ui`) was run before shipping
-  this change: 190/190 specs passing, 0 skipped, across
+  doesn't: clearing a marker-locked `description` is rejected (both via
+  `''` and via `null`), changing it to another marker-carrying value
+  succeeds, clearing an *ordinary* (unmarked) description succeeds (proves
+  the rule doesn't fire on plain data), and clearing a description that
+  was never set at all (no prior value to protect) succeeds.
+- The full UI e2e suite (`npm run test:e2e:cy:ui`) was run, after a clean
+  rebuild reflecting the marker-scoped fixture, before shipping this
+  change: 190/190 specs passing, 0 skipped, across
   `approval_flow_desktop_crud.cy.ts`,
   `approval_flow_same_entity_autocomplete_filter.cy.ts`,
   `approval_flow_self_referential_children.cy.ts`, `audit_log.cy.ts`,
@@ -202,7 +227,11 @@ nothing is generated from it yet.
   `fk_read_permission_graceful_degradation.cy.ts`, `import_modal.cy.ts`,
   `legal_pages.cy.ts`, `organization.cy.ts`, `permission.cy.ts`,
   `role.cy.ts`, `search_page.cy.ts`, `user.cy.ts`, and every
-  `mobile/*.cy.ts` counterpart — no spec touches the description-clearing
-  rule added above, and none regressed.
+  `mobile/*.cy.ts` counterpart, including "3.2 removes optional data and
+  child items" — the exact spec the broader (pre-fix) fixture broke.
 - The mandatory gate (`npm run test:e2e:cy:api`) is unchanged — 239/239
   passing, 0 skipped.
+- Confirmed on GitHub Actions, not only locally: PR #431's `E2E Tests` job
+  failed on the first CI run specifically on "3.2 removes optional data and
+  child items" (`organization.cy.ts`) with the broader fixture; after the
+  marker-scoping fix, a fresh CI run passed clean.

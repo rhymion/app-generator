@@ -35,28 +35,38 @@
 // transaction-client type as needed, e.g.:
 //   import type { PrismaClient } from '@/app/generated/prisma/client';
 //   type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
-// cmd_834 generator regression fixture: once an organization's description
-// has been set to a non-empty value, it may not be cleared back to empty/
-// null. "Clearing an existing value" is only distinguishable from "never
-// had one" by comparing the submitted value against what the row held
-// BEFORE this write -- `data` alone (the value being submitted) cannot
-// answer that on its own, which is exactly why this rule needs `prevRow`.
+// Generator regression fixture: an organization's description carrying the
+// marker below may not be cleared. Scoped to that marker -- not "any
+// non-empty description" -- deliberately: this generated entity's own
+// standard Cypress CRUD spec (cypress/e2e/organization.cy.ts, "removes
+// optional data and child items") always populates every optional field
+// including description via db:populateOrganizationFull and then clears it
+// as routine coverage that optional fields really are optional. A rule
+// keyed on "any non-empty description" fires on that fixture data too and
+// breaks a spec this file has no business touching; keying on a marker no
+// generated fixture ever produces keeps the two fully independent while
+// still genuinely exercising prevRow: "clearing an existing value" is only
+// distinguishable from "never had one" by comparing the submitted value
+// against what the row held BEFORE this write -- `data` alone (the value
+// being submitted) cannot answer that on its own.
 // See test/flows/pre_edit_row_custom_validation.test.ts for the real-DB
 // regression test this line exists to keep green, and
 // docs/knowledge/pre-edit-row-handoff-to-custom-validation.md for the
 // mechanism this fixture exercises.
+const LOCK_MARKER = 'PRE_EDIT_ROW_FIXTURE_LOCKED';
+
 export async function validateCustomRules(
   _tx: unknown,
   data: Record<string, unknown>,
   _currentId: string | null,
   prevRow: Record<string, unknown> | null,
 ): Promise<void> {
-  const hadDescription = typeof prevRow?.description === 'string' && prevRow.description.trim() !== '';
-  if (!hadDescription) return;
+  const hadLockedDescription = typeof prevRow?.description === 'string' && prevRow.description.includes(LOCK_MARKER);
+  if (!hadLockedDescription) return;
 
   const incoming = data.description;
-  const cleared = incoming === null || incoming === undefined || (typeof incoming === 'string' && incoming.trim() === '');
-  if (cleared) {
-    throw new Error('description cannot be cleared once set');
+  const stillLocked = typeof incoming === 'string' && incoming.includes(LOCK_MARKER);
+  if (!stillLocked) {
+    throw new Error('description cannot be cleared once locked');
   }
 }
