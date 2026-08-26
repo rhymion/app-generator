@@ -2313,7 +2313,7 @@ def _build_approval_edge_trigger_update_code(
     terminal entity was silently exploitable before this change."""
     approvable_fk = approvable_rel['prop_name']
     inner = _build_approval_create_block_for_entity(
-        approvable_id_expr=f'_prevRow.{approvable_fk}',
+        approvable_id_expr='_prevApprovableId',
         actor_id_expr='actorId',
         flows_var='_approvalFlows',
         role_ids_var='_creatorRoleIds',
@@ -2327,8 +2327,17 @@ def _build_approval_edge_trigger_update_code(
     return (
         f"    if (_prevRow && _prevRow.{submit_on_field} !== {lit} "
         f"&& updated.{submit_on_field} === {lit}) {{\n"
+        # cmd_836: _prevRow widened (cmd_834) from a narrow findUnique select
+        # (which gave this field its exact column type) to
+        # `Record<string, unknown> | null` -- every field read off it now
+        # needs an explicit cast at first use. Caught by app-template's
+        # broader schema (leave_request/maintenance_ticket/
+        # approval_edit_terminal_test), not by this repo's own dogfood
+        # schema, which has no x-approval edge-trigger entity exercising
+        # this exact assignment context.
+        f"      const _prevApprovableId = _prevRow.{approvable_fk} as string;\n"
         f"      const _latestRequest = await tx.approval_request.findFirst({{\n"
-        f"        where: {{ approvable_id: _prevRow.{approvable_fk} }},\n"
+        f"        where: {{ approvable_id: _prevApprovableId }},\n"
         f"        orderBy: {{ created_at: 'desc' }},\n"
         f"      }});\n"
         f"      const _canCreate = (\n"
