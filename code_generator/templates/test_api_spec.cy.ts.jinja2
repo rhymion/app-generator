@@ -1263,7 +1263,8 @@ describe('API: {{ title }}', () => {
       });
     });
 
-    it('14.4 withdrawing a pending request then editing {{ resubmit_target_field }} back to its open value creates a new pending approval_request', () => {
+{% if resubmit_unsubmitted_value_literal %}
+    it('14.4 withdrawing a pending request then editing {{ resubmit_target_field }} away and back to its open value creates a new pending approval_request', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithApproval', {
           creatorId: setup.requestorUser.id,
@@ -1277,6 +1278,15 @@ describe('API: {{ title }}', () => {
           }).then((withdrawRes) => {
             expect(withdrawRes.status).to.eq(200);
             expect(withdrawRes.body.status).to.eq('withdrawn');
+            // Withdrawal only moves the approval_request itself -- it has
+            // no on_approved/on_rejected-style set_fields side effect, so
+            // {{ resubmit_target_field }} is still at its open value from
+            // creation. The edge trigger only fires on an actual
+            // transition (previous !== target -> new === target), so a
+            // real resubmission first requires the record to leave that
+            // value (an ordinary edit, same as a requestor updating other
+            // details while their request is withdrawn) before coming
+            // back to it.
             cy.request({
               method: 'PUT',
               url: `{{ api_path }}/${data.record.id}`,
@@ -1285,21 +1295,35 @@ describe('API: {{ title }}', () => {
 {% for ln in put_body_resubmit %}
 {{ ln }}
 {% endfor %}
-                {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+                {{ resubmit_target_field }}: {{ resubmit_unsubmitted_value_literal }},
               },
-            }).then((res) => {
-              expect(res.status).to.eq(200);
-              cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
-                .then((getRes) => {
-                  const requests = getRes.body.approvable.approval_requests;
-                  expect(requests.length).to.eq(2);
-                  expect(requests.some((r: any) => r.status === 'pending')).to.eq(true);
-                });
+            }).then((awayRes) => {
+              expect(awayRes.status).to.eq(200);
+              cy.request({
+                method: 'PUT',
+                url: `{{ api_path }}/${data.record.id}`,
+                headers: { 'X-API-Key': TEST_API_KEY },
+                body: {
+{% for ln in put_body_resubmit %}
+{{ ln }}
+{% endfor %}
+                  {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+                },
+              }).then((res) => {
+                expect(res.status).to.eq(200);
+                cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+                  .then((getRes) => {
+                    const requests = getRes.body.approvable.approval_requests;
+                    expect(requests.length).to.eq(2);
+                    expect(requests.some((r: any) => r.status === 'pending')).to.eq(true);
+                  });
+              });
             });
           });
         });
       });
     });
+{% endif %}
 {% if resubmit_unsubmitted_value_literal and not has_deps %}
 
     it('14.5 a newly-created record with {{ resubmit_target_field }} not yet at its open value has no approval_request until explicitly edited there', () => {
