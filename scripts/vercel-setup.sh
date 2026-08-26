@@ -92,6 +92,45 @@ echo "================================================================="
 [[ "$DRY_RUN" == "true" ]] && echo "[DRY-RUN mode — write commands echoed, not executed]"
 echo ""
 
+# ── Preflight: verify the Vercel credential before doing any real work ──────
+# VERCEL_TOKEN (exported above by vercel-env.sh's `set -a; source
+# .env.production.local`) silently overrides an interactive `vercel login`
+# session for every `vercel` CLI call below — see the note next to
+# VERCEL_TOKEN in .env.vercel.production.local.example. When that token is
+# stale/invalid for the configured scope, the CLI does not fail here in an
+# obvious way: it fails several steps later, at Step 1's `vercel project add
+# --scope ...`, with the misleading "Error: The specified scope does not
+# exist" — the CLI's real reason ("Not authorized ... re-authenticate to this
+# scope") never reaches the operator (confirmed live 2026-08-26). `vercel
+# whoami` alone reproduces the same scope-resolution failure, so it is used
+# here, before Step 0, as a fail-closed check — there is no flag to skip it.
+echo "[Preflight] Verifying Vercel credential..."
+if [[ "$DRY_RUN" == "true" ]]; then
+  echo "[DRY-RUN] Would run: vercel whoami"
+else
+  if ! _WHOAMI_OUT=$(vercel whoami 2>&1); then
+    echo "" >&2
+    echo "ERROR: Vercel credential check failed (vercel whoami):" >&2
+    echo "  ${_WHOAMI_OUT}" >&2
+    echo "" >&2
+    if [[ -n "${VERCEL_TOKEN:-}" ]]; then
+      echo "  The VERCEL_TOKEN in .env.production.local is invalid or expired for" >&2
+      echo "  the configured scope. VERCEL_TOKEN silently overrides any 'vercel" >&2
+      echo "  login' session, so this is not a scope-name typo (any later" >&2
+      echo "  \"specified scope does not exist\" error is a symptom of this, not" >&2
+      echo "  the actual cause). Fix one of the following, then re-run:" >&2
+      echo "    - Replace VERCEL_TOKEN in .env.production.local with a valid token, or" >&2
+      echo "    - Remove/comment out the VERCEL_TOKEN line and use a 'vercel login' session." >&2
+    else
+      echo "  VERCEL_TOKEN is unset, so this came from your 'vercel login' session —" >&2
+      echo "  run 'vercel login' and re-run this script." >&2
+    fi
+    exit 1
+  fi
+  echo "  OK: Vercel credential valid (${_WHOAMI_OUT})."
+fi
+echo ""
+
 # ── Step 0: Submodule check ─────────────────────────────────────────────────
 echo "[Step 0] Verifying app-generator submodule is checked out..."
 if [[ ! -d "${ROOT}/app-generator/app" ]]; then
