@@ -2702,6 +2702,36 @@ def helper_context(
     required_fields_prisma = [_enrich_field_prisma(f, title) for f in required_field_metas]
     all_fields_prisma = [_enrich_field_prisma(f, title) for f in fields]
 
+    # cmd_825: populate{{Pascal}}WithRejectedApproval/WithTerminalRejectedApproval
+    # create the approval_request directly (status: 'rejected'/'terminal_rejected'),
+    # bypassing the real reject route entirely -- so unlike a genuine rejection,
+    # they never apply on_rejected.set_fields to the ENTITY's own row. For a
+    # submit_on entity whose set_fields target field happens to already be
+    # required_fields_prisma-omitted (i.e. its schema default already equals
+    # submit_on's own value, the common case), the fixture's created record
+    # is left sitting AT submit_on's target value from creation -- an
+    # unrealistic state a genuine rejection never produces (dispatchOnRejected
+    # always runs set_fields on reject, terminal or not), and one that
+    # silently defeats any resubmit-via-edit test built on top of these two
+    # fixtures: PUTting the field back to a value it never left triggers no
+    # edge (prev !== target -> new === target), so no new approval_request is
+    # created regardless of whether the guard is correct. Bake the same
+    # set_fields the real route would have applied directly into these two
+    # fixtures' own create() calls.
+    _helper_x_approval = parent_def.get('x-approval')
+    _helper_on_rejected_sf = (_helper_x_approval.get('on_rejected') or {}).get('set_fields') if _helper_x_approval else None
+    rejected_set_fields_prisma = []
+    if _helper_on_rejected_sf:
+        _resolved_sf = resolve_set_fields(parent_def.get('properties') or {}, _helper_on_rejected_sf)
+        for _sf_field, _sf_value in _resolved_sf.items():
+            if isinstance(_sf_value, bool):
+                _sf_lit = 'true' if _sf_value else 'false'
+            elif isinstance(_sf_value, (int, float)):
+                _sf_lit = str(_sf_value)
+            else:
+                _sf_lit = "'" + str(_sf_value).replace("\\", "\\\\").replace("'", "\\'") + "'"
+            rejected_set_fields_prisma.append({'prop_name': _sf_field, 'prisma_val_fixed': _sf_lit})
+
     enriched_datagrid_children = []
     for child_meta in datagrid_children:
         child_name = child_meta['child']['name']
@@ -3015,6 +3045,7 @@ def helper_context(
         'ua_dep_fields': ua_dep_fields,
         'ua_dep_fields_full': ua_dep_fields_full,
         'required_fields_prisma': required_fields_prisma,
+        'rejected_set_fields_prisma': rejected_set_fields_prisma,
         'all_fields_prisma': all_fields_prisma,
         'extra_prisma_fields': extra_prisma_fields,
         'has_optional': bool(optional_field_metas),
