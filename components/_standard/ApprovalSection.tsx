@@ -24,13 +24,14 @@ import Collapse from '@mui/material/Collapse';
 import Box from '@mui/material/Box';
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
+import UndoIcon from '@mui/icons-material/Undo';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { Fragment } from 'react';
 import type { ModelPermissions } from '@/lib/authz';
-import { approveApprovalRequest, rejectApprovalRequest } from '@/lib/approval_request/actions';
+import { approveApprovalRequest, rejectApprovalRequest, withdrawApprovalRequest } from '@/lib/approval_request/actions';
 
-const STATUS_LABELS = ['Pending', 'Approved', 'Rejected', 'TerminalRejected'] as const;
+const STATUS_LABELS = ['Pending', 'Approved', 'Rejected', 'TerminalRejected', 'Withdrawn'] as const;
 
 const REASON_KIND_OPTIONS: { value: number; label: string }[] = [
   { value: 0, label: 'Customer' },
@@ -49,7 +50,7 @@ type ApprovalHistory = {
 type ApprovalRequest = {
   id: string;
   approval_flow_id: string;
-  status: 'pending' | 'approved' | 'rejected' | 'terminal_rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'terminal_rejected' | 'withdrawn';
   approval_flow?: {
     id: string;
     entity_name: string;
@@ -61,19 +62,20 @@ type ApprovalRequest = {
   approval_histories?: ApprovalHistory[];
 };
 
-type Action = 'approve' | 'reject';
+type Action = 'approve' | 'reject' | 'withdraw';
 
 type Props = {
   src: { creator_id?: string | null; approvable?: { id: string; approval_requests: ApprovalRequest[] } | null };
   permissions?: ModelPermissions;
   currentUserRoleIds?: string[];
-  // Unused since resubmit's removal (cmd_818 D1) -- kept in the Props type
-  // because form_view.tsx.jinja2's generic x-custom-components wiring
-  // always passes currentUserId to every view-target component.
+  // cmd_825: revived for the withdraw button's own-request check below --
+  // form_view.tsx.jinja2's generic x-custom-components wiring already
+  // always passes currentUserId to every view-target component, so no
+  // template change was needed to make it available here again.
   currentUserId?: string | null;
 };
 
-export default function ApprovalSection({ src, currentUserRoleIds }: Props) {
+export default function ApprovalSection({ src, currentUserRoleIds, currentUserId }: Props) {
   const t = useTranslations('Fields');
   const tCommon = useTranslations('Common');
   const tStatus = useTranslations('ApprovalRequestStatus');
@@ -116,11 +118,14 @@ export default function ApprovalSection({ src, currentUserRoleIds }: Props) {
     closeDialog();
     startTransition(() => {
       if (action === 'approve') approveApprovalRequest(arId, msg);
-      else rejectApprovalRequest(arId, msg, { reason: reasonText, reasonKind });
+      else if (action === 'reject') rejectApprovalRequest(arId, msg, { reason: reasonText, reasonKind });
+      else withdrawApprovalRequest(arId, msg);
     });
   };
 
-  const dialogTitle = dialog?.action === 'approve' ? t('approve') : t('reject');
+  const dialogTitle = dialog?.action === 'approve' ? t('approve')
+    : dialog?.action === 'reject' ? t('reject')
+    : t('withdraw');
 
   return (
     <div style={{ marginTop: '1.5rem' }}>
@@ -145,6 +150,12 @@ export default function ApprovalSection({ src, currentUserRoleIds }: Props) {
               && approverRoleId
               && currentUserRoleIds?.includes(approverRoleId)
               && precedingApproved;
+            // cmd_825: withdrawal is the requestor's own action on their
+            // own still-pending request -- not gated by approver role or
+            // preceding-flow order (those only govern approve/reject).
+            const canWithdraw = ar.status === 'pending'
+              && !!currentUserId
+              && src.creator_id === currentUserId;
             const histories = ar.approval_histories ?? [];
             const isExpanded = expandedIds.has(ar.id);
 
@@ -176,6 +187,13 @@ export default function ApprovalSection({ src, currentUserRoleIds }: Props) {
                           </IconButton>
                         </Tooltip>
                       </>
+                    )}
+                    {canWithdraw && (
+                      <Tooltip title={t('withdraw')}>
+                        <IconButton aria-label="Withdraw" color="warning" size="small" onClick={() => openDialog(ar.id, 'withdraw')}>
+                          <UndoIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                     )}
                   </TableCell>
                 </TableRow>

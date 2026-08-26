@@ -139,6 +139,7 @@ from helpers.schema_helpers import (
     get_self_only_flags,
     derive_approval_locked_values,
     is_write_only_prop,
+    resolve_set_fields,
 )
 from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import (
@@ -147,6 +148,7 @@ from helpers.label_field import (
 )
 from build_context import _get_entity_options, _raw_def, is_forced_required_field, get_uri_kind
 from generate_types import extract_entities
+from generators import resolve_approval_submit_on
 
 
 def _readonly_field_names(model_def: dict) -> set[str]:
@@ -2700,6 +2702,36 @@ def helper_context(
     required_fields_prisma = [_enrich_field_prisma(f, title) for f in required_field_metas]
     all_fields_prisma = [_enrich_field_prisma(f, title) for f in fields]
 
+    # cmd_825: populate{{Pascal}}WithRejectedApproval/WithTerminalRejectedApproval
+    # create the approval_request directly (status: 'rejected'/'terminal_rejected'),
+    # bypassing the real reject route entirely -- so unlike a genuine rejection,
+    # they never apply on_rejected.set_fields to the ENTITY's own row. For a
+    # submit_on entity whose set_fields target field happens to already be
+    # required_fields_prisma-omitted (i.e. its schema default already equals
+    # submit_on's own value, the common case), the fixture's created record
+    # is left sitting AT submit_on's target value from creation -- an
+    # unrealistic state a genuine rejection never produces (dispatchOnRejected
+    # always runs set_fields on reject, terminal or not), and one that
+    # silently defeats any resubmit-via-edit test built on top of these two
+    # fixtures: PUTting the field back to a value it never left triggers no
+    # edge (prev !== target -> new === target), so no new approval_request is
+    # created regardless of whether the guard is correct. Bake the same
+    # set_fields the real route would have applied directly into these two
+    # fixtures' own create() calls.
+    _helper_x_approval = parent_def.get('x-approval')
+    _helper_on_rejected_sf = (_helper_x_approval.get('on_rejected') or {}).get('set_fields') if _helper_x_approval else None
+    rejected_set_fields_prisma = []
+    if _helper_on_rejected_sf:
+        _resolved_sf = resolve_set_fields(parent_def.get('properties') or {}, _helper_on_rejected_sf)
+        for _sf_field, _sf_value in _resolved_sf.items():
+            if isinstance(_sf_value, bool):
+                _sf_lit = 'true' if _sf_value else 'false'
+            elif isinstance(_sf_value, (int, float)):
+                _sf_lit = str(_sf_value)
+            else:
+                _sf_lit = "'" + str(_sf_value).replace("\\", "\\\\").replace("'", "\\'") + "'"
+            rejected_set_fields_prisma.append({'prop_name': _sf_field, 'prisma_val_fixed': _sf_lit})
+
     enriched_datagrid_children = []
     for child_meta in datagrid_children:
         child_name = child_meta['child']['name']
@@ -3013,6 +3045,7 @@ def helper_context(
         'ua_dep_fields': ua_dep_fields,
         'ua_dep_fields_full': ua_dep_fields_full,
         'required_fields_prisma': required_fields_prisma,
+        'rejected_set_fields_prisma': rejected_set_fields_prisma,
         'all_fields_prisma': all_fields_prisma,
         'extra_prisma_fields': extra_prisma_fields,
         'has_optional': bool(optional_field_metas),
@@ -4430,7 +4463,7 @@ def api_spec_context(
             out.append(f"{indent}{c['child']['property_name']}: [],")
         return out
 
-    def _put_body_impl(indent: str, skip_field: str | None = None) -> list[str]:
+    def _put_body_impl(indent: str, skip_field: str | None = None, record_var: str = 'records[0]') -> list[str]:
         out = []
         for prop in put_body_props:
             if prop == skip_field:
@@ -4466,7 +4499,7 @@ def api_spec_context(
                 else:
                     out.append(f"{indent}name: 'Updated {title}',")
             else:
-                out.append(f"{indent}{prop}: records[0].{prop},")
+                out.append(f"{indent}{prop}: {record_var}.{prop},")
         for c in api_child_metas:
             out.append(f"{indent}{c['child']['property_name']}: [],")
         return out
@@ -4535,6 +4568,70 @@ def api_spec_context(
     _x_approval = model_def.get('x-approval')
     entity_on_rejected = _x_approval.get('on_rejected') if _x_approval else None
     entity_on_rejected_terminal = bool((_x_approval or {}).get('on_rejected', {}).get('terminal', False))
+
+    # cmd_824: resubmission is now an ordinary edit of the entity's own
+    # field back toward its "open" value (the dedicated resubmit route was
+    # retired in favor of the update-time edge trigger service.ts.jinja2
+    # emits from x-approval.submit_on). To generate a live PUT-based test
+    # proving (a) a non-terminal rejection can be resubmitted this way and
+    # (b) a terminal rejection cannot, resolve the exact field+value such an
+    # edit targets:
+    #   - when submit_on is declared, use it directly -- the field the
+    #     update-time edge trigger itself watches.
+    #   - otherwise (the "no submit_on" default behavior -- an update never
+    #     re-fires approval creation at all, regardless of value, because
+    #     no update-time trigger code is emitted for this entity), fall
+    #     back to on_rejected.set_fields' own target field and its schema
+    #     default -- the value editing the rejected record back toward
+    #     "open" would naturally use. Either way we get a real field+value
+    #     that can be sent over the API and observed for whether a new
+    #     approval_request appears.
+    _resubmit_target_field, _resubmit_target_value = (
+        resolve_approval_submit_on(model_def) if has_approvable and _x_approval else (None, None)
+    )
+    if _resubmit_target_field is None and entity_on_rejected and entity_on_rejected.get('set_fields'):
+        _rt_field = next(iter(entity_on_rejected['set_fields']), None)
+        _rt_default = (model_def.get('properties') or {}).get(_rt_field, {}).get('default') if _rt_field else None
+        if _rt_field is not None and _rt_default is not None:
+            _resubmit_target_field = _rt_field
+            _resubmit_target_value = resolve_set_fields(
+                model_def.get('properties') or {}, {_rt_field: _rt_default},
+            )[_rt_field]
+    def _resubmit_literal(value) -> str:
+        if isinstance(value, bool):
+            return 'true' if value else 'false'
+        if isinstance(value, (int, float)):
+            return str(value)
+        return "'" + str(value).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+    resubmit_target_field = None
+    resubmit_target_value_literal = None
+    # cmd_825: a value the field could hold that is NEITHER submit_on's
+    # target nor any value on_approved/on_rejected's set_fields writes to
+    # this same field -- i.e. a genuine "not yet submitted" state distinct
+    # from every state the mechanism itself transitions the field to.
+    # Powers the "created but not yet submitted, then explicitly submitted"
+    # test (submit_on's whole reason for existing): only generated when
+    # such a spare enum value actually exists on the field, so a schema
+    # with no room for one (e.g. only submit_on's own value declared)
+    # silently gets no test rather than a broken one.
+    resubmit_unsubmitted_value_literal = None
+    if _resubmit_target_field and _resubmit_target_field in put_body_props:
+        resubmit_target_field = _resubmit_target_field
+        resubmit_target_value_literal = _resubmit_literal(_resubmit_target_value)
+        _rt_field_meta = next((f for f in all_field_metas if f['prop_name'] == resubmit_target_field), None)
+        _rt_evals = [v for v in ((_rt_field_meta or {}).get('enum_values') or []) if v is not None]
+        if _rt_evals:
+            _excluded_values = {_resubmit_target_value}
+            _on_approved_sf = (_x_approval.get('on_approved') or {}).get('set_fields') or {} if _x_approval else {}
+            if resubmit_target_field in _on_approved_sf:
+                _excluded_values.add(_on_approved_sf[resubmit_target_field])
+            _on_rejected_sf = (entity_on_rejected or {}).get('set_fields') or {}
+            if resubmit_target_field in _on_rejected_sf:
+                _excluded_values.add(_on_rejected_sf[resubmit_target_field])
+            _spare_value = next((v for v in _rt_evals if v not in _excluded_values), None)
+            if _spare_value is not None:
+                resubmit_unsubmitted_value_literal = _resubmit_literal(_spare_value)
 
     # Detect count-mode reservation without lines: POST tests must seed the pool entity first.
     _xres_def = model_def.get('x-reservation')
@@ -4632,6 +4729,19 @@ def api_spec_context(
         'has_approvable': has_approvable,
         'entity_on_rejected': entity_on_rejected,
         'entity_on_rejected_terminal': entity_on_rejected_terminal,
+        # cmd_824: PUT body for the resubmit-via-edit tests (14.x below) --
+        # same shape as put_body_update but with resubmit_target_field
+        # skipped from the loop so the template can append it explicitly
+        # with resubmit_target_value_literal, and sourced from the
+        # single-record populate helpers' `data.record` (not `records[0]`,
+        # which only the array-returning db:populate<Entity> task uses).
+        'resubmit_target_field': resubmit_target_field,
+        'resubmit_target_value_literal': resubmit_target_value_literal,
+        'resubmit_unsubmitted_value_literal': resubmit_unsubmitted_value_literal,
+        'put_body_resubmit': (
+            _put_body_impl('              ', skip_field=resubmit_target_field, record_var='data.record')
+            if resubmit_target_field else None
+        ),
         'reservation_count_pool_pascal': _reservation_count_pool_pascal,
         # CSV Export (Phase 1) test context
         'should_filter_by_org': should_filter_by_org,

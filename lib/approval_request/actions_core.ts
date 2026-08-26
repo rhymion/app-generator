@@ -9,7 +9,7 @@ import { assertApprovalOrder } from '@/lib/approval_request/order-check';
 // approval_history.pre_status/post_status are separate legacy Int columns
 // (ordinal snapshot, out of Class A Batch A1 scope) — this maps the
 // ApprovalRequestStatus enum back to its historical ordinal index.
-const APPROVAL_REQUEST_STATUS_ORDER = ['pending', 'approved', 'rejected', 'terminal_rejected'] as const;
+const APPROVAL_REQUEST_STATUS_ORDER = ['pending', 'approved', 'rejected', 'terminal_rejected', 'withdrawn'] as const;
 function statusOrdinal(status: string): number {
   return APPROVAL_REQUEST_STATUS_ORDER.indexOf(status as (typeof APPROVAL_REQUEST_STATUS_ORDER)[number]);
 }
@@ -289,9 +289,59 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
     revalidateApprovableTarget(entityName, targetId);
   }
 
+  // cmd_825: the requestor withdraws their own still-pending request.
+  // Unlike approve/reject this is not an approver action -- permission is
+  // "you are the person this request was submitted for"
+  // (approvable.creator_id, the same field getApprovalRequestRecipient
+  // already treats as the requestor), never approval_flow.approver_role_id
+  // membership. Withdrawal has no on_approved/on_rejected-style dispatch
+  // (no set_fields, no emit_hook) -- it is a pure status transition the
+  // edge-trigger's positive predicate (cmd_826) then treats as an
+  // eligible starting point for a future resubmission, same as a
+  // non-terminal rejection.
+  async function assertRequestorSelfAndPending(id: string): Promise<void> {
+    const req = await prisma.approval_request.findUnique({
+      where: { id },
+      select: { status: true, approvable: { select: { creator_id: true } } },
+    });
+    if (!req) throw new Error('Approval request not found');
+    const userId = await getSessionUserIdOrThrow();
+    if (!req.approvable || req.approvable.creator_id !== userId) {
+      throw new Error('Access denied: only the requestor may withdraw their own request');
+    }
+    if (req.status !== 'pending') {
+      throw new Error('Only a pending approval request can be withdrawn');
+    }
+  }
+
+  async function withdrawApprovalRequest(id: string, message?: string): Promise<void> {
+    await assertRequestorSelfAndPending(id);
+    const userId = await getSessionUserIdOrThrow();
+    await prisma.$transaction(async (tx) => {
+      const result = await tx.approval_request.update({
+        where: { id },
+        data: { status: 'withdrawn' },
+        select: { id: true },
+      });
+      // 'withdrawn' is appended to APPROVAL_REQUEST_STATUS_ORDER at index 4.
+      await tx.approval_history.create({
+        data: {
+          approval_request_id: result.id,
+          pre_status: 0,
+          post_status: statusOrdinal('withdrawn'),
+          message: message ?? null,
+          creator_id: userId,
+        },
+      });
+    }, { isolationLevel: 'Serializable' });
+    const { entityName, targetId } = await getApprovalRequestRecipient(id);
+    revalidateApprovableTarget(entityName, targetId);
+  }
+
   return {
     getApprovalRequestRecipient,
     approveApprovalRequest,
     rejectApprovalRequest,
+    withdrawApprovalRequest,
   };
 }
