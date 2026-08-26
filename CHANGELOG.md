@@ -5,6 +5,32 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **A hand-written `service_validation_custom.ts` rejection of a value that
+  IS present (e.g. an FK that violates a business rule) no longer renders
+  as the generic "{field} is required." text a genuinely-missing value
+  gets.** `AppError`/`ActionFailure` (`lib/_errors.ts`) gained a
+  `reason?: 'missing' | 'invalid'` field for `VALIDATION`-coded errors; the
+  generated `REQUIRED_FIELDS`/one-to-one-missing checks tag `'missing'`,
+  every other schema-driven `VALIDATION` check (decimal format, dangling
+  one-to-one FK, approval-locked field) and any hand-written
+  `validateCustomRules()` rejection tag `'invalid'` (the generated
+  `service_validation.ts` wraps the custom-rules call and re-tags it, so no
+  existing consumer's hand-written file needs editing). `getErrorMessage()`
+  (`form_upsert.tsx.jinja2`) now renders a distinct `fieldInvalid` i18n key
+  for the `'invalid'` case. The REST API path (`handleApiError`) was
+  already correct — it forwards `error.message` verbatim — this only fixes
+  the Server Action / UI form path.
+- **A field whose FK candidates are narrowed via `x-autocomplete-context`
+  no longer offers an unfiltered default list before the user types
+  anything.** `EntityAutocomplete.tsx` shows `initialOptions` verbatim
+  whenever the input is empty; that list used to come from a static,
+  context-blind page-load fetch. Context-filtered relations now seed from
+  that same fetch but live-refetch through the context-aware search action
+  (`searchXOptions('', [])`, still applying `filterAutocompleteOptions()`)
+  on mount and whenever the sibling context field changes. Every other
+  relation's generated code is unchanged.
+
 ### Changed
 - **Approval-request creation moves off the write-once `afterCreate` hook
   (`lib/{entity}/service_after_create.ts`, now retired) into an edge-trigger
