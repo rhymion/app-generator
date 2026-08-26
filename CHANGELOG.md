@@ -5,6 +5,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+- **`.env.vercel.production.local.example` no longer carries a real Vercel
+  team ID.** A previous commit had left a real value in `VERCEL_ORG_ID`;
+  replaced with an obviously-fake placeholder (`team_REPLACE_WITH_YOUR_TEAM_ID`),
+  and the file now opens with an explicit "this is a template, not a copy of
+  real values" notice. Added `scripts/check-example-file-leaks.sh`, a new CI
+  job (`example-file-credential-leak-check`) that fails the build if any
+  tracked `*.example` file contains a real-looking secret/ID pattern
+  (`team_...`, `ghp_`/`github_pat_`, `sk-`, `npm_`, a `postgres(ql)://` URL
+  with a non-placeholder host, or a 32+ char base64-like string).
+  `NEXT_PUBLIC_*` keys are allowlisted by name (client-bundle vars are never
+  secret-bearing by design). Scope is the `.example` files themselves and
+  this new mechanical gate only — existing git history is unchanged.
+
 ### Changed
 - **Approval-request creation moves off the write-once `afterCreate` hook
   (`lib/{entity}/service_after_create.ts`, now retired) into an edge-trigger
