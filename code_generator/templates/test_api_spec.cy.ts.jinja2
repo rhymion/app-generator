@@ -1141,10 +1141,10 @@ describe('API: {{ title }}', () => {
   // submission fires at create time. See
   // code_generator/tests/test_approval_edge_trigger.py for that mechanism's
   // generated-code coverage.
-{% if put_body_resubmit %}
+{% if (can_edit and put_body_resubmit) or entity_on_rejected_terminal %}
 
   describe('Resubmit via ordinary update (cmd_824)', () => {
-{% if not entity_on_rejected_terminal %}
+{% if not entity_on_rejected_terminal and can_edit and put_body_resubmit %}
     it('14.1 editing {{ resubmit_target_field }} back to its open value after a non-terminal rejection creates a new pending approval_request', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithRejectedApproval', {
@@ -1175,6 +1175,7 @@ describe('API: {{ title }}', () => {
     });
 {% endif %}
 {% if entity_on_rejected_terminal %}
+{% if can_edit and put_body_resubmit %}
     it('14.2 editing {{ resubmit_target_field }} back to its open value after a terminal rejection does not create a new approval_request', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithTerminalRejectedApproval', {
@@ -1191,6 +1192,7 @@ describe('API: {{ title }}', () => {
 {% endfor %}
               {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
             },
+            failOnStatusCode: false,
           }).then((res) => {
             expect(res.status).to.eq(200);
             cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
@@ -1203,6 +1205,144 @@ describe('API: {{ title }}', () => {
         });
       });
     });
+{% else %}
+    it('14.2 the entity has no PUT route at all -- there is no ordinary-update path a terminal rejection could be resubmitted through', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithTerminalRejectedApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          cy.request({
+            method: 'PUT',
+            url: `{{ api_path }}/${data.record.id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: {},
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(405);
+          });
+        });
+      });
+    });
+{% endif %}
+{% endif %}
+{% if can_edit and put_body_resubmit %}
+    it('14.3 editing {{ resubmit_target_field }} back to its open value after approval does not create a new approval_request', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/approve`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
+          }).then(() => {
+            cy.request({
+              method: 'PUT',
+              url: `{{ api_path }}/${data.record.id}`,
+              headers: { 'X-API-Key': TEST_API_KEY },
+              body: {
+{% for ln in put_body_resubmit %}
+{{ ln }}
+{% endfor %}
+                {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+              },
+            }).then((res) => {
+              expect(res.status).to.eq(200);
+              cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+                .then((getRes) => {
+                  const requests = getRes.body.approvable.approval_requests;
+                  expect(requests.length).to.eq(1);
+                  expect(requests[0].status).to.eq('approved');
+                });
+            });
+          });
+        });
+      });
+    });
+
+    it('14.4 withdrawing a pending request then editing {{ resubmit_target_field }} back to its open value creates a new pending approval_request', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/withdraw`,
+            headers: { 'X-API-Key': setup.requestorUser.api_key },
+          }).then((withdrawRes) => {
+            expect(withdrawRes.status).to.eq(200);
+            expect(withdrawRes.body.status).to.eq('withdrawn');
+            cy.request({
+              method: 'PUT',
+              url: `{{ api_path }}/${data.record.id}`,
+              headers: { 'X-API-Key': TEST_API_KEY },
+              body: {
+{% for ln in put_body_resubmit %}
+{{ ln }}
+{% endfor %}
+                {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+              },
+            }).then((res) => {
+              expect(res.status).to.eq(200);
+              cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+                .then((getRes) => {
+                  const requests = getRes.body.approvable.approval_requests;
+                  expect(requests.length).to.eq(2);
+                  expect(requests.some((r: any) => r.status === 'pending')).to.eq(true);
+                });
+            });
+          });
+        });
+      });
+    });
+{% if resubmit_unsubmitted_value_literal and not has_deps %}
+
+    it('14.5 a newly-created record with {{ resubmit_target_field }} not yet at its open value has no approval_request until explicitly edited there', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.request({
+          method: 'POST',
+          url: '{{ api_path }}',
+          headers: { 'X-API-Key': setup.requestorUser.api_key },
+          body: {
+{% for ln in post_body_create %}
+{{ ln }}
+{% endfor %}
+            {{ resubmit_target_field }}: {{ resubmit_unsubmitted_value_literal }},
+          },
+        }).then((createRes) => {
+          expect(createRes.status).to.eq(201);
+          cy.request({ url: `{{ api_path }}/${createRes.body.id}`, headers: { 'X-API-Key': setup.requestorUser.api_key } })
+            .then((getRes1) => {
+              expect(getRes1.body.approvable.approval_requests).to.have.length(0);
+              cy.request({
+                method: 'PUT',
+                url: `{{ api_path }}/${createRes.body.id}`,
+                headers: { 'X-API-Key': TEST_API_KEY },
+                body: {
+{% for ln in put_body_resubmit %}
+{{ ln }}
+{% endfor %}
+                  {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+                },
+              }).then((putRes) => {
+                expect(putRes.status).to.eq(200);
+                cy.request({ url: `{{ api_path }}/${createRes.body.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+                  .then((getRes2) => {
+                    const requests = getRes2.body.approvable.approval_requests;
+                    expect(requests.length).to.eq(1);
+                    expect(requests[0].status).to.eq('pending');
+                  });
+              });
+            });
+        });
+      });
+    });
+{% endif %}
 {% endif %}
   });
 {% endif %}

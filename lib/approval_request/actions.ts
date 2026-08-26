@@ -40,3 +40,7 @@ export async function rejectApprovalRequest(
   return approvalActions.rejectApprovalRequest(id, message, options);
 }
 
+export async function withdrawApprovalRequest(id: string, message?: string): Promise<void> {
+  return approvalActions.withdrawApprovalRequest(id, message);
+}
+

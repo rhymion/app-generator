@@ -281,15 +281,17 @@ class TestUpdateTimeTrigger:
         assert "_prevForTrigger.status !== 'submitted'" in code
         assert "updated.status === 'submitted'" in code
 
-    def test_pending_guard_present_on_update_path_too(self):
+    def test_positive_predicate_present_on_update_path(self):
+        """cmd_826/cmd_825: the update path's eligibility check is the
+        positive _canCreate predicate over the latest approval_request, not
+        the old negative '!_pendingGuard' check."""
         code = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_schema())[
             'approval_edge_trigger_update_code'
         ]
-        assert '_pendingGuard' in code
-        # The guard's own where clause (not just any 'pending' literal
-        # elsewhere in the block, e.g. the later approval_request.create
-        # call's own `status: 'pending'`) blocks re-firing.
-        assert "status: { in: ['pending', 'terminal_rejected'] } }" in code
+        assert '_pendingGuard' not in code
+        assert '_canCreate' in code
+        assert 'if (_canCreate) {' in code
+        assert "orderBy: { created_at: 'desc' }" in code
 
     def test_rendered_update_captures_result_and_prefetches_previous(self):
         rendered = _render_service(_entity('purchase_request', 'purchase_request'), _submit_on_schema())
@@ -344,17 +346,21 @@ class TestEntityNameUsesParentNotModel:
 
 
 # ---------------------------------------------------------------------------
-# cmd_824: terminal rejection blocks resubmission-via-edit, even for an
-# entity that (hypothetically -- no shipped consumer schema does this
-# today) declares both x-approval.submit_on and on_rejected.terminal: true.
-# #423's own commit message named this the one honest known gap in
-# retiring the dedicated resubmit route: nothing independently enforced
-# "terminal rejection cannot be resubmitted" against a direct status-field
-# write. These tests pin the fix directly, independent of what any
-# consumer schema currently declares.
+# cmd_826/cmd_825: the update-time trigger's eligibility check is rebuilt
+# as a positive predicate over the approvable's LATEST approval_request --
+# absent, 'withdrawn', or 'rejected'-while-not-terminal are the only three
+# states a new request may be created from. Everything else (still
+# 'pending', already 'approved', or 'rejected'-while-terminal) blocks
+# re-firing. The old negative "!_pendingGuard" form only ever asked "is
+# anything pending right now", so 'approved' and terminal 'rejected' both
+# silently passed -- #423's own commit message named the terminal gap
+# explicitly; the post-approval gap was raised independently in cmd_826.
+# These tests pin the fix directly, independent of what any consumer
+# schema currently declares (no shipped schema combines terminal:true with
+# submit_on today).
 # ---------------------------------------------------------------------------
 
-class TestTerminalRejectionBlocksResubmitEdit:
+class TestPositivePredicateBlocksIneligibleStates:
     def test_update_trigger_still_emitted_when_terminal_declared(self):
         """Declaring on_rejected.terminal alongside submit_on must not
         suppress the update-time trigger itself -- only the guard changes."""
@@ -364,20 +370,37 @@ class TestTerminalRejectionBlocksResubmitEdit:
         assert code != ''
         assert "updated.status === 'submitted'" in code
 
-    def test_guard_blocks_on_terminal_rejected_not_just_pending(self):
+    def test_terminal_baked_in_as_true(self):
         code = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_terminal_schema())[
             'approval_edge_trigger_update_code'
         ]
-        assert "status: { in: ['pending', 'terminal_rejected'] } }" in code
+        assert "&& !true)" in code
 
-    def test_non_terminal_entity_guard_unaffected(self):
-        """A non-terminal entity (on_rejected.terminal absent or false)
-        gets the identical guard clause -- the fix is unconditional, since
-        a non-terminal entity's approval_request rows can never actually
-        reach status 'terminal_rejected' in the first place (only
-        isTerminalReject-gated entities ever get that status written), so
-        there is no behavioural difference to branch on."""
+    def test_non_terminal_baked_in_as_false(self):
         code = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_schema())[
             'approval_edge_trigger_update_code'
         ]
-        assert "status: { in: ['pending', 'terminal_rejected'] } }" in code
+        assert "&& !false)" in code
+
+    def test_predicate_covers_absent_withdrawn_and_non_terminal_rejected(self):
+        code = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_schema())[
+            'approval_edge_trigger_update_code'
+        ]
+        assert '!_latestRequest' in code
+        assert "_latestRequest.status === 'withdrawn'" in code
+        assert "_latestRequest.status === 'rejected' && !false" in code
+
+    def test_predicate_never_mentions_pending_or_approved_as_eligible(self):
+        """'pending' and 'approved' must never appear as a condition that
+        makes _canCreate true -- only as excluded (by omission) states."""
+        code = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_schema())[
+            'approval_edge_trigger_update_code'
+        ]
+        assert "status === 'pending'" not in code
+        assert "status === 'approved'" not in code
+
+    def test_ordered_by_created_at_desc_so_latest_wins(self):
+        code = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_schema())[
+            'approval_edge_trigger_update_code'
+        ]
+        assert "orderBy: { created_at: 'desc' }" in code

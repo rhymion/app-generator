@@ -99,7 +99,8 @@
     "title": "タイトル",
     "update": "更新",
     "users": "ユーザ",
-    "widgets": "ウィジェット"
+    "widgets": "ウィジェット",
+    "withdraw": "取り下げ"
   },
   "Chart": {
     "month": "月",
@@ -230,7 +231,8 @@
     "approved": "承認済み",
     "pending": "承認待ち",
     "rejected": "否決",
-    "terminal_rejected": "最終否決"
+    "terminal_rejected": "最終否決",
+    "withdrawn": "取り下げ済み"
   },
   "ReactionType": {
     "laugh": "笑える",

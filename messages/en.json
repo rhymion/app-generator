@@ -99,7 +99,8 @@
     "title": "Title",
     "update": "Update",
     "users": "Users",
-    "widgets": "Widgets"
+    "widgets": "Widgets",
+    "withdraw": "Withdraw"
   },
   "Chart": {
     "month": "Month",
@@ -230,7 +231,8 @@
     "approved": "Approved",
     "pending": "Pending",
     "rejected": "Rejected",
-    "terminal_rejected": "Terminal Rejected"
+    "terminal_rejected": "Terminal Rejected",
+    "withdrawn": "Withdrawn"
   },
   "ReactionType": {
     "laugh": "Haha",

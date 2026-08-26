@@ -4566,18 +4566,41 @@ def api_spec_context(
             _resubmit_target_value = resolve_set_fields(
                 model_def.get('properties') or {}, {_rt_field: _rt_default},
             )[_rt_field]
+    def _resubmit_literal(value) -> str:
+        if isinstance(value, bool):
+            return 'true' if value else 'false'
+        if isinstance(value, (int, float)):
+            return str(value)
+        return "'" + str(value).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
     resubmit_target_field = None
     resubmit_target_value_literal = None
+    # cmd_825: a value the field could hold that is NEITHER submit_on's
+    # target nor any value on_approved/on_rejected's set_fields writes to
+    # this same field -- i.e. a genuine "not yet submitted" state distinct
+    # from every state the mechanism itself transitions the field to.
+    # Powers the "created but not yet submitted, then explicitly submitted"
+    # test (submit_on's whole reason for existing): only generated when
+    # such a spare enum value actually exists on the field, so a schema
+    # with no room for one (e.g. only submit_on's own value declared)
+    # silently gets no test rather than a broken one.
+    resubmit_unsubmitted_value_literal = None
     if _resubmit_target_field and _resubmit_target_field in put_body_props:
         resubmit_target_field = _resubmit_target_field
-        if isinstance(_resubmit_target_value, bool):
-            resubmit_target_value_literal = 'true' if _resubmit_target_value else 'false'
-        elif isinstance(_resubmit_target_value, (int, float)):
-            resubmit_target_value_literal = str(_resubmit_target_value)
-        else:
-            resubmit_target_value_literal = (
-                "'" + str(_resubmit_target_value).replace("\\", "\\\\").replace("'", "\\'") + "'"
-            )
+        resubmit_target_value_literal = _resubmit_literal(_resubmit_target_value)
+        _rt_field_meta = next((f for f in all_field_metas if f['prop_name'] == resubmit_target_field), None)
+        _rt_evals = [v for v in ((_rt_field_meta or {}).get('enum_values') or []) if v is not None]
+        if _rt_evals:
+            _excluded_values = {_resubmit_target_value}
+            _on_approved_sf = (_x_approval.get('on_approved') or {}).get('set_fields') or {} if _x_approval else {}
+            if resubmit_target_field in _on_approved_sf:
+                _excluded_values.add(_on_approved_sf[resubmit_target_field])
+            _on_rejected_sf = (entity_on_rejected or {}).get('set_fields') or {}
+            if resubmit_target_field in _on_rejected_sf:
+                _excluded_values.add(_on_rejected_sf[resubmit_target_field])
+            _spare_value = next((v for v in _rt_evals if v not in _excluded_values), None)
+            if _spare_value is not None:
+                resubmit_unsubmitted_value_literal = _resubmit_literal(_spare_value)
 
     # Detect count-mode reservation without lines: POST tests must seed the pool entity first.
     _xres_def = model_def.get('x-reservation')
@@ -4683,6 +4706,7 @@ def api_spec_context(
         # which only the array-returning db:populate<Entity> task uses).
         'resubmit_target_field': resubmit_target_field,
         'resubmit_target_value_literal': resubmit_target_value_literal,
+        'resubmit_unsubmitted_value_literal': resubmit_unsubmitted_value_literal,
         'put_body_resubmit': (
             _put_body_impl('              ', skip_field=resubmit_target_field, record_var='data.record')
             if resubmit_target_field else None

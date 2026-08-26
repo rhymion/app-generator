@@ -2276,6 +2276,7 @@ def _build_approval_edge_trigger_update_code(
     model: str,
     submit_on_field: str,
     submit_on_value: object,
+    terminal: bool = False,
 ) -> str:
     """UPDATE-time edge trigger (cmd_818 GROUP A2): fires only on the exact
     transition previous != submit_on -> new === submit_on (an EDGE, not a
@@ -2285,24 +2286,31 @@ def _build_approval_edge_trigger_update_code(
     detect on update (the create-time no-submit_on default has no
     update-time analogue).
 
-    cmd_824: the guard also blocks re-firing when the approvable's most
-    recent rejection was terminal ('terminal_rejected'), not just when a
-    request is already 'pending'. #423's commit message flagged this as an
-    honest known gap: retiring the dedicated resubmit route (which used to
-    check isTerminalReject at resubmit time) in favor of an ordinary field
-    edit meant nothing independently enforced "terminal rejection cannot be
-    resubmitted" against a direct status-field write -- an entity that
-    declares BOTH x-approval.submit_on and on_rejected.terminal: true could
-    have a new approval_request silently recreated by editing the field
-    back to submit_on's value. No shipped consumer schema combines the two
-    today (every terminal entity in those schemas omits submit_on entirely,
-    so this update-time trigger is never even emitted for them -- see the
-    generator-only "cannot resubmit" coverage added to
-    test_api_spec.cy.ts.jinja2 alongside this fix, which proves the same
-    invariant for those entities via the always-blocked
-    default_behavior_no_submit_on path instead), but nothing in validate.py
-    forbids declaring both, so this guard closes the gap for any schema
-    that does."""
+    cmd_826/cmd_825: the eligibility check is a POSITIVE predicate over the
+    approvable's most recent approval_request, not the old negative
+    "!_pendingGuard" ("no pending request exists") check. The old negative
+    form only ever asked "is anything pending right now" -- so anything
+    NOT pending (approved, terminal-rejected, no request at all) silently
+    passed, including two states that must never re-fire: an already-
+    approved request, and a terminal-rejected one (#423's own commit
+    message named this exact gap). A new approval_request may be created
+    only when the LATEST request for this approvable is:
+      (A) absent entirely (never submitted before), or
+      (B) 'rejected' AND this entity is not terminal (a non-terminal
+          rejection closes the flow but re-opens on resubmission), or
+      (C) 'withdrawn' (the requestor pulled their own pending request).
+    Every other latest state -- 'pending' (already in flight), 'approved'
+    (resubmission after approval is not silently allowed; an entity that
+    wants it must opt in via a future x-approval.allow_resubmit_after_approved
+    key, not implemented here since no schema declares it yet), or
+    'rejected' while terminal (baked in as a static boolean at generation
+    time, never read off the DB at runtime -- terminal-ness is a
+    schema-time fact, not request-time-variable state) -- blocks re-firing.
+    This also means a terminal entity's "cannot resubmit" guarantee no
+    longer depends on the consumer schema separately disabling edit for
+    that entity: every terminal entity in every shipped schema happened to
+    declare edit:false, but nothing forced that correlation -- an editable
+    terminal entity was silently exploitable before this change."""
     approvable_fk = approvable_rel['prop_name']
     inner = _build_approval_create_block_for_entity(
         approvable_id_expr=f'_prevForTrigger.{approvable_fk}',
@@ -2315,13 +2323,20 @@ def _build_approval_edge_trigger_update_code(
         target_id_expr='id',
     )
     lit = _ts_literal(submit_on_value)
+    terminal_lit = 'true' if terminal else 'false'
     return (
         f"    if (_prevForTrigger && _prevForTrigger.{submit_on_field} !== {lit} "
         f"&& updated.{submit_on_field} === {lit}) {{\n"
-        f"      const _pendingGuard = await tx.approval_request.findFirst({{\n"
-        f"        where: {{ approvable_id: _prevForTrigger.{approvable_fk}, status: {{ in: ['pending', 'terminal_rejected'] }} }},\n"
+        f"      const _latestRequest = await tx.approval_request.findFirst({{\n"
+        f"        where: {{ approvable_id: _prevForTrigger.{approvable_fk} }},\n"
+        f"        orderBy: {{ created_at: 'desc' }},\n"
         f"      }});\n"
-        f"      if (!_pendingGuard) {{\n"
+        f"      const _canCreate = (\n"
+        f"        !_latestRequest\n"
+        f"        || _latestRequest.status === 'withdrawn'\n"
+        f"        || (_latestRequest.status === 'rejected' && !{terminal_lit})\n"
+        f"      );\n"
+        f"      if (_canCreate) {{\n"
         f"        const _creator = await tx.user.findUnique({{\n"
         f"          where: {{ id: actorId }},\n"
         f"          select: {{ roles: {{ select: {{ id: true }} }} }},\n"
@@ -2390,8 +2405,12 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
             approval_edge_trigger_prev_select_code = (
                 f"{{ {x_approval_submit_on_field}: true, {approvable_rel['prop_name']}: true }}"
             )
+            x_approval_terminal = bool(
+                (raw_def_by_model.get('x-approval') or {}).get('on_rejected', {}).get('terminal', False)
+            )
             approval_edge_trigger_update_code = _build_approval_edge_trigger_update_code(
                 approvable_rel, parent, model, x_approval_submit_on_field, x_approval_submit_on_value,
+                terminal=x_approval_terminal,
             )
 
     has_non_comment_ch = bool(non_comment_ch)
