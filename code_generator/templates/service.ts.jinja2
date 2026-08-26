@@ -156,9 +156,15 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
+    // cmd_834: fetched once, before validateOnUpdate, and reused both for
+    // the hand-written custom-validation hook and (below, on entities with
+    // an x-approval edge trigger) the approval transition check -- a
+    // second findUnique for the same row would otherwise run twice in the
+    // same transaction.
+    const _prevRow = (await tx.{{ model }}.findUnique({ where: { id } })) as Record<string, unknown> | null;
     await validateOnUpdate(tx, id, {
 {{ validation_data_obj }}
-    });
+    }, _prevRow);
 {% if item_reservation_update_check_code %}
 {{ item_reservation_update_check_code }}
 {% endif %}
@@ -172,12 +178,6 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 {% endif %}
 {% if approval_lines_pre_update_code %}
 {{ approval_lines_pre_update_code }}
-{% endif %}
-{% if approval_edge_trigger_prev_select_code %}
-    const _prevForTrigger = await tx.{{ model }}.findUnique({
-      where: { id },
-      select: {{ approval_edge_trigger_prev_select_code }},
-    });
 {% endif %}
 {% if approval_edge_trigger_update_code %}
     const updated = await tx.{{ model }}.update({

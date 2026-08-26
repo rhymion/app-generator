@@ -67,7 +67,26 @@ function isMissingValue(value: unknown): boolean {
   return false;
 }
 
-async function validateSchemaRules(tx: TransactionClient, data: Record<string, unknown>, currentId: string | null): Promise<void> {
+// cmd_834: validateCustomRules's declared arity varies by entity -- newly
+// generated stubs accept the pre-edit row as a 4th parameter, but every
+// already-generated (GENERATED-ONCE, never rewritten in place)
+// service_validation_custom.ts across every existing consumer entity still
+// declares the pre-cmd_834 3-parameter signature. A function type with
+// fewer parameters is always structurally assignable to one with more (the
+// same rule that lets `(x) => x` satisfy an Array.prototype.map callback
+// typed to take (item, index, array)), so casting the import through
+// CustomRulesFn below compiles against BOTH shapes with no back-compat
+// branch: an old 3-param implementation simply never binds the extra
+// argument (JavaScript silently discards a call's trailing arguments a
+// function doesn't declare); a new 4-param one receives it.
+type CustomRulesFn = (
+  tx: TransactionClient,
+  data: Record<string, unknown>,
+  currentId: string | null,
+  prevRow: Record<string, unknown> | null,
+) => Promise<void>;
+
+async function validateSchemaRules(tx: TransactionClient, data: Record<string, unknown>, currentId: string | null, prevRow: Record<string, unknown> | null): Promise<void> {
   for (const field of REQUIRED_FIELDS) {
     if (isMissingValue(data[field.key])) {
       throw new AppError('VALIDATION', `${field.label} is required`, field.key, 'missing');
@@ -154,7 +173,7 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
   // so re-tag it here rather than requiring every hand-written file across
   // every consumer project to be edited.
   try {
-    await validateCustomRules(tx, data, currentId);
+    await (validateCustomRules as CustomRulesFn)(tx, data, currentId, prevRow);
   } catch (e) {
     if (e instanceof AppError && e.code === 'VALIDATION' && !e.reason) {
       throw new AppError('VALIDATION', e.message, e.field, 'invalid');
@@ -164,11 +183,11 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
 }
 
 export async function validateOnAdd(tx: TransactionClient, data: Record<string, unknown>): Promise<void> {
-  await validateSchemaRules(tx, data, null);
+  await validateSchemaRules(tx, data, null, null);
 }
 
-export async function validateOnUpdate(tx: TransactionClient, id: string, data: Record<string, unknown>): Promise<void> {
-  await validateSchemaRules(tx, data, id);
+export async function validateOnUpdate(tx: TransactionClient, id: string, data: Record<string, unknown>, prevRow: Record<string, unknown> | null): Promise<void> {
+  await validateSchemaRules(tx, data, id, prevRow);
 }
 {% if reservation_config and reservation_config.mode == 'item' and reservation_config.dateRange %}
 

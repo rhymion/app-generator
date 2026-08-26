@@ -1,8 +1,8 @@
 // GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
-// Custom save-time validation for {{ parent }}.
+// Custom save-time validation for organization.
 //
 // validateCustomRules() is called unconditionally from validateOnAdd()/
-// validateOnUpdate() (see lib/{{ parent }}/service_validation.ts), after the
+// validateOnUpdate() (see lib/organization/service_validation.ts), after the
 // generated schema-driven checks (required fields, one-to-one uniqueness).
 // Throw an Error to reject the save — the message surfaces to the caller
 // (UI form or direct API request) as the save failure.
@@ -14,7 +14,7 @@
 // see build_context.py's validation_data_obj for what is exposed.
 //
 // `prevRow` (cmd_834) is the row as it stood BEFORE this write -- the full
-// current record, fetched once in update{{ parent_pascal }}() and reused
+// current record, fetched once in updateOrganization() and reused
 // both for this call and (on entities with an x-approval edge trigger) the
 // approval transition check, so it costs a single findUnique, not two. On
 // create it is always null (there is no previous row to read). Use it to
@@ -35,9 +35,28 @@
 // transaction-client type as needed, e.g.:
 //   import type { PrismaClient } from '@/app/generated/prisma/client';
 //   type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+// cmd_834 generator regression fixture: once an organization's description
+// has been set to a non-empty value, it may not be cleared back to empty/
+// null. "Clearing an existing value" is only distinguishable from "never
+// had one" by comparing the submitted value against what the row held
+// BEFORE this write -- `data` alone (the value being submitted) cannot
+// answer that on its own, which is exactly why this rule needs `prevRow`.
+// See test/flows/pre_edit_row_custom_validation.test.ts for the real-DB
+// regression test this line exists to keep green, and
+// docs/knowledge/pre-edit-row-handoff-to-custom-validation.md for the
+// mechanism this fixture exercises.
 export async function validateCustomRules(
   _tx: unknown,
-  _data: Record<string, unknown>,
+  data: Record<string, unknown>,
   _currentId: string | null,
-  _prevRow: Record<string, unknown> | null,
-): Promise<void> {}
+  prevRow: Record<string, unknown> | null,
+): Promise<void> {
+  const hadDescription = typeof prevRow?.description === 'string' && prevRow.description.trim() !== '';
+  if (!hadDescription) return;
+
+  const incoming = data.description;
+  const cleared = incoming === null || incoming === undefined || (typeof incoming === 'string' && incoming.trim() === '');
+  if (cleared) {
+    throw new Error('description cannot be cleared once set');
+  }
+}

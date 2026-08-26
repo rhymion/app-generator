@@ -5,6 +5,21 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`validateCustomRules()` (`lib/{entity}/service_validation_custom.ts`)
+  now receives the row as it stood immediately before the write, not just
+  the values being submitted.** A hand-written rule can now reject a save
+  based on what a field WAS (e.g. "status may not change once it reaches
+  `closed`") — something the submitted values alone can never answer. The
+  row is fetched once per update and reused for both this call and, on
+  entities with an approval edge trigger, that trigger's own previous-state
+  check (previously a second, separately-selected query). Every
+  already-generated entity's hand-written file keeps its old 3-parameter
+  signature and needs no edit — the generated call site accepts either
+  shape without a compatibility branch (see
+  `docs/knowledge/pre-edit-row-handoff-to-custom-validation.md`). On
+  create, the new argument is always `null` (there is no previous row).
+
 ### Fixed
 - **A hand-written `service_validation_custom.ts` rejection of a value that
   IS present (e.g. an FK that violates a business rule) no longer renders
