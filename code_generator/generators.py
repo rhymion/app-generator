@@ -2283,7 +2283,26 @@ def _build_approval_edge_trigger_update_code(
     field edited must NOT re-fire). Only emitted when submit_on is
     declared -- with no declared target value there is no transition to
     detect on update (the create-time no-submit_on default has no
-    update-time analogue)."""
+    update-time analogue).
+
+    cmd_824: the guard also blocks re-firing when the approvable's most
+    recent rejection was terminal ('terminal_rejected'), not just when a
+    request is already 'pending'. #423's commit message flagged this as an
+    honest known gap: retiring the dedicated resubmit route (which used to
+    check isTerminalReject at resubmit time) in favor of an ordinary field
+    edit meant nothing independently enforced "terminal rejection cannot be
+    resubmitted" against a direct status-field write -- an entity that
+    declares BOTH x-approval.submit_on and on_rejected.terminal: true could
+    have a new approval_request silently recreated by editing the field
+    back to submit_on's value. No shipped consumer schema combines the two
+    today (every terminal entity in those schemas omits submit_on entirely,
+    so this update-time trigger is never even emitted for them -- see the
+    generator-only "cannot resubmit" coverage added to
+    test_api_spec.cy.ts.jinja2 alongside this fix, which proves the same
+    invariant for those entities via the always-blocked
+    default_behavior_no_submit_on path instead), but nothing in validate.py
+    forbids declaring both, so this guard closes the gap for any schema
+    that does."""
     approvable_fk = approvable_rel['prop_name']
     inner = _build_approval_create_block_for_entity(
         approvable_id_expr=f'_prevForTrigger.{approvable_fk}',
@@ -2300,7 +2319,7 @@ def _build_approval_edge_trigger_update_code(
         f"    if (_prevForTrigger && _prevForTrigger.{submit_on_field} !== {lit} "
         f"&& updated.{submit_on_field} === {lit}) {{\n"
         f"      const _pendingGuard = await tx.approval_request.findFirst({{\n"
-        f"        where: {{ approvable_id: _prevForTrigger.{approvable_fk}, status: 'pending' }},\n"
+        f"        where: {{ approvable_id: _prevForTrigger.{approvable_fk}, status: {{ in: ['pending', 'terminal_rejected'] }} }},\n"
         f"      }});\n"
         f"      if (!_pendingGuard) {{\n"
         f"        const _creator = await tx.user.findUnique({{\n"

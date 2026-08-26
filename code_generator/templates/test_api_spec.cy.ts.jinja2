@@ -1141,6 +1141,71 @@ describe('API: {{ title }}', () => {
   // submission fires at create time. See
   // code_generator/tests/test_approval_edge_trigger.py for that mechanism's
   // generated-code coverage.
+{% if put_body_resubmit %}
+
+  describe('Resubmit via ordinary update (cmd_824)', () => {
+{% if not entity_on_rejected_terminal %}
+    it('14.1 editing {{ resubmit_target_field }} back to its open value after a non-terminal rejection creates a new pending approval_request', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithRejectedApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          cy.request({
+            method: 'PUT',
+            url: `{{ api_path }}/${data.record.id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: {
+{% for ln in put_body_resubmit %}
+{{ ln }}
+{% endfor %}
+              {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+            },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+              .then((getRes) => {
+                const requests = getRes.body.approvable.approval_requests;
+                expect(requests.length).to.eq(2);
+                expect(requests.some((r: any) => r.status === 'pending')).to.eq(true);
+              });
+          });
+        });
+      });
+    });
+{% endif %}
+{% if entity_on_rejected_terminal %}
+    it('14.2 editing {{ resubmit_target_field }} back to its open value after a terminal rejection does not create a new approval_request', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithTerminalRejectedApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          cy.request({
+            method: 'PUT',
+            url: `{{ api_path }}/${data.record.id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: {
+{% for ln in put_body_resubmit %}
+{{ ln }}
+{% endfor %}
+              {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+            },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+              .then((getRes) => {
+                const requests = getRes.body.approvable.approval_requests;
+                expect(requests.length).to.eq(1);
+                expect(requests[0].status).to.eq('terminal_rejected');
+              });
+          });
+        });
+      });
+    });
+{% endif %}
+  });
+{% endif %}
 {% endif %}
 {% if can_list and can_export %}
 

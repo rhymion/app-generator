@@ -139,6 +139,7 @@ from helpers.schema_helpers import (
     get_self_only_flags,
     derive_approval_locked_values,
     is_write_only_prop,
+    resolve_set_fields,
 )
 from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import (
@@ -147,6 +148,7 @@ from helpers.label_field import (
 )
 from build_context import _get_entity_options, _raw_def, is_forced_required_field, get_uri_kind
 from generate_types import extract_entities
+from generators import resolve_approval_submit_on
 
 
 def _readonly_field_names(model_def: dict) -> set[str]:
@@ -4430,7 +4432,7 @@ def api_spec_context(
             out.append(f"{indent}{c['child']['property_name']}: [],")
         return out
 
-    def _put_body_impl(indent: str, skip_field: str | None = None) -> list[str]:
+    def _put_body_impl(indent: str, skip_field: str | None = None, record_var: str = 'records[0]') -> list[str]:
         out = []
         for prop in put_body_props:
             if prop == skip_field:
@@ -4466,7 +4468,7 @@ def api_spec_context(
                 else:
                     out.append(f"{indent}name: 'Updated {title}',")
             else:
-                out.append(f"{indent}{prop}: records[0].{prop},")
+                out.append(f"{indent}{prop}: {record_var}.{prop},")
         for c in api_child_metas:
             out.append(f"{indent}{c['child']['property_name']}: [],")
         return out
@@ -4535,6 +4537,47 @@ def api_spec_context(
     _x_approval = model_def.get('x-approval')
     entity_on_rejected = _x_approval.get('on_rejected') if _x_approval else None
     entity_on_rejected_terminal = bool((_x_approval or {}).get('on_rejected', {}).get('terminal', False))
+
+    # cmd_824: resubmission is now an ordinary edit of the entity's own
+    # field back toward its "open" value (the dedicated resubmit route was
+    # retired in favor of the update-time edge trigger service.ts.jinja2
+    # emits from x-approval.submit_on). To generate a live PUT-based test
+    # proving (a) a non-terminal rejection can be resubmitted this way and
+    # (b) a terminal rejection cannot, resolve the exact field+value such an
+    # edit targets:
+    #   - when submit_on is declared, use it directly -- the field the
+    #     update-time edge trigger itself watches.
+    #   - otherwise (the "no submit_on" default behavior -- an update never
+    #     re-fires approval creation at all, regardless of value, because
+    #     no update-time trigger code is emitted for this entity), fall
+    #     back to on_rejected.set_fields' own target field and its schema
+    #     default -- the value editing the rejected record back toward
+    #     "open" would naturally use. Either way we get a real field+value
+    #     that can be sent over the API and observed for whether a new
+    #     approval_request appears.
+    _resubmit_target_field, _resubmit_target_value = (
+        resolve_approval_submit_on(model_def) if has_approvable and _x_approval else (None, None)
+    )
+    if _resubmit_target_field is None and entity_on_rejected and entity_on_rejected.get('set_fields'):
+        _rt_field = next(iter(entity_on_rejected['set_fields']), None)
+        _rt_default = (model_def.get('properties') or {}).get(_rt_field, {}).get('default') if _rt_field else None
+        if _rt_field is not None and _rt_default is not None:
+            _resubmit_target_field = _rt_field
+            _resubmit_target_value = resolve_set_fields(
+                model_def.get('properties') or {}, {_rt_field: _rt_default},
+            )[_rt_field]
+    resubmit_target_field = None
+    resubmit_target_value_literal = None
+    if _resubmit_target_field and _resubmit_target_field in put_body_props:
+        resubmit_target_field = _resubmit_target_field
+        if isinstance(_resubmit_target_value, bool):
+            resubmit_target_value_literal = 'true' if _resubmit_target_value else 'false'
+        elif isinstance(_resubmit_target_value, (int, float)):
+            resubmit_target_value_literal = str(_resubmit_target_value)
+        else:
+            resubmit_target_value_literal = (
+                "'" + str(_resubmit_target_value).replace("\\", "\\\\").replace("'", "\\'") + "'"
+            )
 
     # Detect count-mode reservation without lines: POST tests must seed the pool entity first.
     _xres_def = model_def.get('x-reservation')
@@ -4632,6 +4675,18 @@ def api_spec_context(
         'has_approvable': has_approvable,
         'entity_on_rejected': entity_on_rejected,
         'entity_on_rejected_terminal': entity_on_rejected_terminal,
+        # cmd_824: PUT body for the resubmit-via-edit tests (14.x below) --
+        # same shape as put_body_update but with resubmit_target_field
+        # skipped from the loop so the template can append it explicitly
+        # with resubmit_target_value_literal, and sourced from the
+        # single-record populate helpers' `data.record` (not `records[0]`,
+        # which only the array-returning db:populate<Entity> task uses).
+        'resubmit_target_field': resubmit_target_field,
+        'resubmit_target_value_literal': resubmit_target_value_literal,
+        'put_body_resubmit': (
+            _put_body_impl('              ', skip_field=resubmit_target_field, record_var='data.record')
+            if resubmit_target_field else None
+        ),
         'reservation_count_pool_pascal': _reservation_count_pool_pascal,
         # CSV Export (Phase 1) test context
         'should_filter_by_org': should_filter_by_org,

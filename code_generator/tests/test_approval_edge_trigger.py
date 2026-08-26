@@ -149,6 +149,21 @@ def _submit_on_schema(parent: str = 'purchase_request', model: str = 'purchase_r
     }
 
 
+def _submit_on_terminal_schema(parent: str = 'purchase_request', model: str = 'purchase_request') -> dict:
+    """cmd_824: same as _submit_on_schema, plus on_rejected.terminal: true --
+    the combination no shipped consumer schema uses today (every terminal
+    entity in those schemas omits submit_on entirely, so this update
+    trigger never even gets emitted for them), but nothing in validate.py
+    forbids it. Exercises the _pendingGuard's 'terminal_rejected' clause
+    directly, independent of whatever any consumer's schema currently
+    does."""
+    schema = _submit_on_schema(parent=parent, model=model)
+    schema['definitions'][f'__{model}']['x-approval']['on_rejected'] = {
+        'terminal': True, 'set_fields': {'status': 'rejected'},
+    }
+    return schema
+
+
 def _svc_ctx(entity: dict, schema: dict) -> dict:
     ctx = build_context(entity, schema)
     return {**ctx, **service_context(ctx, schema)}
@@ -270,8 +285,11 @@ class TestUpdateTimeTrigger:
         code = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_schema())[
             'approval_edge_trigger_update_code'
         ]
-        assert "status: 'pending'" in code
         assert '_pendingGuard' in code
+        # The guard's own where clause (not just any 'pending' literal
+        # elsewhere in the block, e.g. the later approval_request.create
+        # call's own `status: 'pending'`) blocks re-firing.
+        assert "status: { in: ['pending', 'terminal_rejected'] } }" in code
 
     def test_rendered_update_captures_result_and_prefetches_previous(self):
         rendered = _render_service(_entity('purchase_request', 'purchase_request'), _submit_on_schema())
@@ -323,3 +341,43 @@ class TestEntityNameUsesParentNotModel:
             'approval_edge_trigger_create_code'
         ]
         assert "entity_name: 'purchase_request'" in code
+
+
+# ---------------------------------------------------------------------------
+# cmd_824: terminal rejection blocks resubmission-via-edit, even for an
+# entity that (hypothetically -- no shipped consumer schema does this
+# today) declares both x-approval.submit_on and on_rejected.terminal: true.
+# #423's own commit message named this the one honest known gap in
+# retiring the dedicated resubmit route: nothing independently enforced
+# "terminal rejection cannot be resubmitted" against a direct status-field
+# write. These tests pin the fix directly, independent of what any
+# consumer schema currently declares.
+# ---------------------------------------------------------------------------
+
+class TestTerminalRejectionBlocksResubmitEdit:
+    def test_update_trigger_still_emitted_when_terminal_declared(self):
+        """Declaring on_rejected.terminal alongside submit_on must not
+        suppress the update-time trigger itself -- only the guard changes."""
+        code = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_terminal_schema())[
+            'approval_edge_trigger_update_code'
+        ]
+        assert code != ''
+        assert "updated.status === 'submitted'" in code
+
+    def test_guard_blocks_on_terminal_rejected_not_just_pending(self):
+        code = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_terminal_schema())[
+            'approval_edge_trigger_update_code'
+        ]
+        assert "status: { in: ['pending', 'terminal_rejected'] } }" in code
+
+    def test_non_terminal_entity_guard_unaffected(self):
+        """A non-terminal entity (on_rejected.terminal absent or false)
+        gets the identical guard clause -- the fix is unconditional, since
+        a non-terminal entity's approval_request rows can never actually
+        reach status 'terminal_rejected' in the first place (only
+        isTerminalReject-gated entities ever get that status written), so
+        there is no behavioural difference to branch on."""
+        code = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_schema())[
+            'approval_edge_trigger_update_code'
+        ]
+        assert "status: { in: ['pending', 'terminal_rejected'] } }" in code
