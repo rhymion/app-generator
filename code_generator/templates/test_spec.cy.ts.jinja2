@@ -1192,32 +1192,16 @@ describe('Testing {{ title }} pages and their behavior', () => {
       });
     });
 
-    it('7.8 requestor can re-submit a rejected request', () => {
-      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
-        cy.task<any>('db:populate{{ pascal }}WithRejectedApproval', {
-          creatorId: setup.requestorUser.id,
-          approvalFlowIds: [setup.flowWithRole.id],
-        }).then((data) => {
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.requestorUser.email, 'test-password');
-          cy.visit(`/en/{{ parent }}/view/${data.record.id}`);
-          // Scope to this approval_flow's own row (exact match, cmd_641):
-          // an entity can have a second, ungated approval_flow (no
-          // requestor_role_id, so it applies to every requestor — see the
-          // 7.1 comment above), and once more than one of this approvable's
-          // requests is rejected a page-wide `[aria-label="Re-submit"]`
-          // lookup matches more than one row. Grab the one this test means,
-          // by the approver role name, not position.
-          cy.contains('td', exactRe('Test {{ title }} Approver Role')).closest('tr').find('[aria-label="Re-submit"]').should('be.visible').click();
-          cy.get('[role="dialog"]').find('button').contains('Re-submit').click();
-          cy.contains('Pending').should('be.visible');
-          cy.contains('td', exactRe('Test {{ title }} Approver Role')).closest('tr').find('[aria-label="Re-submit"]').should('not.exist');
-          // History expand button should appear after re-submission
-          cy.contains('td', exactRe('Test {{ title }} Approver Role')).closest('tr').find('[aria-label="Expand history"]').should('be.visible');
-        });
-      });
-    });
+    // cmd_818 (D1): the dedicated resubmit UI action is retired --
+    // ApprovalSection.tsx no longer renders a Re-submit button
+    // (see components/_standard/ApprovalSection.tsx). Re-submission is now
+    // an ordinary update through the entity's own edit form (edit the
+    // status field back to x-approval.submit_on's target value), which
+    // fires the same update-time edge trigger a first-time submission
+    // fires at create time. See
+    // code_generator/tests/test_approval_edge_trigger.py for that
+    // mechanism's generated-code coverage, and the matching removal in
+    // test_api_spec.cy.ts.jinja2's "Resubmit" describe block.
   });
 {% endif %}
 {% if comment_has_mention and can_edit %}
