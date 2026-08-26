@@ -85,6 +85,18 @@ jobs:
             echo "docs_only=false" >> "$GITHUB_OUTPUT"
           fi
 
+  example-file-credential-leak-check:
+    name: Example-file Credential Leak Check
+    runs-on: ubuntu-latest
+    # Mechanical, fail-closed scan of every `.example` file for a real-looking
+    # secret/ID pattern (cmd_829: VERCEL_ORG_ID's real team ID had leaked into
+    # .env.vercel.production.local.example). Needs no build/generate-code
+    # step and no `detect-changes` gating -- it reads only committed files, so
+    # it always runs, on every push and PR.
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash scripts/check-example-file-leaks.sh
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

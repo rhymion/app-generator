@@ -1151,7 +1151,7 @@ export async function populate{{ pascal }}WithRejectedApproval(creatorId: string
 {% for fk in internal_fk_deps %}
       {{ fk.prop_name }}: {{ fk.var_name }}Item.id,
 {% endfor %}
-{% for field in required_fields_prisma %}
+{% for field in required_fields_prisma if field.prop_name not in rejected_set_fields_prisma | map(attribute='prop_name') | list %}
 {% if field.category == 'autocomplete' and field.dep_var_name %}
       {{ field.prop_name }}: deps.{{ field.dep_var_name }}.id,
 {% elif field.category != 'autocomplete' %}
@@ -1160,6 +1160,15 @@ export async function populate{{ pascal }}WithRejectedApproval(creatorId: string
 {% endfor %}
 {% for ua in ua_dep_fields %}
       {{ ua.prop_name }}: testUser.id,
+{% endfor %}
+{% for field in rejected_set_fields_prisma %}
+      // cmd_825: on_rejected.set_fields, applied here to match what the
+      // real reject route (dispatchOnRejected) would have done -- without
+      // it this fixture leaves the field sitting at submit_on's own value
+      // when that happens to be the field's own schema default, defeating
+      // any resubmit-via-edit test built on top of this fixture (no
+      // transition, no edge-trigger fire).
+      {{ field.prop_name }}: {{ field.prisma_val_fixed }},
 {% endfor %}
       creator_id: creatorId,
       updater_id: creatorId,
@@ -1200,7 +1209,7 @@ export async function populate{{ pascal }}WithTerminalRejectedApproval(creatorId
 {% for fk in internal_fk_deps %}
       {{ fk.prop_name }}: {{ fk.var_name }}Item.id,
 {% endfor %}
-{% for field in required_fields_prisma %}
+{% for field in required_fields_prisma if field.prop_name not in rejected_set_fields_prisma | map(attribute='prop_name') | list %}
 {% if field.category == 'autocomplete' and field.dep_var_name %}
       {{ field.prop_name }}: deps.{{ field.dep_var_name }}.id,
 {% elif field.category != 'autocomplete' %}
@@ -1209,6 +1218,11 @@ export async function populate{{ pascal }}WithTerminalRejectedApproval(creatorId
 {% endfor %}
 {% for ua in ua_dep_fields %}
       {{ ua.prop_name }}: testUser.id,
+{% endfor %}
+{% for field in rejected_set_fields_prisma %}
+      // cmd_825: see the Rejected variant above for why this is here --
+      // on_rejected.set_fields applies regardless of terminal-ness.
+      {{ field.prop_name }}: {{ field.prisma_val_fixed }},
 {% endfor %}
       creator_id: creatorId,
       updater_id: creatorId,

@@ -217,6 +217,7 @@ enum ApprovalRequestStatus {
   approved
   rejected
   terminal_rejected
+  withdrawn
 }
 
 model approval_request {

@@ -86,7 +86,7 @@ const dispatchOnRejected = vi.fn();
 const isTerminalReject = vi.fn(() => false);
 
 const {
-  getApprovalRequestRecipient, approveApprovalRequest, rejectApprovalRequest,
+  getApprovalRequestRecipient, approveApprovalRequest, rejectApprovalRequest, withdrawApprovalRequest,
 } = createApprovalActions({
   resolveApprovableTarget,
   resolveApprovableModel,
@@ -541,5 +541,87 @@ describe('entity_name -> model translation before dispatch (cmd_818 GROUP C5)', 
 
     expect(isTerminalReject).not.toHaveBeenCalled();
     expect(dispatchOnRejected).not.toHaveBeenCalled();
+  });
+});
+
+// cmd_825: the requestor withdraws their own still-pending request.
+// Permission is "you are approvable.creator_id" (the requestor), never
+// approval_flow.approver_role_id membership -- and only from 'pending'.
+describe('withdrawApprovalRequest (cmd_825)', () => {
+  const stubPendingOwnedByRequestor = () => {
+    findUnique.mockResolvedValue({
+      status: 'pending',
+      approvable_id: 'appr-1',
+      approval_flow: { entity_name: 'leave_request' },
+      approvable: { creator_id: 'user-1' },
+    });
+  };
+
+  it('transitions status to withdrawn and records history', async () => {
+    stubPendingOwnedByRequestor();
+    arUpdate.mockResolvedValue({ id: 'req-1' });
+
+    await withdrawApprovalRequest('req-1', 'changed my mind');
+
+    expect(arUpdate).toHaveBeenCalledWith({
+      where: { id: 'req-1' },
+      data: { status: 'withdrawn' },
+      select: { id: true },
+    });
+    expect(historyCreate).toHaveBeenCalledWith({
+      data: {
+        approval_request_id: 'req-1',
+        pre_status: 0,
+        post_status: 4,
+        message: 'changed my mind',
+        creator_id: 'user-1',
+      },
+    });
+  });
+
+  it('rejects when the caller is not the requestor', async () => {
+    findUnique.mockResolvedValue({
+      status: 'pending',
+      approvable_id: 'appr-1',
+      approval_flow: { entity_name: 'leave_request' },
+      approvable: { creator_id: 'someone-else' },
+    });
+
+    await expect(withdrawApprovalRequest('req-1')).rejects.toThrow(
+      'Access denied: only the requestor may withdraw their own request',
+    );
+    expect(arUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects when the request is not pending', async () => {
+    findUnique.mockResolvedValue({
+      status: 'approved',
+      approvable_id: 'appr-1',
+      approval_flow: { entity_name: 'leave_request' },
+      approvable: { creator_id: 'user-1' },
+    });
+
+    await expect(withdrawApprovalRequest('req-1')).rejects.toThrow(
+      'Only a pending approval request can be withdrawn',
+    );
+    expect(arUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects when the approval request does not exist', async () => {
+    findUnique.mockResolvedValue(null);
+
+    await expect(withdrawApprovalRequest('req-missing')).rejects.toThrow('Approval request not found');
+    expect(arUpdate).not.toHaveBeenCalled();
+  });
+
+  it('revalidates the target entity view + edit pages', async () => {
+    stubPendingOwnedByRequestor();
+    arUpdate.mockResolvedValue({ id: 'req-1' });
+    resolveApprovableTarget.mockResolvedValue({ id: 'lr-42' });
+
+    await withdrawApprovalRequest('req-1');
+
+    expect(revalidatePathMock).toHaveBeenCalledWith('/[locale]/leave_request/view/lr-42', 'page');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/[locale]/leave_request/edit/lr-42', 'page');
   });
 });

@@ -58,8 +58,13 @@ _SYSTEM_PROPS = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'}
 # of it was actually stale.
 _MANIFEST_FRESH_THRESHOLD_S = 60
 
-# Handwritten files that happen to look like generator-shaped paths.
-# prune_orphans() will never delete these, even if no schema entity matches.
+# Paths that must never be deleted by cleanup, even when a manifest entry or
+# an orphan-sweep heuristic matches them: both handwritten files that happen
+# to look like generator-shaped paths, and generator-emitted-but-git-tracked
+# feature files (mention/compliance/audit_log/etc.) whose regeneration is
+# conditional on schema toggles (x-mention, x-pii, search:true, ...) that may
+# not be present every time generate-code next runs. Consulted by both
+# _prune_orphans() (via _is_protected()) and _clean_from_manifest().
 HANDWRITTEN_ALLOWLIST: frozenset[str] = frozenset([
     # register pages (handwritten auth flow)
     "app/[locale]/register/page.tsx",
@@ -73,6 +78,31 @@ HANDWRITTEN_ALLOWLIST: frozenset[str] = frozenset([
     # login pages
     "app/[locale]/login/page.tsx",
     "app/[locale]/login/page.test.tsx",
+    # audit_log built-in feature (not a json_schema.yaml `definitions:` entity,
+    # so _prune_orphans' per-entity heuristics mistake it for an orphan)
+    "components/audit_log/FormView.tsx",
+    "lib/audit_log/getters.ts",
+    "lib/audit_log/types.ts",
+    # always-generated cypress support files, git-tracked (not gitignored)
+    "cypress/support/db-helpers.ts",
+    "cypress/support/generated-tasks.ts",
+    # compliance / PII anonymization (conditional on x-pii fields existing)
+    "lib/compliance/anonymize_user.ts",
+    # dashboard's service_validation.ts is git-tracked (unlike other entities'
+    # service_validation.ts, which are gitignored, per-entity build artifacts)
+    "lib/dashboard/service_validation.ts",
+    # full-text search GIN index support (conditional on search: true fields)
+    "lib/db-init.ts",
+    "scripts/create-gin-indexes.sql",
+    # @mention support (conditional on x-mention: true fields existing)
+    "lib/mention/parser.ts",
+    "lib/mention/search.ts",
+    # reaction feature named constants (conditional on reaction fields existing)
+    "lib/reaction_constants.ts",
+    # x-self-only admin-bypass allowlist (imported unconditionally by lib/authz.ts)
+    "lib/self_only_admin_bypass_entities.ts",
+    # seed script scaffold, always generated
+    "scripts/generated/seed-entities.ts",
 ])
 
 # Boilerplate content of service_after_create.ts as emitted by
@@ -195,6 +225,9 @@ def _clean_from_manifest(out: Path, keep_stubs: bool = False) -> bool:
         for parent in Path(rel).parents:
             if parent != Path('.'):
                 dirs.add(out / parent)
+        if rel in HANDWRITTEN_ALLOWLIST:
+            print(f'  PROTECTED (allowlist): {rel}')
+            continue
         if keep_stubs and entry.get('mode') == 'stub':
             print(f'  Kept {path} (stub, --keep-stubs)')
             continue
