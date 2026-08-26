@@ -19,6 +19,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   shape without a compatibility branch (see
   `docs/knowledge/pre-edit-row-handoff-to-custom-validation.md`). On
   create, the new argument is always `null` (there is no previous row).
+  The real-DB regression fixture proving this end to end does not live in
+  this repo — it moved to app-template's `prj/` after review flagged that
+  a test-only fixture had no business sitting inside the generator's own
+  generated output (see the doc above, "Where the regression fixture
+  actually lives"). Note for anyone editing a write-once
+  `service_validation_custom.ts` stub in any consumer: a subsequent e2e
+  run against `next start` silently keeps serving the pre-edit bundle
+  unless `next build` is run first — this bit the original fixture once
+  already and is documented in the same section.
 
 ### Fixed
 - **A hand-written `service_validation_custom.ts` rejection of a value that
