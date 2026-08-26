@@ -26,6 +26,7 @@
   "Errors": {
     "capacityExhausted": "No capacity is available. Please try a different selection.",
     "fieldAlreadyLinked": "{field} is already linked to another record.",
+    "fieldInvalid": "{field} has an invalid or disallowed value.",
     "fieldRequired": "{field} is required.",
     "fkPermissionDenied": "You do not have permission to view {entity} options.",
     "fkPermissionDeniedHint": "Contact your administrator to request read access to {entity}.",

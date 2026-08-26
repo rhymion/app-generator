@@ -46,13 +46,13 @@ function isMissingValue(value: unknown): boolean {
 async function validateSchemaRules(tx: TransactionClient, data: Record<string, unknown>, currentId: string | null): Promise<void> {
   for (const field of REQUIRED_FIELDS) {
     if (isMissingValue(data[field.key])) {
-      throw new AppError('VALIDATION', `${field.label} is required`, field.key);
+      throw new AppError('VALIDATION', `${field.label} is required`, field.key, 'missing');
     }
   }
 
   for (const field of DECIMAL_FIELDS) {
     if (isInvalidDecimal(data[field.key])) {
-      throw new AppError('VALIDATION', `${field.label} must be a valid decimal number`, field.key);
+      throw new AppError('VALIDATION', `${field.label} must be a valid decimal number`, field.key, 'invalid');
     }
   }
 
@@ -60,7 +60,7 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
     const value = data[relation.key];
     if (isMissingValue(value)) {
       if (relation.required) {
-        throw new AppError('VALIDATION', `${relation.label} is required`, relation.key);
+        throw new AppError('VALIDATION', `${relation.label} is required`, relation.key, 'missing');
       }
       continue;
     }
@@ -72,7 +72,7 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
       select: { id: true },
     });
     if (!targetExists) {
-      throw new AppError('VALIDATION', `${relation.label} does not exist`, relation.key);
+      throw new AppError('VALIDATION', `${relation.label} does not exist`, relation.key, 'invalid');
     }
 
     const conflict = await tx.dashboard.findFirst({
@@ -92,7 +92,22 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
   // GENERATED-ONCE stub — see that file for the socket contract. This call
   // is unconditional and identical for every entity; the generator carries
   // no knowledge of what (if anything) the hook checks.
-  await validateCustomRules(tx, data, currentId);
+  //
+  // cmd_830: a hand-written rule rejects a value that IS present (e.g. "X
+  // is not a party on the claimed policy") -- never a missing one, since
+  // the REQUIRED_FIELDS loop above already owns that case for any field it
+  // covers. service_validation_custom.ts predates the 'reason' discriminator
+  // and always constructs AppError('VALIDATION', ...) with no 4th argument,
+  // so re-tag it here rather than requiring every hand-written file across
+  // every consumer project to be edited.
+  try {
+    await validateCustomRules(tx, data, currentId);
+  } catch (e) {
+    if (e instanceof AppError && e.code === 'VALIDATION' && !e.reason) {
+      throw new AppError('VALIDATION', e.message, e.field, 'invalid');
+    }
+    throw e;
+  }
 }
 
 export async function validateOnAdd(tx: TransactionClient, data: Record<string, unknown>): Promise<void> {

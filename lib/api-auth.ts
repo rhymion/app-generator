@@ -159,7 +159,12 @@ export function handleApiError(error: unknown): NextResponse {
   }
   if (error instanceof AppError) {
     return NextResponse.json(
-      { error: error.message, code: error.code, ...(error.field ? { field: error.field } : {}) },
+      {
+        error: error.message,
+        code: error.code,
+        ...(error.field ? { field: error.field } : {}),
+        ...(error.reason ? { reason: error.reason } : {}),
+      },
       { status: APP_ERROR_STATUS_MAP[error.code] ?? 500 },
     );
   }

@@ -193,7 +193,7 @@ cross-org existence.
 | Permission denied (general) | Yes — "insufficient permission" | User contacts admin; exposing `model.create` leaks schema names |
 | Not found (genuine) | Yes — "record not found or may have been deleted" | User knows to stop looking |
 | **Org isolation violation** | **Hide — treat as Not Found** | Revealing "Organization access denied" tells the caller that the record EXISTS. The strict org isolation policy forbids even acknowledging existence of records in other orgs. POST/Service Action must match the API path (which already returns 404). |
-| Validation (field-level) | Yes — "{field} is required / already linked" | User can fix and resubmit |
+| Validation (field-level) | Yes — "{field} is required / already linked / has an invalid or disallowed value" | User can fix and resubmit |
 | Stale update | Yes — "updated by another user, reload" | User knows to refresh |
 | Record deleted before submit | Yes — "no longer exists, may have been deleted" | User knows to stop editing |
 | FK autocomplete denied | Yes — "no permission to view {entity}" + hint | User can request access from admin |
