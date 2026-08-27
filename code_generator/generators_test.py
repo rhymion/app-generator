@@ -4469,7 +4469,10 @@ def api_spec_context(
             if prop == skip_field:
                 continue
             if primary_is_fk and not primary_fk_is_ua and prop == f'{primary_field_name}_id':
-                out.append(f"{indent}{prop}: deps.{primary_dep_var}2.id,")
+                if record_var == 'records[0]':
+                    out.append(f"{indent}{prop}: deps.{primary_dep_var}2.id,")
+                else:
+                    out.append(f"{indent}{prop}: {record_var}.{prop},")
             elif primary_fk_is_ua and ua_update_field and prop == ua_update_field['prop_name']:
                 out.append(f"{indent}{prop}: {ua_update_expr},")
             elif not primary_is_fk and primary_field_name and prop == primary_field_name:
