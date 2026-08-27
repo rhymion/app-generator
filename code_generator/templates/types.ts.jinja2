@@ -27,6 +27,9 @@ export type {{ parent | pascal_case }} = {
 {% for oto in one_to_one_rels %}
   {{ oto.relation_name }}?: {
     id: string;
+{% if oto.target == 'approvable' %}
+    creator_id?: string | null;
+{% endif %}
 {% for child in oto.children %}
     {{ child.property_name }}: {
 {% for field in child.fields %}
@@ -152,6 +155,9 @@ export type FormViewProps = Readonly<{
 {% for oto in one_to_one_rels %}
     {{ oto.relation_name }}?: {
       id: string;
+{% if oto.target == 'approvable' %}
+      creator_id?: string | null;
+{% endif %}
 {% for child in oto.children %}
       {{ child.property_name }}: {
 {% for field in child.fields %}

@@ -84,6 +84,9 @@ const resolveApprovableModel = vi.fn((name: string): string | null => name);
 const dispatchOnApproved = vi.fn();
 const dispatchOnRejected = vi.fn();
 const isTerminalReject = vi.fn(() => false);
+// cmd_841: withdrawal's own dispatch counterpart to dispatchOnApproved/
+// dispatchOnRejected above -- keyed by model, same as those.
+const dispatchOnWithdrawn = vi.fn();
 
 const {
   getApprovalRequestRecipient, approveApprovalRequest, rejectApprovalRequest, withdrawApprovalRequest,
@@ -93,6 +96,7 @@ const {
   dispatchOnApproved,
   dispatchOnRejected,
   isTerminalReject,
+  dispatchOnWithdrawn,
 });
 
 // Fake tx client shared by every prisma.$transaction(cb) call in
@@ -116,6 +120,7 @@ beforeEach(() => {
   dispatchOnApproved.mockReset();
   dispatchOnRejected.mockReset();
   isTerminalReject.mockReset().mockReturnValue(false);
+  dispatchOnWithdrawn.mockReset();
   transactionMock.mockReset().mockImplementation(async (cb) => cb(fakeTx));
   vi.mocked(getSessionUserIdOrThrow).mockReset().mockResolvedValue('user-1');
   vi.mocked(getUserRoleIds).mockReset().mockResolvedValue(['approver-role']);
@@ -471,6 +476,7 @@ describe('resubmitApprovalRequest removal (cmd_818 E6)', () => {
   it('is not present on the actions object createApprovalActions returns', () => {
     const actions = createApprovalActions({
       resolveApprovableTarget, resolveApprovableModel, dispatchOnApproved, dispatchOnRejected, isTerminalReject,
+      dispatchOnWithdrawn,
     });
     expect('resubmitApprovalRequest' in actions).toBe(false);
   });
@@ -559,14 +565,14 @@ describe('withdrawApprovalRequest (cmd_825)', () => {
 
   it('transitions status to withdrawn and records history', async () => {
     stubPendingOwnedByRequestor();
-    arUpdate.mockResolvedValue({ id: 'req-1' });
+    arUpdate.mockResolvedValue({ id: 'req-1', approvable_id: 'appr-1' });
 
     await withdrawApprovalRequest('req-1', 'changed my mind');
 
     expect(arUpdate).toHaveBeenCalledWith({
       where: { id: 'req-1' },
       data: { status: 'withdrawn' },
-      select: { id: true },
+      select: { id: true, approvable_id: true },
     });
     expect(historyCreate).toHaveBeenCalledWith({
       data: {
@@ -577,6 +583,49 @@ describe('withdrawApprovalRequest (cmd_825)', () => {
         creator_id: 'user-1',
       },
     });
+  });
+
+  // cmd_841: withdrawal now dispatches on_withdrawn side effects (e.g. an
+  // entity's own status field falling back to a user-selectable value),
+  // symmetric to approve/reject's dispatchOnApproved/dispatchOnRejected.
+  it('dispatches onWithdrawn with the resolved model and approvable id', async () => {
+    stubPendingOwnedByRequestor();
+    arUpdate.mockResolvedValue({ id: 'req-1', approvable_id: 'appr-1' });
+
+    await withdrawApprovalRequest('req-1');
+
+    expect(dispatchOnWithdrawn).toHaveBeenCalledWith(expect.anything(), 'leave_request', 'appr-1');
+  });
+
+  it('resolves dispatchOnWithdrawn against the model, not the view key', async () => {
+    findUnique.mockResolvedValue({
+      status: 'pending',
+      approvable_id: 'appr-1',
+      approval_flow: { entity_name: 'leave_request_gate' },
+      approvable: { creator_id: 'user-1' },
+    });
+    arUpdate.mockResolvedValue({ id: 'req-1', approvable_id: 'appr-1' });
+    resolveApprovableModel.mockImplementation((name: string) =>
+      name === 'leave_request_gate' ? 'leave_request' : name);
+
+    await withdrawApprovalRequest('req-1');
+
+    expect(dispatchOnWithdrawn).toHaveBeenCalledWith(expect.anything(), 'leave_request', 'appr-1');
+  });
+
+  it('skips dispatch when the view key does not resolve to a model', async () => {
+    findUnique.mockResolvedValue({
+      status: 'pending',
+      approvable_id: 'appr-1',
+      approval_flow: { entity_name: 'unknown_view' },
+      approvable: { creator_id: 'user-1' },
+    });
+    arUpdate.mockResolvedValue({ id: 'req-1', approvable_id: 'appr-1' });
+    resolveApprovableModel.mockReturnValue(null);
+
+    await withdrawApprovalRequest('req-1');
+
+    expect(dispatchOnWithdrawn).not.toHaveBeenCalled();
   });
 
   it('rejects when the caller is not the requestor', async () => {

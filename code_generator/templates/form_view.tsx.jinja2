@@ -53,6 +53,9 @@ import { AppDetailShell, AppDetailHeader, AppFieldText{% if uses_app_field_boole
 {% for comp in entity_view_components %}
 import {{ comp.name }} from '{{ comp.path if comp.path else "./" + comp.name }}';
 {% endfor %}
+{% if submit_for_approval_needed %}
+import { submitForApproval{{ parent_pascal }} } from '@/lib/{{ parent }}/submit_actions';
+{% endif %}
 {% if is_splittable and split_config %}
 import { SplitActionSection } from './SplitActionSection';
 {% endif %}
@@ -75,6 +78,19 @@ export default function FormView({ src, permissions{% if comment_has_mention %},
 {% endif %}
 {% if column_variables %}
 {{ column_variables }}
+{% endif %}
+{% if submit_for_approval_needed %}
+  // cmd_841 ruling_4: isTerminal/onSubmitForApproval are wired only to the
+  // ApprovalSection entry below (not every entity_view_components entry --
+  // other custom components don't declare these props, and passing them
+  // unconditionally would be a tsc excess-property error against those).
+  // The actual canSubmitForApproval() evaluation happens inside the
+  // component itself (over the full approval_requests array it already
+  // receives via src) rather than here, since this array's ordering is
+  // not guaranteed -- only a live, explicitly-ordered DB query (as the
+  // update-edge-trigger and submit action both use) may safely index
+  // into "the latest" request.
+  const _onSubmitForApproval = () => submitForApproval{{ parent_pascal }}(src.id);
 {% endif %}
   return (
     <AppDetailShell>
@@ -112,7 +128,7 @@ export default function FormView({ src, permissions{% if comment_has_mention %},
       />
 {% endif %}
 {% for comp in entity_view_components %}
-      <{{ comp.name }} src={src}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId} />
+      <{{ comp.name }} src={src}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId}{% if submit_for_approval_needed and comp.name == 'ApprovalSection' %} isTerminal={{ '{' }}{{ submit_on_terminal_lit }}{{ '}' }} onSubmitForApproval={_onSubmitForApproval}{% endif %} />
 {% endfor %}
     </AppDetailShell>
   );

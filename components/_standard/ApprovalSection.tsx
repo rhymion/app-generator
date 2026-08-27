@@ -30,6 +30,25 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { Fragment } from 'react';
 import type { ModelPermissions } from '@/lib/authz';
 import { approveApprovalRequest, rejectApprovalRequest, withdrawApprovalRequest } from '@/lib/approval_request/actions';
+import { canSubmitForApproval } from '@/lib/approval_request/submit_predicate';
+
+// cmd_841 ruling_4: among all approval_request rows for this approvable,
+// the one most likely to block a new submission -- used as a stand-in for
+// "the latest request" when only the full (possibly unordered) array is
+// available, as it is here (see form_view.tsx.jinja2's comment on why it
+// does not index into this array itself). In this domain the two are
+// equivalent: once any row is 'pending' or 'approved' a new submission is
+// never allowed regardless of what else exists, and 'terminal_rejected'
+// likewise never clears -- so picking the most-blocking row and evaluating
+// canSubmitForApproval() against it alone gives the same answer as
+// evaluating it against the true chronologically-latest row.
+const _BLOCKING_PRIORITY: Record<string, number> = {
+  pending: 0,
+  approved: 1,
+  terminal_rejected: 2,
+  rejected: 3,
+  withdrawn: 3,
+};
 
 const STATUS_LABELS = ['Pending', 'Approved', 'Rejected', 'TerminalRejected', 'Withdrawn'] as const;
 
@@ -65,7 +84,7 @@ type ApprovalRequest = {
 type Action = 'approve' | 'reject' | 'withdraw';
 
 type Props = {
-  src: { creator_id?: string | null; approvable?: { id: string; approval_requests: ApprovalRequest[] } | null };
+  src: { id: string; approvable?: { id: string; creator_id?: string | null; approval_requests: ApprovalRequest[] } | null };
   permissions?: ModelPermissions;
   currentUserRoleIds?: string[];
   // cmd_825: revived for the withdraw button's own-request check below --
@@ -73,9 +92,15 @@ type Props = {
   // always passes currentUserId to every view-target component, so no
   // template change was needed to make it available here again.
   currentUserId?: string | null;
+  // cmd_841 ruling_4: present only for entities that declare
+  // x-approval.submit_on (form_view.tsx.jinja2 passes both together, or
+  // neither). isTerminal mirrors the same generation-time literal the
+  // update-edge-trigger and submit action bake in.
+  isTerminal?: boolean;
+  onSubmitForApproval?: () => Promise<void>;
 };
 
-export default function ApprovalSection({ src, currentUserRoleIds, currentUserId }: Props) {
+export default function ApprovalSection({ src, currentUserRoleIds, currentUserId, isTerminal, onSubmitForApproval }: Props) {
   const t = useTranslations('Fields');
   const tCommon = useTranslations('Common');
   const tStatus = useTranslations('ApprovalRequestStatus');
@@ -87,7 +112,18 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const requests = src.approvable?.approval_requests ?? [];
-  if (requests.length === 0) return null;
+  // cmd_841 ruling_4: a "(re)submit" button may need to render even with
+  // zero approval_request rows yet (a fresh draft that has never been
+  // submitted) or after every row has resolved to a non-blocking state --
+  // so the old "no requests -> render nothing" early return must not fire
+  // when a submit action is available at all.
+  if (requests.length === 0 && !onSubmitForApproval) return null;
+
+  const _blockingRequest = requests.reduce<ApprovalRequest | null>((acc, r) => {
+    if (!acc) return r;
+    return (_BLOCKING_PRIORITY[r.status] ?? 9) < (_BLOCKING_PRIORITY[acc.status] ?? 9) ? r : acc;
+  }, null);
+  const canSubmit = !!onSubmitForApproval && canSubmitForApproval(_blockingRequest, !!isTerminal);
 
   // Build a map of flow_id → status for ordering checks
   const flowIdToStatus = new Map(requests.map((r) => [r.approval_flow_id, r.status]));
@@ -127,9 +163,26 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
     : dialog?.action === 'reject' ? t('reject')
     : t('withdraw');
 
+  const handleSubmitForApproval = () => {
+    if (!onSubmitForApproval) return;
+    startTransition(() => {
+      onSubmitForApproval();
+    });
+  };
+
   return (
     <div style={{ marginTop: '1.5rem' }}>
       <h2>{t('approvalRequests')}</h2>
+      {canSubmit && (
+        // cmd_843: PD-3 ruling -- one label for both the first submission
+        // and any later resubmission, no first-vs-again wording split.
+        <Tooltip title={t('submit')}>
+          <Button variant="contained" aria-label={t('submit')} onClick={handleSubmitForApproval} sx={{ mb: 1 }}>
+            {t('submit')}
+          </Button>
+        </Tooltip>
+      )}
+      {requests.length === 0 ? null : (
       <Table size="small">
         <TableHead>
           <TableRow>
@@ -153,9 +206,15 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
             // cmd_825: withdrawal is the requestor's own action on their
             // own still-pending request -- not gated by approver role or
             // preceding-flow order (those only govern approve/reject).
+            // cmd_842(い): the applicant's single source of truth is
+            // approvable.creator_id, not the entity row's own creator_id --
+            // actions_core.ts's server-side withdraw guard already checks
+            // req.approvable.creator_id, and entities created via a nested
+            // x-approval-lines create (e.g. receiving_receipt_line) never
+            // write their own creator_id at all (stays permanently null).
             const canWithdraw = ar.status === 'pending'
               && !!currentUserId
-              && src.creator_id === currentUserId;
+              && src.approvable?.creator_id === currentUserId;
             const histories = ar.approval_histories ?? [];
             const isExpanded = expandedIds.has(ar.id);
 
@@ -225,6 +284,7 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
           })}
         </TableBody>
       </Table>
+      )}
 
       <Dialog open={!!dialog} onClose={closeDialog} maxWidth="sm" fullWidth>
         <DialogTitle>{dialogTitle}</DialogTitle>

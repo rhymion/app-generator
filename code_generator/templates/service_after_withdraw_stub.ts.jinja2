@@ -1,0 +1,21 @@
+// GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
+
+import type { PrismaClient } from '@/app/generated/prisma/client';
+
+type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+
+/**
+ * Called after {{ snake_name }} is withdrawn.
+ * Customize this function to implement post-withdrawal side effects.
+ *
+ * @param tx - Prisma transaction client
+ * @param entityId - ID of the withdrawn {{ snake_name }}
+ * @param approvableId - ID of the approvable record
+ */
+export async function afterWithdraw(
+  tx: Tx,
+  entityId: string,
+  approvableId: string,
+): Promise<void> {
+  // TODO: implement post-withdrawal effects here
+}

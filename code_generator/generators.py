@@ -2340,11 +2340,14 @@ def _build_approval_edge_trigger_update_code(
         f"        where: {{ approvable_id: _prevApprovableId }},\n"
         f"        orderBy: {{ created_at: 'desc' }},\n"
         f"      }});\n"
-        f"      const _canCreate = (\n"
-        f"        !_latestRequest\n"
-        f"        || _latestRequest.status === 'withdrawn'\n"
-        f"        || (_latestRequest.status === 'rejected' && !{terminal_lit})\n"
-        f"      );\n"
+        # cmd_841 ruling_4: this positive predicate used to be inlined here
+        # (the exact boolean expression this call replaced -- see git
+        # history) and separately, informally, in ApprovalSection.tsx's
+        # submit-button visibility check. Both now call the same
+        # hand-written canSubmitForApproval() (lib/approval_request/
+        # submit_predicate.ts) so the screen and the write path can never
+        # drift apart.
+        f"      const _canCreate = canSubmitForApproval(_latestRequest, {terminal_lit});\n"
         f"      if (_canCreate) {{\n"
         f"        const _creator = await tx.user.findUnique({{\n"
         f"          where: {{ id: actorId }},\n"
@@ -2357,6 +2360,66 @@ def _build_approval_edge_trigger_update_code(
         f"{inner}\n"
         f"      }}\n"
         f"    }}"
+    )
+
+
+def _build_submit_for_approval_action_code(
+    approvable_fk: str,
+    parent: str,
+    model: str,
+    submit_on_field: str,
+    submit_on_value: object,
+    terminal: bool,
+) -> str:
+    """cmd_841 ruling_4: the explicit "(re)submit" server action body, for
+    entities that need a submission path independent of an ordinary edit
+    (edit: false entities cannot reach x-approval.submit_on's target value
+    through a PUT at all -- see submit_for_approval.ts.jinja2's docstring).
+
+    Reuses the same positive-predicate guard as
+    _build_approval_edge_trigger_update_code (canSubmitForApproval) and the
+    same approval_request-creation block
+    (_build_approval_create_block_for_entity) the edge triggers use --
+    "submit" is just a third way to reach the submit_on transition, not a
+    parallel mechanism with its own rules.
+    """
+    inner = _build_approval_create_block_for_entity(
+        approvable_id_expr=f'row.{approvable_fk}',
+        actor_id_expr='actorId',
+        flows_var='_approvalFlows',
+        role_ids_var='_creatorRoleIds',
+        tx_var='tx',
+        indent='    ',
+        target_entity_name=parent,
+        target_id_expr='id',
+    )
+    lit = _ts_literal(submit_on_value)
+    terminal_lit = 'true' if terminal else 'false'
+    return (
+        f"    const row = await tx.{model}.findUniqueOrThrow({{\n"
+        f"      where: {{ id }},\n"
+        f"      select: {{ {approvable_fk}: true }},\n"
+        f"    }});\n"
+        f"    const _latestRequest = await tx.approval_request.findFirst({{\n"
+        f"      where: {{ approvable_id: row.{approvable_fk} }},\n"
+        f"      orderBy: {{ created_at: 'desc' }},\n"
+        f"    }});\n"
+        f"    if (!canSubmitForApproval(_latestRequest, {terminal_lit})) {{\n"
+        f"      return;\n"
+        f"    }}\n"
+        f"    await tx.{model}.update({{\n"
+        f"      where: {{ id }},\n"
+        f"      data: {{ {submit_on_field}: {lit} }},\n"
+        f"    }});\n"
+        f"    const _creator = await tx.user.findUnique({{\n"
+        f"      where: {{ id: actorId }},\n"
+        f"      select: {{ roles: {{ select: {{ id: true }} }} }},\n"
+        f"    }});\n"
+        f"    const _creatorRoleIds = _creator?.roles.map((r) => r.id) ?? [];\n"
+        f"    const _approvalFlows = await tx.approval_flow.findMany({{\n"
+        f"      where: {{ entity_name: '{parent}' }},\n"
+        f"    }});\n"
+        f"{inner}"
     )
 
 
@@ -2402,6 +2465,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     has_approvable_bridge = approvable_rel is not None
     approval_edge_trigger_create_code = ''
     approval_edge_trigger_update_code = ''
+    submit_for_approval_action_code = ''
     x_approval_submit_on_field: str | None = None
     if has_approvable_bridge and can_create:
         raw_def_by_model = _raw_def(model, schema) if schema else {}
@@ -2409,18 +2473,28 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         approval_edge_trigger_create_code = _build_approval_edge_trigger_create_code(
             approvable_rel, parent, x_approval_submit_on_field, x_approval_submit_on_value,
         )
-        # cmd_834: the previous-row lookup this update trigger needs
-        # (_prevRow) is now emitted unconditionally by service.ts.jinja2
-        # itself, ahead of validateOnUpdate, for every can_update entity --
-        # not only approvable ones (it also feeds validateCustomRules). No
-        # separate select-scoped fetch is built here anymore; the trigger
-        # code below just reads off that shared full-row fetch.
-        if can_update and x_approval_submit_on_field is not None:
+        if x_approval_submit_on_field is not None:
             x_approval_terminal = bool(
                 (raw_def_by_model.get('x-approval') or {}).get('on_rejected', {}).get('terminal', False)
             )
-            approval_edge_trigger_update_code = _build_approval_edge_trigger_update_code(
-                approvable_rel, parent, model, x_approval_submit_on_field, x_approval_submit_on_value,
+            # cmd_834: the previous-row lookup this update trigger needs
+            # (_prevRow) is now emitted unconditionally by service.ts.jinja2
+            # itself, ahead of validateOnUpdate, for every can_update entity --
+            # not only approvable ones (it also feeds validateCustomRules). No
+            # separate select-scoped fetch is built here anymore; the trigger
+            # code below just reads off that shared full-row fetch.
+            if can_update:
+                approval_edge_trigger_update_code = _build_approval_edge_trigger_update_code(
+                    approvable_rel, parent, model, x_approval_submit_on_field, x_approval_submit_on_value,
+                    terminal=x_approval_terminal,
+                )
+            # cmd_841 ruling_4: the explicit submit action exists
+            # independent of can_update -- it is precisely the only path
+            # for edit: false entities (which have no PUT route at all) to
+            # ever reach submit_on's target value.
+            submit_for_approval_action_code = _build_submit_for_approval_action_code(
+                approvable_rel['prop_name'], parent, model,
+                x_approval_submit_on_field, x_approval_submit_on_value,
                 terminal=x_approval_terminal,
             )
 
@@ -2784,6 +2858,8 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
            if (approval_lines_post_create_code or approval_lines_post_update_code
                or reservation_self_case_notifies or approval_edge_trigger_create_code
                or approval_edge_trigger_update_code) else '')
+        + (f"\nimport {{ canSubmitForApproval }} from '@/lib/approval_request/submit_predicate';"
+           if approval_edge_trigger_update_code else '')
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
         + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/getters_associated';" if should_filter_by_org and (can_create or can_update) else '')
         + (f"\nimport {{ AppError, p2002Field }} from '@/lib/_errors';" if can_create or can_update else '')
@@ -2838,6 +2914,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'should_filter_by_org':               should_filter_by_org,
         'approval_edge_trigger_create_code':  approval_edge_trigger_create_code,
         'approval_edge_trigger_update_code':  approval_edge_trigger_update_code,
+        'submit_for_approval_action_code':    submit_for_approval_action_code,
     }
 
 
@@ -3510,6 +3587,28 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     ]))
     uses_app_field_boolean = 'AppFieldBoolean' in _view_body_text
 
+    # cmd_841 ruling_4: whether this entity's view page must wire up the
+    # "(re)submit" server action into its entity_view_components (e.g.
+    # ApprovalSection.tsx's submit button). Same detection as
+    # service_context()'s submit_for_approval_action_code (x-approval.
+    # submit_on declared + an approvable bridge + can_create), duplicated
+    # here rather than threaded through ctx because form_view_context and
+    # service_context are independent per-artifact context builders (see
+    # generate.py's separate _write calls) with no shared mutable state.
+    submit_for_approval_needed = False
+    submit_on_terminal_lit = 'false'
+    _fv_approvable_rel = next(
+        (r for r in ctx.get('one_to_one_rels', []) if r.get('target') == 'approvable'),
+        None,
+    )
+    if _fv_approvable_rel is not None and ctx.get('can_create'):
+        _fv_submit_on_field, _ = resolve_approval_submit_on(model_def)
+        if _fv_submit_on_field is not None:
+            submit_for_approval_needed = True
+            submit_on_terminal_lit = 'true' if bool(
+                (model_def.get('x-approval') or {}).get('on_rejected', {}).get('terminal', False)
+            ) else 'false'
+
     return {
         'needs_datetime_wrapper': needs_datetime_wrapper,
         'needs_image_display':    needs_image_display,
@@ -3534,6 +3633,8 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         'uses_format_label_value': uses_format_label_value,
         'uses_decimal_format':    uses_decimal_format,
         'uses_app_field_boolean': uses_app_field_boolean,
+        'submit_for_approval_needed': submit_for_approval_needed,
+        'submit_on_terminal_lit': submit_on_terminal_lit,
     }
 
 
@@ -5195,7 +5296,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     if extra_default_props or has_comment_children or has_current_user_role_ids or _is_bridge_child:
         form_upsert_params = (
             f"{{ src, isEdit, {_permissions_binding}"
-            + (', currentUserId' if has_comment_children else '')
+            + (', currentUserId' if has_comment_children or has_current_user_role_ids else '')
             + (', canViewUserProfile, mentionUserContext' if comment_has_mention_fu else '')
             + (', currentUserRoleIds' if has_current_user_role_ids else '')
             + (f', {extra_default_props}' if extra_default_props else '')

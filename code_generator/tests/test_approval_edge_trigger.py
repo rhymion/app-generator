@@ -374,24 +374,38 @@ class TestPositivePredicateBlocksIneligibleStates:
         assert "updated.status === 'submitted'" in code
 
     def test_terminal_baked_in_as_true(self):
+        """cmd_841 ruling_4: the boolean predicate that used to be inlined
+        here (see git history for the exact expression this replaced) is
+        now the single hand-written canSubmitForApproval() (lib/
+        approval_request/submit_predicate.ts), called with the
+        generation-time terminal literal as its second argument -- the
+        actual absent/withdrawn/non-terminal-rejected logic is pinned by
+        lib/approval_request/submit_predicate.test.ts instead, since it no
+        longer exists as inline TS this Python-side test can string-match."""
         code = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_terminal_schema())[
             'approval_edge_trigger_update_code'
         ]
-        assert "&& !true)" in code
+        assert 'canSubmitForApproval(_latestRequest, true)' in code
 
     def test_non_terminal_baked_in_as_false(self):
         code = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_schema())[
             'approval_edge_trigger_update_code'
         ]
-        assert "&& !false)" in code
+        assert 'canSubmitForApproval(_latestRequest, false)' in code
 
-    def test_predicate_covers_absent_withdrawn_and_non_terminal_rejected(self):
+    def test_predicate_delegates_to_canonical_canSubmitForApproval(self):
+        """cmd_841 ruling_4: the update path's eligibility check calls the
+        SAME canSubmitForApproval() also called by the generated submit
+        server action (submit_for_approval.ts.jinja2) and by
+        ApprovalSection.tsx's submit-button visibility check -- a single
+        source of truth instead of three independently-maintained copies
+        of the absent/withdrawn/non-terminal-rejected logic."""
         code = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_schema())[
             'approval_edge_trigger_update_code'
         ]
-        assert '!_latestRequest' in code
-        assert "_latestRequest.status === 'withdrawn'" in code
-        assert "_latestRequest.status === 'rejected' && !false" in code
+        assert 'canSubmitForApproval(_latestRequest, false)' in code
+        assert '!_latestRequest' not in code
+        assert "_latestRequest.status === 'withdrawn'" not in code
 
     def test_predicate_never_mentions_pending_or_approved_as_eligible(self):
         """'pending' and 'approved' must never appear as a condition that
