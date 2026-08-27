@@ -1264,7 +1264,7 @@ describe('API: {{ title }}', () => {
     });
 
 {% if on_withdrawn_value_literal %}
-    it('14.4 withdrawing a pending request automatically sets {{ resubmit_target_field }} to {{ on_withdrawn_value_literal }}, then editing back to {{ resubmit_target_value_literal }} creates a new pending approval_request', () => {
+    it('14.4 withdrawing a pending request automatically sets {{ resubmit_target_field }} to its on_withdrawn value, then editing back to its open value creates a new pending approval_request', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithApproval', {
           creatorId: setup.requestorUser.id,
