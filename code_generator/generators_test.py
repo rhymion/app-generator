@@ -4654,6 +4654,87 @@ def api_spec_context(
         _resubmit_literal(_on_withdrawn_value) if _on_withdrawn_value else None
     )
 
+    # cmd_843 PD-1 (fail-closed resubmission-reachability gate, round_id-era
+    # rewrite of the cmd_825 comment above): an entity that declares
+    # x-approval.submit_on together with a non-terminal on_rejected promises
+    # a real path back to submit_on's target value -- either the new-form
+    # withdraw-then-edit-back 14.4 test (on_withdrawn_value_literal) or the
+    # old-form away-then-back 14.4 test (resubmit_unsubmitted_value_literal).
+    # cmd_498: a condition the machine cannot see is a hole -- raise instead
+    # of the silent "gets no test" fallback the cmd_825 comment above
+    # describes when NEITHER path exists. Also raise when a DECLARED
+    # on_withdrawn/on_rejected writes a value that collides with submit_on's
+    # own target or on_approved's set_fields value for the same field: the
+    # withdrawn/rejected record would then be indistinguishable from a
+    # submitted/approved one even though no live approval_request backs
+    # that state, and the update-time edge trigger
+    # (_build_approval_edge_trigger_update_code, which fires only on the
+    # EDGE previous!=target -> new===target) could never observe a real
+    # transition on the follow-up resubmit PUT either.
+    if resubmit_target_field and entity_on_rejected and not entity_on_rejected_terminal:
+        _gate_blocked_values = {_resubmit_target_value}
+        _on_approved_sf_raw = (
+            (_x_approval.get('on_approved') or {}).get('set_fields') or {} if _x_approval else {}
+        )
+        if resubmit_target_field in _on_approved_sf_raw:
+            _gate_blocked_values.add(resolve_set_fields(
+                model_def.get('properties') or {},
+                {resubmit_target_field: _on_approved_sf_raw[resubmit_target_field]},
+            )[resubmit_target_field])
+
+        if _on_withdrawn_value is not None:
+            _gate_on_withdrawn_resolved = resolve_set_fields(
+                model_def.get('properties') or {},
+                {resubmit_target_field: _on_withdrawn_value},
+            )[resubmit_target_field]
+            if _gate_on_withdrawn_resolved in _gate_blocked_values:
+                raise ValueError(
+                    f"{model}: x-approval.on_withdrawn.set_fields."
+                    f"{resubmit_target_field} = {_gate_on_withdrawn_resolved!r} "
+                    "is unreachable for resubmission -- it matches "
+                    "submit_on's or on_approved's own value for this field, "
+                    "so a withdrawn record could never be told apart from a "
+                    "submitted/approved one, and the resubmit edge trigger "
+                    "(which fires only on a real previous!=target "
+                    "transition) would never see one. Give "
+                    "on_withdrawn.set_fields a value distinct from "
+                    f"submit_on and on_approved.set_fields for "
+                    f"'{resubmit_target_field}' (e.g. 'draft')."
+                )
+
+        _on_rejected_sf_raw = (entity_on_rejected or {}).get('set_fields') or {}
+        if resubmit_target_field in _on_rejected_sf_raw:
+            _gate_on_rejected_resolved = resolve_set_fields(
+                model_def.get('properties') or {},
+                {resubmit_target_field: _on_rejected_sf_raw[resubmit_target_field]},
+            )[resubmit_target_field]
+            if _gate_on_rejected_resolved in _gate_blocked_values:
+                raise ValueError(
+                    f"{model}: x-approval.on_rejected.set_fields."
+                    f"{resubmit_target_field} = {_gate_on_rejected_resolved!r} "
+                    "(non-terminal) is unreachable for resubmission -- it "
+                    "matches submit_on's or on_approved's own value for "
+                    "this field, so a rejected-but-resubmittable record "
+                    "could never be told apart from a submitted/approved "
+                    "one. Give on_rejected.set_fields a value distinct "
+                    f"from submit_on and on_approved.set_fields for "
+                    f"'{resubmit_target_field}'."
+                )
+
+        if on_withdrawn_value_literal is None and resubmit_unsubmitted_value_literal is None:
+            raise ValueError(
+                f"{model}: x-approval.submit_on is declared with a "
+                "non-terminal on_rejected, but no value is reachable for "
+                f"'{resubmit_target_field}' that is distinct from "
+                "submit_on/on_approved/on_rejected's own values -- "
+                "resubmission after withdrawal or non-terminal rejection "
+                "is unreachable, so 14.4/14.5 cannot be generated. Declare "
+                "x-approval.on_withdrawn.set_fields for "
+                f"'{resubmit_target_field}' with a spare value (e.g. "
+                "'draft'), or add a spare value to the enum that no "
+                "on_approved/on_rejected set_fields entry writes."
+            )
+
     # Detect count-mode reservation without lines: POST tests must seed the pool entity first.
     _xres_def = model_def.get('x-reservation')
     _reservation_count_pool_pascal = None

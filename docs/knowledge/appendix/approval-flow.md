@@ -716,6 +716,58 @@ chains via `preceded_by`), for the benefit of a future consumer schema that decl
 have not been exercised via a live Cypress run in this repo for the same reason (no entity here
 renders them).
 
+### 16.13 Fail-closed gate: unreachable resubmission (`x-approval.submit_on`)
+
+`api_spec_context()` (`code_generator/generators_test.py`) computes two candidate literals for
+an entity's 14.4/14.5 resubmit-after-withdrawal/rejection test scenarios:
+`on_withdrawn_value_literal` (from a declared `x-approval.on_withdrawn.set_fields` entry) and
+`resubmit_unsubmitted_value_literal` (a pre-existing fallback: a spare enum value that no
+`submit_on`/`on_approved`/`on_rejected` writes). Before this section, an entity that declared
+`submit_on` together with a non-terminal `on_rejected` but had **neither** — no spare enum value
+and no `on_withdrawn` — silently produced neither literal, and the 14.4/14.5 Cypress scenarios
+were simply not rendered for that entity. No error, no warning: a real product gap (resubmission
+after withdrawal/non-terminal-rejection is a dead letter for that entity) generated cleanly and
+shipped untested.
+
+Per the "a condition the machine cannot see is a hole" principle (established for a prior
+generator gate), this is now a `generate-code`-time `ValueError`, not a silent skip. The gate
+fires only when `submit_on` is declared **and** `on_rejected.terminal` is `False` (a terminal
+rejection never expects resubmission, so it is exempt — matching the pre-existing
+`resubmit_target_field` computation's own activation condition). Two failure shapes are
+distinguished:
+
+1. **No reachable value anywhere**: neither `on_withdrawn.set_fields` nor a spare enum value
+   exists for the resubmit target field. The entity's own status enum can never represent "sent
+   back for resubmission" as anything other than a value `submit_on`, `on_approved`, or
+   `on_rejected` already claims.
+2. **A declared value collides with `submit_on`/`on_approved`'s own value**: `on_withdrawn` or a
+   non-terminal `on_rejected` is declared, but its `set_fields` value for the resubmit target
+   field is literally the same string `submit_on` or `on_approved.set_fields` already uses for
+   that field. A withdrawn/rejected-but-resubmittable record would then be indistinguishable
+   from a live submitted/approved one — and the update-time edge trigger
+   (`_build_approval_edge_trigger_update_code`, which only fires on a real `previous != target
+   -> new === target` transition) could never observe a genuine resubmit either, since there
+   would be no transition to observe.
+
+Both raise `ValueError` with a message naming the entity, the offending field/value, and a
+concrete fix (declare `x-approval.on_withdrawn.set_fields` with a spare value such as `'draft'`,
+or add a spare enum value). Deviation-injection coverage for both directions (a reachable schema
+generating cleanly; each unreachable/colliding shape raising) lives in
+`code_generator/tests/test_submit_on_resubmit_fail_closed_gate.py`.
+
+**Consumer-schema impact measured, not assumed**: as of this change, `app-template` (`proj_c`
+internally)'s `leave_request` and `maintenance_ticket` entities (`prj/code_generator/
+json_schema.yaml`) declare `submit_on` + non-terminal `on_rejected` with only a 3-value status
+enum (`pending`/`approved`/`rejected`) and no `on_withdrawn` — **these currently fail the new
+gate** (verified by feeding their real, `build_user_schema.py`-expanded definitions through
+`api_spec_context()` directly). This is not a false positive: it is the exact real-world instance
+of the gap the gate exists to catch, and it reflects the schema's state before a separate,
+in-progress follow-up task applies `on_withdrawn` (or an equivalent spare value) to `prj/` for
+both entities. `app-template-4` and `insurance-app` declare no `submit_on` entities at all as of
+this writing, so the gate never activates for either — a vacuous pass, not evidence the gate was
+exercised there. Re-verify with the same method once the follow-up lands before treating that
+consumer schema as passing.
+
 ### 16.14 `x-approval-lines` vs. line-level `x-approval` + `new: true`
 
 §16.10 covers `x-approval-lines`, the standard path for giving an embedded, `new: false` line
