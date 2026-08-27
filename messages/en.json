@@ -35,8 +35,9 @@
     "pageError": "Something went wrong.",
     "permissionDenied": "You do not have permission to perform this action.",
     "reservationConflict": "This action conflicts with an existing reservation.",
+    "reservationLocked": "This row's reservation has already been allocated and its quantity or criteria can no longer be changed.",
     "sessionExpired": "Your session has expired. Please sign in again.",
-    "staleMutation": "This record was updated by another user. Please reload the page and try again.",
+    "staleMutation": "This record has been updated since you opened it. Please reload to compare with the latest changes.",
     "tryAgain": "Try again",
     "unknown": "An unexpected error occurred. Please try again."
   },

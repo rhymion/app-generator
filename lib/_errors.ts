@@ -12,7 +12,8 @@ export type ErrorCode =
   | 'PERMISSION_DENIED'   // authenticated, but operation not allowed
   | 'NOT_FOUND'           // record absent OR org isolation / self-only ownership (masked)
   | 'VALIDATION'          // field-level input error (missing, invalid, OTO conflict)
-  | 'CONFLICT'            // stale-update or reservation conflict
+  | 'CONFLICT'            // stale-update (assertNotStale snapshot mismatch)
+  | 'RESERVATION_LOCKED'  // reservation criteria changed after allocation (ReservationMutationError) — see cmd_849
   | 'CAPACITY'            // pool / inventory exhausted
   | 'UNKNOWN';            // unexpected internal error
 
@@ -77,6 +78,7 @@ export function errorMessageKey(code: ErrorCode): string {
     case 'PERMISSION_DENIED': return 'permissionDenied';
     case 'NOT_FOUND':         return 'notFound';
     case 'CONFLICT':          return 'staleMutation';
+    case 'RESERVATION_LOCKED': return 'reservationLocked';
     case 'CAPACITY':          return 'capacityExhausted';
     default:                  return 'unknown';
   }

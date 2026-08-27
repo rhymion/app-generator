@@ -1007,7 +1007,14 @@ def actions_context(ctx: dict) -> dict:
         Components render boundary, where production builds erase the
         message ("Minified React error #441" — see
         docs/knowledge/error-message-framework.md). Anything else is a
-        truly unexpected error and is re-thrown to error.tsx unchanged."""
+        truly unexpected error and is re-thrown to error.tsx unchanged.
+
+        ReservationMutationError maps to its own 'RESERVATION_LOCKED'
+        errorCode, distinct from 'CONFLICT'. Both are field-less, and
+        field-less 'CONFLICT' is exactly what a real assertNotStale
+        snapshot mismatch also produces, so collapsing them together made
+        a reservation-allocation rejection display as a stale-update
+        warning. See docs/knowledge/error-message-framework.md."""
         lines = [
             f"{indent}try {{",
             f"{indent}  {call_stmt}",
@@ -1019,7 +1026,7 @@ def actions_context(ctx: dict) -> dict:
         if has_reservation:
             lines += [
                 f"{indent}  if (e instanceof ReservationMutationError) {{",
-                f"{indent}    return {{ ok: false, errorCode: 'CONFLICT' }} satisfies ActionFailure;",
+                f"{indent}    return {{ ok: false, errorCode: 'RESERVATION_LOCKED' }} satisfies ActionFailure;",
                 f"{indent}  }}",
                 f"{indent}  if (e instanceof InsufficientPoolCapacityError) {{",
                 f"{indent}    return {{ ok: false, errorCode: 'CAPACITY' }} satisfies ActionFailure;",
