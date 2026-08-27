@@ -7,6 +7,9 @@ import { formatLabelValue } from '@/lib/_format';
 {% if has_mention_comments %}
 import { notify } from '@/lib/_notifier';
 {% endif %}
+{% if has_approvable %}
+import { createId } from '@paralleldrive/cuid2';
+{% endif %}
 
 async function getTestUser() {
   const testUser = await prisma.user.findUnique({
@@ -1184,9 +1187,10 @@ export async function populate{{ pascal }}WithRejectedApproval(creatorId: string
     data: { creator_id: creatorId },
   });
   const approvalRequests = [];
+  const roundId = createId();
   for (const flowId of approvalFlowIds) {
     const ar = await prisma.approval_request.create({
-      data: { approvable_id: {{ approvable_dep.var_name }}Item.id, approval_flow_id: flowId, status: 'rejected' },
+      data: { approvable_id: {{ approvable_dep.var_name }}Item.id, approval_flow_id: flowId, status: 'rejected', round_id: roundId },
     });
     approvalRequests.push(ar);
   }
@@ -1234,9 +1238,10 @@ export async function populate{{ pascal }}WithTerminalRejectedApproval(creatorId
     data: { creator_id: creatorId },
   });
   const approvalRequests = [];
+  const roundId = createId();
   for (const flowId of approvalFlowIds) {
     const ar = await prisma.approval_request.create({
-      data: { approvable_id: {{ approvable_dep.var_name }}Item.id, approval_flow_id: flowId, status: 'terminal_rejected' },
+      data: { approvable_id: {{ approvable_dep.var_name }}Item.id, approval_flow_id: flowId, status: 'terminal_rejected', round_id: roundId },
     });
     approvalRequests.push(ar);
   }
@@ -1280,9 +1285,10 @@ export async function populate{{ pascal }}WithApproval(creatorId: string, approv
     data: { creator_id: creatorId },
   });
   const approvalRequests = [];
+  const roundId = createId();
   for (const flowId of approvalFlowIds) {
     const ar = await prisma.approval_request.create({
-      data: { approvable_id: {{ approvable_dep.var_name }}Item.id, approval_flow_id: flowId, status: 'pending' },
+      data: { approvable_id: {{ approvable_dep.var_name }}Item.id, approval_flow_id: flowId, status: 'pending', round_id: roundId },
     });
     approvalRequests.push(ar);
   }

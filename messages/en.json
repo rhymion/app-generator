@@ -85,6 +85,7 @@
     "name": "Name",
     "order": "No.",
     "password": "Password",
+    "pastSubmissions": "Past Submissions",
     "precededBy": "Preceded By",
     "read": "Read",
     "reject": "Reject",

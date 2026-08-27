@@ -17,7 +17,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const req = await prisma.approval_request.findUnique({
       where: { id },
-      select: { approval_flow: { select: { approver_role_id: true, entity_name: true } } },
+      select: { round_id: true, approval_flow: { select: { approver_role_id: true, entity_name: true } } },
     });
     if (!req?.approval_flow) throw new ApiError(404, 'Approval request not found');
 
@@ -53,6 +53,42 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       await tx.approval_history.create({
         data: { approval_request_id: id, pre_status: 0, post_status: newStatusOrdinal, message: message ?? null, creator_id: userId, reason_kind: reasonKind ?? null },
       });
+
+      // cmd_844 PD-2: a non-terminal rejection closes this whole round --
+      // any other still-pending row in the same round (a later stage that
+      // never got its turn) is auto-cancelled to 'withdrawn' (the existing
+      // status value reused, not a new 'cancelled' one). Mirrors
+      // lib/approval_request/actions_core.ts's rejectApprovalRequest() —
+      // see that function's doc comment for the full rationale. Skipped for
+      // a terminal rejection (see the same comment).
+      if (!terminal) {
+        const siblingPending = await tx.approval_request.findMany({
+          where: {
+            approvable_id: result.approvable_id,
+            round_id: req.round_id,
+            status: 'pending',
+            id: { not: id },
+          },
+          select: { id: true },
+        });
+        if (siblingPending.length > 0) {
+          await tx.approval_request.updateMany({
+            where: { id: { in: siblingPending.map((r) => r.id) } },
+            data: { status: 'withdrawn' },
+          });
+          // pre_status is 0 ('pending') for every row here -- guaranteed by
+          // the status: 'pending' filter above, not a stale hardcode.
+          await tx.approval_history.createMany({
+            data: siblingPending.map((r) => ({
+              approval_request_id: r.id,
+              pre_status: 0,
+              post_status: 4,
+              message: null,
+              creator_id: userId,
+            })),
+          });
+        }
+      }
 
       // on_rejected dispatch
       const approvableData = await tx.approvable.findUnique({

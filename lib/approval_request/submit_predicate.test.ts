@@ -1,44 +1,73 @@
 import { describe, it, expect } from 'vitest';
-import { canSubmitForApproval } from './submit_predicate';
+import { canSubmitForApproval, canWithdrawApproval } from './submit_predicate';
 
-// cmd_841 ruling_4: this pins the actual absent/withdrawn/non-terminal-
-// rejected logic behind canSubmitForApproval(), the single predicate now
-// shared by generators.py's update-edge-trigger guard, the generated
-// submit_for_approval server action, and ApprovalSection.tsx's submit
-// button visibility check. code_generator/tests/test_approval_edge_trigger.py
-// pins the generated call site (that it calls this function with the right
-// arguments); this file pins what the function itself decides.
+// cmd_844: pins the round-based (array-of-rows) predicates that replaced
+// the single-row cmd_841 ruling_4 predicate -- see submit_predicate.ts's
+// module doc for why a single "latest row" is no longer well-defined once
+// a multistage approval_flow can create more than one row per round.
+// code_generator/tests/test_approval_edge_trigger.py pins the generated
+// call site (that it calls these functions with the right arguments and
+// query shape); this file pins what the functions themselves decide,
+// across the seven concept states a round can be in.
 describe('canSubmitForApproval', () => {
-  it('allows submission when no approval_request exists yet', () => {
-    expect(canSubmitForApproval(null, false)).toBe(true);
-    expect(canSubmitForApproval(undefined, false)).toBe(true);
+  it('1. never submitted: no rows -> allowed', () => {
+    expect(canSubmitForApproval([])).toBe(true);
   });
 
-  it('allows submission after a withdrawal', () => {
-    expect(canSubmitForApproval({ status: 'withdrawn' }, false)).toBe(true);
-    expect(canSubmitForApproval({ status: 'withdrawn' }, true)).toBe(true);
+  it('2. in flight: all stages pending -> blocked', () => {
+    expect(canSubmitForApproval([{ status: 'pending' }, { status: 'pending' }])).toBe(false);
   });
 
-  it('allows submission after a non-terminal rejection', () => {
-    expect(canSubmitForApproval({ status: 'rejected' }, false)).toBe(true);
+  it('3. partially approved, rest pending -> blocked', () => {
+    expect(canSubmitForApproval([{ status: 'approved' }, { status: 'pending' }])).toBe(false);
   });
 
-  it('blocks submission after a terminal rejection', () => {
-    expect(canSubmitForApproval({ status: 'rejected' }, true)).toBe(false);
+  it('4. fully approved -> blocked', () => {
+    expect(canSubmitForApproval([{ status: 'approved' }, { status: 'approved' }])).toBe(false);
   });
 
-  it('blocks submission while a request is still pending', () => {
-    expect(canSubmitForApproval({ status: 'pending' }, false)).toBe(false);
-    expect(canSubmitForApproval({ status: 'pending' }, true)).toBe(false);
+  it('5. non-terminal rejection -> allowed', () => {
+    expect(canSubmitForApproval([{ status: 'approved' }, { status: 'rejected' }])).toBe(true);
+    expect(canSubmitForApproval([{ status: 'rejected' }])).toBe(true);
   });
 
-  it('blocks submission once a request has been approved', () => {
-    expect(canSubmitForApproval({ status: 'approved' }, false)).toBe(false);
-    expect(canSubmitForApproval({ status: 'approved' }, true)).toBe(false);
+  it('6. terminal rejection -> blocked', () => {
+    expect(canSubmitForApproval([{ status: 'approved' }, { status: 'terminal_rejected' }])).toBe(false);
+    expect(canSubmitForApproval([{ status: 'terminal_rejected' }])).toBe(false);
   });
 
-  it('blocks submission for a terminal_rejected status', () => {
-    expect(canSubmitForApproval({ status: 'terminal_rejected' }, true)).toBe(false);
-    expect(canSubmitForApproval({ status: 'terminal_rejected' }, false)).toBe(false);
+  it('7. withdrawn -> allowed (resubmission starts a new round from stage one)', () => {
+    expect(canSubmitForApproval([{ status: 'approved' }, { status: 'withdrawn' }])).toBe(true);
+    expect(canSubmitForApproval([{ status: 'withdrawn' }])).toBe(true);
+  });
+});
+
+describe('canWithdrawApproval', () => {
+  it('1. never submitted: no rows -> cannot withdraw', () => {
+    expect(canWithdrawApproval([])).toBe(false);
+  });
+
+  it('2. in flight: all stages pending -> can withdraw', () => {
+    expect(canWithdrawApproval([{ status: 'pending' }, { status: 'pending' }])).toBe(true);
+  });
+
+  it('3. partially approved, rest pending -> can withdraw', () => {
+    expect(canWithdrawApproval([{ status: 'approved' }, { status: 'pending' }])).toBe(true);
+  });
+
+  it('4. fully approved -> cannot withdraw (nothing pending left)', () => {
+    expect(canWithdrawApproval([{ status: 'approved' }, { status: 'approved' }])).toBe(false);
+  });
+
+  it('5. non-terminal rejection -> cannot withdraw', () => {
+    expect(canWithdrawApproval([{ status: 'approved' }, { status: 'rejected' }])).toBe(false);
+  });
+
+  it('6. terminal rejection -> cannot withdraw', () => {
+    expect(canWithdrawApproval([{ status: 'approved' }, { status: 'terminal_rejected' }])).toBe(false);
+  });
+
+  it('7. withdrawn -> cannot withdraw again', () => {
+    expect(canWithdrawApproval([{ status: 'approved' }, { status: 'withdrawn' }])).toBe(false);
   });
 });

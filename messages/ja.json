@@ -85,6 +85,7 @@
     "name": "名前",
     "order": "No.",
     "password": "パスワード",
+    "pastSubmissions": "過去の申請",
     "precededBy": "先行",
     "read": "読取",
     "reject": "却下",

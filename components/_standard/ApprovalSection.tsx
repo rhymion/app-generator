@@ -30,25 +30,7 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { Fragment } from 'react';
 import type { ModelPermissions } from '@/lib/authz';
 import { approveApprovalRequest, rejectApprovalRequest, withdrawApprovalRequest } from '@/lib/approval_request/actions';
-import { canSubmitForApproval } from '@/lib/approval_request/submit_predicate';
-
-// cmd_841 ruling_4: among all approval_request rows for this approvable,
-// the one most likely to block a new submission -- used as a stand-in for
-// "the latest request" when only the full (possibly unordered) array is
-// available, as it is here (see form_view.tsx.jinja2's comment on why it
-// does not index into this array itself). In this domain the two are
-// equivalent: once any row is 'pending' or 'approved' a new submission is
-// never allowed regardless of what else exists, and 'terminal_rejected'
-// likewise never clears -- so picking the most-blocking row and evaluating
-// canSubmitForApproval() against it alone gives the same answer as
-// evaluating it against the true chronologically-latest row.
-const _BLOCKING_PRIORITY: Record<string, number> = {
-  pending: 0,
-  approved: 1,
-  terminal_rejected: 2,
-  rejected: 3,
-  withdrawn: 3,
-};
+import { canSubmitForApproval, canWithdrawApproval } from '@/lib/approval_request/submit_predicate';
 
 const STATUS_LABELS = ['Pending', 'Approved', 'Rejected', 'TerminalRejected', 'Withdrawn'] as const;
 
@@ -69,6 +51,9 @@ type ApprovalHistory = {
 type ApprovalRequest = {
   id: string;
   approval_flow_id: string;
+  // cmd_844: identifies which submission ("round") this row belongs to --
+  // see prisma/schema.prisma's approval_request.round_id doc.
+  round_id: string;
   status: 'pending' | 'approved' | 'rejected' | 'terminal_rejected' | 'withdrawn';
   approval_flow?: {
     id: string;
@@ -92,24 +77,44 @@ type Props = {
   // always passes currentUserId to every view-target component, so no
   // template change was needed to make it available here again.
   currentUserId?: string | null;
-  // cmd_841 ruling_4: present only for entities that declare
-  // x-approval.submit_on (form_view.tsx.jinja2 passes both together, or
-  // neither). isTerminal mirrors the same generation-time literal the
-  // update-edge-trigger and submit action bake in.
-  isTerminal?: boolean;
   onSubmitForApproval?: () => Promise<void>;
 };
 
-export default function ApprovalSection({ src, currentUserRoleIds, currentUserId, isTerminal, onSubmitForApproval }: Props) {
+// cmd_844: split the full (ascending-created_at-ordered, see
+// build_context.py's approval_request child include) approval_requests
+// array into the current round (the round_id of the last row) and every
+// past round, grouped by round_id, most-recent-first. An empty array
+// yields an empty current round and no past rounds.
+function splitRounds(requests: ApprovalRequest[]): {
+  currentRoundRequests: ApprovalRequest[];
+  pastRounds: ApprovalRequest[][];
+} {
+  if (requests.length === 0) return { currentRoundRequests: [], pastRounds: [] };
+  const currentRoundId = requests[requests.length - 1].round_id;
+  const currentRoundRequests = requests.filter((r) => r.round_id === currentRoundId);
+  const pastByRound = new Map<string, ApprovalRequest[]>();
+  for (const r of requests) {
+    if (r.round_id === currentRoundId) continue;
+    const bucket = pastByRound.get(r.round_id);
+    if (bucket) bucket.push(r); else pastByRound.set(r.round_id, [r]);
+  }
+  // Map preserves insertion order (ascending created_at) -- reverse for
+  // most-recent-past-round-first display.
+  const pastRounds = Array.from(pastByRound.values()).reverse();
+  return { currentRoundRequests, pastRounds };
+}
+
+export default function ApprovalSection({ src, currentUserRoleIds, currentUserId, onSubmitForApproval }: Props) {
   const t = useTranslations('Fields');
   const tCommon = useTranslations('Common');
   const tStatus = useTranslations('ApprovalRequestStatus');
   const [, startTransition] = useTransition();
-  const [dialog, setDialog] = useState<{ arId: string; action: Action } | null>(null);
+  const [dialog, setDialog] = useState<{ targetId: string; action: Action } | null>(null);
   const [message, setMessage] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
   const [selectedReasonKind, setSelectedReasonKind] = useState<number | undefined>(undefined);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [historyExpanded, setHistoryExpanded] = useState(false);
 
   const requests = src.approvable?.approval_requests ?? [];
   // cmd_841 ruling_4: a "(re)submit" button may need to render even with
@@ -119,14 +124,23 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
   // when a submit action is available at all.
   if (requests.length === 0 && !onSubmitForApproval) return null;
 
-  const _blockingRequest = requests.reduce<ApprovalRequest | null>((acc, r) => {
-    if (!acc) return r;
-    return (_BLOCKING_PRIORITY[r.status] ?? 9) < (_BLOCKING_PRIORITY[acc.status] ?? 9) ? r : acc;
-  }, null);
-  const canSubmit = !!onSubmitForApproval && canSubmitForApproval(_blockingRequest, !!isTerminal);
+  const { currentRoundRequests, pastRounds } = splitRounds(requests);
+  const canSubmit = !!onSubmitForApproval && canSubmitForApproval(currentRoundRequests);
+  const canWithdrawRound = !!currentUserId
+    && src.approvable?.creator_id === currentUserId
+    && canWithdrawApproval(currentRoundRequests);
 
-  // Build a map of flow_id → status for ordering checks
-  const flowIdToStatus = new Map(requests.map((r) => [r.approval_flow_id, r.status]));
+  // cmd_844 (subtask_844b section_2): built from currentRoundRequests
+  // ONLY, never the full unscoped requests array -- an unscoped Map lets a
+  // past round's approved row on the same flow_id "win" over the current
+  // round's own not-yet-approved row on that flow_id whenever the
+  // include's row order doesn't happen to put the current round last
+  // (confirmed reproducible after a Postgres CLUSTER reorders the table's
+  // heap; the include's `orderBy: { created_at: 'asc' }`, added alongside
+  // this fix, makes normal reads safe too, but scoping to
+  // currentRoundRequests removes the dependency on ordering entirely for
+  // this specific computation).
+  const flowIdToStatus = new Map(currentRoundRequests.map((r) => [r.approval_flow_id, r.status]));
 
   const toggleExpanded = (id: string) => {
     setExpandedIds((prev) => {
@@ -136,26 +150,30 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
     });
   };
 
-  const openDialog = (arId: string, action: Action) => {
+  const openDialog = (targetId: string, action: Action) => {
     setMessage('');
     setRejectionReason('');
     setSelectedReasonKind(undefined);
-    setDialog({ arId, action });
+    setDialog({ targetId, action });
   };
 
   const closeDialog = () => setDialog(null);
 
   const confirmAction = () => {
     if (!dialog) return;
-    const { arId, action } = dialog;
+    const { targetId, action } = dialog;
     const msg = message.trim() || undefined;
     const reasonText = rejectionReason.trim() || undefined;
     const reasonKind = selectedReasonKind;
     closeDialog();
     startTransition(() => {
-      if (action === 'approve') approveApprovalRequest(arId, msg);
-      else if (action === 'reject') rejectApprovalRequest(arId, msg, { reason: reasonText, reasonKind });
-      else withdrawApprovalRequest(arId, msg);
+      if (action === 'approve') approveApprovalRequest(targetId, msg);
+      else if (action === 'reject') rejectApprovalRequest(targetId, msg, { reason: reasonText, reasonKind });
+      // cmd_844: withdraw's targetId is the approvable id, not a specific
+      // approval_request id -- withdrawal closes every pending row of the
+      // current round in one action (see actions_core.ts's
+      // withdrawApprovalRequest).
+      else withdrawApprovalRequest(targetId, msg);
     });
   };
 
@@ -170,6 +188,78 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
     });
   };
 
+  const renderRequestRow = (ar: ApprovalRequest, actionable: boolean) => {
+    const approverRoleId = ar.approval_flow?.approver_role_id;
+    const precedingFlowIds = ar.approval_flow?.preceded_by?.map((f) => f.id) ?? [];
+    const precedingApproved = precedingFlowIds.every(
+      (fid) => flowIdToStatus.get(fid) === 'approved',
+    );
+    const canAct = actionable
+      && ar.status === 'pending'
+      && approverRoleId
+      && currentUserRoleIds?.includes(approverRoleId)
+      && precedingApproved;
+    const histories = ar.approval_histories ?? [];
+    const isExpanded = expandedIds.has(ar.id);
+
+    return (
+      <Fragment key={ar.id}>
+        <TableRow>
+          <TableCell>{ar.approval_flow?.approver_role?.name ?? '-'}</TableCell>
+          <TableCell>{tStatus(ar.status)}</TableCell>
+          <TableCell>
+            {histories.length > 0 && (
+              <Tooltip title={isExpanded ? 'Hide history' : 'Show history'}>
+                <IconButton size="small" onClick={() => toggleExpanded(ar.id)} aria-label={isExpanded ? 'Collapse history' : 'Expand history'}>
+                  {isExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+                </IconButton>
+              </Tooltip>
+            )}
+          </TableCell>
+          <TableCell>
+            {canAct && (
+              <>
+                <Tooltip title={t('approve')}>
+                  <IconButton aria-label="Approve" color="success" size="small" onClick={() => openDialog(ar.id, 'approve')}>
+                    <CheckIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title={t('reject')}>
+                  <IconButton aria-label="Reject" color="error" size="small" onClick={() => openDialog(ar.id, 'reject')}>
+                    <CloseIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </>
+            )}
+          </TableCell>
+        </TableRow>
+        {histories.length > 0 && (
+          <TableRow key={`${ar.id}-history`}>
+            <TableCell colSpan={4} sx={{ py: 0 }}>
+              <Collapse in={isExpanded} unmountOnExit>
+                <Box sx={{ p: 1 }}>
+                  {histories.map((h) => (
+                    <Box key={h.id} sx={{ mb: 0.5 }}>
+                      <Typography variant="caption" sx={{
+                        color: "text.secondary"
+                      }}>
+                        {new Date(h.created_at).toLocaleString()} — {h.creator?.name ?? '—'} :
+                        {' '}{STATUS_LABELS[h.pre_status] ?? h.pre_status} → {STATUS_LABELS[h.post_status] ?? h.post_status}
+                      </Typography>
+                      {h.message && (
+                        <Typography variant="body2" sx={{ ml: 1 }}>&quot;{h.message}&quot;</Typography>
+                      )}
+                    </Box>
+                  ))}
+                </Box>
+              </Collapse>
+            </TableCell>
+          </TableRow>
+        )}
+      </Fragment>
+    );
+  };
+
   return (
     <div style={{ marginTop: '1.5rem' }}>
       <h2>{t('approvalRequests')}</h2>
@@ -182,7 +272,8 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
           </Button>
         </Tooltip>
       )}
-      {requests.length === 0 ? null : (
+      {currentRoundRequests.length === 0 ? null : (
+      <>
       <Table size="small">
         <TableHead>
           <TableRow>
@@ -193,97 +284,59 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
           </TableRow>
         </TableHead>
         <TableBody>
-          {requests.map((ar) => {
-            const approverRoleId = ar.approval_flow?.approver_role_id;
-            const precedingFlowIds = ar.approval_flow?.preceded_by?.map((f) => f.id) ?? [];
-            const precedingApproved = precedingFlowIds.every(
-              (fid) => flowIdToStatus.get(fid) === 'approved',
-            );
-            const canAct = ar.status === 'pending'
-              && approverRoleId
-              && currentUserRoleIds?.includes(approverRoleId)
-              && precedingApproved;
-            // cmd_825: withdrawal is the requestor's own action on their
-            // own still-pending request -- not gated by approver role or
-            // preceding-flow order (those only govern approve/reject).
-            // cmd_842(い): the applicant's single source of truth is
-            // approvable.creator_id, not the entity row's own creator_id --
-            // actions_core.ts's server-side withdraw guard already checks
-            // req.approvable.creator_id, and entities created via a nested
-            // x-approval-lines create (e.g. receiving_receipt_line) never
-            // write their own creator_id at all (stays permanently null).
-            const canWithdraw = ar.status === 'pending'
-              && !!currentUserId
-              && src.approvable?.creator_id === currentUserId;
-            const histories = ar.approval_histories ?? [];
-            const isExpanded = expandedIds.has(ar.id);
-
-            return (
-              <Fragment key={ar.id}>
-                <TableRow>
-                  <TableCell>{ar.approval_flow?.approver_role?.name ?? '-'}</TableCell>
-                  <TableCell>{tStatus(ar.status)}</TableCell>
-                  <TableCell>
-                    {histories.length > 0 && (
-                      <Tooltip title={isExpanded ? 'Hide history' : 'Show history'}>
-                        <IconButton size="small" onClick={() => toggleExpanded(ar.id)} aria-label={isExpanded ? 'Collapse history' : 'Expand history'}>
-                          {isExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
-                        </IconButton>
-                      </Tooltip>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {canAct && (
-                      <>
-                        <Tooltip title={t('approve')}>
-                          <IconButton aria-label="Approve" color="success" size="small" onClick={() => openDialog(ar.id, 'approve')}>
-                            <CheckIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title={t('reject')}>
-                          <IconButton aria-label="Reject" color="error" size="small" onClick={() => openDialog(ar.id, 'reject')}>
-                            <CloseIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </>
-                    )}
-                    {canWithdraw && (
-                      <Tooltip title={t('withdraw')}>
-                        <IconButton aria-label="Withdraw" color="warning" size="small" onClick={() => openDialog(ar.id, 'withdraw')}>
-                          <UndoIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    )}
-                  </TableCell>
-                </TableRow>
-                {histories.length > 0 && (
-                  <TableRow key={`${ar.id}-history`}>
-                    <TableCell colSpan={4} sx={{ py: 0 }}>
-                      <Collapse in={isExpanded} unmountOnExit>
-                        <Box sx={{ p: 1 }}>
-                          {histories.map((h) => (
-                            <Box key={h.id} sx={{ mb: 0.5 }}>
-                              <Typography variant="caption" sx={{
-                                color: "text.secondary"
-                              }}>
-                                {new Date(h.created_at).toLocaleString()} — {h.creator?.name ?? '—'} :
-                                {' '}{STATUS_LABELS[h.pre_status] ?? h.pre_status} → {STATUS_LABELS[h.post_status] ?? h.post_status}
-                              </Typography>
-                              {h.message && (
-                                <Typography variant="body2" sx={{ ml: 1 }}>&quot;{h.message}&quot;</Typography>
-                              )}
-                            </Box>
-                          ))}
-                        </Box>
-                      </Collapse>
-                    </TableCell>
-                  </TableRow>
-                )}
-              </Fragment>
-            );
-          })}
+          {currentRoundRequests.map((ar) => renderRequestRow(ar, true))}
         </TableBody>
       </Table>
+      {canWithdrawRound && (
+        // cmd_844 (PD-1 final ruling): withdrawal is round-level, not
+        // per-row -- one button for the whole current round, closing every
+        // still-pending row of it (approved rows are left untouched).
+        <Tooltip title={t('withdraw')}>
+          <Button
+            variant="outlined"
+            color="warning"
+            startIcon={<UndoIcon fontSize="small" />}
+            aria-label="Withdraw"
+            size="small"
+            onClick={() => src.approvable && openDialog(src.approvable.id, 'withdraw')}
+            sx={{ mt: 1 }}
+          >
+            {t('withdraw')}
+          </Button>
+        </Tooltip>
+      )}
+      </>
+      )}
+
+      {pastRounds.length > 0 && (
+        <Box sx={{ mt: 2 }}>
+          <Tooltip title={historyExpanded ? 'Hide history' : 'Show history'}>
+            <Button
+              size="small"
+              onClick={() => setHistoryExpanded((v) => !v)}
+              startIcon={historyExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+            >
+              {t('pastSubmissions')}
+            </Button>
+          </Tooltip>
+          <Collapse in={historyExpanded} unmountOnExit>
+            {pastRounds.map((round, idx) => (
+              <Table size="small" key={round[0]?.round_id ?? idx} sx={{ mt: 1 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>{t('approverRole')}</TableCell>
+                    <TableCell>{t('status')}</TableCell>
+                    <TableCell>{t('approvalHistory')}</TableCell>
+                    <TableCell />
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {round.map((ar) => renderRequestRow(ar, false))}
+                </TableBody>
+              </Table>
+            ))}
+          </Collapse>
+        </Box>
       )}
 
       <Dialog open={!!dialog} onClose={closeDialog} maxWidth="sm" fullWidth>

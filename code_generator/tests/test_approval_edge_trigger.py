@@ -349,18 +349,21 @@ class TestEntityNameUsesParentNotModel:
 
 
 # ---------------------------------------------------------------------------
-# cmd_826/cmd_825: the update-time trigger's eligibility check is rebuilt
-# as a positive predicate over the approvable's LATEST approval_request --
-# absent, 'withdrawn', or 'rejected'-while-not-terminal are the only three
-# states a new request may be created from. Everything else (still
-# 'pending', already 'approved', or 'rejected'-while-terminal) blocks
-# re-firing. The old negative "!_pendingGuard" form only ever asked "is
-# anything pending right now", so 'approved' and terminal 'rejected' both
-# silently passed -- #423's own commit message named the terminal gap
-# explicitly; the post-approval gap was raised independently in cmd_826.
-# These tests pin the fix directly, independent of what any consumer
-# schema currently declares (no shipped schema combines terminal:true with
-# submit_on today).
+# cmd_826/cmd_825/cmd_844: the update-time trigger's eligibility check is a
+# positive predicate over the approvable's CURRENT approval_request ROUND --
+# absent, or fully resolved to 'withdrawn'/'rejected' rows with nothing
+# still 'pending'/'approved'/'terminal_rejected', are the only states a new
+# round may be created from. The old negative "!_pendingGuard" form only
+# ever asked "is anything pending right now", so 'approved' and terminal
+# 'rejected' both silently passed -- #423's own commit message named the
+# terminal gap explicitly; the post-approval gap was raised independently
+# in cmd_826. cmd_844 replaced the single non-deterministically-selected
+# "latest row" this originally read with a round_id-scoped query over every
+# row of the current round (see submit_predicate.ts's module doc for why a
+# single latest row stopped being well-defined once a multistage flow can
+# create more than one row per submission) -- these tests pin the fix
+# directly, independent of what any consumer schema currently declares (no
+# shipped schema combines terminal:true with submit_on today).
 # ---------------------------------------------------------------------------
 
 class TestPositivePredicateBlocksIneligibleStates:
@@ -373,25 +376,24 @@ class TestPositivePredicateBlocksIneligibleStates:
         assert code != ''
         assert "updated.status === 'submitted'" in code
 
-    def test_terminal_baked_in_as_true(self):
-        """cmd_841 ruling_4: the boolean predicate that used to be inlined
-        here (see git history for the exact expression this replaced) is
-        now the single hand-written canSubmitForApproval() (lib/
-        approval_request/submit_predicate.ts), called with the
-        generation-time terminal literal as its second argument -- the
-        actual absent/withdrawn/non-terminal-rejected logic is pinned by
-        lib/approval_request/submit_predicate.test.ts instead, since it no
-        longer exists as inline TS this Python-side test can string-match."""
-        code = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_terminal_schema())[
+    def test_predicate_takes_no_generation_time_terminal_argument(self):
+        """cmd_844: canSubmitForApproval no longer takes a generation-time
+        terminal boolean -- 'terminal_rejected' is read directly off each
+        round row's own status at runtime (lib/approval_request/
+        submit_predicate.ts), so the generated call site is identical
+        whether or not the schema declares on_rejected.terminal. The actual
+        absent/withdrawn/non-terminal-rejected/terminal-rejected logic is
+        pinned by lib/approval_request/submit_predicate.test.ts instead,
+        since it no longer exists as inline TS this Python-side test can
+        string-match."""
+        code_terminal = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_terminal_schema())[
             'approval_edge_trigger_update_code'
         ]
-        assert 'canSubmitForApproval(_latestRequest, true)' in code
-
-    def test_non_terminal_baked_in_as_false(self):
-        code = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_schema())[
+        code_non_terminal = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_schema())[
             'approval_edge_trigger_update_code'
         ]
-        assert 'canSubmitForApproval(_latestRequest, false)' in code
+        assert 'canSubmitForApproval(_latestRoundRequests)' in code_terminal
+        assert 'canSubmitForApproval(_latestRoundRequests)' in code_non_terminal
 
     def test_predicate_delegates_to_canonical_canSubmitForApproval(self):
         """cmd_841 ruling_4: the update path's eligibility check calls the
@@ -403,7 +405,7 @@ class TestPositivePredicateBlocksIneligibleStates:
         code = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_schema())[
             'approval_edge_trigger_update_code'
         ]
-        assert 'canSubmitForApproval(_latestRequest, false)' in code
+        assert 'canSubmitForApproval(_latestRoundRequests)' in code
         assert '!_latestRequest' not in code
         assert "_latestRequest.status === 'withdrawn'" not in code
 
@@ -421,3 +423,14 @@ class TestPositivePredicateBlocksIneligibleStates:
             'approval_edge_trigger_update_code'
         ]
         assert "orderBy: { created_at: 'desc' }" in code
+
+    def test_round_query_scoped_by_round_id(self):
+        """cmd_844: the eligibility query is round_id-scoped, not a single
+        non-deterministically-selected row (subtask_844a
+        section_A_machine_verification confirmed the old single-row form
+        breaks under same-second created_at ties from a multistage
+        submission)."""
+        code = _svc_ctx(_entity('purchase_request', 'purchase_request'), _submit_on_schema())[
+            'approval_edge_trigger_update_code'
+        ]
+        assert 'round_id: _latestRoundRow.round_id' in code

@@ -227,11 +227,21 @@ model approval_request {
   approval_flow_id String
   approval_flow    approval_flow @relation(fields: [approval_flow_id], references: [id])
   status           ApprovalRequestStatus @default(pending)
+  // cmd_844: identifies which submission ("round") this row belongs to --
+  // every approval_request row created in the same submit transaction
+  // shares one round_id (cuid, generated once per submission). Lets
+  // canSubmitForApproval/canWithdrawApproval reason about "all rows of the
+  // current round" instead of a single non-deterministically-selected row
+  // (see docs/knowledge/appendix/approval-flow.md multistage-round note).
+  // Backfilled to round_id = id for pre-migration rows (each is its own
+  // independent round).
+  round_id         String
   approval_histories approval_history[]
   created_at       DateTime @default(now()) @db.Timestamptz(0)
   updated_at       DateTime @updatedAt @db.Timestamptz(0)
   @@index([approvable_id])
   @@index([approval_flow_id])
+  @@index([round_id])
 }
 
 model approval_history {

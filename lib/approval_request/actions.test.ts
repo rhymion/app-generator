@@ -12,16 +12,35 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // actions_core.ts imports the generated modules, so this test runs unchanged
 // in a checkout that has not run `npm run generate-code`. See
 // docs/knowledge/troubleshooting.md §2.4.
+//
+// cmd_844: canSubmitForApproval/canWithdrawApproval and the withdraw/reject
+// actions became round-scoped -- approveApprovalRequest now reads "is the
+// whole round approved" via a fresh tx.approval_request.findMany() (not the
+// old approvable.approval_requests nested include), withdrawApprovalRequest
+// takes an approvable id and closes every pending row of the current round
+// via updateMany/createMany, and a non-terminal rejectApprovalRequest
+// auto-cancels the round's other pending rows (PD-2). See
+// lib/approval_request/actions_core.ts's doc comments for the full design.
 
 const {
-  findUnique, arUpdate, historyCreate, approvableFindUnique, approvableUpdate, transactionMock, revalidatePathMock,
+  findUnique, findFirst, arUpdate, arUpdateMany, historyCreate, historyCreateMany,
+  approvableFindUnique, approvableFindUniqueOuter, approvableUpdate, transactionMock, revalidatePathMock,
   txFlowFindUnique, txArFindMany, prismaArFindMany, prismaRoleFindUnique,
   notifyMock, notifyApprovalRequestCreatedMock,
 } = vi.hoisted(() => ({
   findUnique: vi.fn(),
+  findFirst: vi.fn(),
   arUpdate: vi.fn(),
+  arUpdateMany: vi.fn(),
   historyCreate: vi.fn(),
+  historyCreateMany: vi.fn(),
   approvableFindUnique: vi.fn(),
+  // cmd_844: assertRequestorSelf() now queries prisma.approvable.findUnique
+  // directly (approvableId is the withdraw entry point's own argument, no
+  // approval_request row needed) -- a separate mock from approvableFindUnique
+  // (the tx-scoped approvable lookup approve/reject also use), since one is
+  // on the outer `prisma` client and the other is on `tx`.
+  approvableFindUniqueOuter: vi.fn(),
   approvableUpdate: vi.fn(),
   transactionMock: vi.fn(),
   revalidatePathMock: vi.fn(),
@@ -41,6 +60,7 @@ const {
 vi.mock('@/lib/prisma', () => ({
   default: {
     approval_request: { findUnique, update: arUpdate, findMany: prismaArFindMany },
+    approvable: { findUnique: approvableFindUniqueOuter },
     role: { findUnique: prismaRoleFindUnique },
     $transaction: transactionMock,
   },
@@ -100,19 +120,23 @@ const {
 });
 
 // Fake tx client shared by every prisma.$transaction(cb) call in
-// approve/reject — cb receives this in place of a real transaction.
+// approve/reject/withdraw — cb receives this in place of a real transaction.
 const fakeTx = {
-  approval_request: { update: arUpdate, findUnique, findMany: txArFindMany },
-  approval_history: { create: historyCreate },
+  approval_request: { update: arUpdate, updateMany: arUpdateMany, findUnique, findMany: txArFindMany, findFirst },
+  approval_history: { create: historyCreate, createMany: historyCreateMany },
   approvable: { findUnique: approvableFindUnique, update: approvableUpdate },
   approval_flow: { findUnique: txFlowFindUnique },
 };
 
 beforeEach(() => {
   findUnique.mockReset();
+  findFirst.mockReset();
   arUpdate.mockReset();
+  arUpdateMany.mockReset();
   historyCreate.mockReset();
+  historyCreateMany.mockReset();
   approvableFindUnique.mockReset();
+  approvableFindUniqueOuter.mockReset();
   approvableUpdate.mockReset();
   revalidatePathMock.mockReset();
   resolveApprovableTarget.mockReset();
@@ -129,6 +153,15 @@ beforeEach(() => {
   // behavior change (findNewlyActionableFollowFlowIds() short-circuits on
   // an empty `followed_by`).
   txFlowFindUnique.mockReset().mockResolvedValue({ followed_by: [] });
+  // cmd_844: tx.approval_request.findMany() now serves THREE distinct call
+  // sites depending on which action is under test (approveApprovalRequest's
+  // currentRoundRequests query, findNewlyActionableFollowFlowIds' sibling
+  // lookup, and rejectApprovalRequest's sibling-pending auto-cancel query) —
+  // each test below sets it explicitly to the shape that call site needs.
+  // Default empty: harmless for reject (no siblings to auto-cancel) and for
+  // order-reached (no unblocked follow-on flows); approve tests must set
+  // their own round rows explicitly (see note on Array.prototype.every's
+  // vacuous truth on an empty array).
   txArFindMany.mockReset().mockResolvedValue([]);
   prismaArFindMany.mockReset().mockResolvedValue([]);
   prismaRoleFindUnique.mockReset().mockResolvedValue(null);
@@ -154,15 +187,15 @@ beforeEach(() => {
 describe('rejectApprovalRequest notify payload status (cmd_539)', () => {
   // rejectApprovalRequest() reads approval_request via findUnique three
   // times in sequence: (1) assertApproverRole's permission check, (2) the
-  // in-transaction lookup used to decide terminal vs non-terminal, (3)
-  // getApprovalRequestRecipient() after the transaction commits. Each call
-  // only needs a subset of fields, but all three must resolve for the
-  // whole flow to complete without throwing.
+  // in-transaction lookup used to decide terminal vs non-terminal (now also
+  // carrying round_id, cmd_844), (3) getApprovalRequestRecipient() after the
+  // transaction commits. Each call only needs a subset of fields, but all
+  // three must resolve for the whole flow to complete without throwing.
   const stubRejectLookups = () => {
     findUnique.mockReset();
     findUnique
       .mockResolvedValueOnce({ approval_flow: { approver_role_id: 'approver-role' } })
-      .mockResolvedValueOnce({ approval_flow: { entity_name: 'leave_request' } })
+      .mockResolvedValueOnce({ round_id: 'round-1', approval_flow: { entity_name: 'leave_request' } })
       .mockResolvedValueOnce({
         approvable_id: 'appr-1',
         approval_flow: { entity_name: 'leave_request' },
@@ -273,6 +306,7 @@ describe('revalidatePath targeting (cmd_491)', () => {
   const stubApprovalFlowLookup = () => {
     findUnique.mockResolvedValue({
       approvable_id: 'appr-1',
+      round_id: 'round-1',
       approval_flow: {
         entity_name: 'leave_request',
         approver_role_id: 'approver-role',
@@ -289,13 +323,11 @@ describe('revalidatePath targeting (cmd_491)', () => {
     arUpdate.mockResolvedValue({
       status: 'approved',
       approvable_id: 'appr-1',
+      round_id: 'round-1',
       approval_flow: { entity_name: 'leave_request' },
     });
-    approvableFindUnique.mockResolvedValue({
-      id: 'appr-1',
-      approved_at: new Date(),
-      approval_requests: [{ status: 'approved' }],
-    });
+    txArFindMany.mockResolvedValue([{ status: 'approved' }]);
+    approvableFindUnique.mockResolvedValue({ id: 'appr-1', approved_at: new Date() });
 
     await approveApprovalRequest('req-1');
 
@@ -319,6 +351,7 @@ describe('revalidatePath targeting (cmd_491)', () => {
   it('skips revalidation when the target cannot be resolved (no approvable bridge)', async () => {
     findUnique.mockResolvedValue({
       approvable_id: null,
+      round_id: 'round-1',
       approval_flow: {
         entity_name: 'leave_request',
         approver_role_id: 'approver-role',
@@ -348,6 +381,7 @@ describe('approveApprovalRequest order-reached notification (cmd_541)', () => {
     findUnique.mockResolvedValue({
       approvable_id: 'appr-1',
       approval_flow_id: 'flow-1',
+      round_id: 'round-1',
       status: 'pending',
       approval_flow: { approver_role_id: 'approver-role', entity_name: 'user' },
       approvable: { creator_id: 'requester-1' },
@@ -355,13 +389,10 @@ describe('approveApprovalRequest order-reached notification (cmd_541)', () => {
     arUpdate.mockResolvedValue({
       status: 'approved',
       approvable_id: 'appr-1',
+      round_id: 'round-1',
       approval_flow: { entity_name: 'user' },
     });
-    approvableFindUnique.mockResolvedValue({
-      id: 'appr-1',
-      approved_at: null,
-      approval_requests: [{ status: 'approved' }, { status: 'pending' }],
-    });
+    approvableFindUnique.mockResolvedValue({ id: 'appr-1', approved_at: null });
     resolveApprovableTarget.mockResolvedValue({ id: 'user-99' });
   }
 
@@ -369,7 +400,12 @@ describe('approveApprovalRequest order-reached notification (cmd_541)', () => {
     stubApprovingFlow1();
     // flow-2 is preceded_by only flow-1 (the one just approved), and
     // flow-1's sibling approval_request is already 'approved' — so flow-2
-    // just became fully unblocked.
+    // just became fully unblocked. This same array serves BOTH
+    // approveApprovalRequest's currentRoundRequests query (call #1) and
+    // findNewlyActionableFollowFlowIds' sibling lookup (call #2) —
+    // {status: 'approved'} alone happens to be a not-yet-fully-approved
+    // round (this test doesn't assert dispatchOnApproved either way), so
+    // only the order-reached call's shape matters here.
     txFlowFindUnique.mockResolvedValue({ followed_by: [{ id: 'flow-2', preceded_by: [{ id: 'flow-1' }] }] });
     txArFindMany.mockResolvedValue([{ approval_flow_id: 'flow-1', status: 'approved' }]);
     prismaArFindMany.mockResolvedValue([
@@ -390,6 +426,7 @@ describe('approveApprovalRequest order-reached notification (cmd_541)', () => {
 
   it('does not notify when no follow-on flow is unblocked yet (default: no followed_by)', async () => {
     stubApprovingFlow1();
+    txArFindMany.mockResolvedValue([{ status: 'approved' }]);
     // Default beforeEach mocks: followed_by: [] — nothing depends on flow-1.
 
     await approveApprovalRequest('req-1');
@@ -401,6 +438,7 @@ describe('approveApprovalRequest order-reached notification (cmd_541)', () => {
     findUnique.mockResolvedValue({
       approvable_id: 'appr-1',
       approval_flow_id: 'flow-1',
+      round_id: 'round-1',
       status: 'approved', // already approved before this call
       approval_flow: { approver_role_id: 'approver-role', entity_name: 'user' },
       approvable: { creator_id: 'requester-1' },
@@ -408,17 +446,14 @@ describe('approveApprovalRequest order-reached notification (cmd_541)', () => {
     arUpdate.mockResolvedValue({
       status: 'approved',
       approvable_id: 'appr-1',
+      round_id: 'round-1',
       approval_flow: { entity_name: 'user' },
     });
-    approvableFindUnique.mockResolvedValue({
-      id: 'appr-1',
-      approved_at: new Date(),
-      approval_requests: [{ status: 'approved' }, { status: 'approved' }],
-    });
+    txArFindMany.mockResolvedValue([{ status: 'approved' }, { status: 'approved' }]);
+    approvableFindUnique.mockResolvedValue({ id: 'appr-1', approved_at: new Date() });
     // Even if a follow-on flow would otherwise look unblocked, the
     // before.status !== 'approved' guard must skip the lookup entirely.
     txFlowFindUnique.mockResolvedValue({ followed_by: [{ id: 'flow-2', preceded_by: [{ id: 'flow-1' }] }] });
-    txArFindMany.mockResolvedValue([{ approval_flow_id: 'flow-1', status: 'approved' }]);
 
     await approveApprovalRequest('req-1');
 
@@ -426,6 +461,70 @@ describe('approveApprovalRequest order-reached notification (cmd_541)', () => {
     expect(vi.mocked(notify).mock.calls.filter((c) => c[1] === 'approval_order_reached')).toHaveLength(0);
   });
 });
+
+// cmd_844: approveApprovalRequest's "fire on_approved once" check moved
+// from an unscoped approvable.approval_requests include to a round_id-
+// scoped tx.approval_request.findMany() query — pins that a stale/other
+// round's rows never leak into this decision.
+describe('approveApprovalRequest round-scoped allApproved (cmd_844)', () => {
+  const stubApprovingLastStage = () => {
+    findUnique.mockResolvedValue({
+      approvable_id: 'appr-1',
+      approval_flow_id: 'flow-2',
+      round_id: 'round-2',
+      status: 'pending',
+      approval_flow: { approver_role_id: 'approver-role', entity_name: 'leave_request' },
+      approvable: { creator_id: 'requester-1' },
+    });
+    arUpdate.mockResolvedValue({
+      status: 'approved',
+      approvable_id: 'appr-1',
+      round_id: 'round-2',
+      approval_flow: { entity_name: 'leave_request' },
+    });
+    resolveApprovableTarget.mockResolvedValue({ id: 'lr-1' });
+  };
+
+  it('queries the current round only (round_id in the where clause)', async () => {
+    stubApprovingLastStage();
+    txArFindMany.mockResolvedValue([{ status: 'approved' }, { status: 'approved' }]);
+    approvableFindUnique.mockResolvedValue({ id: 'appr-1', approved_at: null });
+
+    await approveApprovalRequest('req-1');
+
+    expect(txArFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { approvable_id: 'appr-1', round_id: 'round-2' } }),
+    );
+  });
+
+  it('fires dispatchOnApproved once every row of the current round is approved', async () => {
+    stubApprovingLastStage();
+    txArFindMany.mockResolvedValue([{ status: 'approved' }, { status: 'approved' }]);
+    approvableFindUnique.mockResolvedValue({ id: 'appr-1', approved_at: null });
+
+    await approveApprovalRequest('req-1');
+
+    expect(approvableUpdate).toHaveBeenCalledWith({
+      where: { id: 'appr-1' },
+      data: { approved_at: expect.any(Date) },
+    });
+    expect(dispatchOnApproved).toHaveBeenCalledWith(expect.anything(), 'leave_request', 'appr-1', 'user-1');
+  });
+
+  it('does not fire dispatchOnApproved while the current round still has a non-approved row', async () => {
+    stubApprovingLastStage();
+    // A stale row from an OLD round would leak in here under the pre-cmd_844
+    // unscoped query -- this array represents the CURRENT round only, still
+    // missing an approval on another stage.
+    txArFindMany.mockResolvedValue([{ status: 'approved' }, { status: 'pending' }]);
+    approvableFindUnique.mockResolvedValue({ id: 'appr-1', approved_at: null });
+
+    await approveApprovalRequest('req-1');
+
+    expect(dispatchOnApproved).not.toHaveBeenCalled();
+  });
+});
+
 // cmd_540: the REST route (app/api/approval_request/[id]/{approve,reject}/
 // route.ts) enforces multi-stage ordering via assertApprovalOrder(), but
 // this server action didn't call it at all — reachable directly via Next.js
@@ -492,19 +591,18 @@ describe('entity_name -> model translation before dispatch (cmd_818 GROUP C5)', 
   it('approveApprovalRequest dispatches with the resolved model, not the raw entity_name', async () => {
     findUnique.mockResolvedValue({
       approvable_id: 'appr-1',
+      round_id: 'round-1',
       approval_flow: { entity_name: 'purchase_request_gate', approver_role_id: 'approver-role' },
       approvable: { creator_id: 'creator-1' },
     });
     arUpdate.mockResolvedValue({
       status: 'approved',
       approvable_id: 'appr-1',
+      round_id: 'round-1',
       approval_flow: { entity_name: 'purchase_request_gate' },
     });
-    approvableFindUnique.mockResolvedValue({
-      id: 'appr-1',
-      approved_at: null,
-      approval_requests: [{ status: 'approved' }],
-    });
+    txArFindMany.mockResolvedValue([{ status: 'approved' }]);
+    approvableFindUnique.mockResolvedValue({ id: 'appr-1', approved_at: null });
     resolveApprovableModel.mockImplementation((name: string) =>
       name === 'purchase_request_gate' ? 'purchase_request' : name);
     resolveApprovableTarget.mockResolvedValue({ id: 'pr-1' });
@@ -517,6 +615,7 @@ describe('entity_name -> model translation before dispatch (cmd_818 GROUP C5)', 
   it('rejectApprovalRequest resolves isTerminalReject/dispatchOnRejected against the model, not the view key', async () => {
     findUnique.mockResolvedValue({
       approvable_id: 'appr-1',
+      round_id: 'round-1',
       approval_flow: { entity_name: 'purchase_request_gate', approver_role_id: 'approver-role' },
       approvable: { creator_id: 'creator-1' },
     });
@@ -535,6 +634,7 @@ describe('entity_name -> model translation before dispatch (cmd_818 GROUP C5)', 
   it('skips dispatch when the view key does not resolve to a model', async () => {
     findUnique.mockResolvedValue({
       approvable_id: 'appr-1',
+      round_id: 'round-1',
       approval_flow: { entity_name: 'unknown_view', approver_role_id: 'approver-role' },
       approvable: { creator_id: 'creator-1' },
     });
@@ -550,38 +650,123 @@ describe('entity_name -> model translation before dispatch (cmd_818 GROUP C5)', 
   });
 });
 
-// cmd_825: the requestor withdraws their own still-pending request.
-// Permission is "you are approvable.creator_id" (the requestor), never
-// approval_flow.approver_role_id membership -- and only from 'pending'.
-describe('withdrawApprovalRequest (cmd_825)', () => {
-  const stubPendingOwnedByRequestor = () => {
+// cmd_844 PD-2: a non-terminal rejection auto-cancels the round's other
+// still-pending rows (status: 'withdrawn', the existing value reused rather
+// than a new 'cancelled' one) -- otherwise canSubmitForApproval keeps
+// blocking resubmission forever once any row is left pending.
+describe('rejectApprovalRequest sibling pending auto-cancel (cmd_844 PD-2)', () => {
+  const stubRejectingStage2 = (terminal: boolean) => {
+    findUnique.mockReset();
+    findUnique
+      .mockResolvedValueOnce({ approval_flow: { approver_role_id: 'approver-role' } })
+      .mockResolvedValueOnce({ round_id: 'round-1', approval_flow: { entity_name: 'leave_request' } })
+      .mockResolvedValueOnce({
+        approvable_id: 'appr-1',
+        approval_flow: { entity_name: 'leave_request' },
+        approvable: { creator_id: 'creator-1' },
+      });
+    isTerminalReject.mockReturnValue(terminal);
+    arUpdate.mockResolvedValue({
+      id: 'req-stage2',
+      status: terminal ? 'terminal_rejected' : 'rejected',
+      approvable_id: 'appr-1',
+    });
+    approvableFindUnique.mockResolvedValue({ id: 'appr-1', approved_at: null });
+    resolveApprovableTarget.mockResolvedValue({ id: 'lr-1' });
+  };
+
+  it('auto-cancels a still-pending stage-3 row after a non-terminal stage-2 rejection', async () => {
+    stubRejectingStage2(false);
+    txArFindMany.mockResolvedValue([{ id: 'req-stage3', status: 'pending' }]);
+
+    await rejectApprovalRequest('req-stage2');
+
+    expect(txArFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { approvable_id: 'appr-1', round_id: 'round-1', status: 'pending', id: { not: 'req-stage2' } },
+      }),
+    );
+    expect(arUpdateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['req-stage3'] } },
+      data: { status: 'withdrawn' },
+    });
+    // pre_status reflects the sibling's actual prior status ('pending',
+    // ordinal 0), read off the row rather than hardcoded -- the exact bug
+    // this task's acceptance criteria required fixing.
+    expect(historyCreateMany).toHaveBeenCalledWith({
+      data: [{
+        approval_request_id: 'req-stage3',
+        pre_status: 0,
+        post_status: 4,
+        message: null,
+        creator_id: 'user-1',
+      }],
+    });
+  });
+
+  it('does not auto-cancel siblings on a terminal rejection', async () => {
+    stubRejectingStage2(true);
+    txArFindMany.mockResolvedValue([{ id: 'req-stage3', status: 'pending' }]);
+
+    await rejectApprovalRequest('req-stage2');
+
+    expect(arUpdateMany).not.toHaveBeenCalled();
+    expect(historyCreateMany).not.toHaveBeenCalled();
+  });
+
+  it('does nothing extra when there are no sibling pending rows', async () => {
+    stubRejectingStage2(false);
+    txArFindMany.mockResolvedValue([]);
+
+    await rejectApprovalRequest('req-stage2');
+
+    expect(arUpdateMany).not.toHaveBeenCalled();
+    expect(historyCreateMany).not.toHaveBeenCalled();
+  });
+});
+
+// cmd_825/cmd_844: the requestor withdraws their own round's still-pending
+// request(s). Permission is "you are approvable.creator_id" (the
+// requestor), never approval_flow.approver_role_id membership. cmd_844
+// changed the entry point from a single approval_request id to the
+// approvable id, and withdrawal from a single-row update to a round-scoped
+// updateMany over every still-pending row of the current round.
+describe('withdrawApprovalRequest (cmd_825/cmd_844)', () => {
+  const stubOwnedByRequestor = () => {
+    approvableFindUniqueOuter.mockResolvedValue({ creator_id: 'user-1' });
+    findFirst.mockResolvedValue({ round_id: 'round-1' });
+  };
+
+  it('closes every pending row of the current round, leaving approved rows untouched', async () => {
+    stubOwnedByRequestor();
+    txArFindMany.mockResolvedValue([
+      { id: 'req-2', status: 'pending', approval_flow: { entity_name: 'leave_request' } },
+      { id: 'req-3', status: 'pending', approval_flow: { entity_name: 'leave_request' } },
+    ]);
     findUnique.mockResolvedValue({
-      status: 'pending',
       approvable_id: 'appr-1',
       approval_flow: { entity_name: 'leave_request' },
       approvable: { creator_id: 'user-1' },
     });
-  };
 
-  it('transitions status to withdrawn and records history', async () => {
-    stubPendingOwnedByRequestor();
-    arUpdate.mockResolvedValue({ id: 'req-1', approvable_id: 'appr-1' });
+    await withdrawApprovalRequest('appr-1', 'changed my mind');
 
-    await withdrawApprovalRequest('req-1', 'changed my mind');
-
-    expect(arUpdate).toHaveBeenCalledWith({
-      where: { id: 'req-1' },
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { approvable_id: 'appr-1' },
+      orderBy: { created_at: 'desc' },
+    }));
+    expect(txArFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { approvable_id: 'appr-1', round_id: 'round-1', status: 'pending' },
+    }));
+    expect(arUpdateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['req-2', 'req-3'] } },
       data: { status: 'withdrawn' },
-      select: { id: true, approvable_id: true },
     });
-    expect(historyCreate).toHaveBeenCalledWith({
-      data: {
-        approval_request_id: 'req-1',
-        pre_status: 0,
-        post_status: 4,
-        message: 'changed my mind',
-        creator_id: 'user-1',
-      },
+    expect(historyCreateMany).toHaveBeenCalledWith({
+      data: [
+        { approval_request_id: 'req-2', pre_status: 0, post_status: 4, message: 'changed my mind', creator_id: 'user-1' },
+        { approval_request_id: 'req-3', pre_status: 0, post_status: 4, message: 'changed my mind', creator_id: 'user-1' },
+      ],
     });
   });
 
@@ -589,86 +774,124 @@ describe('withdrawApprovalRequest (cmd_825)', () => {
   // entity's own status field falling back to a user-selectable value),
   // symmetric to approve/reject's dispatchOnApproved/dispatchOnRejected.
   it('dispatches onWithdrawn with the resolved model and approvable id', async () => {
-    stubPendingOwnedByRequestor();
-    arUpdate.mockResolvedValue({ id: 'req-1', approvable_id: 'appr-1' });
+    stubOwnedByRequestor();
+    txArFindMany.mockResolvedValue([
+      { id: 'req-2', status: 'pending', approval_flow: { entity_name: 'leave_request' } },
+    ]);
+    findUnique.mockResolvedValue({
+      approvable_id: 'appr-1',
+      approval_flow: { entity_name: 'leave_request' },
+      approvable: { creator_id: 'user-1' },
+    });
 
-    await withdrawApprovalRequest('req-1');
+    await withdrawApprovalRequest('appr-1');
 
     expect(dispatchOnWithdrawn).toHaveBeenCalledWith(expect.anything(), 'leave_request', 'appr-1');
   });
 
   it('resolves dispatchOnWithdrawn against the model, not the view key', async () => {
+    stubOwnedByRequestor();
+    txArFindMany.mockResolvedValue([
+      { id: 'req-2', status: 'pending', approval_flow: { entity_name: 'leave_request_gate' } },
+    ]);
     findUnique.mockResolvedValue({
-      status: 'pending',
       approvable_id: 'appr-1',
       approval_flow: { entity_name: 'leave_request_gate' },
       approvable: { creator_id: 'user-1' },
     });
-    arUpdate.mockResolvedValue({ id: 'req-1', approvable_id: 'appr-1' });
     resolveApprovableModel.mockImplementation((name: string) =>
       name === 'leave_request_gate' ? 'leave_request' : name);
 
-    await withdrawApprovalRequest('req-1');
+    await withdrawApprovalRequest('appr-1');
 
     expect(dispatchOnWithdrawn).toHaveBeenCalledWith(expect.anything(), 'leave_request', 'appr-1');
   });
 
   it('skips dispatch when the view key does not resolve to a model', async () => {
+    stubOwnedByRequestor();
+    txArFindMany.mockResolvedValue([
+      { id: 'req-2', status: 'pending', approval_flow: { entity_name: 'unknown_view' } },
+    ]);
     findUnique.mockResolvedValue({
-      status: 'pending',
       approvable_id: 'appr-1',
       approval_flow: { entity_name: 'unknown_view' },
       approvable: { creator_id: 'user-1' },
     });
-    arUpdate.mockResolvedValue({ id: 'req-1', approvable_id: 'appr-1' });
     resolveApprovableModel.mockReturnValue(null);
 
-    await withdrawApprovalRequest('req-1');
+    await withdrawApprovalRequest('appr-1');
 
     expect(dispatchOnWithdrawn).not.toHaveBeenCalled();
   });
 
   it('rejects when the caller is not the requestor', async () => {
-    findUnique.mockResolvedValue({
-      status: 'pending',
-      approvable_id: 'appr-1',
-      approval_flow: { entity_name: 'leave_request' },
-      approvable: { creator_id: 'someone-else' },
-    });
+    approvableFindUniqueOuter.mockResolvedValue({ creator_id: 'someone-else' });
 
-    await expect(withdrawApprovalRequest('req-1')).rejects.toThrow(
+    await expect(withdrawApprovalRequest('appr-1')).rejects.toThrow(
       'Access denied: only the requestor may withdraw their own request',
     );
-    expect(arUpdate).not.toHaveBeenCalled();
+    expect(arUpdateMany).not.toHaveBeenCalled();
   });
 
-  it('rejects when the request is not pending', async () => {
+  it('rejects when the approvable does not exist', async () => {
+    approvableFindUniqueOuter.mockResolvedValue(null);
+
+    await expect(withdrawApprovalRequest('appr-missing')).rejects.toThrow('Approvable not found');
+    expect(arUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects when no approval_request round exists yet', async () => {
+    approvableFindUniqueOuter.mockResolvedValue({ creator_id: 'user-1' });
+    findFirst.mockResolvedValue(null);
+
+    await expect(withdrawApprovalRequest('appr-1')).rejects.toThrow('No approval request found');
+    expect(arUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects when the current round has nothing pending left (e.g. fully approved)', async () => {
+    stubOwnedByRequestor();
+    txArFindMany.mockResolvedValue([]);
+
+    await expect(withdrawApprovalRequest('appr-1')).rejects.toThrow('No pending requests to withdraw');
+    expect(arUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('leaves an already-approved sibling row untouched (PD-1: round_id scoping alone, no rewrite)', async () => {
+    stubOwnedByRequestor();
+    // Only the still-pending row is fetched/closed -- an approved sibling
+    // in the same round is never part of this query at all, matching the
+    // final PD-1 ruling (round_id scoping alone; approved rows are never
+    // rewritten).
+    txArFindMany.mockResolvedValue([
+      { id: 'req-3', status: 'pending', approval_flow: { entity_name: 'leave_request' } },
+    ]);
     findUnique.mockResolvedValue({
-      status: 'approved',
       approvable_id: 'appr-1',
       approval_flow: { entity_name: 'leave_request' },
       approvable: { creator_id: 'user-1' },
     });
 
-    await expect(withdrawApprovalRequest('req-1')).rejects.toThrow(
-      'Only a pending approval request can be withdrawn',
-    );
-    expect(arUpdate).not.toHaveBeenCalled();
-  });
+    await withdrawApprovalRequest('appr-1');
 
-  it('rejects when the approval request does not exist', async () => {
-    findUnique.mockResolvedValue(null);
-
-    await expect(withdrawApprovalRequest('req-missing')).rejects.toThrow('Approval request not found');
-    expect(arUpdate).not.toHaveBeenCalled();
+    expect(arUpdateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['req-3'] } },
+      data: { status: 'withdrawn' },
+    });
   });
 
   it('revalidates the target entity view + edit pages', async () => {
-    stubPendingOwnedByRequestor();
-    arUpdate.mockResolvedValue({ id: 'req-1' });
+    stubOwnedByRequestor();
+    txArFindMany.mockResolvedValue([
+      { id: 'req-2', status: 'pending', approval_flow: { entity_name: 'leave_request' } },
+    ]);
+    findUnique.mockResolvedValue({
+      approvable_id: 'appr-1',
+      approval_flow: { entity_name: 'leave_request' },
+      approvable: { creator_id: 'user-1' },
+    });
     resolveApprovableTarget.mockResolvedValue({ id: 'lr-42' });
 
-    await withdrawApprovalRequest('req-1');
+    await withdrawApprovalRequest('appr-1');
 
     expect(revalidatePathMock).toHaveBeenCalledWith('/[locale]/leave_request/view/lr-42', 'page');
     expect(revalidatePathMock).toHaveBeenCalledWith('/[locale]/leave_request/edit/lr-42', 'page');

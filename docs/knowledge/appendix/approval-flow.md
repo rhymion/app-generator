@@ -271,6 +271,7 @@ enum ApprovalRequestStatus {
   approved
   rejected
   terminal_rejected
+  withdrawn
 }
 
 model approval_request {
@@ -280,6 +281,7 @@ model approval_request {
   approval_flow_id    String
   approval_flow       approval_flow         @relation(fields: [approval_flow_id], references: [id])
   status              ApprovalRequestStatus @default(pending)
+  round_id            String                // see section 16.12
   approval_histories  approval_history[]
 }
 
@@ -543,3 +545,173 @@ the approval flow itself — both deferred design questions, not yet decided.
 `emit_hook: true` generates a `service_after_reject.ts` once-stub (same non-overwriting
 convention as `service_after_approve.ts`, §16.9), with signature
 `afterReject(tx, entityId, approvableId, rejectedByUserId)`.
+
+### 16.12 Multistage rounds (`round_id`)
+
+Before this section, `canSubmitForApproval`/`canWithdrawApproval` and the various "latest
+approval_request" lookups picked a single row via `orderBy: { created_at: 'desc' }, take: 1`.
+That is well-defined for a single-stage flow (never more than one row exists at a time), but a
+genuinely multistage flow (`preceded_by` chain of two or more `approval_flow` rows) creates
+several `approval_request` rows in the same submission, all sharing the same `created_at` second
+(Postgres `TIMESTAMPTZ(0)`) — the tie-break between them is non-deterministic, and this was
+proven to actually break resubmission-after-withdrawal in a real test database, not just
+theorized.
+
+#### `approval_request.round_id`
+
+Every row created by one submission (one call into
+`_build_approval_create_block_for_entity`/`_build_split_approval_inherit_block`,
+`code_generator/generators.py`) shares a single `round_id` (`createId()`, generated once per
+submission call). Pre-existing rows (from before this column existed) are backfilled to
+`round_id = id` — each is its own independent round, which reproduces the prior single-stage
+behavior exactly. See `scripts/migrations/03_approval_request_round_id_backfill.sql` for the
+production-style backfill script (test/dev environments just get the column via `prisma db
+push`, same convention as `scripts/migrations/01_user_tenant_id.sql`/`02_user_invalidated_at_
+backfill.sql`).
+
+"The current round" for a given `approvable_id` is found via a two-step query: `findFirst`
+ordered by `created_at desc` selecting only `round_id` (the tie-break between same-round rows is
+harmless — they all carry the same `round_id`), then `findMany` filtered to that `round_id`. Used
+by the update-edge-trigger (`_build_approval_edge_trigger_update_code`), the submit action
+(`_build_submit_for_approval_action_code`), `approveApprovalRequest`'s "is the whole round
+approved" check, and `withdrawApprovalRequest`.
+
+#### `canSubmitForApproval`/`canWithdrawApproval` (array-based)
+
+`lib/approval_request/submit_predicate.ts` now takes the CURRENT ROUND's full row array (not a
+single row + a separate `isTerminal` boolean):
+
+```typescript
+export function canSubmitForApproval(latestRoundRequests: { status: string }[]): boolean {
+  if (latestRoundRequests.length === 0) return true;
+  const statuses = latestRoundRequests.map((r) => r.status);
+  if (statuses.some((s) => s === 'pending')) return false;
+  if (statuses.every((s) => s === 'approved')) return false;
+  if (statuses.some((s) => s === 'terminal_rejected')) return false;
+  return true;
+}
+
+export function canWithdrawApproval(latestRoundRequests: { status: string }[]): boolean {
+  if (latestRoundRequests.length === 0) return false;
+  return latestRoundRequests.some((r) => r.status === 'pending');
+}
+```
+
+`terminal_rejected` is read directly off each row's own status now, so the generation-time
+`isTerminal` boolean argument (and the `isTerminal` prop `ApprovalSection.tsx` used to accept)
+is gone entirely — `x-approval.on_rejected.terminal` still exists and still decides which status
+a rejection writes (`rejectApprovalRequest`/the reject REST route still call
+`deps.isTerminalReject(modelName)` for that), it just no longer needs threading through to the
+eligibility predicate as a second parameter.
+
+A round that reached partial approval (some stages `approved`) before being closed by a
+withdrawal or a non-terminal rejection is still eligible for resubmission — resubmission always
+starts a **brand new round** (new `round_id`, every stage back to `pending`), never resumes a
+closed round from its rejected/withdrawn stage. This matches the product rule "once withdrawn,
+resubmission starts from stage one."
+
+#### Withdrawal is round-scoped, not single-row (PD-1)
+
+`withdrawApprovalRequest` (`lib/approval_request/actions.ts`/`actions_core.ts`) now takes the
+**approvable id**, not a specific `approval_request` id — `ApprovalSection.tsx` renders one
+"Withdraw" button for the whole current round, not one per row. It closes every still-`pending`
+row of the current round via `updateMany` + `approval_history.createMany`; **approved rows are
+never rewritten** (the final ruling on the "should withdrawal touch approved rows too" question
+was: `round_id` scoping alone is sufficient — the approved-history statement of fact stays true,
+and the new round's own predicate never looks at the old round's rows anyway). A round with
+nothing pending left (fully approved, or already fully closed) has nothing to withdraw
+(`canWithdrawApproval` mirrors this client-side; the server action throws `'No pending requests
+to withdraw'`).
+
+**A pending row auto-closed this way (by withdrawal, or by PD-2's reject auto-cancel below) is
+recorded with `status: 'withdrawn'`, the same value a requestor's own explicit withdrawal
+uses — there is no separate `'cancelled'` status.** `withdrawn` is not exclusively "the
+requestor withdrew this specific row"; it also means "this row's round ended before it got a
+turn." Who actually closed a given row (the requestor themselves, or an approver's rejection of
+a different stage) is recoverable from `approval_history.creator_id` on that row's own closing
+history entry, not from the status value itself.
+
+The REST route (`app/api/approval_request/[id]/withdraw/route.ts`) keeps its existing URL
+contract (a specific `approval_request` id in the path — external API consumers, e.g.
+`purchase_per_item`'s programmatic callers, already key on this), but internally resolves that id
+only to the approvable + its current round, then performs the identical round-scoped closure.
+Its JSON response keeps a top-level `status: 'withdrawn'` field for backward compatibility (the
+generated Cypress spec's 14.4 scenario asserts on it) alongside an additive `withdrawnIds` array.
+
+#### Non-terminal rejection auto-cancels the round's other pending rows (PD-2)
+
+Before this section, `rejectApprovalRequest` touched only the one row being rejected — a
+non-terminal rejection at stage 2 of a 3-stage round left stage 3's row `pending` forever,
+requiring the requestor to withdraw (an extra, unintuitive step) before they could resubmit.
+`rejectApprovalRequest` (both the server action and the REST route) now auto-cancels every other
+still-`pending` row of the same round to `'withdrawn'` (same status-reuse rule as above) once a
+**non-terminal** rejection is confirmed — skipped for a terminal rejection, since
+`'terminal_rejected'` alone already blocks `canSubmitForApproval` regardless of what else is in
+the round, and the entity's own `on_rejected` dispatch ends the flow through a separate,
+already-existing mechanism.
+
+#### `approval_history.pre_status` reflects the actual prior status
+
+Every row `withdrawApprovalRequest`/the PD-2 auto-cancel path closes had to have been `'pending'`
+immediately before (guaranteed by the `status: 'pending'` filter each query uses) — `pre_status`
+is computed from each row's own status at read time (`statusOrdinal(r.status)` in
+`actions_core.ts`; the REST routes use the equivalent literal `0`, always correct for the same
+reason), not a blind hardcoded literal that happened to be right only in the pre-round single-row
+case.
+
+#### Round isolation elsewhere: `assertApprovalOrder`, `approveApprovalRequest`'s fire-once check
+
+Two more query sites had to be scoped to `round_id` for the same reason as
+`canSubmitForApproval`/`canWithdrawApproval` above — an `approval_flow_id` is stable across
+rounds (it names the flow definition, not one submission), so an unscoped lookup lets an OLD
+round's row on the same flow satisfy a check that should only ever look at the CURRENT round:
+
+- `lib/approval_request/order-check.ts`'s `assertApprovalOrder(id)` and
+  `findNewlyActionableFollowFlowIds(db, approvableId, justApprovedFlowId, roundId)` both filter
+  their sibling lookup by `round_id` now (the latter gained a `roundId` parameter).
+- `approveApprovalRequest`'s "fire `dispatchOnApproved` once every row of the round is approved"
+  check now queries `tx.approval_request.findMany({ where: { approvable_id, round_id } })`
+  directly, instead of reading `approvable.approval_requests` (every row ever created for that
+  approvable, unscoped).
+
+The exact same category of bug was independently found and fixed in `ApprovalSection.tsx`'s
+`flowIdToStatus` `Map` (used to compute a row's `precedingApproved` for the Approve/Reject
+buttons' visibility) — machine-reproduced against a real database by forcing a Postgres
+`CLUSTER` reorder of the `approval_request` table's heap order, which made an old round's
+approved row on the same `flow_id` outrank the current round's own not-yet-approved row for that
+same flow, incorrectly enabling the current round's next stage. The fix is to build that `Map`
+from the current round's rows only (`ApprovalSection.tsx` derives the current round client-side
+from the full, now-guaranteed-`orderBy: { created_at: 'asc' }`-ordered `approval_requests` array
+— see the include change note below), which also makes the fix independent of row order rather
+than merely relying on the `orderBy` addition to keep it safe.
+
+#### `ApprovalSection.tsx`: current round vs. past rounds
+
+`ApprovalSection.tsx` still receives the full `approvable.approval_requests` array via `src`
+(unchanged prop shape) — it derives the current round itself (the `round_id` of the array's last
+element) and renders it as the live table (Approve/Reject buttons, the single round-level
+Withdraw button). Every earlier round is grouped by `round_id` and rendered in a collapsible
+"Past Submissions" section, most-recent-first, read-only (no action buttons — a past round's rows
+are always in a terminal state for that round).
+
+The `approval_request` child include (`code_generator/build_context.py`, the `auto_create_oto_
+rels`/`approval_request` branch) gained `orderBy: { created_at: 'asc' }` on the array itself
+(alongside the pre-existing `orderBy` already present on the nested `approval_histories`) — this
+is what lets "the last element" reliably mean "the current round" without depending on
+`round_id` scoping alone to survive an unlucky row order.
+
+#### Verifying this without a multistage consumer schema
+
+Neither this repo's own `code_generator/json_schema.yaml` (dogfood) nor any dedicated
+fixture-gate under `code_generator/tests/fixtures/` declares a genuine 2+-stage `x-approval`
+entity — the round system above is exercised by unit tests
+(`lib/approval_request/submit_predicate.test.ts`, `lib/approval_request/actions.test.ts`,
+`components/_standard/ApprovalSection.test.tsx`) plus a hand-built-fixture, real-Postgres
+integration test (`test/flows/multistage_approval_rounds.test.ts`, `npm run test:flows`) that
+calls the server actions directly against a 3-stage chain it constructs with raw `prisma` calls
+— the same pattern `test/flows/approval_order_bypass.test.ts` already used for the single-stage
+ordering-bypass regression. `code_generator/templates/test_api_spec.cy.ts.jinja2` also gained
+14.2M–14.5M multistage scenarios (rendered only for an entity whose `approval_flow` set actually
+chains via `preceded_by`), for the benefit of a future consumer schema that declares one — they
+have not been exercised via a live Cypress run in this repo for the same reason (no entity here
+renders them).
