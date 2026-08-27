@@ -18,7 +18,7 @@ import { search{{ oto.target | pascal_case }}Options } from '@/lib/{{ oto.target
 {% endif %}
 {% endfor %}
 {% if comment_children or entity_edit_components %}
-import { {% if comment_children %}getSessionUserId{% endif %}{% if comment_children and entity_edit_components %}, {% endif %}{% if entity_edit_components %}getUserRoleIds{% endif %} } from '@/lib/authz';
+import { getSessionUserId{% if entity_edit_components %}, getUserRoleIds{% endif %} } from '@/lib/authz';
 {% endif %}
 import { {{ parent_pascal }}DetailPageProps } from '@/lib/{{ parent }}/types';
 import { notFound } from 'next/navigation';
@@ -61,7 +61,7 @@ async function {{ parent_pascal }}EditContent({ id }: { id: string }) {
   const detail = await get{{ parent_pascal }}DetailPageData(id, 'update');
 {% endif %}
 {% endif %}
-{% if comment_children %}
+{% if comment_children or entity_edit_components %}
   const currentUserId = await getSessionUserId();
 {% endif %}
   if (!detail.{{ parent_camel }}) {
@@ -79,5 +79,5 @@ async function {{ parent_pascal }}EditContent({ id }: { id: string }) {
   // no-context branch.
   const initial{{ parent_pascal }}s = await search{{ parent_pascal }}Options('', [], 50, { callerEntity: '{{ parent }}', formValues: detail.{{ parent_camel }} as unknown as Record<string, unknown> });
 {% endif %}
-  return <FormUpsert src={detail.{{ parent_camel }}} isEdit={true} permissions={detail.userPermissions}{% if comment_has_mention %} canViewUserProfile={detail.canViewUserProfile} mentionUserContext={detail.mentionUserContext}{% endif %}{% if entity_edit_components %} currentUserRoleIds={currentUserRoleIds}{% endif %}{% for target in selection_targets %} initial{{ target | pascal_case }}s={ initial{{ target | pascal_case }}s } initial{{ target | pascal_case }}sPermissionDenied={Boolean((initial{{ target | pascal_case }}s as { permissionDenied?: boolean } | undefined)?.permissionDenied)} search{{ target | pascal_case }}Options={ {% if target == 'organization' %}searchAssociatedOrganizationOptions{% else %}search{{ target | pascal_case }}Options{% endif %} }{% endfor %}{% for oto in selector_oto_rels %} initial{{ oto.target | pascal_case }}s={ initialAvailable{{ oto.target | pascal_case }}s } initial{{ oto.target | pascal_case }}sPermissionDenied={Boolean((initialAvailable{{ oto.target | pascal_case }}s as { permissionDenied?: boolean } | undefined)?.permissionDenied)} search{{ oto.target | pascal_case }}Options={ {% if oto.target == 'organization' %}searchAssociatedOrganizationOptions{% else %}search{{ oto.target | pascal_case }}Options{% endif %} }{% endfor %}{% if comment_children %} currentUserId={currentUserId}{% endif %} />;
+  return <FormUpsert src={detail.{{ parent_camel }}} isEdit={true} permissions={detail.userPermissions}{% if comment_has_mention %} canViewUserProfile={detail.canViewUserProfile} mentionUserContext={detail.mentionUserContext}{% endif %}{% if entity_edit_components %} currentUserRoleIds={currentUserRoleIds}{% endif %}{% for target in selection_targets %} initial{{ target | pascal_case }}s={ initial{{ target | pascal_case }}s } initial{{ target | pascal_case }}sPermissionDenied={Boolean((initial{{ target | pascal_case }}s as { permissionDenied?: boolean } | undefined)?.permissionDenied)} search{{ target | pascal_case }}Options={ {% if target == 'organization' %}searchAssociatedOrganizationOptions{% else %}search{{ target | pascal_case }}Options{% endif %} }{% endfor %}{% for oto in selector_oto_rels %} initial{{ oto.target | pascal_case }}s={ initialAvailable{{ oto.target | pascal_case }}s } initial{{ oto.target | pascal_case }}sPermissionDenied={Boolean((initialAvailable{{ oto.target | pascal_case }}s as { permissionDenied?: boolean } | undefined)?.permissionDenied)} search{{ oto.target | pascal_case }}Options={ {% if oto.target == 'organization' %}searchAssociatedOrganizationOptions{% else %}search{{ oto.target | pascal_case }}Options{% endif %} }{% endfor %}{% if comment_children or entity_edit_components %} currentUserId={currentUserId}{% endif %} />;
 }

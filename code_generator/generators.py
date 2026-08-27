@@ -5296,7 +5296,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     if extra_default_props or has_comment_children or has_current_user_role_ids or _is_bridge_child:
         form_upsert_params = (
             f"{{ src, isEdit, {_permissions_binding}"
-            + (', currentUserId' if has_comment_children else '')
+            + (', currentUserId' if has_comment_children or has_current_user_role_ids else '')
             + (', canViewUserProfile, mentionUserContext' if comment_has_mention_fu else '')
             + (', currentUserRoleIds' if has_current_user_role_ids else '')
             + (f', {extra_default_props}' if extra_default_props else '')

@@ -235,7 +235,7 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {{ comment_children_jsx }}
 {% endif %}
 {% for comp in entity_edit_components %}
-      <{{ comp.name }} src={src}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={permissions} currentUserRoleIds={currentUserRoleIds} />
+      <{{ comp.name }} src={src}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId} />
 {% endfor %}
     </>
   );

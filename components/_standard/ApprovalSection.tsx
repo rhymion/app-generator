@@ -84,7 +84,7 @@ type ApprovalRequest = {
 type Action = 'approve' | 'reject' | 'withdraw';
 
 type Props = {
-  src: { id: string; creator_id?: string | null; approvable?: { id: string; approval_requests: ApprovalRequest[] } | null };
+  src: { id: string; approvable?: { id: string; creator_id?: string | null; approval_requests: ApprovalRequest[] } | null };
   permissions?: ModelPermissions;
   currentUserRoleIds?: string[];
   // cmd_825: revived for the withdraw button's own-request check below --
@@ -205,9 +205,15 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
             // cmd_825: withdrawal is the requestor's own action on their
             // own still-pending request -- not gated by approver role or
             // preceding-flow order (those only govern approve/reject).
+            // cmd_842(い): the applicant's single source of truth is
+            // approvable.creator_id, not the entity row's own creator_id --
+            // actions_core.ts's server-side withdraw guard already checks
+            // req.approvable.creator_id, and entities created via a nested
+            // x-approval-lines create (e.g. receiving_receipt_line) never
+            // write their own creator_id at all (stays permanently null).
             const canWithdraw = ar.status === 'pending'
               && !!currentUserId
-              && src.creator_id === currentUserId;
+              && src.approvable?.creator_id === currentUserId;
             const histories = ar.approval_histories ?? [];
             const isExpanded = expandedIds.has(ar.id);
 
