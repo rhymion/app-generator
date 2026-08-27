@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireDualAuth, handleApiError } from '@/lib/api-auth';
 import { ApiError } from '@/lib/api-auth';
 import prisma from '@/lib/prisma';
+import { dispatchOnWithdrawn } from '@/lib/approval_request/on_withdrawn_dispatch';
+import { resolveApprovableModel } from '@/lib/approval_request/resolve_target';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -12,7 +14,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const req = await prisma.approval_request.findUnique({
       where: { id },
-      select: { approvable_id: true, approvable: { select: { creator_id: true } } },
+      // Union of both callers' needs: `approvable_id` for cmd_844's
+      // round scoping, `approvable.creator_id` for the requestor check,
+      // and `approval_flow.entity_name` for cmd_841's on_withdrawn
+      // dispatch. `status` is deliberately NOT selected -- cmd_844
+      // replaced the per-row "this request must be pending" guard with
+      // the round-level pendingRows check below, because a round may be
+      // withdrawn while some of its earlier stages are already approved.
+      select: {
+        approvable_id: true,
+        approvable: { select: { creator_id: true } },
+        approval_flow: { select: { entity_name: true } },
+      },
     });
     if (!req) throw new ApiError(404, 'Approval request not found');
 
@@ -70,6 +83,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           creator_id: userId,
         })),
       });
+      // cmd_841: mirror lib/approval_request/actions_core.ts's
+      // withdrawApprovalRequest() -- an entity may declare
+      // x-approval.on_withdrawn.set_fields to write its own approvable-side
+      // field back to a user-selectable value on withdrawal. This REST
+      // route duplicates that function's transaction for dual-auth support
+      // (see the parity note in app/api/approval_request/[id]/approve/route.ts,
+      // cmd_479/cmd_541) and must stay in parity with it the same way.
+      // cmd_844 merge: the approvable id now comes from `req` rather than a
+      // single-row update `result`, which this route no longer performs.
+      const modelName = req.approval_flow ? resolveApprovableModel(req.approval_flow.entity_name) : null;
+      if (modelName) {
+        await dispatchOnWithdrawn(tx, modelName, req.approvable_id);
+      }
       // cmd_844: `status: 'withdrawn'` is kept in the response for the
       // existing API contract (test_api_spec.cy.ts.jinja2's 14.4 scenario
       // asserts on it) even though this is now a round-level operation, not
