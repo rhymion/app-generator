@@ -716,7 +716,7 @@ chains via `preceded_by`), for the benefit of a future consumer schema that decl
 have not been exercised via a live Cypress run in this repo for the same reason (no entity here
 renders them).
 
-### 16.13 `x-approval-lines` vs. line-level `x-approval` + `new: true`
+### 16.14 `x-approval-lines` vs. line-level `x-approval` + `new: true`
 
 §16.10 covers `x-approval-lines`, the standard path for giving an embedded, `new: false` line
 child its own `approvable`. That is not the only path: a line entity can instead declare its own
