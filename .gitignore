@@ -183,6 +183,8 @@ lib/dashboard/types.ts
 !lib/approval_request/actions.test.ts
 !lib/approval_request/actions_core.ts
 !lib/approval_request/order-check.ts
+!lib/approval_request/submit_predicate.ts
+!lib/approval_request/submit_predicate.test.ts
 !lib/setting/password-actions.ts
 !lib/audit_log/getters.ts
 !lib/audit_log/types.ts

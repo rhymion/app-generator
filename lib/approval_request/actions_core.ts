@@ -53,6 +53,11 @@ export type ApprovalActionDeps = {
     userId: string,
   ) => Promise<void>;
   isTerminalReject: (modelName: string) => boolean;
+  dispatchOnWithdrawn: (
+    tx: TransactionClient,
+    modelName: string,
+    approvableId: string,
+  ) => Promise<void>;
 };
 
 export function createApprovalActions(deps: ApprovalActionDeps) {
@@ -294,11 +299,16 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
   // "you are the person this request was submitted for"
   // (approvable.creator_id, the same field getApprovalRequestRecipient
   // already treats as the requestor), never approval_flow.approver_role_id
-  // membership. Withdrawal has no on_approved/on_rejected-style dispatch
-  // (no set_fields, no emit_hook) -- it is a pure status transition the
-  // edge-trigger's positive predicate (cmd_826) then treats as an
-  // eligible starting point for a future resubmission, same as a
-  // non-terminal rejection.
+  // membership. The edge-trigger's positive predicate (cmd_826) then
+  // treats a withdrawn request as an eligible starting point for a future
+  // resubmission, same as a non-terminal rejection.
+  //
+  // cmd_841: unlike before, withdrawal now DOES carry an
+  // on_withdrawn-style dispatch (see dispatchOnWithdrawn below) -- an
+  // entity may declare x-approval.on_withdrawn.set_fields to write its own
+  // approvable-side field (e.g. status: 'draft') back to a
+  // user-selectable, non-locked value on withdrawal, closing the gap where
+  // a withdrawn request left no way back to resubmission (cmd_840).
   async function assertRequestorSelfAndPending(id: string): Promise<void> {
     const req = await prisma.approval_request.findUnique({
       where: { id },
@@ -318,10 +328,17 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
     await assertRequestorSelfAndPending(id);
     const userId = await getSessionUserIdOrThrow();
     await prisma.$transaction(async (tx) => {
+      const req = await tx.approval_request.findUnique({
+        where: { id },
+        select: { approval_flow: { select: { entity_name: true } } },
+      });
+      if (!req?.approval_flow) throw new Error('Approval request not found');
+      const _modelName = deps.resolveApprovableModel(req.approval_flow.entity_name);
+
       const result = await tx.approval_request.update({
         where: { id },
         data: { status: 'withdrawn' },
-        select: { id: true },
+        select: { id: true, approvable_id: true },
       });
       // 'withdrawn' is appended to APPROVAL_REQUEST_STATUS_ORDER at index 4.
       await tx.approval_history.create({
@@ -333,6 +350,10 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
           creator_id: userId,
         },
       });
+
+      if (_modelName) {
+        await deps.dispatchOnWithdrawn(tx, _modelName, result.approvable_id);
+      }
     }, { isolationLevel: 'Serializable' });
     const { entityName, targetId } = await getApprovalRequestRecipient(id);
     revalidateApprovableTarget(entityName, targetId);

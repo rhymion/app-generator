@@ -4636,6 +4636,24 @@ def api_spec_context(
             if _spare_value is not None:
                 resubmit_unsubmitted_value_literal = _resubmit_literal(_spare_value)
 
+    # cmd_841 ruling_5: x-approval.on_withdrawn.set_fields' value for
+    # resubmit_target_field, when declared -- powers the new-form 14.4 test
+    # (withdrawal itself sets the field, so no separate "away" edit is
+    # needed before editing back to submit_on's value). Independent of the
+    # spare_value / _rt_evals enum-scan above: on_withdrawn's value is never
+    # added to _excluded_values (it is not a state submit_on's own edge
+    # trigger writes -- it is a state the withdrawal dispatch writes, and
+    # the whole point is that a user CAN select it, see cmd_841's
+    # locked_values_interpretation ruling).
+    _on_withdrawn = (_x_approval.get('on_withdrawn') or {}) if _x_approval else {}
+    _on_withdrawn_sf = _on_withdrawn.get('set_fields') or {}
+    _on_withdrawn_value = (
+        _on_withdrawn_sf.get(resubmit_target_field) if _on_withdrawn_sf else None
+    )
+    on_withdrawn_value_literal = (
+        _resubmit_literal(_on_withdrawn_value) if _on_withdrawn_value else None
+    )
+
     # Detect count-mode reservation without lines: POST tests must seed the pool entity first.
     _xres_def = model_def.get('x-reservation')
     _reservation_count_pool_pascal = None
@@ -4741,6 +4759,7 @@ def api_spec_context(
         'resubmit_target_field': resubmit_target_field,
         'resubmit_target_value_literal': resubmit_target_value_literal,
         'resubmit_unsubmitted_value_literal': resubmit_unsubmitted_value_literal,
+        'on_withdrawn_value_literal': on_withdrawn_value_literal,
         'put_body_resubmit': (
             _put_body_impl('              ', skip_field=resubmit_target_field, record_var='data.record')
             if resubmit_target_field else None

@@ -1263,7 +1263,55 @@ describe('API: {{ title }}', () => {
       });
     });
 
-{% if resubmit_unsubmitted_value_literal %}
+{% if on_withdrawn_value_literal %}
+    it('14.4 withdrawing a pending request automatically sets {{ resubmit_target_field }} to {{ on_withdrawn_value_literal }}, then editing back to {{ resubmit_target_value_literal }} creates a new pending approval_request', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/withdraw`,
+            headers: { 'X-API-Key': setup.requestorUser.api_key },
+          }).then((withdrawRes) => {
+            expect(withdrawRes.status).to.eq(200);
+            expect(withdrawRes.body.status).to.eq('withdrawn');
+            // cmd_841: withdrawal itself dispatches on_withdrawn.set_fields,
+            // so {{ resubmit_target_field }} has already left its open
+            // value by the time the request settles -- no separate "away"
+            // edit is needed before editing back to it (contrast the
+            // away-then-back form below, generated for entities with no
+            // on_withdrawn declared).
+            cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+              .then((getRes) => {
+                expect(getRes.body.{{ resubmit_target_field }}).to.eq({{ on_withdrawn_value_literal }});
+                cy.request({
+                  method: 'PUT',
+                  url: `{{ api_path }}/${data.record.id}`,
+                  headers: { 'X-API-Key': TEST_API_KEY },
+                  body: {
+{% for ln in put_body_resubmit %}
+{{ ln }}
+{% endfor %}
+                    {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+                  },
+                }).then((res) => {
+                  expect(res.status).to.eq(200);
+                  cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+                    .then((getRes2) => {
+                      const requests = getRes2.body.approvable.approval_requests;
+                      expect(requests.length).to.eq(2);
+                      expect(requests.some((r: any) => r.status === 'pending')).to.eq(true);
+                    });
+                });
+              });
+          });
+        });
+      });
+    });
+{% elif resubmit_unsubmitted_value_literal %}
     it('14.4 withdrawing a pending request then editing {{ resubmit_target_field }} away and back to its open value creates a new pending approval_request', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithApproval', {

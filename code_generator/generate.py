@@ -913,6 +913,14 @@ def generate(schema_path: str, output_dir: str) -> None:
             if can_new or can_edit:
                 val_ctx = {**ctx, **build_validation_context(ctx)}
                 _write(lib_dir / 'service_validation.ts', _render(env, 'service_validation.ts.jinja2', val_ctx))
+            # --- submit_actions.ts (cmd_841 ruling_4) ---
+            #
+            # Emitted only for entities that declare x-approval.submit_on
+            # with an approvable bridge and can_create -- see
+            # service_context()'s submit_for_approval_action_code.
+            if svc_ctx.get('submit_for_approval_action_code'):
+                _write(lib_dir / 'submit_actions.ts', _render(env, 'submit_for_approval.ts.jinja2', svc_ctx))
+                print(f'  Submit-for-approval action → lib/{parent}/submit_actions.ts')
 
         # --- invalidate handler write-once stub (cmd_583) ---
         # x-generate.invalidate enabled without a configured handler/module:
@@ -1743,6 +1751,51 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _render(env, 'service_after_reject_stub.ts.jinja2', ent),
             )
             print(f"  Rejection stub → lib/{ent['snake_name']}/service_after_reject.ts")
+
+    # --- Withdrawal event dispatch (lib/approval_request/on_withdrawn_dispatch.ts) ---
+    #
+    # cmd_841 ruling_1: symmetric to on_rejected above, minus the terminal
+    # concept (a withdrawal always leaves the door open to resubmission --
+    # see docs/knowledge and lib/approval_request/actions_core.ts's
+    # withdrawApprovalRequest). Emitted when at least one entity declares
+    # `x-approval.on_withdrawn`.
+    withdrawable_entities = []
+    for def_key, def_val in defs.items():
+        if not def_key.startswith('__'):
+            continue
+        x_approval = def_val.get('x-approval')
+        if not x_approval:
+            continue
+        on_withdrawn = x_approval.get('on_withdrawn', {})
+        if not on_withdrawn:
+            continue
+        def_key = def_key[2:]
+        entity_props = def_val.get('properties', {})
+        resolved_sf = _resolve_set_fields(entity_props, on_withdrawn.get('set_fields') or {})
+        withdrawable_entities.append({
+            'snake_name': def_key,
+            'pascal_name': to_pascal_case(def_key),
+            'set_fields': resolved_sf,
+            'emit_hook': bool(on_withdrawn.get('emit_hook', False)),
+        })
+    # Always emitted (mirrors on_rejected_dispatch.ts above) — actions.ts
+    # imports this unconditionally, so it must exist even with zero entities.
+    _withdrawn_body_needed = any(e['set_fields'] or e['emit_hook'] for e in withdrawable_entities)
+    _write(
+        out / 'lib' / 'approval_request' / 'on_withdrawn_dispatch.ts',
+        _render(env, 'on_withdrawn_dispatch.ts.jinja2', {
+            'withdrawable_entities': withdrawable_entities,
+            'withdrawn_body_needed': _withdrawn_body_needed,
+        }),
+    )
+    print(f'  Withdrawal dispatch → lib/approval_request/on_withdrawn_dispatch.ts ({len(withdrawable_entities)} entities)')
+    for ent in withdrawable_entities:
+        if ent['emit_hook']:
+            _write_stub(
+                out / 'lib' / ent['snake_name'] / 'service_after_withdraw.ts',
+                _render(env, 'service_after_withdraw_stub.ts.jinja2', ent),
+            )
+            print(f"  Withdrawal stub → lib/{ent['snake_name']}/service_after_withdraw.ts")
 
     # --- Scheduled tasks (lib/{entity}/service_scheduled.ts + lib/scheduled-tasks/
     #     registry.ts + app/api/scheduled-tasks/[task]/route.ts) ---
