@@ -174,12 +174,13 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
     <div style={{ marginTop: '1.5rem' }}>
       <h2>{t('approvalRequests')}</h2>
       {canSubmit && (
-        // cmd_841 ruling_4 / PD-3: reuses the existing Common.resubmit key
-        // instead of adding a near-duplicate -- this label is provisional
-        // pending final sign-off (see this task's PR description).
-        <Button variant="contained" onClick={handleSubmitForApproval} sx={{ mb: 1 }}>
-          {tCommon('resubmit')}
-        </Button>
+        // cmd_843: PD-3 ruling -- one label for both the first submission
+        // and any later resubmission, no first-vs-again wording split.
+        <Tooltip title={t('submit')}>
+          <Button variant="contained" aria-label={t('submit')} onClick={handleSubmitForApproval} sx={{ mb: 1 }}>
+            {t('submit')}
+          </Button>
+        </Tooltip>
       )}
       {requests.length === 0 ? null : (
       <Table size="small">
