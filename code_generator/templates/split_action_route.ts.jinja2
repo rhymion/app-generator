@@ -47,7 +47,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       {% if has_approvable %}
       // cmd_439 F1: approval_requests included so split children can inherit
       // the parent's flow IDs (Option A — see _parentARFlowIds below).
-      include: { approvable: { include: { approval_requests: true } } },
+      // cmd_847 [③]: orderBy created_at asc added so the last element of the
+      // array is always the latest round's row — required by the
+      // pre-submission split guard's _latestRoundRequests below; the
+      // existing _parentARFlowIds derivation (a plain .map() over every
+      // row) is unaffected by row order.
+      include: { approvable: { include: { approval_requests: { orderBy: { created_at: 'asc' } } } } },
       {% endif %}
     });
     if (!parent) throw new ApiError(404, 'Not found');
@@ -59,6 +64,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     {% if has_approvable %}
     if (parent.approvable?.approved_at != null) {
       throw new ApiError(400, 'Cannot split an already-approved entity');
+    }
+    // cmd_847 [③]: pre-submission guard — a draft (never submitted for
+    // approval) entity has no round to inherit into a split child, so
+    // splitting it would silently produce a child with zero approval
+    // requests (see subtask_847c design). Same round-based state basis as
+    // canSubmitForApproval/canWithdrawApproval (844c/847c) — the array is
+    // sorted created_at asc (include above), so its last element belongs to
+    // the latest round.
+    const _allRequests = (parent.approvable?.approval_requests ?? []) as
+      Array<{ round_id: string; status: string }>;
+    const _latestRoundId = _allRequests.length > 0
+      ? _allRequests[_allRequests.length - 1].round_id
+      : null;
+    const _latestRoundRequests = _latestRoundId
+      ? _allRequests.filter((r) => r.round_id === _latestRoundId)
+      : [];
+    if (_latestRoundRequests.length === 0) {
+      throw new ApiError(400, 'Cannot split an entity that has not yet been submitted for approval');
     }
     {% endif %}
     {% for f in per_part_required_mandatory %}
