@@ -42,7 +42,10 @@ export async function rejectApprovalRequest(
   return approvalActions.rejectApprovalRequest(id, message, options);
 }
 
-export async function withdrawApprovalRequest(id: string, message?: string): Promise<void> {
-  return approvalActions.withdrawApprovalRequest(id, message);
+// cmd_844: takes the approvable id, not a specific approval_request id --
+// withdrawal is now round-scoped (see actions_core.ts's
+// withdrawApprovalRequest doc).
+export async function withdrawApprovalRequest(approvableId: string, message?: string): Promise<void> {
+  return approvalActions.withdrawApprovalRequest(approvableId, message);
 }
 

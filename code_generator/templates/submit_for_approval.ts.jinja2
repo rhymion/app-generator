@@ -16,6 +16,7 @@
 import prisma from '@/lib/prisma';
 import { getSessionUserIdOrThrow } from '@/lib/authz';
 import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
+import { createId } from '@paralleldrive/cuid2';
 import { canSubmitForApproval } from '@/lib/approval_request/submit_predicate';
 import { revalidatePath } from 'next/cache';
 

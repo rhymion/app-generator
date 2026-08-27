@@ -141,7 +141,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
     await prisma.$transaction(async (tx) => {
       const before = await tx.approval_request.findUnique({
         where: { id },
-        select: { status: true, approval_flow_id: true },
+        select: { status: true, approval_flow_id: true, round_id: true },
       });
       const req = await tx.approval_request.update({
         where: { id },
@@ -149,6 +149,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
         select: {
           status: true,
           approvable_id: true,
+          round_id: true,
           approval_flow: { select: { entity_name: true } },
         },
       });
@@ -161,16 +162,20 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
           creator_id: userId,
         },
       });
-      // Fire-once: check if all approval_requests for this approvable are now approved
+      // Fire-once: check if every approval_request row of THIS ROUND is now
+      // approved (cmd_844: round_id-scoped -- otherwise a prior round's
+      // non-approved row, or a stale approved row from a round that never
+      // fully completed, would pollute this check once resubmission makes
+      // more than one round's worth of rows exist for the same approvable).
+      const currentRoundRequests = await tx.approval_request.findMany({
+        where: { approvable_id: req.approvable_id, round_id: req.round_id },
+        select: { status: true },
+      });
       const approvableData = await tx.approvable.findUnique({
         where: { id: req.approvable_id },
-        select: {
-          id: true,
-          approved_at: true,
-          approval_requests: { select: { status: true } },
-        },
+        select: { id: true, approved_at: true },
       });
-      const allApproved = approvableData?.approval_requests.every((r) => r.status === 'approved') ?? false;
+      const allApproved = currentRoundRequests.every((r) => r.status === 'approved');
       const alreadyFired = approvableData?.approved_at != null;
       if (allApproved && !alreadyFired && approvableData) {
         // Set approved_at first (idempotency flag — prevents double-fire on concurrent requests)
@@ -191,7 +196,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
       // otherwise recompute the same already-satisfied ordering as "new"
       // every time.
       if (before && before.status !== 'approved') {
-        orderReachedFlowIds = await findNewlyActionableFollowFlowIds(tx, req.approvable_id, before.approval_flow_id);
+        orderReachedFlowIds = await findNewlyActionableFollowFlowIds(tx, req.approvable_id, before.approval_flow_id, before.round_id);
         orderReachedApprovableId = req.approvable_id;
       }
     });
@@ -232,7 +237,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
     await prisma.$transaction(async (tx) => {
       const req = await tx.approval_request.findUnique({
         where: { id },
-        select: { approval_flow: { select: { entity_name: true } } },
+        select: { round_id: true, approval_flow: { select: { entity_name: true } } },
       });
       if (!req?.approval_flow) throw new Error('Approval request not found');
 
@@ -255,6 +260,46 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
           reason_kind: options?.reasonKind ?? null,
         },
       });
+
+      // cmd_844 PD-2: a non-terminal rejection closes this whole round --
+      // any other still-pending row in the same round (a later stage that
+      // never got its turn) is auto-cancelled to 'withdrawn' (the existing
+      // status value is reused, not a new 'cancelled' one -- who closed it
+      // is recorded via approval_history.creator_id, the rejecting
+      // approver). Without this, canSubmitForApproval keeps blocking
+      // resubmission forever (it treats any pending row as "still in
+      // flight"), and the requestor would be forced through an extra
+      // explicit withdraw step just to unstick a round a rejection already
+      // ended. Skipped for a terminal rejection: 'terminal_rejected' alone
+      // already blocks canSubmitForApproval regardless of what any other
+      // row in the round says, and the entity's own on_rejected dispatch
+      // ends the flow through a separate mechanism.
+      if (!terminal) {
+        const siblingPending = await tx.approval_request.findMany({
+          where: {
+            approvable_id: result.approvable_id,
+            round_id: req.round_id,
+            status: 'pending',
+            id: { not: id },
+          },
+          select: { id: true, status: true },
+        });
+        if (siblingPending.length > 0) {
+          await tx.approval_request.updateMany({
+            where: { id: { in: siblingPending.map((r) => r.id) } },
+            data: { status: 'withdrawn' },
+          });
+          await tx.approval_history.createMany({
+            data: siblingPending.map((r) => ({
+              approval_request_id: r.id,
+              pre_status: statusOrdinal(r.status),
+              post_status: statusOrdinal('withdrawn'),
+              message: null,
+              creator_id: userId,
+            })),
+          });
+        }
+      }
 
       const approvableData = await tx.approvable.findUnique({
         where: { id: result.approvable_id },
@@ -294,13 +339,13 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
     revalidateApprovableTarget(entityName, targetId);
   }
 
-  // cmd_825: the requestor withdraws their own still-pending request.
+  // cmd_825: the requestor withdraws their own still-pending request(s).
   // Unlike approve/reject this is not an approver action -- permission is
   // "you are the person this request was submitted for"
   // (approvable.creator_id, the same field getApprovalRequestRecipient
   // already treats as the requestor), never approval_flow.approver_role_id
   // membership. The edge-trigger's positive predicate (cmd_826) then
-  // treats a withdrawn request as an eligible starting point for a future
+  // treats a withdrawn round as an eligible starting point for a future
   // resubmission, same as a non-terminal rejection.
   //
   // cmd_841: unlike before, withdrawal now DOES carry an
@@ -309,53 +354,74 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
   // approvable-side field (e.g. status: 'draft') back to a
   // user-selectable, non-locked value on withdrawal, closing the gap where
   // a withdrawn request left no way back to resubmission (cmd_840).
-  async function assertRequestorSelfAndPending(id: string): Promise<void> {
-    const req = await prisma.approval_request.findUnique({
-      where: { id },
-      select: { status: true, approvable: { select: { creator_id: true } } },
+  //
+  // cmd_844: withdrawal is now round-scoped, not single-row. A multistage
+  // round can have some stages already 'approved' when the requestor
+  // withdraws -- the final ruling on PD-1 is round_id scoping ALONE:
+  // approved rows are never rewritten (their approval history stays
+  // intact), only the round's remaining 'pending' rows are closed to
+  // 'withdrawn'. A round with nothing pending left has nothing to
+  // withdraw (canWithdrawApproval, lib/approval_request/
+  // submit_predicate.ts, mirrors this exact rule client-side).
+  async function assertRequestorSelf(approvableId: string): Promise<void> {
+    const approvable = await prisma.approvable.findUnique({
+      where: { id: approvableId },
+      select: { creator_id: true },
     });
-    if (!req) throw new Error('Approval request not found');
+    if (!approvable) throw new Error('Approvable not found');
     const userId = await getSessionUserIdOrThrow();
-    if (!req.approvable || req.approvable.creator_id !== userId) {
+    if (approvable.creator_id !== userId) {
       throw new Error('Access denied: only the requestor may withdraw their own request');
-    }
-    if (req.status !== 'pending') {
-      throw new Error('Only a pending approval request can be withdrawn');
     }
   }
 
-  async function withdrawApprovalRequest(id: string, message?: string): Promise<void> {
-    await assertRequestorSelfAndPending(id);
+  async function withdrawApprovalRequest(approvableId: string, message?: string): Promise<void> {
+    await assertRequestorSelf(approvableId);
     const userId = await getSessionUserIdOrThrow();
+    let anchorRequestId: string | undefined;
     await prisma.$transaction(async (tx) => {
-      const req = await tx.approval_request.findUnique({
-        where: { id },
-        select: { approval_flow: { select: { entity_name: true } } },
+      const latestRoundRow = await tx.approval_request.findFirst({
+        where: { approvable_id: approvableId },
+        orderBy: { created_at: 'desc' },
+        select: { round_id: true },
       });
-      if (!req?.approval_flow) throw new Error('Approval request not found');
-      const _modelName = deps.resolveApprovableModel(req.approval_flow.entity_name);
+      if (!latestRoundRow) throw new Error('No approval request found');
 
-      const result = await tx.approval_request.update({
-        where: { id },
-        data: { status: 'withdrawn' },
-        select: { id: true, approvable_id: true },
+      const pendingRows = await tx.approval_request.findMany({
+        where: { approvable_id: approvableId, round_id: latestRoundRow.round_id, status: 'pending' },
+        select: { id: true, status: true, approval_flow: { select: { entity_name: true } } },
       });
-      // 'withdrawn' is appended to APPROVAL_REQUEST_STATUS_ORDER at index 4.
-      await tx.approval_history.create({
-        data: {
-          approval_request_id: result.id,
-          pre_status: 0,
+      if (pendingRows.length === 0) throw new Error('No pending requests to withdraw');
+      anchorRequestId = pendingRows[0].id;
+
+      await tx.approval_request.updateMany({
+        where: { id: { in: pendingRows.map((r) => r.id) } },
+        data: { status: 'withdrawn' },
+      });
+      // cmd_844: pre_status is read off each row's actual prior status
+      // (guaranteed 'pending' by the query above) rather than a hardcoded
+      // literal -- see the pre_status-direct-write fix this task's
+      // acceptance criteria required for both this loop and reject's
+      // sibling auto-cancel above.
+      await tx.approval_history.createMany({
+        data: pendingRows.map((r) => ({
+          approval_request_id: r.id,
+          pre_status: statusOrdinal(r.status),
           post_status: statusOrdinal('withdrawn'),
           message: message ?? null,
           creator_id: userId,
-        },
+        })),
       });
 
+      const entityName = pendingRows[0].approval_flow?.entity_name ?? null;
+      const _modelName = entityName ? deps.resolveApprovableModel(entityName) : null;
       if (_modelName) {
-        await deps.dispatchOnWithdrawn(tx, _modelName, result.approvable_id);
+        await deps.dispatchOnWithdrawn(tx, _modelName, approvableId);
       }
     }, { isolationLevel: 'Serializable' });
-    const { entityName, targetId } = await getApprovalRequestRecipient(id);
+    const { entityName, targetId } = anchorRequestId
+      ? await getApprovalRequestRecipient(anchorRequestId)
+      : { entityName: null, targetId: null };
     revalidateApprovableTarget(entityName, targetId);
   }
 

@@ -2891,6 +2891,20 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                             f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, {_creator_avatar_select} }} }}{_rxn} }},"
                             f" orderBy: {{ created_at: 'asc' }} }}"
                         )
+                    elif c.get('child_name') == 'approval_request':
+                        # cmd_844 diff_4_2: without this orderBy, PostgreSQL's
+                        # heap order (not guaranteed to match created_at
+                        # order -- see subtask_844b's CLUSTER-reorder
+                        # machine test) decides array order, which
+                        # ApprovalSection.tsx relies on to identify "the
+                        # current round" (its own round_id grouping assumes
+                        # ascending created_at, same as the round_id-scoped
+                        # server-side queries' own `orderBy: { created_at:
+                        # 'desc' }, take: 1` pattern for the latest round).
+                        nested_parts.append(
+                            f"{c['property_name']}: {{ include: {{ {', '.join(sub_parts)} }},"
+                            f" orderBy: {{ created_at: 'asc' }} }}"
+                        )
                     else:
                         nested_parts.append(f"{c['property_name']}: {{ include: {{ {', '.join(sub_parts)} }} }}")
                 else:

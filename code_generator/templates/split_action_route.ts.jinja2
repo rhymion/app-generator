@@ -3,6 +3,7 @@ import { requireDualAuth, handleApiError, ApiError } from '@/lib/api-auth';
 import prisma from '@/lib/prisma';
 {% if has_approvable %}
 import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
+import { createId } from '@paralleldrive/cuid2';
 {% endif %}
 
 const SPLIT_STATUS = '{{ status_split_value }}';

@@ -11,7 +11,15 @@ type Db = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction'
 
 /**
  * Assert that all preceding approval flows for the given approval_request
- * have been approved (status='approved') on the same approvable.
+ * have been approved (status='approved') on the same approvable, WITHIN
+ * THE SAME ROUND (cmd_844) as the request being acted on -- a preceding
+ * flow's approval_flow_id is stable across rounds (it names the flow
+ * definition, not a specific submission), so an unscoped lookup would let
+ * an OLD round's approved row satisfy the ordering check for a brand new
+ * round whose own preceding stage is still pending. Same category of bug
+ * as ApprovalSection.tsx's flowIdToStatus Map (subtask_844b
+ * section_2_concern1_machine_verification), just enforced server-side
+ * here instead of only hiding a button client-side.
  * Throws ApiError(400) if the ordering constraint is not satisfied.
  */
 export async function assertApprovalOrder(id: string): Promise<void> {
@@ -19,6 +27,7 @@ export async function assertApprovalOrder(id: string): Promise<void> {
     where: { id },
     select: {
       approvable_id: true,
+      round_id: true,
       approval_flow: { select: { preceded_by: { select: { id: true } } } },
     },
   });
@@ -28,7 +37,7 @@ export async function assertApprovalOrder(id: string): Promise<void> {
   if (precedingFlowIds.length === 0) return;
 
   const siblings = await prisma.approval_request.findMany({
-    where: { approvable_id: req.approvable_id, approval_flow_id: { in: precedingFlowIds } },
+    where: { approvable_id: req.approvable_id, round_id: req.round_id, approval_flow_id: { in: precedingFlowIds } },
     select: { approval_flow_id: true, status: true },
   });
 
@@ -51,11 +60,17 @@ export async function assertApprovalOrder(id: string): Promise<void> {
  * backward from the flow being acted on) to drive the "your turn has
  * arrived" re-notification — see lib/_notifyApprovalRequest.ts's
  * notifyApprovalOrderReached().
+ *
+ * cmd_844: `roundId` scopes the sibling lookup to the same round as the
+ * approval just granted, for the same reason assertApprovalOrder() does —
+ * without it, an old round's approved row on the same flow_id could
+ * satisfy this check for a brand new round.
  */
 export async function findNewlyActionableFollowFlowIds(
   db: Db,
   approvableId: string,
   justApprovedFlowId: string,
+  roundId: string,
 ): Promise<string[]> {
   const flow = await db.approval_flow.findUnique({
     where: { id: justApprovedFlowId },
@@ -66,7 +81,7 @@ export async function findNewlyActionableFollowFlowIds(
 
   const precedingIds = [...new Set(candidates.flatMap((f) => f.preceded_by.map((p) => p.id)))];
   const siblings = await db.approval_request.findMany({
-    where: { approvable_id: approvableId, approval_flow_id: { in: precedingIds } },
+    where: { approvable_id: approvableId, round_id: roundId, approval_flow_id: { in: precedingIds } },
     select: { approval_flow_id: true, status: true },
   });
 

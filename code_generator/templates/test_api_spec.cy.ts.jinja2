@@ -1418,6 +1418,191 @@ describe('API: {{ title }}', () => {
 {% endif %}
   });
 {% endif %}
+
+  // cmd_844: round-based multistage approval -- every scenario below reuses
+  // the same 2-stage ordered chain (flow1 -> flow2, preceded_by) the
+  // "Approval order enforcement" describe block above already sets up via
+  // db:setup{{ pascal }}OrderedApprovalFlow, so no schema-level "is this
+  // entity multistage" declaration is needed -- approval_flow chaining is
+  // admin/test-fixture data, not a schema-time concept.
+  describe('Multistage approval rounds (cmd_844)', () => {
+    it('14.2M withdrawing an all-pending round withdraws every stage', () => {
+      cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.approverUser1.id,
+          approvalFlowIds: [setup.flow1.id, setup.flow2.id],
+        }).then((data) => {
+          const ar1 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow1.id);
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${ar1.id}/withdraw`,
+            headers: { 'X-API-Key': setup.approverUser1.api_key },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            expect(res.body.status).to.eq('withdrawn');
+            cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+              .then((getRes) => {
+                const requests = getRes.body.approvable.approval_requests;
+                expect(requests).to.have.length(2);
+                expect(requests.every((r: any) => r.status === 'withdrawn')).to.eq(true);
+              });
+          });
+        });
+      });
+    });
+
+    // PD-1 final ruling: round_id scoping alone -- an already-approved
+    // stage is never rewritten by a withdrawal of the same round.
+    it('14.3M withdrawing a partially-approved round leaves the approved stage untouched and closes only the pending one', () => {
+      cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.approverUser1.id,
+          approvalFlowIds: [setup.flow1.id, setup.flow2.id],
+        }).then((data) => {
+          const ar1 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow1.id);
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${ar1.id}/approve`,
+            headers: { 'X-API-Key': setup.approverUser1.api_key },
+          }).then(() => {
+            cy.request({
+              method: 'POST',
+              url: `/api/approval_request/${ar1.id}/withdraw`,
+              headers: { 'X-API-Key': setup.approverUser1.api_key },
+            }).then((res) => {
+              expect(res.status).to.eq(200);
+              cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+                .then((getRes) => {
+                  const requests = getRes.body.approvable.approval_requests;
+                  const stage1 = requests.find((r: any) => r.approval_flow_id === setup.flow1.id);
+                  const stage2 = requests.find((r: any) => r.approval_flow_id === setup.flow2.id);
+                  expect(stage1.status).to.eq('approved');
+                  expect(stage2.status).to.eq('withdrawn');
+                });
+            });
+          });
+        });
+      });
+    });
+
+    // PD-2: a non-terminal rejection at stage 1 auto-cancels stage 2's
+    // still-pending row (reuses 'withdrawn', not a new 'cancelled' value).
+    it('14.3M(b) a non-terminal rejection auto-cancels the other still-pending stage', () => {
+      cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.approverUser1.id,
+          approvalFlowIds: [setup.flow1.id, setup.flow2.id],
+        }).then((data) => {
+          const ar1 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow1.id);
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${ar1.id}/reject`,
+            headers: { 'X-API-Key': setup.approverUser1.api_key },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            expect(res.body.status).to.eq('rejected');
+            cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+              .then((getRes) => {
+                const requests = getRes.body.approvable.approval_requests;
+                const stage2 = requests.find((r: any) => r.approval_flow_id === setup.flow2.id);
+                expect(stage2.status).to.eq('withdrawn');
+              });
+          });
+        });
+      });
+    });
+
+{% if resubmit_unsubmitted_value_literal %}
+    it('14.4M resubmitting after a round-level withdrawal starts a brand new round with every stage pending again', () => {
+      cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.approverUser1.id,
+          approvalFlowIds: [setup.flow1.id, setup.flow2.id],
+        }).then((data) => {
+          const ar1 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow1.id);
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${ar1.id}/withdraw`,
+            headers: { 'X-API-Key': setup.approverUser1.api_key },
+          }).then(() => {
+            cy.request({
+              method: 'PUT',
+              url: `{{ api_path }}/${data.record.id}`,
+              headers: { 'X-API-Key': TEST_API_KEY },
+              body: {
+{% for ln in put_body_resubmit %}
+{{ ln }}
+{% endfor %}
+                {{ resubmit_target_field }}: {{ resubmit_unsubmitted_value_literal }},
+              },
+            }).then((awayRes) => {
+              expect(awayRes.status).to.eq(200);
+              cy.request({
+                method: 'PUT',
+                url: `{{ api_path }}/${data.record.id}`,
+                headers: { 'X-API-Key': TEST_API_KEY },
+                body: {
+{% for ln in put_body_resubmit %}
+{{ ln }}
+{% endfor %}
+                  {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+                },
+              }).then((backRes) => {
+                expect(backRes.status).to.eq(200);
+                cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+                  .then((getRes) => {
+                    const requests = getRes.body.approvable.approval_requests;
+                    expect(requests).to.have.length(4); // 2 withdrawn (old round) + 2 pending (new round)
+                    const newRound = requests.filter((r: any) => r.status === 'pending');
+                    expect(newRound).to.have.length(2);
+                    // Every new-round row shares one round_id, distinct from the old (withdrawn) round's.
+                    const newRoundIds = new Set(newRound.map((r: any) => r.round_id));
+                    expect(newRoundIds.size).to.eq(1);
+                    const oldRoundIds = new Set(
+                      requests.filter((r: any) => r.status === 'withdrawn').map((r: any) => r.round_id),
+                    );
+                    expect(oldRoundIds.has([...newRoundIds][0])).to.eq(false);
+                  });
+              });
+            });
+          });
+        });
+      });
+    });
+{% endif %}
+
+    it('14.5M a fully-approved round cannot be withdrawn', () => {
+      cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.approverUser1.id,
+          approvalFlowIds: [setup.flow1.id, setup.flow2.id],
+        }).then((data) => {
+          const ar1 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow1.id);
+          const ar2 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow2.id);
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${ar1.id}/approve`,
+            headers: { 'X-API-Key': setup.approverUser1.api_key },
+          }).then(() => {
+            cy.request({
+              method: 'POST',
+              url: `/api/approval_request/${ar2.id}/approve`,
+              headers: { 'X-API-Key': setup.approverUser2.api_key },
+            }).then(() => {
+              cy.request({
+                method: 'POST',
+                url: `/api/approval_request/${ar1.id}/withdraw`,
+                headers: { 'X-API-Key': setup.approverUser1.api_key },
+                failOnStatusCode: false,
+              }).then((res) => {
+                expect(res.status).to.eq(400);
+              });
+            });
+          });
+        });
+      });
+    });
+  });
 {% endif %}
 {% if can_list and can_export %}
 

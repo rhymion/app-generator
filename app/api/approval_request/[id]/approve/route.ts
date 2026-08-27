@@ -37,7 +37,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const updated = await prisma.$transaction(async (tx) => {
       const before = await tx.approval_request.findUnique({
         where: { id },
-        select: { status: true, approval_flow_id: true },
+        select: { status: true, approval_flow_id: true, round_id: true },
       });
       const result = await tx.approval_request.update({
         where: { id },
@@ -46,22 +46,28 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           id: true,
           status: true,
           approvable_id: true,
+          round_id: true,
           approval_flow: { select: { entity_name: true } },
         },
       });
       await tx.approval_history.create({
         data: { approval_request_id: id, pre_status: 0, post_status: 1, message: message ?? null, creator_id: userId },
       });
-      // Fire-once post-approval dispatch: runs only when all approval_requests are approved
+      // Fire-once post-approval dispatch: runs only when every row of the
+      // CURRENT ROUND is approved (cmd_844: round_id-scoped, mirroring
+      // lib/approval_request/actions_core.ts's approveApprovalRequest() —
+      // an unscoped approvable.approval_requests include would let a stale
+      // row from a different round leak into this decision once
+      // resubmission makes more than one round exist for the approvable).
+      const currentRoundRequests = await tx.approval_request.findMany({
+        where: { approvable_id: result.approvable_id, round_id: result.round_id },
+        select: { status: true },
+      });
       const approvableData = await tx.approvable.findUnique({
         where: { id: result.approvable_id },
-        select: {
-          id: true,
-          approved_at: true,
-          approval_requests: { select: { status: true } },
-        },
+        select: { id: true, approved_at: true },
       });
-      const allApproved = approvableData?.approval_requests.every((r) => r.status === 'approved') ?? false;
+      const allApproved = currentRoundRequests.every((r) => r.status === 'approved');
       const alreadyFired = approvableData?.approved_at != null;
       if (allApproved && !alreadyFired && approvableData) {
         await tx.approvable.update({ where: { id: approvableData.id }, data: { approved_at: new Date() } });
@@ -73,7 +79,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       // why `before.status !== 'approved'` guards against re-notifying on a
       // repeated approve call.
       if (before && before.status !== 'approved') {
-        orderReachedFlowIds = await findNewlyActionableFollowFlowIds(tx, result.approvable_id, before.approval_flow_id);
+        orderReachedFlowIds = await findNewlyActionableFollowFlowIds(tx, result.approvable_id, before.approval_flow_id, before.round_id);
         orderReachedApprovableId = result.approvable_id;
       }
       return result;

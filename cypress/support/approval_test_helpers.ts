@@ -83,11 +83,13 @@ export async function setupMultiStageApprovalFixture() {
   });
 
   const approvable = await prisma.approvable.create({ data: { creator_id: testUser.id } });
+  // cmd_844: both rows belong to the same submission -- one round_id.
+  const roundId = createId();
   const approvalRequest1 = await prisma.approval_request.create({
-    data: { approvable_id: approvable.id, approval_flow_id: flow1.id, status: 'pending' },
+    data: { approvable_id: approvable.id, approval_flow_id: flow1.id, status: 'pending', round_id: roundId },
   });
   const approvalRequest2 = await prisma.approval_request.create({
-    data: { approvable_id: approvable.id, approval_flow_id: flow2.id, status: 'pending' },
+    data: { approvable_id: approvable.id, approval_flow_id: flow2.id, status: 'pending', round_id: roundId },
   });
 
   // Mirror service_after_create_stub.ts.jinja2's for-loop: every flow's

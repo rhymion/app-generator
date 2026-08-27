@@ -110,11 +110,12 @@ async function buildOutOfOrderChain(): Promise<Fixture> {
     data: { creator_id: creatorUser.id },
   });
 
+  const roundId = createId();
   const reqA = await prisma.approval_request.create({
-    data: { approvable_id: approvable.id, approval_flow_id: flowA.id, status: 'pending' },
+    data: { approvable_id: approvable.id, approval_flow_id: flowA.id, status: 'pending', round_id: roundId },
   });
   const reqB = await prisma.approval_request.create({
-    data: { approvable_id: approvable.id, approval_flow_id: flowB.id, status: 'pending' },
+    data: { approvable_id: approvable.id, approval_flow_id: flowB.id, status: 'pending', round_id: roundId },
   });
 
   return { creatorUser, approver, approverRoleB, approvable, reqA, reqB };

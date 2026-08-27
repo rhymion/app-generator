@@ -2058,12 +2058,17 @@ def _build_approval_create_block_for_entity(
         )
     return (
         f"{indent}let _hasFlow = false;\n"
+        # cmd_844: one round_id per submission -- every approval_request row
+        # created below (all stages of this one round) shares this id, so
+        # canSubmitForApproval/canWithdrawApproval can later fetch "all rows
+        # of the current round" instead of a non-deterministic single row.
+        f"{indent}const _roundId = createId();\n"
         f"{indent}for (const _flow of {flows_var}) {{\n"
         f"{indent}  if (_flow.requestor_role_id && !{role_ids_var}.includes(_flow.requestor_role_id)) {{\n"
         f"{indent}    continue;\n"
         f"{indent}  }}\n"
         f"{indent}  const _apprReq = await {tx_var}.approval_request.create({{\n"
-        f"{indent}    data: {{ approvable_id: {approvable_id_expr}, approval_flow_id: _flow.id, status: 'pending' }},\n"
+        f"{indent}    data: {{ approvable_id: {approvable_id_expr}, approval_flow_id: _flow.id, status: 'pending', round_id: _roundId }},\n"
         f"{indent}  }});\n"
         f"{indent}  await notifyApprovalRequestCreated({tx_var}, _apprReq.id, {notify_opts});\n"
         f"{indent}  _hasFlow = true;\n"
@@ -2115,9 +2120,13 @@ def _build_split_approval_inherit_block(
             f"{indent}  }}"
         )
     return (
+        # cmd_844: the split child is a brand new approvable, so its
+        # inherited flows form a fresh round of their own (see
+        # _build_approval_create_block_for_entity's round_id doc).
+        f"{indent}const _roundId = createId();\n"
         f"{indent}for (const _flowId of _parentARFlowIds) {{\n"
         f"{indent}  const _apprReq = await tx.approval_request.create({{\n"
-        f"{indent}    data: {{ approvable_id: childApprovable.id, approval_flow_id: _flowId, status: 'pending' }},\n"
+        f"{indent}    data: {{ approvable_id: childApprovable.id, approval_flow_id: _flowId, status: 'pending', round_id: _roundId }},\n"
         f"{indent}  }});\n"
         f"{indent}  await notifyApprovalRequestCreated(tx, _apprReq.id, {notify_opts});\n"
         f"{indent}}}\n"
@@ -2276,7 +2285,6 @@ def _build_approval_edge_trigger_update_code(
     model: str,
     submit_on_field: str,
     submit_on_value: object,
-    terminal: bool = False,
 ) -> str:
     """UPDATE-time edge trigger (cmd_818 GROUP A2): fires only on the exact
     transition previous != submit_on -> new === submit_on (an EDGE, not a
@@ -2287,25 +2295,25 @@ def _build_approval_edge_trigger_update_code(
     update-time analogue).
 
     cmd_826/cmd_825: the eligibility check is a POSITIVE predicate over the
-    approvable's most recent approval_request, not the old negative
+    approvable's current approval_request ROUND (cmd_844: every stage's row
+    from the most recent submission -- a single "latest row" is not
+    well-defined once a multistage flow can create more than one row per
+    submission, see submit_predicate.ts's module doc), not the old negative
     "!_pendingGuard" ("no pending request exists") check. The old negative
     form only ever asked "is anything pending right now" -- so anything
     NOT pending (approved, terminal-rejected, no request at all) silently
     passed, including two states that must never re-fire: an already-
     approved request, and a terminal-rejected one (#423's own commit
-    message named this exact gap). A new approval_request may be created
-    only when the LATEST request for this approvable is:
+    message named this exact gap). A new approval_request round may be
+    created only when the CURRENT round is:
       (A) absent entirely (never submitted before), or
-      (B) 'rejected' AND this entity is not terminal (a non-terminal
-          rejection closes the flow but re-opens on resubmission), or
-      (C) 'withdrawn' (the requestor pulled their own pending request).
-    Every other latest state -- 'pending' (already in flight), 'approved'
-    (resubmission after approval is not silently allowed; an entity that
-    wants it must opt in via a future x-approval.allow_resubmit_after_approved
-    key, not implemented here since no schema declares it yet), or
-    'rejected' while terminal (baked in as a static boolean at generation
-    time, never read off the DB at runtime -- terminal-ness is a
-    schema-time fact, not request-time-variable state) -- blocks re-firing.
+      (B) fully resolved to 'rejected'/'withdrawn' rows with no row still
+          'pending', 'approved', or 'terminal_rejected' (canSubmitForApproval
+          reads 'terminal_rejected' directly off each row's own status now,
+          not a generation-time boolean -- terminal-ness stays a
+          schema-time fact server-side via deps.isTerminalReject, but the
+          eligibility predicate itself no longer needs it as a separate
+          argument).
     This also means a terminal entity's "cannot resubmit" guarantee no
     longer depends on the consumer schema separately disabling edit for
     that entity: every terminal entity in every shipped schema happened to
@@ -2323,7 +2331,6 @@ def _build_approval_edge_trigger_update_code(
         target_id_expr='id',
     )
     lit = _ts_literal(submit_on_value)
-    terminal_lit = 'true' if terminal else 'false'
     return (
         f"    if (_prevRow && _prevRow.{submit_on_field} !== {lit} "
         f"&& updated.{submit_on_field} === {lit}) {{\n"
@@ -2336,10 +2343,20 @@ def _build_approval_edge_trigger_update_code(
         # schema, which has no x-approval edge-trigger entity exercising
         # this exact assignment context.
         f"      const _prevApprovableId = _prevRow.{approvable_fk} as string;\n"
-        f"      const _latestRequest = await tx.approval_request.findFirst({{\n"
+        # cmd_844: two-step round lookup -- find the latest row (any tied
+        # created_at is fine here, since every row of a round shares the
+        # same round_id), then fetch every row sharing that round_id.
+        f"      const _latestRoundRow = await tx.approval_request.findFirst({{\n"
         f"        where: {{ approvable_id: _prevApprovableId }},\n"
         f"        orderBy: {{ created_at: 'desc' }},\n"
+        f"        select: {{ round_id: true }},\n"
         f"      }});\n"
+        f"      const _latestRoundRequests = _latestRoundRow\n"
+        f"        ? await tx.approval_request.findMany({{\n"
+        f"            where: {{ approvable_id: _prevApprovableId, round_id: _latestRoundRow.round_id }},\n"
+        f"            select: {{ status: true }},\n"
+        f"          }})\n"
+        f"        : [];\n"
         # cmd_841 ruling_4: this positive predicate used to be inlined here
         # (the exact boolean expression this call replaced -- see git
         # history) and separately, informally, in ApprovalSection.tsx's
@@ -2347,7 +2364,7 @@ def _build_approval_edge_trigger_update_code(
         # hand-written canSubmitForApproval() (lib/approval_request/
         # submit_predicate.ts) so the screen and the write path can never
         # drift apart.
-        f"      const _canCreate = canSubmitForApproval(_latestRequest, {terminal_lit});\n"
+        f"      const _canCreate = canSubmitForApproval(_latestRoundRequests);\n"
         f"      if (_canCreate) {{\n"
         f"        const _creator = await tx.user.findUnique({{\n"
         f"          where: {{ id: actorId }},\n"
@@ -2369,7 +2386,6 @@ def _build_submit_for_approval_action_code(
     model: str,
     submit_on_field: str,
     submit_on_value: object,
-    terminal: bool,
 ) -> str:
     """cmd_841 ruling_4: the explicit "(re)submit" server action body, for
     entities that need a submission path independent of an ordinary edit
@@ -2377,8 +2393,8 @@ def _build_submit_for_approval_action_code(
     through a PUT at all -- see submit_for_approval.ts.jinja2's docstring).
 
     Reuses the same positive-predicate guard as
-    _build_approval_edge_trigger_update_code (canSubmitForApproval) and the
-    same approval_request-creation block
+    _build_approval_edge_trigger_update_code (canSubmitForApproval, cmd_844
+    round-based query) and the same approval_request-creation block
     (_build_approval_create_block_for_entity) the edge triggers use --
     "submit" is just a third way to reach the submit_on transition, not a
     parallel mechanism with its own rules.
@@ -2394,17 +2410,23 @@ def _build_submit_for_approval_action_code(
         target_id_expr='id',
     )
     lit = _ts_literal(submit_on_value)
-    terminal_lit = 'true' if terminal else 'false'
     return (
         f"    const row = await tx.{model}.findUniqueOrThrow({{\n"
         f"      where: {{ id }},\n"
         f"      select: {{ {approvable_fk}: true }},\n"
         f"    }});\n"
-        f"    const _latestRequest = await tx.approval_request.findFirst({{\n"
+        f"    const _latestRoundRow = await tx.approval_request.findFirst({{\n"
         f"      where: {{ approvable_id: row.{approvable_fk} }},\n"
         f"      orderBy: {{ created_at: 'desc' }},\n"
+        f"      select: {{ round_id: true }},\n"
         f"    }});\n"
-        f"    if (!canSubmitForApproval(_latestRequest, {terminal_lit})) {{\n"
+        f"    const _latestRoundRequests = _latestRoundRow\n"
+        f"      ? await tx.approval_request.findMany({{\n"
+        f"          where: {{ approvable_id: row.{approvable_fk}, round_id: _latestRoundRow.round_id }},\n"
+        f"          select: {{ status: true }},\n"
+        f"        }})\n"
+        f"      : [];\n"
+        f"    if (!canSubmitForApproval(_latestRoundRequests)) {{\n"
         f"      return;\n"
         f"    }}\n"
         f"    await tx.{model}.update({{\n"
@@ -2474,19 +2496,21 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
             approvable_rel, parent, x_approval_submit_on_field, x_approval_submit_on_value,
         )
         if x_approval_submit_on_field is not None:
-            x_approval_terminal = bool(
-                (raw_def_by_model.get('x-approval') or {}).get('on_rejected', {}).get('terminal', False)
-            )
             # cmd_834: the previous-row lookup this update trigger needs
             # (_prevRow) is now emitted unconditionally by service.ts.jinja2
             # itself, ahead of validateOnUpdate, for every can_update entity --
             # not only approvable ones (it also feeds validateCustomRules). No
             # separate select-scoped fetch is built here anymore; the trigger
             # code below just reads off that shared full-row fetch.
+            #
+            # cmd_844: canSubmitForApproval no longer takes a generation-time
+            # terminal boolean -- 'terminal_rejected' is now read directly off
+            # each round row's own status (see submit_predicate.ts), so
+            # x-approval.on_rejected.terminal no longer needs to be threaded
+            # through to these two call sites at all.
             if can_update:
                 approval_edge_trigger_update_code = _build_approval_edge_trigger_update_code(
                     approvable_rel, parent, model, x_approval_submit_on_field, x_approval_submit_on_value,
-                    terminal=x_approval_terminal,
                 )
             # cmd_841 ruling_4: the explicit submit action exists
             # independent of can_update -- it is precisely the only path
@@ -2495,7 +2519,6 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
             submit_for_approval_action_code = _build_submit_for_approval_action_code(
                 approvable_rel['prop_name'], parent, model,
                 x_approval_submit_on_field, x_approval_submit_on_value,
-                terminal=x_approval_terminal,
             )
 
     has_non_comment_ch = bool(non_comment_ch)
@@ -2860,6 +2883,14 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
                or approval_edge_trigger_update_code) else '')
         + (f"\nimport {{ canSubmitForApproval }} from '@/lib/approval_request/submit_predicate';"
            if approval_edge_trigger_update_code else '')
+        # cmd_844: createId() generates one round_id per submission --
+        # needed everywhere _build_approval_create_block_for_entity's output
+        # lands (same gating condition as notifyApprovalRequestCreated
+        # above, since every one of those call sites embeds that block).
+        + (f"\nimport {{ createId }} from '@paralleldrive/cuid2';"
+           if (approval_lines_post_create_code or approval_lines_post_update_code
+               or reservation_self_case_notifies or approval_edge_trigger_create_code
+               or approval_edge_trigger_update_code) else '')
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
         + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/getters_associated';" if should_filter_by_org and (can_create or can_update) else '')
         + (f"\nimport {{ AppError, p2002Field }} from '@/lib/_errors';" if can_create or can_update else '')
@@ -3595,8 +3626,12 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     # here rather than threaded through ctx because form_view_context and
     # service_context are independent per-artifact context builders (see
     # generate.py's separate _write calls) with no shared mutable state.
+    #
+    # cmd_844: no longer computes/passes a terminal literal -- canSubmit
+    # ForApproval() reads 'terminal_rejected' directly off each round row's
+    # own status now (see submit_predicate.ts), so ApprovalSection.tsx has
+    # no remaining use for a generation-time terminal boolean.
     submit_for_approval_needed = False
-    submit_on_terminal_lit = 'false'
     _fv_approvable_rel = next(
         (r for r in ctx.get('one_to_one_rels', []) if r.get('target') == 'approvable'),
         None,
@@ -3605,9 +3640,6 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         _fv_submit_on_field, _ = resolve_approval_submit_on(model_def)
         if _fv_submit_on_field is not None:
             submit_for_approval_needed = True
-            submit_on_terminal_lit = 'true' if bool(
-                (model_def.get('x-approval') or {}).get('on_rejected', {}).get('terminal', False)
-            ) else 'false'
 
     return {
         'needs_datetime_wrapper': needs_datetime_wrapper,
@@ -3634,7 +3666,6 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         'uses_decimal_format':    uses_decimal_format,
         'uses_app_field_boolean': uses_app_field_boolean,
         'submit_for_approval_needed': submit_for_approval_needed,
-        'submit_on_terminal_lit': submit_on_terminal_lit,
     }
 
 
