@@ -19,6 +19,7 @@ from helpers.schema_helpers import (
     get_entity_properties,
     get_direct_attachment_fk_props,
     is_write_only_prop,
+    get_write_only_field_names,
 )
 from helpers.bridge_direction import collect_parent_bridge_fk_props
 
@@ -31,6 +32,17 @@ def _raw_def(entity_name: str, schema: dict) -> dict:
     proxies the 'user' view instead of having its own raw twin)."""
     defs = schema.get('definitions', {})
     return defs.get(f'__{entity_name}', {}) or defs.get(entity_name, {})
+
+
+def _target_has_write_only_fields(target: str, schema: dict) -> bool:
+    """True when `target` declares at least one write-only field (password,
+    api_key, ...) -- mirrors build_context.py's
+    _write_only_narrowed_include() gate so the generated TS type for a
+    relation to `target` matches the narrowed `{ id, label }` shape that
+    function emits for the Prisma fetch (subtask_854b)."""
+    if not target:
+        return False
+    return bool(get_write_only_field_names(_raw_def(target, schema).get('properties', {}) or {}))
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +61,14 @@ class RelInfo:
     relation_name: str   # resolved from detail def (e.g. "organization", not "organization_id")
     target: str          # entity name (e.g. "organization")
     label_field: str     # for XxxOption types (usually "name")
+    # True when `target` carries write-only fields (password/api_key-shaped
+    # columns) and build_context.py's _write_only_narrowed_include()
+    # therefore narrows this relation's Prisma fetch to `{ id, label_field }`
+    # (see subtask_854b). The TS type must mirror that narrowing -- the
+    # full `{{ target | pascal_case }}` type declares those write-only
+    # columns as required fields the actual (select-narrowed) value never
+    # has, which fails to type-check otherwise.
+    write_only_narrowed: bool = False
 
 
 @dataclass
@@ -59,6 +79,10 @@ class ChildContext:
     fields: list[FieldInfo]
     relationships: list[RelInfo]   # many-to-one rels within this child
     declare_type: bool   # False when this child type was already declared earlier
+    # Same rationale as RelInfo.write_only_narrowed, for a to-many child
+    # relation (e.g. role.users / organization.users) whose child_include_entries
+    # (build_context.py) narrows to `{ id, name }` rows.
+    write_only_narrowed: bool = False
 
 
 @dataclass
@@ -258,6 +282,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             relation_name=r['prop_name'].removesuffix('_id'),
             target=r['target'],
             label_field=r.get('label_field', 'name'),
+            write_only_narrowed=_target_has_write_only_fields(r['target'], schema),
         )
         for r in rels_raw
     ]
@@ -323,6 +348,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             relation_name=r['relation_name'],
             target=r['target'],
             label_field=r['label_field'],
+            write_only_narrowed=_target_has_write_only_fields(r['target'], schema),
         ))
 
     # Reverse OTO rels (FK lives in target, not in this model) — display-only in detail view
@@ -462,6 +488,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             fields=child_fields,
             relationships=child_rels,
             declare_type=not already_declared,
+            write_only_narrowed=_target_has_write_only_fields(child_name, schema),
         ))
 
     # all_option_targets for FormUpsertProps: m2m + optional-FK-list + parent rels + embedded child rels
