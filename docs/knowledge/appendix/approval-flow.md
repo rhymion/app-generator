@@ -874,6 +874,11 @@ Server Action path any UI form actually submits through) unguarded. The rule goi
 insertion point** — insert once at the confluence point if one exists, otherwise insert
 individually at every entry point.
 
+**Related, but distinct**: this section locks *operations* (edit/delete/invalidate) on a row as a
+whole once `submit_on` reaches a terminal value. Locking specific *field values* — independently
+of whether the row is otherwise editable, and without requiring `x-approval` at all — is a
+separate mechanism; see `docs/knowledge/x-write-locked-values-field-lockdown.md`.
+
 **Naming note**: `approval_edit_terminal_test` is the terminal-editable `x-approval` test fixture
 declared in `app-template`'s own consumer schema — a permanent regression fixture. This
 generator's own dogfood schema (`code_generator/json_schema.yaml`) declares no fixture entity of
