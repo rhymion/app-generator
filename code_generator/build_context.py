@@ -2665,10 +2665,39 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # Prisma actually loads the data the label expression dereferences.
     from helpers.label_field import build_label_expression, render_prisma_include
 
+    def _write_only_narrowed_include(relation_name: str, target: str, label_field=None) -> str | None:
+        """Prisma include fragment for a to-one/to-many FK relation whose
+        target entity carries write-only fields (password/api_key-shaped
+        columns; see get_write_only_field_names). A plain FK relation
+        fetch (`{relation}: true`) pulls every scalar column of the
+        target row unconditionally -- target-entity write-only masking
+        (is_write_only_prop / getters.ts's `{{ parent_camel }}Safe`
+        destructure) only ever applies to an entity's OWN top-level
+        fields, never to a row reached through another entity's nested
+        FK include, so a credential column on the target leaks straight
+        through detail/list/search responses for every entity that has
+        an FK to it (subtask_854a/854b). Narrows the fetch down to
+        `{relation}: { select: { id: true, <label>: true } }` -- the same
+        shape already used for the creator/updater audit columns.
+        Returns None when target has no write-only fields, so the
+        caller's existing `: true` behavior is unaffected (no regression
+        for the common case).
+        """
+        if not target:
+            return None
+        target_props = _raw_def(target, schema).get('properties', {}) or {}
+        if not get_write_only_field_names(target_props):
+            return None
+        label = label_field if isinstance(label_field, str) and label_field else 'name'
+        return f"{relation_name}: {{ select: {{ id: true, {label}: true }} }}"
+
     def _include_entry_for_rel(rel: dict) -> str:
         target = rel.get('target', '')
         label_field = rel.get('label_field')
         if not target or not label_field or label_field == 'name':
+            narrowed = _write_only_narrowed_include(rel['relation_name'], target, label_field)
+            if narrowed:
+                return narrowed
             return f"{rel['relation_name']}: true"
         try:
             built = build_label_expression('item', label_field, target, schema)
@@ -2760,7 +2789,25 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     search_include_dict: dict = {}
     _merge_include(search_include_dict, own_include_dict)
     _merge_include(search_include_dict, consumer_includes)
-    search_include_props_list = render_prisma_include(search_include_dict)
+    # own_include_dict/consumer_includes are built independently of
+    # _include_entry_for_rel above (they also fold in cross-entity
+    # labelField paths via _merge_include), so the write-only narrowing
+    # has to be reapplied here rather than inherited from that function.
+    # Only narrows a key that is STILL a bare `True` after both merges --
+    # if some other entity's labelField path needs a deeper include
+    # through this relation, that need is left as-is (no such case
+    # exists in any known consumer schema today; see subtask_854b report).
+    search_write_only_narrow: dict = {}
+    for r in list(parent_rels) + list(selector_oto_rels):
+        narrowed = _write_only_narrowed_include(r['relation_name'], r.get('target', ''), r.get('label_field'))
+        if narrowed:
+            search_write_only_narrow[r['relation_name']] = narrowed
+    search_include_entries = [
+        search_write_only_narrow[k] if v is True and k in search_write_only_narrow
+        else render_prisma_include({k: v})
+        for k, v in search_include_dict.items()
+    ]
+    search_include_props_list = ', '.join(search_include_entries)
 
     # Comment/mention creator avatar select (cmd_803): `user.image` is a
     # direct-attachment FK (x-relationship type:direct) in schemas that have
@@ -2790,6 +2837,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         elif not cdef.get('properties'):
             child_include_entries.append(f"{prop}: true")
         else:
+            # write-only check takes priority over the child_rels-based
+            # deep-include logic below: a write-only-bearing child target
+            # (e.g. role.users / organization.users -> user) must never
+            # get its full row fetched via `{prop}: true` or a nested
+            # `{prop}: { include: {...} } }`, regardless of whether it
+            # also has its own FK relations to include.
+            narrowed = _write_only_narrowed_include(prop, cn)
+            if narrowed:
+                child_include_entries.append(narrowed)
+                continue
             child_rels = get_parent_relationships(cdef)
             if not child_rels:
                 child_include_entries.append(f"{prop}: true")
