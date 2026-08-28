@@ -6,6 +6,31 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **New entity-level schema key `x-write-locked-values` declares field
+  values that only the system may write, independently of `x-approval`.**
+  `{field_name: [value, ...]}`; works on any entity, with or without
+  `x-approval`. `derive_write_locked_values()`
+  (`helpers/schema_helpers.py`, renamed from `derive_approval_locked_values`
+  — the old name remains as a one-line backward-compat alias) now returns
+  the **union** of `x-approval`'s `on_approved`/`on_rejected.set_fields`
+  values and `x-write-locked-values`'s own declarations, so the two sources
+  compose rather than one replacing the other. The five downstream
+  consumers of the derived set were renamed to match
+  (`approval_locked_*` → `write_locked_*` context variables;
+  `APPROVAL_LOCKED_FIELDS`/`ApprovalLockedField` →
+  `WRITE_LOCKED_FIELDS`/`WriteLockedField` in `service_validation.ts` and
+  the CSV import route) — behavior is unchanged for existing `x-approval`
+  entities, since the union with an absent `x-write-locked-values` is
+  exactly the old `x-approval`-only set. The CSV import route's
+  `APPROVAL_LOCKED_VALUE` error code string is intentionally kept as-is
+  (external contract; a future breaking-change rename is a separate
+  decision). `validate.py` fail-closed checks a declared field actually
+  exists on the entity, is a list of values, and every value is a real
+  member of that field's enum. `build_user_schema.py` /
+  `convert_to_user_schema.py`'s entity-level key passthrough allowlist
+  gained the new key (a gap the design missed and the generate-code
+  fixture gate caught empirically — the key was silently dropped at Stage
+  4 without it).
 - **`validateCustomRules()` (`lib/{entity}/service_validation_custom.ts`)
   now receives the row as it stood immediately before the write, not just
   the values being submitted.** A hand-written rule can now reject a save

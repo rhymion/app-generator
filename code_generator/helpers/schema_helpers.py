@@ -39,38 +39,54 @@ def resolve_set_fields(entity_props: dict, raw: dict) -> dict:
     return resolved
 
 
-def derive_approval_locked_values(model_def: dict) -> dict[str, list]:
-    """Per x-approval entity, the set of (field, value) pairs only the
-    approval/rejection mechanism may write — collected from
-    on_approved.set_fields and on_rejected.set_fields. No new schema key:
-    derived from the set_fields mappings that already describe what the
-    approval/rejection hooks write.
+def derive_write_locked_values(model_def: dict) -> dict[str, list]:
+    """Per entity, the (field, value) pairs that only the system may
+    write — union of:
+      - x-approval.on_approved/on_rejected.set_fields values (unchanged
+        behavior from the former derive_approval_locked_values)
+      - x-write-locked-values explicit declarations (entity-level x-* key,
+        {field_name: [value, ...]}) — works independently of x-approval.
 
     Field-scoped, not entity-wide: locking a field's whole range would also
     block values an ordinary create needs (e.g. the initial pending
-    value) — only the specific values that appear in set_fields are
-    locked. Not bundled across entities either — a value that is
-    approval-only on one entity may be an ordinary user-writable value on
-    another.
+    value) — only the specific values named are locked. Not bundled across
+    entities either — a value that is locked on one entity may be an
+    ordinary user-writable value on another.
 
-    Returns {} for entities without x-approval, or where both hooks have
-    empty/absent set_fields — those entities are unprotected by this
-    mechanism. Callers must treat an empty result as "unprotected", not as
-    "nothing to protect here".
+    Returns {} when neither source declares anything. Callers must treat
+    an empty result as "unprotected", not as "nothing to protect here".
     """
-    x_approval = model_def.get('x-approval')
-    if not x_approval:
-        return {}
-    entity_props = model_def.get('properties', {})
     locked: dict[str, list] = {}
-    for stage in ('on_approved', 'on_rejected'):
-        raw = (x_approval.get(stage) or {}).get('set_fields') or {}
-        resolved = resolve_set_fields(entity_props, raw)
-        for field, value in resolved.items():
-            values = locked.setdefault(field, [])
-            if value not in values:
-                values.append(value)
+    entity_props = model_def.get('properties', {})
+
+    # Source 1: x-approval set_fields (unchanged behavior)
+    x_approval = model_def.get('x-approval')
+    if x_approval:
+        for stage in ('on_approved', 'on_rejected'):
+            raw = (x_approval.get(stage) or {}).get('set_fields') or {}
+            resolved = resolve_set_fields(entity_props, raw)
+            for field, value in resolved.items():
+                values = locked.setdefault(field, [])
+                if value not in values:
+                    values.append(value)
+
+    # Source 2: x-write-locked-values (new, x-approval-independent)
+    x_write_locked = model_def.get('x-write-locked-values')
+    if x_write_locked and isinstance(x_write_locked, dict):
+        for field, values in x_write_locked.items():
+            if not isinstance(values, list):
+                continue  # validate.py rejects the malformed declaration
+            existing = locked.setdefault(field, [])
+            for v in values:
+                if v not in existing:
+                    existing.append(v)
+
     return locked
+
+
+# Backward-compat alias — kept during the migration window so any import
+# of the old name keeps working.
+derive_approval_locked_values = derive_write_locked_values
 
 
 def is_string_prop(prop: dict) -> bool:

@@ -75,3 +75,34 @@ definitions:
           - released
           - rejected
         default: pending
+
+  # cmd_857: proves x-write-locked-values works entirely independently of
+  # x-approval -- no x-approval block on this entity at all. Exercises the
+  # same derive_write_locked_values -> disabled-option / service_validation
+  # / CSV-import lockdown path as approval_lockdown_gate_item above, but
+  # driven purely by the declarative x-write-locked-values key.
+  write_lockdown_gate_item:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: false
+      invalidate: false
+      api: true
+      test: false
+    x-import-key:
+      - name
+    x-write-locked-values:
+      status:
+        - in_underwriting
+        - issued
+    fields:
+      name: {}
+      status:
+        enum:
+          - draft
+          - submitted
+          - in_underwriting
+          - issued
+        default: draft

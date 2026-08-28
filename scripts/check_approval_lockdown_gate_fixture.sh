@@ -6,8 +6,10 @@
 # through the real build_user_schema.py -> generate.py -> tsc pipeline and
 # type-checks the generated files that carry the value-lockdown-specific
 # branches: form_upsert_context's disabled-option rendering (FormUpsert.tsx),
-# service_validation.ts (APPROVAL_LOCKED_FIELDS create/update check, shared
-# by the REST API route and the Server Action write path), and
+# service_validation.ts (WRITE_LOCKED_FIELDS create/update check -- the
+# shared mechanism cmd_857 generalized beyond x-approval, still exercised
+# here via this fixture's x-approval declaration -- shared by the REST API
+# route and the Server Action write path), and
 # api_import_route.ts.jinja2 (the CSV-side duplicate of the same check,
 # since CSV import bypasses the service layer entirely).
 #
@@ -78,7 +80,15 @@ _SV="$OUT_DIR/lib/approval_lockdown_gate_item/service_validation.ts"
 _IMPORT_ROUTE="$OUT_DIR/app/api/approval_lockdown_gate_item/import/route.ts"
 _FORM="$OUT_DIR/components/approval_lockdown_gate_item/FormUpsert.tsx"
 
-for f in "$_SV" "$_IMPORT_ROUTE" "$_FORM"; do
+# cmd_857: write_lockdown_gate_item has NO x-approval block -- only
+# x-write-locked-values -- so these markers being present proves the
+# lockdown mechanism works independently of x-approval, not merely that
+# the shared code path still handles the x-approval case correctly.
+_WL_SV="$OUT_DIR/lib/write_lockdown_gate_item/service_validation.ts"
+_WL_IMPORT_ROUTE="$OUT_DIR/app/api/write_lockdown_gate_item/import/route.ts"
+_WL_FORM="$OUT_DIR/components/write_lockdown_gate_item/FormUpsert.tsx"
+
+for f in "$_SV" "$_IMPORT_ROUTE" "$_FORM" "$_WL_SV" "$_WL_IMPORT_ROUTE" "$_WL_FORM"; do
   if [ ! -f "$f" ]; then
     echo "approval-lockdown-gate fixture check FAILED: expected generated file missing: $f" >&2
     content_status=1
@@ -86,10 +96,15 @@ for f in "$_SV" "$_IMPORT_ROUTE" "$_FORM"; do
 done
 
 if [ "$content_status" -eq 0 ]; then
-  grep -q "APPROVAL_LOCKED_FIELDS" "$_SV" || { echo "FAILED: $_SV missing APPROVAL_LOCKED_FIELDS" >&2; content_status=1; }
+  grep -q "WRITE_LOCKED_FIELDS" "$_SV" || { echo "FAILED: $_SV missing WRITE_LOCKED_FIELDS" >&2; content_status=1; }
   grep -q '"active"' "$_SV" || { echo "FAILED: $_SV missing locked value 'active'" >&2; content_status=1; }
   grep -q "APPROVAL_LOCKED_VALUE" "$_IMPORT_ROUTE" || { echo "FAILED: $_IMPORT_ROUTE missing APPROVAL_LOCKED_VALUE" >&2; content_status=1; }
   grep -q "disabled: true" "$_FORM" || { echo "FAILED: $_FORM missing disabled: true option" >&2; content_status=1; }
+
+  grep -q "WRITE_LOCKED_FIELDS" "$_WL_SV" || { echo "FAILED: $_WL_SV missing WRITE_LOCKED_FIELDS (x-write-locked-values without x-approval)" >&2; content_status=1; }
+  grep -q '"in_underwriting"' "$_WL_SV" || { echo "FAILED: $_WL_SV missing locked value 'in_underwriting'" >&2; content_status=1; }
+  grep -q "APPROVAL_LOCKED_VALUE" "$_WL_IMPORT_ROUTE" || { echo "FAILED: $_WL_IMPORT_ROUTE missing APPROVAL_LOCKED_VALUE" >&2; content_status=1; }
+  grep -q "disabled: true" "$_WL_FORM" || { echo "FAILED: $_WL_FORM missing disabled: true option" >&2; content_status=1; }
 fi
 
 t1=$(date +%s.%N)

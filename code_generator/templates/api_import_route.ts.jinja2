@@ -45,19 +45,19 @@ const KEY_COLUMNS: string[] = {{ import_key_specs | map(attribute='csv_col') | l
 // labelField, or read-only on screen) — presence in the CSV header is rejected
 // rather than silently accepted and discarded.
 const UNIMPORTABLE_COLUMNS: string[] = {{ import_unimportable_columns | tojson }};
-{% if approval_locked_fields %}
-// Approval-locked values (see service_validation.ts's identical concept):
-// values a field may only receive through the approval/rejection workflow.
-// CSV import writes directly via a transaction call and never runs through
+{% if write_locked_fields %}
+// Write-locked values (see service_validation.ts's identical concept):
+// values a field may only receive through the system. CSV import writes
+// directly via a transaction call and never runs through
 // service_validation.ts, so the same check is duplicated here.
-type ApprovalLockedField = { key: string; values: unknown[] };
-const APPROVAL_LOCKED_FIELDS: ApprovalLockedField[] = [
-{% for field in approval_locked_fields %}
-  { key: '{{ field }}', values: {{ approval_locked_values[field] | tojson }} },
+type WriteLockedField = { key: string; values: unknown[] };
+const WRITE_LOCKED_FIELDS: WriteLockedField[] = [
+{% for field in write_locked_fields %}
+  { key: '{{ field }}', values: {{ write_locked_values[field] | tojson }} },
 {% endfor %}
 ] ;
-function findLockedViolation(data: Record<string, unknown>): ApprovalLockedField | undefined {
-  return APPROVAL_LOCKED_FIELDS.find((f) => f.key in data && f.values.includes(data[f.key]));
+function findLockedViolation(data: Record<string, unknown>): WriteLockedField | undefined {
+  return WRITE_LOCKED_FIELDS.find((f) => f.key in data && f.values.includes(data[f.key]));
 }
 {% endif %}
 
@@ -369,7 +369,7 @@ export async function POST(request: NextRequest) {
           errors.push({ row: rowNum, code: 'ACCESS_DENIED', message: 'Not permitted to create this entity' });
           continue;
         }
-{% if approval_locked_fields %}
+{% if write_locked_fields %}
         {
           // A newly-created row has no persisted value to fall back to, so
           // any locked value on CREATE is unconditionally rejected.
@@ -377,7 +377,7 @@ export async function POST(request: NextRequest) {
           if (_lockedViolation) {
             errors.push({
               row: rowNum, code: 'APPROVAL_LOCKED_VALUE',
-              message: `Row ${rowNum}, column '${_lockedViolation.key}': '${data[_lockedViolation.key]}' can only be set by the approval/rejection workflow`,
+              message: `Row ${rowNum}, column '${_lockedViolation.key}': '${data[_lockedViolation.key]}' can only be set by the system`,
             });
             continue;
           }
@@ -409,21 +409,21 @@ export async function POST(request: NextRequest) {
         errors.push({ row: rowNum, code: 'ACCESS_DENIED', message: 'Not permitted to update this row' });
         continue;
       }
-{% if approval_locked_fields %}
+{% if write_locked_fields %}
       {
         const _lockedViolation = findLockedViolation(data);
         if (_lockedViolation) {
           // A resubmission of the value the row already holds is not a
-          // lockdown violation -- it's the same value the approval/rejection
-          // workflow already wrote.
+          // lockdown violation -- it was already written by a prior
+          // operation.
           const _lockedCurrent = (await prisma.{{ model }}.findUnique({
             where: { id: existing.id },
-            select: {{ approval_locked_values_select }},
+            select: {{ write_locked_values_select }},
           })) as Record<string, unknown> | null;
           if (!_lockedCurrent || _lockedCurrent[_lockedViolation.key] !== data[_lockedViolation.key]) {
             errors.push({
               row: rowNum, code: 'APPROVAL_LOCKED_VALUE',
-              message: `Row ${rowNum}, column '${_lockedViolation.key}': '${data[_lockedViolation.key]}' can only be set by the approval/rejection workflow`,
+              message: `Row ${rowNum}, column '${_lockedViolation.key}': '${data[_lockedViolation.key]}' can only be set by the system`,
             });
             continue;
           }

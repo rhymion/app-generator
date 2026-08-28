@@ -1729,6 +1729,78 @@ def validate_schema(schema: dict) -> None:
             )
 
     # -----------------------------------------------------------------------
+    # 11. x-write-locked-values: field existence + enum membership
+    # -----------------------------------------------------------------------
+    # derive_write_locked_values() (helpers/schema_helpers.py) trusts every
+    # declared value at generate time -- a typo'd field name or a value not
+    # in that field's enum would otherwise silently produce dead template
+    # code (a locked value that can never be submitted anyway) instead of
+    # failing here with the offending entity and key named.
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        x_write_locked = defn.get('x-write-locked-values')
+        if not x_write_locked:
+            continue
+        if not isinstance(x_write_locked, dict):
+            errors.append(
+                f"Definition '{def_key}': x-write-locked-values must be a "
+                f"mapping of field_name: [value, ...] "
+                f"(got {type(x_write_locked).__name__})."
+            )
+            continue
+        props = defn.get('properties', {})
+        for field, values in x_write_locked.items():
+            if field not in props:
+                errors.append(
+                    f"Definition '{def_key}': x-write-locked-values references "
+                    f"field '{field}' which does not exist in properties."
+                )
+                continue
+            if not isinstance(values, list):
+                errors.append(
+                    f"Definition '{def_key}': x-write-locked-values.{field} "
+                    f"must be a list (got {type(values).__name__})."
+                )
+                continue
+            prop_def = props[field]
+            enum_vals = prop_def.get('enum')
+            if enum_vals is None:
+                errors.append(
+                    f"Definition '{def_key}': x-write-locked-values.{field} "
+                    f"declares locked values but field '{field}' has no enum. "
+                    f"Only enum fields are supported."
+                )
+                continue
+            actual_type = prop_def.get('type')
+            if isinstance(actual_type, list):
+                actual_type = next(
+                    (t for t in actual_type if t != 'null'), None
+                )
+            is_int_enum = (
+                actual_type in ('integer', 'number')
+                and all(isinstance(v, str) for v in enum_vals)
+            )
+            for v in values:
+                if is_int_enum:
+                    if not any(
+                        str(lbl).lower() == str(v).lower()
+                        for lbl in enum_vals
+                    ):
+                        errors.append(
+                            f"Definition '{def_key}': "
+                            f"x-write-locked-values.{field} value {v!r} "
+                            f"does not match any label in enum {enum_vals}."
+                        )
+                else:
+                    if v not in enum_vals:
+                        errors.append(
+                            f"Definition '{def_key}': "
+                            f"x-write-locked-values.{field} value {v!r} "
+                            f"is not in enum {enum_vals}."
+                        )
+
+    # -----------------------------------------------------------------------
     # 14. x-relationship.searchField retired (cmd_552)
     # -----------------------------------------------------------------------
     # searchField used to opt an FK into cross-relation substring search
