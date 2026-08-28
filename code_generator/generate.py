@@ -908,17 +908,35 @@ def generate(schema_path: str, output_dir: str) -> None:
                 )
 
         # --- service.ts + service_validation stub ---
-        if can_new or can_edit or can_delete:
+        #
+        # cmd_856 [変更4 corollary]: a reservation lines-child (new/edit/
+        # delete all false -- e.g. purchase_per_item, whose only value-
+        # mutation path is the PARENT's own nested create/update) can still
+        # declare its own x-approval.submit_on + approvable bridge and need
+        # a standalone submit_for_approval action -- see
+        # service_context()'s has_approvable_bridge-and-not-can_create
+        # branch. needs_submit_action mirrors that same predicate here so
+        # svc_ctx gets computed (and submit_actions.ts written) even though
+        # service.ts itself (gated on can_new/edit/delete, unchanged below)
+        # would otherwise never be reached at all for such an entity.
+        needs_submit_action = (
+            any(r.get('target') == 'approvable' for r in ctx.get('one_to_one_rels', []))
+            and resolve_approval_submit_on(_raw_def(model, schema))[0] is not None
+        )
+        if can_new or can_edit or can_delete or needs_submit_action:
             svc_ctx = {**ctx, **service_context(ctx, schema)}
-            _write(lib_dir / 'service.ts', _render(env, 'service.ts.jinja2', svc_ctx))
-            if can_new or can_edit:
-                val_ctx = {**ctx, **build_validation_context(ctx)}
-                _write(lib_dir / 'service_validation.ts', _render(env, 'service_validation.ts.jinja2', val_ctx))
+            if can_new or can_edit or can_delete:
+                _write(lib_dir / 'service.ts', _render(env, 'service.ts.jinja2', svc_ctx))
+                if can_new or can_edit:
+                    val_ctx = {**ctx, **build_validation_context(ctx)}
+                    _write(lib_dir / 'service_validation.ts', _render(env, 'service_validation.ts.jinja2', val_ctx))
             # --- submit_actions.ts (cmd_841 ruling_4) ---
             #
-            # Emitted only for entities that declare x-approval.submit_on
-            # with an approvable bridge and can_create -- see
-            # service_context()'s submit_for_approval_action_code.
+            # Emitted for entities that declare x-approval.submit_on with an
+            # approvable bridge and either can_create (the ordinary case) or
+            # needs_submit_action (a reservation lines-child with neither
+            # add{Parent} nor update{Parent} of its own, cmd_856 change 4)
+            # -- see service_context()'s submit_for_approval_action_code.
             if svc_ctx.get('submit_for_approval_action_code'):
                 _write(lib_dir / 'submit_actions.ts', _render(env, 'submit_for_approval.ts.jinja2', svc_ctx))
                 print(f'  Submit-for-approval action → lib/{parent}/submit_actions.ts')

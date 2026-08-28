@@ -1715,12 +1715,23 @@ def _build_reservation_guard_and_resubmit_approval_lines(
     _build_approval_lines_post_create_code's per-line block, but keyed off
     an existing line's own approvable_id instead of a freshly pre-created one.
 
-    New-line addition / existing-line deletion stay guarded, but now only
-    when at least one line is genuinely still locked (_anyLineLocked) --
-    narrower than the old bulk "_allocatedCount > 0" (any line EVER
-    allocated, even one long since withdrawn-and-released), which would
-    otherwise keep blocking those structural changes forever after a single
-    line's first-ever submission.
+    cmd_856 [変更2] (subtask_856a design, ruling recorded there): new-line
+    addition is no longer guarded at all here, regardless of whether any
+    existing line is locked -- a brand-new line (no id) carries no
+    allocation and no approval history of its own, so there is no invariant
+    left to protect by blocking it. The per-line value-change/deletion
+    guard above (locked lines only) is unchanged -- this removes only the
+    old bulk "_anyLineLocked && {lines_var}Items.some((i) => !i.id)"
+    addition guard.
+
+    cmd_856 [変更5]: the withdrawn-check/resubmit-claim/new-approval_request
+    machinery described above (paragraphs 3-4) applies only when the lines
+    entity has NO x-approval.submit_on of its own. When it does (e.g.
+    purchase_per_item post-subtask_856a), resubmission is reached
+    exclusively through that line's own submit_for_approval action (change
+    4) -- this function then never resubmits at all, so a net-zero line's
+    value edit (withdrawn or never-submitted alike) is just a plain,
+    unrestricted edit.
     """
     res = rc.get('result') or {}
     req = rc.get('request') or {}
@@ -1819,6 +1830,53 @@ def _build_reservation_guard_and_resubmit_approval_lines(
         target_id_expr='_existing.id',
     )
 
+    # cmd_856 [変更5]: when the lines entity itself declares
+    # x-approval.submit_on, resubmission never happens via this bulk
+    # per-parent-update guard -- only through that line's own
+    # submit_for_approval action (change 4/_build_submit_for_approval_action_code).
+    # A net-zero (withdrawn or never-submitted) line's value edit here is
+    # then just a plain, unrestricted edit -- the withdrawn-check/
+    # resubmit-claim/new-approval_request machinery below is skipped
+    # entirely, not merely gated per-line, so a value edit on a withdrawn
+    # draft line can never create a second approval_request round behind
+    # the submit action's back (finding C, subtask_856a).
+    _lines_entity_has_submit_on = resolve_approval_submit_on(_raw_def(lines_entity, schema or {}))[0] is not None
+    loop_tail = (
+        ''
+        if _lines_entity_has_submit_on
+        else (
+            f"      if (_lineDeleted || !_lineMutated || !_incoming) {{\n"
+            f"        continue;\n"
+            f"      }}\n"
+            f"      const _lineLatestRoundRow = await tx.approval_request.findFirst({{\n"
+            f"        where: {{ approvable_id: _existing.approvable_id }},\n"
+            f"        orderBy: {{ created_at: 'desc' }},\n"
+            f"        select: {{ round_id: true }},\n"
+            f"      }});\n"
+            f"      const _lineLatestRoundRequests = _lineLatestRoundRow\n"
+            f"        ? await tx.approval_request.findMany({{\n"
+            f"            where: {{ approvable_id: _existing.approvable_id, round_id: _lineLatestRoundRow.round_id }},\n"
+            f"            select: {{ status: true }},\n"
+            f"          }})\n"
+            f"        : [];\n"
+            f"      const _lineIsWithdrawn = _lineLatestRoundRequests.length > 0\n"
+            f"        && _lineLatestRoundRequests.every((r) => r.status === 'withdrawn');\n"
+            f"      if (!_lineIsWithdrawn) {{\n"
+            f"        continue;\n"
+            f"      }}\n"
+            f"{resubmit_claim}\n"
+            f"      const _lineCreator = await tx.user.findUnique({{\n"
+            f"        where: {{ id: actorId }},\n"
+            f"        select: {{ roles: {{ select: {{ id: true }} }} }},\n"
+            f"      }});\n"
+            f"      const _lineCreatorRoleIds = _lineCreator?.roles.map((r) => r.id) ?? [];\n"
+            f"      const _lineApprovalFlows = await tx.approval_flow.findMany({{\n"
+            f"        where: {{ entity_name: '{lines_entity}' }},\n"
+            f"      }});\n"
+            f"{resubmit_approval}\n"
+        )
+    )
+
     return (
         f"    // Reservation mutation guard + resubmission (ledger_transaction,\n"
         f"    // per-line -- cmd_847 [丁]): a line's own net ledger allocation\n"
@@ -1839,51 +1897,18 @@ def _build_reservation_guard_and_resubmit_approval_lines(
         f"        }})\n"
         f"      : [];\n"
         f"    const _netByBridge = new Map(_ledgerNets.map((g) => [g.{line_txable_f}, g._sum.reserved_delta ?? 0]));\n"
-        f"    let _anyLineLocked = false;\n"
         f"    for (const _existing of _existingLines) {{\n"
         f"      const _lineNet = _existing.{line_txable_f} ? (_netByBridge.get(_existing.{line_txable_f}) ?? 0) : 0;\n"
         f"      const _incoming = _incomingWithId.find((i) => i.id === _existing.id);\n"
         f"      const _lineDeleted = !_incoming;\n"
         f"      const _lineMutated = _incoming !== undefined && (({line_mutated_check}));\n"
         f"      if (_lineNet > 0) {{\n"
-        f"        _anyLineLocked = true;\n"
         f"        if (_lineDeleted || _lineMutated) {{\n"
         f"          throw new ReservationMutationError('Cannot modify reservation criteria after allocation.');\n"
         f"        }}\n"
         f"        continue;\n"
         f"      }}\n"
-        f"      if (_lineDeleted || !_lineMutated || !_incoming) {{\n"
-        f"        continue;\n"
-        f"      }}\n"
-        f"      const _lineLatestRoundRow = await tx.approval_request.findFirst({{\n"
-        f"        where: {{ approvable_id: _existing.approvable_id }},\n"
-        f"        orderBy: {{ created_at: 'desc' }},\n"
-        f"        select: {{ round_id: true }},\n"
-        f"      }});\n"
-        f"      const _lineLatestRoundRequests = _lineLatestRoundRow\n"
-        f"        ? await tx.approval_request.findMany({{\n"
-        f"            where: {{ approvable_id: _existing.approvable_id, round_id: _lineLatestRoundRow.round_id }},\n"
-        f"            select: {{ status: true }},\n"
-        f"          }})\n"
-        f"        : [];\n"
-        f"      const _lineIsWithdrawn = _lineLatestRoundRequests.length > 0\n"
-        f"        && _lineLatestRoundRequests.every((r) => r.status === 'withdrawn');\n"
-        f"      if (!_lineIsWithdrawn) {{\n"
-        f"        continue;\n"
-        f"      }}\n"
-        f"{resubmit_claim}\n"
-        f"      const _lineCreator = await tx.user.findUnique({{\n"
-        f"        where: {{ id: actorId }},\n"
-        f"        select: {{ roles: {{ select: {{ id: true }} }} }},\n"
-        f"      }});\n"
-        f"      const _lineCreatorRoleIds = _lineCreator?.roles.map((r) => r.id) ?? [];\n"
-        f"      const _lineApprovalFlows = await tx.approval_flow.findMany({{\n"
-        f"        where: {{ entity_name: '{lines_entity}' }},\n"
-        f"      }});\n"
-        f"{resubmit_approval}\n"
-        f"    }}\n"
-        f"    if (_anyLineLocked && {lines_var}Items.some((i) => !i.id)) {{\n"
-        f"      throw new ReservationMutationError('Cannot modify reservation criteria after allocation.');\n"
+        f"{loop_tail}"
         f"    }}"
     )
 
@@ -2229,6 +2254,56 @@ def _resolve_approval_lines_entity(model: str, prop_name: str, schema: dict) -> 
     return entity
 
 
+def _resolve_reservation_config_from_def(entity_name: str, entity_def: dict, schema: dict) -> dict | None:
+    """Mirror build_context.py's x-reservation (mode: count) resolution for
+    an arbitrary entity read straight off raw schema.
+
+    cmd_856 [変更4]: generators.py only ever receives the CURRENT entity's
+    own already-resolved `reservation_config` via ctx — a lines-child's
+    per-line submit-time reservation claim needs its PARENT's reservation
+    config (pool/request/policy/result/ledgerDomain), which lives on a
+    different entity's raw schema def than the child's own. Used by
+    _find_reservation_lines_parent below; kept in lockstep with
+    build_context.py's own resolution (same fields, same defaults).
+    """
+    xres = entity_def.get('x-reservation')
+    if not xres or not isinstance(xres, dict) or xres.get('mode') != 'count':
+        return None
+    lines_prop = xres.get('lines')
+    lines_entity = None
+    if lines_prop:
+        try:
+            lines_entity = _resolve_approval_lines_entity(entity_name, lines_prop, schema)
+        except ValueError:
+            lines_entity = None
+    result = xres.get('result') or {}
+    return {
+        'mode': 'count',
+        'transaction_strategy': (xres.get('transaction') or {}).get('strategy', 'conditional_update'),
+        'ledger_domain': (xres.get('transaction') or {}).get('ledgerDomain'),
+        'lines': lines_prop,
+        'lines_entity': lines_entity,
+        'pool': xres.get('pool') or {},
+        'request': xres.get('request') or {},
+        'policy': xres.get('policy') or {},
+        'result': result,
+        'alloc_has_creator': result.get('allocationAudit', True),
+        'hasLines': bool(lines_prop),
+    }
+
+
+def _find_reservation_lines_parent(model: str, schema: dict) -> tuple[str | None, dict | None]:
+    """Find the entity whose x-reservation (mode: count, ledger_transaction)
+    names `model` as its lines entity, and return (parent_name, its
+    resolved reservation_config) -- cmd_856 [変更4]. (None, None) when no
+    such parent exists (model is not a reservation lines-child at all)."""
+    for entity_name, entity_def in (schema.get('definitions') or {}).items():
+        rc = _resolve_reservation_config_from_def(entity_name, entity_def, schema)
+        if rc and rc.get('transaction_strategy') == 'ledger_transaction' and rc.get('lines_entity') == model:
+            return entity_name, rc
+    return None, None
+
+
 def _build_approval_lines_pre_create_code(parent_def: dict, model: str, schema: dict, mode: str = 'create') -> str:
     """Pre-create one approvable per line, before the parent create/update.
 
@@ -2398,6 +2473,15 @@ def _build_approval_lines_post_create_code(parent_def: dict, model: str, schema:
     creator_id on the approvable). Used for both the create and update flow —
     the caller passes a different `_{child_var}ApprIds` population for each
     (all lines vs. only newly-added lines).
+
+    cmd_856 [変更1]: when the lines entity itself declares
+    `x-approval.submit_on` (e.g. purchase_per_item), the line is created in
+    a draft state and must NOT be submitted for approval at creation time —
+    submission happens later via that entity's own submit_for_approval
+    action (see _build_submit_for_approval_action_code / change 4). The
+    approvable itself is still pre-created (_build_approval_lines_pre_create_code
+    — unaffected, approvable_id stays NOT NULL), only the approval_request
+    creation loop is skipped here.
     """
     props = get_approval_lines_props(parent_def, model, schema)
     if not props:
@@ -2407,6 +2491,10 @@ def _build_approval_lines_post_create_code(parent_def: dict, model: str, schema:
         child_var    = safe_var_name(prop_name)
         arr_var      = f'_{child_var}ApprIds'
         lines_entity = _resolve_approval_lines_entity(model, prop_name, schema)
+        lines_raw_def = _raw_def(lines_entity, schema or {})
+        lines_submit_on_field, _ = resolve_approval_submit_on(lines_raw_def)
+        if lines_submit_on_field is not None:
+            continue
         flows_var    = f'_{child_var}ApprFlows'
         creator_var  = f'_{child_var}Creator'
         role_ids_var = f'_{child_var}CreatorRoleIds'
@@ -2766,16 +2854,40 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     approval_edge_trigger_update_code = ''
     submit_for_approval_action_code = ''
     x_approval_submit_on_field: str | None = None
+    # cmd_856 [変更4]: names which model's own service.ts actually exports
+    # InsufficientPoolCapacityError, for submit_for_approval.ts.jinja2's
+    # import -- `model` itself in the ordinary self-reservation case below,
+    # or the reservation-owning PARENT entity in the lines-child case
+    # (this entity has no x-reservation of its own; has_reservation stays
+    # False for it, so the import can't key off has_reservation here).
+    reservation_error_import_model = ''
     # cmd_847 [乙]: has_reservation AND has_submit_on moves the allocation
     # phase from create-time (tx.model.create(), below) to the submit_on
     # edge -- a draft save must not reserve inventory the entity may never
     # actually submit for. Declaring submit_on with no reservation, or a
     # reservation with no submit_on, both keep today's single call site.
+    #
+    # cmd_856 [変更3]: this model itself (e.g. purchase_order) may declare
+    # no x-approval of its own at all -- the submit_on instead lives on its
+    # x-reservation lines entity (e.g. purchase_per_item, resolved into
+    # reservation_config['lines_entity'] by build_context.py). When that
+    # lines entity has its own submit_on, the parent's create-time
+    # reservation_allocation_code (below, gated on `not has_submit_on`)
+    # must defer just the same -- a batch of still-draft lines must not get
+    # allocated in bulk the instant the parent row is created. Reservation
+    # for those lines instead happens per-line, at each line's own
+    # submit_for_approval action (change 4).
     has_submit_on = False
     if has_reservation and reservation_config is not None:
         _raw_def_for_submit_on = _raw_def(model, schema) if schema else {}
         _submit_on_field_probe, _ = resolve_approval_submit_on(_raw_def_for_submit_on)
         has_submit_on = _submit_on_field_probe is not None
+        if not has_submit_on:
+            _lines_entity_for_submit_on = reservation_config.get('lines_entity')
+            if _lines_entity_for_submit_on:
+                _lines_raw_def_for_submit_on = _raw_def(_lines_entity_for_submit_on, schema) if schema else {}
+                _lines_submit_on_field_probe, _ = resolve_approval_submit_on(_lines_raw_def_for_submit_on)
+                has_submit_on = _lines_submit_on_field_probe is not None
     if has_approvable_bridge and can_create:
         raw_def_by_model = _raw_def(model, schema) if schema else {}
         x_approval_submit_on_field, x_approval_submit_on_value = resolve_approval_submit_on(raw_def_by_model)
@@ -2817,6 +2929,44 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
                 _build_reservation_allocation_code(reservation_config, model, schema, row_var='row')
                 if has_reservation and has_submit_on and reservation_config is not None else ''
             )
+            if _reservation_code_for_submit_action:
+                reservation_error_import_model = model
+            submit_for_approval_action_code = _build_submit_for_approval_action_code(
+                approvable_rel['prop_name'], parent, model,
+                x_approval_submit_on_field, x_approval_submit_on_value,
+                reservation_code=_reservation_code_for_submit_action,
+            )
+    elif has_approvable_bridge and not can_create:
+        # cmd_856 [変更4]: a reservation lines-child (new:false, edit:false
+        # -- e.g. purchase_per_item) that owns its own submit_on and
+        # approvable bridge, but has neither an add{Parent} nor
+        # update{Parent} route of its own -- its only value-mutation path
+        # is the PARENT's own nested create/update (changes 1/2/3/5). No
+        # create/update edge trigger applies here (there is no
+        # add{Parent}/update{Parent} to embed one in); the only route this
+        # entity needs is the standalone submit_for_approval action (cmd_841
+        # ruling_4), reserving inventory for exactly this one line against
+        # the PARENT's reservation config (pool/policy/ledgerDomain) --
+        # found via _find_reservation_lines_parent since that config lives
+        # on a different entity's raw schema def than this one's own ctx.
+        raw_def_by_model = _raw_def(model, schema) if schema else {}
+        x_approval_submit_on_field, x_approval_submit_on_value = resolve_approval_submit_on(raw_def_by_model)
+        if x_approval_submit_on_field is not None:
+            _reservation_code_for_submit_action = ''
+            if schema is not None:
+                _lines_parent, _lines_parent_rc = _find_reservation_lines_parent(model, schema)
+                if _lines_parent_rc is not None:
+                    _child_rc = {
+                        **_lines_parent_rc,
+                        'lines_entity': '',
+                        'lines': None,
+                        'hasLines': False,
+                        'selfQuantityField': (_lines_parent_rc.get('request') or {}).get('quantityField', 'quantity'),
+                    }
+                    _reservation_code_for_submit_action = _build_reservation_allocation_code(
+                        _child_rc, model, schema, row_var='row',
+                    )
+                    reservation_error_import_model = _lines_parent
             submit_for_approval_action_code = _build_submit_for_approval_action_code(
                 approvable_rel['prop_name'], parent, model,
                 x_approval_submit_on_field, x_approval_submit_on_value,
@@ -3250,6 +3400,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'approval_edge_trigger_create_code':  approval_edge_trigger_create_code,
         'approval_edge_trigger_update_code':  approval_edge_trigger_update_code,
         'submit_for_approval_action_code':    submit_for_approval_action_code,
+        'reservation_error_import_model':     reservation_error_import_model,
     }
 
 
@@ -3926,10 +4077,19 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     # "(re)submit" server action into its entity_view_components (e.g.
     # ApprovalSection.tsx's submit button). Same detection as
     # service_context()'s submit_for_approval_action_code (x-approval.
-    # submit_on declared + an approvable bridge + can_create), duplicated
-    # here rather than threaded through ctx because form_view_context and
+    # submit_on declared + an approvable bridge), duplicated here rather
+    # than threaded through ctx because form_view_context and
     # service_context are independent per-artifact context builders (see
     # generate.py's separate _write calls) with no shared mutable state.
+    #
+    # cmd_856 [変更4 corollary]: no longer requires ctx['can_create'] --
+    # service_context() now also builds submit_for_approval_action_code for
+    # a reservation lines-child with neither add{Parent} nor update{Parent}
+    # of its own (can_create False), gated purely on
+    # has_approvable_bridge + this entity's own submit_on (see that
+    # function's has_approvable_bridge-and-not-can_create branch). Keeping
+    # can_create here would silently under-wire the view page's submit
+    # button for exactly that case.
     #
     # cmd_844: no longer computes/passes a terminal literal -- canSubmit
     # ForApproval() reads 'terminal_rejected' directly off each round row's
@@ -3940,7 +4100,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         (r for r in ctx.get('one_to_one_rels', []) if r.get('target') == 'approvable'),
         None,
     )
-    if _fv_approvable_rel is not None and ctx.get('can_create'):
+    if _fv_approvable_rel is not None:
         _fv_submit_on_field, _ = resolve_approval_submit_on(model_def)
         if _fv_submit_on_field is not None:
             submit_for_approval_needed = True
