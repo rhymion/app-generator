@@ -63,7 +63,7 @@ describe('Error message delivery (cmd_695 — Server Action ActionFailure conver
     });
   });
 
-  it('2) stale update ("Updated by another user") shows inline, not error.tsx', () => {
+  it('2) stale update ("Updated since you opened it") shows inline, not error.tsx', () => {
     cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
     apiCreateRole('Approver Stale Test A').then((roleA) => {
       apiCreateRole('Approver Stale Test B').then((roleB) => {
@@ -87,7 +87,10 @@ describe('Error message delivery (cmd_695 — Server Action ActionFailure conver
           assertNoReactErrorBoundary();
           // lib/normalize.ts assertNotStale throws AppError('CONFLICT') with
           // no field — form_upsert.tsx.jinja2 falls back to 'staleMutation'.
-          cy.contains('updated by another user').should('be.visible');
+          // The message states only what the snapshot comparison can
+          // actually establish (changed since it was opened) — it does not
+          // claim "another user" (cmd_849).
+          cy.contains('updated since you opened it').should('be.visible');
           cy.screenshot('cmd695-2-stale-update-fixed', { capture: 'fullPage' });
         });
       });
