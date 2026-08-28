@@ -1056,6 +1056,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% for cmd in required_fill_cmds %}
           {{ cmd | trim }}
 {% endfor %}
+{% if approval_submit_fill_cmd %}
+          {{ approval_submit_fill_cmd | trim }}
+{% endif %}
           cy.clickButton('Save');
           cy.url().should('include', '/{{ parent }}');
           cy.url().should('not.include', '/new');
@@ -1085,6 +1088,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% for cmd in required_fill_cmds %}
           {{ cmd | trim }}
 {% endfor %}
+{% if approval_submit_fill_cmd %}
+          {{ approval_submit_fill_cmd | trim }}
+{% endif %}
           cy.clickButton('Save');
           cy.url().should('include', '/{{ parent }}');
           cy.url().should('not.include', '/new');

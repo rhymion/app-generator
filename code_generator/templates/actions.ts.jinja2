@@ -14,6 +14,9 @@ import { {{ invalidate_handler }} } from '@/{{ invalidate_module }}';
    which collides with this file's own wrapper function of the same name below. #}
 import { invalidate{{ parent_pascal }} as _invalidate{{ parent_pascal }}Stub } from '@/lib/{{ parent }}/invalidate_handler';
 {% endif %}
+{% if has_invalidate_guard %}
+import { assertInvalidateAllowed } from './invalidate_guard';
+{% endif %}
 {% endif %}
 {% if uses_prisma %}import prisma from '@/lib/prisma';
 {% endif %}{% if comment_actions_code %}import { notify } from '@/lib/_notifier';
@@ -97,6 +100,10 @@ export async function invalidate{{ parent_pascal }}(id: string): Promise<void> {
   const userId = await getSessionUserIdOrThrow();
   // TODO: separate 'invalidate' permission from 'delete' in future
   await requirePermission('{{ parent }}', 'delete', undefined, userId);
+  {% if has_invalidate_guard %}
+  const _invalidateGuardRow = await prisma.{{ model }}.findUnique({ where: { id }, select: { {{ lockdown_field }}: true } });
+  assertInvalidateAllowed(_invalidateGuardRow);
+  {% endif %}
   {% if invalidate_module %}
   await {{ invalidate_handler }}(id);
   {% else %}

@@ -1,0 +1,18 @@
+// AUTO-GENERATED - DO NOT EDIT
+//
+// Post-approval delete lockdown (cmd_846). Same locked-status set as
+// edit_guard.ts (see that file's header) -- deleting a {{ parent }} row is
+// forbidden while it sits at one of the locked statuses. Called from
+// lib/{{ parent }}/service.ts's delete{{ parent_pascal }} -- the one choke
+// point both the REST DELETE route and the remove{{ parent_pascal }}
+// Server Action already funnel through.
+import { AppError } from '@/lib/_errors';
+
+const LOCKED_{{ lockdown_field | upper }}_VALUES: unknown[] = {{ lockdown_locked_values_ts }};
+
+export function assertDeleteAllowed(entity: { {{ lockdown_field }}?: unknown } | null | undefined): void {
+  if (!entity) return;
+  if (LOCKED_{{ lockdown_field | upper }}_VALUES.includes(entity.{{ lockdown_field }})) {
+    throw new AppError('PERMISSION_DENIED', 'delete_forbidden:approval_locked');
+  }
+}

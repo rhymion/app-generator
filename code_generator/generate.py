@@ -53,6 +53,7 @@ from generators import (
     _raw_def,
     resolve_approval_submit_on,
     seed_entities_context,
+    approval_lockdown_context,
 )
 from generators_i18n import (
     update_i18n_and_config,
@@ -834,6 +835,11 @@ def generate(schema_path: str, output_dir: str) -> None:
 
         # Base context for all other generators
         ctx = build_context(entity, schema, has_reactions=bool(named_constants))
+        # cmd_846(c): post-approval edit/delete/invalidate lockdown --
+        # merged into ctx (not just svc_ctx) so it's available regardless
+        # of which downstream block (service.ts vs. the invalidate-only
+        # write below) needs it.
+        ctx = {**ctx, **approval_lockdown_context(ctx, schema)}
         if ctx.get('is_self_only') and ctx.get('self_only_admin_bypass'):
             self_only_admin_bypass_entities.append(parent)
 
@@ -923,6 +929,23 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _write(lib_dir / 'submit_actions.ts', _render(env, 'submit_for_approval.ts.jinja2', svc_ctx))
                 print(f'  Submit-for-approval action → lib/{parent}/submit_actions.ts')
 
+            # --- edit_guard.ts / delete_guard.ts (cmd_846(c)) ---
+            #
+            # assertEditAllowed/assertDeleteAllowed, called from inside
+            # update{Parent}/delete{Parent} in service.ts.jinja2 itself --
+            # the one choke point both the REST PUT/DELETE route
+            # (api_detail_route.ts.jinja2) and the upsert{Parent}/
+            # remove{Parent} Server Action (actions.ts.jinja2) already
+            # funnel through. Always regenerated (pure derivation from
+            # schema, not a hand-customization point) -- never a
+            # _write_stub(). Gated on has_edit_guard/has_delete_guard
+            # (approval_lockdown_context(), view-scoped per has_approvable_
+            # bridge) so a proxy view sharing the model never gets one.
+            if svc_ctx.get('has_edit_guard'):
+                _write(lib_dir / 'edit_guard.ts', _render(env, 'edit_guard.ts.jinja2', svc_ctx))
+            if svc_ctx.get('has_delete_guard'):
+                _write(lib_dir / 'delete_guard.ts', _render(env, 'delete_guard.ts.jinja2', svc_ctx))
+
         # --- invalidate handler write-once stub (cmd_583) ---
         # x-generate.invalidate enabled without a configured handler/module:
         # both actions.ts.jinja2 and invalidate_action_route.ts.jinja2 import
@@ -946,6 +969,23 @@ def generate(schema_path: str, output_dir: str) -> None:
                  'this model has no `invalidated_at` column, so no default was written -- or ')
                 + 'configure x-generate.invalidate.module/handler to point elsewhere.',
             )
+
+        # --- invalidate_guard.ts (cmd_846(c)) ---
+        #
+        # assertInvalidateAllowed, called from BOTH
+        # invalidate_action_route.ts.jinja2 (REST) and actions.ts.jinja2's
+        # invalidate{Parent} (Server Action) -- unlike edit/delete there is
+        # no single service.ts choke point here (both call the same
+        # generated lib/{parent}/invalidate_handler.ts directly, not
+        # through service.ts), so the call is wired into both entry
+        # points. Mirrors the existing assertApprovalOrder precedent
+        # (both entry points call the same function -- see
+        # docs/knowledge/appendix/approval-flow.md §16.6.1). Written
+        # regardless of whether a custom handler/module is configured --
+        # the lockdown applies independent of what the invalidate handler
+        # itself does.
+        if can_invalidate and ctx.get('has_invalidate_guard'):
+            _write(lib_dir / 'invalidate_guard.ts', _render(env, 'invalidate_guard.ts.jinja2', ctx))
 
         # --- actions.ts ---
         if can_new or can_edit or can_delete or can_invalidate:

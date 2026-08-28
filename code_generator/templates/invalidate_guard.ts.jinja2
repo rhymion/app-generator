@@ -1,0 +1,20 @@
+// AUTO-GENERATED - DO NOT EDIT
+//
+// Post-approval invalidate lockdown (cmd_846). Same locked-status set as
+// edit_guard.ts (see that file's header) -- invalidating a {{ parent }}
+// row is forbidden while it sits at one of the locked statuses. Called
+// from BOTH invalidate_action_route.ts.jinja2 (REST) and actions.ts's
+// invalidate{{ parent_pascal }} (Server Action) -- unlike edit/delete
+// there is no single service.ts choke point for invalidate (both call
+// lib/{{ parent }}/invalidate_handler.ts directly), so both entry points
+// call this guard.
+import { AppError } from '@/lib/_errors';
+
+const LOCKED_{{ lockdown_field | upper }}_VALUES: unknown[] = {{ lockdown_locked_values_ts }};
+
+export function assertInvalidateAllowed(entity: { {{ lockdown_field }}?: unknown } | null | undefined): void {
+  if (!entity) return;
+  if (LOCKED_{{ lockdown_field | upper }}_VALUES.includes(entity.{{ lockdown_field }})) {
+    throw new AppError('PERMISSION_DENIED', 'invalidate_forbidden:approval_locked');
+  }
+}

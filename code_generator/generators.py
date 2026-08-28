@@ -2472,6 +2472,56 @@ def resolve_approval_submit_on(raw_def: dict) -> tuple[str | None, object]:
     return field, resolved[field]
 
 
+def approval_lockdown_context(ctx: dict, schema: dict | None) -> dict:
+    """cmd_846(c): post-approval edit/delete/invalidate lockdown.
+
+    Locked values for the submit_on field: its own submit_on value
+    (submitted/pending review) and on_approved.set_fields' value for that
+    same field (approved) -- a non-terminal on_rejected/on_withdrawn value
+    is deliberately NOT locked (846b amendment: "non-terminal rejection/
+    withdrawal is not 'submitted after approval'", so the ordinary edit
+    path -- including editing status back to submit_on's value to
+    resubmit, #423/§16.4 -- must stay open in that state).
+
+    Gated the same way approval_edge_trigger_update_code above is gated
+    (has_approvable_bridge, read off ctx['one_to_one_rels'] which is
+    already resolved per-VIEW, not per-model) -- a proxy view sharing the
+    same Prisma model but not itself declaring the approvable one-to-one_
+    bridge relationship gets no guard, matching 846b §一 (never key
+    lockdown off Prisma model name) and the pre-existing cmd_534 escape-
+    hatch precedent for this exact class of proxy-view entity.
+
+    Returns {} (no guard files, no call sites wired) for any entity
+    without both an approvable bridge and a declared submit_on -- there is
+    no "submitted" state to lock against.
+    """
+    model  = ctx['model']
+    approvable_rel = next(
+        (r for r in ctx.get('one_to_one_rels', []) if r.get('target') == 'approvable'),
+        None,
+    )
+    if approvable_rel is None or not schema:
+        return {}
+    raw_def = _raw_def(model, schema)
+    lockdown_field, submit_on_value = resolve_approval_submit_on(raw_def)
+    if lockdown_field is None:
+        return {}
+    locked_values = [submit_on_value]
+    entity_props = raw_def.get('properties', {})
+    on_approved_sf = (raw_def.get('x-approval') or {}).get('on_approved', {}).get('set_fields') or {}
+    resolved_oa = resolve_set_fields(entity_props, on_approved_sf)
+    if lockdown_field in resolved_oa and resolved_oa[lockdown_field] not in locked_values:
+        locked_values.append(resolved_oa[lockdown_field])
+    locked_values_ts = '[' + ', '.join(_ts_literal(v) for v in locked_values) + ']'
+    return {
+        'lockdown_field': lockdown_field,
+        'lockdown_locked_values_ts': locked_values_ts,
+        'has_edit_guard': bool(ctx.get('can_update')),
+        'has_delete_guard': bool(ctx.get('can_delete')),
+        'has_invalidate_guard': bool(ctx.get('can_invalidate')),
+    }
+
+
 def _ts_literal(value: object) -> str:
     if isinstance(value, bool):
         return 'true' if value else 'false'
@@ -2740,6 +2790,11 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     has_assignee_id         = ctx.get('has_assignee_id', False)
     child_assignee_notify_create_code = ctx.get('child_assignee_notify_create_code', '')
     child_assignee_notify_update_code = ctx.get('child_assignee_notify_update_code', '')
+    # cmd_846(c): post-approval edit/delete lockdown -- see
+    # approval_lockdown_context(), already merged into ctx by generate.py.
+    has_edit_guard          = bool(ctx.get('has_edit_guard'))
+    has_delete_guard        = bool(ctx.get('has_delete_guard'))
+    lockdown_field          = ctx.get('lockdown_field')
     is_audited              = ctx.get('is_audited', False)
     should_filter_by_org    = bool(ctx.get('should_filter_by_org'))
     is_self_only            = bool(ctx.get('is_self_only'))
@@ -3199,6 +3254,8 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/getters_associated';" if should_filter_by_org and (can_create or can_update) else '')
         + (f"\nimport {{ AppError, p2002Field }} from '@/lib/_errors';" if can_create or can_update else '')
         + (f"\nimport {{ getModelPermissions }} from '@/lib/authz';" if server_value_override_fields and can_create else '')
+        + (f"\nimport {{ assertEditAllowed }} from './edit_guard';" if has_edit_guard else '')
+        + (f"\nimport {{ assertDeleteAllowed }} from './delete_guard';" if has_delete_guard else '')
         + insufficient_inventory_error_class
         # TransactionClient/normalizeSnapshot/getCurrentSnapshot exist solely
         # to support update{{parent}}'s assertNotStale staleness check —

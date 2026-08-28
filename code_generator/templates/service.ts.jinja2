@@ -162,6 +162,9 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
     // second findUnique for the same row would otherwise run twice in the
     // same transaction.
     const _prevRow = (await tx.{{ model }}.findUnique({ where: { id } })) as Record<string, unknown> | null;
+{% if has_edit_guard %}
+    assertEditAllowed(_prevRow as { {{ lockdown_field }}?: unknown } | null);
+{% endif %}
     await validateOnUpdate(tx, id, {
 {{ validation_data_obj }}
     }, _prevRow);
@@ -266,6 +269,12 @@ export async function delete{{ parent_pascal }}(actorId: string | null, ids: str
 {{ reservation_mutation_guard_delete }}
 {% endif %}
   await prisma.$transaction(async (tx) => {
+{% if has_delete_guard %}
+    const _deleteGuardRows = await tx.{{ model }}.findMany({ where: { id: { in: ids } }, select: { id: true, {{ lockdown_field }}: true } });
+    for (const _row of _deleteGuardRows) {
+      assertDeleteAllowed(_row);
+    }
+{% endif %}
 {% if bridge_cleanup_rels %}
     const _bridgeRows = await tx.{{ model }}.findMany({ where: { id: { in: ids } }, select: {{ bridge_pre_delete_select }} });
 {% endif %}
@@ -288,6 +297,12 @@ export async function delete{{ parent_pascal }}(actorId: string | null, ids: str
 export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
 {% if reservation_mutation_guard_delete %}
 {{ reservation_mutation_guard_delete }}
+{% endif %}
+{% if has_delete_guard %}
+  const _deleteGuardRows = await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: { id: true, {{ lockdown_field }}: true } });
+  for (const _row of _deleteGuardRows) {
+    assertDeleteAllowed(_row);
+  }
 {% endif %}
 {% if bridge_cleanup_rels %}
   const _bridgeRows = await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: {{ bridge_pre_delete_select }} });
