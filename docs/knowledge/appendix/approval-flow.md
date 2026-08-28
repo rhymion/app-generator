@@ -767,3 +767,62 @@ both entities. `app-template-4` and `insurance-app` declare no `submit_on` entit
 this writing, so the gate never activates for either — a vacuous pass, not evidence the gate was
 exercised there. Re-verify with the same method once the follow-up lands before treating that
 consumer schema as passing.
+
+### 16.14 Post-approval edit/delete/invalidate lockdown
+
+An approvable entity's `submit_on` field reaching its submitted or approved value (§16.4/§16.9)
+is treated as a locked state: further edits, deletes, or invalidations of that row are forbidden
+by default until a non-terminal rejection or withdrawal (`on_rejected`/`on_withdrawn.set_fields`,
+§16.11) moves the field away again. `approval_lockdown_context()` (`code_generator/generators.py`)
+computes the locked-value set — `[submit_on_value, on_approved.set_fields[lockdown_field]]` — and
+is gated identically to the edge trigger above: it requires both a `one_to_one_rels` bridge to
+`approvable` (`has_approvable_bridge`) and a declared `submit_on`, returning `{}` otherwise. Like
+the edge trigger, this is resolved **per view_key, not per Prisma model** — a proxy view sharing
+the same underlying model but not itself declaring the approvable bridge gets no guard (the same
+precedent used elsewhere in the generator for proxy views sharing a model).
+
+Three guard modules are generated per qualifying entity, one per declared capability
+(`can_update`/`can_delete`/`can_invalidate`):
+
+```typescript
+// lib/{entity}/edit_guard.ts — AUTO-GENERATED
+const LOCKED_STATUS_VALUES: unknown[] = ['pending', 'approved'];
+export function assertEditAllowed(entity: { status?: unknown } | null | undefined): void {
+  if (!entity) return;
+  if (LOCKED_STATUS_VALUES.includes(entity.status)) {
+    throw new AppError('PERMISSION_DENIED', 'edit_forbidden:approval_locked');
+  }
+}
+```
+
+`delete_guard.ts`/`assertDeleteAllowed` and `invalidate_guard.ts`/`assertInvalidateAllowed` are
+identical apart from the error code. All three throw `AppError('PERMISSION_DENIED', ...)`, which
+the route layer surfaces as HTTP 403.
+
+**Insertion point depends on whether the entry points converge.** edit/delete are called from
+both the REST route (`app/api/{entity}/[id]/route.ts` PUT/DELETE) and the Server Action
+(`actions.ts`'s `upsert{Parent}`/`remove{Parent}`) — but both of those already funnel through
+`lib/{entity}/service.ts`'s `update{Parent}`/`delete{Parent}`, so the guard call is inserted there
+once, not duplicated at each entry point. invalidate has no such choke point: the REST route
+(`invalidate_action_route.ts.jinja2`) and the Server Action's `invalidate{Parent}` each call
+`lib/{entity}/invalidate_handler.ts` directly, so `assertInvalidateAllowed` is inserted at both
+entry points individually — the same shape as the pre-existing `assertApprovalOrder` call sites
+for approve/reject.
+
+**Design lesson (corrects an earlier premise)**: this mechanism was originally specified as
+inserting the guard "in the generated route.ts PATCH handler" for all three operations. That is
+only correct when a service-layer choke point actually exists — true for edit/delete, false for
+invalidate. A design that names one fixed insertion point without first checking, for each
+operation, whether its entry points converge risks leaving a parallel entry point (here, the
+Server Action path any UI form actually submits through) unguarded. The rule going forward:
+**check whether a confluence point (a shared service-layer function) exists before deciding the
+insertion point** — insert once at the confluence point if one exists, otherwise insert
+individually at every entry point.
+
+**Naming note**: this generator's own dogfood schema (`code_generator/json_schema.yaml`) now
+declares an entity named `approval_edit_terminal_test` for this lockdown's own fixture coverage.
+This is a **different entity** from the identically-named `approval_edit_terminal_test` that
+`app-template` declares in its own schema — a permanent regression fixture predating this
+section — the two live in separate repos and separate schema files, and share a name by
+coincidence of both being "the terminal-editable x-approval test fixture" for their respective
+codebases. Do not confuse one for the other when reading reports or grepping across repos.
