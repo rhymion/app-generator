@@ -30,7 +30,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `convert_to_user_schema.py`'s entity-level key passthrough allowlist
   gained the new key (a gap the design missed and the generate-code
   fixture gate caught empirically — the key was silently dropped at Stage
-  4 without it).
+  4 without it). See
+  `docs/knowledge/x-write-locked-values-field-lockdown.md` for the full
+  mechanism writeup, including the no-op-resubmission rule and the direct-
+  transaction escape hatch used to legitimately write a locked value.
 - **`validateCustomRules()` (`lib/{entity}/service_validation_custom.ts`)
   now receives the row as it stood immediately before the write, not just
   the values being submitted.** A hand-written rule can now reject a save

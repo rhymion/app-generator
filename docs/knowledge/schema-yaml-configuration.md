@@ -575,6 +575,11 @@ nativeEnum for new fields: reordering or inserting a label in the middle of a le
 list silently reassigns every existing row's stored index to a different label, which a
 nativeEnum's named Postgres values cannot do.
 
+A specific enum value can be declared system-write-only — blocked from a plain create/update
+across screen, Server Action, REST API, and CSV import, but still writable via a direct
+transaction call — with the entity-level `x-write-locked-values` key; see
+`docs/knowledge/x-write-locked-values-field-lockdown.md`.
+
 ### 4.4 The `id` field
 
 Every entity automatically gets an `id` property (`properties["id"] = {"type": "string",
