@@ -41,6 +41,7 @@
     "unknown": "予期しないエラーが発生しました。もう一度お試しください。"
   },
   "EntityLabel": {
+    "approvalEditTerminalTest": "Approval Edit Terminal Test",
     "approvalFlow": "承認フロー",
     "auditLog": "監査ログ",
     "dashboard": "ダッシュボード",
@@ -136,6 +137,7 @@
     "searchAriaLabel": "検索"
   },
   "Nav": {
+    "approvalEditTerminalTest": "Approval Edit Terminal Test",
     "approvalFlow": "承認フロー",
     "auditLog": "監査ログ",
     "dashboard": "ダッシュボード",
@@ -267,5 +269,11 @@
     "quarter": "四半期",
     "week": "週",
     "year": "年"
+  },
+  "ApprovalEditTerminalTestStatus": {
+    "approved": "Approved",
+    "draft": "Draft",
+    "pending": "Pending",
+    "rejected": "Rejected"
   }
 }

@@ -379,6 +379,13 @@ definitions:
           - approved
           - rejected
           - terminal_rejected
+          - withdrawn
+      # cmd_844 added this column to prisma/schema.prisma (one round_id per
+      # submission) but never declared it here -- ApprovalSection.tsx's
+      # client-side round-splitting (splitRounds()) needs it on every
+      # approval_request row it receives. Never surfaced until cmd_846(c)
+      # became the first dogfood entity to actually mount ApprovalSection.
+      round_id: {}
 
   comment:
     fields:
@@ -485,4 +492,83 @@ definitions:
         type: array
         items:
           $ref: "#/definitions/dashboard_widget"
+
+  # cmd_846(c): dogfood fixture entity for the post-approval edit/delete/
+  # invalidate lockdown feature. This repo's own json_schema.yaml declared
+  # zero x-approval entities before this addition, so mandatory gate step
+  # 16 (test:e2e:cy:api) never exercised any x-approval codepath -- this
+  # entity closes that gap and provides real runtime 403/200 proof for
+  # assertEditAllowed/assertDeleteAllowed/assertInvalidateAllowed, not just
+  # a tsc-level type check. See docs/knowledge/appendix/approval-flow.md.
+  approval_edit_terminal_test:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: true
+      api: true
+      test: true
+      search: false
+    x-approval:
+      submit_on:
+        status: pending
+      on_approved:
+        set_fields:
+          status: approved
+      on_rejected:
+        set_fields:
+          status: rejected
+        terminal: false
+      on_withdrawn:
+        set_fields:
+          status: draft
+    x-custom-components:
+      - name: ApprovalSection
+        path: "@/components/_standard/ApprovalSection"
+        target:
+          - view
+          - edit
+    x-import-key: [title]
+    x-display:
+      table:
+        - title:
+            primary: true
+            width: 200
+        - status:
+            width: 120
+    fields:
+      title: {}
+      status:
+        enum:
+          - draft
+          - pending
+          - approved
+          - rejected
+        # cmd_846(c): 'draft' (NOT submit_on's own value) -- keeping a
+        # freshly-created record unlocked-by-default is what basic CRUD
+        # test scenarios (3.x/5.x/9.x/10.x -- "create then edit/delete a
+        # record") already assume for every entity, approvable or not.
+        # 11.1/11.2 (the approval-request-creation scenarios) instead
+        # explicitly set status to submit_on's value in their own POST
+        # body (post_body_create_at_submit_on in generators_test.py) --
+        # see that context var's docstring for why relying on the schema
+        # default to coincide with submit_on's value is the wrong fix
+        # (it was tried and reverted here after breaking the generic CRUD
+        # scenarios for this, the first entity to combine submit_on with
+        # edit/delete/invalidate lockdown).
+        default: draft
+      approvable_id:
+        type: string
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          type: one-to-one_bridge
+          target: approvable
+          labelField: id
+    required:
+      - approvable
+    properties:
+      approvable:
+        $ref: "#/definitions/approvable"
 

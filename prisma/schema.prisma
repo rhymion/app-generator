@@ -108,6 +108,8 @@ model user {
   created_approvables       approvable[]        @relation("ApprovableCreator")
   created_dashboards        dashboard[]         @relation("DashboardCreator")
   updated_dashboards        dashboard[]         @relation("DashboardUpdater")
+  created_approval_edit_terminal_tests approval_edit_terminal_test[] @relation("ApprovalEditTerminalTestCreator")
+  updated_approval_edit_terminal_tests approval_edit_terminal_test[] @relation("ApprovalEditTerminalTestUpdater")
   created_tenants           tenant[]            @relation("TenantCreator")
   updated_tenants           tenant[]            @relation("TenantUpdater")
   audit_logs                audit_log[]
@@ -185,6 +187,7 @@ model approvable {
   approval_requests approval_request[]
   approved_at       DateTime?          @db.Timestamptz(0)
   rejection_reason  String?
+  approval_edit_terminal_test approval_edit_terminal_test?
 
   @@index([creator_id])
 }
@@ -258,6 +261,35 @@ model approval_history {
   creator          user @relation("ApprovalHistoryCreator", fields: [creator_id], references: [id])
   @@index([creator_id])
   @@index([approval_request_id])
+}
+
+// cmd_846(c): dogfood fixture entity for the post-approval edit/delete/
+// invalidate lockdown feature -- see code_generator/json_schema.yaml's
+// approval_edit_terminal_test entity and docs/knowledge/appendix/
+// approval-flow.md.
+enum ApprovalEditTerminalTestStatus {
+  draft
+  pending
+  approved
+  rejected
+}
+
+model approval_edit_terminal_test {
+  id             String   @id @default(cuid())
+  title          String
+  status         ApprovalEditTerminalTestStatus @default(draft)
+  approvable_id  String   @unique
+  approvable     approvable @relation(fields: [approvable_id], references: [id])
+  invalidated_at DateTime?
+  created_at     DateTime @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user     @relation("ApprovalEditTerminalTestCreator", fields: [creator_id], references: [id])
+  updater_id     String
+  updater        user     @relation("ApprovalEditTerminalTestUpdater", fields: [updater_id], references: [id])
+
+  @@index([creator_id])
+  @@index([updater_id])
 }
 
 model commentable {

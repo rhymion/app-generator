@@ -41,6 +41,7 @@
     "unknown": "An unexpected error occurred. Please try again."
   },
   "EntityLabel": {
+    "approvalEditTerminalTest": "Approval Edit Terminal Test",
     "approvalFlow": "Approval Flow",
     "auditLog": "Audit Log",
     "dashboard": "Dashboard",
@@ -136,6 +137,7 @@
     "searchAriaLabel": "Search"
   },
   "Nav": {
+    "approvalEditTerminalTest": "Approval Edit Terminal Test",
     "approvalFlow": "Approval Flow",
     "auditLog": "Audit Log",
     "dashboard": "Dashboard",
@@ -267,5 +269,11 @@
     "quarter": "Quarter",
     "week": "Week",
     "year": "Year"
+  },
+  "ApprovalEditTerminalTestStatus": {
+    "approved": "Approved",
+    "draft": "Draft",
+    "pending": "Pending",
+    "rejected": "Rejected"
   }
 }

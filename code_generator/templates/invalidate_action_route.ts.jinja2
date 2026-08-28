@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
+{% if has_invalidate_guard %}
+import prisma from '@/lib/prisma';
+import { assertInvalidateAllowed } from '@/lib/{{ parent }}/invalidate_guard';
+{% endif %}
 {% if invalidate_module %}
 import { {{ invalidate_handler }} } from '@/{{ invalidate_module }}';
 {% else %}
@@ -18,6 +22,11 @@ export async function POST(
     const { userId } = await authenticateApiKey(request);
 
     await requireApiPermission(userId, '{{ parent }}', 'delete');
+
+    {% if has_invalidate_guard %}
+    const _invalidateGuardRow = await prisma.{{ model }}.findUnique({ where: { id }, select: { {{ lockdown_field }}: true } });
+    assertInvalidateAllowed(_invalidateGuardRow);
+    {% endif %}
 
     {% if invalidate_module %}
     const result = await {{ invalidate_handler }}(id);

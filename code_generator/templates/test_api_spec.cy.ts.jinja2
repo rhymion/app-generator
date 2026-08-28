@@ -855,6 +855,16 @@ describe('API: {{ title }}', () => {
   // Approval operations
   // -------------------------------------------------------------------------
 
+  // cmd_846(c): 11.1/11.2's POST body now explicitly includes
+  // {{ resubmit_target_field or 'the submit_on field' }} at submit_on's
+  // own value when submit_on is declared -- relying on the schema
+  // default to coincide with it (tried first, reverted) breaks basic
+  // CRUD scenarios elsewhere in this same spec for any entity whose
+  // default is deliberately NOT the locked/submitted value (e.g. a
+  // 'draft' default kept so a freshly-created record stays editable for
+  // 3.x/5.x/9.x/10.x). Entities with no submit_on declared (the create-
+  // fires-unconditionally default behavior, §16.4) are unaffected --
+  // resubmit_target_field is None there, so nothing is added.
   describe('Approval request creation (POST {{ api_path }})', () => {
     it('11.1 creates approval requests for user in requestor role', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
@@ -869,6 +879,9 @@ describe('API: {{ title }}', () => {
 {% for ln in post_body_create %}
 {{ ln }}
 {% endfor %}
+{% if resubmit_target_field %}
+{{ I }}    {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+{% endif %}
 {{ I }}  },
 {{ I }}}).then((res) => {
 {{ I }}  expect(res.status).to.eq(201);
@@ -896,6 +909,9 @@ describe('API: {{ title }}', () => {
 {% for ln in post_body_create %}
 {{ ln }}
 {% endfor %}
+{% if resubmit_target_field %}
+{{ I }}    {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+{% endif %}
 {{ I }}  },
 {{ I }}}).then((res) => {
 {{ I }}  expect(res.status).to.eq(201);
@@ -1227,7 +1243,18 @@ describe('API: {{ title }}', () => {
 {% endif %}
 {% endif %}
 {% if can_edit and put_body_resubmit %}
-    it('14.3 editing {{ resubmit_target_field }} back to its open value after approval does not create a new approval_request', () => {
+    // cmd_846: editing {{ resubmit_target_field }} back to its open value
+    // used to be THE resubmission mechanism (cmd_824) -- it is now exactly
+    // what post-approval edit lockdown (assertEditAllowed, wired into
+    // service.ts's update{{ pascal }} -- the choke point both this REST
+    // route and the Server Action funnel through) forbids while the
+    // record sits at an approved/submitted status. The old "PUT succeeds,
+    // no new approval_request" assertion this scenario originally checked
+    // is retired along with that mechanism -- resubmission after approval
+    // is no longer reachable via ordinary edit at all (14.4/14.5 cover the
+    // actual reachable path: withdraw/reject first, THEN edit, once the
+    // record has left the locked state).
+    it('14.3 editing {{ resubmit_target_field }} back to its open value while approved is forbidden by post-approval edit lockdown', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithApproval', {
           creatorId: setup.requestorUser.id,
@@ -1249,8 +1276,10 @@ describe('API: {{ title }}', () => {
 {% endfor %}
                 {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
               },
+              failOnStatusCode: false,
             }).then((res) => {
-              expect(res.status).to.eq(200);
+              expect(res.status).to.eq(403);
+              expect(res.body.error).to.eq('edit_forbidden:approval_locked');
               cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
                 .then((getRes) => {
                   const requests = getRes.body.approvable.approval_requests;
@@ -1262,6 +1291,106 @@ describe('API: {{ title }}', () => {
         });
       });
     });
+{% if can_delete and put_body_resubmit %}
+
+    // cmd_846: the same lockdown as 14.3, for DELETE (assertDeleteAllowed,
+    // wired into service.ts's delete{{ pascal }} -- the same choke point
+    // both the REST DELETE route and the remove{{ pascal }} Server Action
+    // funnel through).
+    it('14.3D deleting the record while approved is forbidden by post-approval delete lockdown', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/approve`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
+          }).then(() => {
+            cy.request({
+              method: 'DELETE',
+              url: `{{ api_path }}/${data.record.id}`,
+              headers: { 'X-API-Key': TEST_API_KEY },
+              failOnStatusCode: false,
+            }).then((res) => {
+              expect(res.status).to.eq(403);
+              expect(res.body.error).to.eq('delete_forbidden:approval_locked');
+              cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+                .then((getRes) => {
+                  expect(getRes.status).to.eq(200);
+                });
+            });
+          });
+        });
+      });
+    });
+{% endif %}
+{% if can_invalidate and put_body_resubmit %}
+
+    // cmd_846: the same lockdown as 14.3, for invalidate
+    // (assertInvalidateAllowed, wired into BOTH the REST invalidate route
+    // and the invalidate{{ pascal }} Server Action -- there is no single
+    // service.ts choke point for invalidate the way edit/delete have, so
+    // both entry points call the guard independently).
+    it('14.3N invalidating the record while approved is forbidden by post-approval invalidate lockdown', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/approve`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
+          }).then(() => {
+            cy.request({
+              method: 'POST',
+              url: `{{ api_path }}/${data.record.id}/actions/invalidate`,
+              headers: { 'X-API-Key': TEST_API_KEY },
+              failOnStatusCode: false,
+            }).then((res) => {
+              expect(res.status).to.eq(403);
+              expect(res.body.error).to.eq('invalidate_forbidden:approval_locked');
+            });
+          });
+        });
+      });
+    });
+{% if on_withdrawn_value_literal %}
+
+    it('14.4N withdrawing a pending request then invalidating the record succeeds once it is no longer locked', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/withdraw`,
+            headers: { 'X-API-Key': setup.requestorUser.api_key },
+          }).then((withdrawRes) => {
+            expect(withdrawRes.status).to.eq(200);
+            cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+              .then((getRes) => {
+                expect(getRes.body.{{ resubmit_target_field }}).to.eq({{ on_withdrawn_value_literal }});
+                cy.request({
+                  method: 'POST',
+                  url: `{{ api_path }}/${data.record.id}/actions/invalidate`,
+                  headers: { 'X-API-Key': TEST_API_KEY },
+                }).then((res) => {
+                  expect(res.status).to.eq(200);
+                });
+              });
+          });
+        });
+      });
+    });
+{% endif %}
+{% endif %}
 
 {% if on_withdrawn_value_literal %}
     it('14.4 withdrawing a pending request automatically sets {{ resubmit_target_field }} to its on_withdrawn value, then editing back to its open value creates a new pending approval_request', () => {

@@ -3263,6 +3263,25 @@ def spec_context(
     }
     required_fill_cmds = gen_fill_commands(required_field_metas, title, I, fk_dep_vars, dep_search_info)
     all_fill_cmds = gen_fill_commands(fields, title, I, fk_dep_vars, dep_search_info)
+    # cmd_846(c): 7.1/7.2 create a record via the UI form and expect the
+    # create-time edge trigger to have fired (approval_request rows to
+    # exist) -- true only if the record actually reaches submit_on's
+    # value. required_fill_cmds alone does not guarantee that (the status
+    # field may have a default distinct from submit_on's value, same gap
+    # 11.1/11.2 had on the API-spec side -- see test_api_spec.cy.ts.jinja2).
+    # Only emitted (non-empty) when the submit_on field is itself editable
+    # in the form and not already covered by required_fill_cmds.
+    approval_submit_fill_cmd = ''
+    if any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model_name, schema)):
+        _spec_submit_on_field, _spec_submit_on_value = resolve_approval_submit_on(parent_def)
+        if _spec_submit_on_field and _spec_submit_on_field not in required_fields:
+            _submit_on_field_meta = next(
+                (f for f in fields if f['prop_name'] == _spec_submit_on_field and not f.get('readonly')), None,
+            )
+            if _submit_on_field_meta is not None:
+                approval_submit_fill_cmd = gen_fill_command(
+                    _submit_on_field_meta, _enum_label(_submit_on_field_meta, _spec_submit_on_value), I,
+                )
     required_assert_cmds_no_bool = gen_assert_commands(
         [f for f in required_field_metas if f['category'] != 'boolean'], title, I, fk_dep_vars,
         flatten_m2o_props=flatten_m2o_props_view, schema=schema)
@@ -3880,6 +3899,7 @@ def spec_context(
         ),
         'I': I,
         'required_fill_cmds': required_fill_cmds,
+        'approval_submit_fill_cmd': approval_submit_fill_cmd,
         'all_fill_cmds': all_fill_cmds,
         'required_assert_cmds_no_bool': required_assert_cmds_no_bool,
         'all_assert_cmds_no_bool': all_assert_cmds_no_bool,
@@ -4798,6 +4818,17 @@ def api_spec_context(
         'can_new': gen_cfg.get('new', True) is not False,
         'can_edit': gen_cfg.get('edit', True) is not False,
         'can_delete': gen_cfg.get('delete', True) is not False,
+        # cmd_846(c): added for the 14.3N/14.4N invalidate-lockdown
+        # scenarios -- this context builder never needed can_invalidate
+        # before (no invalidate API test scenario existed in this
+        # template until those two were added). Same bool-or-dict
+        # resolution build_context.py uses for the same x-generate.invalidate
+        # value.
+        'can_invalidate': bool(
+            (gen_cfg.get('invalidate') or {}).get('enabled', False)
+            if isinstance(gen_cfg.get('invalidate'), dict)
+            else gen_cfg.get('invalidate', False)
+        ),
         'can_export': gen_cfg.get('export', True) is not False,   # cmd_330
         'seed_count': seed_count,
         'I': I,

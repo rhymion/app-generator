@@ -6,6 +6,7 @@
 // NOT scripts/seed-baseline.ts, which keeps its own fixed enumeration
 // unchanged (see docs/knowledge/seed-baseline-credential-hardening.md).
 export const SEED_ENTITIES: string[] = [
+  'approval_edit_terminal_test',
   'approval_flow',
   'approval_request',
   'attachment',
