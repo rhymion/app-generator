@@ -35,19 +35,19 @@ const ONE_TO_ONE_RELATIONS: OneToOneRelation[] = [
   { key: '{{ check.key }}', label: '{{ check.label }}', target: '{{ check.target }}', required: {{ 'true' if check.required else 'false' }} },
 {% endfor %}
 ] ;
-{% if approval_locked_fields %}
+{% if write_locked_fields %}
 
-// Approval-locked values: values a field may only receive through the
-// approval/rejection workflow (derived from that entity's x-approval
-// on_approved/on_rejected set_fields). A plain create/update attempting to
-// write one of these values is rejected here -- the workflow itself never
-// reaches this check, since it writes via a direct transaction call, not
+// Write-locked values: values a field may only receive through the system
+// (derived from that entity's x-approval on_approved/on_rejected
+// set_fields and/or its x-write-locked-values declarations). A plain
+// create/update attempting to write one of these values is rejected here
+// -- system writers reach this data via a direct transaction call, not
 // this service layer.
-type ApprovalLockedField = { key: string; values: unknown[] };
+type WriteLockedField = { key: string; values: unknown[] };
 
-const APPROVAL_LOCKED_FIELDS: ApprovalLockedField[] = [
-{% for field in approval_locked_fields %}
-  { key: '{{ field }}', values: {{ approval_locked_values[field] | tojson }} },
+const WRITE_LOCKED_FIELDS: WriteLockedField[] = [
+{% for field in write_locked_fields %}
+  { key: '{{ field }}', values: {{ write_locked_values[field] | tojson }} },
 {% endfor %}
 ] ;
 {% endif %}
@@ -128,11 +128,11 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
       throw new AppError('CONFLICT', `${relation.label} is already linked`, relation.key);
     }
   }
-{% if approval_locked_fields %}
+{% if write_locked_fields %}
 
   {
     let currentRow: Record<string, unknown> | null = null;
-    for (const field of APPROVAL_LOCKED_FIELDS) {
+    for (const field of WRITE_LOCKED_FIELDS) {
       if (!(field.key in data)) continue;
       const submitted = data[field.key];
       if (!field.values.includes(submitted)) continue;
@@ -140,17 +140,16 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
         if (currentRow === null) {
           currentRow = (await tx.{{ model }}.findUnique({
             where: { id: currentId },
-            select: {{ approval_locked_values_select }},
+            select: {{ write_locked_values_select }},
           })) as Record<string, unknown> | null;
         }
         // No-op resubmission of the value the row already holds is not a
-        // lockdown violation -- it's the same value the approval/rejection
-        // workflow already wrote.
+        // lockdown violation -- it was already written by a prior operation.
         if (currentRow && currentRow[field.key] === submitted) continue;
       }
       throw new AppError(
         'VALIDATION',
-        `${field.key} cannot be set to this value directly -- it is set by the approval/rejection workflow`,
+        `${field.key} cannot be set to this value directly -- it is managed by the system`,
         field.key,
         'invalid',
       );

@@ -4232,13 +4232,13 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # create via native "please fill out this field" validation since the field is never
     # user-fillable per x-readonly's documented contract).
     readonly_field_names: set[str] = set(ctx.get('readonly_fields') or [])
-    # Value-level lockdown (x-approval entities): per field, the values only
-    # the approval/rejection mechanism may write. Used below to render the
-    # approval-only options as present-but-disabled in enum selects, so an
-    # already-approved/rejected record's current value still displays
-    # instead of the field going blank, while ordinary create/edit can never
-    # newly select it.
-    approval_locked_values: dict = ctx.get('approval_locked_values') or {}
+    # Value-level lockdown: per field, the values only the system may
+    # write (x-approval set_fields and/or x-write-locked-values union).
+    # Used below to render the locked options as present-but-disabled in
+    # enum selects, so a record's current value still displays instead of
+    # the field going blank, while ordinary create/edit can never newly
+    # select it.
+    write_locked_values: dict = ctx.get('write_locked_values') or {}
 
     parent_rels_raw = [
         r for r in parent_rels_raw
@@ -4732,7 +4732,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         # even when the schema doesn't list it (cmd_472/R-2; see
         # validation_context._is_select_like).
         req       = p in (model_def.get('required') or []) or not _is_nullable(prop)
-        _locked_vals = set(approval_locked_values.get(p) or [])
+        _locked_vals = set(write_locked_values.get(p) or [])
 
         if ns and ns not in enum_ns_set:
             enum_ns_set.add(ns)
@@ -4781,7 +4781,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         # keeps it out of json_schema `required:`.
         req       = p in (model_def.get('required') or []) or not _is_nullable(prop)
         native_ns = _native_enum_ns(prop)
-        _locked_vals = set(approval_locked_values.get(p) or [])
+        _locked_vals = set(write_locked_values.get(p) or [])
 
         if native_ns:
             if native_ns not in enum_ns_set:

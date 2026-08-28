@@ -29,12 +29,21 @@ enum ApprovalLockdownGateItemStatus {
   rejected
 }
 
+enum WriteLockdownGateItemStatus {
+  draft
+  submitted
+  in_underwriting
+  issued
+}
+
 model user {
   id      String @id @default(cuid())
   name    String
   email   String @unique
   created_items approval_lockdown_gate_item[] @relation("ApprovalLockdownGateItemCreator")
   updated_items approval_lockdown_gate_item[] @relation("ApprovalLockdownGateItemUpdater")
+  created_write_lockdown_items write_lockdown_gate_item[] @relation("WriteLockdownGateItemCreator")
+  updated_write_lockdown_items write_lockdown_gate_item[] @relation("WriteLockdownGateItemUpdater")
 }
 
 // The one entity this fixture exists for: a nativeEnum status field with
@@ -50,6 +59,23 @@ model approval_lockdown_gate_item {
   creator    user                            @relation("ApprovalLockdownGateItemCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user                            @relation("ApprovalLockdownGateItemUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// cmd_857: an entity with x-write-locked-values declared and NO x-approval
+// block at all, proving the lockdown mechanism works independently of the
+// approval workflow.
+model write_lockdown_gate_item {
+  id         String                        @id @default(cuid())
+  name       String
+  status     WriteLockdownGateItemStatus  @default(draft)
+  created_at DateTime                      @default(now()) @db.Timestamptz(0)
+  updated_at DateTime                      @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user                          @relation("WriteLockdownGateItemCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user                          @relation("WriteLockdownGateItemUpdater", fields: [updater_id], references: [id])
   @@index([creator_id])
   @@index([updater_id])
 }

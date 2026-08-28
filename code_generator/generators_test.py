@@ -137,7 +137,7 @@ from helpers.schema_helpers import (
     get_entity_properties,
     get_entity_required,
     get_self_only_flags,
-    derive_approval_locked_values,
+    derive_write_locked_values,
     is_write_only_prop,
     resolve_set_fields,
 )
@@ -1505,18 +1505,18 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
     return ''  # autocomplete
 
 
-def cypress_edit_value(field: dict, entity_title: str, approval_locked_values: dict | None = None) -> str:
+def cypress_edit_value(field: dict, entity_title: str, write_locked_values: dict | None = None) -> str:
     """Generate a Cypress edit (updated) value.
 
-    approval_locked_values (field -> locked values, from
-    derive_approval_locked_values): an enum/string_enum field's edit value
-    must never be picked from this set. Those values are approval/
-    rejection-workflow-only; a generated spec that wrote one directly would
-    fabricate an approved/rejected record the workflow never produced.
+    write_locked_values (field -> locked values, from
+    derive_write_locked_values): an enum/string_enum field's edit value
+    must never be picked from this set. Those values are system-only
+    (x-approval and/or x-write-locked-values); a generated spec that wrote
+    one directly would fabricate a state the workflow never produced.
     """
     cat = field['category']
     prop_name = field['prop_name']
-    _locked = set((approval_locked_values or {}).get(prop_name) or [])
+    _locked = set((write_locked_values or {}).get(prop_name) or [])
 
     if cat == 'text':
         if field.get('format') == 'uri':
@@ -3082,7 +3082,7 @@ def spec_context(
     if not parent_def or not parent_def.get('properties'):
         return {}
 
-    _approval_locked_values = derive_approval_locked_values(parent_def)
+    _write_locked_values = derive_write_locked_values(parent_def)
 
     title = to_title_case(parent)
     pascal = to_pascal_case(parent)
@@ -3416,8 +3416,8 @@ def spec_context(
             # Approval-locked values (workflow-only) are never picked as a
             # generated test's create/edit value -- neither by direct value
             # match nor by ordinal position (unlabeled int-enum resolves a
-            # set_fields label to its index; see derive_approval_locked_values).
-            _prim_locked = set(_approval_locked_values.get(prim_prop) or [])
+            # set_fields label to its index; see derive_write_locked_values).
+            _prim_locked = set(_write_locked_values.get(prim_prop) or [])
             _prim_unlocked_idx = [
                 i for i, v in enumerate(_raw_enum_values)
                 if i not in _prim_locked and v not in _prim_locked
@@ -3455,7 +3455,7 @@ def spec_context(
             after_create_id = list_id_1
             after_create_id_is_expr = False
             primary_dep_var_for_list = None
-            list_id_updated = cypress_edit_value(prim_meta, title, _approval_locked_values) or list_id_1
+            list_id_updated = cypress_edit_value(prim_meta, title, _write_locked_values) or list_id_1
             has_edit_primary = True
             edit_field_label = lbl
             edit_update_value = list_id_updated
@@ -3767,7 +3767,7 @@ def spec_context(
         )
         if first_opt is not None:
             edit_fill_cmd_3_3 = gen_fill_command(
-                first_opt, cypress_edit_value(first_opt, title, _approval_locked_values), '        ',
+                first_opt, cypress_edit_value(first_opt, title, _write_locked_values), '        ',
             )
 
     # Section 5.1: fill all required fields except one

@@ -111,6 +111,7 @@ _ENTITY_LEVEL_DATA_KEYS = (
     "x-internal",
     "x-approval",
     "x-approval-lines",
+    "x-write-locked-values",
     "x-ledger-source",
     "x-splittable",
     "x-reservation",
