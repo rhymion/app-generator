@@ -379,6 +379,8 @@ definitions:
           - approved
           - rejected
           - terminal_rejected
+          - withdrawn
+      round_id: {}
 
   comment:
     fields:

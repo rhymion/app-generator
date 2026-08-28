@@ -1228,10 +1228,10 @@ def actions_context(ctx: dict) -> dict:
 # service.ts
 # ---------------------------------------------------------------------------
 
-def _build_reservation_mutation_guard_update(rc: dict, model: str) -> str:
+def _build_reservation_mutation_guard_update(rc: dict, model: str, schema: dict | None = None) -> str:
     """Generate TypeScript update guard that rejects criteria changes after allocation."""
     if rc.get('transaction_strategy') == 'ledger_transaction':
-        return _build_reservation_mutation_guard_update_ledger(rc, model)
+        return _build_reservation_mutation_guard_update_ledger(rc, model, schema)
     res          = rc.get('result') or {}
     alloc_entity = res.get('allocationEntity') or ''
     parent_field = res.get('parentField') or f'{model}_id'
@@ -1331,7 +1331,9 @@ def _reservation_self_case_has_approvable_bridge(rc: dict, model: str, schema: d
     return rel.get('type') == 'one-to-one_bridge' and rel.get('target') == 'approvable'
 
 
-def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict | None = None) -> str:
+def _build_ledger_reservation_allocation_code(
+    rc: dict, model: str, schema: dict | None = None, row_var: str = 'created',
+) -> str:
     """Generate the TypeScript reserve phase for strategy: ledger_transaction.
 
     No allocationEntity: each pool claim is written as an inventory_transaction
@@ -1374,6 +1376,12 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
     entity that has x-reservation's self case without an x-approval
     one-to-one_bridge of its own — in which case no afterCreate logic will
     ever run for it, so this function is the only place notify can happen.
+
+    cmd_847: row_var names the in-scope entity-row variable holding the id
+    (and, self-case only, the request fields) this allocation reads/writes
+    against. Defaults to 'created' (the create-path call site); the
+    submit-time call site (has_reservation AND has_submit_on) passes
+    'updated' or another row variable already in scope at its edge trigger.
     """
     pool           = rc.get('pool') or {}
     req            = rc.get('request') or {}
@@ -1446,7 +1454,7 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
     # unexercised by any schema entity — see this function's docstring —
     # so this `_line` reference had never been generated for real and the
     # bug was latent).
-    _criteria_source = '_line' if lines_entity else '(created as Record<string, unknown>)'
+    _criteria_source = '_line' if lines_entity else f'({row_var} as Record<string, unknown>)'
     _criteria_cast   = '' if lines_entity else ' as string'
     criteria_lines = [f'          {k}: {_criteria_source}.{v}{_criteria_cast},' for k, v in criteria.items()]
     criteria_str   = '\n'.join(criteria_lines) if criteria_lines else ''
@@ -1514,7 +1522,7 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
             tx_var='tx',
             indent='      ',
             target_entity_name=entity_name,
-            target_id_expr='created.id',
+            target_id_expr=f'{row_var}.id',
         )
         + "\n"
     )
@@ -1544,10 +1552,10 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
             return (
                 header_comment +
                 f"    {{\n"
-                f"      let _remaining = (created as Record<string, unknown>).{self_qty_field} as number;\n"
+                f"      let _remaining = ({row_var} as Record<string, unknown>).{self_qty_field} as number;\n"
                 + claim_body +
                 f"      await tx.{model}.update({{\n"
-                f"        where: {{ id: created.id }},\n"
+                f"        where: {{ id: {row_var}.id }},\n"
                 f"        data: {{\n"
                 f"          {line_txable_f}: bridge.id,\n"
                 f"        }},\n"
@@ -1557,10 +1565,10 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
         return (
             header_comment + approval_lookup_header +
             f"    {{\n"
-            f"      let _remaining = (created as Record<string, unknown>).{self_qty_field} as number;\n"
+            f"      let _remaining = ({row_var} as Record<string, unknown>).{self_qty_field} as number;\n"
             + claim_body + approval_body +
             f"      await tx.{model}.update({{\n"
-            f"        where: {{ id: created.id }},\n"
+            f"        where: {{ id: {row_var}.id }},\n"
             f"        data: {{\n"
             f"          {line_txable_f}: bridge.id,\n"
             f"          approvable_id: approvable.id,\n"
@@ -1576,7 +1584,7 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
     return (
         header_comment +
         f"    const _reservationLines = await tx.{lines_entity}.findMany({{\n"
-        f"      where: {{ {model}_id: created.id }},\n"
+        f"      where: {{ {model}_id: {row_var}.id }},\n"
         f"    }});\n"
         f"    for (const _line of _reservationLines) {{\n"
         f"      let _remaining = (_line as Record<string, unknown>).{req_qty_field} as number;\n"
@@ -1591,10 +1599,19 @@ def _build_ledger_reservation_allocation_code(rc: dict, model: str, schema: dict
     )
 
 
-def _build_reservation_mutation_guard_update_ledger(rc: dict, model: str) -> str:
+def _build_reservation_mutation_guard_update_ledger(rc: dict, model: str, schema: dict | None = None) -> str:
     """Mutation guard for strategy: ledger_transaction (no allocationEntity).
 
     A line counts as "allocated" once it has a non-null lineTransactionableField.
+
+    cmd_847 [丁]: when the lines_entity itself declares x-approval (e.g.
+    purchase_order.items -> purchase_per_item -- see get_approval_lines_props),
+    delegates to _build_reservation_guard_and_resubmit_approval_lines instead
+    of the bulk "any line allocated -> block every structural change" check
+    below -- see that function's docstring for the per-line/resubmission
+    design. schema is required for that path (resolves x-ledger-entities and
+    checks the lines_entity's own x-approval declaration); the plain
+    (non-approval-lines) lines case below is unaffected either way.
     """
     res            = rc.get('result') or {}
     line_txable_f  = res.get('lineTransactionableField')
@@ -1625,6 +1642,13 @@ def _build_reservation_mutation_guard_update_ledger(rc: dict, model: str) -> str
     check_parts = [f'ex.{f} !== incoming.{f}' for f in select_fields_set]
     criteria_check = ' || '.join(check_parts)
 
+    _lines_entity_has_approval = bool(_raw_def(lines_entity, schema or {}).get('x-approval'))
+    if lines_entity and _lines_entity_has_approval:
+        return _build_reservation_guard_and_resubmit_approval_lines(
+            rc, model, schema or {}, lines_entity, lines_var, line_txable_f,
+            select_fields_str, select_fields_set,
+        )
+
     return (
         f"    // Reservation mutation guard (ledger_transaction): reject criteria changes after allocation\n"
         f"    const _allocatedCount = await tx.{lines_entity}.count({{\n"
@@ -1649,6 +1673,217 @@ def _build_reservation_mutation_guard_update_ledger(rc: dict, model: str) -> str
         f"      if (_mutated) {{\n"
         f"        throw new ReservationMutationError('Cannot modify reservation criteria after allocation.');\n"
         f"      }}\n"
+        f"    }}"
+    )
+
+
+def _build_reservation_guard_and_resubmit_approval_lines(
+    rc: dict,
+    model: str,
+    schema: dict,
+    lines_entity: str,
+    lines_var: str,
+    line_txable_f: str,
+    select_fields_str: str,
+    select_fields_set: list[str],
+) -> str:
+    """cmd_847 [丁] (per subtask_847e/847h design): per-line mutation guard +
+    resubmission for x-approval-lines lines under a ledger_transaction
+    reservation (e.g. purchase_order.items -> purchase_per_item).
+
+    Per-line, not per-parent: a line's own NET ledger allocation
+    (sum(reserved_delta) over every ledger row sharing its bridge FK) gates
+    whether ITS OWN value change is blocked -- not whether any OTHER line
+    under the same parent was ever allocated. This is what makes a withdrawn
+    line's release (x-approval.on_withdrawn -> service_after_withdraw.ts,
+    subtask_847e task_II) actually unlock that one line: the withdrawal's
+    'cancel' ledger rows net its bridge back to zero, so _lineNet becomes 0
+    even though {line_txable_f} itself stays non-null forever (it is never
+    cleared -- the bridge is reused, not replaced, on resubmission below).
+
+    A net-zero line only resubmits if it is genuinely a withdrawn line
+    (latestRoundRequests non-empty and every row 'withdrawn' -- same
+    round-based lookup as 844c/847c/submit_predicate.ts, no separate
+    condition invented here). A net-zero line with no approval history at
+    all (never submitted) is a plain, unrestricted edit -- nothing to
+    resubmit.
+
+    Resubmission reuses the line's EXISTING bridge (never creates a second
+    one or re-links {line_txable_f}) and claims fresh pool capacity against
+    it, then opens a new approval_request round via
+    _build_approval_create_block_for_entity -- mirrors
+    _build_approval_lines_post_create_code's per-line block, but keyed off
+    an existing line's own approvable_id instead of a freshly pre-created one.
+
+    New-line addition / existing-line deletion stay guarded, but now only
+    when at least one line is genuinely still locked (_anyLineLocked) --
+    narrower than the old bulk "_allocatedCount > 0" (any line EVER
+    allocated, even one long since withdrawn-and-released), which would
+    otherwise keep blocking those structural changes forever after a single
+    line's first-ever submission.
+    """
+    res = rc.get('result') or {}
+    req = rc.get('request') or {}
+    pool = rc.get('pool') or {}
+    pol = rc.get('policy') or {}
+    criteria = req.get('criteria') or {}
+    req_qty_field = req.get('quantityField', 'quantity')
+    pool_qty_field = pool.get('quantityField', 'quantity')
+    pool_res_field = pool.get('reservedField', 'reserved_quantity')
+    line_mutated_check = ' || '.join(f'_existing.{f} !== _incoming.{f}' for f in select_fields_set)
+
+    domain_key = rc.get('ledger_domain')
+    if not domain_key:
+        raise ValueError(f"x-reservation for {model!r}: transaction.ledgerDomain is required (OD-1)")
+    _domain = resolve_ledger_domain(schema, domain_key)
+    pool_entity = _domain['pool']
+    ledger_entity = _domain['ledger']
+    item_field = _domain['item_field']
+    location_field = _domain['location_field']
+    lot_field = _domain['lot_field']
+    expiration_field = _domain['expiration_field']
+
+    def _order_entry(field: str, direction: str) -> str:
+        if direction == 'asc_nulls_last':
+            return f"{{ {field}: {{ sort: 'asc', nulls: 'last' }} }}"
+        if direction == 'desc_nulls_first':
+            return f"{{ {field}: {{ sort: 'desc', nulls: 'first' }} }}"
+        return f"{{ {field}: '{direction}' }}"
+
+    order_parts = [
+        _order_entry(field, str(direction))
+        for item in (pol.get('orderBy') or [])
+        for field, direction in item.items()
+    ]
+    order_str = ', '.join(order_parts)
+
+    criteria_lines = [f'            {k}: _incoming.{v},' for k, v in criteria.items()]
+    criteria_str = '\n'.join(criteria_lines) if criteria_lines else ''
+    where_clause = f"            {pool_qty_field}: {{ gt: 0 }},"
+    if criteria_str:
+        where_clause = criteria_str + '\n' + where_clause
+
+    resubmit_claim = (
+        f"      {{\n"
+        f"        let _remaining = _incoming.{req_qty_field} as number;\n"
+        f"        const _candidates = await tx.{pool_entity}.findMany({{\n"
+        f"          where: {{\n"
+        f"{where_clause}\n"
+        f"          }},\n"
+        + (f"          orderBy: [{order_str}],\n" if order_str else '') +
+        f"        }});\n"
+        f"        for (const _candidate of _candidates) {{\n"
+        f"          if (_remaining <= 0) break;\n"
+        f"          const _available = _candidate.{pool_qty_field} - _candidate.{pool_res_field};\n"
+        f"          if (_available <= 0) continue;\n"
+        f"          const _claim = Math.min(_remaining, _available);\n"
+        f"          const _claimResult = await tx.{pool_entity}.updateMany({{\n"
+        f"            where: {{ id: _candidate.id, {pool_res_field}: {{ lte: _candidate.{pool_qty_field} - _claim }} }},\n"
+        f"            data: {{ {pool_res_field}: {{ increment: _claim }} }},\n"
+        f"          }});\n"
+        f"          if (_claimResult.count > 0) {{\n"
+        f"            _remaining -= _claim;\n"
+        f"            await tx.{ledger_entity}.create({{\n"
+        f"              data: {{\n"
+        f"                {line_txable_f}: _existing.{line_txable_f} as string,\n"
+        f"                event_type: 'reserve',\n"
+        f"                quantity_delta: 0,\n"
+        f"                reserved_delta: _claim,\n"
+        f"                {item_field}: _candidate.{item_field},\n"
+        f"                {location_field}: _candidate.{location_field},\n"
+        f"                {lot_field}: _candidate.{lot_field},\n"
+        f"                {expiration_field}: _candidate.{expiration_field},\n"
+        f"                created_by_id: actorId,\n"
+        f"                creator_id: actorId,\n"
+        f"                updater_id: actorId,\n"
+        f"              }},\n"
+        f"            }});\n"
+        f"          }}\n"
+        f"        }}\n"
+        f"        if (_remaining > 0) {{\n"
+        f"          throw new InsufficientPoolCapacityError(\n"
+        f"            `Insufficient inventory for {lines_entity} line`\n"
+        f"          );\n"
+        f"        }}\n"
+        f"      }}"
+    )
+
+    resubmit_approval = _build_approval_create_block_for_entity(
+        approvable_id_expr='_existing.approvable_id',
+        actor_id_expr='actorId',
+        flows_var='_lineApprovalFlows',
+        role_ids_var='_lineCreatorRoleIds',
+        tx_var='tx',
+        indent='      ',
+        target_entity_name=lines_entity,
+        target_id_expr='_existing.id',
+    )
+
+    return (
+        f"    // Reservation mutation guard + resubmission (ledger_transaction,\n"
+        f"    // per-line -- cmd_847 [丁]): a line's own net ledger allocation\n"
+        f"    // gates its own value change; a withdrawn, net-zero line resubmits.\n"
+        f"    const _existingLines = await tx.{lines_entity}.findMany({{\n"
+        f"      where: {{ {model}_id: id }},\n"
+        f"      select: {{ id: true, approvable_id: true, {line_txable_f}: true, {select_fields_str} }},\n"
+        f"    }});\n"
+        f"    const _incomingWithId = {lines_var}Items.filter(i => i.id);\n"
+        f"    const _bridgeIds = _existingLines\n"
+        f"      .map(l => l.{line_txable_f})\n"
+        f"      .filter((v): v is string => v != null);\n"
+        f"    const _ledgerNets = _bridgeIds.length > 0\n"
+        f"      ? await tx.{ledger_entity}.groupBy({{\n"
+        f"          by: ['{line_txable_f}'],\n"
+        f"          where: {{ {line_txable_f}: {{ in: _bridgeIds }} }},\n"
+        f"          _sum: {{ reserved_delta: true }},\n"
+        f"        }})\n"
+        f"      : [];\n"
+        f"    const _netByBridge = new Map(_ledgerNets.map((g) => [g.{line_txable_f}, g._sum.reserved_delta ?? 0]));\n"
+        f"    let _anyLineLocked = false;\n"
+        f"    for (const _existing of _existingLines) {{\n"
+        f"      const _lineNet = _existing.{line_txable_f} ? (_netByBridge.get(_existing.{line_txable_f}) ?? 0) : 0;\n"
+        f"      const _incoming = _incomingWithId.find((i) => i.id === _existing.id);\n"
+        f"      const _lineDeleted = !_incoming;\n"
+        f"      const _lineMutated = _incoming !== undefined && (({line_mutated_check}));\n"
+        f"      if (_lineNet > 0) {{\n"
+        f"        _anyLineLocked = true;\n"
+        f"        if (_lineDeleted || _lineMutated) {{\n"
+        f"          throw new ReservationMutationError('Cannot modify reservation criteria after allocation.');\n"
+        f"        }}\n"
+        f"        continue;\n"
+        f"      }}\n"
+        f"      if (_lineDeleted || !_lineMutated || !_incoming) {{\n"
+        f"        continue;\n"
+        f"      }}\n"
+        f"      const _lineLatestRoundRow = await tx.approval_request.findFirst({{\n"
+        f"        where: {{ approvable_id: _existing.approvable_id }},\n"
+        f"        orderBy: {{ created_at: 'desc' }},\n"
+        f"        select: {{ round_id: true }},\n"
+        f"      }});\n"
+        f"      const _lineLatestRoundRequests = _lineLatestRoundRow\n"
+        f"        ? await tx.approval_request.findMany({{\n"
+        f"            where: {{ approvable_id: _existing.approvable_id, round_id: _lineLatestRoundRow.round_id }},\n"
+        f"            select: {{ status: true }},\n"
+        f"          }})\n"
+        f"        : [];\n"
+        f"      const _lineIsWithdrawn = _lineLatestRoundRequests.length > 0\n"
+        f"        && _lineLatestRoundRequests.every((r) => r.status === 'withdrawn');\n"
+        f"      if (!_lineIsWithdrawn) {{\n"
+        f"        continue;\n"
+        f"      }}\n"
+        f"{resubmit_claim}\n"
+        f"      const _lineCreator = await tx.user.findUnique({{\n"
+        f"        where: {{ id: actorId }},\n"
+        f"        select: {{ roles: {{ select: {{ id: true }} }} }},\n"
+        f"      }});\n"
+        f"      const _lineCreatorRoleIds = _lineCreator?.roles.map((r) => r.id) ?? [];\n"
+        f"      const _lineApprovalFlows = await tx.approval_flow.findMany({{\n"
+        f"        where: {{ entity_name: '{lines_entity}' }},\n"
+        f"      }});\n"
+        f"{resubmit_approval}\n"
+        f"    }}\n"
+        f"    if (_anyLineLocked && {lines_var}Items.some((i) => !i.id)) {{\n"
+        f"      throw new ReservationMutationError('Cannot modify reservation criteria after allocation.');\n"
         f"    }}"
     )
 
@@ -1683,10 +1918,18 @@ def _build_reservation_mutation_guard_delete_ledger(rc: dict, model: str) -> str
     )
 
 
-def _build_reservation_allocation_code(rc: dict, model: str, schema: dict | None = None) -> str:
-    """Generate the TypeScript allocation phase for count mode reservation."""
+def _build_reservation_allocation_code(
+    rc: dict, model: str, schema: dict | None = None, row_var: str = 'created',
+) -> str:
+    """Generate the TypeScript allocation phase for count mode reservation.
+
+    cmd_847: row_var (default 'created') is the in-scope entity-row
+    variable this allocation reads/writes against — see
+    _build_ledger_reservation_allocation_code's docstring for the same
+    parameter on the ledger_transaction strategy.
+    """
     if rc.get('transaction_strategy') == 'ledger_transaction':
-        return _build_ledger_reservation_allocation_code(rc, model, schema)
+        return _build_ledger_reservation_allocation_code(rc, model, schema, row_var)
     pool        = rc.get('pool') or {}
     req         = rc.get('request') or {}
     pol         = rc.get('policy') or {}
@@ -1733,7 +1976,7 @@ def _build_reservation_allocation_code(rc: dict, model: str, schema: dict | None
         alloc_block = (
             f"          await tx.{alloc_entity}.create({{\n"
             f"            data: {{\n"
-            f"              {parent_field}: created.id,\n"
+            f"              {parent_field}: {row_var}.id,\n"
             f"              {line_field}: _line.id,\n"
             f"              {pool_field}: _candidate.id,\n"
             f"              {alloc_qty}: _claim,\n"
@@ -1752,19 +1995,19 @@ def _build_reservation_allocation_code(rc: dict, model: str, schema: dict | None
     if lines_entity:
         lines.append(
             f"    const _reservationLines = await tx.{lines_entity}.findMany({{\n"
-            f"      where: {{ {model}_id: created.id }},\n"
+            f"      where: {{ {model}_id: {row_var}.id }},\n"
             f"    }});"
         )
         iter_var = '_reservationLines'
     elif not has_lines:
         # ④A: count mode without lines — treat the request entity itself as the single line
         lines.append(
-            f"    const _reservationLines = [{{ ...created, {req_qty_field}: "
-            f"(created as Record<string, unknown>).{self_qty_field} as number }}];"
+            f"    const _reservationLines = [{{ ...{row_var}, {req_qty_field}: "
+            f"({row_var} as Record<string, unknown>).{self_qty_field} as number }}];"
         )
         iter_var = '_reservationLines'
     else:
-        iter_var = f'(created as Record<string, unknown>).{lines_prop} as Record<string, unknown>[]'
+        iter_var = f'({row_var} as Record<string, unknown>).{lines_prop} as Record<string, unknown>[]'
 
     where_clause = f"          {pool_qty_field}: {{ gt: 0 }},"
     if criteria_str:
@@ -1776,7 +2019,7 @@ def _build_reservation_allocation_code(rc: dict, model: str, schema: dict | None
     # creator_id/updater_id omitted when allocation entity has no such fields.
     alloc_block = ''
     if alloc_entity:
-        alloc_data_entries = [f"              {parent_field}: created.id,"]
+        alloc_data_entries = [f"              {parent_field}: {row_var}.id,"]
         if line_field:
             alloc_data_entries.append(f"              {line_field}: _line.id,")
         alloc_data_entries += [
@@ -1802,7 +2045,7 @@ def _build_reservation_allocation_code(rc: dict, model: str, schema: dict | None
         lines = [
             f"    // Reservation: count mode — allocate {pool_entity}",
             f"    {{",
-            f"      let _remaining = (created as Record<string, unknown>).{req_qty_field} as number;",
+            f"      let _remaining = ({row_var} as Record<string, unknown>).{req_qty_field} as number;",
             f"      const _candidates = await tx.{pool_entity}.findMany({{",
             f"        where: {{",
             f"{where_clause}",
@@ -1832,7 +2075,7 @@ def _build_reservation_allocation_code(rc: dict, model: str, schema: dict | None
             f"      }}",
             f"      if (_remaining > 0) {{",
             f"        throw new InsufficientPoolCapacityError(",
-            f"          `Insufficient inventory for request ${{created.id}}`",
+            f"          `Insufficient inventory for request ${{{row_var}.id}}`",
             f"        );",
             f"      }}",
             f"    }}",
@@ -1843,7 +2086,7 @@ def _build_reservation_allocation_code(rc: dict, model: str, schema: dict | None
     lines = [
         f"    // Reservation: count mode — allocate {pool_entity} for each {lines_prop} line",
         f"    const _reservationLines = await tx.{lines_entity}.findMany({{\n"
-        f"      where: {{ {model}_id: created.id }},\n"
+        f"      where: {{ {model}_id: {row_var}.id }},\n"
         f"    }});",
         f"    for (const _line of _reservationLines) {{",
         f"      let _remaining = (_line as Record<string, unknown>).{req_qty_field} as number;",
@@ -2242,6 +2485,7 @@ def _build_approval_edge_trigger_create_code(
     parent: str,
     submit_on_field: str | None,
     submit_on_value: object,
+    reservation_code: str = '',
 ) -> str:
     """CREATE-time edge trigger (cmd_818 GROUP A2): the row's initial state
     counts as an edge from "no row" (null) into whatever submit_on requires
@@ -2251,6 +2495,13 @@ def _build_approval_edge_trigger_create_code(
     The _pendingGuard check enforces the invariant that at most one open
     flow may exist at a time, identically on both the create and update
     trigger paths.
+
+    cmd_847: reservation_code (has_reservation AND has_submit_on only) is
+    the allocation phase, built with row_var='created' since this whole
+    block runs after add{Parent}'s own tx.model.create() -- it is placed
+    inside the same !_pendingGuard branch as the approval_request creation
+    it's paired with, so a row created directly in its submit_on state
+    both submits AND reserves in the same edge, exactly once.
     """
     approvable_var = approvable_rel['relation_name']
     inner = _build_approval_create_block_for_entity(
@@ -2268,6 +2519,7 @@ def _build_approval_edge_trigger_create_code(
         f"        where: {{ approvable_id: {approvable_var}.id, status: 'pending' }},\n"
         f"      }});\n"
         f"      if (!_pendingGuard) {{\n"
+        + (f"{reservation_code}\n" if reservation_code else '') +
         f"        const _creator = await tx.user.findUnique({{\n"
         f"          where: {{ id: actorId }},\n"
         f"          select: {{ roles: {{ select: {{ id: true }} }} }},\n"
@@ -2292,6 +2544,7 @@ def _build_approval_edge_trigger_update_code(
     model: str,
     submit_on_field: str,
     submit_on_value: object,
+    reservation_code: str = '',
 ) -> str:
     """UPDATE-time edge trigger (cmd_818 GROUP A2): fires only on the exact
     transition previous != submit_on -> new === submit_on (an EDGE, not a
@@ -2325,7 +2578,14 @@ def _build_approval_edge_trigger_update_code(
     longer depends on the consumer schema separately disabling edit for
     that entity: every terminal entity in every shipped schema happened to
     declare edit:false, but nothing forced that correlation -- an editable
-    terminal entity was silently exploitable before this change."""
+    terminal entity was silently exploitable before this change.
+
+    cmd_847: reservation_code (has_reservation AND has_submit_on only) is
+    the allocation phase, built with row_var='updated' (the full row
+    tx.model.update() just returned, in scope here). Placed inside the
+    same _canCreate branch as the approval_request creation it's paired
+    with -- reservation happens exactly when a fresh round is actually
+    created, not on every submit_on-value PUT."""
     approvable_fk = approvable_rel['prop_name']
     inner = _build_approval_create_block_for_entity(
         approvable_id_expr='_prevApprovableId',
@@ -2373,6 +2633,7 @@ def _build_approval_edge_trigger_update_code(
         # drift apart.
         f"      const _canCreate = canSubmitForApproval(_latestRoundRequests);\n"
         f"      if (_canCreate) {{\n"
+        + (f"{reservation_code}\n" if reservation_code else '') +
         f"        const _creator = await tx.user.findUnique({{\n"
         f"          where: {{ id: actorId }},\n"
         f"          select: {{ roles: {{ select: {{ id: true }} }} }},\n"
@@ -2393,6 +2654,7 @@ def _build_submit_for_approval_action_code(
     model: str,
     submit_on_field: str,
     submit_on_value: object,
+    reservation_code: str = '',
 ) -> str:
     """cmd_841 ruling_4: the explicit "(re)submit" server action body, for
     entities that need a submission path independent of an ordinary edit
@@ -2405,6 +2667,12 @@ def _build_submit_for_approval_action_code(
     (_build_approval_create_block_for_entity) the edge triggers use --
     "submit" is just a third way to reach the submit_on transition, not a
     parallel mechanism with its own rules.
+
+    cmd_847: reservation_code (has_reservation AND has_submit_on only) is
+    the allocation phase, built with row_var='row' -- the initial select
+    widens to the full row (dropping the narrow {approvable_fk: true}
+    select) whenever reservation_code is non-empty, since allocation reads
+    request/criteria fields off the row, not just its approvable FK.
     """
     inner = _build_approval_create_block_for_entity(
         approvable_id_expr=f'row.{approvable_fk}',
@@ -2417,10 +2685,11 @@ def _build_submit_for_approval_action_code(
         target_id_expr='id',
     )
     lit = _ts_literal(submit_on_value)
+    _row_select = '' if reservation_code else f"      select: {{ {approvable_fk}: true }},\n"
     return (
         f"    const row = await tx.{model}.findUniqueOrThrow({{\n"
         f"      where: {{ id }},\n"
-        f"      select: {{ {approvable_fk}: true }},\n"
+        f"{_row_select}"
         f"    }});\n"
         f"    const _latestRoundRow = await tx.approval_request.findFirst({{\n"
         f"      where: {{ approvable_id: row.{approvable_fk} }},\n"
@@ -2440,6 +2709,7 @@ def _build_submit_for_approval_action_code(
         f"      where: {{ id }},\n"
         f"      data: {{ {submit_on_field}: {lit} }},\n"
         f"    }});\n"
+        + (f"{reservation_code}\n" if reservation_code else '') +
         f"    const _creator = await tx.user.findUnique({{\n"
         f"      where: {{ id: actorId }},\n"
         f"      select: {{ roles: {{ select: {{ id: true }} }} }},\n"
@@ -2496,11 +2766,26 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     approval_edge_trigger_update_code = ''
     submit_for_approval_action_code = ''
     x_approval_submit_on_field: str | None = None
+    # cmd_847 [乙]: has_reservation AND has_submit_on moves the allocation
+    # phase from create-time (tx.model.create(), below) to the submit_on
+    # edge -- a draft save must not reserve inventory the entity may never
+    # actually submit for. Declaring submit_on with no reservation, or a
+    # reservation with no submit_on, both keep today's single call site.
+    has_submit_on = False
+    if has_reservation and reservation_config is not None:
+        _raw_def_for_submit_on = _raw_def(model, schema) if schema else {}
+        _submit_on_field_probe, _ = resolve_approval_submit_on(_raw_def_for_submit_on)
+        has_submit_on = _submit_on_field_probe is not None
     if has_approvable_bridge and can_create:
         raw_def_by_model = _raw_def(model, schema) if schema else {}
         x_approval_submit_on_field, x_approval_submit_on_value = resolve_approval_submit_on(raw_def_by_model)
+        _reservation_code_for_create = (
+            _build_reservation_allocation_code(reservation_config, model, schema, row_var='created')
+            if has_reservation and has_submit_on and reservation_config is not None else ''
+        )
         approval_edge_trigger_create_code = _build_approval_edge_trigger_create_code(
             approvable_rel, parent, x_approval_submit_on_field, x_approval_submit_on_value,
+            reservation_code=_reservation_code_for_create,
         )
         if x_approval_submit_on_field is not None:
             # cmd_834: the previous-row lookup this update trigger needs
@@ -2516,16 +2801,26 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
             # x-approval.on_rejected.terminal no longer needs to be threaded
             # through to these two call sites at all.
             if can_update:
+                _reservation_code_for_update = (
+                    _build_reservation_allocation_code(reservation_config, model, schema, row_var='updated')
+                    if has_reservation and has_submit_on and reservation_config is not None else ''
+                )
                 approval_edge_trigger_update_code = _build_approval_edge_trigger_update_code(
                     approvable_rel, parent, model, x_approval_submit_on_field, x_approval_submit_on_value,
+                    reservation_code=_reservation_code_for_update,
                 )
             # cmd_841 ruling_4: the explicit submit action exists
             # independent of can_update -- it is precisely the only path
             # for edit: false entities (which have no PUT route at all) to
             # ever reach submit_on's target value.
+            _reservation_code_for_submit_action = (
+                _build_reservation_allocation_code(reservation_config, model, schema, row_var='row')
+                if has_reservation and has_submit_on and reservation_config is not None else ''
+            )
             submit_for_approval_action_code = _build_submit_for_approval_action_code(
                 approvable_rel['prop_name'], parent, model,
                 x_approval_submit_on_field, x_approval_submit_on_value,
+                reservation_code=_reservation_code_for_submit_action,
             )
 
     has_non_comment_ch = bool(non_comment_ch)
@@ -2784,9 +3079,11 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     flatten_nested_creates = '\n'.join(flatten_nested_create_lines)
 
     # Reservation count mode: build allocation code block
+    # cmd_847 [乙]: skipped here (and built into the submit_on edge trigger
+    # instead, above) when has_submit_on -- see that comment for why.
     reservation_allocation_code = ''
     reservation_self_case_notifies = False
-    if has_reservation and reservation_config is not None:
+    if has_reservation and reservation_config is not None and not has_submit_on:
         reservation_allocation_code = _build_reservation_allocation_code(reservation_config, model, schema)
         # ledger_transaction self-case (no lines_entity) calls
         # notifyApprovalRequestCreated itself (cmd_734) ONLY in the fallback
@@ -2852,7 +3149,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     reservation_mutation_guard_update = ''
     reservation_mutation_guard_delete = ''
     if has_reservation and reservation_config is not None:
-        reservation_mutation_guard_update = _build_reservation_mutation_guard_update(reservation_config, model)
+        reservation_mutation_guard_update = _build_reservation_mutation_guard_update(reservation_config, model, schema)
         reservation_mutation_guard_delete = _build_reservation_mutation_guard_delete(reservation_config, model)
 
     # item mode: assertNoDuplicateReservation added to service_validation import when dateRange present
