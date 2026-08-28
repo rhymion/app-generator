@@ -114,7 +114,7 @@ generated app's Prisma version/driver (7.9.1, Postgres driver adapter) puts the
 violated column names at `e.meta.driverAdapterError.cause.constraint.fields`, not the
 classic `e.meta.target` most Prisma docs/examples show. Getting this wrong doesn't
 crash — it silently produces `field: undefined`, which falls back to the CONFLICT
-code's field-less wording (`staleMutation`, "updated by another user") instead of the
+code's field-less wording (`staleMutation`, "has been updated since you opened it") instead of the
 correct field-bearing one (`fieldAlreadyLinked`, "{field} is already linked to another
 record") — a wrong-but-plausible message that a code read alone would not catch. Found
 only by adding a temporary diagnostic log to the generated output and running the new
@@ -194,7 +194,8 @@ cross-org existence.
 | Not found (genuine) | Yes — "record not found or may have been deleted" | User knows to stop looking |
 | **Org isolation violation** | **Hide — treat as Not Found** | Revealing "Organization access denied" tells the caller that the record EXISTS. The strict org isolation policy forbids even acknowledging existence of records in other orgs. POST/Service Action must match the API path (which already returns 404). |
 | Validation (field-level) | Yes — "{field} is required / already linked / has an invalid or disallowed value" | User can fix and resubmit |
-| Stale update | Yes — "updated by another user, reload" | User knows to refresh |
+| Stale update | Yes — "updated since you opened it, reload" | User knows to refresh. The detection is snapshot-based (`assertNotStale` compares DB state to what the form loaded) and never determines *who* changed the record, so the wording must not claim "another user" — see "Stale-update wording must not claim 'another user'" below. |
+| Reservation locked (criteria changed after allocation) | Yes — "this row's reservation has already been allocated, criteria can no longer be changed" | User understands this is a business-rule rejection, not a version conflict — carries its own `RESERVATION_LOCKED` errorCode, kept apart from `CONFLICT` (see "`CONFLICT`/no-field also covered an unrelated reservation-lock rejection" below) |
 | Record deleted before submit | Yes — "no longer exists, may have been deleted" | User knows to stop editing |
 | FK autocomplete denied | Yes — "no permission to view {entity}" + hint | User can request access from admin |
 | Reservation-specific | Yes (current behavior, unchanged) | Domain-specific and safe |
@@ -222,7 +223,8 @@ export type ErrorCode =
   | 'PERMISSION_DENIED'   // authenticated, but operation not allowed
   | 'NOT_FOUND'           // record absent OR org isolation (masked)
   | 'VALIDATION'          // field-level input error (missing, invalid, OTO conflict)
-  | 'CONFLICT'            // stale-update or reservation conflict
+  | 'CONFLICT'            // stale-update (assertNotStale snapshot mismatch), field-less
+  | 'RESERVATION_LOCKED'  // reservation criteria changed after allocation, field-less
   | 'CAPACITY'            // pool / inventory exhausted
   | 'UNKNOWN';            // unexpected internal error
 
@@ -286,7 +288,7 @@ try {
   if (e instanceof AppError)
     return { ok: false, errorCode: e.code, field: e.field } satisfies ActionFailure;
   if (e instanceof ReservationMutationError)
-    return { ok: false, errorCode: 'CONFLICT' } satisfies ActionFailure;
+    return { ok: false, errorCode: 'RESERVATION_LOCKED' } satisfies ActionFailure;
   if (e instanceof InsufficientPoolCapacityError)
     return { ok: false, errorCode: 'CAPACITY' } satisfies ActionFailure;
   throw e;  // truly unexpected → error.tsx
@@ -323,6 +325,7 @@ function getErrorMessage(err: ActionFailure): string {
     case 'CONFLICT':          return err.field
                                 ? te('fieldAlreadyLinked', { field: err.field })
                                 : te('staleMutation');
+    case 'RESERVATION_LOCKED': return te('reservationLocked');
     case 'CAPACITY':          return te('capacityExhausted');
     default:                  return te('unknown');
   }
@@ -345,6 +348,7 @@ export function handleApiError(error: unknown): NextResponse {
       NOT_FOUND:         404,
       VALIDATION:        422,
       CONFLICT:          409,
+      RESERVATION_LOCKED: 409,
       CAPACITY:          409,
       UNKNOWN:           500,
     };
@@ -399,7 +403,8 @@ entity-agnostic — `{field}` and `{entity}` are runtime interpolation params, n
     "notFound":               "The record could not be found. It may have been deleted.",
     "fieldRequired":          "{field} is required.",
     "fieldAlreadyLinked":     "{field} is already linked to another record.",
-    "staleMutation":          "This record was updated by another user. Please reload the page and try again.",
+    "staleMutation":          "This record has been updated since you opened it. Please reload to compare with the latest changes.",
+    "reservationLocked":      "This row's reservation has already been allocated and its quantity or criteria can no longer be changed.",
     "invalidSnapshot":        "The form data is outdated. Please reload the page.",
     "reservationConflict":    "This action conflicts with an existing reservation.",
     "capacityExhausted":      "No capacity is available. Please try a different selection.",
@@ -416,7 +421,7 @@ entity-agnostic — `{field}` and `{entity}` are runtime interpolation params, n
 
 ---
 
-## "Other User's Update" Detection
+## Stale-Update Detection
 
 **Assessment: the detection mechanism exists and is sufficient. Only the error transport is broken.**
 
@@ -425,13 +430,65 @@ entity-agnostic — `{field}` and `{entity}` are runtime interpolation params, n
 1. When a form opens for edit, the current entity state is serialized as `__src_snapshot` (FormData).
 2. On submit, the snapshot is sent back to the server.
 3. Inside the `$transaction`, `assertNotStale` compares the DB's current state to the expected snapshot.
-4. If any field changed (by another user or another tab), it throws.
+4. If any field changed (by another user, another tab, or a server-side side effect of the
+   entity's own update path), it throws.
 
 This does NOT require a version column or schema change. The snapshot covers all tracked fields.
 
 The only work needed: change `throw new Error(...)` to `throw new AppError('CONFLICT', ...)` so the
 action can catch it and return `{ ok: false, errorCode: 'CONFLICT' }` → form shows `te('staleMutation')`
 inline instead of crashing to `error.tsx`.
+
+### Stale-update wording must not claim "another user"
+
+`assertNotStale` only ever compares two snapshots — it has no way to determine *who* or *what*
+changed the record between form-open and submit. It fires the same way whether the change came
+from another user, another tab of the same user, or a server-side side effect of the entity's own
+update path. Both the server-side `AppError` message (`lib/normalize.ts`) and the UI-facing
+`staleMutation` i18n key state only the fact the mechanism can actually establish — the record
+changed since it was opened — and must not say "by another user". `messages/en.json` /
+`messages/ja.json` and `form_upsert.tsx.jinja2` were corrected to match this; see the
+i18n Key Catalog above.
+
+### `CONFLICT`/no-field also covered an unrelated reservation-lock rejection
+
+Fixing the wording above was not sufficient on its own. A follow-up investigation found that the
+same `errorCode: 'CONFLICT'` + no `field` combination the UI uses to select the `staleMutation`
+text was reached by **two semantically unrelated causes**, not one:
+
+1. A genuine `assertNotStale` snapshot mismatch (the case this whole section is about).
+2. `updateXxx`'s reservation-mutation guard throwing `ReservationMutationError` when an update
+   tries to change a row whose reservation is already allocated
+   (`lib/{{ parent }}/service.ts`'s reservation guard, generated for any `x-reservation` entity).
+   This guard runs and can throw *before* `assertNotStale` is ever reached — the snapshot
+   comparison itself never ran in this case, yet the UI showed the exact same "record changed
+   since you opened it" message.
+
+Neither the "reload and compare" wording nor any snapshot-mismatch fix addresses cause (2):
+the record was rejected because of an allocation lock, not because it changed underneath the
+user. `_wrap_call_with_catch` in `code_generator/generators.py` (the generic try/catch the
+generator wraps every create/update Server Action call in) mapped `ReservationMutationError` to
+`errorCode: 'CONFLICT'`, the same field-less code `assertNotStale` produces — merging the two
+causes onto one wire code. Fixed by giving `ReservationMutationError` its own errorCode,
+`RESERVATION_LOCKED`, with its own `reservationLocked` i18n key (en/ja) and its own
+`getErrorMessage` branch in `form_upsert.tsx.jinja2` — see the `ErrorCode` union and the
+Server Action / client transport code samples above. This is a template-level, generator-wide
+fix: it applies to every entity with `x-reservation` configured, not just one entity, since
+`_wrap_call_with_catch` is the single generic wrapper used for all create/update actions.
+
+**Lesson**: a field-less `errorCode` is a lossy signal by construction — before adding a new
+throw site anywhere in the generated create/update path that can produce a field-less error,
+check whether it collides with an existing field-less code (`CONFLICT` in particular) rather
+than assuming each throw site maps to a distinct, already-correct user-facing message.
+
+**Second lesson, caught by the mandatory `test:e2e:build` type-check, not by inspection**: adding
+`RESERVATION_LOCKED` to the `ErrorCode` union broke `next build`'s TypeScript pass —
+`lib/api-auth.ts`'s `APP_ERROR_STATUS_MAP: Record<ErrorCode, number>` is an *exhaustive* mapping
+(TS2741, "Property is missing"), unlike `form_upsert.tsx.jinja2`'s `getErrorMessage` `switch`,
+which has a `default` case and would have silently fallen through to `unknown` with no compiler
+error at all. Any future addition to `ErrorCode` must grep for every `Record<ErrorCode, ...>` in
+the repo (currently just this one map), not only the `switch` statements — the two fail
+differently, and only one of them fails loud.
 
 ---
 
@@ -489,6 +546,6 @@ Steps 1–5 are write-once lib / config changes. Steps 6–12 are generator temp
 | ID | Question |
 |----|----------|
 | OQ-1 | **Org isolation masking**: Confirm `NOT_FOUND` is correct for org isolation violations — the earlier org-isolation fix's "Organization access denied" text would be replaced by "Not found" to match the API path and avoid leaking cross-org existence. |
-| OQ-2 | **`staleMutation` message**: "reload the page and try again" causes the user to lose form edits. Should the UI preserve or diff the form state instead? Out of scope here, but worth tracking. |
+| OQ-2 | **`staleMutation` message**: "reload to compare with the latest changes" causes the user to lose form edits. Should the UI preserve or diff the form state instead? Out of scope here, but worth tracking. |
 | OQ-3 | **Japanese i18n keys**: Who authors `messages/ja.json` equivalents for the `Errors` namespace? Standard pattern: generator emits English; consumer provides Japanese. |
 | OQ-4 | ~~**error.tsx session-redirect**: Should Next.js middleware redirect unauthenticated requests to `/login` before the page renders? This would eliminate U1/U2 scenarios entirely. Separate design issue.~~ **Resolved (an earlier auth-redirect fix)**: it already did, on `develop`, before this question was written — see "U1/U2 unreachable (an earlier auth-redirect fix)" above. That same fix additionally closed the one gap that existed (no return-to-original-page behavior) by adding a validated `?redirect=` round trip through `lib/auth/safe-redirect.ts`. |

@@ -768,7 +768,62 @@ this writing, so the gate never activates for either — a vacuous pass, not evi
 exercised there. Re-verify with the same method once the follow-up lands before treating that
 consumer schema as passing.
 
-### 16.14 Post-approval edit/delete/invalidate lockdown
+### 16.14 `x-approval-lines` vs. line-level `x-approval` + `new: true`
+
+§16.10 covers `x-approval-lines`, the standard path for giving an embedded, `new: false` line
+child its own `approvable`. That is not the only path: a line entity can instead declare its own
+`x-approval` block directly and be marked `new: true`. This section records the tradeoff between
+the two — the choice was raised, and settled, as a design question (not a defect): `approvable_id`
+stays `NOT NULL` and is never made nullable, so *some* pre-create mechanism is always required for
+a line to have an approvable; the two paths below are the two ways to supply it, not "required"
+vs. "optional."
+
+**(i) `x-approval-lines` on the parent — line stays `new: false`.** The line is created only
+through the parent's nested-create array; the parent's `service.ts` pre-creates one `approvable`
+per incoming line before that nested-create call and creates each line's `approval_request` rows
+right after (§16.10). This is the current default for every line entity this generator ships
+(`receiving_receipt_line`, `purchase_per_item`). Its strength is containment: a line has no
+standalone create entry point, so it can never exist without going through its parent's create
+flow, and there is exactly one place (`get_approval_lines_props()`) that decides which parent
+arrays get this treatment. Its cost is inflexibility — a line can only ever be created bundled
+inside its parent, which is awkward for any workflow that wants to add a line independently of a
+full parent submission (bulk import being the sharpest case: importing 500 lines against a
+handful of existing parents means constructing 500 synthetic parent nested-create payloads just
+to get an `approvable` per line, when the parent itself doesn't need to change).
+
+**(ii) Line entity declares its own `x-approval` + `new: true`.** The line becomes an ordinary
+top-level approvable entity in its own right (§16.2) — its own `create` call is where its
+`approvable` gets pre-created, exactly like any non-line entity, and it no longer needs
+`x-approval-lines` on the parent at all. The strength is exactly the import case above: a line
+can be created (and thus enter the approval flow) on its own, one row at a time or in bulk,
+without needing its parent present in the same call — this is the operational convenience that
+motivates reaching for this path. **The same change is also its risk**: `new: true` plus the
+line's own `x-approval` means the generator scaffolds the line a standalone create page, a
+standalone API route, and — if nothing else restricts it — a standalone import path, all
+reachable independently of the parent. A line that was previously only ever reachable *through*
+its parent (and therefore implicitly carried whatever access control gated the parent) is now a
+first-class entity with its own surface. Adopting (ii) for a given line entity means deliberately
+deciding what role/permission scope that standalone surface gets — it is not automatically as
+restricted as the bundled path was, and an entity migrated to (ii) without that review can expose
+more than the bundled form ever did. That exposure question — whether giving each line its own
+submission path leaks more than intended — is exactly what this tradeoff needs to be weighed
+against before choosing (ii) for a given entity.
+
+**`purchase_per_item` is folded into the same mechanism.** `get_approval_lines_props()`
+(`helpers/schema_helpers.py`) does not special-case `purchase_per_item` — it resolves *every*
+parent-declared `x-approval-lines` entry (§16.10 role (c)), and `purchase_order.lines[]` →
+`purchase_per_item` is one such entry today. Moving a line entity from (i) to (ii) is a
+per-entity schema decision, but `purchase_per_item` specifically shares its pre-create/post-create
+code path with `receiving_receipt_line` through this one function — a change to move
+`purchase_per_item` onto path (ii) needs to be made with that shared plumbing in mind (removing
+its entry from the parent's `x-approval-lines` list and adding `x-approval` + `new: true` on
+`purchase_per_item` itself), not by editing `get_approval_lines_props()`'s shared logic, which
+`receiving_receipt_line` would still depend on.
+
+No code changes accompany this section — both paths above already exist in the generator; this
+is a record of when to reach for which.
+
+### 16.15 Post-approval edit/delete/invalidate lockdown
 
 An approvable entity's `submit_on` field reaching its submitted or approved value (§16.4/§16.9)
 is treated as a locked state: further edits, deletes, or invalidations of that row are forbidden
@@ -819,10 +874,12 @@ Server Action path any UI form actually submits through) unguarded. The rule goi
 insertion point** — insert once at the confluence point if one exists, otherwise insert
 individually at every entry point.
 
-**Naming note**: this generator's own dogfood schema (`code_generator/json_schema.yaml`) now
-declares an entity named `approval_edit_terminal_test` for this lockdown's own fixture coverage.
-This is a **different entity** from the identically-named `approval_edit_terminal_test` that
-`app-template` declares in its own schema — a permanent regression fixture predating this
-section — the two live in separate repos and separate schema files, and share a name by
-coincidence of both being "the terminal-editable x-approval test fixture" for their respective
-codebases. Do not confuse one for the other when reading reports or grepping across repos.
+**Naming note**: `approval_edit_terminal_test` is the terminal-editable `x-approval` test fixture
+declared in `app-template`'s own consumer schema — a permanent regression fixture. This
+generator's own dogfood schema (`code_generator/json_schema.yaml`) declares no fixture entity of
+its own for this lockdown's coverage: test-only entities belong in the consumer schema, never in
+this generator's own schema, so runtime verification (403/200 checks against the generated
+`edit_guard.ts`/`delete_guard.ts`/`invalidate_guard.ts`) instead runs against `app-template`'s
+existing `approval_edit_terminal_test` entity in a throwaway isolated worktree, with no entity or
+model committed to app-generator itself.
+

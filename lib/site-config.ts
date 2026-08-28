@@ -87,7 +87,6 @@ export const siteConfig = {
     { label: "Permission", href: "/permission" },
     { label: "Approval Flow", href: "/approval_flow" },
     { label: "Dashboard", href: "/dashboard" },
-    { label: "Approval Edit Terminal Test", href: "/approval_edit_terminal_test" },
   ] satisfies NavLink[],
 
   /** Sidebar navigation groups (nested menu headers). Empty by default — see NavGroup above. */

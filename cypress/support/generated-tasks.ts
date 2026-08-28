@@ -67,38 +67,6 @@ export function getGeneratedTasks() {
       const { populateDashboardDashboardWidgetData } = require('./dashboard/helper');
       return await populateDashboardDashboardWidgetData(params.parentId, params.length || 1);
     },
-    async 'db:populateApprovalEditTerminalTestDependencies'() {
-      const { populateApprovalEditTerminalTestDependencies } = require('./approval_edit_terminal_test/helper');
-      return await populateApprovalEditTerminalTestDependencies();
-    },
-    async 'db:populateApprovalEditTerminalTest'(length: number) {
-      const { populateApprovalEditTerminalTestData } = require('./approval_edit_terminal_test/helper');
-      return await populateApprovalEditTerminalTestData(length);
-    },
-    async 'db:populateApprovalEditTerminalTestFull'(length: number) {
-      const { populateApprovalEditTerminalTestFullData } = require('./approval_edit_terminal_test/helper');
-      return await populateApprovalEditTerminalTestFullData(length);
-    },
-    async 'db:setupApprovalEditTerminalTestApprovalFlow'() {
-      const { setupApprovalEditTerminalTestApprovalFlow } = require('./approval_edit_terminal_test/helper');
-      return await setupApprovalEditTerminalTestApprovalFlow();
-    },
-    async 'db:setupApprovalEditTerminalTestOrderedApprovalFlow'() {
-      const { setupApprovalEditTerminalTestOrderedApprovalFlow } = require('./approval_edit_terminal_test/helper');
-      return await setupApprovalEditTerminalTestOrderedApprovalFlow();
-    },
-    async 'db:populateApprovalEditTerminalTestWithApproval'(params: { creatorId: string; approvalFlowIds: string[]; overrides?: Record<string, any> }) {
-      const { populateApprovalEditTerminalTestWithApproval } = require('./approval_edit_terminal_test/helper');
-      return await populateApprovalEditTerminalTestWithApproval(params.creatorId, params.approvalFlowIds, params.overrides || {});
-    },
-    async 'db:populateApprovalEditTerminalTestWithRejectedApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
-      const { populateApprovalEditTerminalTestWithRejectedApproval } = require('./approval_edit_terminal_test/helper');
-      return await populateApprovalEditTerminalTestWithRejectedApproval(params.creatorId, params.approvalFlowIds);
-    },
-    async 'db:populateApprovalEditTerminalTestWithTerminalRejectedApproval'(params: { creatorId: string; approvalFlowIds: string[] }) {
-      const { populateApprovalEditTerminalTestWithTerminalRejectedApproval } = require('./approval_edit_terminal_test/helper');
-      return await populateApprovalEditTerminalTestWithTerminalRejectedApproval(params.creatorId, params.approvalFlowIds);
-    },
     async 'db:getNotificationsForUser'(userId: string) {
       const { prisma } = require('./db-helpers');
       const notifications = await prisma.notification.findMany({ where: { user_id: userId } });

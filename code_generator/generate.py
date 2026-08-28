@@ -51,6 +51,7 @@ from generators import (
     _build_approval_create_block_for_entity,
     _build_split_approval_inherit_block,
     _raw_def,
+    resolve_approval_submit_on,
     seed_entities_context,
     approval_lockdown_context,
 )
@@ -1291,6 +1292,21 @@ def generate(schema_path: str, output_dir: str) -> None:
         }
 
         _split_has_approvable = 'approvable_id' in _split_entity_props
+        # cmd_847 [③]: the pre-submission split guard only makes sense for
+        # entities with their own draft -> submit_on lifecycle -- an
+        # x-approval-lines child (e.g. purchase_per_item) gets its
+        # approval_request(s) unconditionally at the PARENT's create time
+        # (get_approval_lines_props/_build_approval_lines_post_create_code),
+        # with no separate "submitted" transition of its own; an empty
+        # approval_requests array there means no approval_flow matched its
+        # entity_name, not "still draft" -- guarding split on that would
+        # reject a legitimate split with zero approval configured, not an
+        # unsubmitted draft (see subtask_847f's purchase_per_item_split.cy.ts
+        # regression finding).
+        _split_submit_on_field, _ = (
+            resolve_approval_submit_on(_def_val) if _split_has_approvable else (None, None)
+        )
+        _split_has_submit_on = _split_submit_on_field is not None
         # cmd_296 Phase2: one approvable per part, created directly in the
         # per-part loop (no pre-create array — unlike cmd_295's x-approval-lines
         # batch).
@@ -1319,6 +1335,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'status_split_value': next((v for v in _split_status_enum if str(v).lower() == 'split'), 'split'),
             'status_rejected_value': next((v for v in _split_status_enum if str(v).lower() == 'rejected'), 'rejected'),
             'has_approvable': _split_has_approvable,
+            'has_submit_on': _split_has_submit_on,
             'approval_create_block': _split_approval_create_block,
             'has_quantity_check': bool(_qty_field),
             'quantity_field': _qty_field,
