@@ -1642,9 +1642,7 @@ def _build_reservation_mutation_guard_update_ledger(rc: dict, model: str, schema
     check_parts = [f'ex.{f} !== incoming.{f}' for f in select_fields_set]
     criteria_check = ' || '.join(check_parts)
 
-    _lines_entity_has_approval = bool(
-        ((schema or {}).get('definitions', {}).get(lines_entity) or {}).get('x-approval')
-    )
+    _lines_entity_has_approval = bool(_raw_def(lines_entity, schema or {}).get('x-approval'))
     if lines_entity and _lines_entity_has_approval:
         return _build_reservation_guard_and_resubmit_approval_lines(
             rc, model, schema or {}, lines_entity, lines_var, line_txable_f,

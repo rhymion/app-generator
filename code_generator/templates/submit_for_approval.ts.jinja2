@@ -19,6 +19,9 @@ import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
 import { createId } from '@paralleldrive/cuid2';
 import { canSubmitForApproval } from '@/lib/approval_request/submit_predicate';
 import { revalidatePath } from 'next/cache';
+{% if has_reservation %}
+import { InsufficientPoolCapacityError } from '@/lib/{{ model }}/service';
+{% endif %}
 
 export async function submitForApproval{{ parent_pascal }}(id: string): Promise<void> {
   const actorId = await getSessionUserIdOrThrow();
