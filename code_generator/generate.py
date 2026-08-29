@@ -735,7 +735,14 @@ def _entity_is_write_reachable(entity_name: str, defs: dict) -> bool:
     """
     own_key = f'__{entity_name}'
     own_def = defs.get(own_key) or {}
-    if own_def.get('x-generate'):
+    # x-generate lives on the BARE definitions key after
+    # build_user_schema.py's transform, not on the '__'-prefixed raw def
+    # (confirmed empirically: __inventory_movement.get('x-generate') is
+    # None in the real generated_json_schema.yaml; generate.py's own
+    # search_entities() reads it the same way, defs['definitions'].get(bare)
+    # falling back to the '__'-prefixed form only when the bare key is
+    # missing -- generate.py:~2170).
+    if (defs.get(entity_name) or {}).get('x-generate') or own_def.get('x-generate'):
         return False
     own_props = own_def.get('properties') or {}
     for other_key, other_def in defs.items():
@@ -1804,7 +1811,12 @@ def generate(schema_path: str, output_dir: str) -> None:
         if not _val_x_approval:
             continue
         _val_entity_name = _val_def_key[2:]
-        _val_can_update = (_val_def_val.get('x-generate') or {}).get('edit', True) is not False
+        # x-generate lives on the BARE definitions key after
+        # build_user_schema.py's transform (see _entity_is_write_reachable's
+        # docstring) -- fall back to the '__'-prefixed def for entities with
+        # no bare counterpart.
+        _val_x_generate = defs.get(_val_entity_name, {}).get('x-generate') or _val_def_val.get('x-generate') or {}
+        _val_can_update = _val_x_generate.get('edit', True) is not False
         _val_is_editable = _val_can_update or _entity_is_write_reachable(_val_entity_name, defs)
         _validate_x_approval_combinations(
             _val_entity_name, _val_x_approval, _val_def_val.get('properties', {}), _val_is_editable,

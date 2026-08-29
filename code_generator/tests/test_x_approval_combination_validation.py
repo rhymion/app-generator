@@ -310,3 +310,26 @@ class TestEntityIsWriteReachable:
             },
         }
         assert _entity_is_write_reachable('standalone', defs) is False
+
+    def test_x_generate_on_bare_key_only_still_recognized_as_independent(self):
+        # Regression (cmd_865): build_user_schema.py's real output puts
+        # x-generate on the BARE definitions key, not on the '__'-prefixed
+        # raw def -- confirmed empirically against proj_c's
+        # generated_json_schema.yaml (__inventory_movement.get('x-generate')
+        # is None; defs['inventory_movement']['x-generate'] holds the real
+        # config). A version of this function that only checked the
+        # '__'-prefixed key treated every entity as non-independent,
+        # wrongly flagging inventory_movement/inventory_adjustment/
+        # receiving_receipt_line/purchase_per_item as write-reachable and
+        # breaking generate-code against proj_c's real schema.
+        defs = {
+            '__standalone': {
+                # No x-generate here -- only on the bare key below, as in
+                # real build_user_schema.py output.
+                'properties': {'status': {'type': 'string'}},
+            },
+            'standalone': {
+                'x-generate': {'list': True, 'view': True, 'new': True, 'edit': False},
+            },
+        }
+        assert _entity_is_write_reachable('standalone', defs) is False
