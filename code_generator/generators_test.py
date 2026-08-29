@@ -5308,6 +5308,16 @@ def _reservation_base(entity: str, schema: dict, children: list) -> dict | None:
     lines_prop   = x_res.get('lines', '')
     lines_entity = next((c['name'] for c in children if c.get('property_name') == lines_prop), None)
 
+    # cmd_869: whether the lines entity declares x-approval.submit_on — if so,
+    # POST no longer creates a reservation (moved to submit time, cmd_856),
+    # and IT-(2) in the generated spec must assert 201/no-reservation instead
+    # of 409.
+    _lines_submit_on_field, _ = (
+        resolve_approval_submit_on(_raw_def(lines_entity, schema))
+        if lines_entity else (None, None)
+    )
+    reservation_lines_has_submit_on = _lines_submit_on_field is not None
+
     # orderBy description for spec comment
     orderby_desc = ' → '.join(
         f"{f['field']} {f['direction']}" for f in orderby_fields
@@ -5347,6 +5357,7 @@ def _reservation_base(entity: str, schema: dict, children: list) -> dict | None:
         'orderby_fields':     orderby_fields,
         'orderby_sortable':   orderby_sortable,
         'orderby_desc':       orderby_desc,
+        'reservation_lines_has_submit_on': reservation_lines_has_submit_on,
     }
 
 

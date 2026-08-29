@@ -55,6 +55,36 @@ describe('{{ pascal }} Reservation (generated)', () => {
   // ---------------------------------------------------------------------------
   // (2) Insufficient stock rollback
   // ---------------------------------------------------------------------------
+{% if reservation_lines_has_submit_on %}
+  it('(2): insufficient stock — creation returns 201 (capacity check deferred to submit time)', () => {
+    // With submit_on declared on the lines entity, POST does not create a
+    // reservation. Capacity is checked only at submit time (via the per-line
+    // submit_for_approval Server Action). Verify: an over-capacity POST
+    // returns 201 and the pool's reserved_quantity stays at 0.
+    cy.task<any>('db:seedReservation{{ pascal }}Insufficient').then((seed: any) => {
+      cy.request({
+        method: 'POST',
+        url: API_BASE,
+        headers: { 'X-API-Key': TEST_API_KEY },
+        body: {
+          {{ parent_str_field }}: 'GEN-TEST-②',
+          {{ parent_fk_field }}: seed.userId,
+          {{ lines_prop }}: [
+            { {{ criteria_item_field }}: seed.product.id, {{ req_qty_field }}: seed.overQty, price: null },
+          ],
+        },
+        failOnStatusCode: false,
+      }).then((res: any) => {
+        expect(res.status).to.eq(201);  // No capacity check at creation time
+
+        cy.task<any>('db:get{{ pascal }}PoolState', seed.inventory.id).then((inv: any) => {
+          expect(inv.{{ pool_qty_field }}).to.eq(2);
+          expect(inv.{{ pool_res_field }}).to.eq(0);  // No reservation created
+        });
+      });
+    });
+  });
+{% else %}
   it('(2): insufficient stock — returns 409 and no {{ alloc_entity }} remains', () => {
     cy.task<any>('db:seedReservation{{ pascal }}Insufficient').then((seed: any) => {
       cy.request({
@@ -79,6 +109,7 @@ describe('{{ pascal }} Reservation (generated)', () => {
       });
     });
   });
+{% endif %}
 
 {% if alloc_entity %}
   // ---------------------------------------------------------------------------

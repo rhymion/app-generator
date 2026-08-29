@@ -356,3 +356,30 @@ class TestChange5ResubmitSkippedForSubmitOnLines:
         for token in ('_lineIsWithdrawn', '_lineLatestRoundRow', '_lineLatestRoundRequests'):
             assert token in guard
         assert 'inventory_transactionable_id: _existing.inventory_transactionable_id' in guard
+
+
+# ---------------------------------------------------------------------------
+# subtask_869b design: submit_on branch of reservation_spec_context
+# ---------------------------------------------------------------------------
+from generators_test import reservation_spec_context
+
+
+class TestReservationSpecContextSubmitOn:
+    def test_has_submit_on_true_when_lines_has_submit_on(self):
+        schema = _schema(has_submit_on=True)
+        children = [_lines_child()]
+        ctx = reservation_spec_context('purchase_order', schema, children)
+        assert ctx is not None
+        assert ctx.get('reservation_lines_has_submit_on') is True, (
+            'purchase_per_item has submit_on, template must see True '
+            'to switch IT-(2) to the 201/no-reservation assertion'
+        )
+
+    def test_has_submit_on_false_when_lines_has_no_submit_on(self):
+        schema = _schema(has_submit_on=False)
+        children = [_lines_child()]
+        ctx = reservation_spec_context('purchase_order', schema, children)
+        assert ctx is not None
+        assert ctx.get('reservation_lines_has_submit_on') is False, (
+            'without submit_on, keep the original 409 assertion path'
+        )
