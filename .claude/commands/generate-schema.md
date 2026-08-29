@@ -100,6 +100,41 @@ inventory:
 <!-- why: these fields are maintained by transaction/reservation logic,
      not by direct user edits — the form should show, not accept, them. -->
 
+Or lock a single field directly on the property, without an entity-level list:
+
+```yaml
+inventory:
+  fields:
+    reserved_quantity:
+      x-readonly: true
+```
+<!-- why: same rendering effect as x-readonly-fields for one field, but
+     scoped differently — see "x-readonly vs x-readonly-fields" below for
+     which to reach for. -->
+
+### `x-readonly` vs `x-readonly-fields`: which one to use
+
+Both make a field non-editable in the generated form (shown, not accepted,
+on edit). They differ in **scope**, not effect:
+
+| | `x-readonly` | `x-readonly-fields` |
+|---|---|---|
+| Where declared | on the property itself, under `fields:` | entity-level list, alongside `x-generate` |
+| Scope | the Prisma model — every view built on it | the one view entity it's declared on |
+| Use when | the field must never be editable through *any* view of this model (e.g. a computed/system column) | only *this* view should lock the field down; other views of the same model may still let it be edited |
+
+Properties (`fields:`/`required:`) always live on the model, not the view
+— that's why `x-readonly` is inherently model-wide: there's no separate
+per-view copy of the property to attach it to differently. `x-readonly-fields`
+is the opposite: it's entity-level metadata, and it stays on whichever view
+entity declares it. A proxy/secondary view of a model (e.g. a settings page
+that is really just another view of `user`) can declare `x-readonly-fields`
+without affecting the model's other views — declaring the same field name
+with `x-readonly` instead would lock it down everywhere. See
+`docs/knowledge/readonly-field-form-rendering.md` for the implementation
+detail (`build_context.py` reads `x-readonly-fields` from the view entity's
+own definition, not the shared raw entity).
+
 ## Common rules
 
 1. `npm run lint` must pass.

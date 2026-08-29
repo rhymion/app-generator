@@ -291,3 +291,33 @@ class TestBuildUserSchemaKeySurvival:
         }
         raw, _view = _build_raw_and_view("role", entry, models)
         assert raw.get("x-scheduled-task") == entry["x-scheduled-task"]
+
+
+class TestXReadonlyFieldsScope:
+    """cmd_874 subtask_874d: `x-readonly-fields` moved from
+    `_ENTITY_LEVEL_DATA_KEYS` to `_VIEW_LEVEL_CONFIG_KEYS` in
+    build_user_schema.py -- it must land on the reconstructed VIEW entity,
+    not the shared RAW entity. Before this fix it landed on `raw`, so
+    build_context.py (which reads the raw entity for entity-level
+    annotations) saw one view's declaration applied to every other view of
+    the same Prisma model -- a proxy view like `setting` (a second view of
+    the `user` model) could not declare a readonly field without also
+    making it readonly on the `user` view itself. See
+    build_context.py's `_ro_from_entity` for the read-side half of this
+    fix."""
+
+    def test_x_readonly_fields_lands_on_view_not_raw(self):
+        models = parse_prisma_schema(PRISMA_SCHEMA_PATH)
+        model = models["role"]
+        entry = {
+            "fields": {"name": {"minLength": 1}},
+            "x-generate": {"list": True, "view": True, "new": True, "edit": True, "delete": True},
+            "x-readonly-fields": ["name"],
+        }
+        raw, view = _build_raw_and_view("role", entry, models)
+        assert "x-readonly-fields" not in raw, (
+            "x-readonly-fields must NOT be copied onto the raw entity -- "
+            "that is the shared entity every view of this model resolves "
+            "to, so anything placed there leaks across views"
+        )
+        assert view.get("x-readonly-fields") == ["name"]

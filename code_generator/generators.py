@@ -28,10 +28,16 @@ from build_context import get_uri_kind
 
 def _raw_def(entity_name: str, schema: dict) -> dict:
     """Resolve a bare/view model name to its raw entity dict — scalar/FK
-    properties, x-readonly-fields, x-gdpr-mode, x-display etc. all live on
-    the raw ('__'-prefixed) entity, not the view. Falls back to the bare
-    view for entities with no raw counterpart (e.g. 'setting', which
-    proxies the 'user' view instead of having its own raw twin)."""
+    properties, x-gdpr-mode, x-display etc. all live on the raw
+    ('__'-prefixed) entity, not the view. Falls back to the bare view for
+    entities with no raw counterpart (e.g. 'setting', which proxies the
+    'user' view instead of having its own raw twin).
+
+    NOTE: `x-readonly-fields` is NOT among these (cmd_874 subtask_874d) —
+    it lives on the view entity itself. This module never reads it
+    directly; it consumes the already-view-scoped `readonly_fields` /
+    `readonly_fields_create_reject` build_context.py computes.
+    """
     defs = schema.get('definitions', {})
     return defs.get(f'__{entity_name}', {}) or defs.get(entity_name, {})
 from helpers.label_field import (

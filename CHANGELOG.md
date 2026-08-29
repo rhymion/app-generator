@@ -120,6 +120,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   (`searchXOptions('', [])`, still applying `filterAutocompleteOptions()`)
   on mount and whenever the sibling context field changes. Every other
   relation's generated code is unchanged.
+- **A view's `x-readonly-fields` declaration no longer leaks onto every
+  other view built on the same Prisma model.** `x-readonly-fields` used to
+  be copied onto the shared raw entity during schema reconstruction
+  (`build_user_schema.py`), and `build_context.py` read it back from that
+  same raw entity — so a proxy/secondary view (e.g. a `setting` page that
+  is really just another view of `user`) could not declare a readonly
+  field without also locking it down on the model's other view(s).
+  `x-readonly-fields` now stays on the view entity that declares it, and
+  `build_context.py` reads it from the view entity itself. No current
+  schema declares `x-readonly-fields`, so this is a scope fix with no
+  observable effect until a schema actually uses it on a shared model; see
+  `docs/knowledge/readonly-field-form-rendering.md` for the full writeup
+  and `.claude/commands/generate-schema.md` for updated guidance on when
+  to use `x-readonly-fields` vs. per-property `x-readonly`.
 ### Security
 - **`.env.vercel.production.local.example` no longer carries a real Vercel
   team ID.** A previous commit had left a real value in `VERCEL_ORG_ID`;

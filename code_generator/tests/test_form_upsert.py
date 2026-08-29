@@ -1057,11 +1057,14 @@ class TestUriKindLinkFieldReadonlyInFormUpsert:
                             "x-uri-kind": "link",
                         },
                     },
-                    "x-readonly-fields": ["reference_url"],
                 },
                 "resource": {
                     "x-generate": {"list": True, "view": True, "new": True, "edit": True,
                                    "delete": True, "api": False, "test": False},
+                    # x-readonly-fields is view-scoped (cmd_874 subtask_874d):
+                    # it lives on the view entity itself, not the shared raw
+                    # entity — see build_context.py's _ro_from_entity.
+                    "x-readonly-fields": ["reference_url"],
                     "allOf": [{"$ref": "#/definitions/__resource"}],
                 },
             }

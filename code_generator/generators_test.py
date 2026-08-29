@@ -151,13 +151,24 @@ from generate_types import extract_entities
 from generators import resolve_approval_submit_on
 
 
-def _readonly_field_names(model_def: dict) -> set[str]:
+def _readonly_field_names(model_def: dict, view_def: dict | None = None) -> set[str]:
     """Fields marked read-only via x-readonly-fields (entity) or x-readonly (per field).
 
     Such fields render as non-editable text in the form, so UI tests must not try
     to fill or clear them (the helper would fail typing into a read-only input).
+
+    x-readonly-fields is entity-level but view-scoped (cmd_874 subtask_874d):
+    it lives on the view entity itself, not the shared raw entity `model_def`
+    resolves to — pass `view_def` (schema['definitions'][definition_key])
+    whenever the caller has it, or a proxy view's declaration is silently
+    invisible here (fail-open: the test helper would try to fill a field the
+    real form renders read-only). Falls back to `model_def` when `view_def`
+    is omitted so a caller mid-migration can't crash outright, but that
+    fallback reads the wrong (pre-fix) scope — always pass `view_def`.
+    Per-property x-readonly is unaffected: properties live on the raw entity
+    by design, not something this scoping fix changes.
     """
-    ro = set(model_def.get('x-readonly-fields') or [])
+    ro = set((view_def if view_def is not None else model_def).get('x-readonly-fields') or [])
     ro |= {k for k, v in (model_def.get('properties') or {}).items()
            if isinstance(v, dict) and v.get('x-readonly')}
     return ro
@@ -2185,7 +2196,9 @@ def helper_context(
     # Mark read-only fields: they stay in `fields` (so seed/prisma data still sets
     # required values) but UI fill/clear/assert commands skip them — the form renders
     # them non-editable, so typing into them would fail.
-    _readonly_props = _readonly_field_names(parent_def)
+    _readonly_props = _readonly_field_names(
+        parent_def, schema.get('definitions', {}).get(definition_key, {})
+    )
     for _f in fields:
         _f['readonly'] = _f['prop_name'] in _readonly_props
     deps = resolve_dependencies(model_name, schema)
@@ -3191,7 +3204,9 @@ def spec_context(
     fields = [f for f in fields if f['prop_name'] not in _direct_attachment_prop_names]
     # Mark read-only fields: kept in `fields` for seed/prisma data, skipped by UI
     # fill/clear/assert commands (the form renders them non-editable).
-    _readonly_props = _readonly_field_names(parent_def)
+    _readonly_props = _readonly_field_names(
+        parent_def, schema.get('definitions', {}).get(definition_key, {})
+    )
     for _f in fields:
         _f['readonly'] = _f['prop_name'] in _readonly_props
     deps = resolve_dependencies(model_name, schema)
@@ -4383,7 +4398,12 @@ def api_spec_context(
     ]
 
     # Collect readonly fields (x-readonly-fields entity-level OR x-readonly per-field).
-    _ro_from_entity: set[str] = set(model_def.get('x-readonly-fields') or [])
+    # x-readonly-fields is read from _api_detail_def (the view entity itself),
+    # not model_def (cmd_874 subtask_874d) — mirrors build_context.py's
+    # _ro_from_entity: model_def is the raw entity shared by every view of
+    # this Prisma model, so reading it there would let one proxy view's
+    # declaration leak into every other view's generated test helper.
+    _ro_from_entity: set[str] = set(_api_detail_def.get('x-readonly-fields') or [])
     _ro_from_props: set[str] = {
         fn for fn, fp in (model_def.get('properties') or {}).items()
         if isinstance(fp, dict) and fp.get('x-readonly')
