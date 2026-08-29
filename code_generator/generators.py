@@ -2467,7 +2467,155 @@ def _build_split_approval_inherit_block(
     )
 
 
-def _build_approval_lines_post_create_code(parent_def: dict, model: str, schema: dict) -> str:
+def _build_approval_lines_per_line_reservation_code(
+    rc: dict, model: str, schema: dict | None,
+    line_var: str = '_apprTargetRow',
+    target_id_var: str = '_apprTargetId',
+    child_var: str = '',
+) -> str:
+    """Reservation claim for a single already-created line row.
+
+    cmd_871 [乙]: companion to _build_approval_lines_post_create_code's new
+    value-checked submit_on branch — when a line is created directly in its
+    submit_on state (e.g. purchase_per_item with status: 'pending'), the
+    reservation claim must fire in the *same* edge as the approval_request,
+    exactly like _build_approval_edge_trigger_create_code already does for
+    an entity that reserves against itself. This is the lines-entity
+    equivalent, adapted from _build_ledger_reservation_allocation_code's
+    lines-case claim_body (L1386-1598) for a single row already resolved by
+    the caller instead of a `for (const _line of _reservationLines)` loop
+    over the whole set.
+
+    Only strategy: ledger_transaction is supported — the caller only wires
+    this in for that strategy (see change_c_call_sites in the design
+    report); any other strategy reaching here is a caller bug.
+
+    bridge_var is namespaced by child_var (`_resBridge_{child_var}`) to
+    avoid colliding with the sibling `bridge` local inside
+    _build_ledger_reservation_allocation_code's own generated block, and
+    with any other lines prop's per-line block generated alongside this one
+    in the same for-loop scope.
+    """
+    if rc.get('transaction_strategy') != 'ledger_transaction':
+        raise ValueError(
+            "_build_approval_lines_per_line_reservation_code: only "
+            f"transaction_strategy 'ledger_transaction' is supported, got "
+            f"{rc.get('transaction_strategy')!r}"
+        )
+
+    pool = rc.get('pool') or {}
+    req  = rc.get('request') or {}
+    pol  = rc.get('policy') or {}
+    res  = rc.get('result') or {}
+
+    domain_key = rc.get('ledger_domain')
+    if not domain_key:
+        raise ValueError(
+            f"x-reservation for {model!r}: transaction.ledgerDomain is required (OD-1)"
+        )
+    _domain = resolve_ledger_domain(schema or {}, domain_key)
+    pool_entity             = _domain['pool']
+    ledger_entity           = _domain['ledger']
+    transactionable_entity  = _domain['transactionable']
+    item_field       = _domain['item_field']
+    location_field   = _domain['location_field']
+    lot_field        = _domain['lot_field']
+    expiration_field = _domain['expiration_field']
+
+    pool_qty_field = pool.get('quantityField', 'quantity')
+    pool_res_field = pool.get('reservedField', 'reserved_quantity')
+    req_qty_field  = req.get('quantityField', 'quantity')
+    criteria       = req.get('criteria') or {}
+    policy_order   = pol.get('orderBy') or []
+    line_txable_f  = res.get('lineTransactionableField')
+    if not line_txable_f:
+        raise ValueError(
+            f"x-reservation for {model!r}: result.lineTransactionableField is required (OD-1)"
+        )
+    lines_entity = rc.get('lines_entity') or model
+
+    def _order_entry(field: str, direction: str) -> str:
+        if direction == 'asc_nulls_last':
+            return f"{{ {field}: {{ sort: 'asc', nulls: 'last' }} }}"
+        if direction == 'desc_nulls_first':
+            return f"{{ {field}: {{ sort: 'desc', nulls: 'first' }} }}"
+        return f"{{ {field}: '{direction}' }}"
+
+    order_parts: list[str] = []
+    for item in policy_order:
+        for field, direction in item.items():
+            order_parts.append(_order_entry(field, str(direction)))
+    order_str = ', '.join(order_parts)
+
+    criteria_lines = [f'            {k}: {line_var}.{v},' for k, v in criteria.items()]
+    criteria_str   = '\n'.join(criteria_lines) if criteria_lines else ''
+    where_clause = f"            {pool_qty_field}: {{ gt: 0 }},"
+    if criteria_str:
+        where_clause = criteria_str + '\n' + where_clause
+
+    bridge_var = f'_resBridge_{child_var}'
+
+    claim_body = (
+        f"          const _candidates = await tx.{pool_entity}.findMany({{\n"
+        f"            where: {{\n"
+        f"{where_clause}\n"
+        f"            }},\n"
+        + (f"            orderBy: [{order_str}],\n" if order_str else '') +
+        f"          }});\n"
+        f"          const {bridge_var} = await tx.{transactionable_entity}.create({{ data: {{}} }});\n"
+        f"          for (const _candidate of _candidates) {{\n"
+        f"            if (_remaining <= 0) break;\n"
+        f"            const _available = _candidate.{pool_qty_field} - _candidate.{pool_res_field};\n"
+        f"            if (_available <= 0) continue;\n"
+        f"            const _claim = Math.min(_remaining, _available);\n"
+        f"            const _claimResult = await tx.{pool_entity}.updateMany({{\n"
+        f"              where: {{ id: _candidate.id, {pool_res_field}: {{ lte: _candidate.{pool_qty_field} - _claim }} }},\n"
+        f"              data: {{ {pool_res_field}: {{ increment: _claim }} }}, // O-4: quantity unchanged on reserve\n"
+        f"            }});\n"
+        f"            if (_claimResult.count > 0) {{\n"
+        f"              _remaining -= _claim;\n"
+        f"              await tx.{ledger_entity}.create({{\n"
+        f"                data: {{\n"
+        f"                  {line_txable_f}: {bridge_var}.id,\n"
+        f"                  event_type: 'reserve',\n"
+        f"                  quantity_delta: 0,\n"
+        f"                  reserved_delta: _claim,\n"
+        f"                  {item_field}: _candidate.{item_field},\n"
+        f"                  {location_field}: _candidate.{location_field},\n"
+        f"                  {lot_field}: _candidate.{lot_field},\n"
+        f"                  {expiration_field}: _candidate.{expiration_field},\n"
+        f"                  created_by_id: actorId,\n"
+        f"                  creator_id: actorId,\n"
+        f"                  updater_id: actorId,\n"
+        f"                }},\n"
+        f"              }});\n"
+        f"            }}\n"
+        f"          }}\n"
+        f"          if (_remaining > 0) {{\n"
+        f"            throw new InsufficientPoolCapacityError(\n"
+        f"              `Insufficient inventory for {lines_entity} line`\n"
+        f"            );\n"
+        f"          }}\n"
+    )
+
+    return (
+        f"        {{\n"
+        f"          let _remaining = ({line_var} as Record<string, unknown>).{req_qty_field} as number;\n"
+        f"{claim_body}"
+        f"          await tx.{lines_entity}.update({{\n"
+        f"            where: {{ id: {target_id_var} }},\n"
+        f"            data: {{\n"
+        f"              {line_txable_f}: {bridge_var}.id,\n"
+        f"            }},\n"
+        f"          }});\n"
+        f"        }}"
+    )
+
+
+def _build_approval_lines_post_create_code(
+    parent_def: dict, model: str, schema: dict,
+    reservation_config: dict | None = None,
+) -> str:
     """Create approval_request(s) for each pre-created line approvable.
 
     Mirrors the per-child approval body in
@@ -2495,8 +2643,71 @@ def _build_approval_lines_post_create_code(parent_def: dict, model: str, schema:
         arr_var      = f'_{child_var}ApprIds'
         lines_entity = _resolve_approval_lines_entity(model, prop_name, schema)
         lines_raw_def = _raw_def(lines_entity, schema or {})
-        lines_submit_on_field, _ = resolve_approval_submit_on(lines_raw_def)
+        lines_submit_on_field, lines_submit_on_value = resolve_approval_submit_on(lines_raw_def)
         if lines_submit_on_field is not None:
+            # cmd_871 [乙]: a submit_on declaration on the lines entity no
+            # longer means "always skip" (that made a line created directly
+            # in its submit_on state — e.g. purchase_per_item with
+            # status: 'pending' — submit for approval without ever being
+            # asked to). Check the actual value instead: a draft-state line
+            # (submit_on not matched) still skips exactly as before; a line
+            # created already in its submit_on state fires approval_request
+            # creation AND (when this prop reserves) the reservation claim,
+            # in the same edge as _build_approval_edge_trigger_create_code
+            # already does for a self-reserving entity.
+            _so_flows_var    = f'_{child_var}ApprFlows'
+            _so_creator_var  = f'_{child_var}Creator'
+            _so_role_ids_var = f'_{child_var}CreatorRoleIds'
+            _so_inner = _build_approval_create_block_for_entity(
+                approvable_id_expr='_apprId',
+                actor_id_expr='actorId',
+                flows_var=_so_flows_var,
+                role_ids_var=_so_role_ids_var,
+                tx_var='tx',
+                indent='        ',
+                target_entity_name=lines_entity,
+                target_id_expr='_apprTargetId',
+            )
+            _value_check = _ts_literal(lines_submit_on_value)
+            # select: id + the submit_on field + (when this prop reserves)
+            # every field the reservation claim reads off the line row.
+            _select_fields = {'id': True, lines_submit_on_field: True}
+            if reservation_config is not None:
+                _req_qty_field = (reservation_config.get('request') or {}).get('quantityField', 'quantity')
+                _select_fields[_req_qty_field] = True
+                for _criteria_val_field in ((reservation_config.get('request') or {}).get('criteria') or {}).values():
+                    _select_fields[_criteria_val_field] = True
+            _select_str = ', '.join(f'{f}: true' for f in _select_fields)
+            _res_block = ''
+            if reservation_config is not None:
+                _res_block = _build_approval_lines_per_line_reservation_code(
+                    reservation_config, model, schema,
+                    line_var='_apprTargetRow',
+                    target_id_var='_apprTargetId',
+                    child_var=child_var,
+                )
+            blocks.append(
+                f"    if ({arr_var}.length > 0) {{\n"
+                f"      const {_so_flows_var} = await tx.approval_flow.findMany({{\n"
+                f"        where: {{ entity_name: '{lines_entity}' }},\n"
+                f"      }});\n"
+                f"      const {_so_creator_var} = await tx.user.findUnique({{\n"
+                f"        where: {{ id: actorId }},\n"
+                f"        select: {{ roles: {{ select: {{ id: true }} }} }},\n"
+                f"      }});\n"
+                f"      const {_so_role_ids_var} = {_so_creator_var}?.roles.map((r) => r.id) ?? [];\n"
+                f"      for (const _apprId of {arr_var}) {{\n"
+                f"        const _apprTargetRow = await tx.{lines_entity}.findFirst({{\n"
+                f"          where: {{ approvable_id: _apprId }},\n"
+                f"          select: {{ {_select_str} }},\n"
+                f"        }});\n"
+                f"        const _apprTargetId = _apprTargetRow?.id;\n"
+                f"        if (_apprTargetRow?.{lines_submit_on_field} !== {_value_check}) continue;\n"
+                f"{_so_inner}\n"
+                + (f"{_res_block}\n" if _res_block else '') +
+                f"      }}\n"
+                f"    }}"
+            )
             continue
         flows_var    = f'_{child_var}ApprFlows'
         creator_var  = f'_{child_var}Creator'
@@ -3324,7 +3535,14 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     approval_lines_post_update_code = ''
     if get_approval_lines_props(parent_def, model, schema):
         approval_lines_pre_create_code  = _build_approval_lines_pre_create_code(parent_def, model, schema, mode='create')
-        approval_lines_post_create_code = _build_approval_lines_post_create_code(parent_def, model, schema)
+        approval_lines_post_create_code = _build_approval_lines_post_create_code(
+            parent_def, model, schema,
+            reservation_config=(
+                reservation_config
+                if (has_reservation and has_submit_on and reservation_config is not None)
+                else None
+            ),
+        )
         if can_update:
             approval_lines_pre_update_code  = _build_approval_lines_pre_create_code(parent_def, model, schema, mode='update')
             approval_lines_post_update_code = _build_approval_lines_post_create_code(parent_def, model, schema)
