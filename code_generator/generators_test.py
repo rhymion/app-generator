@@ -4959,6 +4959,22 @@ def api_spec_context(
             _put_body_impl('              ', skip_field=resubmit_target_field, record_var='data.record')
             if resubmit_target_field else None
         ),
+        # cmd_867: 14.5 alone has no `data` in scope -- it POSTs the record
+        # itself rather than sourcing it from a db:populate<Entity> task, so
+        # the row it PUTs back must come from the detail GET response
+        # (`getRes1.body`, from the .then((getRes1) => {...}) wrapper the
+        # 14.5 template block opens around its PUT) instead of `data.record`.
+        # createRes.body is not usable here: the generated add<Parent>()
+        # service function (service.ts.jinja2) returns only `{ id }`, so
+        # createRes.body.<field> would silently resolve to undefined for
+        # every field but id.
+        # Indent is 18 spaces (one level deeper than put_body_resubmit's 14 --
+        # 14.5 nests its PUT inside two .then() blocks, the other resubmit
+        # tests inside one).
+        'put_body_resubmit_created': (
+            _put_body_impl('                  ', skip_field=resubmit_target_field, record_var='getRes1.body')
+            if resubmit_target_field else None
+        ),
         'reservation_count_pool_pascal': _reservation_count_pool_pascal,
         # CSV Export (Phase 1) test context
         'should_filter_by_org': should_filter_by_org,
