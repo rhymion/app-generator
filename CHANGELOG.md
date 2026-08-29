@@ -6,6 +6,44 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Withdraw lockout for entities that never declare `x-approval.on_withdrawn`, plus a
+  structural combination check on `x-approval` clauses.** An entity without
+  `on_withdrawn` has no safe path back into the workflow after a
+  withdrawal (a locked `submit_on` field freezes the row forever, or —
+  with no `submit_on` at all — the row can never be resubmitted).
+  Withdrawal is now blocked for such entities at the API
+  (`app/api/approval_request/[id]/withdraw/route.ts`, 400) and Server
+  Action (`lib/approval_request/actions_core.ts`'s
+  `withdrawApprovalRequest()`, fail-fast inside the transaction before any
+  write) layers, keyed by the resolved Prisma model name via a new
+  `ENTITIES_WITH_ON_WITHDRAWN` Set/`hasOnWithdrawn()` exported from the
+  generated `on_withdrawn_dispatch.ts`. The Withdraw button
+  (`components/_standard/ApprovalSection.tsx`) is hidden for the same
+  entities via a new generator-computed `hasOnWithdrawn` prop
+  (`form_view_context()` in `generators.py`, wired through
+  `form_view.tsx.jinja2`).
+
+  A new `_validate_x_approval_combinations()` (`code_generator/generate.py`)
+  runs once per `x-approval`-declaring entity before any approval-related
+  file is generated, enforcing a combination truth table over four axes —
+  `S`=`submit_on` declared, `W`=`on_withdrawn` declared, `T`=`on_rejected`
+  terminal, `E`=editable via any generated write path. `S=true` is valid
+  unconditionally; `S=false` is valid only for exactly `W=false, T=true,
+  E=false` (no withdrawal, a terminal rejection, and no way to edit the
+  request's content post-submission) — every other `S=false` combination
+  raises a `ValueError` naming the entity and which condition failed. `E`
+  is determined empirically (a new `_entity_is_write_reachable()` helper)
+  rather than from `x-generate.edit` alone, since a one-to-many list child
+  with no `x-generate` of its own can still be rewritten through an
+  ancestor entity's nested `create`/`update` regardless of its own edit
+  flag. A second, independent check flags the same `(field, resolved
+  value)` pair used by 2+ distinct `submit_on`/`on_approved.set_fields`/
+  `on_rejected.set_fields`/`on_withdrawn.set_fields` declarations (e.g. a
+  rejection writing a field back to `submit_on`'s own value would
+  re-trigger the update-side edge trigger, creating an infinite approval
+  round). Verified directly against the real `x-approval` entities in two
+  consumer repos' current schemas (seven entities in one, three in the
+  other) to confirm none are newly rejected.
 - **New entity-level schema key `x-write-locked-values` declares field
   values that only the system may write, independently of `x-approval`.**
   `{field_name: [value, ...]}`; works on any entity, with or without

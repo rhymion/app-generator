@@ -888,3 +888,81 @@ this generator's own schema, so runtime verification (403/200 checks against the
 existing `approval_edit_terminal_test` entity in a throwaway isolated worktree, with no entity or
 model committed to app-generator itself.
 
+### 16.16 Withdraw lockout and the `x-approval` combination truth table
+
+An entity that never declares `x-approval.on_withdrawn` has no safe way back into the workflow
+once a withdrawal happens: with `submit_on` present, the field is left at its locked, submitted
+value forever (§16.15's lockdown never releases it); without `submit_on` at all, there is no
+resubmission path in the first place (§16.13). Either way, "being able to withdraw" is itself the
+hazard — not something to leave open by default.
+
+**Server-side lockout.** `dispatchOnWithdrawn`'s generated module
+(`on_withdrawn_dispatch.ts.jinja2`) now also exports `ENTITIES_WITH_ON_WITHDRAWN` (a `Set<string>`
+of every entity declaring `on_withdrawn`, same shape as `on_rejected_dispatch.ts`'s
+`TERMINAL_REJECT_ENTITIES`) and a thin `hasOnWithdrawn(entityType)` wrapper. Both the REST route
+(`app/api/approval_request/[id]/withdraw/route.ts`) and the Server Action path
+(`lib/approval_request/actions_core.ts`'s `withdrawApprovalRequest()`) check membership — keyed
+by the **resolved Prisma model name**, not the raw `approval_flow.entity_name` view key, matching
+every other dispatch lookup in this file (§16.9's `resolveApprovableModel` translation) — and
+reject with an error before any row is written if the entity is absent from the set. The route
+checks before its transaction opens; the Server Action checks inside its transaction, immediately
+after the round's pending rows are confirmed non-empty but before either is updated, so a
+rejection is still fail-fast (no partial write) without a second query. `ApprovalSection.tsx`'s
+Withdraw button is hidden the same way, via a `hasOnWithdrawn` prop computed in
+`form_view_context()` (`generators.py`) and threaded through `form_view.tsx.jinja2` — the API
+rejection is the actual enforcement; the hidden button just avoids surfacing an error a requestor
+has no use for.
+
+**Combination truth table.** Beyond the single unreachable-resubmission check in §16.13,
+`_validate_x_approval_combinations()` (`code_generator/generate.py`) runs once per
+`x-approval`-declaring entity, before any approval-related file is generated, checking a full
+combination of four axes:
+
+| Axis | Meaning |
+|------|---------|
+| `S` | `submit_on` declared |
+| `W` | `on_withdrawn` declared |
+| `T` | `on_rejected.terminal` (absent `on_rejected` counts as `T=false`, matching `isTerminalReject()`'s own runtime default) |
+| `E` | editable via *any* generated write path (see below — not just `x-generate.edit`) |
+
+`S=true` is valid for all 8 combinations of `W`/`T`/`E`. `S=false` is valid **only** for exactly
+`W=false, T=true, E=false` — no withdrawal, a terminal rejection, and no way to edit the request's
+content after submission. Every other `S=false` combination raises `ValueError` naming the entity
+and which condition failed:
+
+- `W=true` with `S=false`: a withdrawn row can never resubmit (same root cause the lockout above
+  exists for).
+- `T=false` with `S=false`: a rejected row is neither terminal nor resubmittable — permanently
+  stuck (§16.13's failure mode, generalized to the no-`submit_on` case).
+- `E=true` with `S=false`: with no `submit_on`, there is no lockdown at all (§16.15's guard is
+  gated on `submit_on` being present) — an editable request's content can be freely rewritten
+  mid-approval with nothing to stop it.
+
+**Why `E` is not just `x-generate.edit`.** A one-to-many list child with no `x-generate` of its
+own (an "embedded", non-independent child — `build_context.py`'s `_build_child_data`/
+`embedded_ch`, ~L342-358/~L2247) is written with full field values through its parent's nested
+`create`/`update`, regardless of the child's own edit flag (it has none to set). A list child that
+*does* declare its own `x-generate` (an "independent" child, shown read-only on the parent form)
+is excluded from that nested write body entirely — `embedded_ch`'s filter keeps a list child only
+when it is `use_connect` (many-to-many / nullable-FK, id-only `connect`/`set`, no field-value
+write) or not independent. `_entity_is_write_reachable()` (`code_generator/generate.py`) mirrors
+this without needing the full `ctx`-building pipeline: `E` is `x-generate.edit is not false` OR
+(no independent `x-generate` of its own AND some other entity embeds it as a required-FK list
+child). One subtlety confirmed empirically while building this: `x-generate` lives on the **bare**
+definitions key after `build_user_schema.py`'s Stage-4 transform, not on the `__`-prefixed raw
+def — a lookup against only the `__`-prefixed key silently treats every entity as `x-generate`-less
+(non-independent), which is a distinct failure mode from the one this whole check exists to catch.
+
+**Duplicate-value check (independent of the table above).** The same `(field, resolved value)`
+pair used by 2+ distinct declarations among `submit_on`/`on_approved.set_fields`/
+`on_rejected.set_fields`/`on_withdrawn.set_fields` also raises `ValueError` — e.g. a rejection or
+withdrawal writing a field back to `submit_on`'s own value would re-trigger the update-side edge
+trigger (§16.4), creating an approval round in an infinite loop.
+
+**Consumer-schema impact measured, not assumed**: fed through both checks directly against the
+real, `build_user_schema.py`-expanded definitions of every `x-approval`-declaring entity in two
+consumer repos' current schemas (seven entities in one, three in the other) — none are newly
+rejected. The three entities among them declaring neither `submit_on` nor `on_withdrawn`
+(`S=false, W=false`) all have `on_rejected.terminal: true` and `x-generate.edit: false` with no
+ancestor embedding them as a dependent list child, landing exactly on the one valid `S=false` row.
+
