@@ -261,44 +261,54 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
         },
       });
 
-      // cmd_844 PD-2: a non-terminal rejection closes this whole round --
-      // any other still-pending row in the same round (a later stage that
-      // never got its turn) is auto-cancelled to 'withdrawn' (the existing
-      // status value is reused, not a new 'cancelled' one -- who closed it
-      // is recorded via approval_history.creator_id, the rejecting
-      // approver). Without this, canSubmitForApproval keeps blocking
-      // resubmission forever (it treats any pending row as "still in
-      // flight"), and the requestor would be forced through an extra
-      // explicit withdraw step just to unstick a round a rejection already
-      // ended. Skipped for a terminal rejection: 'terminal_rejected' alone
-      // already blocks canSubmitForApproval regardless of what any other
-      // row in the round says, and the entity's own on_rejected dispatch
-      // ends the flow through a separate mechanism.
-      if (!terminal) {
-        const siblingPending = await tx.approval_request.findMany({
-          where: {
-            approvable_id: result.approvable_id,
-            round_id: req.round_id,
-            status: 'pending',
-            id: { not: id },
-          },
-          select: { id: true, status: true },
+      // cmd_844 PD-2 (cmd_863c fix: unconditional on terminal-ness -- see
+      // below): a rejection closes this whole round -- any other still-
+      // pending row in the same round (a later stage that never got its
+      // turn) is auto-cancelled to 'withdrawn' (the existing status value
+      // is reused, not a new 'cancelled' one -- who closed it is recorded
+      // via approval_history.creator_id, the rejecting approver). Without
+      // this, a still-pending sibling row lingers forever in the approver's
+      // pending-approvals view even though the round it belongs to has
+      // already ended -- an orphaned row nothing will ever act on again.
+      //
+      // cmd_863c: originally gated on `if (!terminal)` (cmd_844's own
+      // reasoning was "'terminal_rejected' alone already blocks
+      // canSubmitForApproval, and the entity's own on_rejected dispatch
+      // ends the flow through a separate mechanism"), but that reasoning
+      // only covers *resubmission* being blocked -- it says nothing about
+      // the sibling approval_request row itself, which the entity's
+      // on_rejected dispatch never touches (it writes the ENTITY's own
+      // field, not another approval_request's status). A terminal
+      // rejection ends the round exactly as finally as a non-terminal one,
+      // so the sibling auto-cancel must run for both -- this is what
+      // 14.3M(b) (generated unconditionally of terminal-ness) actually
+      // asserts, and what left it failing (`expected 'pending' to equal
+      // 'withdrawn'`) for every terminal-on_rejected entity in the proj_c
+      // consumer schema (approval_edit_terminal_test/inventory_adjustment/
+      // inventory_movement).
+      const siblingPending = await tx.approval_request.findMany({
+        where: {
+          approvable_id: result.approvable_id,
+          round_id: req.round_id,
+          status: 'pending',
+          id: { not: id },
+        },
+        select: { id: true, status: true },
+      });
+      if (siblingPending.length > 0) {
+        await tx.approval_request.updateMany({
+          where: { id: { in: siblingPending.map((r) => r.id) } },
+          data: { status: 'withdrawn' },
         });
-        if (siblingPending.length > 0) {
-          await tx.approval_request.updateMany({
-            where: { id: { in: siblingPending.map((r) => r.id) } },
-            data: { status: 'withdrawn' },
-          });
-          await tx.approval_history.createMany({
-            data: siblingPending.map((r) => ({
-              approval_request_id: r.id,
-              pre_status: statusOrdinal(r.status),
-              post_status: statusOrdinal('withdrawn'),
-              message: null,
-              creator_id: userId,
-            })),
-          });
-        }
+        await tx.approval_history.createMany({
+          data: siblingPending.map((r) => ({
+            approval_request_id: r.id,
+            pre_status: statusOrdinal(r.status),
+            post_status: statusOrdinal('withdrawn'),
+            message: null,
+            creator_id: userId,
+          })),
+        });
       }
 
       const approvableData = await tx.approvable.findUnique({

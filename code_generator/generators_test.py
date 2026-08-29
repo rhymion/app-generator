@@ -2751,6 +2751,39 @@ def helper_context(
     required_fields_prisma = [_enrich_field_prisma(f, title) for f in required_field_metas]
     all_fields_prisma = [_enrich_field_prisma(f, title) for f in fields]
 
+    # cmd_863c: the lockdown escape-hatch override built above only ever
+    # reaches a *generated* record through all_fields_prisma -- the lockdown
+    # field itself (submit_on's own target field, e.g. status) is virtually
+    # always required_fields_prisma-omitted by design (its schema default
+    # intentionally equals submit_on's value, cmd_858c), so
+    # populate{Pascal}Data (built from required_fields_prisma alone, and the
+    # one 4.1/4.2/9.1/9.2/10.1/10.2/4.4 actually call via db:populate{Pascal})
+    # never wrote the override at all -- the field was simply omitted from
+    # its create() call, leaving the DB default (the locked value) in place.
+    # Only populate{Pascal}FullData (built from all_fields_prisma) ever saw
+    # it, and nothing generated calls that function.
+    #
+    # A dedicated list (NOT a mutation of required_fields_prisma itself) is
+    # used for this: required_fields_prisma is also read unfiltered by
+    # populate{Pascal}WithApproval, which deliberately needs the lockdown
+    # field left at submit_on's own value (the flow is still in-flight,
+    # nothing has been rejected yet) -- injecting the override there would
+    # make a "pending approval" fixture claim the entity is already
+    # 'rejected'. populate{Pascal}WithRejectedApproval/
+    # WithTerminalRejectedApproval already filter required_fields_prisma by
+    # rejected_set_fields_prisma's own prop names, so they would have been
+    # safe either way, but keeping the change additive avoids relying on
+    # that filter for correctness here too.
+    required_fields_prisma_for_populate_data = list(required_fields_prisma)
+    if _lockdown_field is not None and _lockdown_override_literal is not None:
+        if not any(f['prop_name'] == _lockdown_field for f in required_fields_prisma):
+            _lockdown_enriched_field = next(
+                (f for f in all_fields_prisma if f['prop_name'] == _lockdown_field),
+                None,
+            )
+            if _lockdown_enriched_field is not None:
+                required_fields_prisma_for_populate_data.append(_lockdown_enriched_field)
+
     # cmd_825: populate{{Pascal}}WithRejectedApproval/WithTerminalRejectedApproval
     # create the approval_request directly (status: 'rejected'/'terminal_rejected'),
     # bypassing the real reject route entirely -- so unlike a genuine rejection,
@@ -3094,6 +3127,7 @@ def helper_context(
         'ua_dep_fields': ua_dep_fields,
         'ua_dep_fields_full': ua_dep_fields_full,
         'required_fields_prisma': required_fields_prisma,
+        'required_fields_prisma_for_populate_data': required_fields_prisma_for_populate_data,
         'rejected_set_fields_prisma': rejected_set_fields_prisma,
         'all_fields_prisma': all_fields_prisma,
         'extra_prisma_fields': extra_prisma_fields,
