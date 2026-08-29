@@ -2686,6 +2686,51 @@ def helper_context(
     deps_return = ', '.join(deps_return_parts)
     non_self_deps_return = ', '.join(non_self_deps_return_parts)
 
+    # cmd_858c (系統①): prisma_value()'s 'string_enum' branch always picks
+    # enum_values[0] as the populate/seed value, regardless of the field's
+    # actual schema default. For every x-approval.submit_on entity in this
+    # schema, submit_on's own locked value happens to be enum_values[0]
+    # (the status default intentionally matches submit_on, so real
+    # create()-time approval-request firing stays unconditional -- see the
+    # json_schema.yaml comment above approval_edit_terminal_test), so this
+    # generic populate helper was creating every test record already
+    # sitting AT the one value post-approval edit/delete lockdown
+    # (approval_lockdown_context(), cmd_846c/#439) locks -- 403ing the
+    # generic CRUD tests (4.1/4.2/9.1/9.2/10.1/10.2) built on top of it
+    # unconditionally, regardless of what those tests are actually
+    # exercising. Override the lockdown field's populate value to
+    # on_rejected.set_fields' resolved value instead: approval_lockdown_
+    # context() never adds on_rejected's value to locked_values regardless
+    # of terminal-ness (846b amendment), so it is always a safe non-locked
+    # escape hatch when declared -- no schema change needed (the schema's
+    # own default must stay locked for the reason above; this only changes
+    # what this test-only DB helper writes via prisma.model.create(),
+    # bypassing the service layer / real create route entirely, so it can
+    # never itself fire or skip approval-request creation).
+    _lockdown_field, _lockdown_submit_value = (
+        resolve_approval_submit_on(parent_def) if parent_def.get('x-approval') else (None, None)
+    )
+    _lockdown_override_literal = None
+    if _lockdown_field is not None:
+        _lockdown_x_approval = parent_def['x-approval']
+        _lockdown_locked_values = {_lockdown_submit_value}
+        _lockdown_on_approved_sf = (_lockdown_x_approval.get('on_approved') or {}).get('set_fields') or {}
+        if _lockdown_field in _lockdown_on_approved_sf:
+            _lockdown_locked_values.add(resolve_set_fields(
+                parent_def.get('properties') or {},
+                {_lockdown_field: _lockdown_on_approved_sf[_lockdown_field]},
+            )[_lockdown_field])
+        _lockdown_on_rejected_sf = (_lockdown_x_approval.get('on_rejected') or {}).get('set_fields') or {}
+        if _lockdown_field in _lockdown_on_rejected_sf:
+            _lockdown_rejected_value = resolve_set_fields(
+                parent_def.get('properties') or {},
+                {_lockdown_field: _lockdown_on_rejected_sf[_lockdown_field]},
+            )[_lockdown_field]
+            if _lockdown_rejected_value not in _lockdown_locked_values:
+                _lockdown_override_literal = (
+                    "'" + str(_lockdown_rejected_value).replace("\\", "\\\\").replace("'", "\\'") + "'"
+                )
+
     def _enrich_field_prisma(field: dict, entity_title: str) -> dict:
         f = dict(field)
         if f['category'] == 'autocomplete':
@@ -2693,6 +2738,10 @@ def helper_context(
             f['dep_var_name'] = dep['dep_var_name'] if dep else None
             f['prisma_val'] = None
             f['prisma_val_fixed'] = None
+        elif f['prop_name'] == _lockdown_field and _lockdown_override_literal is not None:
+            f['prisma_val'] = _lockdown_override_literal
+            f['prisma_val_fixed'] = _lockdown_override_literal
+            f['dep_var_name'] = None
         else:
             f['prisma_val'] = prisma_value(f, 'i', entity_title)
             f['prisma_val_fixed'] = prisma_value(f, '1', entity_title)
