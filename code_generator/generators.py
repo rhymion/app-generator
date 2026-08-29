@@ -2297,7 +2297,10 @@ def _find_reservation_lines_parent(model: str, schema: dict) -> tuple[str | None
     names `model` as its lines entity, and return (parent_name, its
     resolved reservation_config) -- cmd_856 [変更4]. (None, None) when no
     such parent exists (model is not a reservation lines-child at all)."""
-    for entity_name, entity_def in (schema.get('definitions') or {}).items():
+    for entity_name in (schema.get('definitions') or {}):
+        if entity_name.startswith('__'):
+            continue
+        entity_def = _raw_def(entity_name, schema)
         rc = _resolve_reservation_config_from_def(entity_name, entity_def, schema)
         if rc and rc.get('transaction_strategy') == 'ledger_transaction' and rc.get('lines_entity') == model:
             return entity_name, rc
