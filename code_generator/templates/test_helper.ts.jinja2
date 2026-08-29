@@ -634,7 +634,7 @@ export async function populate{{ pascal }}Data(length: number) {
 {% for fk in internal_fk_deps %}
         {{ fk.prop_name }}: {{ fk.var_name }}Item.id,
 {% endfor %}
-{% for field in required_fields_prisma %}
+{% for field in required_fields_prisma_for_populate_data %}
 {% if field.category == 'autocomplete' and field.dep_var_name %}
 {% if (primary_fk_dep and field.dep_var_name == primary_fk_dep.var_name) or field.dep_var_name in extra_oto_fk_dep_vars %}
         {{ field.prop_name }}: {{ field.dep_var_name }}Item.id,

@@ -18,9 +18,10 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // whole round approved" via a fresh tx.approval_request.findMany() (not the
 // old approvable.approval_requests nested include), withdrawApprovalRequest
 // takes an approvable id and closes every pending row of the current round
-// via updateMany/createMany, and a non-terminal rejectApprovalRequest
-// auto-cancels the round's other pending rows (PD-2). See
-// lib/approval_request/actions_core.ts's doc comments for the full design.
+// via updateMany/createMany, and rejectApprovalRequest auto-cancels the
+// round's other pending rows regardless of terminal-ness (PD-2, cmd_863c
+// fix). See lib/approval_request/actions_core.ts's doc comments for the
+// full design.
 
 const {
   findUnique, findFirst, arUpdate, arUpdateMany, historyCreate, historyCreateMany,
@@ -650,10 +651,12 @@ describe('entity_name -> model translation before dispatch (cmd_818 GROUP C5)', 
   });
 });
 
-// cmd_844 PD-2: a non-terminal rejection auto-cancels the round's other
-// still-pending rows (status: 'withdrawn', the existing value reused rather
-// than a new 'cancelled' one) -- otherwise canSubmitForApproval keeps
-// blocking resubmission forever once any row is left pending.
+// cmd_844 PD-2 (cmd_863c: unconditional on terminal-ness, see
+// rejectApprovalRequest's own doc comment): a rejection auto-cancels the
+// round's other still-pending rows (status: 'withdrawn', the existing
+// value reused rather than a new 'cancelled' one) -- otherwise a
+// still-pending sibling row is left orphaned forever, whether the
+// rejection that ended the round was terminal or not.
 describe('rejectApprovalRequest sibling pending auto-cancel (cmd_844 PD-2)', () => {
   const stubRejectingStage2 = (terminal: boolean) => {
     findUnique.mockReset();
@@ -704,14 +707,25 @@ describe('rejectApprovalRequest sibling pending auto-cancel (cmd_844 PD-2)', () 
     });
   });
 
-  it('does not auto-cancel siblings on a terminal rejection', async () => {
+  it('also auto-cancels siblings on a terminal rejection', async () => {
     stubRejectingStage2(true);
     txArFindMany.mockResolvedValue([{ id: 'req-stage3', status: 'pending' }]);
 
     await rejectApprovalRequest('req-stage2');
 
-    expect(arUpdateMany).not.toHaveBeenCalled();
-    expect(historyCreateMany).not.toHaveBeenCalled();
+    expect(arUpdateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['req-stage3'] } },
+      data: { status: 'withdrawn' },
+    });
+    expect(historyCreateMany).toHaveBeenCalledWith({
+      data: [{
+        approval_request_id: 'req-stage3',
+        pre_status: 0,
+        post_status: 4,
+        message: null,
+        creator_id: 'user-1',
+      }],
+    });
   });
 
   it('does nothing extra when there are no sibling pending rows', async () => {
