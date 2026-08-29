@@ -583,7 +583,7 @@ describe('resubmitApprovalRequest removal (cmd_818 E6)', () => {
   it('is not present on the actions object createApprovalActions returns', () => {
     const actions = createApprovalActions({
       resolveApprovableTarget, resolveApprovableModel, dispatchOnApproved, dispatchOnRejected, isTerminalReject,
-      dispatchOnWithdrawn,
+      hasOnWithdrawn, dispatchOnWithdrawn,
     });
     expect('resubmitApprovalRequest' in actions).toBe(false);
   });
