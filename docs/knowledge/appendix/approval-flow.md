@@ -999,3 +999,57 @@ rejected. The three entities among them declaring neither `submit_on` nor `on_wi
 (`S=false, W=false`) all have `on_rejected.terminal: true` and `x-generate.edit: false` with no
 ancestor embedding them as a dependent list child, landing exactly on the one valid `S=false` row.
 
+### 16.17 Design intent: the approval mechanism does not inspect the approvable record's own fields
+
+**This is a deliberate design decision, not a gap to be filed as a bug.** Confirmed by explicit
+product ruling (2026-08-29), after an earlier internal review mistakenly flagged it as one: an
+intermediate business state between submission and approval/rejection (e.g. "under review") is a
+normal, expected part of the workflow, and gating approval on the record's field values would
+block that natural flow.
+
+**What the gate actually checks.** Both `approveApprovalRequest`/`rejectApprovalRequest`
+(`lib/approval_request/actions_core.ts`) and the REST routes
+(`app/api/approval_request/[id]/{approve,reject}/route.ts`) authorize on the *acting user's role*
+and the *`approval_request`'s own workflow state* only:
+
+- Role check: the user holds `approval_flow.approver_role_id`
+  (`app/api/approval_request/[id]/approve/route.ts:25-28`).
+- Ordering check: `assertApprovalOrder(id)` — every `preceded_by` flow's sibling request in the
+  same round is already `approved` (`app/api/approval_request/[id]/approve/route.ts:30`,
+  §16.6.1).
+
+Neither check reads any field of the approvable entity itself (`leave_request.status` or
+equivalent). The route's only interaction with the entity happens after the `approval_request`
+row is already updated, when `dispatchOnApproved`/`dispatchOnRejected` run
+(`app/api/approval_request/[id]/approve/route.ts:66-75`, §16.9/§16.11).
+
+**Why this is intentional.** Requiring the entity's current field state to still match
+`submit_on`'s value at approval time would mean any legitimate intermediate transition made while
+a request is pending (e.g. moving a record to an "under review" state) silently blocks approval.
+The approval mechanism's job is to gate on the *request's own* workflow state (role, ordering,
+round), not to re-validate the entity's business state — that would conflate two different
+concerns. A record moving through business states while its approval request is `pending` is the
+expected flow, not an attack surface for the approval mechanism to police.
+
+**What is out of scope for this mechanism (by ruling), and where it belongs instead.** A state
+that should never be approvable (e.g. an entity-level "expired" status) is a real concern, but the
+ruling places its enforcement outside the approval mechanism — in the entity's own read path (a
+proxy view, or equivalent entity-side logic), not as a field check added to
+`approveApprovalRequest`/the approve route. This section is not asking for that check to be added
+here.
+
+**Fact, not a call to close anything: there is currently no "before" hook on the entity side.**
+The only entity-side hooks the generator emits for the approval lifecycle are *after*-hooks —
+`service_after_approve.ts`, `service_after_reject.ts`, `service_after_withdraw.ts`
+(`code_generator/templates/service_after_{approve,reject,withdraw}_stub.ts.jinja2`, emitted as
+once-stubs when `x-approval.on_{approved,rejected,withdrawn}.emit_hook: true`, §16.9/§16.11) —
+and each runs only once the corresponding `approval_request` status transition has already
+committed. No template or route queries the entity for permission to approve/reject before that
+transition (confirmed by grep: no `before_approve`/`beforeApprove`/`before_reject`/`beforeReject`
+hook exists anywhere in `code_generator/`, `lib/`, or `app/`). Per the ruling above, this is not a
+seam that needs closing — a state-based approval veto belongs on the record's read side (proxy
+view or equivalent), not as a new pre-approval entity hook. It is recorded here only as the
+current factual shape of the code, so that a future attempt to add a "reject on the server side"
+control knows there is no existing seam to hook into and would need to design one from scratch —
+consistent with the ruling that any such control lives outside this mechanism.
+
