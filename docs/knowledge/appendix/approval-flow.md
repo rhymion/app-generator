@@ -768,6 +768,39 @@ this writing, so the gate never activates for either — a vacuous pass, not evi
 exercised there. Re-verify with the same method once the follow-up lands before treating that
 consumer schema as passing.
 
+**14.5's PUT body sources a different variable than every other resubmit test**:
+`api_spec_context()`'s `put_body_resubmit` context key builds the PUT body shared by
+14.1/14.2/14.3/14.3D/14.3N/14.4/14.4N/14.4M, all of which read the record from `data.record` — the
+`data` variable a `cy.task('db:populate<Entity>...')` helper yields. 14.5 alone has no `data` in
+scope: unlike every other resubmit scenario, it doesn't come from a populate-helper task at all —
+it POSTs a fresh record itself (proving a newly-created record below its open value has no
+`approval_request` yet) and does its resubmit PUT from inside
+`.then((getRes1) => {...}).then((createRes) => {...})`. A generator change that reused
+`put_body_resubmit` for 14.5 produces a spec that references an undefined `data`, throwing
+`ReferenceError: data is not defined` at runtime.
+
+The fix is a second, 14.5-only context key, `put_body_resubmit_created`, sourcing every field from
+`getRes1.body` (the detail GET response already in scope one `.then()` level in) rather than
+`data.record`. `createRes.body` (the POST response) is not a usable alternative: the generated
+`add<Parent>()` service function (`service.ts.jinja2`) returns only `Promise<{ id: string; ... }>`
+— no other fields — so `createRes.body.<field>` would silently resolve to `undefined` for every
+field but `id`, a data-loss bug that is harder to notice than the original `ReferenceError` (the
+PUT would appear to succeed while quietly nulling out every field it "updates"). Before reusing a
+POST response body as a record source anywhere else in this template, confirm empirically what the
+relevant `add<Parent>()`/`update<Parent>()` service function actually returns — it is `{ id }`-only
+except where an entity's own service explicitly widens that return type.
+
+Because 14.5 is gated on `not has_deps` (no required FK dependency) in addition to
+`resubmit_unsubmitted_value_literal`, and this repository's own `json_schema.yaml` declares zero
+`x-approval` entities, none of this repo's own fixture/consumer-schema gates ever render or run
+14.5 — the same gate-blind-spot pattern this appendix's other sections describe for the multistage
+scenarios (16.12 above) and the dark generator branches in the generator's own fixture-gate steps.
+Verified for real (not by fixture tsc-check alone) against a disposable, throwaway schema
+addition — a `submit_on` + non-terminal `on_rejected` + no-`on_withdrawn` + no-FK entity,
+generated, migrated, and exercised through an actual running app + Cypress, then discarded — rather
+than committed as a permanent fixture, to avoid adding an entity to this repo's own schema solely
+to keep a rarely-exercised branch covered by every future gate run.
+
 ### 16.14 `x-approval-lines` vs. line-level `x-approval` + `new: true`
 
 §16.10 covers `x-approval-lines`, the standard path for giving an embedded, `new: false` line

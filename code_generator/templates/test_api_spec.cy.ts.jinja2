@@ -1525,7 +1525,7 @@ describe('API: {{ title }}', () => {
                 url: `{{ api_path }}/${createRes.body.id}`,
                 headers: { 'X-API-Key': TEST_API_KEY },
                 body: {
-{% for ln in put_body_resubmit %}
+{% for ln in put_body_resubmit_created %}
 {{ ln }}
 {% endfor %}
                   {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
