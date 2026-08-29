@@ -59,7 +59,15 @@ definitions:
       test: false
     x-import-key:
       - name
+    # cmd_865: submit_on is required whenever x-approval is declared on an
+    # editable entity (x-generate.edit is not false) -- see
+    # _validate_x_approval_combinations() in generate.py. Added here purely
+    # to satisfy that structural check; the value-lockdown mechanism this
+    # fixture actually exercises (WRITE_LOCKED_FIELDS / disabled-option
+    # rendering, see the file header above) does not depend on submit_on.
     x-approval:
+      submit_on:
+        status: pending
       on_approved:
         set_fields:
           status: active

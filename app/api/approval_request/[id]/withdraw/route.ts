@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireDualAuth, handleApiError } from '@/lib/api-auth';
 import { ApiError } from '@/lib/api-auth';
 import prisma from '@/lib/prisma';
-import { dispatchOnWithdrawn } from '@/lib/approval_request/on_withdrawn_dispatch';
+import { dispatchOnWithdrawn, ENTITIES_WITH_ON_WITHDRAWN } from '@/lib/approval_request/on_withdrawn_dispatch';
 import { resolveApprovableModel } from '@/lib/approval_request/resolve_target';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -28,6 +28,24 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       },
     });
     if (!req) throw new ApiError(404, 'Approval request not found');
+
+    // cmd_865: entities that never declare x-approval.on_withdrawn have no
+    // resubmission-safe path back out of the 'withdrawn' state (see
+    // subtask_865a's ko_withdraw_lockout_design) -- block the withdrawal
+    // itself rather than let it silently no-op inside dispatchOnWithdrawn.
+    // ENTITIES_WITH_ON_WITHDRAWN is keyed by Prisma MODEL name (same as
+    // dispatchOnWithdrawn's modelName param below), while
+    // approval_flow.entity_name is a VIEW key that a proxy view can share
+    // across models (cmd_818) -- resolve the model first, same as
+    // actions_core.ts's withdrawApprovalRequest, rather than matching the
+    // raw view key against the model-keyed Set.
+    const modelName = req.approval_flow ? resolveApprovableModel(req.approval_flow.entity_name) : null;
+    if (!modelName || !ENTITIES_WITH_ON_WITHDRAWN.has(modelName)) {
+      throw new ApiError(
+        400,
+        `Withdrawal is not supported for this entity: declare x-approval.on_withdrawn in the schema to enable withdrawal. (entity: ${req.approval_flow?.entity_name ?? 'unknown'})`,
+      );
+    }
 
     // cmd_825: withdrawal is the requestor's own action, not an approver
     // action — permission is "you are the person this request was
@@ -92,10 +110,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       // cmd_479/cmd_541) and must stay in parity with it the same way.
       // cmd_844 merge: the approvable id now comes from `req` rather than a
       // single-row update `result`, which this route no longer performs.
-      const modelName = req.approval_flow ? resolveApprovableModel(req.approval_flow.entity_name) : null;
-      if (modelName) {
-        await dispatchOnWithdrawn(tx, modelName, req.approvable_id);
-      }
+      // cmd_865: modelName is guaranteed non-null here -- resolved and
+      // Set-checked above, before this transaction opened.
+      await dispatchOnWithdrawn(tx, modelName, req.approvable_id);
       // cmd_844: `status: 'withdrawn'` is kept in the response for the
       // existing API contract (test_api_spec.cy.ts.jinja2's 14.4 scenario
       // asserts on it) even though this is now a round-level operation, not

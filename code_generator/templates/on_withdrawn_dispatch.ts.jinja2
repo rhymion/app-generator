@@ -10,6 +10,23 @@ import { afterWithdraw as {{ entity.pascal_name }}AfterWithdraw } from '@/lib/{{
 {% endif %}
 {% endfor %}
 
+export const ENTITIES_WITH_ON_WITHDRAWN = new Set<string>([
+{% for entity in withdrawable_entities %}
+  '{{ entity.snake_name }}',
+{% endfor %}
+]);
+
+/**
+ * Returns true if the entity type (resolved Prisma model name, same key
+ * space as ENTITIES_WITH_ON_WITHDRAWN/dispatchOnWithdrawn) declares
+ * x-approval.on_withdrawn. Mirrors isTerminalReject's shape in
+ * on_rejected_dispatch.ts, for the same DI reason (actions_core.ts takes
+ * generated collaborators as injected deps, see its file-top comment).
+ */
+export function hasOnWithdrawn(entityType: string): boolean {
+  return ENTITIES_WITH_ON_WITHDRAWN.has(entityType);
+}
+
 /**
  * Dispatch post-withdrawal effects for the withdrawn entity.
  * Called from withdrawApprovalRequest after approval_request.status is

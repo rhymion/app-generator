@@ -2,7 +2,7 @@
 
 import { dispatchOnApproved } from '@/lib/approval_request/on_approved_dispatch';
 import { isTerminalReject, dispatchOnRejected } from '@/lib/approval_request/on_rejected_dispatch';
-import { dispatchOnWithdrawn } from '@/lib/approval_request/on_withdrawn_dispatch';
+import { dispatchOnWithdrawn, hasOnWithdrawn } from '@/lib/approval_request/on_withdrawn_dispatch';
 import { resolveApprovableTarget, resolveApprovableModel } from '@/lib/approval_request/resolve_target';
 import { createApprovalActions } from '@/lib/approval_request/actions_core';
 
@@ -19,6 +19,7 @@ const approvalActions = createApprovalActions({
   dispatchOnRejected,
   isTerminalReject,
   dispatchOnWithdrawn,
+  hasOnWithdrawn,
 });
 
 export async function getApprovalRequestRecipient(id: string): Promise<{

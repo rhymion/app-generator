@@ -4165,6 +4165,17 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         if _fv_submit_on_field is not None:
             submit_for_approval_needed = True
 
+    # cmd_865: whether this entity declares x-approval.on_withdrawn --
+    # threaded through to ApprovalSection.tsx's hasOnWithdrawn prop so the
+    # withdraw button is hidden for entities the server-side withdraw
+    # lockout (on_withdrawn_dispatch.ts's ENTITIES_WITH_ON_WITHDRAWN) would
+    # reject anyway.
+    has_on_withdrawn = False
+    if _fv_approvable_rel is not None:
+        has_on_withdrawn = bool(
+            (model_def.get('x-approval') or {}).get('on_withdrawn')
+        )
+
     return {
         'needs_datetime_wrapper': needs_datetime_wrapper,
         'needs_image_display':    needs_image_display,
@@ -4190,6 +4201,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         'uses_decimal_format':    uses_decimal_format,
         'uses_app_field_boolean': uses_app_field_boolean,
         'submit_for_approval_needed': submit_for_approval_needed,
+        'has_on_withdrawn':       has_on_withdrawn,
     }
 
 

@@ -129,7 +129,7 @@ export default function FormView({ src, permissions{% if comment_has_mention %},
       />
 {% endif %}
 {% for comp in entity_view_components %}
-      <{{ comp.name }} src={src}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId}{% if submit_for_approval_needed and comp.name == 'ApprovalSection' %} onSubmitForApproval={_onSubmitForApproval}{% endif %} />
+      <{{ comp.name }} src={src}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId}{% if submit_for_approval_needed and comp.name == 'ApprovalSection' %} onSubmitForApproval={_onSubmitForApproval}{% endif %}{% if comp.name == 'ApprovalSection' %} hasOnWithdrawn={ {{ 'true' if has_on_withdrawn else 'false' }} }{% endif %} />
 {% endfor %}
     </AppDetailShell>
   );

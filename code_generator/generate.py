@@ -36,6 +36,8 @@ from helpers.schema_helpers import get_self_only_flags
 from helpers.schema_helpers import get_parent_relationships
 from helpers.schema_helpers import resolve_set_fields as _resolve_set_fields
 from helpers.schema_helpers import schema_has_direct_attachment_fk
+from helpers.schema_helpers import get_parent_fk_props
+from helpers.schema_helpers import is_optional_fk_to_parent
 from generators import (
     chart_context,
     page_list_context,
@@ -708,6 +710,153 @@ def _ledger_stub_field_vars(domain: dict, schema: dict) -> dict:
         'pool_lot_field': domain['lot_field'],
         'pool_expiration_field': domain['expiration_field'],
     }
+
+
+def _entity_is_write_reachable(entity_name: str, defs: dict) -> bool:
+    """True if entity_name's own field values can be written by some
+    ancestor entity's nested create/update, i.e. it is a one-to-many list
+    child that is neither independent (own x-generate, shown read-only on
+    the parent form and excluded from the parent's nested write body -- see
+    build_context.py's `embedded_ch` filter, `not c['is_independent']`) nor
+    use_connect (a many-to-many or nullable-FK list child, which only
+    connects/sets existing ids -- no field-value write at all).
+
+    Mirrors build_context.py's `_build_child_data`/`embedded_ch` computation
+    without needing the full ctx-building pipeline -- this runs earlier, in
+    generate()'s definitions-scan pass, before any ctx exists. Does not
+    special-case many-to-many list children (no schema in current use
+    combines x-approval with an m2m list-child relationship); treated the
+    same as any other list child here, since a m2m child is always
+    use_connect and so is already excluded via is_optional_fk_to_parent's
+    fallback returning False only for a genuinely non-nullable FK -- an m2m
+    child has no such column at all (bridge table), which would
+    misclassify it as a required FK if one ever appeared. Flagged as a
+    known gap rather than silently assumed safe.
+    """
+    own_key = f'__{entity_name}'
+    own_def = defs.get(own_key) or {}
+    # x-generate lives on the BARE definitions key after
+    # build_user_schema.py's transform, not on the '__'-prefixed raw def
+    # (confirmed empirically: __inventory_movement.get('x-generate') is
+    # None in the real generated_json_schema.yaml; generate.py's own
+    # search_entities() reads it the same way, defs['definitions'].get(bare)
+    # falling back to the '__'-prefixed form only when the bare key is
+    # missing -- generate.py:~2170).
+    if (defs.get(entity_name) or {}).get('x-generate') or own_def.get('x-generate'):
+        return False
+    own_props = own_def.get('properties') or {}
+    for other_key, other_def in defs.items():
+        if not other_key.startswith('__') or other_key == own_key:
+            continue
+        other_name = other_key[2:]
+        is_list_child = any(
+            isinstance(p, dict) and p.get('type') == 'array'
+            and (p.get('items') or {}).get('$ref', '').rsplit('/', 1)[-1] == entity_name
+            for p in (other_def.get('properties') or {}).values()
+        )
+        if not is_list_child:
+            continue
+        fk_props = get_parent_fk_props(own_def, other_name) & set(own_props)
+        if not fk_props:
+            continue
+        if is_optional_fk_to_parent(own_def, other_name):
+            continue
+        return True
+    return False
+
+
+def _validate_x_approval_combinations(
+    entity_name: str, x_approval: dict, entity_props: dict, is_editable: bool,
+) -> None:
+    """Fail-closed structural checks on an entity's x-approval clause
+    combination (cmd_865). Runs once per x-approval-declaring entity, before
+    any approval-related file is generated from it.
+
+    Combination truth table (subtask_865b task YAML, 2026-08-29 14:37
+    amendment -- this single table supersedes the three earlier separate
+    checks it replaced, which are no longer implemented on their own):
+
+    Axes: S=submit_on declared, W=on_withdrawn declared, T=on_rejected
+    terminal (on_rejected absent counts as T=False -- matches
+    isTerminalReject()'s runtime behavior, which only ever returns true for
+    a model that declared on_rejected.terminal: true), E=is_editable
+    (editable via ANY generated write path -- see _entity_is_write_reachable
+    for what counts as a write path beyond the entity's own x-generate.edit).
+
+    Rule: S=True is valid unconditionally (all 8 W/T/E combinations). S=False
+    is valid ONLY for exactly W=False, T=True, E=False; every other S=False
+    combination is rejected -- see subtask_865a's report (harm_cases and the
+    truth table's own reasoning column) for why each forbidden combination
+    is unsafe (a resubmission dead end, or unguarded post-submission edits).
+
+    Duplicate-value check (kept independent of the table above; see
+    subtask_865a's report for the full design): the same (field, resolved
+    value) pair used by 2+ distinct declarations among submit_on/
+    on_approved.set_fields/on_rejected.set_fields/on_withdrawn.set_fields --
+    e.g. a rejection or withdrawal writing a field back to submit_on's own
+    value re-triggers the update-side edge trigger, creating an approval
+    round in an infinite loop.
+    """
+    submit_on_raw = x_approval.get('submit_on') or {}
+    on_rejected = x_approval.get('on_rejected') or {}
+    on_approved = x_approval.get('on_approved') or {}
+    on_withdrawn = x_approval.get('on_withdrawn') or {}
+
+    submit_on_present = bool(submit_on_raw)
+    on_withdrawn_present = bool(on_withdrawn)
+    on_rejected_terminal = bool(on_rejected.get('terminal', False))
+
+    if not submit_on_present and not (
+        not on_withdrawn_present and on_rejected_terminal and not is_editable
+    ):
+        reasons = []
+        if on_withdrawn_present:
+            reasons.append(
+                "on_withdrawn is declared -- a withdrawn row can never resubmit "
+                "without submit_on"
+            )
+        if not on_rejected_terminal:
+            reasons.append(
+                "on_rejected.terminal is not true (or on_rejected is absent) -- "
+                "a rejected row can never resubmit and is not terminal either"
+            )
+        if is_editable:
+            reasons.append(
+                "the entity is editable via a generated write path (its own "
+                "edit endpoint, or nested writes from an ancestor entity's "
+                "create/update) -- with no submit_on there is no approval "
+                "lockdown to stop the request's content being rewritten "
+                "after submission"
+            )
+        raise ValueError(
+            f"{entity_name}: x-approval.submit_on is absent. This is only allowed when "
+            f"x-approval.on_withdrawn is NOT declared, x-approval.on_rejected.terminal is "
+            f"true, and the entity is not editable via any generated write path. "
+            f"Violated: " + "; ".join(reasons)
+        )
+
+    # Duplicate-value check: same (field, resolved value) pair across 2+ distinct clauses.
+    value_registry: dict[tuple[str, str], set[str]] = {}
+    if submit_on_raw:
+        resolved_so = _resolve_set_fields(entity_props, submit_on_raw)
+        for f, v in resolved_so.items():
+            value_registry.setdefault((f, str(v)), set()).add('submit_on')
+    for f, v in _resolve_set_fields(entity_props, on_approved.get('set_fields') or {}).items():
+        value_registry.setdefault((f, str(v)), set()).add('on_approved')
+    for f, v in _resolve_set_fields(entity_props, on_rejected.get('set_fields') or {}).items():
+        value_registry.setdefault((f, str(v)), set()).add('on_rejected')
+    for f, v in _resolve_set_fields(entity_props, on_withdrawn.get('set_fields') or {}).items():
+        value_registry.setdefault((f, str(v)), set()).add('on_withdrawn')
+
+    for (field, value), clauses in value_registry.items():
+        if len(clauses) > 1:
+            raise ValueError(
+                f"{entity_name}: x-approval field '{field}' maps to value "
+                f"'{value}' in multiple declarations: {sorted(clauses)}. Each approval "
+                f"state transition must target a distinct value to avoid ambiguous or "
+                f"self-retriggering state machine behavior. Conflicting declarations: "
+                f"{{{field!r}: {value!r}}} appears in {sorted(clauses)}."
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1651,6 +1800,28 @@ def generate(schema_path: str, output_dir: str) -> None:
     # Builds an `approvable_entities` list and generates the dispatch module plus
     # per-entity service_after_approve once-stubs (emit_hook: true only).
     defs = schema.get('definitions', {})
+    # cmd_865: fail-closed structural validation of every entity's
+    # x-approval clause combination, before any approval-related file
+    # (dispatch modules, service.ts's edit guard, etc.) is generated from
+    # it. One pass over every x-approval-declaring definition.
+    for _val_def_key, _val_def_val in defs.items():
+        if not _val_def_key.startswith('__'):
+            continue
+        _val_x_approval = _val_def_val.get('x-approval')
+        if not _val_x_approval:
+            continue
+        _val_entity_name = _val_def_key[2:]
+        # x-generate lives on the BARE definitions key after
+        # build_user_schema.py's transform (see _entity_is_write_reachable's
+        # docstring) -- fall back to the '__'-prefixed def for entities with
+        # no bare counterpart.
+        _val_x_generate = defs.get(_val_entity_name, {}).get('x-generate') or _val_def_val.get('x-generate') or {}
+        _val_can_update = _val_x_generate.get('edit', True) is not False
+        _val_is_editable = _val_can_update or _entity_is_write_reachable(_val_entity_name, defs)
+        _validate_x_approval_combinations(
+            _val_entity_name, _val_x_approval, _val_def_val.get('properties', {}), _val_is_editable,
+        )
+
     approvable_entities = []
     for def_key, def_val in defs.items():
         if not def_key.startswith('__'):

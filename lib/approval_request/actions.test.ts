@@ -108,6 +108,11 @@ const isTerminalReject = vi.fn(() => false);
 // cmd_841: withdrawal's own dispatch counterpart to dispatchOnApproved/
 // dispatchOnRejected above -- keyed by model, same as those.
 const dispatchOnWithdrawn = vi.fn();
+// cmd_865: defaults to true so every pre-existing withdraw test (written
+// before the withdraw lockout existed) keeps exercising the same "entity
+// declares on_withdrawn" case it always implicitly assumed; the lockout
+// itself is covered by dedicated tests below with this mocked false.
+const hasOnWithdrawn = vi.fn(() => true);
 
 const {
   getApprovalRequestRecipient, approveApprovalRequest, rejectApprovalRequest, withdrawApprovalRequest,
@@ -118,6 +123,7 @@ const {
   dispatchOnRejected,
   isTerminalReject,
   dispatchOnWithdrawn,
+  hasOnWithdrawn,
 });
 
 // Fake tx client shared by every prisma.$transaction(cb) call in
@@ -146,6 +152,7 @@ beforeEach(() => {
   dispatchOnRejected.mockReset();
   isTerminalReject.mockReset().mockReturnValue(false);
   dispatchOnWithdrawn.mockReset();
+  hasOnWithdrawn.mockReset().mockReturnValue(true);
   transactionMock.mockReset().mockImplementation(async (cb) => cb(fakeTx));
   vi.mocked(getSessionUserIdOrThrow).mockReset().mockResolvedValue('user-1');
   vi.mocked(getUserRoleIds).mockReset().mockResolvedValue(['approver-role']);
@@ -576,7 +583,7 @@ describe('resubmitApprovalRequest removal (cmd_818 E6)', () => {
   it('is not present on the actions object createApprovalActions returns', () => {
     const actions = createApprovalActions({
       resolveApprovableTarget, resolveApprovableModel, dispatchOnApproved, dispatchOnRejected, isTerminalReject,
-      dispatchOnWithdrawn,
+      hasOnWithdrawn, dispatchOnWithdrawn,
     });
     expect('resubmitApprovalRequest' in actions).toBe(false);
   });
@@ -821,7 +828,12 @@ describe('withdrawApprovalRequest (cmd_825/cmd_844)', () => {
     expect(dispatchOnWithdrawn).toHaveBeenCalledWith(expect.anything(), 'leave_request', 'appr-1');
   });
 
-  it('skips dispatch when the view key does not resolve to a model', async () => {
+  // cmd_865: an entity_name that resolves to no model at all is treated the
+  // same as one that resolves to a model without on_withdrawn declared --
+  // there is no model to look up in ENTITIES_WITH_ON_WITHDRAWN, so
+  // withdrawal is blocked rather than silently closing the round with no
+  // dispatch (the pre-cmd_865 behavior this test used to assert).
+  it('rejects and does not close the round when the view key does not resolve to a model', async () => {
     stubOwnedByRequestor();
     txArFindMany.mockResolvedValue([
       { id: 'req-2', status: 'pending', approval_flow: { entity_name: 'unknown_view' } },
@@ -833,8 +845,34 @@ describe('withdrawApprovalRequest (cmd_825/cmd_844)', () => {
     });
     resolveApprovableModel.mockReturnValue(null);
 
-    await withdrawApprovalRequest('appr-1');
+    await expect(withdrawApprovalRequest('appr-1')).rejects.toThrow(
+      'Withdrawal is not supported for this entity type (on_withdrawn not declared): unknown_view',
+    );
+    expect(arUpdateMany).not.toHaveBeenCalled();
+    expect(dispatchOnWithdrawn).not.toHaveBeenCalled();
+  });
 
+  // cmd_865: the withdraw lockout itself -- an entity whose model resolves
+  // fine but does not declare x-approval.on_withdrawn (hasOnWithdrawn false)
+  // must not be allowed to withdraw at all (see subtask_865a's
+  // ko_withdraw_lockout_design harm_cases).
+  it('rejects and does not close the round when the model does not declare on_withdrawn', async () => {
+    stubOwnedByRequestor();
+    txArFindMany.mockResolvedValue([
+      { id: 'req-2', status: 'pending', approval_flow: { entity_name: 'no_withdraw_entity' } },
+    ]);
+    findUnique.mockResolvedValue({
+      approvable_id: 'appr-1',
+      approval_flow: { entity_name: 'no_withdraw_entity' },
+      approvable: { creator_id: 'user-1' },
+    });
+    hasOnWithdrawn.mockReturnValue(false);
+
+    await expect(withdrawApprovalRequest('appr-1')).rejects.toThrow(
+      'Withdrawal is not supported for this entity type (on_withdrawn not declared): no_withdraw_entity',
+    );
+    expect(arUpdateMany).not.toHaveBeenCalled();
+    expect(historyCreateMany).not.toHaveBeenCalled();
     expect(dispatchOnWithdrawn).not.toHaveBeenCalled();
   });
 
