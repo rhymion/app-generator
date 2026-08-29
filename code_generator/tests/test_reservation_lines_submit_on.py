@@ -198,19 +198,33 @@ def _child_svc(has_submit_on: bool = True):
 
 
 # ---------------------------------------------------------------------------
-# 変更1: post-create approval_request loop skipped for submit_on lines
+# 変更1: post-create approval_request loop value-checks submit_on lines
+# (cmd_871 [乙]: a bare call -- no reservation_config, matching the update
+# call site -- generates the value-checked block instead of skipping
+# outright; only a line actually created in its submit_on state fires
+# approval_request creation.)
 # ---------------------------------------------------------------------------
 
 class TestChange1PostCreateSkipsSubmitOnLines:
-    def test_no_approval_request_create_when_lines_entity_has_submit_on(self):
+    def test_pending_line_creates_approval_request_when_lines_entity_has_submit_on(self):
         schema = _schema(has_submit_on=True)
         parent_def = schema['definitions']['purchase_order']
         out = _build_approval_lines_post_create_code(parent_def, 'purchase_order', schema)
-        assert out == '', (
-            'submit_on lines entity must not create approval_request(s) at '
-            'parent create/update time -- that only happens via its own '
-            'submit_for_approval action'
+        assert out != '', (
+            'submit_on lines entity must still generate the value-checked '
+            'approval_request creation block (cmd_871) -- only the runtime '
+            'check gates it now, not the declaration'
         )
+        assert "if (_apprTargetRow?.status !== 'pending') continue;" in out
+        assert 'tx.approval_request.create' in out
+
+    def test_draft_line_skipped_by_value_check_when_lines_entity_has_submit_on(self):
+        """The generated code still skips a draft-state line at runtime --
+        it is the VALUE check, not the declaration, doing the skipping now."""
+        schema = _schema(has_submit_on=True)
+        parent_def = schema['definitions']['purchase_order']
+        out = _build_approval_lines_post_create_code(parent_def, 'purchase_order', schema)
+        assert "if (_apprTargetRow?.status !== 'pending') continue;" in out
 
     def test_approval_request_create_unchanged_when_lines_entity_has_no_submit_on(self):
         schema = _schema(has_submit_on=False)
@@ -382,4 +396,63 @@ class TestReservationSpecContextSubmitOn:
         assert ctx is not None
         assert ctx.get('reservation_lines_has_submit_on') is False, (
             'without submit_on, keep the original 409 assertion path'
+        )
+
+
+# ---------------------------------------------------------------------------
+# cmd_871 [乙]: a line created directly in its submit_on state must fire
+# both approval_request creation AND the reservation claim in the same
+# edge -- previously the whole block was skipped by declaration alone,
+# leaving a "pending" line with neither an approval_request nor a
+# reservation (the データ整合性 bug this task fixes).
+# ---------------------------------------------------------------------------
+
+class TestApprovalLinesPostCreateCodeSubmitOn:
+    def _reservation_config(self):
+        schema = _schema(has_submit_on=True)
+        entity = _entity_spec('purchase_order', schema, children=[_lines_child()])
+        ctx = build_context(entity, schema)
+        return ctx['reservation_config'], schema
+
+    def test_pending_line_generates_approval_and_reservation_code(self):
+        rc, schema = self._reservation_config()
+        parent_def = schema['definitions']['purchase_order']
+        out = _build_approval_lines_post_create_code(
+            parent_def, 'purchase_order', schema, reservation_config=rc,
+        )
+        assert "if (_apprTargetRow?.status !== 'pending') continue;" in out, (
+            'a draft-state line must still be skipped by the runtime value '
+            'check, not by the submit_on declaration'
+        )
+        assert 'tx.approval_request.create' in out, (
+            'a line created directly in its submit_on state must still get '
+            'an approval_request'
+        )
+        assert 'InsufficientPoolCapacityError' in out, (
+            'a line created directly in its submit_on state must also claim '
+            'inventory in the same edge -- the reservation half of the fix'
+        )
+        assert 'inventory_transactionable_id: _resBridge_items.id' in out, (
+            'the reservation claim must link the line to the new bridge row'
+        )
+
+    def test_draft_line_skipped_not_blocked_by_declaration(self):
+        """Without a reservation_config (e.g. the update call site, or a
+        lines entity with submit_on but no x-reservation at all), the code
+        block must still be generated -- the old all-or-nothing skip keyed
+        off the mere presence of the submit_on declaration is gone."""
+        schema = _schema(has_submit_on=True)
+        parent_def = schema['definitions']['purchase_order']
+        out = _build_approval_lines_post_create_code(
+            parent_def, 'purchase_order', schema, reservation_config=None,
+        )
+        assert out != '', (
+            'submit_on declaration alone must not blank out the whole block '
+            'anymore -- only the runtime value check does the skipping'
+        )
+        assert "if (_apprTargetRow?.status !== 'pending') continue;" in out
+        assert 'tx.approval_request.create' in out
+        assert 'InsufficientPoolCapacityError' not in out, (
+            'no reservation_config means no reservation claim code -- only '
+            'the approval_request half fires'
         )
