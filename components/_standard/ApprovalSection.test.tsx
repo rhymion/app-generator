@@ -91,7 +91,7 @@ describe('ApprovalSection (cmd_844 round-based rendering)', () => {
         approval_flow: { id: 'flow-2', entity_name: 'e', approver_role_id: 'role-2', preceded_by: [{ id: 'flow-1' }] } },
     ];
 
-    render(<ApprovalSection src={makeSrc(requests)} currentUserId="requestor-1" />);
+    render(<ApprovalSection src={makeSrc(requests)} currentUserId="requestor-1" hasOnWithdrawn />);
 
     expect(screen.getByLabelText('Withdraw')).toBeInTheDocument();
   });
@@ -104,7 +104,7 @@ describe('ApprovalSection (cmd_844 round-based rendering)', () => {
         approval_flow: { id: 'flow-2', entity_name: 'e', approver_role_id: 'role-2', preceded_by: [{ id: 'flow-1' }] } },
     ];
 
-    render(<ApprovalSection src={makeSrc(requests)} currentUserId="requestor-1" />);
+    render(<ApprovalSection src={makeSrc(requests)} currentUserId="requestor-1" hasOnWithdrawn />);
 
     expect(screen.queryByLabelText('Withdraw')).not.toBeInTheDocument();
   });
@@ -115,7 +115,22 @@ describe('ApprovalSection (cmd_844 round-based rendering)', () => {
         approval_flow: { id: 'flow-1', entity_name: 'e', approver_role_id: 'role-1' } },
     ];
 
-    render(<ApprovalSection src={makeSrc(requests, 'requestor-1')} currentUserId="someone-else" />);
+    render(<ApprovalSection src={makeSrc(requests, 'requestor-1')} currentUserId="someone-else" hasOnWithdrawn />);
+
+    expect(screen.queryByLabelText('Withdraw')).not.toBeInTheDocument();
+  });
+
+  // cmd_865: entities that never declare x-approval.on_withdrawn have no
+  // resubmission-safe path back out of 'withdrawn' (see subtask_865a's
+  // ko_withdraw_lockout_design) -- the button must not render even when
+  // every other condition (matching requestor, a pending row) is met.
+  it('hides the Withdraw button when the entity does not declare on_withdrawn, even with a pending row and matching requestor', () => {
+    const requests: Row[] = [
+      { id: 'r1', approval_flow_id: 'flow-1', round_id: 'round-1', status: 'pending',
+        approval_flow: { id: 'flow-1', entity_name: 'e', approver_role_id: 'role-1' } },
+    ];
+
+    render(<ApprovalSection src={makeSrc(requests)} currentUserId="requestor-1" />);
 
     expect(screen.queryByLabelText('Withdraw')).not.toBeInTheDocument();
   });
@@ -126,7 +141,7 @@ describe('ApprovalSection (cmd_844 round-based rendering)', () => {
         approval_flow: { id: 'flow-1', entity_name: 'e', approver_role_id: 'role-1' } },
     ];
 
-    render(<ApprovalSection src={makeSrc(requests)} currentUserId="requestor-1" />);
+    render(<ApprovalSection src={makeSrc(requests)} currentUserId="requestor-1" hasOnWithdrawn />);
 
     fireEvent.click(screen.getByLabelText('Withdraw'));
     const dialog = screen.getByRole('dialog');

@@ -58,6 +58,10 @@ export type ApprovalActionDeps = {
     modelName: string,
     approvableId: string,
   ) => Promise<void>;
+  // cmd_865: entities that never declare x-approval.on_withdrawn have no
+  // resubmission-safe path back out of 'withdrawn' -- withdrawApprovalRequest
+  // must block the withdrawal itself, not just let dispatchOnWithdrawn no-op.
+  hasOnWithdrawn: (modelName: string) => boolean;
 };
 
 export function createApprovalActions(deps: ApprovalActionDeps) {
@@ -404,6 +408,18 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
       if (pendingRows.length === 0) throw new Error('No pending requests to withdraw');
       anchorRequestId = pendingRows[0].id;
 
+      // cmd_865: resolved here (before any write in this transaction) so the
+      // on_withdrawn-declaration check below is fail-fast -- no row has been
+      // touched yet if this throws. Reused for dispatchOnWithdrawn below so
+      // resolveApprovableModel is not called twice for the same entity_name.
+      const entityName = pendingRows[0].approval_flow?.entity_name ?? null;
+      const _modelName = entityName ? deps.resolveApprovableModel(entityName) : null;
+      if (!_modelName || !deps.hasOnWithdrawn(_modelName)) {
+        throw new Error(
+          `Withdrawal is not supported for this entity type (on_withdrawn not declared): ${_modelName ?? entityName ?? 'unknown'}`,
+        );
+      }
+
       await tx.approval_request.updateMany({
         where: { id: { in: pendingRows.map((r) => r.id) } },
         data: { status: 'withdrawn' },
@@ -423,11 +439,7 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
         })),
       });
 
-      const entityName = pendingRows[0].approval_flow?.entity_name ?? null;
-      const _modelName = entityName ? deps.resolveApprovableModel(entityName) : null;
-      if (_modelName) {
-        await deps.dispatchOnWithdrawn(tx, _modelName, approvableId);
-      }
+      await deps.dispatchOnWithdrawn(tx, _modelName, approvableId);
     }, { isolationLevel: 'Serializable' });
     const { entityName, targetId } = anchorRequestId
       ? await getApprovalRequestRecipient(anchorRequestId)

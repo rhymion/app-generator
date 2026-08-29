@@ -78,6 +78,12 @@ type Props = {
   // template change was needed to make it available here again.
   currentUserId?: string | null;
   onSubmitForApproval?: () => Promise<void>;
+  // cmd_865: whether this entity declares x-approval.on_withdrawn
+  // (generators.py's form_view_context, threaded via form_view.tsx.jinja2).
+  // The server-side withdraw lockout (on_withdrawn_dispatch.ts's
+  // ENTITIES_WITH_ON_WITHDRAWN) rejects a withdrawal for any entity where
+  // this is false, so the button is hidden here rather than left to fail.
+  hasOnWithdrawn?: boolean;
 };
 
 // cmd_844: split the full (ascending-created_at-ordered, see
@@ -104,7 +110,7 @@ function splitRounds(requests: ApprovalRequest[]): {
   return { currentRoundRequests, pastRounds };
 }
 
-export default function ApprovalSection({ src, currentUserRoleIds, currentUserId, onSubmitForApproval }: Props) {
+export default function ApprovalSection({ src, currentUserRoleIds, currentUserId, onSubmitForApproval, hasOnWithdrawn }: Props) {
   const t = useTranslations('Fields');
   const tCommon = useTranslations('Common');
   const tStatus = useTranslations('ApprovalRequestStatus');
@@ -126,7 +132,8 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
 
   const { currentRoundRequests, pastRounds } = splitRounds(requests);
   const canSubmit = !!onSubmitForApproval && canSubmitForApproval(currentRoundRequests);
-  const canWithdrawRound = !!currentUserId
+  const canWithdrawRound = !!hasOnWithdrawn
+    && !!currentUserId
     && src.approvable?.creator_id === currentUserId
     && canWithdrawApproval(currentRoundRequests);
 
