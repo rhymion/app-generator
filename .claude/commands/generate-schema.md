@@ -123,30 +123,14 @@ on edit). They differ in **scope**, not effect:
 | Scope | the Prisma model — every view built on it | the one view entity it's declared on |
 | Use when | the field must never be editable through *any* view of this model (e.g. a computed/system column) | only *this* view should lock the field down; other views of the same model may still let it be edited |
 
-Properties (`fields:`/`required:`) always live on the model, not the view
-— that's why `x-readonly` is inherently model-wide: there's no separate
-per-view copy of the property to attach it to differently. `x-readonly-fields`
-is the opposite: it's entity-level metadata, and it stays on whichever view
-entity declares it. A proxy/secondary view of a model (e.g. a settings page
-that is really just another view of `user`) can declare `x-readonly-fields`
-without affecting the model's other views — declaring the same field name
-with `x-readonly` instead would lock it down everywhere. See
-`docs/knowledge/readonly-field-form-rendering.md` for the implementation
-detail (`build_context.py` reads `x-readonly-fields` from the view entity's
-own definition, not the shared raw entity).
+Properties always live on the Prisma model, not the view, which is why
+`x-readonly` is model-wide and `x-readonly-fields` is view-scoped — see
+`docs/knowledge/readonly-field-form-rendering.md` for the mechanism.
 
-**Known limitation: does not reach DataGrid child inline editing.** Both
-`x-readonly` and `x-readonly-fields` correctly lock down the parent
-entity's own form/list rendering. Neither currently has any effect on a
-DataGrid child (an editable one-to-many child grid embedded in the
-parent's form) — a column on a readonly-declared child field still
-renders fully editable, and the corresponding write path (child
-create/update body construction) still accepts and persists client-sent
-values for that field with no server-side guard either. This is a
-pre-existing gap in both the UI column generation and the API/service
-write-path generation, not a regression from the scoping fix above. A fix
-is under consideration but not yet scheduled — treat DataGrid child
-fields as currently unprotectable by either annotation.
+**Landmine**: neither annotation reaches DataGrid child inline editing — a
+readonly-declared child field still renders as an editable grid cell and
+is still accepted server-side, on any view. See the same doc for detail;
+there is no current workaround.
 
 ### `x-filter-values`: view-scoped row restriction
 Restrict a view to only the rows matching a fixed set of field values:
@@ -172,24 +156,14 @@ Like `x-readonly-fields`, this is entity-level metadata that stays on the
 view entity that declares it — it never leaks onto other views sharing the
 same underlying model.
 
-Enforcement is server-side and unconditional, covering both read and write:
-
-- **Read** — list, detail GET, export, FK autocomplete/sort-filter, and
-  cross-entity full-text search all exclude rows outside the filter. A
-  filtered-out row's detail GET returns 404, exactly as if it didn't exist.
-- **Write** — PUT/DELETE (single-item REST, bulk REST, and the Server
-  Action delete path) also 404 for a row already outside the filtered view,
-  the same fail-closed behavior `x-self-only` uses. The check is judged
-  against the row's state **before** the write (the pre-image): a PUT that
-  legitimately moves a row from inside the filter to outside it (e.g.
-  `status: pending -> approved` on a view filtered to `status: [pending]`)
-  still succeeds — only a row that is *already* outside the filter is
-  rejected. See `docs/knowledge/filter-values-row-scope.md` for the
-  implementation detail and the full list of enforcement points.
-
-No permission setting (`general`/`Creator`/`Assignee` roles, org isolation)
-can widen past `x-filter-values` — it composes with every other row-scope
-condition via AND, never OR, the same guarantee `x-self-only` gives.
+Enforcement is server-side, unconditional, and covers every read and write
+path (list, detail, export, search, and PUT/DELETE including the Server
+Action delete path) — a filtered-out row 404s exactly like an
+`x-self-only` violation, judged against the row's state **before** the
+write. No permission setting can widen past it — it composes with every
+other row-scope condition via AND, never OR. See
+`docs/knowledge/filter-values-row-scope.md` for the full list of
+enforcement points and the pre-image semantics.
 
 ## Common rules
 
