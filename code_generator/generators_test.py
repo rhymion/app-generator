@@ -4811,6 +4811,16 @@ def api_spec_context(
     # the whole point is that a user CAN select it, see cmd_841's
     # locked_values_interpretation ruling).
     _on_withdrawn = (_x_approval.get('on_withdrawn') or {}) if _x_approval else {}
+    # cmd_876: whether this entity declares x-approval.on_withdrawn at all --
+    # the server-side withdraw lockout (on_withdrawn_dispatch.ts's
+    # ENTITIES_WITH_ON_WITHDRAWN, cmd_865/PR#450) 400s every POST
+    # .../withdraw call for an entity that lacks this declaration,
+    # regardless of round/stage state. The round-based multistage tests
+    # below (14.2M/14.3M/14.4M) call withdraw expecting 200, so they must
+    # only be generated when this is true -- 14.3M(b) (uses /reject, not
+    # /withdraw) and 14.5M (already asserts 400 via failOnStatusCode: false)
+    # are unaffected and stay unconditional.
+    has_on_withdrawn = bool(_on_withdrawn)
     _on_withdrawn_sf = _on_withdrawn.get('set_fields') or {}
     _on_withdrawn_value = (
         _on_withdrawn_sf.get(resubmit_target_field) if _on_withdrawn_sf else None
@@ -5017,6 +5027,7 @@ def api_spec_context(
         'resubmit_target_value_literal': resubmit_target_value_literal,
         'resubmit_unsubmitted_value_literal': resubmit_unsubmitted_value_literal,
         'on_withdrawn_value_literal': on_withdrawn_value_literal,
+        'has_on_withdrawn': has_on_withdrawn,
         'put_body_resubmit': (
             _put_body_impl('              ', skip_field=resubmit_target_field, record_var='data.record')
             if resubmit_target_field else None
