@@ -147,3 +147,32 @@ coverage: `code_generator/tests/test_scheduled_task_templates.py`'s
 
 `x-readonly` (per-property) was deliberately left unchanged — see the
 scope list above.
+
+## Known limitation: neither annotation reaches DataGrid child inline editing
+
+Both `x-readonly` and `x-readonly-fields` are fully wired for the parent
+entity's own form/list rendering (verified above), but neither has any
+effect on a DataGrid child (an editable one-to-many child grid embedded in
+the parent's form).
+
+- **UI side**: `generators.py`'s `column_def_context()` builds each child
+  grid column with `editable: editable` (the caller's bool argument,
+  applied uniformly to every column) — it never reads the child entity's
+  `x-readonly-fields` or a child property's own `x-readonly`. A
+  readonly-declared child field still renders as an editable grid cell.
+- **API/service side**: `build_context.py`'s child-context builder (the
+  `props_no_id` list feeding the create/update body construction for
+  DataGrid children) has no equivalent of the readonly-field exclusion
+  that the parent entity's own context builder applies. The generated
+  `update()`/`create()` calls accept and persist client-sent values for a
+  readonly-declared child field with no server-side guard — a direct API
+  request can write to it even if the UI hid the column.
+
+This is a pre-existing gap (present before, and unrelated to, the
+cross-view scoping fix above), confirmed against the live generated output
+of the one true-editable DataGrid child in the base schema
+(`dashboard_widget`, under `dashboard`): declaring `x-readonly-fields` on
+it changed nothing in either the generated `column_def.tsx` or the
+generated `service.ts` write path. A fix is under consideration but not
+yet scheduled — until then, treat DataGrid child fields as currently
+unprotectable by either annotation.
