@@ -16,7 +16,7 @@ Verifies:
 """
 import pytest
 from build_context import build_context
-from generators_test import helper_context
+from generators_test import helper_context, spec_context, analyze_children
 
 
 # ---------------------------------------------------------------------------
@@ -450,6 +450,109 @@ class TestGeneratedPopulateHelperRespectsFilterValues:
         ctx = helper_context("item", [], schema, "item", "item_detail", self._generate_config())
         team_field = next(f for f in ctx["required_fields_prisma"] if f["prop_name"] == "team")
         assert team_field["prisma_val"] == "false"
+
+
+class TestSpecContextOptionalFieldExcludesFilterValues:
+    """cmd_881: generators_test.py's generic "adds/removes optional data"
+    UI e2e test-target selection (spec_context, top-level entity path) must
+    exclude a field the view uses as its own x-filter-values discriminator
+    -- editing it can move the row out of the filtered view, making the
+    generic scaffold's "still visible after edit" assertion
+    self-contradicting. Reproduces the real bug live in proj_c's
+    alpha_xxxxx_xxxxx.cy.ts ("3.1 adds optional data and child items" /
+    "3.2 removes optional data and child items")."""
+
+    def _schema(self, filter_values: dict) -> dict:
+        return {
+            "definitions": {
+                "item": {
+                    "type": "object",
+                    # 'team' deliberately NOT in required: — reproduces the
+                    # real proj_c bug (xxxxx_xxxxx.team is optional).
+                    "required": ["id", "name"],
+                    "properties": {
+                        "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                        "name": {"type": "string"},
+                        "team": {"type": "string"},
+                    },
+                },
+                "item_detail": {
+                    "x-generate": {
+                        "list": True, "view": True, "new": True, "edit": True,
+                        "delete": True, "api": True, "test": True, "fields": None,
+                    },
+                    "x-filter-values": filter_values,
+                    "allOf": [{"$ref": "#/definitions/item"}],
+                },
+            }
+        }
+
+    def _generate_config(self) -> dict:
+        return {
+            "list": True, "view": True, "new": True, "edit": True,
+            "delete": True, "api": True, "test": True, "fields": None,
+        }
+
+    def test_filter_values_field_excluded_from_optional_fill_and_clear(self):
+        schema = self._schema({"team": ["alpha"]})
+        ctx = spec_context("item", [], schema, "item", "item_detail", self._generate_config())
+        assert not any("Team" in cmd for cmd in ctx["opt_fill_cmds_3_1"])
+        assert not any("Team" in cmd for cmd in ctx["opt_clear_cmds_3_2"])
+        # 'team' was the only optional field, so with it excluded there is
+        # nothing left for the "adds/removes optional data" section to test.
+        assert ctx["has_optional"] is False
+
+    def test_no_filter_values_field_stays_a_normal_optional_target(self):
+        schema = self._schema({})
+        ctx = spec_context("item", [], schema, "item", "item_detail", self._generate_config())
+        assert any("Team" in cmd for cmd in ctx["opt_fill_cmds_3_1"])
+        assert any("Team" in cmd for cmd in ctx["opt_clear_cmds_3_2"])
+        assert ctx["has_optional"] is True
+
+
+class TestAnalyzeChildrenOptionalFieldExcludesFilterValues:
+    """cmd_881: same exclusion as spec_context above, but for the
+    analyze_children() path (datagrid child entities) — the general fix
+    covers both, in case a future x-filter-values view is itself embedded
+    as a datagrid child of another entity."""
+
+    def _schema(self, filter_values: dict) -> dict:
+        return {
+            "definitions": {
+                "child_item": {
+                    "type": "object",
+                    "required": ["id", "name", "parent_id"],
+                    "properties": {
+                        "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                        "name": {"type": "string"},
+                        "team": {"type": "string"},
+                        "parent_id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                    },
+                    "x-filter-values": filter_values,
+                },
+            }
+        }
+
+    def _children(self) -> list:
+        return [{
+            "name": "child_item",
+            "property_name": "child_items",
+            "output_type": None,
+            "file_type": None,
+            "relationship": None,
+        }]
+
+    def test_filter_values_field_excluded_from_child_optional_fields(self):
+        schema = self._schema({"team": ["alpha"]})
+        result = analyze_children(self._children(), schema, "parent")
+        optional_names = {f["prop_name"] for f in result[0]["optional_fields"]}
+        assert "team" not in optional_names
+
+    def test_no_filter_values_field_stays_optional_on_child(self):
+        schema = self._schema({})
+        result = analyze_children(self._children(), schema, "parent")
+        optional_names = {f["prop_name"] for f in result[0]["optional_fields"]}
+        assert "team" in optional_names
 
 
 class TestActionsTemplate:

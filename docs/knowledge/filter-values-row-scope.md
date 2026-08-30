@@ -135,6 +135,29 @@ validation. There is no separate `validate.py` rule, matching precedent:
 adding a second, differently-timed validation path for the same fact would
 duplicate logic without a concrete need driving it.
 
+## Generated UI e2e test scaffold: optional-field exclusion
+
+`generators_test.py`'s generic "adds/removes optional data" scaffold
+(section 3.1/3.2 in the generated `*.cy.ts` spec) picks a schema-optional
+field, fills it, then asserts the row is **still visible** in the (possibly
+filtered) list. If the chosen field is also the view's own
+`x-filter-values` discriminator, that assertion is self-contradicting: a
+legitimate edit through it can move the row out of the filtered view (see
+the pre-image semantics above — the write itself succeeds, only the
+post-write row is no longer reachable through this view), so "still
+visible" is not guaranteed. `spec_context()` (top-level entity path) and
+`analyze_children()` (datagrid child path) both exclude any field named in
+the view's own `x-filter-values` from the optional-field test-target
+candidates for this reason — the same field still gets a legal,
+filter-satisfying value via the required-for-populate override
+`helper_context()` already applies (see `_filter_values_for_populate`
+above), it is just never toggled by the generic optional-edit/-clear test.
+This repo's own `json_schema.yaml` declares no `x-filter-values` entity, so
+this branch is dormant here; it was found and fixed against a real
+`x-filter-values` view in a consumer schema, reproduced live as that
+view's generated UI spec's "adds optional data and child items" /
+"removes optional data and child items" tests failing.
+
 ## What `x-filter-values` does not do
 
 - It does not restrict **create** — a new row can be created with any
