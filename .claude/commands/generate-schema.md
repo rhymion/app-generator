@@ -127,11 +127,6 @@ Properties always live on the Prisma model, not the view, which is why
 `x-readonly` is model-wide and `x-readonly-fields` is view-scoped — see
 `docs/knowledge/readonly-field-form-rendering.md` for the mechanism.
 
-**Landmine**: neither annotation reaches DataGrid child inline editing — a
-readonly-declared child field still renders as an editable grid cell and
-is still accepted server-side, on any view. See the same doc for detail;
-there is no current workaround.
-
 ### `x-filter-values`: view-scoped row restriction
 Restrict a view to only the rows matching a fixed set of field values:
 
