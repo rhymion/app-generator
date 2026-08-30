@@ -2323,10 +2323,34 @@ def helper_context(
                 if nested_fk.get('dep_var_name') == old_var:
                     nested_fk['dep_var_name'] = new_var
 
+    # cmd_874/subtask_874f: x-filter-values-constrained fields must have
+    # their generated populate/seed value forced to an allowed value — the
+    # generic prisma_value() default (e.g. 'Test <label> <index>') has no
+    # awareness of the view's filter, so an unconstrained populate call
+    # would silently create test rows outside the view it exists to test,
+    # 404ing the generic CRUD tests (1.2/2.1/4.1/4.2/9.x/10.x/N6/N10) built
+    # on top of it — the same class of problem the lockdown-field override
+    # below fixes for x-approval submit_on. Read from the VIEW entity
+    # (definition_key), not parent_def (the raw entity) — filter_values
+    # lives in _VIEW_LEVEL_CONFIG_KEYS and is never copied to the raw entity
+    # (see build_user_schema.py). A constrained field that is NOT itself
+    # schema-required (e.g. x-filter-values on an optional column) must
+    # still be treated as required-for-populate-purposes below — otherwise
+    # populate{Pascal}Data() (built from required_field_metas only) omits
+    # it entirely, leaving the column unset/null, which almost never
+    # satisfies the filter either.
+    _filter_values_for_populate: dict = (
+        schema['definitions'].get(definition_key, {}) or {}
+    ).get('x-filter-values') or {}
+
     # Note: read-only fields stay in these lists so seed/prisma create data includes
     # their required values; the fill/clear/assert command builders skip them.
-    required_field_metas = [f for f in fields if f['required']]
-    optional_field_metas = [f for f in fields if not f['required']]
+    required_field_metas = [
+        f for f in fields if f['required'] or f['prop_name'] in _filter_values_for_populate
+    ]
+    optional_field_metas = [
+        f for f in fields if not f['required'] and f['prop_name'] not in _filter_values_for_populate
+    ]
 
     child_metas = analyze_children(children, schema, model_name)
     datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
@@ -2733,21 +2757,6 @@ def helper_context(
     # what this test-only DB helper writes via prisma.model.create(),
     # bypassing the service layer / real create route entirely, so it can
     # never itself fire or skip approval-request creation).
-    # cmd_874/subtask_874f: x-filter-values-constrained fields must have
-    # their generated populate/seed value forced to an allowed value — the
-    # generic prisma_value() default (e.g. 'Test <label> <index>') has no
-    # awareness of the view's filter, so an unconstrained populate call
-    # would silently create test rows outside the view it exists to test,
-    # 404ing the generic CRUD tests (1.2/2.1/4.1/4.2/9.x/10.x/N6/N10) built
-    # on top of it — the same class of problem the lockdown-field override
-    # immediately below fixes for x-approval submit_on. Read from the VIEW
-    # entity (definition_key), not parent_def (the raw entity) — filter_values
-    # lives in _VIEW_LEVEL_CONFIG_KEYS and is never copied to the raw entity
-    # (see build_user_schema.py).
-    _filter_values_for_populate: dict = (
-        schema['definitions'].get(definition_key, {}) or {}
-    ).get('x-filter-values') or {}
-
     _lockdown_field, _lockdown_submit_value = (
         resolve_approval_submit_on(parent_def) if parent_def.get('x-approval') else (None, None)
     )

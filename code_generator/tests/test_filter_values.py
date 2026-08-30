@@ -388,7 +388,12 @@ class TestGeneratedPopulateHelperRespectsFilterValues:
             "definitions": {
                 "item": {
                     "type": "object",
-                    "required": ["id", "name", "team"],
+                    # 'team' is deliberately NOT in required: — reproduces the
+                    # real proj_c bug (xxxxx_xxxxx.team is optional). The
+                    # constrained field must still be forced into
+                    # required_field_metas so populate{Pascal}Data() (built
+                    # from required_field_metas only) doesn't omit it.
+                    "required": ["id", "name"],
                     "properties": {
                         "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
                         "name": {"type": "string"},
@@ -422,8 +427,23 @@ class TestGeneratedPopulateHelperRespectsFilterValues:
     def test_unconstrained_field_still_uses_generic_placeholder(self):
         schema = self._schema({})
         ctx = helper_context("item", [], schema, "item", "item_detail", self._generate_config())
-        team_field = next(f for f in ctx["required_fields_prisma"] if f["prop_name"] == "team")
+        # Without a filter_values constraint, 'team' stays optional — not
+        # promoted into required_fields_prisma — but still gets a generic
+        # placeholder value in all_fields_prisma (used by populate{Pascal}FullData).
+        assert not any(f["prop_name"] == "team" for f in ctx["required_fields_prisma"])
+        team_field = next(f for f in ctx["all_fields_prisma"] if f["prop_name"] == "team")
         assert "Test" in team_field["prisma_val"]
+
+    def test_optional_constrained_field_promoted_to_required_for_populate(self):
+        """Reproduces the real proj_c bug: x-filter-values on an optional
+        field (team is not in required:) must still land in
+        required_fields_prisma, or populate{Pascal}Data() (built from
+        required_fields_prisma only) omits the column entirely — leaving it
+        null, which fails the filter regardless of the value override."""
+        schema = self._schema({"team": ["alpha"]})
+        ctx = helper_context("item", [], schema, "item", "item_detail", self._generate_config())
+        team_field = next(f for f in ctx["required_fields_prisma"] if f["prop_name"] == "team")
+        assert team_field["prisma_val"] == "'alpha'"
 
     def test_boolean_filter_value_renders_as_js_boolean_not_string(self):
         schema = self._schema({"team": [False]})
