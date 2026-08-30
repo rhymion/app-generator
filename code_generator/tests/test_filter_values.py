@@ -16,6 +16,7 @@ Verifies:
 """
 import pytest
 from build_context import build_context
+from generators_test import helper_context
 
 
 # ---------------------------------------------------------------------------
@@ -371,6 +372,65 @@ class TestApiBulkRouteTemplate:
 # ---------------------------------------------------------------------------
 # actions.ts.jinja2: remove{Entity} (Server Action delete) pre-image filter
 # ---------------------------------------------------------------------------
+
+class TestGeneratedPopulateHelperRespectsFilterValues:
+    """cmd_874/subtask_874f addendum: the generic prisma_value() default for
+    a plain text field (e.g. `Test Team 1`) has no awareness of a view's
+    x-filter-values — an unconstrained populate call would silently create
+    test rows outside the view it exists to test, 404ing the generated
+    CRUD round-trip tests built on top of it (reproduced live in proj_c's
+    alpha_xxxxx_xxxxx.cy.ts: 10/22 tests failed before this fix). Mirrors
+    the existing x-approval submit_on lockdown-field override (cmd_858c)
+    at the same insertion point."""
+
+    def _schema(self, filter_values: dict) -> dict:
+        return {
+            "definitions": {
+                "item": {
+                    "type": "object",
+                    "required": ["id", "name", "team"],
+                    "properties": {
+                        "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                        "name": {"type": "string"},
+                        "team": {"type": "string"},
+                    },
+                },
+                "item_detail": {
+                    "x-generate": {
+                        "list": True, "view": True, "new": False, "edit": True,
+                        "delete": True, "api": True, "test": True, "fields": None,
+                    },
+                    "x-filter-values": filter_values,
+                    "allOf": [{"$ref": "#/definitions/item"}],
+                },
+            }
+        }
+
+    def _generate_config(self) -> dict:
+        return {
+            "list": True, "view": True, "new": False, "edit": True,
+            "delete": True, "api": True, "test": True, "fields": None,
+        }
+
+    def test_constrained_field_uses_allowed_value_not_generic_placeholder(self):
+        schema = self._schema({"team": ["alpha"]})
+        ctx = helper_context("item", [], schema, "item", "item_detail", self._generate_config())
+        team_field = next(f for f in ctx["required_fields_prisma"] if f["prop_name"] == "team")
+        assert team_field["prisma_val"] == "'alpha'"
+        assert team_field["prisma_val_fixed"] == "'alpha'"
+
+    def test_unconstrained_field_still_uses_generic_placeholder(self):
+        schema = self._schema({})
+        ctx = helper_context("item", [], schema, "item", "item_detail", self._generate_config())
+        team_field = next(f for f in ctx["required_fields_prisma"] if f["prop_name"] == "team")
+        assert "Test" in team_field["prisma_val"]
+
+    def test_boolean_filter_value_renders_as_js_boolean_not_string(self):
+        schema = self._schema({"team": [False]})
+        ctx = helper_context("item", [], schema, "item", "item_detail", self._generate_config())
+        team_field = next(f for f in ctx["required_fields_prisma"] if f["prop_name"] == "team")
+        assert team_field["prisma_val"] == "false"
+
 
 class TestActionsTemplate:
     def test_remove_filters_by_pre_image(self):

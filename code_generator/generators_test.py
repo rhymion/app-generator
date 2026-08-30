@@ -1376,6 +1376,19 @@ def _clip_to_max_length(value: str, max_len: int | None, tail: str) -> str:
     return value[:max(0, max_len - 1)] + tail
 
 
+def _ts_literal_for_python_value(value) -> str:
+    """Render a plain Python value (as it appears in an x-filter-values
+    allowed-values list) as a TypeScript literal, for a generated
+    populate/seed helper's `prisma.<model>.create()` call. cmd_874/subtask_874f."""
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    if value is None:
+        return 'null'
+    if isinstance(value, (int, float)):
+        return str(value)
+    return "'" + str(value).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
 def prisma_value(field: dict, index: str, entity_title: str) -> str:
     """Generate a TypeScript expression for Prisma test data."""
     cat = field['category']
@@ -2720,6 +2733,21 @@ def helper_context(
     # what this test-only DB helper writes via prisma.model.create(),
     # bypassing the service layer / real create route entirely, so it can
     # never itself fire or skip approval-request creation).
+    # cmd_874/subtask_874f: x-filter-values-constrained fields must have
+    # their generated populate/seed value forced to an allowed value — the
+    # generic prisma_value() default (e.g. 'Test <label> <index>') has no
+    # awareness of the view's filter, so an unconstrained populate call
+    # would silently create test rows outside the view it exists to test,
+    # 404ing the generic CRUD tests (1.2/2.1/4.1/4.2/9.x/10.x/N6/N10) built
+    # on top of it — the same class of problem the lockdown-field override
+    # immediately below fixes for x-approval submit_on. Read from the VIEW
+    # entity (definition_key), not parent_def (the raw entity) — filter_values
+    # lives in _VIEW_LEVEL_CONFIG_KEYS and is never copied to the raw entity
+    # (see build_user_schema.py).
+    _filter_values_for_populate: dict = (
+        schema['definitions'].get(definition_key, {}) or {}
+    ).get('x-filter-values') or {}
+
     _lockdown_field, _lockdown_submit_value = (
         resolve_approval_submit_on(parent_def) if parent_def.get('x-approval') else (None, None)
     )
@@ -2754,6 +2782,11 @@ def helper_context(
         elif f['prop_name'] == _lockdown_field and _lockdown_override_literal is not None:
             f['prisma_val'] = _lockdown_override_literal
             f['prisma_val_fixed'] = _lockdown_override_literal
+            f['dep_var_name'] = None
+        elif f['prop_name'] in _filter_values_for_populate and _filter_values_for_populate[f['prop_name']]:
+            _filter_literal = _ts_literal_for_python_value(_filter_values_for_populate[f['prop_name']][0])
+            f['prisma_val'] = _filter_literal
+            f['prisma_val_fixed'] = _filter_literal
             f['dep_var_name'] = None
         else:
             f['prisma_val'] = prisma_value(f, 'i', entity_title)
