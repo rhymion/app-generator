@@ -6,6 +6,16 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **README.md/README_ja.md sync gate (`npm run check:readme-sync`,
+  `scripts/check_readme_sync.sh`).** Fails closed if a branch's diff touches
+  README.md relative to its base without also touching README_ja.md (or the
+  reverse) — added as a Completion gate step in `add-component.md`,
+  `generate-schema.md`, `update-code.md`, and `update-generator.md`. Local
+  only, no CI dependency. Content parity (do the two files actually say the
+  same thing) is still an agent procedure, not something this script checks
+  — see `docs/knowledge/readme-en-ja-sync-gate.md` for the full two-tier
+  design and why they aren't merged into one mechanism.
+
 - **`x-filter-values`: view-scoped row restriction, enforced server-side across
   read and write.** A view entity can now declare
   `x-filter-values: { field: [allowed values, ...], ... }` (map form,

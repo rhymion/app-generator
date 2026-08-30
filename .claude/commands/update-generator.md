@@ -48,6 +48,8 @@ Run in this order:
 17. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop + mobile)
 18. `npm audit --omit=dev --audit-level=high`
 19. `pip-audit -r requirements.txt`
+20. `npm run check:readme-sync` — fails closed if this branch's diff touches
+    README.md without also touching README_ja.md (or vice versa)
 
 **Step 1 (`npm run lint`) must run on a checkout where `generate-code` has
 not yet run** — that is what CI's `Lint` job actually checks (`npm ci && npm
@@ -301,6 +303,11 @@ an `x-display.table`
 column set nor embedded as a one-to-many child's column, so this repo's
 own `test:e2e:build` (step 14) never compiles either branch. ~4-5s. See
 `scripts/check_uri_kind_gate_fixture.sh`.
+
+Step 20 only proves both README files were touched, not that their content
+actually agrees — if this task's diff includes a README.md change, bring
+README_ja.md's content up to date with it (and vice versa) before this
+step, not after. See `docs/knowledge/readme-en-ja-sync-gate.md`.
 
 ## Debug priority
 

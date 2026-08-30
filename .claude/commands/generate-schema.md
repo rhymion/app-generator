@@ -213,6 +213,8 @@ Run in this order:
 5. `npm run check:generated` — generated code matches templates/schema
 6. `npm run test:e2e:cy:api` — API Cypress specs only
 7. `npm audit --omit=dev --audit-level=high`
+8. `npm run check:readme-sync` — fails closed if this branch's diff touches
+   README.md without also touching README_ja.md (or vice versa)
 
 **Step 1 (`npm run lint`) must run on a checkout where `generate-code` has
 not yet run** — that is what CI's `Lint` job actually checks (`npm ci && npm
@@ -230,6 +232,12 @@ Steps 2 and 3 run unconditionally, with no "unchanged" exemption: CI's
 no path filter, so a local gate that conditionally skips either can go green
 while CI goes red on the same commit (see
 `docs/knowledge/gate-exemption-must-be-machine-checkable.md` — cmd_498).
+
+Step 8 only proves both README files were touched, not that their content
+actually agrees — a new `x-*` schema key generally needs a README.md
+bullet (see `## Features`); if this task's diff includes one, bring
+README_ja.md's content up to date with it (and vice versa) before this
+step, not after. See `docs/knowledge/readme-en-ja-sync-gate.md`.
 
 ## Debug priority
 
