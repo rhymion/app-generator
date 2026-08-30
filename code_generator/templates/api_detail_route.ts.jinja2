@@ -94,6 +94,17 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if (!existing) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
+{% if filter_values %}
+    // x-filter-values: judged against the PRE-image row fetched above, not
+    // the incoming PUT body — a legitimate transition out of the filtered
+    // view (e.g. status pending -> approved) must still succeed; only a row
+    // already outside the view is rejected (cmd_874/subtask_874f, ruling_C).
+{% for field, values in filter_values.items() %}
+    if (!({{ values | tojson }} as unknown[]).includes((existing as Record<string, unknown>).{{ field }})) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+{% endfor %}
+{% endif %}
 {% if is_self_only %}
     // x-self-only: no general.update/Creator-role override — ownership is
     // the sole gate, unconditionally (no admin bypass on write). "Not
@@ -148,6 +159,14 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     if (!existing) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
+{% if filter_values %}
+    // x-filter-values: judged against the PRE-image row (cmd_874/subtask_874f, ruling_C).
+{% for field, values in filter_values.items() %}
+    if (!({{ values | tojson }} as unknown[]).includes((existing as Record<string, unknown>).{{ field }})) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+{% endfor %}
+{% endif %}
 {% if is_self_only %}
     // x-self-only: no general.delete/Creator-role override — ownership is
     // the sole gate, unconditionally (no admin bypass on delete).

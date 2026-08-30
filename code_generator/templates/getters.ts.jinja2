@@ -80,6 +80,14 @@ async function build{{ parent_pascal }}AccessWhere(
     }
   }
 {% endif %}
+{% if filter_values %}
+  // x-filter-values: this view only shows rows matching every field's
+  // allowed-value list — ANDed alongside org/self-only above, never OR
+  // (cmd_874/subtask_874f).
+{% for field, values in filter_values.items() %}
+  and.push({ {{ field }}: { in: {{ values | tojson }} } });
+{% endfor %}
+{% endif %}
   return and;
 }
 
@@ -107,6 +115,11 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
 {% else %}
       creator_id: userId,
 {% endif %}
+{% endif %}
+{% if filter_values %}
+{% for field, values in filter_values.items() %}
+      {{ field }}: { in: {{ values | tojson }} },
+{% endfor %}
 {% endif %}
     },
 {% if include_props_detail %}

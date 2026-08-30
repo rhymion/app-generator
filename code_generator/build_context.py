@@ -46,11 +46,12 @@ def _raw_def(entity_name: str, schema: dict) -> dict:
     entities with no raw counterpart (e.g. 'setting', which proxies the
     'user' view instead of having its own raw twin).
 
-    NOTE: `x-readonly-fields` is the one entity-level annotation that does
-    NOT live here (cmd_874 subtask_874d) — it stays on the view entity
-    itself so one view's declaration can't leak to every other view of the
-    same raw model. Read it from `schema['definitions'][definition_key]`
-    instead; see `build_context()`'s `_ro_from_entity`.
+    NOTE: `x-readonly-fields` and `x-filter-values` are entity-level
+    annotations that do NOT live here (cmd_874 subtask_874d/874f) — they
+    stay on the view entity itself so one view's declaration can't leak to
+    every other view of the same raw model. Read them from
+    `schema['definitions'][definition_key]` instead; see `build_context()`'s
+    `_ro_from_entity` / `_filter_values_raw`.
     """
     defs = schema.get('definitions', {})
     return defs.get(f'__{entity_name}', {}) or defs.get(entity_name, {})
@@ -1521,6 +1522,41 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     if not is_self_only:
         is_self_only, self_only_admin_bypass = get_self_only_flags(model_def)
 
+    # x-filter-values: entity-level access invariant restricting which rows
+    # a view may see to those matching { field: [allowed values, ...] },
+    # AND across fields, IN across each field's values (cmd_874/subtask_874f,
+    # ruling_B Option A). Composes with should_filter_by_org / is_self_only
+    # via AND (never OR) — see build{Entity}AccessWhere() in
+    # getters.ts.jinja2, which ANDs this into the same `and` array as the
+    # org-isolation and self-only clauses.
+    #
+    # Read from the VIEW entity itself (schema['definitions'][def_key]),
+    # single-level like x-readonly-fields — x-filter-values lives in
+    # _VIEW_LEVEL_CONFIG_KEYS (build_user_schema.py) and is never copied
+    # onto the shared raw entity, so there is no raw-entity fallback to
+    # check (unlike is_self_only's two-level read above, which exists only
+    # because x-self-only IS copied to the raw entity for non-proxy models).
+    _filter_values_raw: dict = _view_entry.get('x-filter-values') or {}
+    _unresolved_filter_fields = sorted(set(_filter_values_raw) - set(filtered_props))
+    if _unresolved_filter_fields:
+        raise ValueError(
+            f"x-filter-values on '{model}' references unknown propert"
+            f"{'y' if len(_unresolved_filter_fields) == 1 else 'ies'}: "
+            f"{_unresolved_filter_fields}. Each key must be an exact "
+            "property name."
+        )
+    filter_values: dict[str, list] = {
+        field: list(values) for field, values in _filter_values_raw.items()
+    }
+    # Select clause to re-fetch a pre-image row's filter_values fields at the
+    # actual write (service.ts update<Entity>), mirroring is_self_only's own
+    # _selfOnlyExisting pre-check — see that block for why this must be a
+    # PRE-image read (before the transaction), not the post-write value.
+    filter_values_select: str | None = (
+        '{ ' + ', '.join(f'{f}: true' for f in filter_values) + ' }'
+        if filter_values else None
+    )
+
     # x-import-key: natural key fields (CSV export column guarantee, Phase 1;
     # natural-key import matching, Phase 2). Dotted FK paths (e.g. role.name)
     # are Phase 2-only — Phase 1 export only needs the non-dotted portion.
@@ -1992,8 +2028,15 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         })
 
     has_assignee_id   = 'assignee_id' in filtered_props
+    # cmd_874/subtask_874f: filter_values fields are appended so the write
+    # paths that already fetch a pre-image row via item_context_select
+    # (api_detail_route.ts, api_bulk_route.ts) can pre-image-check
+    # x-filter-values without an extra query.
+    _filter_value_select_fields = ''.join(f', {f}: true' for f in sorted(filter_values))
     item_context_select = (
-        f'{{ id: true, creator_id: true{", assignee_id: true" if has_assignee_id else ""} }}'
+        f'{{ id: true, creator_id: true'
+        f'{", assignee_id: true" if has_assignee_id else ""}'
+        f'{_filter_value_select_fields} }}'
     )
 
     # is_audited: when true, generated service.ts wraps create/update/delete
@@ -3222,6 +3265,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         org_relationship_optional=org_relationship_optional,
         is_self_only=is_self_only,
         self_only_admin_bypass=self_only_admin_bypass,
+        filter_values=filter_values,  # cmd_874/subtask_874f
+        filter_values_select=filter_values_select,  # cmd_874/subtask_874f
         # CSV export (Phase 1): natural-key columns + FK flatten metadata
         import_key_fields=import_key_fields,
         has_import_key=has_import_key,

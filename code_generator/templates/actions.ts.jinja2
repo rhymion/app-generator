@@ -50,32 +50,45 @@ export async function remove{{ parent_pascal }}(ids: string[]) {
 {% if org_relationship_optional %}
     const {{ parent_camel }}s = await prisma.{{ model }}.findMany({
       where: { id: { in: ids }, OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }] },
-      select: { id: true, creator_id: true },
+      select: { id: true, creator_id: true{% for field in filter_values %}, {{ field }}: true{% endfor %} },
     });
 {% else %}
     const {{ parent_camel }}s = await prisma.{{ model }}.findMany({
       where: { id: { in: ids }, organization_id: { in: _assocOrgIds } },
-      select: { id: true, creator_id: true },
+      select: { id: true, creator_id: true{% for field in filter_values %}, {{ field }}: true{% endfor %} },
     });
 {% endif %}
 {% else %}
     const [{% if is_self_only %}{ userId }{% else %}{ permissions: userPermissions, userId }{% endif %}, {{ parent_camel }}s] = await Promise.all([
       getModelPermissions('{{ parent }}'),
-      await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } }),
+      await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true{% for field in filter_values %}, {{ field }}: true{% endfor %} } }),
     ]);
 {% endif %}
 {% if is_self_only %}
     // x-self-only: no general.delete/Creator-role override — ownership is
     // the sole gate, unconditionally (no admin bypass on delete).
-    const filtered{{ parent_pascal }}s = {{ parent_camel }}s.filter(item => item.creator_id === userId);
+    const _filteredByRole{{ parent_pascal }}s = {{ parent_camel }}s.filter(item => item.creator_id === userId);
 {% else %}
-    const filtered{{ parent_pascal }}s = userPermissions.general.delete
+    const _filteredByRole{{ parent_pascal }}s = userPermissions.general.delete
       ? {{ parent_camel }}s
       : {{ parent_camel }}s.filter(item =>
           (userPermissions.creator?.delete && item.creator_id === userId) ||
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (userPermissions.assignee?.delete && (item as any).assignee_id === userId)
         );
+{% endif %}
+{% if filter_values %}
+    // x-filter-values: ANDed on top of role-based scope above — a row
+    // outside the filtered view is never deletable via this action, even
+    // by a caller who otherwise has delete permission (cmd_874/subtask_874f).
+    const filtered{{ parent_pascal }}s = _filteredByRole{{ parent_pascal }}s.filter(item => (
+{% for field, values in filter_values.items() %}
+      ({{ values | tojson }} as unknown[]).includes((item as Record<string, unknown>).{{ field }}){% if not loop.last %} &&{% endif %}
+
+{% endfor %}
+    ));
+{% else %}
+    const filtered{{ parent_pascal }}s = _filteredByRole{{ parent_pascal }}s;
 {% endif %}
     if (filtered{{ parent_pascal }}s.length === 0) {
       throw new AppError('PERMISSION_DENIED', 'No permission to delete');

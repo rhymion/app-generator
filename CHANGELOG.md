@@ -6,6 +6,32 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`x-filter-values`: view-scoped row restriction, enforced server-side across
+  read and write.** A view entity can now declare
+  `x-filter-values: { field: [allowed values, ...], ... }` (map form,
+  multiple fields AND, multiple values per field IN) to restrict which
+  rows it shows and can write to — e.g. an "active orders" view of a
+  shared `order` model. Enforcement covers all 4 read paths (list/export
+  via `build{Entity}AccessWhere()` in `getters.ts`, detail GET's own
+  inline `where`, and the cross-entity full-text search union in
+  `search_helpers.ts`) plus the write paths: `service.ts`'s
+  `update{Entity}` (the convergence point both the REST route and the
+  Server Action funnel through for update), and — since `delete{Entity}`
+  has no equivalent internal check, mirroring the existing `x-self-only`
+  precedent — each of `api_detail_route.ts`, `api_bulk_route.ts`, and
+  `actions.ts`'s `remove{Entity}` individually. All write-path checks
+  judge the row's **pre-image** (its state before the write), not the
+  incoming request body, so a legitimate transition out of the filtered
+  view still succeeds — only a row already outside the view is rejected
+  (404). Composes with org isolation and `x-self-only` via AND, never OR.
+  `x-filter-values` is entity-level, view-scoped metadata (added to
+  `_VIEW_LEVEL_CONFIG_KEYS` in `build_user_schema.py`, same as
+  `x-readonly-fields`), so one proxy view's declaration never leaks onto
+  another view of the same underlying model. See
+  `docs/knowledge/filter-values-row-scope.md` for the full design and
+  `.claude/commands/generate-schema.md`'s "x-filter-values" section for
+  schema-author-facing usage.
+
 - **Withdraw lockout for entities that never declare `x-approval.on_withdrawn`, plus a
   structural combination check on `x-approval` clauses.** An entity without
   `on_withdrawn` has no safe path back into the workflow after a

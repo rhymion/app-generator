@@ -104,6 +104,12 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
       {{ entity.access_clauses_ts_var }}.push({{ entity.or_clauses_ts_var }}.length > 0 ? Prisma.sql`(${ Prisma.join({{ entity.or_clauses_ts_var }}, ' OR ') })` : Prisma.sql`1=0`);
     }
 {% endif %}
+{% if entity.filter_values %}
+    // x-filter-values: ANDed alongside org/self-only above (cmd_874/subtask_874f).
+{% for field, values in entity.filter_values.items() %}
+    {{ entity.access_clauses_ts_var }}.push(Prisma.sql`{{ field }} IN (${ Prisma.join({{ values | tojson }}.map((v: unknown) => Prisma.sql`${ v }`)) })`);
+{% endfor %}
+{% endif %}
     const {{ entity.access_where_ts_var }}: Prisma.Sql = {{ entity.access_clauses_ts_var }}.length > 0
       ? Prisma.sql`(${ Prisma.join({{ entity.access_clauses_ts_var }}, ' AND ') })`
       : Prisma.sql`1=1`;
@@ -150,6 +156,12 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
 {% endif %}
       {{ entity.parent_access_clauses_ts_var }}.push({{ entity.parent_or_clauses_ts_var }}.length > 0 ? Prisma.sql`(${ Prisma.join({{ entity.parent_or_clauses_ts_var }}, ' OR ') })` : Prisma.sql`1=0`);
     }
+{% endif %}
+{% if entity.filter_values %}
+    // x-filter-values: ANDed alongside org/self-only above (cmd_874/subtask_874f).
+{% for field, values in entity.filter_values.items() %}
+    {{ entity.parent_access_clauses_ts_var }}.push(Prisma.sql`parent.{{ field }} IN (${ Prisma.join({{ values | tojson }}.map((v: unknown) => Prisma.sql`${ v }`)) })`);
+{% endfor %}
 {% endif %}
     const {{ entity.parent_access_where_ts_var }}: Prisma.Sql = {{ entity.parent_access_clauses_ts_var }}.length > 0
       ? Prisma.sql`(${ Prisma.join({{ entity.parent_access_clauses_ts_var }}, ' AND ') })`

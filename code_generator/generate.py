@@ -2287,6 +2287,13 @@ def generate(schema_path: str, output_dir: str) -> None:
         # investigation surface the bypass exists for.
         is_self_only, _ = get_self_only_flags(base_def if isinstance(base_def, dict) else {})
 
+        # x-filter-values: mirrors build_context.py's filter_values read —
+        # the VIEW entity's own declaration only (never the raw entity; see
+        # build_user_schema.py's _VIEW_LEVEL_CONFIG_KEYS). Field-name
+        # validity is already fail-closed-checked by build_context() earlier
+        # in generate() for every entity, so no re-validation needed here.
+        filter_values = detail_def.get('x-filter-values') or {}
+
         # Phase1+2: non-independent child entities searchable via the parent's page
         # (inline grid / embedded list children, and non-m2o flattened OTO relations).
         no_page_children = []
@@ -2357,6 +2364,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'org_relationship_optional': org_relationship_optional,
             'has_assignee_id':       has_assignee_id,
             'is_self_only':          is_self_only,
+            'filter_values':         filter_values,  # cmd_874/subtask_874f
             # Pre-computed TypeScript identifiers (avoids Jinja2/TypeScript ${{{...}}} delimiter conflict)
             'perms_ts_var':          f'{parent}Perms',
             'general_read_ts_var':   f'{parent}GeneralRead',
