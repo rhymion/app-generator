@@ -135,6 +135,19 @@ with `x-readonly` instead would lock it down everywhere. See
 detail (`build_context.py` reads `x-readonly-fields` from the view entity's
 own definition, not the shared raw entity).
 
+**Known limitation: does not reach DataGrid child inline editing.** Both
+`x-readonly` and `x-readonly-fields` correctly lock down the parent
+entity's own form/list rendering. Neither currently has any effect on a
+DataGrid child (an editable one-to-many child grid embedded in the
+parent's form) — a column on a readonly-declared child field still
+renders fully editable, and the corresponding write path (child
+create/update body construction) still accepts and persists client-sent
+values for that field with no server-side guard either. This is a
+pre-existing gap in both the UI column generation and the API/service
+write-path generation, not a regression from the scoping fix above. A fix
+is under consideration but not yet scheduled — treat DataGrid child
+fields as currently unprotectable by either annotation.
+
 ## Common rules
 
 1. `npm run lint` must pass.
