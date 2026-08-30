@@ -135,18 +135,19 @@ with `x-readonly` instead would lock it down everywhere. See
 detail (`build_context.py` reads `x-readonly-fields` from the view entity's
 own definition, not the shared raw entity).
 
-**Known limitation: does not reach DataGrid child inline editing.** Both
-`x-readonly` and `x-readonly-fields` correctly lock down the parent
-entity's own form/list rendering. Neither currently has any effect on a
-DataGrid child (an editable one-to-many child grid embedded in the
-parent's form) — a column on a readonly-declared child field still
-renders fully editable, and the corresponding write path (child
-create/update body construction) still accepts and persists client-sent
-values for that field with no server-side guard either. This is a
-pre-existing gap in both the UI column generation and the API/service
-write-path generation, not a regression from the scoping fix above. A fix
-is under consideration but not yet scheduled — treat DataGrid child
-fields as currently unprotectable by either annotation.
+**DataGrid child support.** Both `x-readonly` and
+`x-readonly-fields` also reach a DataGrid child (an editable one-to-many
+child grid embedded in the parent's form) when declared directly on the
+child entity — not just the parent's own form/list rendering. A
+readonly-declared child column renders with `editable: false` in the
+generated grid, and the write path (child create/update body
+construction) omits the field from the Prisma `update` call entirely so
+an existing row's value can't be overwritten. `create` is asymmetric by
+necessity: a brand-new child row has no prior value to preserve, so the
+field is instead seeded with a schema-derived default (the field's
+`default:`, or a type-appropriate fallback) rather than the client-
+submitted value. See `docs/knowledge/readonly-field-form-rendering.md`
+for the implementation detail and the create/update asymmetry rationale.
 
 ## Common rules
 

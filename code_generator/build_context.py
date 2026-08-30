@@ -337,6 +337,79 @@ def _get_child_parent_id_props(child_name: str, model: str, parent_rels_raw: lis
     return get_parent_fk_props(child_def, model)
 
 
+def _child_readonly_field_names(child_name: str, child_props_dict: dict, schema: dict, model: str) -> set[str]:
+    """Resolve x-readonly-fields (entity-level) + x-readonly (per-field) for a
+    DataGrid child entity — the child-grid counterpart of build_context()'s own
+    `_ro_from_entity`/`_ro_from_props` (cmd_874 subtask_874i). x-readonly-fields
+    is read from the child's own definitions entry directly (not via _raw_def),
+    mirroring the parent's view-scoped read (see _raw_def's docstring note) —
+    child grid entities referenced by `children:` have no raw/view split today,
+    so `schema['definitions'][child_name]` already is the view-equivalent entry.
+    Fails closed (cmd_642 precedent) on an x-readonly-fields entry that names an
+    unknown property, rather than silently leaving it editable.
+    """
+    _child_entry = schema['definitions'].get(child_name, {}) or {}
+    _ro_from_entity: set[str] = set(_child_entry.get('x-readonly-fields') or [])
+    _unresolved = sorted(_ro_from_entity - set(child_props_dict))
+    if _unresolved:
+        raise ValueError(
+            f"x-readonly-fields on child entity '{child_name}' (under '{model}') references "
+            f"unknown propert{'y' if len(_unresolved) == 1 else 'ies'}: {_unresolved}. "
+            "Each entry must be an exact property name."
+        )
+    _ro_from_props: set[str] = {
+        fn for fn, fp in child_props_dict.items()
+        if isinstance(fp, dict) and fp.get('x-readonly')
+    }
+    return _ro_from_entity | _ro_from_props
+
+
+def _child_readonly_default_value(prop_name: str, defn: dict, child_def: dict) -> str:
+    """Server-side create-time default literal for a readonly child-grid
+    column. A row is still `create`d with all its columns even when one of
+    them is readonly (the row itself is new — there is no prior value to
+    keep), so the client-submitted value is replaced with a schema-derived
+    default instead of being dropped outright (contrast
+    _build_child_nested_update's `update` branch, which omits the key
+    entirely — see field_map_update below).
+
+    A third near-duplicate of this same schema-default-literal logic
+    (generators.py's `_new_prop_val` seeds the client-side new-row grid
+    state; build_context.py's own `_default_value` seeds the parent's
+    page_new defaults) — kept separate rather than shared because neither
+    runs in this function's scope: `_new_prop_val` emits for the browser,
+    and `_default_value` is a closure over build_context()'s parent-model
+    locals (model_def, is required, etc.) not available here for a child.
+    """
+    actual = _get_actual_type(defn)
+    fmt = defn.get('format')
+    is_req = prop_name in (child_def.get('required') or [])
+    is_null = _is_nullable(defn)
+    has_db_default = 'default' in defn or (not is_req and not is_null)
+    if actual == 'string' and fmt in ('date', 'date-time', 'time'):
+        return 'new Date()' if has_db_default else 'null'
+    if actual in ('integer', 'number'):
+        if has_db_default and defn.get('default') is not None:
+            schema_default = defn['default']
+            return str(int(schema_default)) if actual == 'integer' else str(schema_default)
+        return 'null'
+    if actual == 'string':
+        if defn.get('_prisma_native_enum_type') and 'default' in defn:
+            return f"'{defn['default']}'"
+        if defn.get('_prisma_native_enum_type') and isinstance(defn.get('enum'), list) and defn['enum']:
+            return f"'{defn['enum'][0]}'"
+        if isinstance(defn.get('enum'), list) and defn['enum']:
+            if 'default' in defn:
+                return f"'{defn['default']}'"
+            return f"'{defn['enum'][0]}'"
+        if 'default' in defn:
+            return f"'{defn['default']}'"
+        return "''"
+    if actual == 'boolean':
+        return str(defn.get('default', False)).lower()
+    return 'null'
+
+
 def _build_child_data(children_raw: list[dict], model: str, schema: dict,
                       parent_rels_raw: list[dict]) -> list[dict]:
     result = []
@@ -417,11 +490,37 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             return (isinstance(t, list) and 'null' in t
                     and defn.get('pattern') == '^c[a-z0-9]{24,}$')
 
+        # x-readonly-fields / x-readonly on the child entity (cmd_874
+        # subtask_874i): the UI's editable flag (generators.py
+        # column_def_context, via readonly_field_names below) and this
+        # write path both need to honor it. Asymmetric by design (874g
+        # report): a create still needs *some* value for a readonly column
+        # (the row is new — there is no prior value to preserve), so
+        # field_map_create substitutes a schema-derived default; an update
+        # instead omits the key entirely from `data:` so Prisma leaves the
+        # existing value untouched. field_map_update is used only for the
+        # `update:` (existing-row) branch in _build_child_nested_update —
+        # the `create:` branch there (new rows added during an update) is a
+        # create, so it keeps using field_map_create like
+        # _build_child_nested_create does.
+        readonly_field_names = _child_readonly_field_names(child_name, child_props_dict, schema, model)
+
         field_map_create = '\n'.join(
+            f'          {p}: {_child_readonly_default_value(p, child_props_dict.get(p, {}), child_def)},'
+            if p in readonly_field_names
+            else (
+                f'          {p}: f.{p} || null,'
+                if _is_nullable_cuid(child_props_dict.get(p, {}))
+                else f'          {p}: f.{p},'
+            )
+            for p in props_no_id
+        )
+        field_map_update = '\n'.join(
             f'          {p}: f.{p} || null,'
             if _is_nullable_cuid(child_props_dict.get(p, {}))
             else f'          {p}: f.{p},'
             for p in props_no_id
+            if p not in readonly_field_names
         )
 
         child_var    = safe_var_name(prop_name)
@@ -461,6 +560,8 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             'field_type':       field_type,
             'field_type_with_id': field_type_with_id,
             'field_map_create': field_map_create,
+            'field_map_update': field_map_update,
+            'readonly_field_names': readonly_field_names,
             'approval_indexed':   approval_indexed,
             'approval_array_var': approval_array_var,
             'has_assignee_id':    child_has_assignee_id,
@@ -526,6 +627,7 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
         pn  = c['property_name']
         cv  = c['child_var']
         fmc = c['field_map_create']
+        fmu = c['field_map_update']
         if c['use_connect']:
             lines.append(f"      {pn}: {{\n        set: {cv}Ids.map((id) => ({{ id }})),\n      }},")
         elif c.get('approval_indexed'):
@@ -539,7 +641,7 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
                 f"        deleteMany: {{ id: {{ notIn: {cv}Items.map(f => f.id).filter((id): id is string => Boolean(id)) }} }},\n"
                 f"        update: {cv}Items.filter(f => f.id).map(f => ({{\n"
                 f"          where: {{ id: f.id! }},\n"
-                f"          data: {{\n{fmc}\n          }},\n"
+                f"          data: {{\n{fmu}\n          }},\n"
                 f"        }})),\n"
                 f"        create: {cv}Items.filter(f => !f.id).map((f, _i) => ({{\n"
                 f"{fmc}\n"
@@ -559,7 +661,7 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
                 f"        deleteMany: {{ id: {{ notIn: {cv}Items.map(f => f.id).filter((id): id is string => Boolean(id)) }} }},\n"
                 f"        update: {cv}Items.filter(f => f.id).map(f => ({{\n"
                 f"          where: {{ id: f.id! }},\n"
-                f"          data: {{\n{fmc}\n          }},\n"
+                f"          data: {{\n{fmu}\n          }},\n"
                 f"        }})),\n"
                 f"        create: {cv}Items.filter(f => !f.id).map(f => ({{\n{fmc}\n        }})),\n"
                 f"      }},"
