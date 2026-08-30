@@ -18,7 +18,7 @@ it the new key convention:
     carries at least one Category D / view-level annotation
     (`_VIEW_LEVEL_CONFIG_KEYS` -- `x-generate`, `x-audit`,
     `x-relationships`, `x-search`, `x-custom-components`,
-    `x-readonly-fields`) -- a "paired"
+    `x-readonly-fields`, `x-filter-values`) -- a "paired"
     entity, e.g. `role` (was `role_detail`): the raw entity `__role` is
     synthesized from Prisma (`schema_deriver.derive_raw_entity`),
     Category C entity-level annotations (`x-import-key`, `x-display`,
@@ -135,6 +135,11 @@ _ENTITY_LEVEL_DATA_KEYS = (
 # own definition — see that module for the read-side half of this fix.
 # Contrast with per-property `x-readonly` (unchanged, still model/raw-wide
 # by design — see `docs/knowledge/readonly-field-form-rendering.md`).
+#
+# `x-filter-values` (cmd_874/subtask_874f) is view-scoped for the same
+# reason: a proxy view's row-restriction declaration must not leak onto
+# other views sharing the same raw model. See build_context.py's
+# `filter_values` read for the enforcement side.
 _VIEW_LEVEL_CONFIG_KEYS = (
     "x-generate",
     "x-audit",
@@ -142,6 +147,7 @@ _VIEW_LEVEL_CONFIG_KEYS = (
     "x-search",
     "x-custom-components",
     "x-readonly-fields",
+    "x-filter-values",
 )
 
 

@@ -101,6 +101,15 @@ export async function PUT(request: NextRequest) {
         bulkResults.push({ index: i, success: false, error: `Not found: ${id}` });
         continue;
       }
+{% if filter_values %}
+      // x-filter-values: judged against the PRE-image row (cmd_874/subtask_874f, ruling_C).
+{% for field, values in filter_values.items() %}
+      if (!({{ values | tojson }} as unknown[]).includes((existing as Record<string, unknown>).{{ field }})) {
+        bulkResults.push({ index: i, success: false, error: `Not found: ${id}` });
+        continue;
+      }
+{% endfor %}
+{% endif %}
 {% if is_self_only %}
       // x-self-only: no general.update/Creator-role override — ownership is
       // the sole gate, unconditionally (no admin bypass on bulk write).
@@ -167,6 +176,15 @@ export async function DELETE(request: NextRequest) {
         results.push({ index: i, success: false, error: `Not found: ${id}` });
         continue;
       }
+{% if filter_values %}
+      // x-filter-values: judged against the PRE-image row (cmd_874/subtask_874f, ruling_C).
+{% for field, values in filter_values.items() %}
+      if (!({{ values | tojson }} as unknown[]).includes((existing as Record<string, unknown>).{{ field }})) {
+        results.push({ index: i, success: false, error: `Not found: ${id}` });
+        continue;
+      }
+{% endfor %}
+{% endif %}
 {% if is_self_only %}
       // x-self-only: no general.delete/Creator-role override — ownership is
       // the sole gate, unconditionally (no admin bypass on bulk delete).

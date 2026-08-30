@@ -148,6 +148,49 @@ write-path generation, not a regression from the scoping fix above. A fix
 is under consideration but not yet scheduled — treat DataGrid child
 fields as currently unprotectable by either annotation.
 
+### `x-filter-values`: view-scoped row restriction
+Restrict a view to only the rows matching a fixed set of field values:
+
+```yaml
+active_setting:
+  allOf: [{ $ref: '#/definitions/setting' }]
+  x-generate: { ... }
+  x-filter-values:
+    status: [active, pending]
+    is_archived: [false]
+```
+<!-- why: shows only rows where status is one of [active, pending] AND
+     is_archived is false — a proxy view that should only ever handle a
+     subset of the underlying model's rows (e.g. an "active orders" view of
+     a shared `order` model). -->
+
+Map of `field: [allowed values, ...]`. Multiple fields combine with **AND**;
+multiple values for one field combine with **IN**. There is no NOT/OR form
+— add one only once a real use case needs it, not speculatively.
+
+Like `x-readonly-fields`, this is entity-level metadata that stays on the
+view entity that declares it — it never leaks onto other views sharing the
+same underlying model.
+
+Enforcement is server-side and unconditional, covering both read and write:
+
+- **Read** — list, detail GET, export, FK autocomplete/sort-filter, and
+  cross-entity full-text search all exclude rows outside the filter. A
+  filtered-out row's detail GET returns 404, exactly as if it didn't exist.
+- **Write** — PUT/DELETE (single-item REST, bulk REST, and the Server
+  Action delete path) also 404 for a row already outside the filtered view,
+  the same fail-closed behavior `x-self-only` uses. The check is judged
+  against the row's state **before** the write (the pre-image): a PUT that
+  legitimately moves a row from inside the filter to outside it (e.g.
+  `status: pending -> approved` on a view filtered to `status: [pending]`)
+  still succeeds — only a row that is *already* outside the filter is
+  rejected. See `docs/knowledge/filter-values-row-scope.md` for the
+  implementation detail and the full list of enforcement points.
+
+No permission setting (`general`/`Creator`/`Assignee` roles, org isolation)
+can widen past `x-filter-values` — it composes with every other row-scope
+condition via AND, never OR, the same guarantee `x-self-only` gives.
+
 ## Common rules
 
 1. `npm run lint` must pass.
