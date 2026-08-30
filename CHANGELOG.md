@@ -160,6 +160,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/readonly-field-form-rendering.md` for the full writeup
   and `.claude/commands/generate-schema.md` for updated guidance on when
   to use `x-readonly-fields` vs. per-property `x-readonly`.
+- **`x-readonly-fields`/`x-readonly` declared on a DataGrid child entity had
+  no effect on that child's editable grid.** A readonly-declared child
+  column still rendered as an editable cell, and the write path (child
+  `create`/`update` body construction) still accepted and persisted
+  client-sent values for it with no server-side guard. `generators.py`'s
+  child-grid column builder now forces `editable: false` on a readonly
+  column, the same pattern the `order` column already used.
+  `build_context.py`'s per-child field mapping now excludes readonly
+  fields from the `update` write payload entirely (an existing row keeps
+  its current value) while still seeding a schema-derived default for
+  `create` (a new row has no prior value to preserve). No current schema
+  declares `x-readonly-fields`/`x-readonly` on a DataGrid child entity, so
+  this is a fix with no observable effect on any existing schema; see
+  `docs/knowledge/readonly-field-form-rendering.md` for the full writeup.
 ### Security
 - **`.env.vercel.production.local.example` no longer carries a real Vercel
   team ID.** A previous commit had left a real value in `VERCEL_ORG_ID`;

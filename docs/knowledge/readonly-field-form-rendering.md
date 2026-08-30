@@ -148,31 +148,41 @@ coverage: `code_generator/tests/test_scheduled_task_templates.py`'s
 `x-readonly` (per-property) was deliberately left unchanged — see the
 scope list above.
 
-## Known limitation: neither annotation reaches DataGrid child inline editing
+## DataGrid child support
 
-Both `x-readonly` and `x-readonly-fields` are fully wired for the parent
-entity's own form/list rendering (verified above), but neither has any
-effect on a DataGrid child (an editable one-to-many child grid embedded in
-the parent's form).
+Both `x-readonly` and `x-readonly-fields` also reach a DataGrid child (an
+editable one-to-many child grid embedded in the parent's form) when
+declared on the child entity itself — not just the parent's own
+form/list rendering (verified above). A readonly-declared child field
+renders with `editable: false` in the generated grid, and the write path
+protects it too: an existing row's value can't be overwritten through the
+child's `update` path, even by a direct API request that bypasses the UI.
 
-- **UI side**: `generators.py`'s `column_def_context()` builds each child
-  grid column with `editable: editable` (the caller's bool argument,
-  applied uniformly to every column) — it never reads the child entity's
-  `x-readonly-fields` or a child property's own `x-readonly`. A
-  readonly-declared child field still renders as an editable grid cell.
-- **API/service side**: `build_context.py`'s child-context builder (the
-  `props_no_id` list feeding the create/update body construction for
-  DataGrid children) has no equivalent of the readonly-field exclusion
-  that the parent entity's own context builder applies. The generated
-  `update()`/`create()` calls accept and persist client-sent values for a
-  readonly-declared child field with no server-side guard — a direct API
-  request can write to it even if the UI hid the column.
-
-This is a pre-existing gap (present before, and unrelated to, the
-cross-view scoping fix above), confirmed against the live generated output
-of the one true-editable DataGrid child in the base schema
-(`dashboard_widget`, under `dashboard`): declaring `x-readonly-fields` on
-it changed nothing in either the generated `column_def.tsx` or the
-generated `service.ts` write path. A fix is under consideration but not
-yet scheduled — until then, treat DataGrid child fields as currently
-unprotectable by either annotation.
+- **Resolution**: `build_context.py`'s per-child loop resolves the
+  readonly field set for each child — the union of the child entity's own
+  `x-readonly-fields` (read from its own definitions entry, mirroring the
+  parent's view-scoped read above) and any per-property `x-readonly` on
+  the child's own properties. Fails closed on an `x-readonly-fields` entry
+  that doesn't match a real child property, the same as the parent-level
+  check above.
+- **UI side**: `generators.py`'s child-grid column builder forces
+  `editable: false` for a readonly column, the same pattern the `order`
+  column already used.
+- **API/service side — create vs. update asymmetry**: a child row's
+  create-time field mapping (used for both a standalone create and a new
+  row added during an update) substitutes a schema-derived default
+  literal for a readonly field instead of the client-submitted value,
+  because a brand-new row has no prior value to preserve. A separate
+  update-time field mapping (used only for an *existing* row's `update`
+  branch) omits the field from the write payload entirely, so Prisma
+  leaves the persisted value untouched — an omitted key is a no-op for
+  that column, so no "re-read and resend the current value" plumbing is
+  needed.
+- **Verification**: confirmed against the live generated output of the
+  one true-editable DataGrid child in the base schema (`dashboard_widget`,
+  under `dashboard`) — declaring `x-readonly-fields: [name]` on it
+  produced `editable: false` for the `name` column in the generated
+  `column_def.tsx`, `name: ''` (no schema default, so the empty-string
+  fallback) in the generated create bodies, and no `name:` key at all in
+  the generated update branch's write payload. Reverting the declaration
+  and regenerating round-tripped the output back to a clean `git status`.

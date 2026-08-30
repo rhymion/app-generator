@@ -3729,12 +3729,22 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                 param_camel = to_camel_case(key)
                 rel_params.append(f"{param_camel}Config?: EntityAutocompleteCellConfig")
 
+        # x-readonly-fields / x-readonly on this child (cmd_874 subtask_874i):
+        # already resolved once in build_context.py's _build_child_data (this
+        # same child_raw dict — child_raw here IS a children_data entry, see
+        # generate.py's `ctx['non_comment_ch']`), so it's read here rather
+        # than re-derived from child_def, keeping the fail-closed unknown-
+        # property validation in one place.
+        readonly_field_names: set = child_raw.get('readonly_field_names') or set()
+
         columns = []
         col_ns_hooks: list[str] = []
         col_seen_ns: set[str] = set()
         for key, prop in child_props.items():
             if key in ('id', f'{model}_id', 'created_at', 'updated_at', 'creator_id'):
                 continue
+
+            col_editable = 'false' if key in readonly_field_names else 'editable'
 
             rel = prop.get('x-relationship', {})
             # Internal bridge FKs are implementation details, never shown as a
@@ -3766,7 +3776,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                 # included relation's label.
                 columns.append(
                     f"    ...({param_name}\n"
-                    f"      ? [{{ field: '{key}', headerName: t('{header_camel}'), width: 200, editable: editable,\n"
+                    f"      ? [{{ field: '{key}', headerName: t('{header_camel}'), width: 200, editable: {col_editable},\n"
                     f"          renderEditCell: (params: GridRenderEditCellParams) => (\n"
                     f"            <EntityAutocompleteCellEditor {{...params}} config={{{param_name}}} />\n"
                     f"          ),\n"
@@ -3791,7 +3801,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
             enum_vals = prop.get('enum')
 
             if is_bool:
-                columns.append(f"    {{ field: '{key}', headerName: t('{header_camel}'), width: 100, editable: editable, type: 'boolean' }},")
+                columns.append(f"    {{ field: '{key}', headerName: t('{header_camel}'), width: 100, editable: {col_editable}, type: 'boolean' }},")
             elif is_int and isinstance(enum_vals, list):
                 is_nullable = isinstance(prop_type_raw, list) and 'null' in prop_type_raw
                 opts = ', '.join(_int_enum_option(v, i) for i, v in enumerate(enum_vals))
@@ -3805,9 +3815,9 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                         f"      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n"
                         f"      valueSetter: (value: any, row: any) => ({{ ...row, {key}: value === '' ? null : value }})"
                     )
-                columns.append(f"    {{ field: '{key}', headerName: t('{header_camel}'), width: 150, editable: editable, type: 'singleSelect' as const, valueOptions: [{value_opts}]{extra} }},")
+                columns.append(f"    {{ field: '{key}', headerName: t('{header_camel}'), width: 150, editable: {col_editable}, type: 'singleSelect' as const, valueOptions: [{value_opts}]{extra} }},")
             elif is_int:
-                columns.append(f"    {{ field: '{key}', headerName: t('{header_camel}'), width: 100, editable: editable, type: 'number' }},")
+                columns.append(f"    {{ field: '{key}', headerName: t('{header_camel}'), width: 100, editable: {col_editable}, type: 'number' }},")
             elif actual == 'string' and fmt in ('date', 'date-time', 'time'):
                 needs_datetime_imports = True
                 show_date_str = "\n      show_date={false}" if fmt == 'time' else ''
@@ -3816,7 +3826,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                     f"      field: '{key}',\n"
                     f"      headerName: t('{header_camel}'),\n"
                     f"      width: 250,\n"
-                    f"      editable: editable,\n"
+                    f"      editable: {col_editable},\n"
                     f"      type: 'dateTime',\n"
                     f"      valueFormatter: (value) => {{\n"
                     f"        if (!value) return '';\n"
@@ -3844,17 +3854,17 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                         f"      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n"
                         f"      valueSetter: (value: any, row: any) => ({{ ...row, {key}: value === '' ? null : value }})"
                     )
-                columns.append(f"    {{ field: '{key}', headerName: t('{header_camel}'), width: 150, editable: editable, type: 'singleSelect' as const, valueOptions: [{value_opts}]{extra} }},")
+                columns.append(f"    {{ field: '{key}', headerName: t('{header_camel}'), width: 150, editable: {col_editable}, type: 'singleSelect' as const, valueOptions: [{value_opts}]{extra} }},")
             elif actual == 'string' and prop.get('x-decimal-scale') is not None:
                 uses_decimal_format = True
                 _scale = int(prop['x-decimal-scale'])
                 columns.append(
-                    f"    {{ field: '{key}', headerName: t('{header_camel}'), width: {width}, editable: editable,\n"
+                    f"    {{ field: '{key}', headerName: t('{header_camel}'), width: {width}, editable: {col_editable},\n"
                     f"      // eslint-disable-next-line @typescript-eslint/no-explicit-any\n"
                     f"      valueFormatter: (value: any) => formatDecimalDisplay(value, {_scale}) }},"
                 )
             else:
-                columns.append(f"    {{ field: '{key}', headerName: t('{header_camel}'), width: {width}, editable: editable }},")
+                columns.append(f"    {{ field: '{key}', headerName: t('{header_camel}'), width: {width}, editable: {col_editable} }},")
 
         rel_params_str = (', ' + ', '.join(rel_params)) if rel_params else ''
         _col_ns_hooks_str = ('\n' + '\n'.join(col_ns_hooks)) if col_ns_hooks else ''
