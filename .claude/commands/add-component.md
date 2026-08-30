@@ -39,6 +39,8 @@ Run in this order:
 4. `npm run test:vitest`     — vitest component tests
 5. `npm run test:e2e:cy:api` — API Cypress specs only
 6. `npm audit --omit=dev --audit-level=high`
+7. `npm run check:readme-sync` — fails closed if this branch's diff touches
+   README.md without also touching README_ja.md (or vice versa)
 
 **Step 1 (`npm run lint`) must run on a checkout where `generate-code` has
 not yet run** — that is what CI's `Lint` job actually checks (`npm ci && npm
@@ -54,6 +56,11 @@ current change — see cmd_600 /
 Step 2 runs unconditionally, with no "unchanged" exemption: CI's `pytest`
 job runs on every push/PR to `main`/`master` with no path filter (see
 `docs/knowledge/gate-exemption-must-be-machine-checkable.md` — cmd_498).
+
+Step 7 only proves both README files were touched, not that their content
+actually agrees — if this task's diff includes a README.md change, bring
+README_ja.md's content up to date with it (and vice versa) before this
+step, not after. See `docs/knowledge/readme-en-ja-sync-gate.md`.
 
 ## Debug priority
 
