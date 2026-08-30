@@ -691,6 +691,42 @@ fields:
 
 `x-ui.rows` and `x-ui.width` can be combined: the generator applies the Box wrapper first, then the multiline attribute.
 
+### 4.7 Readonly Fields (`x-readonly` / `x-readonly-fields`)
+
+Marks a field readonly in the generated `FormUpsert.tsx` (the field stays visible but not
+editable). Both annotations feed the same `readonly_fields` set and render identically — a
+relation shows its `labelField` via `<AppFieldRelation>`, date/time fields render formatted
+(not a raw ISO string), booleans and enums show their labeled value, and `format: uri` fields
+show `<ImageDisplay>` (or `<AppFieldExternalLink>` for `x-uri-kind: link`) — the same
+type-dispatch `FormView.tsx` already uses, not a raw `String(value)` dump.
+
+```yaml
+fields:
+  status:
+    x-readonly: true          # per-property — always readonly, on every view of this model
+```
+
+```yaml
+some_view_entity:
+  x-readonly-fields: [parent_goods_receipt_line_id, name]   # entity-level — this view only
+```
+
+| | `x-readonly` (`fields:` override) | `x-readonly-fields` (entity-level list) |
+|---|---|---|
+| Scope | Model/raw-wide — properties live on the raw entity, so it applies to every view built on that model. No way to scope it to a single view. | View-scoped — lives on the view entity that declares it, applies only to that view. A proxy view can declare it without locking the field down on another view of the same underlying model. |
+
+**Naming convention**: `x-readonly-fields` entries must be the exact property name — the FK
+column (e.g. `parent_goods_receipt_line_id`), never the relation name
+(`parent_goods_receipt_line`). Generation fails closed (`ValueError`) if an entry doesn't
+resolve to a real property on the entity.
+
+**Known limitation**: neither annotation reaches a DataGrid child's inline editing — a
+readonly-declared child field still renders as an editable grid cell, and the generated
+`create()`/`update()` calls still accept and persist client-sent values for it with no
+server-side guard. Treat DataGrid child fields as currently unprotectable by either
+annotation. See `docs/knowledge/readonly-field-form-rendering.md` for the full rendering
+type-dispatch table and the cross-view scoping fix's test coverage.
+
 ---
 
 ## 5. Many-to-One Relationships (`x-relationship`)
@@ -2156,6 +2192,94 @@ fields:
 2. **Reference the parent instead** — point the FK at the parent entity rather than its embedded child. Use filtering or display logic to narrow to the relevant records.
 
 If a user requests a FK that would target an embedded entity, reject the request and explain these two alternatives clearly.
+
+---
+
+## 16. `x-self-only` — Permission-Independent Access Invariant
+
+Place on the entity. Declares "only the record's creator can ever access it" as a fixed
+property of the entity, independent of any `general`/`Creator` permission grant — a role
+with `general.read: true` on a self-only entity still only sees its own rows.
+
+```yaml
+personal_note:
+  x-generate: { list: true, view: true, new: true, edit: true, delete: true, api: true }
+  x-self-only: true            # shorthand — equivalent to { admin_bypass: false }
+```
+
+```yaml
+personal_note:
+  x-generate: { ... }
+  x-self-only:
+    admin_bypass: true         # allow an audited Administrator-role bypass on reads
+```
+
+`admin_bypass` defaults to `false` and must be written out explicitly to enable it — the
+permissive direction is never implicit.
+
+**Unconditional enforcement**: every read/write code path (`getters.ts`, `search_helpers.ts`,
+`actions.ts`, `api_bulk_route.ts`, `api_detail_route.ts`, `service.ts`) drops the
+`general.read`/`update`/`delete` escape entirely for a self-only entity and checks
+`creator_id === actorId` as the sole gate. A non-owner's row reads as `404 Not Found`, not
+`403 Forbidden`. CSV import/export forces `creator_id` into `import_unimportable_columns`
+(never user-supplied) and scopes both to the caller's own rows.
+
+**Admin bypass, when enabled**: applies to reads only (list/detail/search/FK candidates) —
+never delete, update, or cross-entity full-text search. The bypass and its audit-log write
+are inseparable: a failed audit write denies the bypass rather than granting it silently.
+
+**Validation**: the underlying Prisma model must have a `creator_id` column, and `creator_id`
+must never appear in `x-import-key` (always session-stamped, never user-supplied).
+
+**Composes with org isolation**: an entity with both `organization_id` and `x-self-only` gets
+both filters, ANDed — never OR.
+
+See `docs/knowledge/self-only-entity.md` for the proxy-view case (`setting`, a self-only view
+over `user`), the admin-bypass allowlist mechanism, and Stage 2 (DB-level RLS) status.
+
+---
+
+## 17. `x-filter-values` — View-Scoped Row Restriction
+
+Place on a proxy view entity (`allOf: [{ $ref: <model> }]`). Restricts the view to rows whose
+field values match a fixed allowlist — enforced unconditionally, server-side, on every read
+and write path, not just in the UI.
+
+```yaml
+active_setting:
+  allOf: [{ $ref: '#/definitions/setting' }]
+  x-generate: { ... }
+  x-filter-values:
+    status: [active, pending]
+    is_archived: [false]
+```
+
+Map of `field: [allowed values, ...]`. Multiple fields combine with **AND**; multiple values
+for one field combine with **IN**. No NOT/OR form exists yet.
+
+Like `x-readonly-fields` (§4.7), this is view-scoped entity-level metadata — it stays on the
+declaring view entity and never leaks onto another view of the same underlying model. Every
+field named must be an existing property; generation fails closed (`ValueError`) on an
+unresolved field name.
+
+**Unconditional enforcement**: pushed as an `AND` clause alongside org isolation and
+`x-self-only` in `getters.ts` (list/export/FK candidates/detail — a filtered-out row's detail
+GET returns `404`), `search_helpers.ts` (parameterized `IN (...)`, never string-concatenated),
+`api_detail_route.ts`/`api_bulk_route.ts` (pre-image check before PUT/DELETE), `actions.ts`'s
+`remove{Entity}`, and `service.ts`'s `update{Entity}` (the write path both routes funnel
+through). `delete{Entity}` itself has no internal check — mirroring the `x-self-only`
+precedent, every caller does its own pre-image fetch-and-filter first.
+
+**Pre-image semantics**: a write is judged against the row's state *before* the write, never
+the incoming body. A transition *out of* the filtered view succeeds; a row already outside the
+view is rejected regardless of what the request body contains.
+
+**Does not restrict create** — a new row can be created with any value; it simply won't appear
+in, or be reachable through, that view once created. Not a general-purpose user-facing filter
+either — `FILTERABLE_FIELDS`/`buildFilter()` operate independently on top of this fixed floor.
+
+See `docs/knowledge/filter-values-row-scope.md` for the full per-file enforcement-point list
+and the composition rule with org isolation and `x-self-only`.
 
 ---
 
