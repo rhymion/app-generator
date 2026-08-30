@@ -41,10 +41,17 @@ _SCALAR_TYPES   = {'string', 'integer', 'number', 'boolean'}
 
 def _raw_def(entity_name: str, schema: dict) -> dict:
     """Resolve a bare/view model name to its raw entity dict — scalar/FK
-    properties, x-readonly-fields, x-gdpr-mode, x-display etc. all live on
-    the raw ('__'-prefixed) entity, not the view. Falls back to the bare
-    view for entities with no raw counterpart (e.g. 'setting', which
-    proxies the 'user' view instead of having its own raw twin)."""
+    properties, x-gdpr-mode, x-display etc. all live on the raw
+    ('__'-prefixed) entity, not the view. Falls back to the bare view for
+    entities with no raw counterpart (e.g. 'setting', which proxies the
+    'user' view instead of having its own raw twin).
+
+    NOTE: `x-readonly-fields` is the one entity-level annotation that does
+    NOT live here (cmd_874 subtask_874d) — it stays on the view entity
+    itself so one view's declaration can't leak to every other view of the
+    same raw model. Read it from `schema['definitions'][definition_key]`
+    instead; see `build_context()`'s `_ro_from_entity`.
+    """
     defs = schema.get('definitions', {})
     return defs.get(f'__{entity_name}', {}) or defs.get(entity_name, {})
 
@@ -1122,9 +1129,11 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     parent_camel  = to_camel_case(parent)
 
     # model_def is the raw entity backing `model` — scalar/FK properties,
-    # x-readonly-fields, x-gdpr-mode etc. all live there. Prefer the
-    # '__'-prefixed raw form; fall back to the bare view for entities with
-    # no raw counterpart (e.g. 'setting', which proxies the 'user' view).
+    # x-gdpr-mode etc. all live there. Prefer the '__'-prefixed raw form;
+    # fall back to the bare view for entities with no raw counterpart (e.g.
+    # 'setting', which proxies the 'user' view). x-readonly-fields is the
+    # exception — it lives on the view entity itself (`def_key`), not here;
+    # see `_ro_from_entity` below.
     model_def      = canonicalize_bridges(
         schema['definitions'].get(f'__{model}', {}) or schema['definitions'].get(model, {}),
         schema.get('definitions', {}),
@@ -1226,7 +1235,19 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # Collect explicit readonly fields: x-readonly per-field OR x-readonly-fields entity-level.
     # x-server-value fields are always readonly too (server-computed, never
     # client-editable through the normal form path).
-    _ro_from_entity: set[str] = set(model_def.get('x-readonly-fields') or [])
+    #
+    # x-readonly-fields is read from the VIEW entity itself
+    # (schema['definitions'][def_key]), not model_def (cmd_874
+    # subtask_874d) — model_def is the shared raw entity backing every
+    # view of this Prisma model, and build_user_schema.py used to copy a
+    # view's x-readonly-fields declaration onto it, so one proxy view's
+    # declaration silently applied to every other view sharing the same
+    # raw model. Per-property x-readonly (below, _ro_from_props) is
+    # deliberately unchanged: properties themselves live on the raw
+    # entity, so a per-property flag is inherently model/raw-wide by
+    # design, not something this fix rescopes.
+    _view_entry = schema['definitions'].get(def_key, {}) or {}
+    _ro_from_entity: set[str] = set(_view_entry.get('x-readonly-fields') or [])
     # Fail closed (cmd_642): every x-readonly-fields entry must name an actual
     # property. Downstream consumers (this function's readonly_fields_api
     # filter, and generators.py's FormUpsert readonly-field loop) both silently

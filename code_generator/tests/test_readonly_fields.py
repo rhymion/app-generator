@@ -36,19 +36,25 @@ def _schema_with_readonly(
                 props[fn] = {**props[fn], "x-readonly": True}
 
     entity_def: dict = {"type": "object", "required": ["id", "name"], "properties": props}
+
+    view_def: dict = {
+        "x-generate": {
+            "list": True, "view": True, "new": True, "edit": True,
+            "delete": True, "api": True, "test": False, "fields": None,
+        },
+        "allOf": [{"$ref": "#/definitions/item"}],
+    }
+    # x-readonly-fields is view-scoped (cmd_874 subtask_874d): it lives on
+    # the view entity (item_detail, the definition_key build_context reads),
+    # not the shared raw entity (item) — see build_context.py's
+    # _ro_from_entity.
     if entity_level_ro:
-        entity_def["x-readonly-fields"] = entity_level_ro
+        view_def["x-readonly-fields"] = entity_level_ro
 
     return {
         "definitions": {
             "item": entity_def,
-            "item_detail": {
-                "x-generate": {
-                    "list": True, "view": True, "new": True, "edit": True,
-                    "delete": True, "api": True, "test": False, "fields": None,
-                },
-                "allOf": [{"$ref": "#/definitions/item"}],
-            },
+            "item_detail": view_def,
         }
     }
 
@@ -121,7 +127,7 @@ class TestBuildContextReadonlyFields:
         schema["definitions"]["item"]["properties"]["parent_id"] = {
             "type": "string", "pattern": "^c[a-z0-9]{24,}$",
         }
-        schema["definitions"]["item"]["x-readonly-fields"] = ["parent"]
+        schema["definitions"]["item_detail"]["x-readonly-fields"] = ["parent"]
         with pytest.raises(ValueError, match="parent"):
             build_context(_entity(), schema)
 
@@ -133,6 +139,83 @@ class TestBuildContextReadonlyFields:
         schema = _schema_with_readonly(field_level_ro=["status"])
         ctx = build_context(_entity(), schema)
         assert "status" in ctx["readonly_fields"]
+
+
+# ---------------------------------------------------------------------------
+# cmd_874 subtask_874d: x-readonly-fields is view-scoped, not raw/model-wide
+# ---------------------------------------------------------------------------
+
+class TestReadonlyFieldsCrossViewIsolation:
+    """Two views sharing the same raw entity (the `setting` proxy view of
+    `user`, in the real schema) must not leak an x-readonly-fields
+    declaration between them. Regression coverage for the exact bug this
+    task fixes: before it, build_context.py read x-readonly-fields from the
+    shared raw entity, so a proxy view's declaration silently applied to
+    every other view of the same Prisma model too."""
+
+    def _schema(self) -> dict:
+        return {
+            "definitions": {
+                "__item": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "properties": {
+                        "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                        "name": {"type": "string"},
+                    },
+                },
+                "item_a": {
+                    "x-generate": {
+                        "list": True, "view": True, "new": True, "edit": True,
+                        "delete": True, "api": True, "test": False, "fields": None,
+                    },
+                    "x-readonly-fields": ["name"],
+                    "allOf": [{"$ref": "#/definitions/__item"}],
+                },
+                "item_b": {
+                    "x-generate": {
+                        "list": True, "view": True, "new": True, "edit": True,
+                        "delete": True, "api": True, "test": False, "fields": None,
+                    },
+                    "allOf": [{"$ref": "#/definitions/__item"}],
+                },
+            }
+        }
+
+    def _entity(self, definition_key: str) -> dict:
+        return {
+            "parent": definition_key,
+            "model": "item",
+            "definition_key": definition_key,
+            "children": [],
+            "generate_config": {
+                "list": True, "view": True, "new": True, "edit": True,
+                "delete": True, "api": True, "test": False, "fields": None,
+            },
+        }
+
+    def test_declaring_view_sees_it_readonly(self):
+        schema = self._schema()
+        ctx = build_context(self._entity("item_a"), schema)
+        assert "name" in ctx["readonly_fields"]
+
+    def test_sibling_view_of_same_raw_model_does_not_inherit_it(self):
+        schema = self._schema()
+        ctx = build_context(self._entity("item_b"), schema)
+        assert "name" not in ctx["readonly_fields"], (
+            "item_b shares the __item raw entity with item_a but declares "
+            "no x-readonly-fields of its own — item_a's declaration must "
+            "not leak onto it"
+        )
+
+    def test_raw_entity_itself_never_carries_the_key(self):
+        """Belt-and-suspenders: the raw entity dict in the schema fixture
+        itself has no x-readonly-fields key (this test constructs the
+        schema directly, so it also documents the shape build_user_schema.py
+        must produce -- see test_x_readonly_fields_lands_on_view_not_raw in
+        test_scheduled_task_templates.py for the builder-side assertion)."""
+        schema = self._schema()
+        assert "x-readonly-fields" not in schema["definitions"]["__item"]
 
 
 # ---------------------------------------------------------------------------

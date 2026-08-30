@@ -98,3 +98,52 @@ Only relation and enum readonly fields had a *user-visible correctness* bug
 (wrong value / untranslated key). Date/boolean/image readonly fields were
 previously legible but unstyled (raw ISO string, raw `"true"`/`"false"`, raw
 URL text) — now rendered with the same components `FormView` uses.
+
+## `x-readonly` vs `x-readonly-fields`: two different scopes
+
+These two annotations both feed into `readonly_fields` and render the same
+way, but they are **not** interchangeable — they differ in scope, and that
+difference is load-bearing for anyone using a proxy/secondary view.
+
+- **`x-readonly` (per-property, under `fields:`)** is **model/raw-wide**.
+  Properties themselves always live on the raw entity (`build_user_schema.py`
+  derives them from Prisma; they are never duplicated per view), so a
+  per-property flag necessarily applies to every view built on that model.
+  There is no way to scope it to a single view, by design.
+- **`x-readonly-fields` (entity-level list)** is **view-scoped**. It lives
+  on whichever view entity declares it and applies only to that view.
+
+The two annotations entered the codebase for different features at
+different times, which is why their scopes were never unified until the
+fix below made the distinction explicit and intentional rather than
+incidental.
+
+### Fixed: `x-readonly-fields` used to leak across views of the same model
+
+`build_user_schema.py`'s `_ENTITY_LEVEL_DATA_KEYS` allowlist used to copy a
+view's `x-readonly-fields` declaration onto the shared **raw** entity
+(alongside genuinely raw-scoped keys like `x-import-key`/`x-display`), and
+`build_context.py` read it back from that same raw entity (`model_def`).
+Since every view of a Prisma model resolves to the same raw entity, one
+view's declaration silently applied to every other view sharing that
+model — a proxy view (e.g. a `setting` page that is really just another
+view of `user`, per `docs/knowledge/schema-restructuring-build-order.md`'s
+pass-through description) could not declare a readonly field without also
+locking it down on the model's other view(s).
+
+Fix: `x-readonly-fields` moved to `_VIEW_LEVEL_CONFIG_KEYS`
+(`build_user_schema.py`) so it stays on the view entity, and
+`build_context.py`'s `_ro_from_entity` now reads
+`schema['definitions'][definition_key]` (the view entity itself) instead
+of `model_def` (the shared raw entity). Verified against the real schema:
+declaring `x-readonly-fields: [name]` on `setting` (a proxy view of
+`user`) rendered `name` readonly in `setting`'s generated `FormUpsert.tsx`
+while `user`'s own `FormUpsert.tsx` kept `name` fully editable — and the
+reconstructed raw entity (`__user`) never carried the key at all. Test
+coverage: `code_generator/tests/test_scheduled_task_templates.py`'s
+`TestXReadonlyFieldsScope` (builder side) and
+`code_generator/tests/test_readonly_fields.py`'s
+`TestReadonlyFieldsCrossViewIsolation` (read side).
+
+`x-readonly` (per-property) was deliberately left unchanged — see the
+scope list above.

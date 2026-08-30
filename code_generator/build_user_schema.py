@@ -17,7 +17,8 @@ it the new key convention:
   - For every user schema entity whose name IS a Prisma model AND that
     carries at least one Category D / view-level annotation
     (`_VIEW_LEVEL_CONFIG_KEYS` -- `x-generate`, `x-audit`,
-    `x-relationships`, `x-search`, `x-custom-components`) -- a "paired"
+    `x-relationships`, `x-search`, `x-custom-components`,
+    `x-readonly-fields`) -- a "paired"
     entity, e.g. `role` (was `role_detail`): the raw entity `__role` is
     synthesized from Prisma (`schema_deriver.derive_raw_entity`),
     Category C entity-level annotations (`x-import-key`, `x-display`,
@@ -107,7 +108,6 @@ _ENTITY_LEVEL_DATA_KEYS = (
     "x-import-key",
     "x-bridge",
     "x-display",
-    "x-readonly-fields",
     "x-internal",
     "x-approval",
     "x-approval-lines",
@@ -125,12 +125,23 @@ _ENTITY_LEVEL_DATA_KEYS = (
 # Category D: unchanged location, stay on the view entity as before. Also
 # the content-based signal (`_has_view_level_config`) for whether an entity
 # needs a raw/view split at all.
+#
+# `x-readonly-fields` moved here from `_ENTITY_LEVEL_DATA_KEYS` (cmd_874
+# subtask_874d): copying it onto the shared raw entity meant one view's
+# declaration leaked to every other view of the same raw model (e.g. a
+# proxy view's readonly declaration would have applied to the raw model's
+# other views too), since `build_context.py` reads the raw entity for it.
+# It now stays on the view entity, and `build_context.py` reads the view's
+# own definition — see that module for the read-side half of this fix.
+# Contrast with per-property `x-readonly` (unchanged, still model/raw-wide
+# by design — see `docs/knowledge/readonly-field-form-rendering.md`).
 _VIEW_LEVEL_CONFIG_KEYS = (
     "x-generate",
     "x-audit",
     "x-relationships",
     "x-search",
     "x-custom-components",
+    "x-readonly-fields",
 )
 
 
