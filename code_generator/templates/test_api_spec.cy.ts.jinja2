@@ -1555,6 +1555,7 @@ describe('API: {{ title }}', () => {
   // entity multistage" declaration is needed -- approval_flow chaining is
   // admin/test-fixture data, not a schema-time concept.
   describe('Multistage approval rounds (cmd_844)', () => {
+{% if has_on_withdrawn %}
     it('14.2M withdrawing an all-pending round withdraws every stage', () => {
       cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithApproval', {
@@ -1613,6 +1614,71 @@ describe('API: {{ title }}', () => {
         });
       });
     });
+{% else %}
+    // cmd_876: this entity does not declare x-approval.on_withdrawn, so the
+    // server-side withdraw lockout (on_withdrawn_dispatch.ts's
+    // ENTITIES_WITH_ON_WITHDRAWN, cmd_865/PR#450) 400s every POST
+    // .../withdraw regardless of round/stage state -- these replace the
+    // withdraw-succeeds variants above with withdraw-is-rejected ones,
+    // asserting the round is left untouched by the failed call.
+    it('14.2M withdrawing an all-pending round is rejected because on_withdrawn is not declared', () => {
+      cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.approverUser1.id,
+          approvalFlowIds: [setup.flow1.id, setup.flow2.id],
+        }).then((data) => {
+          const ar1 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow1.id);
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${ar1.id}/withdraw`,
+            headers: { 'X-API-Key': setup.approverUser1.api_key },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(400);
+            cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+              .then((getRes) => {
+                const requests = getRes.body.approvable.approval_requests;
+                expect(requests).to.have.length(2);
+                expect(requests.every((r: any) => r.status === 'pending')).to.eq(true);
+              });
+          });
+        });
+      });
+    });
+
+    it('14.3M withdrawing a partially-approved round is rejected because on_withdrawn is not declared', () => {
+      cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.approverUser1.id,
+          approvalFlowIds: [setup.flow1.id, setup.flow2.id],
+        }).then((data) => {
+          const ar1 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow1.id);
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${ar1.id}/approve`,
+            headers: { 'X-API-Key': setup.approverUser1.api_key },
+          }).then(() => {
+            cy.request({
+              method: 'POST',
+              url: `/api/approval_request/${ar1.id}/withdraw`,
+              headers: { 'X-API-Key': setup.approverUser1.api_key },
+              failOnStatusCode: false,
+            }).then((res) => {
+              expect(res.status).to.eq(400);
+              cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+                .then((getRes) => {
+                  const requests = getRes.body.approvable.approval_requests;
+                  const stage1 = requests.find((r: any) => r.approval_flow_id === setup.flow1.id);
+                  const stage2 = requests.find((r: any) => r.approval_flow_id === setup.flow2.id);
+                  expect(stage1.status).to.eq('approved');
+                  expect(stage2.status).to.eq('pending');
+                });
+            });
+          });
+        });
+      });
+    });
+{% endif %}
 
     // PD-2: a non-terminal rejection at stage 1 auto-cancels stage 2's
     // still-pending row (reuses 'withdrawn', not a new 'cancelled' value).
@@ -1645,7 +1711,7 @@ describe('API: {{ title }}', () => {
       });
     });
 
-{% if resubmit_unsubmitted_value_literal %}
+{% if has_on_withdrawn and resubmit_unsubmitted_value_literal %}
     it('14.4M resubmitting after a round-level withdrawal starts a brand new round with every stage pending again', () => {
       cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithApproval', {
