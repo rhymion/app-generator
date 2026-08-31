@@ -115,6 +115,56 @@ class TestServiceScheduledTemplate:
         assert 'expires_at:' not in rendered
         assert "status: { in: ['pending'] }" in rendered
 
+    def test_claim_then_process_advisory_lock_and_recheck_present(self):
+        """cmd_886 AC: the dispatcher must claim a row -- a transaction-scoped
+        advisory lock keyed on the row id, then a re-check of the same
+        filter -- before calling the handler, and skip silently when the
+        recheck finds 0 rows (another concurrent invocation's transaction
+        already committed a disqualifying write for this row).
+
+        Not an updateMany-with-updated_at compare-and-swap: that shape was
+        tried and empirically falsified in a real-Postgres integration test
+        -- two invocations racing within the same wall-clock second write
+        and re-read `updated_at` (@db.Timestamptz(0), whole-second
+        precision) as identical values, so the CAS silently never detects
+        the second invocation. See
+        test/flows/scheduled_task_claim_then_process.test.ts in a consumer
+        checkout for the real-DB proof of both the chosen design and why
+        the CAS alternative was rejected."""
+        rendered = self._render(_EXPIRE_ENTITY)
+        assert 'prisma.inventory_reservation.findMany' in rendered
+        assert 'select: { id: true }' in rendered
+        assert 'pg_advisory_xact_lock(hashtextextended(${row.id}, 0))' in rendered
+        assert 'tx.inventory_reservation.count' in rendered
+        assert 'if (stillEligible === 0)' in rendered
+        assert '.updateMany(' not in rendered  # rejected CAS design, see docstring
+        assert 'row.updated_at' not in rendered
+        assert rendered.count("expires_at: { not: null, lt: new Date() }") == 2
+        assert rendered.count("status: { in: ['pending', 'active'] }") == 2
+
+    def test_claim_guards_the_handler_call(self):
+        """The handler must be called only after the stillEligible === 0
+        skip check -- textual ordering proxy for "claim happens before
+        dispatch"."""
+        rendered = self._render(_EXPIRE_ENTITY)
+        claim_check_pos = rendered.index('if (stillEligible === 0)')
+        handler_call_pos = rendered.index('await afterExpire(tx, row.id, systemActorId)')
+        assert claim_check_pos < handler_call_pos
+
+    def test_claim_and_dispatch_share_one_transaction(self):
+        """The claim (lock + recheck) and the handler call must run in the
+        same prisma.$transaction as each other -- otherwise the advisory
+        lock would be released (transaction-scoped) before the handler's
+        writes commit, reopening the exact race this guard exists to
+        close."""
+        rendered = self._render(_EXPIRE_ENTITY)
+        assert rendered.count('prisma.$transaction') == 1
+        transaction_pos = rendered.index('prisma.$transaction')
+        lock_pos = rendered.index('pg_advisory_xact_lock')
+        claim_pos = rendered.index('tx.inventory_reservation.count')
+        handler_call_pos = rendered.index('await afterExpire(tx, row.id, systemActorId)')
+        assert transaction_pos < lock_pos < claim_pos < handler_call_pos
+
 
 class TestServiceScheduledHandlerStubTemplate:
     def _render(self, ctx: dict) -> str:
@@ -158,6 +208,28 @@ class TestServiceScheduledBulkTemplate:
         rendered = self._render(_BULK_DEMO_RESET)
         assert 'export async function resetDemo' not in rendered
         assert rendered.count('export async function') == 1  # only `run`
+
+    def test_no_claim_then_process_needed_no_row_selection_to_race_on(self):
+        """cmd_886 AC-甲 (bulk-applicability check): the entity-level
+        template's double-dispatch race exists because two overlapping
+        invocations can both see the same row from their own `findMany`
+        before either processes it, so the row must be *claimed* (updateMany
+        + compare-and-swap) before dispatch. Bulk mode calls the handler
+        directly with no row selection and no per-row loop at all (see
+        test_calls_handler_directly_with_no_row_selection above: no
+        `findMany`, no `$transaction`) -- there is no "row selected as
+        eligible, then processed" step for a second invocation to race
+        against at the dispatcher level, so the entity-level fix does not
+        apply here. Whether a *bulk handler's own* internal logic (which can
+        span arbitrarily many rows/tables and is entirely hand-authored, see
+        service_scheduled_bulk_handler_stub.ts.jinja2) needs its own
+        idempotency guard is that handler's responsibility, same as any
+        other GENERATED ONCE handler -- the generic template has no rows to
+        claim on its behalf."""
+        rendered = self._render(_BULK_DEMO_RESET)
+        assert 'findMany' not in rendered
+        assert 'updateMany' not in rendered
+        assert 'claim' not in rendered
 
     def test_interval_and_task_id_surfaced_in_header_comment(self):
         rendered = self._render(_BULK_DEMO_RESET)
