@@ -14,7 +14,7 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
   result = await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
 {{ validation_data_obj }}
-    });
+    }, actorId);
 {% if bridge_child_pre_create_code %}
 {{ bridge_child_pre_create_code }}
 {% endif %}
@@ -184,7 +184,7 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 {% endif %}
     await validateOnUpdate(tx, id, {
 {{ validation_data_obj }}
-    }, _prevRow);
+    }, _prevRow, actorId);
 {% if item_reservation_update_check_code %}
 {{ item_reservation_update_check_code }}
 {% endif %}

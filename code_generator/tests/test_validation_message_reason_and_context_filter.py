@@ -146,7 +146,7 @@ class TestValidationReasonDiscriminator:
         it rejects a value that IS present, never a missing one."""
         rendered = self._render_service_validation()
         assert 'try {' in rendered
-        assert 'await (validateCustomRules as CustomRulesFn)(tx, data, currentId, prevRow);' in rendered
+        assert 'await (validateCustomRules as CustomRulesFn)(tx, data, currentId, prevRow, actorId);' in rendered
         assert "e instanceof AppError && e.code === 'VALIDATION' && !e.reason" in rendered
         assert "new AppError('VALIDATION', e.message, e.field, 'invalid')" in rendered
 
