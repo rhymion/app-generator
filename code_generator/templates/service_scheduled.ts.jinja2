@@ -17,8 +17,12 @@ type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction'
 
 /**
  * Runs the `{{ task_id }}` scheduled task: selects {{ snake_name }} rows matching
- * the x-scheduled-task filter and calls {{ handler }}() once per row, each in
- * its own transaction.
+ * the x-scheduled-task filter, claims each one (an advisory lock scoped to
+ * the row's own transaction, then a re-check of the same filter against the
+ * now-locked, up-to-date row — see cmd_886), and calls {{ handler }}() once
+ * per row that is still eligible after the claim, each in its own
+ * transaction. A row that no longer matches the filter once claimed is
+ * skipped silently — another invocation already processed it.
  */
 export async function run(systemActorId: string): Promise<void> {
   const rows = await prisma.{{ snake_name }}.findMany({
@@ -33,6 +37,42 @@ export async function run(systemActorId: string): Promise<void> {
     },
   });
   for (const row of rows) {
-    await prisma.$transaction((tx: Tx) => {{ handler }}(tx, row.id, systemActorId));
+    await prisma.$transaction(async (tx: Tx) => {
+      // Claim-then-process: Vercel Cron delivery is best-effort and can
+      // invoke this task twice for the same run, so two overlapping
+      // invocations can both see this row from the findMany above before
+      // either has processed it. A transaction-scoped advisory lock keyed
+      // on the row id serializes concurrent invocations touching the same
+      // row — the second invocation blocks here until the first
+      // invocation's whole transaction (this check plus the handler call)
+      // has committed. The count() below then re-evaluates the same filter
+      // against that now-committed state: if the handler already moved the
+      // row out of the filter (as any well-formed handler must eventually
+      // do, or the row would be reprocessed on the next scheduled run
+      // regardless of this guard), this returns 0 and we skip silently —
+      // not an error, the other invocation already owns it. A plain
+      // updateMany-with-affected-row-check cannot serve as this guard on
+      // its own: two invocations racing within the same wall-clock second
+      // can write and re-read `updated_at` (@db.Timestamptz(0), whole-
+      // second precision) as identical values, making an updated_at-based
+      // compare-and-swap silently ineffective for exactly the near-
+      // simultaneous double-delivery case this guard exists for.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${row.id}, 0))`;
+      const stillEligible = await tx.{{ snake_name }}.count({
+        where: {
+          id: row.id,
+{% if expires_at_before_now %}
+          expires_at: { not: null, lt: new Date() },
+{% endif %}
+{% if status_in %}
+          status: { in: [{% for s in status_in %}'{{ s }}'{% if not loop.last %}, {% endif %}{% endfor %}] },
+{% endif %}
+        },
+      });
+      if (stillEligible === 0) {
+        return;
+      }
+      await {{ handler }}(tx, row.id, systemActorId);
+    });
   }
 }
