@@ -256,6 +256,57 @@ def test_non_model_named_pass_through_entity_does_not_raise():
 
 
 # ---------------------------------------------------------------------------
+# Standalone raw properties merge (cmd_883/subtask_883h)
+# ---------------------------------------------------------------------------
+
+def test_standalone_entity_properties_key_does_not_clobber_derived_scalars():
+    """RED (pre-fix): `_build_standalone_raw()` used to do a plain
+    `raw[key] = value` for every key in the user schema entry, including
+    `properties`. For a standalone entity (no view-level config key) that
+    declares BOTH `fields:` (scalars) and `properties:` (a relation embed,
+    e.g. a polymorphic FK's owner side), that overwrote the scalar
+    `properties` dict `derive_raw_entity` had just built from `fields:`
+    wholesale with only the relation embed -- every derived scalar
+    (id/type/name/... ) silently vanished, and any TS-generation code that
+    reads a scalar off `_raw_def(entity, schema)['properties']` (e.g.
+    `attachment_type_ts()` in generators.py) always fell back to its
+    'unknown field' default. `attachment` (real Prisma model, ships no
+    `properties:` key in this project's own default schema) is used here
+    with a synthetic `properties.attachable` embed added to exercise the
+    exact shape without touching the live json_schema.yaml.
+    """
+    prisma_models = parse_prisma_schema(PRISMA_SCHEMA_PATH)
+    prisma_enums = parse_prisma_enums(PRISMA_SCHEMA_PATH)
+    user_schema = {
+        "definitions": {
+            "attachment": {
+                "fields": {
+                    "type": {"enum": ["image", "file", "video", "audio"], "_required": True},
+                    "name": {},
+                    "path": {"format": "uri"},
+                    "attachable_id": {},
+                },
+                "properties": {
+                    "attachable": {"$ref": "#/definitions/attachable"},
+                },
+            },
+        }
+    }
+    out = build_intermediate_schema(user_schema, prisma_models, prisma_enums)
+    raw_properties = out["definitions"]["attachment"]["properties"]
+
+    # The user-declared relation embed survives...
+    assert raw_properties["attachable"] == {"$ref": "#/definitions/attachable"}
+    # ...alongside every scalar derive_raw_entity built from fields:, not
+    # instead of them.
+    assert raw_properties["type"]["enum"] == ["image", "file", "video", "audio"]
+    assert raw_properties["name"] == {"type": "string"}
+    assert "path" in raw_properties
+    assert "attachable_id" in raw_properties
+    assert "id" in raw_properties  # derive_raw_entity's own id field
+
+
+# ---------------------------------------------------------------------------
 # Phase A golden diff (see docs/knowledge/schema-restructuring-build-order.md Sec.5 phase_A_schema_level)
 # ---------------------------------------------------------------------------
 
