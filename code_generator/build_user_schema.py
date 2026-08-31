@@ -267,6 +267,19 @@ def _build_standalone_raw(
     for key, value in entry.items():
         if key == "fields":
             continue
+        if key == "properties":
+            # Merge, don't replace (cmd_883/subtask_883h): a standalone
+            # entity (no _VIEW_LEVEL_CONFIG_KEYS) can declare its own
+            # `properties:` for relation embeds (e.g. attachment's
+            # `organization: {$ref: ...}`) alongside `fields:`. A bare
+            # `raw[key] = value` here clobbered derive_raw_entity's
+            # scalar properties (id/type/name/... -- attachment.type's
+            # enum included) with just the entry's relation-embed dict,
+            # so any scalar lookup on the raw entity (e.g. generators.py's
+            # attachment_type_ts()) silently lost the field and fell back
+            # to its `number` default.
+            raw.setdefault("properties", {}).update(value)
+            continue
         raw[key] = value
     return raw
 
