@@ -20,6 +20,7 @@ from helpers.schema_helpers import (
     get_internal_bridge_fk_prop_names,
     get_entity_properties, get_self_only_flags,
     derive_write_locked_values,
+    derive_state_lockdown,
     get_direct_attachment_fk_props,
     get_write_only_field_names,
 )
@@ -1406,6 +1407,27 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     write_locked_values_select: str | None = (
         '{ ' + ', '.join(f'{f}: true' for f in write_locked_fields) + ' }'
         if write_locked_fields else None
+    )
+
+    # State lockdown: once state_lockdown.field reaches one of
+    # terminal_values, (1) that field itself may not move to a different
+    # value and (2) state_lockdown.locked_fields may not change from their
+    # current value. Different axis from write_locked_values above (which
+    # locks specific values, not transitions) — see derive_state_lockdown
+    # for the full reasoning. None when the entity declares no
+    # x-state-lockdown.
+    state_lockdown: dict | None = derive_state_lockdown(model_def)
+    # Select clause for the fallback DB fetch used only by write paths that
+    # bypass the service layer (service.ts itself always fetches the prior
+    # row with all fields already, so this is a safety net, not the common
+    # case). Includes the state field itself (needed for the ①
+    # no-op/backward-transition comparison) plus every locked field.
+    state_lockdown_select: str | None = (
+        '{ ' + ', '.join(
+            [f"{state_lockdown['field']}: true"] +
+            [f'{f}: true' for f in state_lockdown['locked_fields']]
+        ) + ' }'
+        if state_lockdown else None
     )
 
     # Config flags
@@ -3524,6 +3546,10 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         write_locked_values=write_locked_values,
         write_locked_fields=write_locked_fields,
         write_locked_values_select=write_locked_values_select,
+        # State-transition lockdown: x-state-lockdown declaration (None when
+        # absent) and its DB-fallback select clause.
+        state_lockdown=state_lockdown,
+        state_lockdown_select=state_lockdown_select,
         # x-server-value: server-computed field values (cmd_556/cmd_565).
         server_value_fields=server_value_fields,
         server_value_override_fields=server_value_override_fields,

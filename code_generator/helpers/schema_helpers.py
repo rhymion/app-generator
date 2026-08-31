@@ -89,6 +89,33 @@ def derive_write_locked_values(model_def: dict) -> dict[str, list]:
 derive_approval_locked_values = derive_write_locked_values
 
 
+def derive_state_lockdown(model_def: dict) -> dict | None:
+    """x-state-lockdown declaration, normalized for template consumption.
+
+    Distinct axis from derive_write_locked_values: that locks specific
+    *values* a field may take; this locks *transitions* — once the
+    monitored field reaches one of terminal_values, (1) the field itself
+    may not move to a different value, and (2) locked_fields may not
+    change from their current value. x-approval-independent.
+
+    validate.py's x-state-lockdown section runs before this is called and
+    rejects every malformed shape, so a non-None return here is always
+    structurally sound: 'field' names an enum property, 'terminal_values'
+    is a non-empty subset of that enum, and 'locked_fields' names existing
+    properties disjoint from 'field'.
+
+    Returns None when the entity declares no x-state-lockdown.
+    """
+    x_state_lockdown = model_def.get('x-state-lockdown')
+    if not x_state_lockdown or not isinstance(x_state_lockdown, dict):
+        return None
+    return {
+        'field': x_state_lockdown.get('field'),
+        'terminal_values': list(x_state_lockdown.get('terminal_values') or []),
+        'locked_fields': list(x_state_lockdown.get('locked_fields') or []),
+    }
+
+
 def is_string_prop(prop: dict) -> bool:
     t = prop.get('type')
     if isinstance(t, str):

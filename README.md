@@ -57,6 +57,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - **Cross-entity search** — `GET /api/search` with UNION ALL across searchable entities; facets, highlight, Japanese pg_bigm support; header search icon and full search page generated
 - **Approval event dispatch** — post-approval hooks (`x-approval.on_approved.set_fields`, `x-approval.on_approved.emit_hook`) with fire-once idempotency via `approvable.approved_at`; `x-approval-lines` generates matching pre-/post-create helpers that wire approval-line entities to inventory ledger operations
 - **Declarative write-locked values** (`x-write-locked-values`) — annotate an entity with `{field_name: [value, ...]}` to reject a plain create/update that writes one of those values directly (screen, REST API, Server Action, and CSV import all enforce it), while still rendering the value as a disabled — not hidden — form option; composes with `x-approval`'s own locked values as a union, so a field can be protected by either or both mechanisms at once, with no schema-authoring dependency between them; see [`docs/knowledge/x-write-locked-values-field-lockdown.md`](docs/knowledge/x-write-locked-values-field-lockdown.md)
+- **Declarative state-transition lockdown** (`x-state-lockdown`) — annotate an entity with `{field, terminal_values, locked_fields}` to block a monitored enum field from moving away from a terminal value and to freeze a designated set of other fields once that terminal value is reached (screen, REST API, Server Action, and CSV import all enforce it, same-value resubmission always allowed); `x-approval`-independent — no `x-approval` block required at all; see [`docs/knowledge/x-state-lockdown-transition-lockdown.md`](docs/knowledge/x-state-lockdown-transition-lockdown.md)
 - **Terminal rejection** (`x-readonly-fields`) — annotate fields to lock them once an entity reaches a terminal rejected state; rejection fires a once-stub (`service_after_reject_stub.ts`) via `on_rejected_dispatch` for custom post-rejection logic (e.g. notifications, inventory adjustments)
 - **Stripe payments** (`x-payment`, opt-in) — declaring `x-payment: true` on any entity generates write-once stubs for Stripe Checkout Session creation and webhook handling (`lib/stripe.ts`, `app/api/payment/checkout/route.ts`, `app/api/webhooks/stripe/route.ts`), fail-closed on missing secrets; one-time purchases only, no entity/authz/UI generated — see [Payments](#payments-stripe-opt-in) below
 
@@ -602,6 +603,7 @@ All architectural documentation lives in `docs/knowledge/`:
 | Attachment display opt-out (showImages/showFiles) | ✅ Implemented |
 | Performance hardening (statement_timeout, FK indexes, GIN indexes, COUNT opt-out) | ✅ Implemented |
 | Declarative write-locked values (x-write-locked-values) | ✅ Implemented |
+| Declarative state-transition lockdown (x-state-lockdown) | ✅ Implemented |
 
 > **Backward compatibility (v1.4 → v1.5)**: Non-breaking. Existing schemas work unchanged. Cross-entity search is opt-in per entity (`x-generate.search: true`). Approval event dispatch activates only when `x-approval.on_approved` is set in the schema.
 

@@ -51,6 +51,18 @@ const WRITE_LOCKED_FIELDS: WriteLockedField[] = [
 {% endfor %}
 ] ;
 {% endif %}
+{% if state_lockdown %}
+
+// State lockdown: once the monitored state field reaches a terminal value,
+// (1) backward transitions are blocked, (2) designated fields become read-only.
+// x-approval-independent -- see x-state-lockdown in the generator schema docs.
+type StateLockdownCfg = { field: string; terminalValues: unknown[]; lockedFields: string[] };
+const STATE_LOCKDOWN: StateLockdownCfg = {
+  field: '{{ state_lockdown.field }}',
+  terminalValues: {{ state_lockdown.terminal_values | tojson }},
+  lockedFields: {{ state_lockdown.locked_fields | tojson }},
+};
+{% endif %}
 
 function isMissingValue(value: unknown): boolean {
   if (value === null || value === undefined) return true;
@@ -153,6 +165,47 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
         field.key,
         'invalid',
       );
+    }
+  }
+{% endif %}
+{% if state_lockdown %}
+
+  // State lockdown enforcement (updates only -- creates have no prior state).
+  if (currentId !== null) {
+    // prevRow is fetched with all fields by service.ts before calling
+    // validateOnUpdate; fall back to a DB query only for write paths that
+    // bypass the service layer.
+    let _statePrevRow: Record<string, unknown> | null = prevRow;
+    if (_statePrevRow === null) {
+      _statePrevRow = (await tx.{{ model }}.findUnique({
+        where: { id: currentId },
+        select: {{ state_lockdown_select }},
+      })) as Record<string, unknown> | null;
+    }
+    if (_statePrevRow !== null) {
+      const _currentState = _statePrevRow[STATE_LOCKDOWN.field];
+      if (STATE_LOCKDOWN.terminalValues.includes(_currentState)) {
+        // (1) Backward transition check
+        if (STATE_LOCKDOWN.field in data && data[STATE_LOCKDOWN.field] !== _currentState) {
+          throw new AppError(
+            'VALIDATION',
+            `${STATE_LOCKDOWN.field} is in a terminal state and cannot be changed`,
+            STATE_LOCKDOWN.field,
+            'invalid',
+          );
+        }
+        // (2) Field freeze check -- no-op resubmission of the same value is allowed
+        for (const _lockedField of STATE_LOCKDOWN.lockedFields) {
+          if (_lockedField in data && data[_lockedField] !== _statePrevRow[_lockedField]) {
+            throw new AppError(
+              'VALIDATION',
+              `${_lockedField} cannot be changed when ${STATE_LOCKDOWN.field} is in a terminal state`,
+              _lockedField,
+              'invalid',
+            );
+          }
+        }
+      }
     }
   }
 {% endif %}

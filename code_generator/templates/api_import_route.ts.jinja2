@@ -60,6 +60,19 @@ function findLockedViolation(data: Record<string, unknown>): WriteLockedField | 
   return WRITE_LOCKED_FIELDS.find((f) => f.key in data && f.values.includes(data[f.key]));
 }
 {% endif %}
+{% if state_lockdown %}
+// State lockdown (see service_validation.ts's identical concept): once the
+// monitored state field reaches a terminal value, backward transitions and
+// changes to locked_fields are rejected. CSV import writes directly via a
+// transaction call and never runs through service_validation.ts, so the
+// same check is duplicated here.
+type StateLockdownCfg = { field: string; terminalValues: unknown[]; lockedFields: string[] };
+const STATE_LOCKDOWN: StateLockdownCfg = {
+  field: '{{ state_lockdown.field }}',
+  terminalValues: {{ state_lockdown.terminal_values | tojson }},
+  lockedFields: {{ state_lockdown.locked_fields | tojson }},
+};
+{% endif %}
 
 type PendingAction =
   | { op: 'create'; row: number; data: Record<string, unknown> }
@@ -426,6 +439,39 @@ export async function POST(request: NextRequest) {
               message: `Row ${rowNum}, column '${_lockedViolation.key}': '${data[_lockedViolation.key]}' can only be set by the system`,
             });
             continue;
+          }
+        }
+      }
+{% endif %}
+{% if state_lockdown %}
+      {
+        // State lockdown (CSV import UPDATE): same semantics as validateSchemaRules.
+        const _stateLockdownRow = (await prisma.{{ model }}.findUnique({
+          where: { id: existing.id },
+          select: {{ state_lockdown_select }},
+        })) as Record<string, unknown> | null;
+        if (_stateLockdownRow !== null) {
+          const _currentState = _stateLockdownRow[STATE_LOCKDOWN.field];
+          if (STATE_LOCKDOWN.terminalValues.includes(_currentState)) {
+            let _stateViolation = false;
+            if (STATE_LOCKDOWN.field in data && data[STATE_LOCKDOWN.field] !== _currentState) {
+              errors.push({ row: rowNum, code: 'STATE_LOCKDOWN_VIOLATION',
+                message: `Row ${rowNum}: ${STATE_LOCKDOWN.field} is in a terminal state and cannot be changed` });
+              _stateViolation = true;
+            }
+            if (!_stateViolation) {
+              for (const _lockedField of STATE_LOCKDOWN.lockedFields) {
+                if (_lockedField in data && data[_lockedField] !== _stateLockdownRow[_lockedField]) {
+                  errors.push({ row: rowNum, code: 'STATE_LOCKDOWN_VIOLATION',
+                    message: `Row ${rowNum}: ${_lockedField} cannot be changed when ${STATE_LOCKDOWN.field} is in a terminal state` });
+                  _stateViolation = true;
+                  break;
+                }
+              }
+            }
+            if (_stateViolation) {
+              continue;
+            }
           }
         }
       }

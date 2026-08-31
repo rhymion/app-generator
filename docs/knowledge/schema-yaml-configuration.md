@@ -580,6 +580,12 @@ across screen, Server Action, REST API, and CSV import, but still writable via a
 transaction call — with the entity-level `x-write-locked-values` key; see
 `docs/knowledge/x-write-locked-values-field-lockdown.md`.
 
+An enum field's *transitions* (not just specific values) can be locked once it reaches a
+terminal state — blocking both further changes to the field itself and changes to a
+designated set of other fields, enforced across screen, Server Action, REST API, and CSV
+import — with the entity-level `x-state-lockdown` key; see
+`docs/knowledge/x-state-lockdown-transition-lockdown.md`.
+
 ### 4.4 The `id` field
 
 Every entity automatically gets an `id` property (`properties["id"] = {"type": "string",

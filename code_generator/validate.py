@@ -1801,6 +1801,105 @@ def validate_schema(schema: dict) -> None:
                         )
 
     # -----------------------------------------------------------------------
+    # 12. x-state-lockdown: field existence + enum membership + locked_fields
+    #     existence
+    # -----------------------------------------------------------------------
+    # derive_state_lockdown() (helpers/schema_helpers.py) trusts the
+    # declared shape completely -- every check below must run here so a
+    # typo'd field name, a terminal value outside the field's enum, or an
+    # unknown locked_fields entry fails loudly with the offending entity
+    # and key named, instead of silently producing dead or broken template
+    # code.
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        x_state_lockdown = defn.get('x-state-lockdown')
+        if not x_state_lockdown:
+            continue
+        if not isinstance(x_state_lockdown, dict):
+            errors.append(
+                f"Definition '{def_key}': x-state-lockdown must be a mapping "
+                f"with 'field', 'terminal_values', 'locked_fields' keys "
+                f"(got {type(x_state_lockdown).__name__})."
+            )
+            continue
+        missing = [
+            k for k in ('field', 'terminal_values', 'locked_fields')
+            if k not in x_state_lockdown
+        ]
+        if missing:
+            errors.append(
+                f"Definition '{def_key}': x-state-lockdown is missing "
+                f"required key(s): {missing}."
+            )
+            continue
+        field = x_state_lockdown['field']
+        terminal_values = x_state_lockdown['terminal_values']
+        locked_fields = x_state_lockdown['locked_fields']
+        props = defn.get('properties', {})
+
+        if not isinstance(field, str):
+            errors.append(
+                f"Definition '{def_key}': x-state-lockdown.field must be a "
+                f"string (got {type(field).__name__})."
+            )
+            continue
+        if field not in props:
+            errors.append(
+                f"Definition '{def_key}': x-state-lockdown.field '{field}' "
+                f"does not exist in properties."
+            )
+            continue
+        field_prop = props[field]
+        enum_vals = field_prop.get('enum')
+        if enum_vals is None:
+            errors.append(
+                f"Definition '{def_key}': x-state-lockdown.field '{field}' "
+                f"has no enum."
+            )
+            continue
+
+        if not isinstance(terminal_values, list) or not terminal_values:
+            errors.append(
+                f"Definition '{def_key}': x-state-lockdown.terminal_values "
+                f"must be a non-empty list."
+            )
+        else:
+            for v in terminal_values:
+                if v not in enum_vals:
+                    errors.append(
+                        f"Definition '{def_key}': x-state-lockdown."
+                        f"terminal_values value {v!r} is not in "
+                        f"{field}'s enum {enum_vals}."
+                    )
+
+        if not isinstance(locked_fields, list):
+            errors.append(
+                f"Definition '{def_key}': x-state-lockdown.locked_fields "
+                f"must be a list (got {type(locked_fields).__name__})."
+            )
+        else:
+            for lf in locked_fields:
+                if not isinstance(lf, str):
+                    errors.append(
+                        f"Definition '{def_key}': x-state-lockdown."
+                        f"locked_fields entry {lf!r} must be a string."
+                    )
+                    continue
+                if lf not in props:
+                    errors.append(
+                        f"Definition '{def_key}': x-state-lockdown."
+                        f"locked_fields references field '{lf}' which does "
+                        f"not exist in properties."
+                    )
+                elif lf == field:
+                    errors.append(
+                        f"Definition '{def_key}': x-state-lockdown."
+                        f"locked_fields must not include 'field' ('{field}') "
+                        f"itself — the transition check already covers it."
+                    )
+
+    # -----------------------------------------------------------------------
     # 14. x-relationship.searchField retired (cmd_552)
     # -----------------------------------------------------------------------
     # searchField used to opt an FK into cross-relation substring search

@@ -6,6 +6,21 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`x-state-lockdown`: declarative state-transition lockdown.** An entity-level key,
+  `{field, terminal_values, locked_fields}`, that blocks a monitored enum field from moving
+  away from a terminal value and freezes a designated set of other fields once that terminal
+  value is reached. Enforced in `validateSchemaRules()` (`service_validation.ts.jinja2` —
+  shared by the REST API route and Server Action) and the CSV import UPDATE branch
+  (`api_import_route.ts.jinja2`); CREATE never runs the check (a new row has no prior state).
+  Same-value resubmission of either the monitored field or a locked field is always allowed —
+  only an actual attempted change once terminal is rejected. `x-approval`-independent: no
+  `x-approval` block is required at all, distinguishing it from the existing post-approval
+  operation lockdown (§16.15 in `docs/knowledge/appendix/approval-flow.md`), which is entirely
+  driven by `x-approval`'s presence. `validate.py` fail-closed checks cover field existence,
+  enum membership of `field` and every `terminal_values` entry, `locked_fields` shape and
+  member existence, and rejects `field` appearing in its own `locked_fields`. See
+  `docs/knowledge/x-state-lockdown-transition-lockdown.md`.
+
 - **README.md/README_ja.md sync gate (`npm run check:readme-sync`,
   `scripts/check_readme_sync.sh`).** Fails closed if a branch's diff touches
   README.md relative to its base without also touching README_ja.md (or the
