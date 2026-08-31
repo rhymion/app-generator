@@ -1346,13 +1346,27 @@ def analyze_children(children: list, schema: dict, parent_model_name: str) -> li
             range_end_field=_child_date_range['end'] if _child_date_range else None,
         )
 
+        # cmd_881: a field the child's own view uses as an x-filter-values
+        # discriminator must not be picked as a generic "optional field"
+        # edit/clear target — changing it can move the row out of the
+        # filtered view, so the generic scaffold's "still visible after
+        # edit" assertion would be self-contradicting. Read from the VIEW
+        # entity (child['name']), not child_def (the raw entity) — mirrors
+        # helper_context()'s _filter_values_for_populate read above.
+        _child_filter_values: dict = (
+            schema['definitions'].get(child['name'], {}) or {}
+        ).get('x-filter-values') or {}
+
         result.append({
             'child': child,
             'names': names,
             'render_type': render_type,
             'fields': fields,
             'required_fields': [f for f in fields if f['required']],
-            'optional_fields': [f for f in fields if not f['required']],
+            'optional_fields': [
+                f for f in fields
+                if not f['required'] and f['prop_name'] not in _child_filter_values
+            ],
             'parent_fk_prop': parent_fk_prop,
         })
     return result
@@ -3366,10 +3380,24 @@ def spec_context(
     )
     needs_pool_for_create = _has_nolines_reservation and not has_deps
 
+    # cmd_881: a field this view uses as an x-filter-values discriminator
+    # must not be picked as a generic "optional field" edit/clear target —
+    # changing it can move the row out of the filtered view, so the generic
+    # scaffold's "still visible after edit" assertion would be
+    # self-contradicting. Read from the VIEW entity (definition_key), not
+    # parent_def (the raw entity) — mirrors helper_context()'s
+    # _filter_values_for_populate read.
+    _filter_values_for_spec: dict = (
+        schema['definitions'].get(definition_key, {}) or {}
+    ).get('x-filter-values') or {}
+
     # Note: read-only fields stay in these lists so seed/prisma create data includes
     # their required values; the fill/clear/assert command builders skip them.
     required_field_metas = [f for f in fields if f['required']]
-    optional_field_metas = [f for f in fields if not f['required']]
+    optional_field_metas = [
+        f for f in fields
+        if not f['required'] and f['prop_name'] not in _filter_values_for_spec
+    ]
     # Fail-edit/clear target must be a user-editable required field (not read-only).
     non_autocomplete_required = [
         f for f in required_field_metas
