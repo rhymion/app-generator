@@ -48,22 +48,54 @@ export type ActionSuccess = { ok: true };
 export type ActionFailure = { ok: false; errorCode: ErrorCode; field?: string; reason?: ValidationReason };
 export type ActionResult = ActionSuccess | ActionFailure;
 
-// Extracts the violated column name from a Prisma P2002 error's `meta`
-// object. Prisma's shape for this has changed across versions/drivers —
-// classic `{ target: string[] }` vs. the driver-adapter shape seen with
-// Prisma 7's Postgres adapter (`{ driverAdapterError: { cause: { constraint:
-// { fields: string[] } } } }`, empirically confirmed 2026-08-15, cmd_695).
-// Checked in that order; returns undefined (not "the first key found") if
-// neither shape matches, so a field-less CONFLICT falls back to the generic
-// staleMutation wording instead of showing a wrong field name.
+// Extracts a violated-column label from a Prisma P2002 error's `meta`
+// object. Prisma's shape for this is undocumented and has changed across
+// versions/drivers at least twice now:
+//   1. classic `{ target: string[] }` (older query-engine path).
+//   2. the driver-adapter shape seen with Prisma 7.9.1's Postgres adapter,
+//      `{ driverAdapterError: { cause: { constraint: { fields: string[] } } },
+//      modelName } }` (empirically confirmed 2026-08-15).
+//   3. Prisma 7.10.0's Postgres adapter DROPPED `constraint.fields` entirely
+//      and now reports only `{ driverAdapterError: { cause: { constraint:
+//      { index: string } }, modelName } }` — `index` is the raw Postgres
+//      constraint/index name (e.g. `approval_flow_entity_name_approver_
+//      role_id_key`), not a column list (empirically confirmed 2026-08-31
+//      against a live Postgres test database running Prisma 7.10.0). This
+//      is Postgres protocol behavior, not a Prisma choice: SQLSTATE 23505
+//      (unique_violation) only ever carries a constraint *name* on the
+//      wire, never the individual column names — Prisma 7.9.1's
+//      `constraint.fields` was itself Prisma synthesizing that list from
+//      schema metadata, and 7.10.0 simply stopped doing so.
+// Checked in that order; branch 3 strips Prisma's own default constraint-
+// naming affixes (`${modelName}_` prefix, `_key` suffix) to recover a
+// label. For a single-column `@@unique` (the common case) this yields the
+// exact original field name. For a compound `@@unique([a, b])` it yields
+// the underscore-joined `a_b` (no reliable way to split that back into
+// individual column names without either an extra DB catalog round-trip or
+// generator-time schema metadata threaded through the call site — out of
+// scope for this write-once, entity-agnostic helper) — still a truthful,
+// useful label, just not perfectly one column. Returns undefined only if
+// none of the three shapes match at all, so a field-less CONFLICT falls
+// back to the generic staleMutation wording instead of showing a
+// wrong/empty field name.
 export function p2002Field(meta: unknown): string | undefined {
   const m = meta as {
     target?: unknown;
-    driverAdapterError?: { cause?: { constraint?: { fields?: unknown } } };
+    modelName?: unknown;
+    driverAdapterError?: { cause?: { constraint?: { fields?: unknown; index?: unknown } } };
   } | null | undefined;
   if (Array.isArray(m?.target) && m.target.length > 0) return String(m.target[0]);
   const adapterFields = m?.driverAdapterError?.cause?.constraint?.fields;
   if (Array.isArray(adapterFields) && adapterFields.length > 0) return String(adapterFields[0]);
+  const indexName = m?.driverAdapterError?.cause?.constraint?.index;
+  if (typeof indexName === 'string' && indexName.length > 0) {
+    let label = indexName;
+    if (typeof m?.modelName === 'string' && m.modelName.length > 0 && label.startsWith(`${m.modelName}_`)) {
+      label = label.slice(m.modelName.length + 1);
+    }
+    label = label.replace(/_key$/, '');
+    if (label.length > 0) return label;
+  }
   return undefined;
 }
 
