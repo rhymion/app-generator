@@ -31,6 +31,14 @@
 // whenever the same shape of hand-written rule shows up on more than one
 // entity) -- this note only keeps the door open.
 //
+// `actorId` (cmd_891) is the id of the user performing this write --
+// resolved from the session cookie on the Server Action path and from the
+// API key's own owning user on the REST PUT/POST path (never null: both
+// entry points require a resolved caller before reaching this far). Use it
+// for a rule that needs to know WHO is writing, not just what -- e.g.
+// stamping a system-owned ledger row (inventory_transaction.created_by_id
+// etc.) from inside this hook rather than leaving it to the caller.
+//
 // Default (unedited) stub is a no-op. Cast `tx` to your own Prisma
 // transaction-client type as needed, e.g.:
 //   import type { PrismaClient } from '@/app/generated/prisma/client';
@@ -40,4 +48,5 @@ export async function validateCustomRules(
   _data: Record<string, unknown>,
   _currentId: string | null,
   _prevRow: Record<string, unknown> | null,
+  _actorId: string,
 ): Promise<void> {}

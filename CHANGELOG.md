@@ -6,6 +6,19 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`validateCustomRules()` (`lib/{entity}/service_validation_custom.ts`)
+  now also receives `actorId`, the id of the user performing the write.**
+  A hand-written rule can now stamp a system-owned row (e.g. an
+  `inventory_transaction` ledger entry with a required `created_by_id` FK)
+  as a side effect of a save, without duplicating the caller's own actor
+  resolution. `actorId` is added as a 5th parameter, using the same
+  structural-widening cast already used for the pre-edit row parameter —
+  every already-generated hand-written file keeps its old signature and
+  needs no edit. Unlike the pre-edit row, `actorId` is never `null`: both
+  the Server Action and REST entry points already require a resolved
+  caller before reaching this far. See
+  `docs/knowledge/actor-id-handoff-to-custom-validation.md`.
+
 - **README.md/README_ja.md sync gate (`npm run check:readme-sync`,
   `scripts/check_readme_sync.sh`).** Fails closed if a branch's diff touches
   README.md relative to its base without also touching README_ja.md (or the
