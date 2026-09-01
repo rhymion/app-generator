@@ -1578,6 +1578,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             })
 
     # Stage 2: auto-add bridge FK prop to readonly_fields for bridge child entities.
+    # (referenced later by _base_data_lines' create-time skip below; stays None
+    # for every entity that isn't a new-form-bridge child)
+    _bridge_fk_prop: str | None = None
     if bridge_child_ir:
         _bridge_fk_prop = f'{bridge_child_ir["name"]}_id'
         if _bridge_fk_prop not in readonly_fields and _bridge_fk_prop in filtered_props:
@@ -2330,9 +2333,23 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # x-server-value fields never go through the generic "just write the client
     # value" line below — server_value_data_lines (built further down) supplies
     # a dedicated, server-resolved line for each of them instead.
+    #
+    # Plain readonly fields (x-readonly-fields / x-readonly, cmd_897/subtask_886a)
+    # are skipped too: readonly_fields_create_reject guarantees a client can
+    # never supply a value for these, so var_name is always the guarded-null
+    # form value with nothing else to write it — omitting the key lets the
+    # column's own Prisma @default apply (shipment_line.status's motivating
+    # case: a required, non-nullable enum with @default(picked) — passing an
+    # explicit `status: null` made the query engine reject the whole create
+    # with a confusing "Argument `shipment` is missing" error, not a status
+    # error). The dynamically-added bridge FK prop (_bridge_fk_prop, Stage 2
+    # above) is exempted: bridge_child_fk_data_line already writes it with the
+    # real resolved parent id via its own dedicated template line.
+    _ro_create_skip = set(readonly_fields_create_reject) - {_bridge_fk_prop}
     _base_data_lines = [
         f"        {p['prop']}: {p['var_name']},"
-        for p in parent_prop_infos if p['prop'] not in _server_value_prop_names
+        for p in parent_prop_infos
+        if p['prop'] not in _server_value_prop_names and p['prop'] not in _ro_create_skip
     ]
 
     # server_value_fields: template-facing list for service.ts.jinja2's per-field
