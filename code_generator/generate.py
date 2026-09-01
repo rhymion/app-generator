@@ -26,7 +26,7 @@ from helpers.bridge_prisma import emit_bridge_model, emit_parent_bridge_fk, emit
 from helpers.schema_helpers import get_flatten_rels
 from generate_types import extract_entities, extract_named_constants
 from context import build_entity_context
-from build_context import build_context, build_anonymize_user_context, _get_actual_type
+from build_context import build_context, build_anonymize_user_context, _get_actual_type, set_prisma_models
 from helpers.label_field import build_label_expression
 from helpers.schema_helpers import derive_text_fields as _derive_text_fields
 from helpers.schema_helpers import get_splittable_bridge_field
@@ -937,6 +937,10 @@ def generate(schema_path: str, output_dir: str) -> None:
     # so it is threaded in here rather than through `schema`.
     _prisma_models = parse_prisma_schema(out / 'prisma' / 'schema.prisma')
     set_prisma_uniques(collect_unique_columns(_prisma_models))
+    # subtask_892d GAP1: registers the same parsed Prisma models for
+    # build_context.py's child audit-field (creator_id/updater_id) presence
+    # lookups -- see build_context.py's set_prisma_models() docstring.
+    set_prisma_models(_prisma_models)
 
     print(f'Found {len(entities)} entities in {schema_path}')
 

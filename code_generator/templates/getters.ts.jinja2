@@ -122,7 +122,11 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
 {% endfor %}
 {% endif %}
     },
-{% if include_props_detail %}
+{% if detail_select %}
+    select: {
+      {{ detail_select }}
+    },
+{% elif include_props_detail %}
     include: {
       {{ include_props_detail }}
     },
