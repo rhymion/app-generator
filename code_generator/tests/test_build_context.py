@@ -2324,4 +2324,179 @@ class TestOrgRelationshipOptionalAndScopingWithSelfOnly:
         rendered = self._env().get_template('getters.ts.jinja2').render(**full_ctx)
         assert "and.push({ OR: [{ organization_id: { in: associatedOrganizationIds } }, { organization_id: null }] });" in rendered
         assert "and.push({ OR: or });" in rendered
+
+
+# ---------------------------------------------------------------------------
+# subtask_892d GAP1: §7.1 raw-inline-child nested-create/update must
+# populate creator_id/updater_id on each child row when the child's own
+# Prisma model carries those columns -- never derivable from the JSON
+# schema alone (audit columns are deliberately never a `fields:` entry), so
+# checked against a registered Prisma-model map instead (set_prisma_models(),
+# mirroring generators_test.py's existing set_prisma_uniques() pattern).
+# Reuses test_readonly_fields.py's board/widget fixture -- the same shape as
+# the real dashboard/dashboard_widget precedent, which has neither column
+# and must stay byte-for-byte unaffected.
+# ---------------------------------------------------------------------------
+
+class TestChildAuditFieldInjection:
+    @staticmethod
+    def _reset():
+        from build_context import set_prisma_models
+        set_prisma_models({})
+
+    @staticmethod
+    def _widget_child(ctx):
+        widgets = [c for c in ctx["non_comment_ch"] if c["property_name"] == "widgets"]
+        assert len(widgets) == 1
+        return widgets[0]
+
+    @staticmethod
+    def _widget_model_with_audit_fields():
+        from schema_deriver import PrismaModel, PrismaField
+        return PrismaModel(name="widget", fields={
+            "id": PrismaField(name="id", prisma_type="String", nullable=False, is_list=False, is_id=True),
+            "creator_id": PrismaField(name="creator_id", prisma_type="String", nullable=False, is_list=False),
+            "updater_id": PrismaField(name="updater_id", prisma_type="String", nullable=False, is_list=False),
+        })
+
+    def test_child_without_audit_columns_gets_no_injection(self):
+        """dashboard_widget precedent: no creator_id/updater_id registered
+        for the child's Prisma model -- nested create/update must render
+        exactly as before this fix (no injected lines)."""
+        from build_context import set_prisma_models
+        from test_readonly_fields import _board_entity, _board_schema
+        set_prisma_models({})
+        try:
+            ctx = build_context(_board_entity(), _board_schema())
+            assert self._widget_child(ctx)["has_audit_fields"] is False
+            assert "creator_id: actorId" not in ctx["child_nested_create"]
+            assert "updater_id: actorId" not in ctx["child_nested_create"]
+            assert "creator_id: actorId" not in ctx["child_nested_update"]
+            assert "updater_id: actorId" not in ctx["child_nested_update"]
+        finally:
+            self._reset()
+
+    def test_child_with_audit_columns_gets_injected_on_nested_create(self):
+        from build_context import set_prisma_models
+        from test_readonly_fields import _board_entity, _board_schema
+        set_prisma_models({"widget": self._widget_model_with_audit_fields()})
+        try:
+            ctx = build_context(_board_entity(), _board_schema())
+            assert self._widget_child(ctx)["has_audit_fields"] is True
+            create_block = ctx["child_nested_create"]
+            assert "create: widgetsItems.map(f => ({" in create_block
+            assert "creator_id: actorId," in create_block
+            assert "updater_id: actorId," in create_block
+        finally:
+            self._reset()
+
+    def test_update_path_injects_audit_fields_only_on_newly_added_rows(self):
+        """The nested update's `update:` sub-array (existing rows, keyed by
+        id) must NOT get creator_id/updater_id re-injected -- creator_id is
+        immutable post-creation, and Prisma's update input type already
+        makes updater_id optional there (no TS2322 either way), so only the
+        `create:` sub-array (new rows added during an update) is in scope."""
+        from build_context import set_prisma_models
+        from test_readonly_fields import _board_entity, _board_schema
+        set_prisma_models({"widget": self._widget_model_with_audit_fields()})
+        try:
+            ctx = build_context(_board_entity(), _board_schema())
+            nested_update = ctx["child_nested_update"]
+            update_branch, create_branch = nested_update.split("create: widgetsItems", 1)
+            assert "creator_id: actorId," in create_branch
+            assert "updater_id: actorId," in create_branch
+            assert "creator_id: actorId" not in update_branch
+            assert "updater_id: actorId" not in update_branch
+        finally:
+            self._reset()
+
+
+# ---------------------------------------------------------------------------
+# subtask_892d GAP2: an x-generate.fields-restricted Proxy View's
+# get{Parent}Detail() findUnique/findFirst call must select only the
+# narrowed field set (+ id/creator_id, unconditionally required by the
+# Detail type per context.py's build_entity_context) rather than the full,
+# unrestricted row -- otherwise a column filter_fields() excluded leaks
+# through the `...{{parent_camel}}` spread with its REAL Prisma type,
+# mismatching whatever type context.py derived for that same excluded name
+# (report: lib/supplier_return_status/getters.ts(52,3) TS2322 on
+# `shipped_at`, a real DateTime column filtered out by `fields: [status]`
+# but reintroduced as a `string`-typed "virtual column" because it also
+# appears in x-display.table). shipment_line_status (no `fields:`
+# restriction) must render byte-identical output to before this fix.
+# ---------------------------------------------------------------------------
+
+class TestDetailSelectForFieldsRestrictedEntity:
+    @staticmethod
+    def _schema():
+        return {
+            "definitions": {
+                "proxy_base": {
+                    "type": "object",
+                    "required": ["id", "status"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "status": {"type": "string", "enum": ["draft", "shipped"]},
+                        # Excluded by `fields: [status]` below -- must never
+                        # leak through the raw findUnique/findFirst spread.
+                        "shipped_at": {"type": ["string", "null"], "format": "date-time"},
+                    },
+                },
+                "proxy_base_detail": {
+                    "x-generate": {
+                        "list": False, "view": False, "new": False, "edit": True,
+                        "delete": False, "api": True, "test": False, "fields": None,
+                    },
+                    "allOf": [{"$ref": "#/definitions/proxy_base"}],
+                },
+            }
+        }
+
+    def _entity(self, fields_restriction):
+        return _entity(
+            "proxy_base",
+            gen_cfg={
+                "list": False, "view": False, "new": False, "edit": True,
+                "delete": False, "api": True, "test": False,
+                "fields": fields_restriction,
+            },
+        )
+
+    @staticmethod
+    def _env():
+        from generate import _make_env
+        return _make_env()
+
+    def test_fields_restricted_entity_gets_narrow_select(self):
+        ctx = build_context(self._entity(["status"]), self._schema())
+        assert ctx["detail_select"] != ""
+        assert "id: true" in ctx["detail_select"]
+        assert "status: true" in ctx["detail_select"]
+        assert "creator_id: true" in ctx["detail_select"]
+        assert "shipped_at: true" not in ctx["detail_select"]
+
+    def test_unrestricted_entity_gets_no_select(self):
+        ctx = build_context(self._entity(None), self._schema())
+        assert ctx["detail_select"] == ""
+
+    def test_rendered_getters_uses_select_not_include_when_restricted(self):
+        ctx = build_context(self._entity(["status"]), self._schema())
+        rendered = self._env().get_template("getters.ts.jinja2").render(**ctx)
+        first_query = rendered.split("findUnique(", 1)[1].split(");", 1)[0]
+        assert "select:" in first_query
+        assert "include:" not in first_query
+        assert "shipped_at" not in first_query
+
+    def test_rendered_getters_keeps_include_when_unrestricted(self):
+        """No regression for an entity with no `fields:` restriction (e.g.
+        shipment_line_status) -- pre-existing `include:`-based query,
+        unchanged."""
+        ctx = build_context(self._entity(None), self._schema())
+        rendered = self._env().get_template("getters.ts.jinja2").render(**ctx)
+        first_query = rendered.split("findUnique(", 1)[1].split(");", 1)[0]
+        # "select:" still appears nested inside include's own creator/updater
+        # sub-objects (pre-existing, unrelated to this fix) -- what must NOT
+        # appear is a top-level `select:` key as a sibling of `include:`.
+        assert "    include: {" in first_query
+        assert "    select: {" not in first_query
         assert "AND: [\n      ...accessAnd," in rendered

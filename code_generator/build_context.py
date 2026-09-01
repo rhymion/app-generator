@@ -38,6 +38,34 @@ _EXCLUDE_FIELDS = {'created_at', 'updated_at'}
 _EXCLUDE_ID_TS  = {'id', 'created_at', 'updated_at', 'creator_id'}
 _SCALAR_TYPES   = {'string', 'integer', 'number', 'boolean'}
 
+# Parsed Prisma models (schema_deriver.parse_prisma_schema() output), for
+# Prisma-only facts that can never be answered from the JSON schema alone.
+# creator_id/updater_id are a case in point (subtask_892d GAP1): every
+# *top-level* x-generate entity is assumed to carry them unconditionally
+# (service.ts.jinja2 hardcodes `creator_id: actorId, updater_id: actorId,`
+# on its own add/update), but a §7.1 raw-inline-child is NOT guaranteed to
+# (the dashboard_widget precedent has neither) -- audit columns are
+# deliberately never a JSON-schema `fields:` entry (they're always
+# server-set), so child_props_dict (build_user_schema.py-derived) can never
+# answer "does this child model actually have them" on its own. Mirrors the
+# existing generators_test.py set_prisma_uniques() pattern -- populated by
+# set_prisma_models() before build_context() runs for any entity.
+_prisma_models: dict = {}
+
+
+def set_prisma_models(models: dict) -> None:
+    """Register the parsed Prisma models (schema_deriver.parse_prisma_schema()
+    output) for Prisma-only-fact lookups (e.g. child audit-field presence)."""
+    global _prisma_models
+    _prisma_models = models or {}
+
+
+def _model_has_audit_fields(model_name: str) -> bool:
+    """True when `model_name`'s Prisma model declares both creator_id and
+    updater_id columns."""
+    pm = _prisma_models.get(model_name)
+    return bool(pm and 'creator_id' in pm.fields and 'updater_id' in pm.fields)
+
 
 def _raw_def(entity_name: str, schema: dict) -> dict:
     """Resolve a bare/view model name to its raw entity dict — scalar/FK
@@ -547,6 +575,12 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
         # _build_child_assignee_notify_create_code/_update_code below.
         child_has_assignee_id = 'assignee_id' in child_props_dict
 
+        # subtask_892d GAP1: does this child's own Prisma model declare
+        # creator_id/updater_id? Never derivable from child_props_dict (see
+        # _model_has_audit_fields docstring) -- checked directly against the
+        # parsed Prisma schema instead.
+        child_has_audit_fields = _model_has_audit_fields(child_name)
+
         result.append({
             **child_raw,
             'child_var':        child_var,
@@ -566,6 +600,7 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             'approval_indexed':   approval_indexed,
             'approval_array_var': approval_array_var,
             'has_assignee_id':    child_has_assignee_id,
+            'has_audit_fields':   child_has_audit_fields,
         })
     return result
 
@@ -596,12 +631,26 @@ def _build_child_form_data_extractions(children_data: list[dict]) -> str:
     return '\n'.join(lines)
 
 
+def _child_audit_create_lines(c: dict) -> str:
+    """`creator_id`/`updater_id` lines for a child-row `create:` object, when
+    the child's own Prisma model carries them (subtask_892d GAP1) — mirrors
+    the parent row's own unconditional `creator_id: actorId, updater_id:
+    actorId,` in service.ts.jinja2's add{{ parent_pascal }}/
+    update{{ parent_pascal }}, both of which pass `actorId` as their first
+    parameter (the name is hardcoded here, not templated, because it is a
+    TypeScript-source-level constant, not a Python value)."""
+    if not c.get('has_audit_fields'):
+        return ''
+    return "          creator_id: actorId,\n          updater_id: actorId,\n"
+
+
 def _build_child_nested_create(children_data: list[dict]) -> str:
     lines = []
     for c in children_data:
         pn  = c['property_name']
         cv  = c['child_var']
         fmc = c['field_map_create']
+        audit = _child_audit_create_lines(c)
         if c['use_connect']:
             lines.append(f"      {pn}: {{\n        connect: {cv}Ids.map((id) => ({{ id }})),\n      }},")
         elif c.get('approval_indexed'):
@@ -613,12 +662,13 @@ def _build_child_nested_create(children_data: list[dict]) -> str:
                 f"      {pn}: {{\n"
                 f"        create: {cv}Items.map((f, _i) => ({{\n"
                 f"{fmc}\n"
+                f"{audit}"
                 f"          approvable_id: {arr}[_i],\n"
                 f"        }})),\n"
                 f"      }},"
             )
         else:
-            lines.append(f"      {pn}: {{\n        create: {cv}Items.map(f => ({{\n{fmc}\n        }})),\n      }},")
+            lines.append(f"      {pn}: {{\n        create: {cv}Items.map(f => ({{\n{fmc}\n{audit}        }})),\n      }},")
     return '\n'.join(lines)
 
 
@@ -629,6 +679,7 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
         cv  = c['child_var']
         fmc = c['field_map_create']
         fmu = c['field_map_update']
+        audit = _child_audit_create_lines(c)
         if c['use_connect']:
             lines.append(f"      {pn}: {{\n        set: {cv}Ids.map((id) => ({{ id }})),\n      }},")
         elif c.get('approval_indexed'):
@@ -646,6 +697,7 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
                 f"        }})),\n"
                 f"        create: {cv}Items.filter(f => !f.id).map((f, _i) => ({{\n"
                 f"{fmc}\n"
+                f"{audit}"
                 f"          approvable_id: {arr}[_i],\n"
                 f"        }})),\n"
                 f"      }},"
@@ -656,7 +708,13 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
             # with an id are kept (and updated in place); ids no longer
             # present are deleted; items without an id are created. This
             # turns N statements per update into roughly K_new + K_changed
-            # + 1 (vs the old K_existing + K_new).
+            # + 1 (vs the old K_existing + K_new). New rows (the `create:`
+            # branch) get creator_id/updater_id like any other create
+            # (subtask_892d GAP1); existing rows (the `update:` branch above)
+            # deliberately do not — creator_id is immutable post-creation and
+            # Prisma's update input type makes updater_id optional there, so
+            # leaving it untouched on an edit is not a compile error and is
+            # out of this fix's scope (only the two reported `create:` paths).
             lines.append(
                 f"      {pn}: {{\n"
                 f"        deleteMany: {{ id: {{ notIn: {cv}Items.map(f => f.id).filter((id): id is string => Boolean(id)) }} }},\n"
@@ -664,7 +722,7 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
                 f"          where: {{ id: f.id! }},\n"
                 f"          data: {{\n{fmu}\n          }},\n"
                 f"        }})),\n"
-                f"        create: {cv}Items.filter(f => !f.id).map(f => ({{\n{fmc}\n        }})),\n"
+                f"        create: {cv}Items.filter(f => !f.id).map(f => ({{\n{fmc}\n{audit}        }})),\n"
                 f"      }},"
             )
     return '\n'.join(lines)
@@ -3223,6 +3281,59 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     creator_filtered_props = copy.deepcopy(filtered_props)
     creator_filtered_props['creator_id'] = {'type': 'string'}
 
+    # detail_select (subtask_892d GAP2): when x-generate.fields restricts this
+    # entity (a fields-narrowed Proxy View, e.g. supplier_return_status), the
+    # findUnique/findFirst call in get{{Parent}}Detail() must not fetch the
+    # full, unrestricted Prisma row -- the function's declared return type is
+    # the narrow {{Parent}}Detail interface (context.py's build_entity_context
+    # derives its field list from this SAME filtered_props), so an unselected
+    # full row leaks whatever columns filter_fields() excluded straight
+    # through the `...{{parent_camel}}` spread with their REAL Prisma type
+    # (e.g. a DateTime column stays `Date`, not the `string` type context.py
+    # assigns that same excluded name via its x-display.table "virtual
+    # column" fallback) -- TS2322 (subtask_892d GAP2 report,
+    # lib/supplier_return_status/getters.ts(52,3) on `shipped_at`).
+    # `creator_id` is force-included even though it is never itself a
+    # `fields:` entry (audit columns are Prisma-only, never a JSON-schema
+    # property) because context.py unconditionally types it non-optional
+    # regardless of `fields:` (parent_fields.append(FieldInfo('creator_id',
+    # 'string | null'))) -- omitting it from `select` would make the object
+    # literal miss a required property. write_only_field_names is force-
+    # included too: it is deliberately computed above (cmd_801) from the
+    # FULL, unfiltered model_def properties -- not filtered_props -- because
+    # a write-only guard (password, api_key, ...) must strip these columns
+    # even when `fields:` already hides them from the view; the strip code
+    # (`const { password: _password, ... } = {{ parent_camel }};`) still
+    # destructures them unconditionally, so `select` must still fetch them
+    # or that destructure hits a column absent from the query result
+    # entirely (TS2339 -- caught live against this repo's own `user` entity,
+    # which combines `fields:` with two `x-pii: sensitive` columns).
+    # include_entries_detail's relation entries (creator/updater/children/
+    # parent rels) are folded in verbatim: each is already a self-contained
+    # `name: true` / `name: { include: {...} } }` entry, which Prisma
+    # accepts nested inside `select` exactly as it does inside `include`.
+    # Falls back to the pre-existing unrestricted `include:` block when
+    # `fields:` is not declared -- shipment_line_status and every other
+    # entity generate byte-identical output to before.
+    detail_select = ''
+    if gen_cfg.get('fields'):
+        # Relation-shaped entries (a bare `$ref`, or a `type: array` of
+        # `$ref` items -- e.g. `user`'s own `roles`) are excluded here: they
+        # are already covered by include_entries_detail under this SAME key
+        # name (child_include_entries above uses the property name
+        # verbatim), so adding them again as a bare `{prop}: true` scalar
+        # would emit a duplicate object key.
+        def _is_relation_placeholder(v) -> bool:
+            return isinstance(v, dict) and ('$ref' in v or v.get('type') == 'array')
+        _detail_select_scalars = sorted(
+            {k for k, v in filtered_props.items() if not _is_relation_placeholder(v)}
+            | set(write_only_field_names) | {'id', 'creator_id'}
+        )
+        detail_select = ', '.join(
+            [f'{f}: true' for f in _detail_select_scalars]
+            + ([include_props_detail] if include_props_detail else [])
+        )
+
     # decimal_display_columns: consumed by get{{ parent_pascal }}Detail's raw
     # `...{{ parent_camel }}` spread (getters.ts.jinja2) to override each
     # Decimal-backed column with its .toString() form, the same
@@ -3456,6 +3567,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         include_props_list=include_props_list,
         search_include_props_list=search_include_props_list,
         include_props_detail=include_props_detail,
+        detail_select=detail_select,
         include_entries_detail=include_entries_detail,
         # Selection targets (page_new / page_edit)
         selection_targets=selection_targets,
