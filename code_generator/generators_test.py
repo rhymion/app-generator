@@ -1306,28 +1306,12 @@ def _child_system_managed_fk_excludes(child_def: dict) -> set[str]:
     - 'parent_id' on x-splittable children (e.g. receiving_receipt_line): the
       self-FK to the pre-split parent row (see generate.py split inherited_fields
       exclusion list, which treats it the same way).
-    - field-level `x-internal: true` (cmd_897/subtask_886a, e.g.
-      supplier_return_line.organization_id): a schema-author's declared
-      "this column isn't meant to be filled through the UI" marker for a
-      single field on an otherwise-normal child (as opposed to the
-      existing entity-level `x-internal` used to mark a whole entity
-      internal-only, e.g. reaction — see build_user_schema.py's
-      _ENTITY_LEVEL_DATA_KEYS, which is unrelated and copies the key onto
-      the raw entity as a whole, not onto one of its properties). Nothing
-      else in the generator currently reads this per-field flag — it does
-      NOT hide the column from column_def.tsx/FormUpsert.tsx (verified:
-      generated components/supplier_return/column_def.tsx still renders
-      organization_id as a plain editable text column) — so it is not a
-      general "hide this field from the UI" mechanism yet, only a
-      test-generation-side guard here to stop autofilling a real FK column
-      with a literal placeholder string it can never satisfy.
     """
     props = child_def.get('properties') or {}
     excludes = {
         prop_name for prop_name, prop in props.items()
         if isinstance(prop, dict) and (
             (prop.get('x-relationship') or {}).get('type') == 'one-to-one_bridge'
-            or prop.get('x-internal')
         )
     }
     _bridge_field = get_splittable_bridge_field(child_def)
