@@ -21,6 +21,11 @@
 #   ./scripts/vercel-seed.sh           # seed staging DB (preview)
 #   ./scripts/vercel-seed.sh --prod    # seed production DB
 #   DRY_RUN=true ./scripts/vercel-seed.sh [--prod]
+#   SEED_COMMAND=db:seed-demo ./scripts/vercel-seed.sh   # run a different
+#     app-generator npm script instead of the default db:seed-baseline
+#     (e.g. db:seed-demo for one-off demo data; the target script's own
+#     env-var guards, such as db:seed-demo's SEED_DEMO_DATA=true, still
+#     apply and must be set separately)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,6 +34,7 @@ ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${SCRIPT_DIR}/vercel-env.sh"
 
 DRY_RUN="${DRY_RUN:-false}"
+SEED_COMMAND="${SEED_COMMAND:-db:seed-baseline}"
 _TARGET="${1:-}"
 case "$_TARGET" in
   --prod)    _TARGET="prod" ;;
@@ -105,12 +111,12 @@ if [[ "$DRY_RUN" != "true" ]]; then
 fi
 
 # ── Seed ─────────────────────────────────────────────────────────────────
-echo "[Seed] Running db:seed-baseline against ${_ENV_LABEL} DB..."
+echo "[Seed] Running ${SEED_COMMAND} against ${_ENV_LABEL} DB..."
 if [[ "$DRY_RUN" == "true" ]]; then
-  echo "[DRY-RUN] DATABASE_URL=<redacted> npm --prefix app-generator run db:seed-baseline"
+  echo "[DRY-RUN] DATABASE_URL=<redacted> npm --prefix app-generator run ${SEED_COMMAND}"
 else
   DATABASE_URL="${_DB_URL}" \
-    npm --prefix "${ROOT}/app-generator" run db:seed-baseline
+    npm --prefix "${ROOT}/app-generator" run "${SEED_COMMAND}"
 fi
 echo "  OK: ${_ENV_LABEL} seed complete."
 echo ""
