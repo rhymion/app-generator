@@ -1037,13 +1037,19 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'parent_pascal': parent_pascal,
             }),
         )
-        _write_stub(
-            lib_dir / 'service_validation_custom.ts',
-            _render(env, 'service_validation_custom_stub.ts.jinja2', {
-                'parent': parent,
-                'parent_pascal': parent_pascal,
-            }),
-        )
+        # An allOf proxy entity (model != parent, e.g. 'setting' -> 'user')
+        # has no Prisma model of its own -- service_validation.ts.jinja2
+        # imports validateCustomRules from '@/lib/{{ model }}/...', never
+        # from the proxy's own lib dir, so a stub written here would never
+        # be imported by anything.
+        if model == parent:
+            _write_stub(
+                lib_dir / 'service_validation_custom.ts',
+                _render(env, 'service_validation_custom_stub.ts.jinja2', {
+                    'parent': parent,
+                    'parent_pascal': parent_pascal,
+                }),
+            )
 
         # --- virtual column resolver stub (per-entity, async/bulk) ---
         if ctx.get('virtual_columns'):
