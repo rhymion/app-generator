@@ -1711,7 +1711,18 @@ describe('API: {{ title }}', () => {
       });
     });
 
-{% if has_on_withdrawn and resubmit_unsubmitted_value_literal %}
+{# cmd_897/subtask_886a: `can_edit` added to this guard -- unlike the
+   single-stage 14.4/14.5 pair above (line ~1194, `can_edit and
+   put_body_resubmit`), this multistage-rounds version resubmits via a
+   direct PUT to the main entity with no can_edit check at all, so an
+   edit:false entity (no PUT route generated -- see 14.2's own no-PUT-route
+   branch above, "no ordinary-update path ... could be resubmitted
+   through") got a PUT-based test generated anyway, hitting a 405 the
+   entity's own 14.2 test already asserts is correct. No extra test is
+   added here for the edit:false case: 14.2's no-PUT-route branch already
+   covers "this entity has no PUT route at all" once per spec; repeating
+   it per-round-shape would be redundant, not missing coverage. #}
+{% if can_edit and has_on_withdrawn and resubmit_unsubmitted_value_literal %}
     it('14.4M resubmitting after a round-level withdrawal starts a brand new round with every stage pending again', () => {
       cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithApproval', {

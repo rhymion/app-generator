@@ -1306,11 +1306,29 @@ def _child_system_managed_fk_excludes(child_def: dict) -> set[str]:
     - 'parent_id' on x-splittable children (e.g. receiving_receipt_line): the
       self-FK to the pre-split parent row (see generate.py split inherited_fields
       exclusion list, which treats it the same way).
+    - field-level `x-internal: true` (cmd_897/subtask_886a, e.g.
+      supplier_return_line.organization_id): a schema-author's declared
+      "this column isn't meant to be filled through the UI" marker for a
+      single field on an otherwise-normal child (as opposed to the
+      existing entity-level `x-internal` used to mark a whole entity
+      internal-only, e.g. reaction — see build_user_schema.py's
+      _ENTITY_LEVEL_DATA_KEYS, which is unrelated and copies the key onto
+      the raw entity as a whole, not onto one of its properties). Nothing
+      else in the generator currently reads this per-field flag — it does
+      NOT hide the column from column_def.tsx/FormUpsert.tsx (verified:
+      generated components/supplier_return/column_def.tsx still renders
+      organization_id as a plain editable text column) — so it is not a
+      general "hide this field from the UI" mechanism yet, only a
+      test-generation-side guard here to stop autofilling a real FK column
+      with a literal placeholder string it can never satisfy.
     """
     props = child_def.get('properties') or {}
     excludes = {
         prop_name for prop_name, prop in props.items()
-        if isinstance(prop, dict) and (prop.get('x-relationship') or {}).get('type') == 'one-to-one_bridge'
+        if isinstance(prop, dict) and (
+            (prop.get('x-relationship') or {}).get('type') == 'one-to-one_bridge'
+            or prop.get('x-internal')
+        )
     }
     _bridge_field = get_splittable_bridge_field(child_def)
     if _bridge_field in props:
@@ -3258,6 +3276,27 @@ def spec_context(
     # direct_attachment_and_uri_kind_file.cy.ts spec.
     _direct_attachment_prop_names = {d['prop_name'] for d in get_direct_attachment_fk_props(parent_def)}
     fields = [f for f in fields if f['prop_name'] not in _direct_attachment_prop_names]
+    # Exclude fields left off x-display.form the same way (cmd_897/subtask_886a
+    # scope-expansion). generators.py's FormUpsert/FormView builders treat a
+    # declared x-display.form as a strict allowlist -- a field with a real jsx
+    # renderer but missing from that list is never emitted onto the page
+    # (generators.py:4121/5244, `[f for f in _x_display_form if f in
+    # jsx_by_field]`) -- a documented, sanctioned pattern for a field that
+    # isn't knowable/writable at create time (e.g. customer_return.responsibility/
+    # resolution, inventory_reservation.modification_reason, supplier_return.
+    # shipped_at). Without this same filter here, `fields` still carries such a
+    # field, so all_fill_cmds/all_assert_cmds below emit a
+    # cy.selectAutocomplete()/cy.fillDateTime() for a label the form never
+    # renders -- the same "Expected to find element: `filter`, but never found
+    # it" failure already noted above for x-server-value and direct-attachment
+    # fields. Only applies when x-display.form is actually declared (mirrors
+    # generators.py's own `if _x_display_form:` branch) -- an entity with no
+    # x-display.form (e.g. shipment_line) renders every field, so nothing is
+    # excluded here either.
+    _x_display_form_props = (parent_def.get('x-display') or {}).get('form')
+    if _x_display_form_props:
+        _x_display_form_set = set(_x_display_form_props)
+        fields = [f for f in fields if f['prop_name'] in _x_display_form_set]
     # Mark read-only fields: kept in `fields` for seed/prisma data, skipped by UI
     # fill/clear/assert commands (the form renders them non-editable).
     _readonly_props = _readonly_field_names(
