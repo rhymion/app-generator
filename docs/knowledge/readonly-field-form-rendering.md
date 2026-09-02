@@ -148,6 +148,41 @@ coverage: `code_generator/tests/test_scheduled_task_templates.py`'s
 `x-readonly` (per-property) was deliberately left unchanged — see the
 scope list above.
 
+## `x-display.form` is NOT view-scoped (unlike `x-readonly-fields`)
+
+`x-display.form` and `x-readonly-fields` look similar — both are declared on
+a view entity to control what a Proxy View's edit form shows — but they
+resolve from **different scopes**. This difference matters in practice.
+
+**`x-display.form`** is **not** view-scoped. The form/view-order helpers in
+`build_context.py`/`generators.py` resolve `x-display.form` from the shared
+raw model backing the Proxy View, not from the Proxy View entity's own
+definition. Declaring `x-display.form: [status]` on a Proxy View entity does
+**not** limit the generated `FormUpsert.tsx` to render only the `status`
+field — the form will still render all raw-model fields as interactive
+inputs. This was verified against an actual generated `FormUpsert.tsx` for a
+Proxy View entity that declared `x-display.form: [status]`: it rendered
+every field of the underlying raw model (relations, quantities, text
+fields, status) despite the narrowed `x-display.form` declaration.
+
+**`x-readonly-fields`** is view-scoped (as the section above documents). It
+is read from the Proxy View entity's own definition, not from the raw
+model. This is what actually locks the non-`status` fields in a Proxy
+View's edit form.
+
+**`x-display` never received the view-scoped fix that `x-readonly-fields`
+got.** The two diverged: `x-readonly-fields` moved to
+`_VIEW_LEVEL_CONFIG_KEYS` in `build_user_schema.py` so it stays per-view;
+`x-display` remained tied to the raw model. Until `x-display` gets a
+similar view-scope fix, the only reliable way to restrict a Proxy View's
+edit form to specific fields is `x-readonly-fields` (which hides other
+fields as read-only), not `x-display.form`.
+
+_Provenance: originally recorded as a schema comment in a consumer
+project's Proxy View entity, documenting a gap found while building that
+entity. Moved here when that entity was later retired, so the generator's
+behavior is documented independent of any particular consumer entity._
+
 ## DataGrid child support
 
 Both `x-readonly` and `x-readonly-fields` also reach a DataGrid child (an
