@@ -4,6 +4,7 @@ Tests for the comment reaction foundation layer.
 Covers:
   - extract_entities: x-internal entities are excluded (2 tests)
   - validate_schema:  valid reaction accepted, malformed x-internal/enum rejected (4 tests)
+  - validate_schema:  x-internal is entity-level only, field-level use rejected (cmd_903, 2 tests)
   - build_context:    comment includes contain reactions (3 tests)
   - extract_named_constants: correct value/label mapping for x-internal integer enums,
     explicit constantParent declaration order-invariance, fail-closed on unmarked/
@@ -215,6 +216,65 @@ class TestValidateSchemaXInternal:
         schema = {"definitions": {"user": _user_defn(), "comment": _comment_defn(), "reaction": reaction}}
         with pytest.raises(SchemaValidationError, match="integer enum labels count"):
             validate_schema(schema)
+
+
+# ---------------------------------------------------------------------------
+# 2b. validate_schema: x-internal is entity-level only (cmd_903 fail-open fix)
+# ---------------------------------------------------------------------------
+#
+# `x-internal` marks an ENTITY as excluded from pages/embedding
+# (generate_types.py:123,322 both read it off an entity definition; the
+# entity-shape check in TestValidateSchemaXInternal above does the same).
+# Prior to cmd_903, nothing rejected `x-internal` written on a *field*
+# instead (e.g. `fields: {organization_id: {x-internal: true}}`) — the
+# generator simply never looks for it there, so the annotation silently did
+# nothing (fail-open). Confirmed against the real schemas that had this
+# exact misuse: proj_g (inventory-app) `supplier_return_line.organization_id`
+# (1 instance); proj_c (app-template) has none (re-measured directly against
+# both projects' json_schema.yaml at cmd_903 time — see task report).
+
+class TestValidateSchemaXInternalFieldLevelMisuse:
+    def test_field_level_x_internal_raises(self):
+        """x-internal on a field (not the entity) must raise, not be silently accepted."""
+        schema = {
+            "definitions": {
+                "user": _user_defn(),
+                "comment": _comment_defn(),
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "organization_id"],
+                    "properties": {
+                        "id": _cuid_field(),
+                        # Mirrors the real-world misuse: entity-level key
+                        # (x-internal) written under a field instead.
+                        "organization_id": {
+                            "type": "string",
+                            "pattern": "^c[a-z0-9]{24,}$",
+                            "x-internal": True,
+                        },
+                    },
+                },
+            }
+        }
+        with pytest.raises(
+            SchemaValidationError,
+            match="x-internal is an entity-level key",
+        ):
+            validate_schema(schema)
+
+    def test_entity_level_x_internal_with_plain_sibling_field_still_allowed(self):
+        """A correctly-declared entity-level x-internal, alongside an ordinary
+        field with no x-internal of its own, must not raise (regression guard —
+        the new field-level check must not false-positive on the entity that
+        legitimately carries x-internal at its own top level)."""
+        schema = {
+            "definitions": {
+                "user": _user_defn(),
+                "comment": _comment_defn(),
+                "reaction": _reaction_defn(),
+            }
+        }
+        validate_schema(schema)  # should not raise
 
 
 # ---------------------------------------------------------------------------

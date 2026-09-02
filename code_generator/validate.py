@@ -1252,6 +1252,39 @@ def validate_schema(schema: dict) -> None:
                 )
 
     # -----------------------------------------------------------------------
+    # 7b. x-internal is an entity-level key only — reject field-level misuse
+    # -----------------------------------------------------------------------
+    # `x-internal` (schema-yaml-configuration.md §4.5) marks an ENTITY as
+    # excluded from pages/embedding. Every generator reference reads it off
+    # an entity definition (generate_types.py:123 "Skip x-internal
+    # entities", :322; the entity check above at :1218), never off a
+    # property. Declaring it under `fields: {<col>: {x-internal: true}}`
+    # (the entity-level key mistakenly written on a field, e.g. as a
+    # workaround for an unrelated template gap) is therefore silently
+    # accepted and silently does nothing — no exclusion happens for that
+    # field, and nothing else rejects it either (fail-open, cmd_903). This
+    # loop is deliberately NOT gated on the entity itself having a (correct)
+    # entity-level `x-internal` — the erroneous case by definition lacks one.
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        for prop_name, prop_def in defn.get('properties', {}).items():
+            if not isinstance(prop_def, dict):
+                continue
+            if 'x-internal' in prop_def:
+                errors.append(
+                    f"Definition '{def_key}', property '{prop_name}': "
+                    f"x-internal is an entity-level key (schema-yaml-"
+                    f"configuration.md §4.5), not a field-level one — the "
+                    f"generator never reads x-internal off a property, so "
+                    f"this is silently ignored at generation time. Remove "
+                    f"it from this field; if the intent is to exclude an "
+                    f"entire entity from pages/embedding, declare "
+                    f"x-internal (with page/embed/api keys) on that "
+                    f"entity's own definition instead."
+                )
+
+    # -----------------------------------------------------------------------
     # 6. x-bridge validation (new object form — clean break, array form rejected)
     # -----------------------------------------------------------------------
     for def_key, defn in defs.items():
