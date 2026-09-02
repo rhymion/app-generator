@@ -35,10 +35,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid file type.' }, { status: 400 });
     }
 
-    // Validate file size (max 10MB)
-    const maxSize = 10 * 1024 * 1024;
+    // Validate file size
+    const maxSize = Number(process.env.UPLOAD_MAX_BYTES ?? String(10 * 1024 * 1024)); // 10MB
     if (file.size > maxSize) {
-      return NextResponse.json({ error: 'File size exceeds 10MB limit' }, { status: 400 });
+      return NextResponse.json({ error: `File size exceeds ${maxSize} byte limit` }, { status: 400 });
     }
 
     // Generate unique directory path while preserving original filename

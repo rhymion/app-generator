@@ -14,7 +14,7 @@ import { getAssociatedOrganizations } from '@/lib/organization/getters_associate
 {% endif %}
 
 const MAX_IMPORT_ROWS = Number(process.env.IMPORT_MAX_ROWS ?? '5000');
-const MAX_IMPORT_BYTES = Number(process.env.IMPORT_MAX_BYTES ?? String(4 * 1024 * 1024)); // 4MB default (Vercel 4.5MB platform ceiling)
+const MAX_IMPORT_BYTES = Number(process.env.IMPORT_MAX_BYTES ?? String(10 * 1024 * 1024)); // 10MB
 
 type ImportRowError = { row: number; code: string; message: string };
 type ImportResult = {
