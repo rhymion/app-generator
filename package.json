@@ -129,7 +129,8 @@
     "eslint-config-next": {
       "minimatch": "^10.2.5"
     },
-    "deepmerge-ts": "^8.0.1"
+    "deepmerge-ts": "^8.0.1",
+    "mysql2": ">=3.22.0"
   },
   "devDependencies": {
     "@fontsource/noto-sans-jp": "^5.3.0",
