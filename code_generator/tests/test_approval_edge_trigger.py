@@ -226,10 +226,16 @@ class TestNoApprovableBridge:
         assert svc['approval_edge_trigger_update_code'] == ''
 
     def test_rendered_service_has_no_approval_references(self):
+        # 'afterCreate' is deliberately NOT asserted absent here (unlike
+        # 'approval_request'/'approval_flow') -- since cmd_923a it is a
+        # general-purpose post-create hook called unconditionally for every
+        # can_create entity, unrelated to approval. It is not itself
+        # approval-related code; only the two table-name substrings below
+        # are what this test guards against leaking into a no-approval
+        # entity's service.ts.
         rendered = _render_service(_entity('organization', 'organization'), _no_approval_schema())
         assert 'approval_request' not in rendered
         assert 'approval_flow' not in rendered
-        assert 'afterCreate' not in rendered
 
 
 # ---------------------------------------------------------------------------

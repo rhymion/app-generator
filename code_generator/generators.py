@@ -2887,6 +2887,10 @@ def _build_approval_edge_trigger_create_code(
         f"          where: {{ entity_name: '{parent}' }},\n"
         f"        }});\n"
         f"{inner}\n"
+        # cmd_923b: post-submit side effect hook, in-tx -- fires once per
+        # submit event regardless of how many approval_flow rows `inner`
+        # created above.
+        f"        await afterSubmit(tx, created.id, {approvable_var}.id);\n"
         f"      }}"
     )
     if submit_on_field is None:
@@ -3001,6 +3005,9 @@ def _build_approval_edge_trigger_update_code(
         f"          where: {{ entity_name: '{parent}' }},\n"
         f"        }});\n"
         f"{inner}\n"
+        # cmd_923b: post-submit side effect hook, in-tx -- symmetric to the
+        # create-time edge trigger (_build_approval_edge_trigger_create_code).
+        f"        await afterSubmit(tx, id, _prevApprovableId);\n"
         f"      }}\n"
         f"    }}"
     )
@@ -3027,10 +3034,14 @@ def _build_submit_for_approval_action_code(
     parallel mechanism with its own rules.
 
     cmd_847: reservation_code (has_reservation AND has_submit_on only) is
-    the allocation phase, built with row_var='row' -- the initial select
-    widens to the full row (dropping the narrow {approvable_fk: true}
-    select) whenever reservation_code is non-empty, since allocation reads
-    request/criteria fields off the row, not just its approvable FK.
+    the allocation phase, built with row_var='row'.
+
+    cmd_923b: the initial select always fetches the full row now (previously
+    narrowed to `{approvable_fk: true}` unless reservation_code needed more)
+    -- validateCustomRules below needs the pre-write row as `prevRow`, the
+    same contract service_validation.ts's validateOnUpdate already honors.
+    A wider select than reservation_code alone required is a strict superset,
+    so this is a no-op for entities that were already fetching the full row.
     """
     inner = _build_approval_create_block_for_entity(
         approvable_id_expr=f'row.{approvable_fk}',
@@ -3043,11 +3054,9 @@ def _build_submit_for_approval_action_code(
         target_id_expr='id',
     )
     lit = _ts_literal(submit_on_value)
-    _row_select = '' if reservation_code else f"      select: {{ {approvable_fk}: true }},\n"
     return (
         f"    const row = await tx.{model}.findUniqueOrThrow({{\n"
         f"      where: {{ id }},\n"
-        f"{_row_select}"
         f"    }});\n"
         f"    const _latestRoundRow = await tx.approval_request.findFirst({{\n"
         f"      where: {{ approvable_id: row.{approvable_fk} }},\n"
@@ -3063,6 +3072,14 @@ def _build_submit_for_approval_action_code(
         f"    if (!canSubmitForApproval(_latestRoundRequests)) {{\n"
         f"      return;\n"
         f"    }}\n"
+        # cmd_923b [変更8/乙7]: submit_for_approval previously wrote directly
+        # via tx.model.update() below with no validation at all -- the only
+        # write path in the generator that skipped validateCustomRules
+        # entirely. Routes through the SAME hook add{Parent}/update{Parent}
+        # already call (service_validation.ts's socket), rather than
+        # inventing a parallel one -- `data` here is just the single field
+        # this action actually writes, matching what the caller submitted.
+        f"    await validateCustomRules(tx, {{ {submit_on_field}: {lit} }}, id, row as unknown as Record<string, unknown>, actorId);\n"
         f"    await tx.{model}.update({{\n"
         f"      where: {{ id }},\n"
         f"      data: {{ {submit_on_field}: {lit} }},\n"
@@ -3076,7 +3093,10 @@ def _build_submit_for_approval_action_code(
         f"    const _approvalFlows = await tx.approval_flow.findMany({{\n"
         f"      where: {{ entity_name: '{parent}' }},\n"
         f"    }});\n"
-        f"{inner}"
+        f"{inner}\n"
+        # cmd_923b: post-submit side effect hook, in-tx -- symmetric to the
+        # create/update edge triggers.
+        f"    await afterSubmit(tx, id, row.{approvable_fk});"
     )
 
 
@@ -3611,6 +3631,24 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
             if (can_create or can_update) else ''
         )
         + (f"\nimport {{ assertNoDuplicateReservation }} from './service_validation';" if has_item_daterange and not (can_create or can_update) else '')
+        # cmd_923a: post-create side-effect hook, in-tx (see service_after_create.ts).
+        # Absolute '@/lib/{model}/...' path, not a relative './...' -- an
+        # allOf proxy view (model != parent, e.g. 'setting' -> 'user') has no
+        # Prisma model of its own and no service_after_create.ts stub of its
+        # own either (write-once guard is model == parent, generate.py); its
+        # add{{ parent_pascal }}() must import the model's stub instead, same
+        # as service_validation.ts's validateCustomRules import above.
+        + (f"\nimport {{ afterCreate }} from '@/lib/{model}/service_after_create';" if can_create else '')
+        # cmd_923b: post-update/post-delete/pre-delete hooks, same in-tx
+        # convention and absolute-path reasoning as afterCreate above.
+        + (f"\nimport {{ afterUpdate }} from '@/lib/{model}/service_after_update';" if can_update else '')
+        + (f"\nimport {{ afterDelete }} from '@/lib/{model}/service_after_delete';" if can_delete else '')
+        + (f"\nimport {{ validateOnDelete }} from '@/lib/{model}/service_validation_delete';" if can_delete else '')
+        # cmd_923b: post-submit side effect hook -- fires once per submit
+        # transition (create edge trigger / update edge trigger / the
+        # standalone submit_for_approval action all funnel through
+        # _build_approval_create_block_for_entity, which emits the call).
+        + (f"\nimport {{ afterSubmit }} from '@/lib/{model}/service_after_submit';" if has_approvable_bridge else '')
         + (f"\nimport {{ notify }} from '@/lib/_notifier';"
            if has_assignee_id or child_assignee_notify_create_code or child_assignee_notify_update_code else '')
         + (f"\nimport {{ notifyApprovalRequestCreated }} from '@/lib/_notifyApprovalRequest';"
@@ -3685,6 +3723,10 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'approval_edge_trigger_update_code':  approval_edge_trigger_update_code,
         'submit_for_approval_action_code':    submit_for_approval_action_code,
         'reservation_error_import_model':     reservation_error_import_model,
+        # cmd_923b: exposed so generate.py can gate the service_after_submit.ts
+        # write-once stub on the same predicate this function already uses to
+        # decide whether the submit edge-trigger/action code exists at all.
+        'has_approvable_bridge':              has_approvable_bridge,
     }
 
 

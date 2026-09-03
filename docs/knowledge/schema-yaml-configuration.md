@@ -1777,7 +1777,12 @@ export async function addLeaveRequest(...) {
     const created = await tx.leave_request.create({
       data: { ..., approvable_id: approvable.id },
     });
-    await afterCreate(tx, created as Record<string, unknown>, { ... });
+    // Approval-request creation itself is emitted inline here (edge-trigger
+    // code, see docs/knowledge/appendix/approval-flow.md §16.4) — not via
+    // the afterCreate hook below.
+    await afterCreate(tx, created.id);   // post-create hook, always called
+                                          // for a can_create entity — see
+                                          // docs/knowledge/post-create-side-effect-hook.md
     return { id: created.id };
   });
 }

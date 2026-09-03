@@ -11,8 +11,11 @@ notification can be created:
   1. `_build_approval_create_block_for_entity` / `_build_split_approval_inherit_block`
      (generators.py) — the shared inner blocks used by x-approval-lines and
      the split-action route.
-  2. `service_after_create_stub.ts.jinja2` — the top-level single-entity
-     afterCreate hook (Trigger #2).
+  2. `_build_approval_edge_trigger_create_code` (generators.py) — the
+     top-level single-entity trigger (Trigger #2), inline in service.ts.jinja2's
+     add{Parent} (replaces the retired service_after_create_stub.ts.jinja2
+     afterCreate hook this surface originally used — see the
+     "cmd_818" section below).
   3. `split_action_route.ts.jinja2` — the split-action route must create the
      child row BEFORE the approval block runs, or no target id exists yet
      to link to.

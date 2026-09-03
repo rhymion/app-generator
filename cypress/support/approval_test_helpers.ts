@@ -24,10 +24,12 @@ export async function getPendingApprovalRequest(approvable_id: string) {
 /**
  * cmd_541: seeds a two-stage `preceded_by` approval chain (flow2 preceded
  * by flow1) on a single approvable, with both flows' approval_request rows
- * created up front — the same shape service_after_create_stub.ts.jinja2
- * produces for a real entity (all flows' requests created together at
- * entity-creation time, before any of them are actionable except the
- * first). `entity_name: 'user'` is an arbitrary label (default-schema-safe,
+ * created up front — the same shape the generated edge-trigger code
+ * (`_build_approval_edge_trigger_create_code`, code_generator/generators.py;
+ * see docs/knowledge/appendix/approval-flow.md §16.4) produces for a real
+ * entity (all flows' requests created together at entity-creation time,
+ * before any of them are actionable except the first). `entity_name: 'user'`
+ * is an arbitrary label (default-schema-safe,
  * same convention as the earlier setupApprovalNotificationFixture) —
  * this fixture never touches a real `user`-entity approvable bridge.
  */
@@ -92,7 +94,7 @@ export async function setupMultiStageApprovalFixture() {
     data: { approvable_id: approvable.id, approval_flow_id: flow2.id, status: 'pending', round_id: roundId },
   });
 
-  // Mirror service_after_create_stub.ts.jinja2's for-loop: every flow's
+  // Mirror the generated edge-trigger code's for-loop: every flow's
   // approval_request gets its Trigger #2 creation notification up front,
   // regardless of whether that flow is actionable yet (§16.4/16.8 of
   // docs/knowledge/appendix/approval-flow.md) — so this fixture's baseline

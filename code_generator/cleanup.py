@@ -16,8 +16,19 @@ translations wholesale (cmd_560). See docs/knowledge/i18n-locale-routing.md.
 
 Stubs (form_validation.ts, service_validation.ts) are deleted unless
 --keep-stubs is passed, since they may contain user customizations.
-service_after_create.ts is generated write-once; cleanup deletes it only
-when the file still matches the original stub template output.
+service_after_create.ts (cmd_923a) is a permanent write-once hook stub, like
+service_validation_custom.ts -- never swept here, even for an orphaned
+entity, since a hand-customized copy is indistinguishable from a pristine
+one without re-rendering it per entity (the file's default body embeds the
+entity name in its docstring, unlike the truly boilerplate-invariant stubs
+this script does prune). The same applies to cmd_923b's six siblings --
+service_after_update.ts, service_after_delete.ts,
+service_validation_delete.ts, service_after_submit.ts,
+service_before_approve.ts, service_before_reject.ts, and
+service_before_withdraw.ts -- none of which this script explicitly deletes;
+they simply aren't in the file lists below, so a leftover copy in an
+orphaned entity's lib dir is (like service_after_create.ts) the reason
+_rmdir_tree() can leave that directory behind non-empty.
 
 --prune-orphans sweeps files that are generator-shaped but no longer
 expected by the current schema (e.g., a column_def.tsx left behind after
@@ -104,19 +115,6 @@ HANDWRITTEN_ALLOWLIST: frozenset[str] = frozenset([
     # seed script scaffold, always generated
     "scripts/generated/seed-entities.ts",
 ])
-
-# Boilerplate content of service_after_create.ts as emitted by
-# templates/service_after_create_stub.ts.jinja2. Mirror the template output
-# exactly (including trailing newline) so the equality check below stays
-# tight — any user customization, even reformatting, will preserve the file.
-_SERVICE_AFTER_CREATE_BOILERPLATE = (
-    "export async function afterCreate(\n"
-    "  _tx: unknown,\n"
-    "  _created: Record<string, unknown>,\n"
-    "  _data: Record<string, unknown>,\n"
-    "): Promise<void> {}\n"
-)
-
 
 # ---------------------------------------------------------------------------
 # File helpers
@@ -412,9 +410,8 @@ def _prune_orphans(out: Path, entities: list, keep_stubs: bool = False) -> None:
                 f = lib_dir / 'service_validation.ts'
                 if not _is_protected(f):
                     _delete(f)
-            sac = lib_dir / 'service_after_create.ts'
-            if not _is_protected(sac):
-                _delete_if_boilerplate(sac, _SERVICE_AFTER_CREATE_BOILERPLATE)
+            # service_after_create.ts (cmd_923a): permanent write-once stub,
+            # like service_validation_custom.ts just above -- never swept.
             _rmdir_tree(lib_dir)
 
     # components/<entity>/ — FormUpsert/FormView/form_validation for removed entities.
@@ -525,14 +522,8 @@ def _clean_schema_driven(out: Path, entities: list, test_entities: list,
             _delete(lib_dir / 'actions.ts')
             if not keep_stubs:
                 _delete(lib_dir / 'service_validation.ts')
-        # service_after_create.ts is generated with _write_stub (write-once,
-        # never overwritten — user may customize it). Delete only when the
-        # file still matches the original stub template output.
-        if can_new:
-            _delete_if_boilerplate(
-                lib_dir / 'service_after_create.ts',
-                _SERVICE_AFTER_CREATE_BOILERPLATE,
-            )
+        # service_after_create.ts (cmd_923a): permanent write-once stub, like
+        # service_validation_custom.ts -- never deleted here either.
         _delete(lib_dir / 'chart-getters.ts')  # safe if not present
 
         # components/

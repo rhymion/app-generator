@@ -5,6 +5,7 @@ import prisma from '@/lib/prisma';
 import { getUserRoleIds } from '@/lib/authz';
 import { assertApprovalOrder, findNewlyActionableFollowFlowIds } from '@/lib/approval_request/order-check';
 import { dispatchOnApproved } from '@/lib/approval_request/on_approved_dispatch';
+import { dispatchBeforeApprove } from '@/lib/approval_request/on_before_approve_dispatch';
 import { getApprovalRequestRecipient } from '@/lib/approval_request/actions';
 import { notify } from '@/lib/_notifier';
 import { notifyApprovalOrderReached } from '@/lib/_notifyApprovalRequest';
@@ -37,8 +38,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const updated = await prisma.$transaction(async (tx) => {
       const before = await tx.approval_request.findUnique({
         where: { id },
-        select: { status: true, approval_flow_id: true, round_id: true },
+        select: {
+          status: true,
+          approval_flow_id: true,
+          round_id: true,
+          // cmd_923b: needed to dispatch the pre-approval hook below, before
+          // any write happens in this transaction.
+          approvable_id: true,
+          approval_flow: { select: { entity_name: true } },
+        },
       });
+      if (before?.approval_flow && before.approvable_id) {
+        await dispatchBeforeApprove(tx, before.approval_flow.entity_name, before.approvable_id, userId);
+      }
       const result = await tx.approval_request.update({
         where: { id },
         data: { status: 'approved' },

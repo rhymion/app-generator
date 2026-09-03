@@ -97,8 +97,10 @@ The generator detects the `one-to-one_bridge` relationship and extends the norma
 
 ### 16.4 Edge-trigger: `x-approval.submit_on`
 
-`service_after_create.ts`'s write-once `afterCreate` hook is retired. Approval-request creation
-is now emitted directly into `service.ts.jinja2`'s `add{Parent}`/`update{Parent}` (built by
+Approval-request creation no longer goes through `service_after_create.ts`'s write-once
+`afterCreate` hook — that hook was retired for this purpose and later reinstated for an unrelated
+one (see `docs/knowledge/post-create-side-effect-hook.md`); approval-request creation is emitted
+directly into `service.ts.jinja2`'s `add{Parent}`/`update{Parent}` (built by
 `generators.py`'s `_build_approval_edge_trigger_create_code`/`_build_approval_edge_trigger_update_code`,
 `code_generator/generators.py`), for any entity with an `approvable` one-to-one_bridge — no
 custom-hook file to hand-edit.

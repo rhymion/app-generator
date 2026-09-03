@@ -254,20 +254,22 @@ would point at the admin, not at themselves.
 normally reachable — no default create form/route exists for `user`, and
 this is not expected to change in the default schema.
 
-**The write-once `afterCreate` hook this fix used to rely on is retired**
-(approval-request creation, its only other consumer, now emits inline into
-`service.ts.jinja2`'s generated code — see
-`docs/knowledge/appendix/approval-flow.md` §16.4). If a consumer project
-ever sets `user.x-generate.new` to `true`, this self-reference stamp needs
-a different landing spot; the straightforward option is to call
-`db.user.update({ where: { id }, data: { creator_id: id } })` from the
-caller's own code right after `addUser()` returns (it resolves to `{ id }`),
-outside the generated transaction. Verified previously against a live
-database (with the id stamped, a user created by an Administrator can
-read/update their own `/setting` row via `getModelPermissions('setting',
-...)`'s `x-self-only` `creator_id` filter; without it, access is correctly
-denied — reproducing the failure this fix exists to prevent) — that
-verification predates the `afterCreate` retirement and has not been
-re-run against the caller-side approach above. Not a current follow-up
-task, since the trigger condition (`user.new: true`) has never been set on
-any known consumer schema.
+**The write-once `afterCreate` hook this fix used to rely on was retired,
+then later reinstated** as a general-purpose, no-op-by-default post-create
+hook unrelated to approval-request creation (which still lives entirely in
+`service.ts.jinja2`'s inline edge-trigger code — see
+`docs/knowledge/appendix/approval-flow.md` §16.4; see
+`docs/knowledge/post-create-side-effect-hook.md` for the current contract).
+If a consumer project ever sets `user.x-generate.new` to `true`, the
+straightforward landing spot for this self-reference stamp is again
+`lib/user/service_after_create.ts`'s `afterCreate(tx, entityId)` — set
+`await tx.user.update({ where: { id: entityId }, data: { creator_id:
+entityId } })` inside it, in the same transaction as the create. Verified
+previously against a live database (with the id stamped, a user created by
+an Administrator can read/update their own `/setting` row via
+`getModelPermissions('setting', ...)`'s `x-self-only` `creator_id` filter;
+without it, access is correctly denied — reproducing the failure this fix
+exists to prevent) — that verification predates both the retirement and
+the reinstatement, and has not been re-run against this hook. Not a
+current follow-up task, since the trigger condition (`user.new: true`) has
+never been set on any known consumer schema.

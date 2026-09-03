@@ -6,6 +6,47 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Seven more in-tx write hooks, completing the set `afterCreate` started:
+  `afterUpdate`, `afterDelete`, `validateOnDelete`, `afterSubmit`,
+  `beforeApprove`, `beforeReject`, `beforeWithdraw`.** Same contract as
+  `afterCreate` throughout — run inside the write's own transaction, a
+  throw rolls back everything, default stub is a no-op — verified
+  empirically for each one (a temporary throwing stub, before/after row
+  count, restored to no-op immediately after). `afterUpdate`/`afterDelete`
+  mirror `afterCreate` exactly; `delete{Entity}` for a non-audited entity
+  is now wrapped in its own transaction for the first time (previously
+  several independent `prisma.*` calls with no shared rollback). `
+  validateOnDelete` is the delete-side counterpart to `validateCustomRules`
+  — a hand-written check can now reject a delete before it happens.
+  `afterSubmit` fires once per approval-flow submission, regardless of
+  whether it was reached via create, an ordinary edit, or the standalone
+  `submit_for_approval` action. The `submit_for_approval` action itself now
+  calls `validateCustomRules` before its write — previously the only
+  mutating path in the generator with no validation hook at all.
+  `beforeApprove`/`beforeReject`/`beforeWithdraw` are the pre-action
+  counterparts to the existing `afterApprove`/`afterReject`/`afterWithdraw`,
+  called from both the REST approval routes and the Server Action path
+  before `approval_request.status` is written. See
+  `docs/knowledge/post-create-side-effect-hook.md`.
+
+- **Post-create side-effect hook (`lib/{entity}/service_after_create.ts`,
+  `afterCreate(tx, entityId)`) reinstated for every `can_create` entity,
+  called in-tx.** A write-once, no-op-by-default stub — same convention as
+  `service_validation_custom.ts` — called from inside `add{Parent}()`'s own
+  `prisma.$transaction()`, after the row and its own nested-create machinery
+  are fully written. A throw inside it rolls back the entire create,
+  including the row itself, verified empirically (a temporary throwing stub
+  left zero rows and zero leaked data after the call failed). This is the
+  first of eight post-create/pre-mutation hooks required to share this
+  in-tx, throw-rolls-back-everything contract, matching the existing
+  `afterApprove` pattern; the other seven follow in later changes. This
+  particular file name and function existed once before for a different,
+  narrower purpose (creating `approval_request` rows on create) and was
+  retired when that moved to inline generated code — this is an unrelated
+  reinstatement; approval-request creation is untouched and still lives
+  entirely in that inline code. See
+  `docs/knowledge/post-create-side-effect-hook.md`.
+
 - **`validateCustomRules()` (`lib/{entity}/service_validation_custom.ts`)
   now also receives `actorId`, the id of the user performing the write.**
   A hand-written rule can now stamp a system-owned row (e.g. an
