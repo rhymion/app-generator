@@ -6,6 +6,17 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **New field-level schema key `x-fk-constrained`** for an optional
+  many-to-one FK field whose valid values are constrained relative to
+  another already-set field on the same row (an invariant only a
+  hand-written custom validator can enforce). Excludes the field from the
+  generated "adds optional data and child items" test's independent
+  per-field autofill, which has no way to satisfy a cross-field constraint
+  it doesn't know exists — the field's create-time coverage is unaffected,
+  since the "creates with full data" test fills it via the entity's own
+  full-data populate helper instead. See
+  `docs/knowledge/schema-yaml-configuration.md` §4.8.
+
 - **Seven more in-tx write hooks, completing the set `afterCreate` started:
   `afterUpdate`, `afterDelete`, `validateOnDelete`, `afterSubmit`,
   `beforeApprove`, `beforeReject`, `beforeWithdraw`.** Same contract as
