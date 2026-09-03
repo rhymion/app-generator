@@ -3611,6 +3611,14 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
             if (can_create or can_update) else ''
         )
         + (f"\nimport {{ assertNoDuplicateReservation }} from './service_validation';" if has_item_daterange and not (can_create or can_update) else '')
+        # cmd_923a: post-create side-effect hook, in-tx (see service_after_create.ts).
+        # Absolute '@/lib/{model}/...' path, not a relative './...' -- an
+        # allOf proxy view (model != parent, e.g. 'setting' -> 'user') has no
+        # Prisma model of its own and no service_after_create.ts stub of its
+        # own either (write-once guard is model == parent, generate.py); its
+        # add{{ parent_pascal }}() must import the model's stub instead, same
+        # as service_validation.ts's validateCustomRules import above.
+        + (f"\nimport {{ afterCreate }} from '@/lib/{model}/service_after_create';" if can_create else '')
         + (f"\nimport {{ notify }} from '@/lib/_notifier';"
            if has_assignee_id or child_assignee_notify_create_code or child_assignee_notify_update_code else '')
         + (f"\nimport {{ notifyApprovalRequestCreated }} from '@/lib/_notifyApprovalRequest';"

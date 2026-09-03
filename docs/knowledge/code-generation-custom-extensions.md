@@ -3,10 +3,13 @@
 The code generator (under ./code_generator) overwrites most files on every run. To minimize manual re-work while still supporting entity-specific logic, extension points have been established. Each follows the same principle: the generator produces a boilerplate file that delegates to a separate, user-maintained file that is **never overwritten**.
 
 A fifth extension point, the post-create hook (`lib/{entity}/service_after_create.ts`, an
-`afterCreate` call inside `service.ts`'s create transaction), is retired — approval-request
-creation, its one real consumer, now emits directly into `service.ts.jinja2`'s generated code
-(see `docs/knowledge/appendix/approval-flow.md` §16.4). A hand-written `service_after_create.ts`
-left over from before the retirement is simply unused; it is no longer imported by anything.
+`afterCreate(tx, entityId)` call inside `service.ts`'s create transaction), was retired once --
+approval-request creation, its original consumer, moved to inline edge-trigger code in
+`service.ts.jinja2` (see `docs/knowledge/appendix/approval-flow.md` §16.4) -- and later reinstated
+as a general-purpose, no-op-by-default hook for arbitrary post-create side effects, unrelated to
+approval-request creation (which still lives entirely in the edge-trigger code). See
+`docs/knowledge/post-create-side-effect-hook.md` for the current contract: called in-tx, a throw
+rolls back the whole create.
 
 ---
 
@@ -335,4 +338,5 @@ components/{entity}/
 lib/{entity}/
   service.ts                  ← overwritten by generator
   service_validation.ts       ← stub created once, never overwritten
+  service_after_create.ts     ← stub created once, never overwritten (new:true entities only)
 ```

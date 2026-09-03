@@ -1051,6 +1051,33 @@ def generate(schema_path: str, output_dir: str) -> None:
                 }),
             )
 
+        # --- post-create side-effect hook write-once stub (cmd_923a) ---
+        #
+        # Same model == parent guard as service_validation_custom.ts above,
+        # for the same reason: an allOf proxy view (model != parent) has no
+        # Prisma model of its own, and service.ts.jinja2 imports afterCreate
+        # from '@/lib/{{ model }}/...', never from the proxy's own lib dir --
+        # a stub written at the proxy's lib_dir would never be imported.
+        #
+        # Unconditional on can_new here (unlike the call site in
+        # service.ts.jinja2, which IS gated on can_create) -- deliberately
+        # mirrors service_validation_custom.ts's own unconditional write
+        # just above. A proxy view sharing this model can independently
+        # declare x-generate.new: true even when the canonical (model ==
+        # parent) entity itself has create disabled; that proxy's
+        # add{{ parent_pascal }}() imports this same file via the absolute
+        # '@/lib/{{ model }}/...' path (see generators.py utility_code), so
+        # the stub must exist regardless of the canonical entity's own
+        # can_new value.
+        if model == parent:
+            _write_stub(
+                lib_dir / 'service_after_create.ts',
+                _render(env, 'service_after_create_stub.ts.jinja2', {
+                    'parent': parent,
+                    'parent_pascal': parent_pascal,
+                }),
+            )
+
         # --- virtual column resolver stub (per-entity, async/bulk) ---
         if ctx.get('virtual_columns'):
             vr_path = lib_dir / 'virtual_resolvers.ts'

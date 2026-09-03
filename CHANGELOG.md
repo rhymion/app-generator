@@ -6,6 +6,24 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Post-create side-effect hook (`lib/{entity}/service_after_create.ts`,
+  `afterCreate(tx, entityId)`) reinstated for every `can_create` entity,
+  called in-tx.** A write-once, no-op-by-default stub — same convention as
+  `service_validation_custom.ts` — called from inside `add{Parent}()`'s own
+  `prisma.$transaction()`, after the row and its own nested-create machinery
+  are fully written. A throw inside it rolls back the entire create,
+  including the row itself, verified empirically (a temporary throwing stub
+  left zero rows and zero leaked data after the call failed). This is the
+  first of eight post-create/pre-mutation hooks required to share this
+  in-tx, throw-rolls-back-everything contract, matching the existing
+  `afterApprove` pattern; the other seven follow in later changes. This
+  particular file name and function existed once before for a different,
+  narrower purpose (creating `approval_request` rows on create) and was
+  retired when that moved to inline generated code — this is an unrelated
+  reinstatement; approval-request creation is untouched and still lives
+  entirely in that inline code. See
+  `docs/knowledge/post-create-side-effect-hook.md`.
+
 - **`validateCustomRules()` (`lib/{entity}/service_validation_custom.ts`)
   now also receives `actorId`, the id of the user performing the write.**
   A hand-written rule can now stamp a system-owned row (e.g. an
