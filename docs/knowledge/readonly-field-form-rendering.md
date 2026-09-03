@@ -148,6 +148,52 @@ coverage: `code_generator/tests/test_scheduled_task_templates.py`'s
 `x-readonly` (per-property) was deliberately left unchanged — see the
 scope list above.
 
+## `x-generate.fields` filters, `x-display.form` only orders
+
+Three keys look related — all three are declared on a view entity and all
+three affect its generated edit form — but only one of them actually
+restricts which fields render. Mixing them up produces exactly the wrong
+conclusion about which key to reach for.
+
+- **`x-generate.fields`** (entity-level list) is the **filter**. It is
+  view-scoped: `schema_helpers.py`'s `filter_fields()` keeps only the
+  listed properties (plus `id`/timestamps) for that view's own definition,
+  so two views sharing the same raw model can each declare a different
+  subset — one view's list has no effect on any other view's rendered
+  fields.
+- **`x-display.form`** is **not** a filter — it only reorders the fields a
+  view already renders. It is also **not view-scoped**: the form/view-order
+  helpers in `build_context.py`/`generators.py` resolve it from the shared
+  raw model backing the view, not from the view's own definition, so it
+  cannot vary per view the way `x-generate.fields` can.
+- **`x-readonly-fields`** (entity-level list, view-scoped) does neither of
+  the above — it makes already-rendered fields non-editable. The field
+  still renders, just as read-only display; it is not a way to remove a
+  field from the form.
+
+**Verified against a real, live example** — `user` and its Proxy View
+`setting` (both resolve to the same raw model, `__user`): `user` declares
+`x-generate.fields: [name, image_id, roles]` and `setting` declares
+`x-generate.fields: [name, email, image_id, password, api_key,
+mfa_enabled]`. Their generated `FormUpsert.tsx` files render exactly their
+own list and nothing else — `user`'s form has no email/password/api_key/
+mfa_enabled inputs at all, and `setting`'s form has all of them plus
+`email`, neither leaking into the other — confirming `x-generate.fields`
+filters per-view, independent of the shared raw model. `x-display` itself,
+by contrast, lives only on the raw entity (`__user`) in the built schema —
+neither `user` nor `setting`'s own view definition carries it — confirming
+it is raw-model-tied, not view-scoped, which is why it cannot be used to
+vary which fields render across views of the same model the way
+`x-generate.fields` can.
+
+_Provenance: originally recorded as a schema comment in a consumer
+project's Proxy View entity, documenting a gap found while building that
+entity. Moved here when that entity was later retired, so the generator's
+behavior is documented independent of any particular consumer entity. An
+earlier version of this section incorrectly concluded that no key can
+restrict which fields a Proxy View's form renders except `x-readonly-fields`
+— `x-generate.fields` does exactly that, and was overlooked._
+
 ## DataGrid child support
 
 Both `x-readonly` and `x-readonly-fields` also reach a DataGrid child (an
