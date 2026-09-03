@@ -3288,6 +3288,26 @@ def spec_context(
     )
     for _f in fields:
         _f['readonly'] = _f['prop_name'] in _readonly_props
+    # x-fk-constrained (cmd_935/subtask_935d): an optional FK field whose valid
+    # values are constrained relative to ANOTHER already-set field on the same
+    # row (a cross-field invariant enforced by hand-written custom validation,
+    # not expressible in json_schema.yaml -- e.g. shipment_line.inventory_id
+    # must reference a row for the same item as shipment_line.item_id).
+    # Section 3.1's generic optional-fill step (below) selects a value for
+    # each optional FK independently of every other field on the row, using
+    # whatever dependency fixture populate*Dependencies() happened to seed --
+    # there is no way for that generic, per-field selection to know about or
+    # satisfy a sibling-field invariant. Marking the field here excludes it
+    # from 3.1's fill step only; 3.2 (its clear-command generation already
+    # excludes every autocomplete-category field categorically, unrelated to
+    # this key) and 2.2 (which fills full data internally consistent via
+    # populate*Full(), not this per-field path) are unaffected.
+    _fk_constrained_props = {
+        pn for pn, prop in properties.items()
+        if isinstance(prop, dict) and prop.get('x-fk-constrained')
+    }
+    for _f in fields:
+        _f['fk_constrained'] = _f['prop_name'] in _fk_constrained_props
     deps = resolve_dependencies(model_name, schema)
 
     # Collect ALL user_account FK fields (required and optional) for fill/assert commands.
@@ -3867,10 +3887,10 @@ def spec_context(
     opt_fill_cmds_3_1_non_ac = [
         gen_fill_command(f, cypress_create_value(f, title), '        ')
         for f in optional_field_metas
-        if f['category'] != 'autocomplete' and not f.get('readonly')
+        if f['category'] != 'autocomplete' and not f.get('readonly') and not f.get('fk_constrained')
     ]
     opt_fill_cmds_3_1_ac = gen_fill_commands(
-        [f for f in optional_field_metas if f['category'] == 'autocomplete'],
+        [f for f in optional_field_metas if f['category'] == 'autocomplete' and not f.get('fk_constrained')],
         title, '        ', fk_dep_vars, dep_search_info,
     ) if use_deps_in_3_1 else []
     # Optional UA FK fields (excluded from field_metas; appended separately via all_ua_spec)

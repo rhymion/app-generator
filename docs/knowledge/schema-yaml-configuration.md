@@ -729,6 +729,44 @@ type-dispatch table and the cross-view scoping fix's test coverage.
 
 ---
 
+### 4.8 Cross-Field FK Consistency (`x-fk-constrained`)
+
+Marks an optional many-to-one FK field (`fields: { <prop>: { x-fk-constrained: true } }`) whose
+valid values are constrained relative to another already-set field on the same row — an
+invariant enforced by hand-written custom validation (`service_validation_custom.ts`), not
+expressible as a declarative schema key.
+
+```yaml
+fields:
+  inventory_id:
+    x-relationship:
+      labelField: [item.sku, location.code, lot_number, expiration_date]
+    x-fk-constrained: true   # inventory.item_id must match this row's item_id
+```
+
+**Why this exists**: the generated "3.1 adds optional data and child items" Cypress test fills
+every optional field independently — for an autocomplete FK, it selects whatever
+`populate{Entity}Dependencies()` seeded, with no awareness of any other field already set on the
+row. If the field's real-world validity depends on a sibling field's value (e.g. a shipment
+line's inventory FK must reference an inventory row for the same item as the line's own item
+FK), the independently-selected dependency value can violate that invariant — the server
+correctly rejects the write, and the generic test fails, not because of a product bug but
+because the generic single-field fill step has no way to satisfy a cross-field constraint it
+doesn't know exists.
+
+**Effect**: excludes the field from Section 3.1's fill step only.
+
+- Section 3.2 ("removes optional data") is unaffected — its clear-command generation already
+  excludes every autocomplete-category (FK) field categorically, independent of this key.
+- Section 2.2 ("creates with full data") is unaffected — it fills the field via
+  `populate{Entity}Full()`, which seeds all of a row's fields together in a mutually consistent
+  way, not through this per-field independent-selection path.
+
+Declare it only on the field that receives the constraint (the field whose independently-selected
+value can violate an invariant tied to another field), not the field it must stay consistent with.
+
+---
+
 ## 5. Many-to-One Relationships (`x-relationship`)
 
 Declare a many-to-one FK field under `fields:` — or, when its resolved object also appears in
