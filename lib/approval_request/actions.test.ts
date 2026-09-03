@@ -113,6 +113,12 @@ const dispatchOnWithdrawn = vi.fn();
 // declares on_withdrawn" case it always implicitly assumed; the lockout
 // itself is covered by dedicated tests below with this mocked false.
 const hasOnWithdrawn = vi.fn(() => true);
+// cmd_923b: pre-action validation dispatchers -- called before any write in
+// approve/reject/withdraw's own transaction. Default no-op resolves void,
+// same as the after-hook dispatch mocks above.
+const dispatchBeforeApprove = vi.fn();
+const dispatchBeforeReject = vi.fn();
+const dispatchBeforeWithdraw = vi.fn();
 
 const {
   getApprovalRequestRecipient, approveApprovalRequest, rejectApprovalRequest, withdrawApprovalRequest,
@@ -124,6 +130,9 @@ const {
   isTerminalReject,
   dispatchOnWithdrawn,
   hasOnWithdrawn,
+  dispatchBeforeApprove,
+  dispatchBeforeReject,
+  dispatchBeforeWithdraw,
 });
 
 // Fake tx client shared by every prisma.$transaction(cb) call in
@@ -153,6 +162,9 @@ beforeEach(() => {
   isTerminalReject.mockReset().mockReturnValue(false);
   dispatchOnWithdrawn.mockReset();
   hasOnWithdrawn.mockReset().mockReturnValue(true);
+  dispatchBeforeApprove.mockReset();
+  dispatchBeforeReject.mockReset();
+  dispatchBeforeWithdraw.mockReset();
   transactionMock.mockReset().mockImplementation(async (cb) => cb(fakeTx));
   vi.mocked(getSessionUserIdOrThrow).mockReset().mockResolvedValue('user-1');
   vi.mocked(getUserRoleIds).mockReset().mockResolvedValue(['approver-role']);
@@ -583,7 +595,7 @@ describe('resubmitApprovalRequest removal (cmd_818 E6)', () => {
   it('is not present on the actions object createApprovalActions returns', () => {
     const actions = createApprovalActions({
       resolveApprovableTarget, resolveApprovableModel, dispatchOnApproved, dispatchOnRejected, isTerminalReject,
-      hasOnWithdrawn, dispatchOnWithdrawn,
+      hasOnWithdrawn, dispatchOnWithdrawn, dispatchBeforeApprove, dispatchBeforeReject, dispatchBeforeWithdraw,
     });
     expect('resubmitApprovalRequest' in actions).toBe(false);
   });
@@ -654,6 +666,76 @@ describe('entity_name -> model translation before dispatch (cmd_818 GROUP C5)', 
     await rejectApprovalRequest('req-1');
 
     expect(isTerminalReject).not.toHaveBeenCalled();
+    expect(dispatchOnRejected).not.toHaveBeenCalled();
+  });
+});
+
+describe('pre-action dispatch (cmd_923b)', () => {
+  it('approveApprovalRequest dispatches beforeApprove before the status write', async () => {
+    findUnique.mockResolvedValue({
+      approvable_id: 'appr-1',
+      round_id: 'round-1',
+      approval_flow: { entity_name: 'leave_request', approver_role_id: 'approver-role' },
+      approvable: { creator_id: 'creator-1' },
+    });
+    arUpdate.mockResolvedValue({
+      status: 'approved',
+      approvable_id: 'appr-1',
+      round_id: 'round-1',
+      approval_flow: { entity_name: 'leave_request' },
+    });
+    txArFindMany.mockResolvedValue([{ status: 'approved' }]);
+    approvableFindUnique.mockResolvedValue({ id: 'appr-1', approved_at: null });
+    resolveApprovableTarget.mockResolvedValue({ id: 'lr-1' });
+
+    await approveApprovalRequest('req-1');
+
+    expect(dispatchBeforeApprove).toHaveBeenCalledWith(expect.anything(), 'leave_request', 'appr-1', 'user-1');
+  });
+
+  it('rolls back the approval when beforeApprove throws', async () => {
+    findUnique.mockResolvedValue({
+      approvable_id: 'appr-1',
+      round_id: 'round-1',
+      approval_flow: { entity_name: 'leave_request', approver_role_id: 'approver-role' },
+      approvable: { creator_id: 'creator-1' },
+    });
+    dispatchBeforeApprove.mockRejectedValueOnce(new Error('blocked by custom rule'));
+
+    await expect(approveApprovalRequest('req-1')).rejects.toThrow('blocked by custom rule');
+
+    expect(arUpdate).not.toHaveBeenCalled();
+    expect(dispatchOnApproved).not.toHaveBeenCalled();
+  });
+
+  it('rejectApprovalRequest dispatches beforeReject before the status write', async () => {
+    findUnique.mockResolvedValue({
+      approvable_id: 'appr-1',
+      round_id: 'round-1',
+      approval_flow: { entity_name: 'leave_request', approver_role_id: 'approver-role' },
+      approvable: { creator_id: 'creator-1' },
+    });
+    arUpdate.mockResolvedValue({ id: 'req-1', status: 'rejected', approvable_id: 'appr-1' });
+    approvableFindUnique.mockResolvedValue({ id: 'appr-1', approved_at: null });
+    resolveApprovableTarget.mockResolvedValue({ id: 'lr-1' });
+
+    await rejectApprovalRequest('req-1');
+
+    expect(dispatchBeforeReject).toHaveBeenCalledWith(expect.anything(), 'leave_request', 'appr-1', 'user-1');
+  });
+
+  it('rolls back the rejection when beforeReject throws', async () => {
+    findUnique.mockResolvedValue({
+      approvable_id: 'appr-1',
+      round_id: 'round-1',
+      approval_flow: { entity_name: 'leave_request', approver_role_id: 'approver-role' },
+      approvable: { creator_id: 'creator-1' },
+    });
+    dispatchBeforeReject.mockRejectedValueOnce(new Error('blocked by custom rule'));
+
+    await expect(rejectApprovalRequest('req-1')).rejects.toThrow('blocked by custom rule');
+
+    expect(arUpdate).not.toHaveBeenCalled();
     expect(dispatchOnRejected).not.toHaveBeenCalled();
   });
 });
@@ -808,6 +890,37 @@ describe('withdrawApprovalRequest (cmd_825/cmd_844)', () => {
     await withdrawApprovalRequest('appr-1');
 
     expect(dispatchOnWithdrawn).toHaveBeenCalledWith(expect.anything(), 'leave_request', 'appr-1');
+  });
+
+  // cmd_923b: pre-withdrawal dispatch, called before any write in the same
+  // transaction -- a throw rejects the withdrawal entirely.
+  it('dispatches beforeWithdraw before the status write', async () => {
+    stubOwnedByRequestor();
+    txArFindMany.mockResolvedValue([
+      { id: 'req-2', status: 'pending', approval_flow: { entity_name: 'leave_request' } },
+    ]);
+    findUnique.mockResolvedValue({
+      approvable_id: 'appr-1',
+      approval_flow: { entity_name: 'leave_request' },
+      approvable: { creator_id: 'user-1' },
+    });
+
+    await withdrawApprovalRequest('appr-1');
+
+    expect(dispatchBeforeWithdraw).toHaveBeenCalledWith(expect.anything(), 'leave_request', 'appr-1', 'user-1');
+  });
+
+  it('rolls back the withdrawal when beforeWithdraw throws', async () => {
+    stubOwnedByRequestor();
+    txArFindMany.mockResolvedValue([
+      { id: 'req-2', status: 'pending', approval_flow: { entity_name: 'leave_request' } },
+    ]);
+    dispatchBeforeWithdraw.mockRejectedValueOnce(new Error('blocked by custom rule'));
+
+    await expect(withdrawApprovalRequest('appr-1')).rejects.toThrow('blocked by custom rule');
+
+    expect(arUpdateMany).not.toHaveBeenCalled();
+    expect(dispatchOnWithdrawn).not.toHaveBeenCalled();
   });
 
   it('resolves dispatchOnWithdrawn against the model, not the view key', async () => {

@@ -3,6 +3,7 @@ import { requireDualAuth, handleApiError } from '@/lib/api-auth';
 import { ApiError } from '@/lib/api-auth';
 import prisma from '@/lib/prisma';
 import { dispatchOnWithdrawn, ENTITIES_WITH_ON_WITHDRAWN } from '@/lib/approval_request/on_withdrawn_dispatch';
+import { dispatchBeforeWithdraw } from '@/lib/approval_request/on_before_withdraw_dispatch';
 import { resolveApprovableModel } from '@/lib/approval_request/resolve_target';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -82,6 +83,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       if (pendingRows.length === 0) {
         throw new ApiError(400, 'No pending requests to withdraw');
       }
+
+      // cmd_923b: pre-withdrawal dispatch, before any write in this
+      // transaction -- a throw here rejects the withdrawal attempt
+      // entirely. modelName is guaranteed non-null here, same as the
+      // dispatchOnWithdrawn call below.
+      await dispatchBeforeWithdraw(tx, modelName, req.approvable_id, userId);
 
       await tx.approval_request.updateMany({
         where: { id: { in: pendingRows.map((r) => r.id) } },

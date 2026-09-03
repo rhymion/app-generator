@@ -19,6 +19,11 @@ import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
 import { createId } from '@paralleldrive/cuid2';
 import { canSubmitForApproval } from '@/lib/approval_request/submit_predicate';
 import { revalidatePath } from 'next/cache';
+// cmd_923b: same convergence-point/absolute-path convention as
+// service.ts.jinja2's afterCreate import -- see generators.py's
+// service_context() utility_code for the full rationale.
+import { validateCustomRules } from '@/lib/{{ model }}/service_validation_custom';
+import { afterSubmit } from '@/lib/{{ model }}/service_after_submit';
 {% if reservation_error_import_model %}
 import { InsufficientPoolCapacityError } from '@/lib/{{ reservation_error_import_model }}/service';
 {% endif %}

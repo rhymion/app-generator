@@ -1078,6 +1078,45 @@ def generate(schema_path: str, output_dir: str) -> None:
                 }),
             )
 
+        # --- post-update/post-delete/pre-delete/post-submit write-once
+        # stubs (cmd_923b) ---
+        #
+        # Same model == parent guard, and the same "unconditional on this
+        # view's own can_edit/can_delete" reasoning, as service_after_create.ts
+        # above -- a proxy view sharing this model can independently enable
+        # edit/delete/submit even when the canonical entity itself has that
+        # operation disabled, and its generated service.ts imports these
+        # stubs via the absolute '@/lib/{{ model }}/...' path regardless.
+        if model == parent:
+            _write_stub(
+                lib_dir / 'service_after_update.ts',
+                _render(env, 'service_after_update_stub.ts.jinja2', {
+                    'parent': parent,
+                    'parent_pascal': parent_pascal,
+                }),
+            )
+            _write_stub(
+                lib_dir / 'service_after_delete.ts',
+                _render(env, 'service_after_delete_stub.ts.jinja2', {
+                    'parent': parent,
+                    'parent_pascal': parent_pascal,
+                }),
+            )
+            _write_stub(
+                lib_dir / 'service_validation_delete.ts',
+                _render(env, 'service_validation_delete_stub.ts.jinja2', {
+                    'parent': parent,
+                    'parent_pascal': parent_pascal,
+                }),
+            )
+            _write_stub(
+                lib_dir / 'service_after_submit.ts',
+                _render(env, 'service_after_submit_stub.ts.jinja2', {
+                    'parent': parent,
+                    'parent_pascal': parent_pascal,
+                }),
+            )
+
         # --- virtual column resolver stub (per-entity, async/bulk) ---
         if ctx.get('virtual_columns'):
             vr_path = lib_dir / 'virtual_resolvers.ts'
@@ -2079,6 +2118,66 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _render(env, 'service_after_withdraw_stub.ts.jinja2', ent),
             )
             print(f"  Withdrawal stub → lib/{ent['snake_name']}/service_after_withdraw.ts")
+
+    # --- Pre-approve/pre-reject/pre-withdraw dispatch (cmd_923b) ---
+    #
+    # Symmetric to the on_approved/on_rejected/on_withdrawn dispatch modules
+    # above, but unconditional -- no emit_hook opt-in -- since these are
+    # validation sockets (like validateCustomRules), not opt-in side-effect
+    # hooks. beforeApprove/beforeReject apply to every entity declaring
+    # x-approval at all (approve/reject are always reachable regardless of
+    # what an entity's x-approval block actually configures); beforeWithdraw
+    # is scoped to withdrawable_entities (x-approval.on_withdrawn declared)
+    # only, since withdrawal itself is blocked upstream (hasOnWithdrawn) for
+    # any entity that doesn't declare it -- a stub without that scoping
+    # would be dead code (see service_before_withdraw_stub.ts.jinja2).
+    approval_entities = []
+    for def_key, def_val in defs.items():
+        if not def_key.startswith('__'):
+            continue
+        x_approval = def_val.get('x-approval')
+        if not x_approval:
+            continue
+        def_key = def_key[2:]
+        approval_entities.append({
+            'snake_name': def_key,
+            'pascal_name': to_pascal_case(def_key),
+        })
+    _write(
+        out / 'lib' / 'approval_request' / 'on_before_approve_dispatch.ts',
+        _render(env, 'on_before_approve_dispatch.ts.jinja2', {'approval_entities': approval_entities}),
+    )
+    print(f'  Pre-approval dispatch → lib/approval_request/on_before_approve_dispatch.ts ({len(approval_entities)} entities)')
+    for ent in approval_entities:
+        _write_stub(
+            out / 'lib' / ent['snake_name'] / 'service_before_approve.ts',
+            _render(env, 'service_before_approve_stub.ts.jinja2', ent),
+        )
+        print(f"  Pre-approval stub → lib/{ent['snake_name']}/service_before_approve.ts")
+
+    _write(
+        out / 'lib' / 'approval_request' / 'on_before_reject_dispatch.ts',
+        _render(env, 'on_before_reject_dispatch.ts.jinja2', {'approval_entities': approval_entities}),
+    )
+    print(f'  Pre-rejection dispatch → lib/approval_request/on_before_reject_dispatch.ts ({len(approval_entities)} entities)')
+    for ent in approval_entities:
+        _write_stub(
+            out / 'lib' / ent['snake_name'] / 'service_before_reject.ts',
+            _render(env, 'service_before_reject_stub.ts.jinja2', ent),
+        )
+        print(f"  Pre-rejection stub → lib/{ent['snake_name']}/service_before_reject.ts")
+
+    _write(
+        out / 'lib' / 'approval_request' / 'on_before_withdraw_dispatch.ts',
+        _render(env, 'on_before_withdraw_dispatch.ts.jinja2', {'withdrawable_entities': withdrawable_entities}),
+    )
+    print(f'  Pre-withdrawal dispatch → lib/approval_request/on_before_withdraw_dispatch.ts ({len(withdrawable_entities)} entities)')
+    for ent in withdrawable_entities:
+        _write_stub(
+            out / 'lib' / ent['snake_name'] / 'service_before_withdraw.ts',
+            _render(env, 'service_before_withdraw_stub.ts.jinja2', ent),
+        )
+        print(f"  Pre-withdrawal stub → lib/{ent['snake_name']}/service_before_withdraw.ts")
 
     # --- Scheduled tasks (lib/{entity}/service_scheduled.ts + lib/scheduled-tasks/
     #     registry.ts + app/api/scheduled-tasks/[task]/route.ts) ---

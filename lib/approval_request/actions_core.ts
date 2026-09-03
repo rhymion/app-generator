@@ -62,6 +62,29 @@ export type ApprovalActionDeps = {
   // resubmission-safe path back out of 'withdrawn' -- withdrawApprovalRequest
   // must block the withdrawal itself, not just let dispatchOnWithdrawn no-op.
   hasOnWithdrawn: (modelName: string) => boolean;
+  // cmd_923b: pre-action validation dispatch -- called BEFORE the
+  // approval_request status write, inside the same transaction, so a throw
+  // rejects the action entirely. Symmetric to the dispatchOn*/after-hook
+  // dispatchers above, but unconditional (see on_before_approve_dispatch.ts
+  // .jinja2's own doc for why these aren't emit_hook-gated).
+  dispatchBeforeApprove: (
+    tx: TransactionClient,
+    modelName: string,
+    approvableId: string,
+    actorId: string,
+  ) => Promise<void>;
+  dispatchBeforeReject: (
+    tx: TransactionClient,
+    modelName: string,
+    approvableId: string,
+    actorId: string,
+  ) => Promise<void>;
+  dispatchBeforeWithdraw: (
+    tx: TransactionClient,
+    modelName: string,
+    approvableId: string,
+    actorId: string,
+  ) => Promise<void>;
 };
 
 export function createApprovalActions(deps: ApprovalActionDeps) {
@@ -145,8 +168,22 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
     await prisma.$transaction(async (tx) => {
       const before = await tx.approval_request.findUnique({
         where: { id },
-        select: { status: true, approval_flow_id: true, round_id: true },
+        select: {
+          status: true,
+          approval_flow_id: true,
+          round_id: true,
+          // cmd_923b: needed to resolve the pre-approval dispatch target
+          // BEFORE the status write below -- see dispatchBeforeApprove call.
+          approvable_id: true,
+          approval_flow: { select: { entity_name: true } },
+        },
       });
+      if (before?.approval_flow) {
+        const _beforeModelName = deps.resolveApprovableModel(before.approval_flow.entity_name);
+        if (_beforeModelName) {
+          await deps.dispatchBeforeApprove(tx, _beforeModelName, before.approvable_id, userId);
+        }
+      }
       const req = await tx.approval_request.update({
         where: { id },
         data: { status: 'approved' },
@@ -241,13 +278,23 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
     await prisma.$transaction(async (tx) => {
       const req = await tx.approval_request.findUnique({
         where: { id },
-        select: { round_id: true, approval_flow: { select: { entity_name: true } } },
+        select: {
+          round_id: true,
+          approvable_id: true,
+          approval_flow: { select: { entity_name: true } },
+        },
       });
       if (!req?.approval_flow) throw new Error('Approval request not found');
 
       const _modelName = deps.resolveApprovableModel(req.approval_flow.entity_name);
       const terminal = _modelName != null && deps.isTerminalReject(_modelName);
       newStatus = terminal ? 'terminal_rejected' : 'rejected';
+
+      // cmd_923b: pre-rejection dispatch, before any write in this
+      // transaction -- a throw here rejects the rejection attempt entirely.
+      if (_modelName && req.approvable_id) {
+        await deps.dispatchBeforeReject(tx, _modelName, req.approvable_id, userId);
+      }
 
       const result = await tx.approval_request.update({
         where: { id },
@@ -419,6 +466,10 @@ export function createApprovalActions(deps: ApprovalActionDeps) {
           `Withdrawal is not supported for this entity type (on_withdrawn not declared): ${_modelName ?? entityName ?? 'unknown'}`,
         );
       }
+
+      // cmd_923b: pre-withdrawal dispatch, before any write in this
+      // transaction -- a throw here rejects the withdrawal attempt entirely.
+      await deps.dispatchBeforeWithdraw(tx, _modelName, approvableId, userId);
 
       await tx.approval_request.updateMany({
         where: { id: { in: pendingRows.map((r) => r.id) } },

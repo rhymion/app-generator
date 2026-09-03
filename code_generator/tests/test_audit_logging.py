@@ -10,8 +10,12 @@ Two surfaces are covered:
      must wrap its work in a `recordAuditEvent` call:
        - `add{Entity}` audits inside the existing $transaction
        - `update{Entity}` audits inside the existing $transaction
-       - `delete{Entity}` is wrapped in a NEW $transaction (the unaudited
-         variant uses `prisma.deleteMany` directly) and audits each id
+       - `delete{Entity}` audits each id inside its own $transaction
+     cmd_923b: `delete{Entity}` is now wrapped in a $transaction either way
+     (previously the unaudited variant used several independent
+     `prisma.*` calls with no rollback relationship) -- see
+     docs/knowledge/post-create-side-effect-hook.md for why (validateOnDelete/
+     afterDelete must run in the same transaction as the write they guard).
 
 The render is exercised end-to-end with Jinja2 so a template typo (mismatched
 braces, missing variable) is caught here rather than at `demo:generate` time.
@@ -162,8 +166,18 @@ def test_audited_delete_wraps_in_transaction_and_logs_each_id():
 def test_unaudited_delete_keeps_original_signature():
     out = _render_service(_schema(audited=False))
     assert "deleteThing(ids: string[])" in out
-    # No transaction wrap, no per-id loop.
-    assert "for (const id of ids)" not in out
+    # cmd_923b: the unaudited variant is now ALSO wrapped in its own
+    # transaction (previously several independent prisma.* calls with no
+    # rollback relationship) so validateOnDelete/afterDelete run in-tx like
+    # every other write path -- see docs/knowledge/post-create-side-effect-
+    # hook.md. A per-id loop now exists here too, for afterDelete -- this no
+    # longer distinguishes the unaudited variant from the audited one the
+    # way it used to (that distinction is the recordAuditEvent call itself,
+    # asserted by test_audited_delete_wraps_in_transaction_and_logs_each_id).
+    assert "await prisma.$transaction(async (tx) => {" in out
+    assert "for (const id of ids)" in out
+    assert "await afterDelete(tx, id);" in out
+    assert "action: 'thing:delete'" not in out
 
 
 # ---------------------------------------------------------------------------

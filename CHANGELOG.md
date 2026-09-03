@@ -6,6 +6,29 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Seven more in-tx write hooks, completing the set `afterCreate` started:
+  `afterUpdate`, `afterDelete`, `validateOnDelete`, `afterSubmit`,
+  `beforeApprove`, `beforeReject`, `beforeWithdraw`.** Same contract as
+  `afterCreate` throughout — run inside the write's own transaction, a
+  throw rolls back everything, default stub is a no-op — verified
+  empirically for each one (a temporary throwing stub, before/after row
+  count, restored to no-op immediately after). `afterUpdate`/`afterDelete`
+  mirror `afterCreate` exactly; `delete{Entity}` for a non-audited entity
+  is now wrapped in its own transaction for the first time (previously
+  several independent `prisma.*` calls with no shared rollback). `
+  validateOnDelete` is the delete-side counterpart to `validateCustomRules`
+  — a hand-written check can now reject a delete before it happens.
+  `afterSubmit` fires once per approval-flow submission, regardless of
+  whether it was reached via create, an ordinary edit, or the standalone
+  `submit_for_approval` action. The `submit_for_approval` action itself now
+  calls `validateCustomRules` before its write — previously the only
+  mutating path in the generator with no validation hook at all.
+  `beforeApprove`/`beforeReject`/`beforeWithdraw` are the pre-action
+  counterparts to the existing `afterApprove`/`afterReject`/`afterWithdraw`,
+  called from both the REST approval routes and the Server Action path
+  before `approval_request.status` is written. See
+  `docs/knowledge/post-create-side-effect-hook.md`.
+
 - **Post-create side-effect hook (`lib/{entity}/service_after_create.ts`,
   `afterCreate(tx, entityId)`) reinstated for every `can_create` entity,
   called in-tx.** A write-once, no-op-by-default stub — same convention as

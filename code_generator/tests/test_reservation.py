@@ -1120,8 +1120,15 @@ class TestItemModeOverlapAvailability:
     def test_start_end_check_is_before_find_many_in_generated_code(self):
         """start >= end validation must appear before candidates findMany (not inside try/catch)."""
         code = self._service_code(include_exclude_statuses=True)
-        pos_start_check = code.find('Start date must be before end date')
-        pos_find_many = code.find('findMany')
+        # cmd_923b: scoped to the reservation section (reserve{Parent}Core
+        # onward) -- a bare code.find('findMany') from index 0 would instead
+        # match delete{Parent}()'s own unrelated findMany (validateOnDelete's
+        # pre-delete row fetch), which now precedes the reservation section
+        # in the rendered file.
+        reservation_section_start = code.find('Reservation: item mode')
+        assert reservation_section_start != -1, "Reservation section not found in generated code"
+        pos_start_check = code.find('Start date must be before end date', reservation_section_start)
+        pos_find_many = code.find('findMany', reservation_section_start)
         assert pos_start_check != -1, "Start date check not found in generated code"
         assert pos_find_many != -1, "findMany not found in generated code"
         assert pos_start_check < pos_find_many, (

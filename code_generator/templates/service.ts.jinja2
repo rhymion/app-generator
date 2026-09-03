@@ -242,6 +242,9 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
       tx,
     });
 {% endif %}
+    // cmd_923b: post-update side effect hook, called in-tx -- symmetric to
+    // afterCreate in add{{ parent_pascal }}() above (see cmd_923a).
+    await afterUpdate(tx, id);
 {% if item_reservation_update_check_code %}
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 {% else %}
@@ -290,12 +293,21 @@ export async function delete{{ parent_pascal }}(actorId: string | null, ids: str
 {{ reservation_mutation_guard_delete }}
 {% endif %}
   await prisma.$transaction(async (tx) => {
+    // cmd_923b: fetched once, before any write -- reused for both the
+    // (optional) post-approval delete guard and the (always emitted)
+    // validateOnDelete hook below, so the same ids aren't queried twice.
+    const _deleteRows = await tx.{{ model }}.findMany({ where: { id: { in: ids } } });
 {% if has_delete_guard %}
-    const _deleteGuardRows = await tx.{{ model }}.findMany({ where: { id: { in: ids } }, select: { id: true, {{ lockdown_field }}: true } });
-    for (const _row of _deleteGuardRows) {
+    for (const _row of _deleteRows) {
       assertDeleteAllowed(_row);
     }
 {% endif %}
+    // cmd_923b: pre-delete validation hook, in-tx -- same convergence-point
+    // convention as validateOnAdd/validateOnUpdate (runs before the write
+    // it guards, inside the same transaction, throws to reject).
+    for (const _row of _deleteRows) {
+      await validateOnDelete(tx, _row.id, _row as Record<string, unknown>);
+    }
 {% if bridge_cleanup_rels %}
     const _bridgeRows = await tx.{{ model }}.findMany({ where: { id: { in: ids } }, select: {{ bridge_pre_delete_select }} });
 {% endif %}
@@ -311,6 +323,9 @@ export async function delete{{ parent_pascal }}(actorId: string | null, ids: str
         target_id: id,
         tx,
       });
+      // cmd_923b: post-delete side effect hook, in-tx -- symmetric to
+      // afterCreate/afterUpdate above.
+      await afterDelete(tx, id);
     }
   });
 }
@@ -319,19 +334,33 @@ export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
 {% if reservation_mutation_guard_delete %}
 {{ reservation_mutation_guard_delete }}
 {% endif %}
+  // cmd_923b: wrapped in a transaction (previously several independent
+  // prisma.* calls with no rollback relationship between them) so
+  // validateOnDelete/afterDelete run in-tx like every other write path --
+  // a throw from either now rolls back the delete itself, not just fail to
+  // run its own effect while the row is already gone. See
+  // docs/knowledge/post-create-side-effect-hook.md.
+  await prisma.$transaction(async (tx) => {
+    const _deleteRows = await tx.{{ model }}.findMany({ where: { id: { in: ids } } });
 {% if has_delete_guard %}
-  const _deleteGuardRows = await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: { id: true, {{ lockdown_field }}: true } });
-  for (const _row of _deleteGuardRows) {
-    assertDeleteAllowed(_row);
-  }
+    for (const _row of _deleteRows) {
+      assertDeleteAllowed(_row);
+    }
 {% endif %}
+    for (const _row of _deleteRows) {
+      await validateOnDelete(tx, _row.id, _row as Record<string, unknown>);
+    }
 {% if bridge_cleanup_rels %}
-  const _bridgeRows = await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: {{ bridge_pre_delete_select }} });
-  await prisma.{{ model }}.deleteMany({ where: { id: { in: ids } } });
-{{ bridge_post_delete_cleanups }}
+    const _bridgeRows = await tx.{{ model }}.findMany({ where: { id: { in: ids } }, select: {{ bridge_pre_delete_select }} });
+    await tx.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+{{ bridge_post_delete_cleanups | replace('await prisma.', '    await tx.') }}
 {% else %}
-  await prisma.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+    await tx.{{ model }}.deleteMany({ where: { id: { in: ids } } });
 {% endif %}
+    for (const id of ids) {
+      await afterDelete(tx, id);
+    }
+  });
 }
 {% endif %}
 {% endif %}

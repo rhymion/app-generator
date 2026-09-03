@@ -5,6 +5,7 @@ import prisma from '@/lib/prisma';
 import { getUserRoleIds } from '@/lib/authz';
 import { assertApprovalOrder } from '@/lib/approval_request/order-check';
 import { isTerminalReject, dispatchOnRejected } from '@/lib/approval_request/on_rejected_dispatch';
+import { dispatchBeforeReject } from '@/lib/approval_request/on_before_reject_dispatch';
 import { getApprovalRequestRecipient } from '@/lib/approval_request/actions';
 import { notify } from '@/lib/_notifier';
 
@@ -17,7 +18,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const req = await prisma.approval_request.findUnique({
       where: { id },
-      select: { round_id: true, approval_flow: { select: { approver_role_id: true, entity_name: true } } },
+      select: {
+        round_id: true,
+        approvable_id: true,
+        approval_flow: { select: { approver_role_id: true, entity_name: true } },
+      },
     });
     if (!req?.approval_flow) throw new ApiError(404, 'Approval request not found');
 
@@ -40,6 +45,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       (typeof body?.reason_kind === 'number') ? body.reason_kind : undefined;
 
     const updated = await prisma.$transaction(async (tx) => {
+      // cmd_923b: pre-rejection dispatch, before any write in this
+      // transaction -- a throw here rejects the rejection attempt entirely.
+      if (req.approvable_id) {
+        await dispatchBeforeReject(tx, req.approval_flow.entity_name, req.approvable_id, userId);
+      }
       const result = await tx.approval_request.update({
         where: { id },
         data: { status: newStatus },

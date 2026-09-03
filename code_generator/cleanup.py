@@ -21,7 +21,14 @@ service_validation_custom.ts -- never swept here, even for an orphaned
 entity, since a hand-customized copy is indistinguishable from a pristine
 one without re-rendering it per entity (the file's default body embeds the
 entity name in its docstring, unlike the truly boilerplate-invariant stubs
-this script does prune).
+this script does prune). The same applies to cmd_923b's six siblings --
+service_after_update.ts, service_after_delete.ts,
+service_validation_delete.ts, service_after_submit.ts,
+service_before_approve.ts, service_before_reject.ts, and
+service_before_withdraw.ts -- none of which this script explicitly deletes;
+they simply aren't in the file lists below, so a leftover copy in an
+orphaned entity's lib dir is (like service_after_create.ts) the reason
+_rmdir_tree() can leave that directory behind non-empty.
 
 --prune-orphans sweeps files that are generator-shaped but no longer
 expected by the current schema (e.g., a column_def.tsx left behind after

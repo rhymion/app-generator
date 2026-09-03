@@ -107,3 +107,97 @@ lives entirely in that inline edge-trigger code. It is a general-purpose
 extension point, in the same family as `service_validation_custom.ts` — the
 signature and in-tx semantics deliberately mirror `afterApprove` rather
 than reusing anything from the first version.
+
+## The other seven hooks
+
+`afterCreate` is one of eight in-tx hooks that all share the same contract:
+run inside the same Prisma transaction as the write they're attached to, a
+throw rolls back that entire transaction, and the default (unedited) stub
+is a no-op. The reason this matters: a side effect that runs outside the
+write's own transaction can leave the write committed with its side effect
+silently missing -- an inconsistency the caller never sees and can't
+detect. Requiring every one of these hooks to run in-tx is what closes
+that gap.
+
+| Hook | File | Signature | Generated for |
+|---|---|---|---|
+| `afterCreate` | `service_after_create.ts` | `(tx, entityId)` | every `can_create` entity |
+| `afterUpdate` | `service_after_update.ts` | `(tx, entityId)` | every `can_update` entity |
+| `afterDelete` | `service_after_delete.ts` | `(tx, entityId)` | every `can_delete` entity |
+| `validateOnDelete` | `service_validation_delete.ts` | `(tx, entityId, prevRow)` | every `can_delete` entity |
+| `afterSubmit` | `service_after_submit.ts` | `(tx, entityId, approvableId)` | every entity with an `approvable` bridge |
+| `beforeApprove` | `service_before_approve.ts` | `(tx, entityId, approvableId, actorId)` | every entity declaring `x-approval` |
+| `beforeReject` | `service_before_reject.ts` | `(tx, entityId, approvableId, actorId)` | every entity declaring `x-approval` |
+| `beforeWithdraw` | `service_before_withdraw.ts` | `(tx, entityId, approvableId, actorId)` | every entity declaring `x-approval.on_withdrawn` |
+
+All eight are write-once stubs (`_write_stub()`), model-keyed rather than
+view-keyed (same reasoning as `afterCreate` above), and never swept by
+`cleanup.py` even for an orphaned entity.
+
+### Post-write hooks: `afterUpdate` / `afterDelete`
+
+Exact mirrors of `afterCreate`, called from `update{Parent}()`/
+`delete{Parent}()` right before their own transaction closes, after every
+other write in that transaction has completed. `delete{Parent}()` for a
+non-audited entity previously issued several independent `prisma.*` calls
+with no shared transaction at all; it is now wrapped in its own
+`prisma.$transaction()` for exactly this reason -- without a transaction,
+`afterDelete` throwing would do nothing to undo a delete that had already
+committed.
+
+### `validateOnDelete`: the delete-side counterpart to `validateCustomRules`
+
+Create and update both run a hand-written validation hook
+(`validateCustomRules`, see `docs/knowledge/pre-edit-row-handoff-to-custom-
+validation.md`) before their own write. Delete had no equivalent
+convergence point at all -- a schema that wanted to block a delete under
+some condition had nowhere to put that check. `validateOnDelete` fills that
+gap: called once per row about to be deleted, before `deleteMany()`,
+receiving the full pre-delete row as `prevRow`. Throwing rejects the
+delete for that id and rolls back the whole transaction (nothing has
+actually been deleted yet at the point it runs).
+
+### `afterSubmit`
+
+Fires once whenever an entity's approval flow is opened -- on create (an
+entity created already at its `x-approval.submit_on` target value, or with
+no `submit_on` declared at all), on an ordinary edit that crosses the
+`submit_on` edge, and from the standalone `submit_for_approval` action.
+All three paths build their `approval_request` row(s) through the same
+shared code path, so `afterSubmit` is called from that one place rather
+than being duplicated at each of the three call sites.
+
+### `submit_for_approval` now validates
+
+Every write path except one already ran hand-written validation before its
+own write: create and update call `validateCustomRules` from inside
+`service_validation.ts`; approve/reject/withdraw now call their own
+`beforeApprove`/`beforeReject`/`beforeWithdraw` (below). The standalone
+`submit_for_approval` action was the one write path that reached the
+database directly with no validation hook of any kind. It now calls
+`validateCustomRules` with the single field it's actually writing, the same
+hook create/update already use -- not a new, parallel validation socket.
+
+### `beforeApprove` / `beforeReject` / `beforeWithdraw`
+
+The pre-action counterpart to `afterApprove`/`afterReject`/`afterWithdraw`
+(see `docs/knowledge/appendix/approval-flow.md`): called before
+`approval_request.status` is written, inside the same transaction, from
+both the REST route (`app/api/approval_request/[id]/{approve,reject,
+withdraw}/route.ts`) and the Server Action path (`lib/approval_request/
+actions_core.ts`) -- both entry points call it, since they duplicate each
+other's transaction body rather than sharing one.
+
+`beforeApprove`/`beforeReject` are generated for every entity that declares
+`x-approval` at all, unconditionally -- unlike the after-hooks, which are
+opt-in via `emit_hook`. Approving or rejecting a request is always possible
+regardless of what an entity's `x-approval` block configures, so unlike
+the after-hooks (which fire only when their own event is opt-in-declared),
+there is no narrower condition to gate on -- the same reasoning that makes
+`validateCustomRules` itself unconditional.
+
+`beforeWithdraw` is narrower: generated only for entities declaring
+`x-approval.on_withdrawn`, the same set `on_withdrawn_dispatch.ts` already
+uses. Withdrawal itself is blocked entirely (`hasOnWithdrawn`) for any
+entity that doesn't declare `on_withdrawn`, so a `beforeWithdraw` stub
+without that same restriction would never be reachable -- dead code.
