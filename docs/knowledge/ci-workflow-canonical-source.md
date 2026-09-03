@@ -94,18 +94,29 @@ guessing.
 
 **Excluded (treated as docs-only, safe to skip) paths**, matched
 against each consumer repo's real top-level layout:
-`docs/**`, `README.md`, `README_ja.md`, `CHANGELOG.md`, `AGENTS.md`,
-`CLAUDE.md`, `LICENSE`.
+`docs/**`, `spec/**`, top-level `*.md` (via `:(exclude,glob)*.md`, see
+"Docs-only E2E skip — folder and extension additions" below),
+`README.md`, `README_ja.md`, `CHANGELOG.md`, `AGENTS.md`, `CLAUDE.md`,
+`LICENSE`.
 
 **Deliberately NOT included** (still trigger the full suite even
 though they look docs-adjacent): `.claude/**`, `.codex/**` (agent
 tooling — kept conservative rather than asserting they can never
-affect a generate-code run), `spec/**` (inventory-app/insurance-app
-only — ER-diagram source, not `.md`; a plausible future addition, not
-decided here), `.github/**` (workflow files themselves — must never be
-skippable, including edits to this very `ci.yml`), `app-generator`
-(the submodule pointer — a pointer bump is a real code change),
-`.gitmodules`, `package.json`, `.env*`, `prj/**`, `scripts/**`.
+affect a generate-code run; this also covers nested `.md` files under
+those trees such as `.claude/commands/*.md` and
+`.claude/skills/**/SKILL.md` — see "folder and extension additions"
+below for why a recursive `*.md` rule was rejected specifically
+because it would have swept those in), `.github/**` (workflow files
+themselves — must never be skippable, including edits to this very
+`ci.yml`), `app-generator` (the submodule pointer — a pointer bump is
+a real code change), `.gitmodules`, `package.json`, `.env*`, `prj/**`
+(including nested `.md` files under it, e.g.
+`prj/docs/manual-tests/fk-reference-rules.md` found on insurance-app —
+`prj/**` stays conservative for the same generate-code-input reason as
+`.claude/**`/`.codex/**`; carving out a docs-only subfolder there would
+need the same kind of pre-exclusion carve-out job used for
+`docs/consumer-commands/**` in this repo's own CI below, which is a
+real design addition, not attempted here), `scripts/**`.
 
 **Before/after contrast, measured on app-template (public, disposable
 probe PRs closed after measurement)**:
@@ -119,10 +130,92 @@ probe PRs closed after measurement)**:
   path in the same commit) still runs `E2E Tests` to completion,
   unskipped.
 
-inventory-app and insurance-app (both private) have **not** received
-this copy yet, same reasoning as the concurrency change above — left
-as a follow-up so as not to burn their limited/newly-enabled Actions
-allotment as a side effect of this task.
+inventory-app and insurance-app (both private) have since received
+this copy (each carries its own `ci: sync ci.yml with app-generator
+canonical source (concurrency, detect-changes, drift check)` commit;
+correcting the "not received yet" note above, now stale).
+
+## Docs-only E2E skip — folder and extension additions
+
+Two additions to the exclude list above, both triggered by a real
+incident: a doc-only PR touching only
+`spec/inventory-implementation-gap-ledger.md` (a one-line ledger
+entry) still ran the full `E2E Tests` job end-to-end on a private
+repo, burning Actions minutes against a limited allotment for a change
+that could not possibly affect generated output.
+
+**`spec/**` (folder).** Present on inventory-app and insurance-app
+(ER-diagram/gap-ledger/state-machine prose: `.md` and `.mermaid`
+files), absent on app-template. Confirmed safe by scanning: nothing
+under `code_generator/`, `.claude/commands/*.md`, or `.codex/prompts/*.md`
+in this repo reads a consumer's `spec/**` as generate-code input, and
+no consumer app route imports or renders anything from `spec/**` at
+build or runtime (checked for `readFileSync`/import references to
+`.md` paths in `app/`, `lib/`, `components/`, `scripts/` across all
+three consumers — none found). It was considered and deliberately left
+out during the original docs-only-skip design (see the "Deliberately
+NOT included" list above at the time) specifically because it hadn't
+yet been proven safe; this PR is that proof.
+
+**Top-level `*.md` (extension), via `:(exclude,glob)*.md`.** A bare
+`*.md`/`**/*.md` pathspec was rejected — verified empirically against
+a scratch repo — because git's default (non-`:(glob)`) pathspec
+wildcard matching does **not** set `FNM_PATHNAME`, so a bare `*`
+crosses `/` and a bare `*.md` pattern excludes `.md` files at any
+depth, not just the top level. That would have silently also exempted
+`.claude/commands/*.md` (this repo's own Gate SoT — see CLAUDE.md
+"Gate SoT Rule" — a doc a consumer's own generator tasks read to know
+which commands the Completion gate runs, but not itself consumed by
+this `ci.yml`'s fixed npm scripts, so exempting it from the E2E gate
+specifically is plausibly safe on its own; still not adopted here,
+see below), `.codex/prompts/*.md`, `.claude/skills/**/SKILL.md` (agent
+tooling, kept conservative for the same "not proven never to affect
+generate-code" reason as `.claude/**`/`.codex/**` above), and
+`prj/docs/manual-tests/fk-reference-rules.md` (found on insurance-app,
+nested under `prj/**`, which stays conservative for the same reason).
+Git pathspec exclude patterns have no re-include operator (already
+noted in the "Docs-only E2E skip — app-generator's own CI" section
+below for the same reason), so there is no way to write "exclude all
+`.md` except these" as a single pathspec — only a scope narrow enough
+to exclude nothing else works without a dedicated carve-out job. Using
+`:(exclude,glob)*.md` (glob magic sets `FNM_PATHNAME`, so `*` does not
+cross `/`) restricts the match to files directly at the consumer
+repo's root — verified in the same scratch repo: a root `README.md`
+edit was excluded, a nested `.claude/commands/update-code.md` edit in
+the same diff was not. This covers the already-named root files
+(`README.md`, `README_ja.md`, `CHANGELOG.md`, `AGENTS.md`, `CLAUDE.md`
+— left in place alongside the glob rather than removed, since the glob
+already subsumes them and removing them would be an unrelated,
+unrequested simplification) and future-proofs against a new top-level
+`.md` file being added later without another `ci.yml` edit, without
+touching anything nested.
+
+**Considered and not adopted (fail-closed — no proof of safety, not a
+folder the incident actually hit):** `prj/docs/manual-tests/*.md`
+(insurance-app) — a docs subfolder nested inside `prj/**`, which is
+kept conservative as generate-code input; carving just this subfolder
+out would need the same kind of pre-exclusion carve-out job that
+`docs/consumer-commands/**` uses in this repo's own CI (see below),
+which is a real design addition out of scope here. `.claude/commands/*.md`
+— plausibly safe on its own reasoning (a consumer's Completion-gate
+commands are read by an agent, not executed by this fixed-script
+`ci.yml`, so editing their prose can't change what the E2E gate runs),
+but a blanket glob can't reach it without also reaching
+`.codex/prompts/*.md` and `.claude/skills/**/SKILL.md`, which have no
+equivalent safety argument yet — left for a future, separately-scoped
+change if ever pursued.
+
+**Vercel `ignoreCommand` (`scripts/vercel-ignore-check.sh`) — measured,
+not implemented.** All three consumers wire it identically via
+`vercel.json`'s `"ignoreCommand": "sh scripts/vercel-ignore-check.sh"`.
+Its exclude-path list is a deliberate mirror of this job's list (see
+that script's own header comment), so the same `spec/**` and
+`:(exclude,glob)*.md` additions would be logically consistent there —
+skipping an unnecessary Vercel preview build for the same shape of
+doc-only diff. Not implemented here: Actions consumption (this task's
+actual trigger — a private-repo minutes allotment) and Vercel
+consumption are billed and governed separately, and this task's
+mandate was measurement only for the Vercel side.
 
 ## Docs-only E2E skip — app-generator's own CI
 

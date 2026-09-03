@@ -88,7 +88,13 @@ jobs:
         # never having existed. Gating the job instead makes it show up
         # as "Skipped" — visible, not silently absent. See
         # docs/knowledge/ci-workflow-canonical-source.md "Docs-only E2E
-        # skip" for the fail-closed list of excluded paths.
+        # skip" for the fail-closed list of excluded paths, including why
+        # `:(exclude,glob)*.md` is root-anchored (glob magic sets
+        # FNM_PATHNAME, so `*` does not cross `/`) rather than a bare
+        # `*.md`/`**/*.md` — a bare pattern would also silently exempt
+        # `.claude/commands/*.md`, `.codex/prompts/*.md`, and
+        # `.claude/skills/**/SKILL.md`, which stay deliberately
+        # non-exempt (agent tooling, not proven safe to skip).
         id: check
         run: |
           set -euo pipefail
@@ -104,6 +110,8 @@ jobs:
           fi
           if git diff --quiet "$BASE" HEAD -- . \
               ':(exclude)docs/**' \
+              ':(exclude)spec/**' \
+              ':(exclude,glob)*.md' \
               ':(exclude)README.md' ':(exclude)README_ja.md' \
               ':(exclude)CHANGELOG.md' ':(exclude)AGENTS.md' ':(exclude)CLAUDE.md' \
               ':(exclude)LICENSE'; then
