@@ -20,6 +20,11 @@ Minimum docs to read before starting:
 See `.claude/commands/update-code.md §Completion gate` — canonical source of truth.
 Open the file directly (it is in the same repository under `.claude/commands/`).
 
+## Write-once side-effect hooks
+
+See `.claude/commands/update-code.md §Write-once side-effect hooks` — canonical
+source of truth for this checklist. Open the file directly.
+
 ## Debug priority
 
 | Failure | Investigate in this order |

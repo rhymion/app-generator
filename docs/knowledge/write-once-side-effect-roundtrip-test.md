@@ -1,0 +1,137 @@
+# Write-once side-effect round-trip test
+
+## What this catches, and what it doesn't
+
+`docs/knowledge/post-create-side-effect-hook.md` documents the eight
+write-once in-tx hooks (`afterCreate`/`afterUpdate`/`afterDelete`/etc.) and
+`code_generator/validate.py`'s `validate_write_once_stub_asymmetry()`
+catches the coarsest failure: a `service_after_create.ts` that's been
+implemented while `service_after_update.ts`/`service_after_delete.ts` is
+still the untouched stub. That's a purely file-level, static check — it
+never reads what a hook's body actually does.
+
+That check cannot catch a subtler bug: a `service_after_update.ts` that
+**is** implemented, but whose own logic is asymmetric — it reacts to one
+direction of a change and not the other. Example (the one this pattern was
+proven against during verification): a hook that grants something when a
+field is set to a specific value, but does nothing when that field is set
+back away from it. The file is "implemented" on both sides — the static
+check sees nothing wrong. Only running the hook and checking whether an
+edit's effect survives being undone can catch this.
+
+## The pattern
+
+```
+create the entity
+  |
+snapshot every OTHER model's row content        (snapshotOtherModels)
+  |
+apply an edit that is expected to trigger the side effect   ("forward")
+  |
+snapshot again -- diff against the first snapshot
+  |
+  no other model touched?  -> nothing to verify here, stop (most entities
+                               have no side effect at all -- that is the
+                               static asymmetry check's business, not
+                               this one's)
+  | (something WAS touched)
+snapshot again (post-forward baseline)
+  |
+apply the edit that undoes the first one         ("revert")
+  |
+snapshot again -- diff against the post-forward baseline
+  |
+assert this diff is NON-EMPTY
+```
+
+The only thing asserted is **"the revert touched at least one other
+model too"** -- never that what it wrote is the *correct* undo. Verifying
+correctness would mean reading the hook's business logic, which this test
+deliberately does not do (same boundary as the static asymmetry check's
+error message). An append-only side effect (e.g. an audit-log row) is not
+a false positive under this rule: the revert appends its own row too, so
+the diff is non-empty even though it's a different row than the forward
+edit wrote.
+
+## The primitives (permanent, generator-owned)
+
+`code_generator/templates/test_db_helpers.ts.jinja2` renders two exports
+into every consumer's `cypress/support/db-helpers.ts`, alongside the
+existing `ALL_ENTITIES`/`resetTestDatabase()` model enumeration:
+
+```ts
+export const ALL_PRISMA_MODELS: string[];  // reuses resetTestDatabase()'s own deletion_levels
+export async function snapshotOtherModels(excludeModel: string): Promise<Record<string, string>>;
+export function diffTouchedModels(before: Record<string,string>, after: Record<string,string>): string[];
+```
+
+`snapshotOtherModels()` serializes every row of every Prisma model except
+`excludeModel` (independently per row, then sorted, so it never depends on
+row return order) and joins them into one string per model. Two snapshots
+compare equal for a model iff that model's row *content* is unchanged.
+
+`cypress.config.ts` exposes it as a task: `cy.task('db:snapshotOtherModels', excludeModel)`.
+A spec file runs in the browser, not Node, so it cannot import
+`db-helpers.ts` directly -- this task is the only way to reach it. Diffing
+two already-fetched snapshots is plain object comparison and needs no task
+of its own; do it in the spec (see the worked example below).
+
+## Why there is no generated per-entity spec today
+
+No entity in this schema currently implements a real `service_after_update.ts`
+side effect (verified: every `model == parent` entity's stub is still the
+pristine, unedited render -- the same signal the static asymmetry check
+uses). Auto-generating a per-entity round-trip spec into
+`generators_test.py`'s already-large `api_spec_context()` for zero entities
+that would ever run it was judged not worth the blast radius: it is one of
+the highest-risk files to touch in this generator (changes there routinely
+break UI e2e specs that share its helpers), and there is no real hook
+anywhere to validate the generated shape against. What follows is the
+hand-written alternative, with the reasoning recorded here as required
+whenever a test is hand-written instead of generated.
+
+What's shipped instead is permanent, real, and runs against the live test
+database: `cypress/e2e/api/write_once_side_effect_roundtrip_probe.cy.ts`
+proves the *mechanism* (`snapshotOtherModels`) correctly detects both "another
+model was touched" and "nothing was touched" -- the two outcomes any real
+per-entity round-trip assertion depends on. The full end-to-end pattern
+(one-way hook fails, reversible hook passes) was verified once by hand
+against a deliberately-injected asymmetric hook on `organization` and
+reverted immediately after -- nothing from that injection is in this
+repository; the transcript lives in that task's own report.
+
+## Worked example -- wire this up once a real hook exists
+
+```ts
+// Inside a beforeEach: cy.task('db:reset'); cy.task('db:seed'); cy.login(...);
+
+cy.task<{ id: string }>('db:create{Entity}WithX', { ... }).then((row) => {
+  cy.task<Record<string, string>>('db:snapshotOtherModels', '{model}').then((before) => {
+    // Forward edit -- the field/value expected to trigger the hook.
+    cy.request({ method: 'PUT', url: `/api/{entity}/${row.id}`, body: { ...forwardChange } }).then(() => {
+      cy.task<Record<string, string>>('db:snapshotOtherModels', '{model}').then((afterForward) => {
+        const touchedForward = Object.keys(before).filter((m) => before[m] !== afterForward[m]);
+        if (touchedForward.length === 0) return; // nothing to verify -- no side effect fired
+
+        cy.task<Record<string, string>>('db:snapshotOtherModels', '{model}').then((beforeRevert) => {
+          // Revert edit -- undo the forward change back to the original value.
+          cy.request({ method: 'PUT', url: `/api/{entity}/${row.id}`, body: { ...revertChange } }).then(() => {
+            cy.task<Record<string, string>>('db:snapshotOtherModels', '{model}').then((afterRevert) => {
+              const touchedRevert = Object.keys(beforeRevert).filter((m) => beforeRevert[m] !== afterRevert[m]);
+              expect(touchedRevert, 'models touched by the revert edit').to.have.length.greaterThan(0);
+            });
+          });
+        });
+      });
+    });
+  });
+});
+```
+
+If no entity's forward edit can be expressed as a single field toggle (e.g.
+the side effect only fires on some other transition), adapt the two
+`cy.request` bodies accordingly -- the snapshot/diff/assert skeleton around
+them does not change.
+
+See also `.claude/commands/update-code.md` ("Write-once side-effect hooks")
+for the checklist item that points back here.
