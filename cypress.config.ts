@@ -374,6 +374,12 @@ export default defineConfig({
           const result = await anonymizeUser(userId);
           return JSON.parse(JSON.stringify(result));
         },
+        // cmd_941 gate 2: write-once side-effect round-trip probe. See
+        // docs/knowledge/write-once-side-effect-roundtrip-test.md.
+        async 'db:snapshotOtherModels'(excludeModel: string) {
+          const { snapshotOtherModels } = require('./cypress/support/db-helpers');
+          return await snapshotOtherModels(excludeModel);
+        },
         ...projectTasks,
       });
 

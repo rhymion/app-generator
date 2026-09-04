@@ -396,4 +396,64 @@ export async function createCrossOrgScenario(
   return JSON.parse(JSON.stringify({ orgA: { id: orgA.id }, orgB: { id: orgB.id }, entityInOrgB }));
 }
 
+// Every Prisma model, in the same enumeration `resetTestDatabase()` already
+// derives from the schema — reused here so the write-once side-effect
+// round-trip probe below (cmd_941 gate 2) never drifts from the model list
+// as the schema grows.
+export const ALL_PRISMA_MODELS = [
+  'audit_log',
+  'mfa_recovery_code',
+  'approval_request',
+  'attachment',
+  'dashboard_widget',
+  'notification',
+  'organization',
+  'permission',
+  'reaction',
+  'approvable',
+  'approval_flow',
+  'attachable',
+  'comment',
+  'dashboard',
+  'commentable',
+  'role',
+  'user',
+];
+
+/**
+ * cmd_941 gate 2: snapshot every OTHER Prisma model's current row content —
+ * the "what did this operation touch" probe for the write-once side-effect
+ * round-trip test. See docs/knowledge/write-once-side-effect-roundtrip-test.md
+ * for the full pattern (create → edit → snapshot → revert-edit → snapshot →
+ * assert the revert touched at least one of whatever the edit touched).
+ *
+ * Row order is never assumed stable: each row is serialized independently
+ * and the per-model list is sorted before joining, so two snapshots compare
+ * equal iff the row *content* is unchanged, regardless of return order.
+ * `excludeModel` is the entity under test's own model — its own row is
+ * expected to change and is not "another model".
+ */
+export async function snapshotOtherModels(excludeModel: string): Promise<Record<string, string>> {
+  const snapshot: Record<string, string> = {};
+  for (const model of ALL_PRISMA_MODELS) {
+    if (model === excludeModel) continue;
+    const delegate = (prisma as Record<string, any>)[model];
+    if (typeof delegate?.findMany !== 'function') continue;
+    const rows: unknown[] = await delegate.findMany();
+    snapshot[model] = rows.map((row) => JSON.stringify(row)).sort().join('\n');
+  }
+  return snapshot;
+}
+
+/**
+ * Models whose snapshotOtherModels() content differs between two calls —
+ * i.e. were created in, updated in, or deleted from in between.
+ */
+export function diffTouchedModels(
+  before: Record<string, string>,
+  after: Record<string, string>,
+): string[] {
+  return Object.keys(before).filter((model) => before[model] !== after[model]);
+}
+
 export { prisma };
