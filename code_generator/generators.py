@@ -3125,6 +3125,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     lockdown_field          = ctx.get('lockdown_field')
     is_audited              = ctx.get('is_audited', False)
     should_filter_by_org    = bool(ctx.get('should_filter_by_org'))
+    org_id_client_writable  = bool(ctx.get('org_id_client_writable'))
     is_self_only            = bool(ctx.get('is_self_only'))
     reservation_config      = ctx.get('reservation_config')
     has_reservation         = bool(reservation_config and reservation_config.get('mode') == 'count')
@@ -3666,7 +3667,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
                or reservation_self_case_notifies or approval_edge_trigger_create_code
                or approval_edge_trigger_update_code) else '')
         + (f"\nimport {{ recordAuditEvent }} from '@/lib/audit-log';" if is_audited else '')
-        + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/getters_associated';" if should_filter_by_org and (can_create or can_update) else '')
+        + (f"\nimport {{ getAssociatedOrganizations }} from '@/lib/organization/getters_associated';" if org_id_client_writable and (can_create or can_update) else '')
         + (f"\nimport {{ AppError, p2002Field }} from '@/lib/_errors';" if can_create or can_update else '')
         + (f"\nimport {{ getModelPermissions }} from '@/lib/authz';" if server_value_override_fields and can_create else '')
         + (f"\nimport {{ assertEditAllowed }} from './edit_guard';" if has_edit_guard else '')
@@ -3719,6 +3720,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'approval_lines_pre_update_code':     approval_lines_pre_update_code,
         'approval_lines_post_update_code':    approval_lines_post_update_code,
         'should_filter_by_org':               should_filter_by_org,
+        'org_id_client_writable':             org_id_client_writable,
         'approval_edge_trigger_create_code':  approval_edge_trigger_create_code,
         'approval_edge_trigger_update_code':  approval_edge_trigger_update_code,
         'submit_for_approval_action_code':    submit_for_approval_action_code,

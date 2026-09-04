@@ -2351,6 +2351,27 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     parent_params_with_types = ', '.join(
         f"{p['var_name']}: {get_ts_type(p['def'])}" for p in client_prop_infos
     )
+    # org_id_client_writable (cmd_946d, #486 regression fix): service.ts's
+    # should_filter_by_org guard (`if (organizationId) { ... }`) validates a
+    # CLIENT-SUPPLIED organization_id value before it gets written — it is
+    # not the entity's primary org-scope enforcement (that lives in the
+    # org-filtered findFirst pre-fetch added by cmd_452's GAP-2 fix, present
+    # in every should_filter_by_org REST route/Server Action update path
+    # regardless of this flag). The guard therefore only makes sense, and
+    # only compiles, when organization_id is actually one of the function's
+    # parameters — i.e. still present in client_prop_infos. #486 (cmd_945)
+    # started excluding readonly fields (x-readonly-fields) from
+    # client_prop_infos/parent_params_with_types entirely, so an org-scoped
+    # entity with organization_id declared readonly (e.g. a Proxy View like
+    # asn_status) generates a guard referencing an `organizationId` that no
+    # longer exists as a parameter — TS2304. When organization_id isn't
+    # client-writable there is no client-supplied value to validate, so the
+    # guard is correctly omitted rather than patched to reference a
+    # parameter that would have no legitimate value to receive.
+    _org_fk_prop = next((r['prop_name'] for r in parent_rels if r['target'] == 'organization'), None)
+    org_id_client_writable = bool(
+        should_filter_by_org and _org_fk_prop and _org_fk_prop not in _ro_client_exclude
+    )
     # x-server-value fields never go through the generic "just write the client
     # value" line below — server_value_data_lines (built further down) supplies
     # a dedicated, server-resolved line for each of them instead.
@@ -3525,6 +3546,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         parent_rels_raw=parent_rels_raw,
         relationship_targets=relationship_targets,
         should_filter_by_org=should_filter_by_org,
+        org_id_client_writable=org_id_client_writable,
         org_relationship_optional=org_relationship_optional,
         is_self_only=is_self_only,
         self_only_admin_bypass=self_only_admin_bypass,
