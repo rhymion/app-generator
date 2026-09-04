@@ -1,7 +1,7 @@
 {{ utility_code }}
 {% if can_create %}
-export async function add{{ parent_pascal }}(actorId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if bridge_child_params_str %}, {{ bridge_child_params_str }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}): Promise<{ id: string{% if server_value_override_fields %}; _server_value_overrides?: Record<string, string>{% endif %} }> {
-{% if should_filter_by_org %}
+export async function add{{ parent_pascal }}(actorId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if bridge_child_params_str %}, {{ bridge_child_params_str }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}): Promise<{ id: string{% if has_assignee_id %}; assignee_id: string | null{% endif %}{% if server_value_override_fields %}; _server_value_overrides?: Record<string, string>{% endif %} }> {
+{% if org_id_client_writable %}
   if (organizationId) {
     const _createOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
     if (!_createOrgIds.includes(organizationId)) {
@@ -73,9 +73,9 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
     await afterCreate(tx, created.id);
 {% if server_value_overrides_build_code %}
 {{ server_value_overrides_build_code }}
-    return { id: created.id, ...(Object.keys(_serverValueOverrides).length ? { _server_value_overrides: _serverValueOverrides } : {}) };
+    return { id: created.id{% if has_assignee_id %}, assignee_id: created.assignee_id{% endif %}, ...(Object.keys(_serverValueOverrides).length ? { _server_value_overrides: _serverValueOverrides } : {}) };
 {% else %}
-    return { id: created.id };
+    return { id: created.id{% if has_assignee_id %}, assignee_id: created.assignee_id{% endif %} };
 {% endif %}
 {% if item_reservation_create_code %}
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -104,9 +104,13 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
   }
 {% if has_assignee_id %}
   // Trigger #1 (notification design 2026-05-11): the new assignee learns
-  // they were assigned. Skipped when self-assigned.
-  if (assigneeId && assigneeId !== actorId) {
-    notify(assigneeId, 'assigned', {
+  // they were assigned. Skipped when self-assigned. Read off the persisted
+  // row (cmd_947), not an `assigneeId` parameter: assignee_id may be
+  // x-readonly-fields (no such parameter exists at all — cmd_945/#486) or
+  // server-set within this same create (approval set_fields etc.) — the row
+  // is the only value that is always both in scope and actually correct.
+  if (result.assignee_id && result.assignee_id !== actorId) {
+    notify(result.assignee_id, 'assigned', {
       title: 'You were assigned to {{ parent_pascal }}',
       href: `/{{ parent }}/view/${result.id}`,
       itemType: '{{ model }}',
@@ -125,8 +129,9 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 export async function update{{ parent_pascal }}(actorId: string, id: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if child_params_for_update %}, {{ child_params_for_update }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}, srcSnapshotRaw: string | null): Promise<void> {
 {% if has_assignee_id %}
   let _prevAssigneeId: string | null = null;
+  let _newAssigneeId: string | null = null;
 {% endif %}
-{% if should_filter_by_org %}
+{% if org_id_client_writable %}
   if (organizationId) {
     const _updateOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
     if (!_updateOrgIds.includes(organizationId)) {
@@ -216,7 +221,11 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
     });
 {{ approval_edge_trigger_update_code }}
 {% else %}
+{% if has_assignee_id %}
+    const updated = await tx.{{ model }}.update({
+{% else %}
     await tx.{{ model }}.update({
+{% endif %}
       where: { id },
       data: {
         updater_id: actorId,
@@ -226,6 +235,15 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 {% endif %}
       },
     });
+{% endif %}
+{% if has_assignee_id %}
+    // cmd_947: read the actual post-write value off the row, not an
+    // `assigneeId` parameter — that parameter doesn't exist at all when
+    // assignee_id is x-readonly-fields (#486), and even when it does exist
+    // it may not be what actually landed (a server-driven write, e.g. an
+    // approval set_fields, can still change assignee_id on this same
+    // update — the row is the only value that is always correct).
+    _newAssigneeId = updated.assignee_id;
 {% endif %}
 {% if approval_lines_post_update_code %}
 {{ approval_lines_post_update_code }}
@@ -271,8 +289,8 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
     throw e;
   }
 {% if has_assignee_id %}
-  if (assigneeId && assigneeId !== _prevAssigneeId && assigneeId !== actorId) {
-    notify(assigneeId, 'assigned', {
+  if (_newAssigneeId && _newAssigneeId !== _prevAssigneeId && _newAssigneeId !== actorId) {
+    notify(_newAssigneeId, 'assigned', {
       title: 'You were assigned to {{ parent_pascal }}',
       href: `/{{ parent }}/view/${id}`,
       itemType: '{{ model }}',
