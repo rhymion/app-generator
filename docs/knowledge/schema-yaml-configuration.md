@@ -727,6 +727,20 @@ server-side guard. Treat DataGrid child fields as currently unprotectable by eit
 annotation. See `docs/knowledge/readonly-field-form-rendering.md` for the full rendering
 type-dispatch table and the cross-view scoping fix's test coverage.
 
+**Server-side invariant (cmd_945)**: for a parent-level readonly field (this section — not the
+DataGrid-child limitation above), the generated Server Action and REST routes never read the
+client's submitted value at all — not `data.get()` on the FormData, not a destructure off a
+POST/PUT body. The field is never a parameter of the generated service function either
+(`client_prop_infos` in `build_context.py` excludes it entirely from the parameter list, the
+`validate()`/`validateCustomRules()` payload, and both bodies' extraction — the same treatment
+`x-server-value`-without-override fields already got). Before this fix, the value *was* still
+read (and still excluded from the actual Prisma write, which was already correct) — so a
+non-nullable field's absence from the client payload silently became a wrong-but-valid value
+(`Number(null)` → `0`, `new Date(null)` → the Unix epoch, or `''`) instead of `undefined`, and
+any hand-written `validateCustomRules()` logic that inspected the field directly (instead of
+`prevRow`, the actual persisted value) could reject a save that never touched it. Always read a
+readonly field's real value from `prevRow`, never from `data`, in custom validation.
+
 ---
 
 ### 4.8 Cross-Field FK Consistency (`x-fk-constrained`)

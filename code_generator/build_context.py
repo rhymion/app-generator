@@ -2326,30 +2326,45 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         {'prop': p, 'var_name': safe_var_name(p), 'def': filtered_props[p]}
         for p in parent_props
     ]
-    parent_params = ', '.join(p['var_name'] for p in parent_prop_infos)
+    # Plain readonly fields (x-readonly-fields / x-readonly) must never be read
+    # from client input at all (cmd_945) — not FormData, not a POST/PUT body,
+    # not even as a service-function parameter. readonly_fields_create_reject
+    # already excludes x-server-value fields (those have their own dedicated,
+    # server-resolved value — see server_value_data_lines below); the
+    # dynamically-added bridge FK prop (_bridge_fk_prop, Stage 2 above) is
+    # exempted too, since bridge_child_fk_data_line writes it with the real
+    # resolved parent id via its own dedicated template line and still needs
+    # it threaded through as a parameter.
+    #
+    # parent_prop_infos itself stays the FULL set (readonly fields included):
+    # normalizeSnapshot()/getCurrentSnapshot() (snapshot_field_mappings below)
+    # need every persisted column, readonly ones included, for assertNotStale's
+    # staleness comparison — that is a read of the *persisted* value, not of
+    # client input, so it is unaffected by this exclusion. client_prop_infos is
+    # the narrower set for every consumer that reads a value the client supplied:
+    # the service function's own parameter list, the object passed to
+    # validate()/validateCustomRules, and the FormData/JSON-body extraction
+    # (_build_form_data_gets, REST route body destructuring, service call args).
+    _ro_client_exclude = set(readonly_fields_create_reject) - {_bridge_fk_prop}
+    client_prop_infos = [p for p in parent_prop_infos if p['prop'] not in _ro_client_exclude]
+    parent_params = ', '.join(p['var_name'] for p in client_prop_infos)
     parent_params_with_types = ', '.join(
-        f"{p['var_name']}: {get_ts_type(p['def'])}" for p in parent_prop_infos
+        f"{p['var_name']}: {get_ts_type(p['def'])}" for p in client_prop_infos
     )
     # x-server-value fields never go through the generic "just write the client
     # value" line below — server_value_data_lines (built further down) supplies
     # a dedicated, server-resolved line for each of them instead.
     #
-    # Plain readonly fields (x-readonly-fields / x-readonly, cmd_897/subtask_886a)
-    # are skipped too: readonly_fields_create_reject guarantees a client can
-    # never supply a value for these, so var_name is always the guarded-null
-    # form value with nothing else to write it — omitting the key lets the
-    # column's own Prisma @default apply (shipment_line.status's motivating
-    # case: a required, non-nullable enum with @default(picked) — passing an
-    # explicit `status: null` made the query engine reject the whole create
-    # with a confusing "Argument `shipment` is missing" error, not a status
-    # error). The dynamically-added bridge FK prop (_bridge_fk_prop, Stage 2
-    # above) is exempted: bridge_child_fk_data_line already writes it with the
-    # real resolved parent id via its own dedicated template line.
-    _ro_create_skip = set(readonly_fields_create_reject) - {_bridge_fk_prop}
+    # Plain readonly fields are skipped too, reusing _ro_client_exclude above:
+    # omitting the key lets the column's own Prisma @default apply
+    # (shipment_line.status's motivating case: a required, non-nullable enum
+    # with @default(picked) — passing an explicit `status: null` made the
+    # query engine reject the whole create with a confusing "Argument
+    # `shipment` is missing" error, not a status error).
     _base_data_lines = [
         f"        {p['prop']}: {p['var_name']},"
         for p in parent_prop_infos
-        if p['prop'] not in _server_value_prop_names and p['prop'] not in _ro_create_skip
+        if p['prop'] not in _server_value_prop_names and p['prop'] not in _ro_client_exclude
     ]
 
     # server_value_fields: template-facing list for service.ts.jinja2's per-field
@@ -2416,16 +2431,24 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         _base_data_lines + ([one_to_one_fk_data_lines] if one_to_one_fk_data_lines else [])
     )
     # Read-only fields are preserved on update: omit them from the update `data` so
-    # Prisma leaves the stored value untouched. The server action reads absent form
-    # fields as Number(null)=0, so without this a required read-only field (e.g. a
-    # reservation pool's quantity) would be silently zeroed. Create still sets them,
-    # and the field stays in validation_data_obj so its param remains referenced.
+    # Prisma leaves the stored value untouched. x-server-value fields are included
+    # in this skip too (their own dedicated server_value_data_lines writes them
+    # instead). Plain readonly fields are no longer even parameters (see
+    # client_prop_infos above, cmd_945) — this filter still runs over the FULL
+    # parent_prop_infos because x-server-value-with-override fields DO remain
+    # parameters and must still be skipped here.
     _ro_update_skip = set(readonly_fields)
     parent_data_obj_update = '\n'.join(
         f"        {p['prop']}: {p['var_name']},"
         for p in parent_prop_infos if p['prop'] not in _ro_update_skip
     )
-    validation_data_obj  = '\n'.join(f"      {p['prop']}: {p['var_name']}," for p in parent_prop_infos)
+    # validate()/validateCustomRules must never see a plain readonly field's
+    # value at all (cmd_945) — it can only ever be the client's absent-from-
+    # form/body value, never the field's real persisted value, so a custom
+    # rule that inspects it directly (rather than prevRow, which IS the real
+    # persisted value) would be validating garbage. client_prop_infos already
+    # excludes those fields entirely.
+    validation_data_obj  = '\n'.join(f"      {p['prop']}: {p['var_name']}," for p in client_prop_infos)
     # Synthetic object spreading created record with nested auto-create OTO stubs for afterCreate
     one_to_one_spread = ', '.join(
         f"{r['relation_name']}: {{ id: created.{r['prop_name']} }}"
@@ -2439,8 +2462,10 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         for p in parent_prop_infos
     )
 
-    # Form data gets (for actions / API POST)
-    form_data_gets = _build_form_data_gets(parent_prop_infos, set(model_def.get('required') or []))
+    # Form data gets (for actions / API POST). Never emits a data.get() line
+    # for a plain readonly field (cmd_945) — client_prop_infos already
+    # excludes them.
+    form_data_gets = _build_form_data_gets(client_prop_infos, set(model_def.get('required') or []))
 
     # Children (full analysis)
     children_data    = _build_child_data(children_raw, model, schema, parent_rels_raw)
@@ -2603,8 +2628,12 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # current value in the DB, since the caller has no way to supply a
     # different one. Placed in the shared service layer so both the API
     # route and the form's server action get the guarantee. See
-    # docs/knowledge/fk-read-permission-graceful-degradation.md.
-    _prop_to_var = {p['prop']: p['var_name'] for p in parent_prop_infos}
+    # docs/knowledge/fk-read-permission-graceful-degradation.md. Built from
+    # client_prop_infos, not the full parent_prop_infos: a plain readonly FK
+    # is never a service parameter at all (cmd_945), so it can never need this
+    # fallback either — the guard below (`f['prop_name'] in _prop_to_var`)
+    # correctly skips it rather than referencing an undeclared variable.
+    _prop_to_var = {p['prop']: p['var_name'] for p in client_prop_infos}
     fk_preservation_update_code = '\n'.join(
         f"    if (!{_prop_to_var[f['prop_name']]}) {{\n"
         f"      const _fkFallback = await tx.{model}.findUnique({{ where: {{ id }}, select: {{ {f['prop_name']}: true }} }});\n"
@@ -2890,10 +2919,12 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         for i in _xcc_items if 'edit' in i['target']
     ]
 
-    # Service args helpers
+    # Service args helpers. client_prop_infos, not parent_prop_infos: this
+    # feeds the REST route's add{Parent}/update{Parent} call (cmd_945) — a
+    # plain readonly field is no longer a parameter of those functions at all.
     parent_service_args = ', '.join(
         f"{p['var_name']} ?? null" if _is_nullable(p['def']) else p['var_name']
-        for p in parent_prop_infos
+        for p in client_prop_infos
     )
     child_service_args = ', '.join(
         f"{c['child_var']}_ids ?? []" if c['use_connect'] else f"{c['property_name']} ?? []"
@@ -3428,10 +3459,12 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         for c in children_raw
     )
 
-    # All body fields for API routes
+    # All body fields for API routes. client_prop_infos, not parent_prop_infos:
+    # this is destructured straight off the client's request body (cmd_945) —
+    # a plain readonly field must never be read from it at all, on POST or PUT.
     all_body_fields_create = ', '.join([
         *(p['prop'] if p['prop'] == p['var_name'] else f"{p['prop']}: {p['var_name']}"
-          for p in parent_prop_infos),
+          for p in client_prop_infos),
         *(f"{c['child_var']}_ids" if c['use_connect'] else c['property_name']
           for c in embedded_ch),
     ])

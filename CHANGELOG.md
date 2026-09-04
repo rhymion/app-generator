@@ -197,6 +197,38 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   already and is documented in the same section.
 
 ### Fixed
+- **A readonly field (`x-readonly` / `x-readonly-fields`) is no longer read
+  from client input at all on save -- not FormData, not a POST/PUT body, not
+  even as a generated service function's own parameter (cmd_945).**
+  Previously, `_build_form_data_gets()` still emitted a `data.get(<field>)`
+  line for every readonly field, and the REST routes still destructured it
+  off the request body -- the value never reached Prisma (an existing,
+  correct skip already excluded it from the write), but it still flowed
+  into `validate()`/`validateCustomRules()` as if it were real client
+  input. For a non-nullable field, `Number(null)` / `new Date(null)` /
+  a bare cast silently produced a *wrong but valid-looking* value (`0`, the
+  Unix epoch, or an empty string) instead of `undefined` -- so a
+  hand-written custom rule that read the field directly (rather than
+  `prevRow`, the actual persisted value) could see that fabricated value
+  and reject a save that never touched the field at all. Reproduced
+  end-to-end with a scratch entity: a `received_at` (readonly, non-nullable,
+  required) field combined with a realistic content-freeze custom rule
+  made every edit-and-save of an unrelated field throw
+  `received_at is locked and cannot change` before the fix, and save
+  cleanly after. `client_prop_infos` (a narrower view of `parent_prop_infos`
+  excluding readonly fields, mirroring how `x-server-value`-without-override
+  fields were already excluded) now feeds the service function's parameter
+  list, `validate()`'s payload, `_build_form_data_gets()`, and the REST
+  routes' body destructuring/service-call args; `parent_prop_infos` itself
+  is unchanged and still feeds `normalizeSnapshot()`'s staleness
+  comparison, which legitimately needs every persisted column. Confirmed
+  for both a nullable and a non-nullable readonly field, and for a required
+  relation FK. Unrelated, pre-existing behavior found (not fixed here,
+  out of scope): the REST PUT route's readonly-field compare check
+  (`AP-3=B`) can reject a same-valued resubmission of a readonly `date`/
+  `date-time` field, because it compares `String(Date)` against the raw
+  ISO string from the request body -- different textual formats for the
+  identical instant.
 - **A hand-written `service_validation_custom.ts` rejection of a value that
   IS present (e.g. an FK that violates a business rule) no longer renders
   as the generic "{field} is required." text a genuinely-missing value
