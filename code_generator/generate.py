@@ -69,6 +69,7 @@ from validate import (
     validate_self_only_creator_id_columns, validate_defaults_cross_schema,
     validate_direct_attachment_prerequisite,
     validate_direct_attachment_reverse_fields,
+    validate_write_once_stub_asymmetry,
     SchemaValidationError,
 )
 from generators_doc import build_doc_entity_context, build_doc_index_context, convert_md_to_mdx
@@ -896,6 +897,11 @@ def generate(schema_path: str, output_dir: str) -> None:
     global _manifest
     _manifest = ManifestRecorder(out=out)
     _handwritten_notices.clear()
+    # cmd_941 gate (1): populated per-entity below (model == parent only,
+    # where service_after_create/update/delete.ts are actually written),
+    # checked as a gate at the end of this function once all stubs are on
+    # disk — see validate_write_once_stub_asymmetry()'s docstring.
+    _stub_asymmetry_entries: list[dict] = []
 
     env = _make_env()
 
@@ -1109,6 +1115,16 @@ def generate(schema_path: str, output_dir: str) -> None:
                     'parent_pascal': parent_pascal,
                 }),
             )
+            # cmd_941 gate (1): record this entity's create/update/delete
+            # stub paths so the end-of-run asymmetry check can compare them.
+            _stub_asymmetry_entries.append({
+                'parent': parent,
+                'create_path': lib_dir / 'service_after_create.ts',
+                'update_path': lib_dir / 'service_after_update.ts',
+                'delete_path': lib_dir / 'service_after_delete.ts',
+                'can_edit': can_edit,
+                'can_delete': can_delete,
+            })
             _write_stub(
                 lib_dir / 'service_after_submit.ts',
                 _render(env, 'service_after_submit_stub.ts.jinja2', {
@@ -2731,6 +2747,18 @@ def generate(schema_path: str, output_dir: str) -> None:
                 print('  Cloud: output:standalone already present in next.config.ts')
         else:
             print('  Cloud: next.config.ts not found — skipping standalone injection')
+
+    # --- cmd_941 gate (1): write-once side-effect asymmetry ---
+    # Must run after every service_after_*.ts stub for this run has been
+    # written (so the manifest's stub history reflects them) and before the
+    # run is allowed to report success — see validate_write_once_stub_
+    # asymmetry()'s docstring for why this is a generation-time gate despite
+    # running at the end rather than the start.
+    try:
+        validate_write_once_stub_asymmetry(_stub_asymmetry_entries, _manifest)
+    except SchemaValidationError as exc:
+        print(f'\n{exc}', file=sys.stderr)
+        sys.exit(1)
 
     # --- generation manifest (drives cleanup.py) ---
     # Written last so it reflects exactly what this run produced. Appended files

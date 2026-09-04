@@ -57,6 +57,65 @@ actually agrees — if this task's diff includes a README.md change, bring
 README_ja.md's content up to date with it (and vice versa) before this
 step, not after. See `docs/knowledge/readme-en-ja-sync-gate.md`.
 
+## Write-once side-effect hooks (`service_after_create.ts` / `_update.ts` /
+`_delete.ts` / `_approve.ts` / etc.)
+
+Two automated checks already exist for these hooks and should not be
+second-guessed by hand: `validate.py`'s write-once stub asymmetry check
+(rejects an implemented `service_after_create.ts` with a still-untouched
+`service_after_update.ts`/`_delete.ts` counterpart) and the write-once
+side-effect round-trip test pattern (`docs/knowledge/write-once-side-
+effect-roundtrip-test.md` — proves a hook's forward and revert edits are
+both actually reversible). Both are file-level or behavior-level machine
+checks. What they cannot see is judgment — the items below are exactly the
+gap between what those checks cover and what a human has to decide.
+
+1. **Did you provide a way back?** The asymmetry check only sees "a hook
+   file exists or it doesn't" — it cannot tell whether the update/delete
+   hook you wrote actually *undoes* what the create hook did, only that
+   something is there. If you implement a hook that has a side effect,
+   write the round-trip test from `docs/knowledge/write-once-side-effect-
+   roundtrip-test.md` for it — this is not optional once the hook exists.
+   If the round-trip test for your hook has to be hand-written rather than
+   generated (most cases today — see that doc's "Why there is no generated
+   per-entity spec" section), write it anyway and record the reason inline
+   next to the test.
+
+2. **Protecting a reference outside an approval flow.** Whether editing or
+   deleting some row would break a side effect that already fired on a
+   *different* row referencing it is, outside an approval flow, something
+   only reading the actual hook code can answer — there is no schema
+   signal an automated check could key off. There is no generic tooling
+   for this case. If you are implementing or reviewing a hook whose effect
+   depends on data reachable through a foreign key, trace every entity
+   that references it by hand and decide case by case.
+
+3. **Protecting a reference inside an approval flow.** When an approval-
+   time side effect (`service_after_approve.ts`) reads a value from
+   *another* entity (entity B approved, B has an FK to A, the hook reads a
+   field on A), do not lock A's entire row once an approved B exists that
+   references it — reference/master data (item, organization, bin,
+   location, supplier, and the like) is read by many other transactions
+   independently of B, and a blanket lock on the whole row breaks all of
+   them. Instead, add a hand-written check to *A's own*
+   `service_validation_custom.ts` that rejects a change only to the
+   specific field(s) the approved hook actually reads, only while an
+   approved B still references A. This is the same pattern already used
+   for FK-crossing rules elsewhere in this generator family (see whichever
+   consumer schema already declares one, as a working reference) — it is
+   not a new mechanism, just applying the existing one here. Do not
+   introduce a new `x-*` declaration key for this; express it as ordinary
+   hand-written validation code.
+
+4. **A Proxy View that reopens editing after approval.** If a Proxy View
+   exposes a field for editing once its backing row is already approved,
+   check first whether that field is one a `service_after_approve.ts` hook
+   reads or writes. If it is, do not let the Proxy View write it directly
+   — route the change through a change-request entity plus its own
+   approval, the same way any other post-approval change to an audited
+   record should be handled, rather than a bare edit that silently
+   bypasses whatever the approval hook already did.
+
 ## Debug priority
 
 | Failure | Investigate in this order |

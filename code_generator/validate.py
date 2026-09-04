@@ -1,9 +1,11 @@
 """
-validate.py — Pre-generation schema validation.
+validate.py — Schema and generated-output validation.
 
-Called by generate() before any files are written.  Collects all problems and
-reports them together so the user can fix everything in one pass rather than
-encountering errors one by one.
+Most checks here are called by generate() before any files are written, and
+collect all problems so they can be reported together rather than one at a
+time. One exception: validate_write_once_stub_asymmetry() must run at the
+END of generate(), once this run's write-once stubs are on disk and its
+manifest's stub history reflects them — see that function's docstring.
 
 Raises SchemaValidationError (a ValueError subclass) on failure so generate()
 can catch it and print a clean message without a traceback.
@@ -19,6 +21,7 @@ from helpers.schema_helpers import (
     get_direct_attachment_fk_props, schema_has_direct_attachment_fk,
     is_write_only_prop,
 )
+from manifest import sha256_file
 from schema_deriver import parse_prisma_schema
 
 _SNAKE_CASE = re.compile(r'^(__)?[a-z][a-z0-9_]*$')
@@ -353,6 +356,74 @@ def validate_direct_attachment_reverse_fields(schema: dict, prisma_schema_path: 
             + examples + "\n\n"
             "See docs/knowledge/schema-yaml-configuration.md \"Direct "
             "Attachment FK\"."
+        )
+
+
+def validate_write_once_stub_asymmetry(entries: list[dict], manifest) -> None:
+    """cmd_941 gate 1: reject a lopsided write-once side-effect implementation.
+
+    Unlike every other validate_* in this file, this one runs at the END of
+    generate() — after all write-once stubs have been written for this run —
+    because the thing it inspects (whether a stub is still the pristine
+    generator render or was hand-edited) only exists once `_write_stub()` has
+    populated `manifest`'s stub history for this run. It is still "the
+    generation-time gate" (cmd_941 gate 1): it fails the run (nonzero exit)
+    before generate() reports success, which is what makes it a gate rather
+    than a passive observation.
+
+    Coarse and cheap on purpose (殿ご裁定): this never reads what a stub's
+    body actually does. It only asks "was this file's content ever hand-
+    edited away from a known pristine render of its current stub template?"
+    (see `manifest.is_stale_stub`) — file-level, not field-level. A create
+    hook can reference any number of other models; the gate does not care
+    which. Its only signal is: create is implemented, but the update or
+    delete hook for the same entity is not — and edit/delete generation is
+    not turned off — meaning nothing runs to mirror whatever side effect the
+    create hook introduced.
+
+    `entries` is one dict per entity where these stubs are written (`model ==
+    parent` in generate()'s loop), each with keys `parent`, `create_path`,
+    `update_path`, `delete_path`, `can_edit`, `can_delete` (`can_edit`/
+    `can_delete` mirror the entity's own `x-generate.edit`/`.delete`).
+    """
+    def _implemented(path: Path) -> bool:
+        # _write_stub() always leaves the file on disk by the time this runs
+        # (creates it if missing), so existence itself is not the signal —
+        # whether its content still matches a known pristine render is.
+        return not manifest.is_stale_stub(path, sha256_file(path))
+
+    violations = []
+    for e in entries:
+        if not _implemented(e['create_path']):
+            continue
+        pairs = [('update', e['update_path'], e['can_edit']),
+                 ('delete', e['delete_path'], e['can_delete'])]
+        for kind, path, can_do in pairs:
+            if can_do and not _implemented(path):
+                violations.append((e['parent'], kind, path))
+
+    if violations:
+        lines = "\n".join(
+            f"  - {parent}: service_after_create.ts is implemented, but "
+            f"service_after_{kind}.ts is still the untouched stub ({path})"
+            for parent, kind, path in violations
+        )
+        raise SchemaValidationError(
+            "Write-once side-effect asymmetry — one or more entities "
+            "implement service_after_create.ts (writes/updates/deletes "
+            "another model) without a matching hook on the operations that "
+            "can undo or repeat that effect:\n\n"
+            + lines + "\n\n"
+            "This is a coarse, file-level check (cmd_941 gate 1) — it does not "
+            "read what the create hook does, only that its update/delete "
+            "counterpart for the same entity is still untouched. Pick one "
+            "per entity listed above:\n"
+            "  1. Implement the corresponding service_after_update.ts / "
+            "service_after_delete.ts stub (even a no-op with a comment "
+            "explaining why nothing needs to mirror the create hook), or\n"
+            "  2. Set x-generate.edit / x-generate.delete to false for that "
+            "entity so the operation this gate is protecting against cannot "
+            "happen at all."
         )
 
 
