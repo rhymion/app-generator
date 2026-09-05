@@ -16,7 +16,7 @@ export function getGeneratedTasks() {
       const { populate{{ entity.pascal }}FullData } = require('{{ entity.helper_path }}');
       return await populate{{ entity.pascal }}FullData(length);
     },
-{% if entity.primary_fk_dep and not entity.primary_fk_dep.is_user_account and entity.primary_fk_dep.extra_required_fields %}
+{% if entity.primary_fk_dep and not entity.primary_fk_dep.is_user_account and (entity.primary_fk_dep.extra_required_fields or entity.primary_fk_dep.nested_fk_deps) %}
     'db:reset{{ entity.pascal }}CallSeq'() {
       const { _reset{{ entity.pascal }}CallSeq } = require('{{ entity.helper_path }}');
       _reset{{ entity.pascal }}CallSeq();

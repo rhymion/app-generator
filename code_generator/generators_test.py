@@ -2940,6 +2940,62 @@ def helper_context(
         )
     if primary_fk_dep is not None:
         primary_fk_dep = {**primary_fk_dep, 'is_user_account': primary_fk_dep['target'] == 'user'}
+        # cmd_958: when the primary display FK's OWN label is a composite built
+        # from ITS OWN FK fields (a dotted labelField, e.g.
+        # goods_receipt_line_amendment's primary FK goods_receipt_line has
+        # labelField ['goods_receipt.receipt_number', 'item.sku'] — no bare
+        # scalar of goods_receipt_line's own carries the label), the shared
+        # `deps.<var>` row those FK fields point at (fixed for the whole test
+        # file) can never disambiguate one loop iteration's label from
+        # another's — every row renders the same "Test Receipt Number A ..."
+        # label instead of the `${callIndex}_${i}`-suffixed one the generated
+        # spec asserts on. (Gating on primary_fk_dep.extra_required_fields
+        # being empty is NOT the right signal here — goods_receipt_line still
+        # has its own unrelated required scalar quantity_received, which
+        # renders non-unique per iteration anyway since ints don't get
+        # callIndex_i disambiguation; the label composition itself is what
+        # decides whether a nested fresh row is needed.)
+        #
+        # For each dotted labelField segment (`<stem>.<leaf>`), find the
+        # matching fk_dep by prop-name stem and, only when that FK's target
+        # itself has an extra_required_fields entry for that exact leaf field
+        # (a real per-iteration-unique-able scalar), give the loop a fresh
+        # instance of THAT target instead of the shared one. Only one level
+        # deep — the current schema has no case needing more — and this only
+        # ever fires for a dotted labelField, so the common case (a bare
+        # labelField on the primary FK's own scalar, e.g. purchase_order_line's
+        # `item`/sku) renders byte-identical output to before this change.
+        _nested_fk_deps = []
+        if not primary_fk_dep['is_user_account']:
+            _label_field = primary_fk_dep.get('label_field')
+            _label_paths = _label_field if isinstance(_label_field, list) else ([_label_field] if _label_field else [])
+            _label_leaves_by_stem: dict[str, set[str]] = {}
+            for _p in _label_paths:
+                if isinstance(_p, str) and '.' in _p:
+                    _stem, _leaf = _p.split('.', 1)
+                    _label_leaves_by_stem.setdefault(_stem, set()).add(_leaf)
+            for _fk in primary_fk_dep.get('fk_deps') or []:
+                _fk_stem = re.sub(r'_id$', '', _fk['prop_name'])
+                _leaves = _label_leaves_by_stem.get(_fk_stem)
+                if not _leaves:
+                    continue
+                _nested_dep = next(
+                    (d for d in enriched_deps if d['var_name'] == _fk['dep_var_name']),
+                    None,
+                )
+                if not _nested_dep:
+                    continue
+                _nested_efs = _nested_dep.get('extra_required_fields') or []
+                if not any(_ef['prop_name'] in _leaves for _ef in _nested_efs):
+                    continue
+                _nested_fk_deps.append({
+                    'prop_name': _fk['prop_name'],
+                    'dep_var_name': _fk['dep_var_name'],
+                    'target': _nested_dep['target'],
+                    'extra_required_fields': _nested_efs,
+                    'fk_deps': _nested_dep.get('fk_deps') or [],
+                })
+        primary_fk_dep['nested_fk_deps'] = _nested_fk_deps
 
     # When the primary display FK is optional (nullable), it won't appear in
     # required_fields_prisma, so populateData creates records without it and
