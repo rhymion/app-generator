@@ -94,7 +94,19 @@ jobs:
         # `*.md`/`**/*.md` — a bare pattern would also silently exempt
         # `.claude/commands/*.md`, `.codex/prompts/*.md`, and
         # `.claude/skills/**/SKILL.md`, which stay deliberately
-        # non-exempt (agent tooling, not proven safe to skip).
+        # non-exempt (agent tooling, not proven safe to skip). The
+        # `scripts/check_*`/`scripts/check-*`/`scripts/vercel-*.sh`/
+        # `scripts/gcp-*.sh` lines below are a narrow subset of
+        # `scripts/**`, not the whole tree — see "Docs-only E2E skip —
+        # scripts/** (partial)" in the same doc for why a blanket
+        # `scripts/**` exclusion was rejected (this same job's script
+        # body also runs, unmodified, as app-generator's own
+        # `.github/workflows/ci.yml` `detect-changes` step, where
+        # `scripts/**` is the full top-level tree including scripts this
+        # very e2e-tests job invokes, e.g. `write-mock-oauth-sentinel.js`
+        # and `docker-compose-env.js` — a hole a blanket exclusion would
+        # open there even though a consumer repo's own top-level
+        # `scripts/**` never contains those).
         id: check
         run: |
           set -euo pipefail
@@ -114,7 +126,9 @@ jobs:
               ':(exclude,glob)*.md' \
               ':(exclude)README.md' ':(exclude)README_ja.md' \
               ':(exclude)CHANGELOG.md' ':(exclude)AGENTS.md' ':(exclude)CLAUDE.md' \
-              ':(exclude)LICENSE'; then
+              ':(exclude)LICENSE' \
+              ':(exclude,glob)scripts/check_*' ':(exclude,glob)scripts/check-*' \
+              ':(exclude,glob)scripts/vercel-*.sh' ':(exclude,glob)scripts/gcp-*.sh'; then
             echo "docs_only=true" >> "$GITHUB_OUTPUT"
           else
             echo "docs_only=false" >> "$GITHUB_OUTPUT"

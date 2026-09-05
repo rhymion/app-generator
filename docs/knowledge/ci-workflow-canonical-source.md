@@ -97,7 +97,10 @@ against each consumer repo's real top-level layout:
 `docs/**`, `spec/**`, top-level `*.md` (via `:(exclude,glob)*.md`, see
 "Docs-only E2E skip — folder and extension additions" below),
 `README.md`, `README_ja.md`, `CHANGELOG.md`, `AGENTS.md`, `CLAUDE.md`,
-`LICENSE`.
+`LICENSE`, and four narrow `scripts/**` subsets — `scripts/check_*`,
+`scripts/check-*`, `scripts/vercel-*.sh`, `scripts/gcp-*.sh` (see
+"Docs-only E2E skip — scripts/** (partial)" below for why only these
+four, not the whole tree).
 
 **Deliberately NOT included** (still trigger the full suite even
 though they look docs-adjacent): `.claude/**`, `.codex/**` (agent
@@ -116,7 +119,9 @@ a real code change), `.gitmodules`, `package.json`, `.env*`, `prj/**`
 `.claude/**`/`.codex/**`; carving out a docs-only subfolder there would
 need the same kind of pre-exclusion carve-out job used for
 `docs/consumer-commands/**` in this repo's own CI below, which is a
-real design addition, not attempted here), `scripts/**`.
+real design addition, not attempted here), the rest of `scripts/**`
+beyond the four narrow subsets named above (see next section for which
+scripts were considered and rejected).
 
 **Before/after contrast, measured on app-template (public, disposable
 probe PRs closed after measurement)**:
@@ -216,6 +221,79 @@ doc-only diff. Not implemented here: Actions consumption (this task's
 actual trigger — a private-repo minutes allotment) and Vercel
 consumption are billed and governed separately, and this task's
 mandate was measurement only for the Vercel side.
+
+## Docs-only E2E skip — scripts/** (partial)
+
+Triggered by a real incident on a private consumer repo: a single-file
+change to that repo's own migration-diff safety script (a hand-written
+CI helper unrelated to code generation) still ran the full `E2E Tests`
+job end-to-end, burning close to an hour of Actions minutes against a
+limited allotment for a change that could not affect generated output.
+
+A blanket `':(exclude)scripts/**'` addition was considered first and
+rejected. This job's script body is not consumer-only: the identical
+text also runs, largely unmodified, as this repo's own
+`.github/workflows/ci.yml` `detect-changes` step (see "Docs-only E2E
+skip — app-generator's own CI" below for how that file's exclude list
+already differs from this one in two other ways). In *this* repo,
+top-level `scripts/**` is not a small, deploy-only folder — it
+includes several scripts the `e2e-tests` job's own
+`test:e2e:build`/`check:generated`/`test:e2e:cy:start` npm-script
+chain directly invokes: `write-mock-oauth-sentinel.js`,
+`docker-compose-env.js`, `seed-baseline.ts`, `run-e2e.js`,
+`run-next-start.js` (traced from `package.json`'s
+`pretest:e2e:cy:*`/`test:e2e:*` script definitions). A blanket
+exclusion would let a change to any of those skip the very E2E run
+that exercises them — the same "a condition the machine doesn't see
+is a hole, not an exemption" failure shape the existing
+`detect-changes` comment already warns about for a bare `*.md`
+pathspec.
+
+By contrast, a consumer repo's own top-level `scripts/**` (verified
+against app-template) holds none of those five files — they live
+inside the `app-generator` submodule instead, at a different path
+(`app-generator/scripts/**`) already outside this job's `scripts/**`
+pathspec, which operates on the checkout root; a consumer's own
+`scripts/**` there is limited to a bootstrap script plus deploy
+helpers.
+
+**Adopted instead: four narrow, naming-convention-scoped subsets**,
+verified empirically (scratch repo, one commit per candidate path,
+diffed against this job's exact pathspec) to (a) correctly stay
+docs-only for the incident's own file and its analogues, and (b)
+correctly still trigger the full suite for the five e2e-invoked
+scripts above and for `prj_sync.py` (the consumer-schema sync
+mechanism — not itself invoked by this job's script chain today, but
+left out of the exclusion on the same conservative footing as
+`prj/**` elsewhere in this doc, since it decides what generate-code
+sees as input):
+
+- `scripts/check_*` and `scripts/check-*` — verification/gate-check
+  scripts by established naming convention in this repo (e.g.
+  `check_readme_sync.sh`, `check-example-file-leaks.sh`, every
+  `check_*_gate_fixture.sh`); confirmed absent from the `e2e-tests`
+  job's own invocation chain, and — for the ones that exist in this
+  repo — already covered by their own always-run CI jobs independent
+  of this docs-only gate (this repo's own `.github/workflows/ci.yml`
+  runs `example-file-credential-leak-check` and each `*-gate-fixture`
+  job unconditionally, not gated on `docs_only`). This is the pattern
+  that directly covers the incident file, a `check_*`-named
+  migration-diff safety script.
+- `scripts/vercel-*.sh` and `scripts/gcp-*.sh` — deployment-only
+  scripts invoked by Vercel/GCP build and deploy tooling, confirmed by
+  grep to have zero references in any `package.json` script or any
+  GitHub Actions workflow in this repo.
+
+**Deliberately left out of the exclusion** (fail-closed default,
+matching this doc's existing posture toward `prj/**`/`.claude/**`):
+every other `scripts/**` file, including `prj_sync.py`,
+`replace_schema.sh`, `seed-baseline.ts`, `seed-demo.ts`,
+`grant-all-permissions.ts`, `db-reset-sql.sh`, the migration `.sql`
+helpers, and the five e2e-invoked scripts named above. A future change
+wiring one of the currently-excluded `check_*`/`vercel-*`/`gcp-*`
+scripts into the `e2e-tests` chain would silently reopen this same
+hole for that one file — not proven impossible, just not observed
+today.
 
 ## Docs-only E2E skip — app-generator's own CI
 
