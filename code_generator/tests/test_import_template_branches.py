@@ -204,6 +204,25 @@ def test_unimportable_column_present_in_header_ignored_not_rejected(env):
     assert 'skippedColumns' in rendered
 
 
+def test_skipped_columns_reported_even_when_other_rows_error(env):
+    """cmd_964 follow-up: a per-row error (MULTI_MATCH, WRITE_FAILED, etc.)
+    must not suppress skippedColumns -- the two are orthogonal (file-level
+    column visibility vs. row-level matching), and a real fixture with both
+    an ignorable column present AND unrelated per-row errors regressed to
+    reporting only the errors (skippedColumns silently absent) before this
+    was added to the `errors.length > 0` early-return branch too."""
+    ctx = _ctx(import_unimportable_columns=['legacy_owner_name'])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    # The errors.length > 0 early-return block must also spread skippedColumns
+    # -- assert both appear together within that one response block, not just
+    # that each string exists somewhere in the file (they exist elsewhere too).
+    error_block_start = rendered.index('if (errors.length > 0) {')
+    error_block_end = rendered.index('if (dryRun) {')
+    error_block = rendered[error_block_start:error_block_end]
+    assert 'errors,' in error_block
+    assert '...(skippedColumns.length > 0 ? { skippedColumns } : {}),' in error_block
+
+
 def test_no_unimportable_columns_renders_empty_array(env):
     """Non-regression: the common case (nothing unimportable) still renders
     a valid, empty TS array — not `Undefined`."""

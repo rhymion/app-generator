@@ -456,7 +456,11 @@ export async function POST(request: NextRequest) {
 
     if (errors.length > 0) {
       return NextResponse.json(
-        { summary: { total: rows.length, succeeded: 0, failed: errors.length, dryRun }, errors } satisfies ImportResult,
+        {
+          summary: { total: rows.length, succeeded: 0, failed: errors.length, dryRun },
+          errors,
+          ...(skippedColumns.length > 0 ? { skippedColumns } : {}),
+        } satisfies ImportResult,
       );
     }
 
