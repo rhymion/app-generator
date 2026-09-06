@@ -49,7 +49,19 @@ type Round = {
  * _build_approval_create_block_for_entity emits for a real multistage
  * submission (code_generator/generators.py).
  */
-async function build3StageRound(creatorId: string): Promise<Round> {
+// entityName defaults to 'user' -- an entity_name intentionally NOT
+// declared in ENTITIES_WITH_ON_WITHDRAWN/TERMINAL_REJECT_ENTITIES (see
+// on_withdrawn_dispatch.ts/on_rejected_dispatch.ts), which is exactly what
+// the reject-focused tests below need (they pin the "unrecognized
+// entity_name" non-terminal-reject path -- see the 4th test's own
+// comment). Callers that exercise withdrawApprovalRequest on a round with
+// a still-pending row (cmd_969a, Issue not filed -- docs/knowledge/
+// proj-b-backlog-2026-09.md §9) must instead pass a real
+// on_withdrawn-declaring entity name (e.g. 'goods_receipt_line') --
+// swapping the default here would silently flip isTerminalReject too
+// (every on_withdrawn entity in this schema is also terminal-reject),
+// breaking the reject tests' asserted 'rejected' (non-terminal) status.
+async function build3StageRound(creatorId: string, entityName = 'user'): Promise<Round> {
   const approverRole1 = await prisma.role.create({
     data: { name: `MultistageApprover1_${createId()}`, creator_id: creatorId, updater_id: creatorId },
   });
@@ -61,17 +73,17 @@ async function build3StageRound(creatorId: string): Promise<Round> {
   });
 
   const flow1 = await prisma.approval_flow.create({
-    data: { entity_name: 'user', approver_role_id: approverRole1.id, creator_id: creatorId, updater_id: creatorId },
+    data: { entity_name: entityName, approver_role_id: approverRole1.id, creator_id: creatorId, updater_id: creatorId },
   });
   const flow2 = await prisma.approval_flow.create({
     data: {
-      entity_name: 'user', approver_role_id: approverRole2.id,
+      entity_name: entityName, approver_role_id: approverRole2.id,
       preceded_by: { connect: [{ id: flow1.id }] }, creator_id: creatorId, updater_id: creatorId,
     },
   });
   const flow3 = await prisma.approval_flow.create({
     data: {
-      entity_name: 'user', approver_role_id: approverRole3.id,
+      entity_name: entityName, approver_role_id: approverRole3.id,
       preceded_by: { connect: [{ id: flow2.id }] }, creator_id: creatorId, updater_id: creatorId,
     },
   });
@@ -110,7 +122,7 @@ describe('multistage approval rounds (cmd_844)', () => {
   // PD-1 final ruling: round_id scoping alone -- approved rows are never
   // rewritten, only the round's remaining pending rows are closed.
   it('withdraw closes only the round\'s pending rows, leaving an already-approved stage untouched', async () => {
-    const round = await build3StageRound(creator.id);
+    const round = await build3StageRound(creator.id, 'goods_receipt_line');
     getSessionUserIdOrThrow.mockResolvedValue(creator.id);
     getUserRoleIds.mockResolvedValue([round.approverRole1.id]);
     await approveApprovalRequest(round.stage1.id);
@@ -227,7 +239,7 @@ describe('multistage approval rounds (cmd_844)', () => {
   // check, must never let an OLD (closed) round's approved row satisfy a
   // NEW round's own ordering/completeness requirement.
   it('a new round after a withdrawn round starts genuinely fresh -- old approved stage does not unblock the new round\'s later stage', async () => {
-    const round1 = await build3StageRound(creator.id);
+    const round1 = await build3StageRound(creator.id, 'goods_receipt_line');
     getSessionUserIdOrThrow.mockResolvedValue(creator.id);
     getUserRoleIds.mockResolvedValueOnce([round1.approverRole1.id]);
     await approveApprovalRequest(round1.stage1.id);
