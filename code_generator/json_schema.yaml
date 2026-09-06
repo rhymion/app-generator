@@ -380,6 +380,12 @@ definitions:
           - rejected
           - terminal_rejected
           - withdrawn
+          # cmd_963: keep in sync with prisma/schema.prisma's
+          # ApprovalRequestStatus enum -- this json-schema enum drives the
+          # TS type emitted for approval_request's own `status` field
+          # (types.ts.jinja2/getters.ts.jinja2), independently of the
+          # Prisma enum itself.
+          - split_invalidated
       round_id: {}
 
   comment:
