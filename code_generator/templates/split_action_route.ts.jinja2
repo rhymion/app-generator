@@ -119,11 +119,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     await prisma.$transaction(async (tx) => {
       // 1. Set parent status = split. approvable_id is mandatory (per cmd_296 ruling) — it is
       // never null'd and the approvable record is never deleted (history/audit
-      // trail preserved). Only the still-pending approval_requests are removed
-      // so the invalidated parent no longer shows as awaiting approval.
+      // trail preserved). The parent's approval_request rows are invalidated
+      // (not deleted, cmd_963) so the round no longer shows as awaiting
+      // approval, but the rows -- and any approval_history linked to them via
+      // onDelete: Cascade -- survive the split. canSubmitForApproval treats
+      // 'split_invalidated' as a permanent close, so the parent can never be
+      // resubmitted (see lib/approval_request/submit_predicate.ts).
       {% if has_approvable %}
       if (parent.approvable_id) {
-        await tx.approval_request.deleteMany({ where: { approvable_id: parent.approvable_id } });
+        await tx.approval_request.updateMany({
+          where: { approvable_id: parent.approvable_id },
+          data: { status: 'split_invalidated' },
+        });
       }
       {% endif %}
       await tx.{{ entity_name }}.update({

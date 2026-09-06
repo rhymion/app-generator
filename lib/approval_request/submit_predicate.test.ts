@@ -40,6 +40,16 @@ describe('canSubmitForApproval', () => {
     expect(canSubmitForApproval([{ status: 'approved' }, { status: 'withdrawn' }])).toBe(true);
     expect(canSubmitForApproval([{ status: 'withdrawn' }])).toBe(true);
   });
+
+  // cmd_963: 8th state, additive only -- states 1-7 above are pinned
+  // unchanged by this same test file; split_invalidated never appeared in
+  // any of their inputs, so none of those assertions exercise the new
+  // branch. This state can only ever arise from a split (see
+  // split_action_route.ts.jinja2), never as a fresh input on its own.
+  it('8. split-invalidated: parent split into children -> blocked, permanently (never clears)', () => {
+    expect(canSubmitForApproval([{ status: 'split_invalidated' }])).toBe(false);
+    expect(canSubmitForApproval([{ status: 'approved' }, { status: 'split_invalidated' }])).toBe(false);
+  });
 });
 
 describe('canWithdrawApproval', () => {

@@ -218,6 +218,12 @@ enum ApprovalRequestStatus {
   rejected
   terminal_rejected
   withdrawn
+  // cmd_963: split invalidates the parent's current round instead of
+  // deleting its approval_request rows (deletion cascaded to delete linked
+  // approval_history, losing audit trail). canSubmitForApproval treats a
+  // round containing this status as permanently closed, same as
+  // terminal_rejected -- the parent's rows may never resubmit once split.
+  split_invalidated
 }
 
 model approval_request {

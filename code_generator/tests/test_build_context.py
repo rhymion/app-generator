@@ -1326,16 +1326,33 @@ class TestImportKeySpecsLookupEntityFilterByOrg:
                     "organization_id": _fk_field("organization", label="name"),
                 },
             },
+            # cmd_964 (Issue #88): org-scoped, but its own organization_id is
+            # OPTIONAL — an org-less "supplier" row is legitimate (matches
+            # inventory-app's real supplier/purchase_order/item shape). This
+            # is the case api_import_route.ts.jinja2's dotted-FK lookup
+            # (line ~213) used to miss: `organization_id: { in: ids } }`
+            # never matches NULL, so an org-less supplier row was
+            # unreachable via a dotted x-import-key against it.
+            "supplier": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "name": {"type": "string"},
+                    "organization_id": _fk_field("organization", nullable=True, label="name"),
+                },
+            },
             "ticket": {
                 "type": "object",
                 "required": ["id", "name", "organization_id"],
-                "x-import-key": ["name", "role.name", "department.name"],
+                "x-import-key": ["name", "role.name", "department.name", "supplier.name"],
                 "properties": {
                     "id": _base_props()["id"],
                     "name": {"type": "string"},
                     "organization_id": _fk_field("organization", label="name"),
                     "role_id": _fk_field("role", nullable=True, label="name"),
                     "department_id": _fk_field("department", nullable=True, label="name"),
+                    "supplier_id": _fk_field("supplier", nullable=True, label="name"),
                 },
             },
         }
@@ -1360,6 +1377,33 @@ class TestImportKeySpecsLookupEntityFilterByOrg:
         doc calls out — role is legitimately visible org-wide)."""
         specs = self._specs_by_raw()
         assert specs["role.name"]["lookup_entity_filter_by_org"] is False
+
+    def test_org_required_lookup_entity_is_not_marked_optional(self):
+        """department's own organization_id is required (non-nullable) →
+        the OR-null branch must not fire (harmless no-op case, cmd_964)."""
+        specs = self._specs_by_raw()
+        assert specs["department.name"]["lookup_entity_org_relationship_optional"] is False
+
+    def test_org_optional_lookup_entity_is_marked_optional(self):
+        """cmd_964 (Issue #88): supplier's own organization_id is nullable →
+        the dotted lookup must admit NULL rows too, or an org-less supplier
+        can never be re-matched by CSV import."""
+        specs = self._specs_by_raw()
+        assert specs["supplier.name"]["lookup_entity_filter_by_org"] is True
+        assert specs["supplier.name"]["lookup_entity_org_relationship_optional"] is True
+
+    def test_org_optional_lookup_entity_renders_or_null_where_clause(self):
+        """The rendered template must actually emit the OR-null form for the
+        org-optional lookup entity, not just carry the flag unused."""
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        from generate import _make_env
+        rendered = _make_env().get_template('api_import_route.ts.jinja2').render(**ctx)
+        assert (
+            "where: { name: _supplier_csv_val, OR: [{ organization_id: { in: _importOrgIds } }, "
+            "{ organization_id: null }] }" in rendered
+        )
+        # department (org-required) keeps the plain form, unchanged.
+        assert "where: { name: _department_csv_val, organization_id: { in: _importOrgIds } }" in rendered
 
     def test_any_dotted_fk_needs_org_filter_true_when_any_spec_needs_it(self):
         ctx = build_context(self.ENTITY, self.SCHEMA)
