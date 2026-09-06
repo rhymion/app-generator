@@ -235,6 +235,7 @@
     "approved": "承認済み",
     "pending": "承認待ち",
     "rejected": "否決",
+    "split_invalidated": "分割済み(無効)",
     "terminal_rejected": "最終否決",
     "withdrawn": "取り下げ済み"
   },

@@ -235,6 +235,7 @@
     "approved": "Approved",
     "pending": "Pending",
     "rejected": "Rejected",
+    "split_invalidated": "Split (invalidated)",
     "terminal_rejected": "Terminal Rejected",
     "withdrawn": "Withdrawn"
   },
