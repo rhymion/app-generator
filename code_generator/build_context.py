@@ -1942,6 +1942,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             # instead of by an organization_id column that doesn't exist
             # on this model.
             _lookup_entity_filter_by_self_id = _lookup_entity == 'organization'
+            # cmd_964 (Issue #88): same reasoning as `org_relationship_optional`
+            # above, but for the LOOKUP entity's own organization_id, not the
+            # importing entity's. `organization_id: { in: _importOrgIds } }`
+            # never matches NULL in SQL, so a lookup entity whose own org
+            # relation is optional (e.g. a supplier/item shared org-wide)
+            # silently fails to resolve any org-less row — the import can
+            # never re-find a record the export itself just emitted.
+            _lookup_org_relationship_optional = _lookup_entity_filter_by_org and _is_nullable(
+                _lookup_entity_def.get('properties', {}).get('organization_id', {})
+            )
             import_key_specs.append({
                 'raw':                  _raw,
                 'is_dotted':            True,
@@ -1954,6 +1964,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 'fk_nullable':          _fk_nullable,
                 'lookup_entity_filter_by_org': _lookup_entity_filter_by_org,
                 'lookup_entity_filter_by_self_id': _lookup_entity_filter_by_self_id,
+                'lookup_entity_org_relationship_optional': _lookup_org_relationship_optional,
             })
         else:
             import_key_specs.append({
@@ -1966,6 +1977,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 'fk_nullable':   False,
                 'lookup_entity_filter_by_org': False,
                 'lookup_entity_filter_by_self_id': False,
+                'lookup_entity_org_relationship_optional': False,
             })
 
     # import_fk_specs (cmd_530): generalizes the dotted-FK lookup-by-label
@@ -1990,7 +2002,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # writable via import just because they're visible in export. Both
     # exclusion classes remain exported but become import_unimportable_columns
     # below (fail loud instead of silent drop).
-    def _fk_nullable_and_org_filter(_prop_name: str, _lookup_entity: str) -> tuple[bool, bool, bool]:
+    def _fk_nullable_and_org_filter(_prop_name: str, _lookup_entity: str) -> tuple[bool, bool, bool, bool]:
         _fk_prop  = model_def.get('properties', {}).get(_prop_name, {})
         _fk_types = _fk_prop.get('type', [])
         if isinstance(_fk_types, str):
@@ -2006,7 +2018,14 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         # block above — 'organization' as a lookup target needs a self-id
         # filter, not an organization_id filter (it has no such column).
         _lookup_entity_filter_by_self_id = _lookup_entity == 'organization'
-        return _fk_nullable, _lookup_entity_filter_by_org, _lookup_entity_filter_by_self_id
+        # cmd_964 (Issue #88): see the matching comment in the dotted
+        # x-import-key block above — a lookup entity whose own organization_id
+        # is optional needs the OR-null form, or an org-less row is never
+        # re-found on import.
+        _lookup_org_relationship_optional = _lookup_entity_filter_by_org and _is_nullable(
+            _lookup_entity_def.get('properties', {}).get('organization_id', {})
+        )
+        return _fk_nullable, _lookup_entity_filter_by_org, _lookup_entity_filter_by_self_id, _lookup_org_relationship_optional
 
     _key_relation_names = {s['var_prefix'] for s in import_key_specs if s['is_dotted']}
     import_fk_specs = [
@@ -2018,7 +2037,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         if r['prop_name'] in readonly_fields:
             continue
         _lookup_entity = r['target']
-        _fk_nullable, _lookup_entity_filter_by_org, _lookup_entity_filter_by_self_id = (
+        _fk_nullable, _lookup_entity_filter_by_org, _lookup_entity_filter_by_self_id, _lookup_org_relationship_optional = (
             _fk_nullable_and_org_filter(r['prop_name'], _lookup_entity)
         )
         if r['simple_label'] is None:
@@ -2034,6 +2053,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 'fk_nullable':          _fk_nullable,
                 'lookup_entity_filter_by_org': _lookup_entity_filter_by_org,
                 'lookup_entity_filter_by_self_id': _lookup_entity_filter_by_self_id,
+                'lookup_entity_org_relationship_optional': _lookup_org_relationship_optional,
                 'is_key':               False,
                 'import_label_expr':    r['import_label_expr'],
                 'has_format':           r['import_has_format'],
@@ -2053,6 +2073,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             'fk_nullable':          _fk_nullable,
             'lookup_entity_filter_by_org': _lookup_entity_filter_by_org,
             'lookup_entity_filter_by_self_id': _lookup_entity_filter_by_self_id,
+            'lookup_entity_org_relationship_optional': _lookup_org_relationship_optional,
             'is_key':               False,
         })
 

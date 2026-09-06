@@ -21,7 +21,7 @@ type Row = {
   id: string;
   approval_flow_id: string;
   round_id: string;
-  status: 'pending' | 'approved' | 'rejected' | 'terminal_rejected' | 'withdrawn';
+  status: 'pending' | 'approved' | 'rejected' | 'terminal_rejected' | 'withdrawn' | 'split_invalidated';
   approval_flow?: {
     id: string;
     entity_name: string;
@@ -171,6 +171,24 @@ describe('ApprovalSection (cmd_844 round-based rendering)', () => {
     );
 
     expect(screen.getByLabelText('submit')).toBeInTheDocument();
+  });
+
+  it('renders a split-invalidated round without a (re)submit button (cmd_963: permanently closed)', () => {
+    const requests: Row[] = [
+      { id: 'r1', approval_flow_id: 'flow-1', round_id: 'round-1', status: 'split_invalidated',
+        approval_flow: { id: 'flow-1', entity_name: 'e', approver_role_id: 'role-1' } },
+    ];
+
+    render(
+      <ApprovalSection
+        src={makeSrc(requests)}
+        currentUserId="requestor-1"
+        onSubmitForApproval={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByText('split_invalidated')).toBeInTheDocument();
+    expect(screen.queryByLabelText('submit')).not.toBeInTheDocument();
   });
 
   it('groups past rounds under a collapsible history section, separate from the current round table', () => {

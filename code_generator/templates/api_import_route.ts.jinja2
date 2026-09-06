@@ -21,6 +21,13 @@ type ImportResult = {
   summary: { total: number; succeeded: number; failed: number; dryRun: boolean };
   errors: ImportRowError[];
   confirmToken?: string;
+  // cmd_964 (殿ご裁定): a CSV column with no write path (UNIMPORTABLE_COLUMNS
+  // below) is a column whose value can never have been written by this same
+  // import route in the first place -- so ignoring it on import loses
+  // nothing a user could have intended (unlike silently dropping a column
+  // that WAS writable, cmd_530's concern). Reported here instead of failing
+  // the whole import, so the caller can see what was skipped.
+  skippedColumns?: string[];
 };
 
 {% if not import_can_create and not import_can_update %}
@@ -144,16 +151,16 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
-    const unimportableColumns = UNIMPORTABLE_COLUMNS.filter((c) => headerFields.includes(c));
-    if (unimportableColumns.length > 0) {
-      return NextResponse.json(
-        {
-          summary: { total: rows.length, succeeded: 0, failed: 0, dryRun },
-          errors: [{ row: 0, code: 'UNIMPORTABLE_COLUMN', message: `Column(s) present in CSV cannot be imported (no write path — read-only or non-resolvable on this entity): ${unimportableColumns.join(', ')}` }],
-        } satisfies ImportResult,
-        { status: 400 },
-      );
-    }
+    // cmd_964 (殿ご裁定): a column in UNIMPORTABLE_COLUMNS has no write path
+    // on this entity by definition (read-only or a non-resolvable composite/
+    // dotted label) -- its value could never have been written by import in
+    // the first place, so its presence is ignored rather than rejecting the
+    // whole file. Every code path below only ever reads a column it knows
+    // how to handle (FIELD_SPECS / KEY_COLUMNS / import_fk_specs), so an
+    // unimportable column in `raw` is simply never looked at again; nothing
+    // else needs to change to make "ignore" mean "ignore". Still reported
+    // back (skippedColumns) so ignoring it is visible, not silent.
+    const skippedColumns = UNIMPORTABLE_COLUMNS.filter((c) => headerFields.includes(c));
 
     const errors: ImportRowError[] = [];
     const actions: PendingAction[] = [];
@@ -210,7 +217,7 @@ export async function POST(request: NextRequest) {
       {
 {% endif %}
         const _{{ spec.var_prefix }}_rows = await prisma.{{ spec.lookup_entity }}.findMany({
-          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val{% if spec.lookup_entity_filter_by_org %}, organization_id: { in: _importOrgIds }{% elif spec.lookup_entity_filter_by_self_id %}, id: { in: _importOrgIds }{% endif %} },
+          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val{% if spec.lookup_entity_filter_by_org and spec.lookup_entity_org_relationship_optional %}, OR: [{ organization_id: { in: _importOrgIds } }, { organization_id: null }]{% elif spec.lookup_entity_filter_by_org %}, organization_id: { in: _importOrgIds }{% elif spec.lookup_entity_filter_by_self_id %}, id: { in: _importOrgIds }{% endif %} },
           select: { id: true },
         });
         if (_{{ spec.var_prefix }}_rows.length === 0) {
@@ -283,7 +290,7 @@ export async function POST(request: NextRequest) {
       {
 {% endif %}
         const _{{ spec.var_prefix }}_rows = await prisma.{{ spec.lookup_entity }}.findMany({
-          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val{% if spec.lookup_entity_filter_by_org %}, organization_id: { in: _importOrgIds }{% elif spec.lookup_entity_filter_by_self_id %}, id: { in: _importOrgIds }{% endif %} },
+          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val{% if spec.lookup_entity_filter_by_org and spec.lookup_entity_org_relationship_optional %}, OR: [{ organization_id: { in: _importOrgIds } }, { organization_id: null }]{% elif spec.lookup_entity_filter_by_org %}, organization_id: { in: _importOrgIds }{% elif spec.lookup_entity_filter_by_self_id %}, id: { in: _importOrgIds }{% endif %} },
           select: { id: true },
         });
         if (_{{ spec.var_prefix }}_rows.length === 0) {
@@ -449,7 +456,11 @@ export async function POST(request: NextRequest) {
 
     if (errors.length > 0) {
       return NextResponse.json(
-        { summary: { total: rows.length, succeeded: 0, failed: errors.length, dryRun }, errors } satisfies ImportResult,
+        {
+          summary: { total: rows.length, succeeded: 0, failed: errors.length, dryRun },
+          errors,
+          ...(skippedColumns.length > 0 ? { skippedColumns } : {}),
+        } satisfies ImportResult,
       );
     }
 
@@ -459,6 +470,7 @@ export async function POST(request: NextRequest) {
           summary: { total: rows.length, succeeded: actions.length, failed: 0, dryRun: true },
           errors: [],
           confirmToken: generateImportToken(actorId, '{{ parent }}'),
+          ...(skippedColumns.length > 0 ? { skippedColumns } : {}),
         } satisfies ImportResult,
       );
     }
@@ -507,6 +519,7 @@ export async function POST(request: NextRequest) {
       {
         summary: { total: rows.length, succeeded, failed: commitErrors.length, dryRun: false },
         errors: commitErrors,
+        ...(skippedColumns.length > 0 ? { skippedColumns } : {}),
       } satisfies ImportResult,
     );
   } catch (error) {

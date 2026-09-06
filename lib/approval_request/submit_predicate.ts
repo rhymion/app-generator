@@ -53,12 +53,21 @@ export type RoundRequestStatus = {
 //       one.
 // A round with any row still 'terminal_rejected' never clears, regardless
 // of what else is mixed in.
+//
+// cmd_963: a round containing 'split_invalidated' never clears either --
+// the parent entity was split into child rows, so the parent can never be
+// resubmitted for approval again. Before this status existed, a split
+// deleted the round's rows outright (see split_action_route.ts.jinja2),
+// which made an invalidated round indistinguishable from "never
+// submitted" (case 1 above) and let a split-then-invalid parent pass this
+// predicate and resubmit.
 export function canSubmitForApproval(latestRoundRequests: RoundRequestStatus[]): boolean {
   if (latestRoundRequests.length === 0) return true;
   const statuses = latestRoundRequests.map((r) => r.status);
   if (statuses.some((s) => s === 'pending')) return false;
   if (statuses.every((s) => s === 'approved')) return false;
   if (statuses.some((s) => s === 'terminal_rejected')) return false;
+  if (statuses.some((s) => s === 'split_invalidated')) return false;
   return true;
 }
 

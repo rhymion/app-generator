@@ -54,7 +54,10 @@ type ApprovalRequest = {
   // cmd_844: identifies which submission ("round") this row belongs to --
   // see prisma/schema.prisma's approval_request.round_id doc.
   round_id: string;
-  status: 'pending' | 'approved' | 'rejected' | 'terminal_rejected' | 'withdrawn';
+  // cmd_963: split_invalidated added -- a permanently-closed round left by
+  // a split (see lib/approval_request/submit_predicate.ts's matching
+  // comment). Renders like any other closed status via tStatus() below.
+  status: 'pending' | 'approved' | 'rejected' | 'terminal_rejected' | 'withdrawn' | 'split_invalidated';
   approval_flow?: {
     id: string;
     entity_name: string;
