@@ -7,7 +7,7 @@ pyyaml>=6.0.3
 ruamel.yaml>=0.19.1
 pytest>=9.0.0
 pytest-cov>=7.1.0
-fonttools[woff]>=4.63.0
+fonttools[woff]>=4.64.0
 # Used by the Type B / Type A gates and by the dependency-audit CI job to
 # surface known CVEs in the Python tooling. Even though nothing here ships
 # to end users, the generator runs in CI and on dev laptops; keeping pip
