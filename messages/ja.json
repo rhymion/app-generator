@@ -34,6 +34,7 @@
     "notFound": "レコードが見つかりませんでした。削除された可能性があります。",
     "pageError": "問題が発生しました。",
     "permissionDenied": "この操作を行う権限がありません。",
+    "relatedRecordInvalid": "関連するレコードが必要な条件を満たしていないため、この操作を完了できません。",
     "reservationConflict": "この操作は既存の予約と競合しています。",
     "reservationLocked": "この行の予約は既に確保済みのため、数量や条件を変更することはできません。",
     "sessionExpired": "セッションの有効期限が切れました。再度サインインしてください。",

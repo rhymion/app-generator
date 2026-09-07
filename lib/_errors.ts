@@ -14,6 +14,13 @@ export type ErrorCode =
   | 'VALIDATION'          // field-level input error (missing, invalid, OTO conflict)
   | 'CONFLICT'            // stale-update (assertNotStale snapshot mismatch)
   | 'RESERVATION_LOCKED'  // reservation criteria changed after allocation (ReservationMutationError) — see cmd_849
+  | 'RELATED_RECORD_INVALID' // a 1-to-many (or many-to-many) related record does not satisfy a
+                             // precondition for this action — e.g. a child row is not in the
+                             // required state, or an FK-referenced row's own status blocks the
+                             // operation. Field-less by construction: the offending row usually
+                             // lives on a different entity/form than the one the user submitted,
+                             // so there is no `field` on THIS form to attach the error to (see
+                             // cmd_979, docs/knowledge/error-message-framework.md).
   | 'CAPACITY'            // pool / inventory exhausted
   | 'UNKNOWN';            // unexpected internal error
 
@@ -111,6 +118,7 @@ export function errorMessageKey(code: ErrorCode): string {
     case 'NOT_FOUND':         return 'notFound';
     case 'CONFLICT':          return 'staleMutation';
     case 'RESERVATION_LOCKED': return 'reservationLocked';
+    case 'RELATED_RECORD_INVALID': return 'relatedRecordInvalid';
     case 'CAPACITY':          return 'capacityExhausted';
     default:                  return 'unknown';
   }
