@@ -490,6 +490,39 @@ error at all. Any future addition to `ErrorCode` must grep for every `Record<Err
 the repo (currently just this one map), not only the `switch` statements — the two fail
 differently, and only one of them fails loud.
 
+### `VALIDATION`/no-field also covers a whole class of "related row is wrong" rejections
+
+A follow-up case, structurally identical to the `CONFLICT`/no-field collision above but on the
+`VALIDATION` code instead. A hand-written cascade rejected a shipment header's own status update
+because a *child* row (`shipment_line`) referenced by that shipment did not satisfy a precondition
+(missing `inventory_id`, wrong item, or — the new rule added at the same time — not yet marked
+`packed`). The rejection reached the client as `errorCode: 'VALIDATION'`, `field: undefined` —
+because the throw site had no field on the *shipment* form to blame; the actual problem lives on a
+different row of a different entity. `getErrorMessage`'s `VALIDATION` branch falls back to
+`terr('unknown')` whenever `field` is absent, so the user saw the same generic "An unexpected
+error occurred" text this whole framework exists to eliminate.
+
+This is not a one-off: it is the general shape of any 1-to-many (or many-to-many) relationship
+where an action on the parent depends on every related row satisfying some condition — a
+purchasing-side receiving/QC entity checking its lines, an approval flow checking its requests,
+any parent/children pair with a business rule like "all children must be X before the parent can
+become Y". Each such site would otherwise either invent its own ad hoc errorCode (multiplying
+one-off codes without a shared UI branch) or fall into the same `VALIDATION`/no-field bucket as
+ordinary required-field errors, which is what happened here.
+
+Fixed the same way as `RESERVATION_LOCKED`: a new field-less code, `RELATED_RECORD_INVALID`, with
+its own `relatedRecordInvalid` i18n key (en/ja) and its own `getErrorMessage` branch in
+`form_upsert.tsx.jinja2`. Unlike `RESERVATION_LOCKED` (which is tied to one specific generated
+mechanism, `x-reservation`), this code is intentionally generic — any hand-written
+`service_validation_custom.ts` or cascade file, for any entity, that rejects an action because a
+related row fails a condition should throw `AppError('RELATED_RECORD_INVALID', ...)` rather than
+inventing a new code or falling back to field-less `VALIDATION`.
+
+**What this does NOT fix**: even with the distinct errorCode, the message shown is still generic —
+"a related record does not meet the required condition" says nothing about *which* row, *which*
+entity, or *what* condition. That is a harder, still-open problem: the parent form's error display
+has no vocabulary for "go look at row 3 of a different entity's list" — see the open question below.
+
 ---
 
 ## Impact on Existing Specs
@@ -549,3 +582,4 @@ Steps 1–5 are write-once lib / config changes. Steps 6–12 are generator temp
 | OQ-2 | **`staleMutation` message**: "reload to compare with the latest changes" causes the user to lose form edits. Should the UI preserve or diff the form state instead? Out of scope here, but worth tracking. |
 | OQ-3 | **Japanese i18n keys**: Who authors `messages/ja.json` equivalents for the `Errors` namespace? Standard pattern: generator emits English; consumer provides Japanese. |
 | OQ-4 | ~~**error.tsx session-redirect**: Should Next.js middleware redirect unauthenticated requests to `/login` before the page renders? This would eliminate U1/U2 scenarios entirely. Separate design issue.~~ **Resolved (an earlier auth-redirect fix)**: it already did, on `develop`, before this question was written — see "U1/U2 unreachable (an earlier auth-redirect fix)" above. That same fix additionally closed the one gap that existed (no return-to-original-page behavior) by adding a validated `?redirect=` round trip through `lib/auth/safe-redirect.ts`. |
+| OQ-5 | **A parent form has no vocabulary to point at a child row's field.** Giving a related-record rejection its own errorCode (`RELATED_RECORD_INVALID`, see the case study above) only fixes *which generic sentence* is shown — it does not fix the sentence's lack of specificity. The deeper gap: `ActionFailure.field` names a field on the form that submitted the action, but the actual defect can live on a *different entity's row* that the current form has no way to display or link to (e.g. a shipment header's status update fails because shipment_line #3 is not packed — the shipment edit form has no "line #3" or "packed" field of its own to attach an error to, and adding `field: 'status'` on the *child* entity wouldn't help either, since the child isn't the form currently open). Adding a bare `field` string is not enough to close this — it would need to identify the row (which entity, which id or row index) as well as the field, and the display layer would need new logic to render that as a usable pointer ("go check shipment_line #3") rather than plain text. No design for this exists yet. Recommendation for whoever picks this up: treat it as a generator-wide, cross-entity feature (like the errorCode itself), not a one-off fix for shipment; survey which other entities have the same parent-depends-on-children shape before designing the fix, since a design that only covers shipment would likely need redoing for the next entity that hits this. |
