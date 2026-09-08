@@ -165,6 +165,50 @@ def _is_nullable(defn: dict) -> bool:
     return isinstance(t, list) and 'null' in t
 
 
+# A nullable plain-text field written as '' (an empty-but-not-cleared
+# client value -- a blank text input, an omitted-then-defaulted FormData
+# read, a JSON body that sends "" instead of null) must persist as NULL,
+# the same as if the field had never been set at all. Two writes of "no
+# value" that land as two different DB values (NULL vs '') silently break
+# any later equality-match against the column (e.g. a find-or-create
+# unique-compound-key lookup keyed in part on this field never matches a
+# row saved the other way -- confirmed root cause of a duplicate-row
+# incident on goods_receipt_line.lot_number, traced to inventory's
+# @@unique([..., lot_number, ...]) never matching an existing NULL row
+# against a freshly-'' one).
+#
+# Scoped narrowly to a PLAIN nullable string column -- not date/time
+# (format set), not Decimal (_prisma_decimal_type), not a Prisma
+# nativeEnum (_prisma_native_enum_type, where '' isn't a valid member to
+# begin with and this cast would be a no-op at best). A non-nullable
+# string field is deliberately untouched -- '' is a legitimate, distinct
+# value there (an entity requiring the field to be present, just possibly
+# blank), never a stand-in for "absent".
+def _is_nullable_plain_string(defn: dict) -> bool:
+    if not _is_nullable(defn):
+        return False
+    t = defn.get('type')
+    types = t if isinstance(t, list) else [t]
+    if 'string' not in types:
+        return False
+    if defn.get('format'):
+        return False
+    if defn.get('_prisma_decimal_type') or defn.get('_prisma_native_enum_type'):
+        return False
+    return True
+
+
+def _normalized_value_expr(prop: str, var_name: str, defn: dict) -> str:
+    """The write-side expression for one field's `data: {...}` entry --
+    `var_name` untouched, or (for a nullable plain-text field only)
+    `var_name === '' ? null : var_name` so an empty string never reaches
+    the DB as a value distinct from NULL. See _is_nullable_plain_string.
+    """
+    if _is_nullable_plain_string(defn):
+        return f"{var_name} === '' ? null : {var_name}"
+    return var_name
+
+
 def is_select_like_field(defn: dict) -> bool:
     """True for fields rendered via AppFieldSelect / a MUI Autocomplete that
     cypress drives with cy.clearAutocomplete(): enum_integer, enum_string
@@ -2404,7 +2448,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # query engine reject the whole create with a confusing "Argument
     # `shipment` is missing" error, not a status error).
     _base_data_lines = [
-        f"        {p['prop']}: {p['var_name']},"
+        f"        {p['prop']}: {_normalized_value_expr(p['prop'], p['var_name'], p['def'])},"
         for p in parent_prop_infos
         if p['prop'] not in _server_value_prop_names and p['prop'] not in _ro_client_exclude
     ]
@@ -2481,7 +2525,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # parameters and must still be skipped here.
     _ro_update_skip = set(readonly_fields)
     parent_data_obj_update = '\n'.join(
-        f"        {p['prop']}: {p['var_name']},"
+        f"        {p['prop']}: {_normalized_value_expr(p['prop'], p['var_name'], p['def'])},"
         for p in parent_prop_infos if p['prop'] not in _ro_update_skip
     )
     # validate()/validateCustomRules must never see a plain readonly field's
@@ -2490,7 +2534,10 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # rule that inspects it directly (rather than prevRow, which IS the real
     # persisted value) would be validating garbage. client_prop_infos already
     # excludes those fields entirely.
-    validation_data_obj  = '\n'.join(f"      {p['prop']}: {p['var_name']}," for p in client_prop_infos)
+    validation_data_obj  = '\n'.join(
+        f"      {p['prop']}: {_normalized_value_expr(p['prop'], p['var_name'], p['def'])},"
+        for p in client_prop_infos
+    )
     # Synthetic object spreading created record with nested auto-create OTO stubs for afterCreate
     one_to_one_spread = ', '.join(
         f"{r['relation_name']}: {{ id: created.{r['prop_name']} }}"
