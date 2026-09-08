@@ -371,7 +371,7 @@ def validate_write_once_stub_asymmetry(entries: list[dict], manifest) -> None:
     before generate() reports success, which is what makes it a gate rather
     than a passive observation.
 
-    Coarse and cheap on purpose (殿ご裁定): this never reads what a stub's
+    Coarse and cheap on purpose (per ruling): this never reads what a stub's
     body actually does. It only asks "was this file's content ever hand-
     edited away from a known pristine render of its current stub template?"
     (see `manifest.is_stale_stub`) — file-level, not field-level. A create

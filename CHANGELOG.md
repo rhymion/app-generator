@@ -213,6 +213,22 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   already and is documented in the same section.
 
 ### Fixed
+- **`.env.example` now documents `IMPORT_MAX_ROWS`/`IMPORT_MAX_BYTES`**, the
+  two env vars `api_import_route.ts.jinja2` reads to override the CSV
+  import row/byte ceilings (defaults `5000` / `10485760` — 10MB). Neither
+  was documented anywhere before, so a consumer that needed to change the
+  limit had no way to discover the correct var name. Note the var names
+  intentionally keep the opposite word order from the generated code's own
+  constant names (`MAX_IMPORT_ROWS`/`MAX_IMPORT_BYTES`) — renaming either
+  side would touch every generated `api_import_route.ts` across every
+  entity, so the mismatch is called out in a comment at the constant
+  declarations instead of renamed.
+- **Internal role/honorific vocabulary removed from generator-authored
+  comments** in `api_import_route.ts.jinja2` (and the two source-only
+  files `schema_deriver.py`/`validate.py`, which don't ship but are
+  maintained code) — reworded to English, design intent preserved,
+  ticket/commit references (`cmd_NNN`) kept as-is.
+
 - **CSV import now commits through the same `lib/{entity}/service.ts`
   functions the REST route and Server Action call, instead of a raw
   `tx.model.create/update`, for any entity whose signature carries no

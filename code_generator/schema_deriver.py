@@ -35,7 +35,7 @@ from dataclasses import dataclass, field as _dc_field
 from pathlib import Path
 
 # Category A scalar type mapping (design doc Sec.3 Category A table).
-# `Decimal`: mapped to "string", not "number" --殿ご裁定(cmd_705, 2026-08-15).
+# `Decimal`: mapped to "string", not "number" -- per ruling (cmd_705, 2026-08-15).
 # Prisma's Decimal (decimal.js) round-trips through a JS `number` with float
 # rounding error (e.g. 0.1 + 0.2); a string preserves exact precision through
 # JSON response / form value / CSV round-trip. See
