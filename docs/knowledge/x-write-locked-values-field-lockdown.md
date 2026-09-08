@@ -70,11 +70,17 @@ surfaces. A schema author who only checks the screen will miss the other three:
    wrapper, so this one check covers both entry points — the same "insert once at the confluence
    point" shape used by the post-approval operation lockdown (see "Related, but distinct"
    below).
-3. **CSV import** — `api_import_route.ts.jinja2` writes via a direct transaction call and never
-   goes through `service_validation.ts` at all, so it carries its own, deliberately duplicated
-   `WRITE_LOCKED_FIELDS`/`findLockedViolation()` copy. Both the create branch (any locked value
-   is unconditionally rejected — a new row has no persisted value to fall back to) and the
-   update branch (locked value allowed only as a same-value resubmission, see below) enforce it.
+3. **CSV import** (Issue #93) — `api_import_route.ts.jinja2`'s commit loop calls
+   `add{Parent}`/`update{Parent}` (the same `lib/{entity}/service.ts` functions the REST route
+   and Server Action call) whenever the entity has no embedded-DataGrid-child or bridge-child
+   param (a flat CSV row has no per-row data source for either shape). For that entity shape,
+   this check reaches import automatically — there is no separate copy to keep in sync, and the
+   import route's former `WRITE_LOCKED_FIELDS`/`findLockedViolation()` duplicate has been
+   removed. For the remaining, infeasible entity shape (embedded children or a bridge-child
+   parent), import still writes via a direct transaction call and never goes through
+   `service_validation.ts` — that fallback path keeps its own duplicated
+   `WRITE_LOCKED_FIELDS`/`findLockedViolation()` copy, enforcing the same rule (create:
+   unconditional reject; update: same-value resubmission allowed, see below).
 4. **Generated tests** — `cypress_edit_value()` (`code_generator/generators_test.py`) excludes
    every locked value when it picks a value to drive a generated "edit this field" Cypress step.
    Without this exclusion a generated spec would try to fabricate a state (e.g. jumping straight
@@ -88,9 +94,11 @@ generator, to accidentally leave it unguarded.
 
 A row already holding a locked value is allowed to resubmit that same value — this is not a
 lockdown violation, because the value was already written by whatever prior operation put it
-there. Both the service-layer check and the CSV import update path re-fetch the row's current
-value (via a targeted `select` built from `write_locked_values_select`) and compare it against
-the submitted one before rejecting:
+there. The service-layer check (which CSV import now shares, for the entity shape described
+above) re-fetches the row's current value (via a targeted `select` built from
+`write_locked_values_select`) and compares it against the submitted one before rejecting; the
+import route's own fallback-path duplicate (the remaining, infeasible entity shape) does the
+same re-fetch-and-compare independently:
 
 ```typescript
 // lib/{{ model }}/service_validation.ts — inside validateSchemaRules()

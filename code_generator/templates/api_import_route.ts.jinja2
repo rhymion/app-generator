@@ -457,7 +457,22 @@ export async function POST(request: NextRequest) {
 {% for spec in import_fk_specs %}
       updateData.{{ spec.result_col }} = _{{ spec.result_col }};
 {% endfor %}
+{% if import_service_call_feasible %}
+      // cmd_996: update{{ parent_pascal }}'s positional signature needs a
+      // value for every parent field, including key/unchanged ones
+      // updateData deliberately omits (a raw tx.update() with an absent key
+      // leaves it untouched -- fine for the raw-tx path, but
+      // validateOnUpdate's REQUIRED_FIELDS check rejects `undefined` for a
+      // still-required field like the natural key). `data` already carries
+      // every export_scalar_field's CSV value (including key columns --
+      // FIELD_SPECS is built from export_scalar_fields, not filtered by
+      // import_key_fields), so merging it under updateData (which adds
+      // updater_id and the resolved FK columns) supplies the same "resubmit
+      // the whole record" shape a REST PUT body already has.
+      actions.push({ op: 'update', row: rowNum, id: existing.id, data: { ...data, ...updateData } });
+{% else %}
       actions.push({ op: 'update', row: rowNum, id: existing.id, data: updateData });
+{% endif %}
 {% else %}
       errors.push({ row: rowNum, code: 'ENTITY_IMPORT_UPDATE_NOT_SUPPORTED', message: 'This entity does not support CSV-import row updates' });
 {% endif %}

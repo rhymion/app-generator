@@ -3547,17 +3547,27 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         and not child_params_for_update
     )
     # One expression per add{{parent_pascal}}/update{{parent_pascal}} parent
-    # parameter, in parent_prop_infos order (the same order the signature
-    # itself is built in) -- reads the value off the row's already-merged
-    # write object (`action.data`, see api_import_route.ts.jinja2) and casts
-    # it from `unknown` to that parameter's real TS type. A cast, not a
-    # runtime conversion (e.g. a Date param stays a raw ISO string at
-    # runtime) -- Prisma's JS client already accepts that shape today via
-    # the raw tx.create/update path, so this changes nothing about what a
-    # value actually looks like on the wire, only what tsc accepts.
+    # parameter, in client_prop_infos order -- the SAME list and order
+    # parent_params_with_types (the signature itself, above) is built from.
+    # client_prop_infos, not the full parent_prop_infos: a plain readonly
+    # field (x-readonly-fields/x-readonly, e.g. an x-approval-driven status
+    # column) is excluded from the service function's own parameter list
+    # entirely (see the parent_prop_infos-vs-client_prop_infos comment
+    # above) -- using parent_prop_infos here over-supplies an argument
+    # add/update{{parent_pascal}} doesn't declare (confirmed against a real
+    # consumer schema: asn/goods_receipt_line's status column, TS2554
+    # "Expected N arguments, but got N+1").
+    #
+    # Reads the value off the row's already-merged write object
+    # (`action.data`, see api_import_route.ts.jinja2) and casts it from
+    # `unknown` to that parameter's real TS type. A cast, not a runtime
+    # conversion (e.g. a Date param stays a raw ISO string at runtime) --
+    # Prisma's JS client already accepts that shape today via the raw
+    # tx.create/update path, so this changes nothing about what a value
+    # actually looks like on the wire, only what tsc accepts.
     import_service_parent_args = ', '.join(
         f"(action.data.{p['prop']} as {get_ts_type(p['def'])})"
-        for p in parent_prop_infos
+        for p in client_prop_infos
     )
     flatten_null_args = _flatten_null_args
 
