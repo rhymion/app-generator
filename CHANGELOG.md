@@ -213,6 +213,77 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   already and is documented in the same section.
 
 ### Fixed
+- **CSV import now commits through the same `lib/{entity}/service.ts`
+  functions the REST route and Server Action call, instead of a raw
+  `tx.model.create/update`, for any entity whose signature carries no
+  embedded-DataGrid-child or bridge-child-parent parameter (a flat CSV
+  row has no per-row data source for either shape; those entities keep
+  the prior raw-tx path unchanged).** Previously, import bypassed
+  `validateOnAdd`/`validateOnUpdate` entirely, so a hand-written
+  `service_validation_custom.ts` business rule -- and every
+  `afterCreate`/`afterUpdate` side effect (audit logging, notifications,
+  reservation allocation, approval edge triggers) -- never ran for
+  import; a change the screen/API refuses could still be written through
+  import. Confirmed end to end against a real consumer's seeded demo data:
+  a purchase-order-line quantity edit the screen correctly rejects (its
+  parent purchase order is not in draft status) previously imported
+  successfully and now returns the same rejection through import. The
+  import route's own former `WRITE_LOCKED_FIELDS`/`findLockedViolation()`
+  duplicate of the `x-write-locked-values`/`x-approval` value-lockdown
+  check is removed for this now-service-call-backed path -- the identical
+  check already lives in `service_validation.ts`'s `validateSchemaRules`,
+  which the shared functions call internally; it remains for the
+  raw-tx fallback path, which still bypasses the service layer. An
+  `AppError` thrown by the service layer is translated into a
+  row-numbered `ImportRowError` (field + message) instead of collapsing
+  into a generic write-failure string.
+
+- **A composite/dotted-label FK's CSV-import candidate lookup now
+  includes org-null rows when its target's own `organization_id` is
+  optional**, matching the OR-null form the two sibling dotted-FK lookup
+  branches in the same template already use. The composite-label branch
+  had been left out of that earlier fix: a lookup entity whose
+  `organization_id` is genuinely `NULL` on every row (a shared/global
+  reference table, e.g. a seed script that deliberately leaves it unset)
+  produced zero candidates for a composite label, and every import
+  referencing it failed with a "no such row" error the row's data
+  actually satisfied -- confirmed end to end against a real consumer's
+  seeded demo data (a goods-receipt-line import naming an existing
+  purchase-order-line by its composite label previously failed to
+  resolve; now resolves). Golden-diffed against a from-scratch generation
+  of a real consumer schema with no `organization_id`-bearing lookup
+  targets: zero output changed.
+
+- **A nullable plain-text field written as `''` now persists as `NULL`,
+  the same as an omitted/never-set value, wherever
+  `add{Parent}`/`update{Parent}` writes it (CREATE, UPDATE, and the data
+  object passed to `validateOnAdd`/`validateOnUpdate`/
+  `validateCustomRules`).** A blank text input, a JSON body that sends
+  `""` instead of `null`, and CSV import's already-`null`-mapped empty
+  cell had been producing two different persisted values for the same
+  "no value" state depending on which write path produced them --
+  silently breaking any later equality-match against the column, most
+  concretely a hand-written `find`-then-`create` inventory lookup keyed
+  in part on such a field: an existing `NULL`-valued row and a
+  freshly-`''`-valued one never matched, so approving a second receipt
+  line against a matching bin (with no lot number recorded) created a
+  duplicate inventory row instead of adding to the existing one.
+  Reproduced end to end against a real consumer's seeded demo data by
+  calling the actual write path and post-approval hook: before this fix,
+  a second goods-receipt-line approval with an unspecified lot number
+  created a second inventory row; after, it adds to the existing row's
+  quantity. Scoped to a plain nullable string column only -- not
+  date/time, Decimal, or a Prisma-nativeEnum field (none of which treat
+  `''` as a meaningful stand-in for "no value"), and never a non-nullable
+  string field (`''` is a legitimate, distinct value there). Surveyed
+  the mechanism's four generated write-side data-object builders for the
+  same one-line pattern; not yet extended to DataGrid child-row nested
+  create/update fields, a separate code-generation path -- flagged as a
+  candidate for the same treatment if a child-row nullable-text column is
+  later found to need it. Historical rows already holding `''` for such a
+  column are unaffected by this fix (a data-migration concern, out of
+  scope here).
+
 - **A readonly field (`x-readonly` / `x-readonly-fields`) is no longer read
   from client input at all on save -- not FormData, not a POST/PUT body, not
   even as a generated service function's own parameter (cmd_945).**

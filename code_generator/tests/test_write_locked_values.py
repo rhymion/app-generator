@@ -371,6 +371,15 @@ class TestServiceValidationWriteLockdown:
 # ---------------------------------------------------------------------------
 
 class TestCsvImportWriteLockdown:
+    # cmd_996 (Issue #93): this fixture entity (no children, no bridge
+    # parent) is import_service_call_feasible -- the import route commits
+    # through add/updateItem (the same service.ts convergence point
+    # REST route.ts / Server Action actions.ts use) instead of a raw
+    # tx.model.create/update, so the import route's own former
+    # WRITE_LOCKED_FIELDS/findLockedViolation duplicate is folded away here:
+    # the identical check already lives in service_validation.ts's
+    # validateSchemaRules (see TestServiceValidationWriteLockdown below),
+    # which add/updateItem call internally.
     def _render(self, schema: dict) -> str:
         from generate import _make_env
         env = _make_env()
@@ -383,34 +392,59 @@ class TestCsvImportWriteLockdown:
         assert 'APPROVAL_LOCKED_VALUE' not in rendered
         assert 'findLockedViolation' not in rendered
 
-    def test_create_branch_rejects_locked_value(self):
-        schema = _schema_with_locks(
-            set_fields_approved={'status': 'active'},
-            set_fields_rejected={'status': 'released'},
-        )
-        rendered = self._render(schema)
-        assert 'findLockedViolation' in rendered
-        # CREATE has no persisted row to fall back to -- unconditional reject.
-        # Error code string is intentionally kept as-is (external contract).
-        assert "code: 'APPROVAL_LOCKED_VALUE'" in rendered
-        assert 'row: rowNum' in rendered
-        assert "column '${_lockedViolation.key}'" in rendered
-
-    def test_update_branch_allows_resubmission_of_persisted_value(self):
+    def test_create_and_update_commit_through_service_layer_not_duplicate_check(self):
         schema = _schema_with_locks(
             set_fields_approved={'status': 'active'},
             set_fields_rejected={'status': 'released'},
             edit=True,
         )
         rendered = self._render(schema)
-        assert '_lockedCurrent' in rendered
-        assert 'select: { status: true }' in rendered
+        # The import-route-local duplicate is gone -- folded away, not
+        # merely unused (cmd_996 AC: "残すか畳むかを判じ、理由を書け").
+        assert 'findLockedViolation' not in rendered
+        assert 'WRITE_LOCKED_FIELDS' not in rendered
+        assert "code: 'APPROVAL_LOCKED_VALUE'" not in rendered
+        # Guard is delegated: commit calls addItem/updateItem (validateOnAdd/
+        # validateOnUpdate, which enforce the same write-locked-values rule),
+        # and an AppError from either is translated into a row-numbered
+        # ImportRowError (cmd_530: never silently drop a rejected write).
+        assert "import { addItem, updateItem } from '@/lib/item/service';" in rendered
+        assert "import { AppError } from '@/lib/_errors';" in rendered
+        assert 'await addItem(actorId,' in rendered
+        assert 'await updateItem(actorId, action.id,' in rendered
+        assert 'err instanceof AppError' in rendered
+        assert 'row: action.row, code: err.code' in rendered
 
-    def test_write_locked_values_only_also_rejects(self):
+    def test_write_locked_values_only_also_delegates(self):
         schema = _schema_with_locks(write_locked_values={'status': ['released']})
         rendered = self._render(schema)
-        assert 'findLockedViolation' in rendered
-        assert "code: 'APPROVAL_LOCKED_VALUE'" in rendered
+        assert 'findLockedViolation' not in rendered
+        assert 'await addItem(actorId,' in rendered
+
+
+class TestServiceValidationWriteLockdownResubmission:
+    """The no-op-resubmission allowance (a locked value equal to the row's
+    current persisted value is not a violation) that used to live in the
+    import route's own findLockedViolation call site now lives only in
+    service_validation.ts's validateSchemaRules -- verify it's still there
+    for both the REST/Server Action path AND the CSV import path that now
+    shares it (cmd_996)."""
+
+    def _render(self, schema: dict) -> str:
+        from generate import _make_env
+        env = _make_env()
+        ctx = build_context(_entity(), schema)
+        return env.get_template('service_validation.ts.jinja2').render(**ctx)
+
+    def test_update_allows_resubmission_of_persisted_value(self):
+        schema = _schema_with_locks(
+            set_fields_approved={'status': 'active'},
+            set_fields_rejected={'status': 'released'},
+            edit=True,
+        )
+        rendered = self._render(schema)
+        assert 'currentRow[field.key] === submitted' in rendered
+        assert 'select: { status: true }' in rendered
 
 
 # ---------------------------------------------------------------------------
