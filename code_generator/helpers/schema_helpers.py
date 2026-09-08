@@ -478,6 +478,19 @@ def resolve_ledger_domain(schema: dict, domain_key: str) -> dict:
     plain-string design; cmd_562 removes both the old bug and the fix
     wholesale in favor of the strictly simpler id-FK design (see
     docs/knowledge/appendix/inventory-reservation-split.md).
+
+    cmd_991: bin_field is OPT-IN, unlike the four fields above — a
+    domain may omit `binField` entirely (no bin dimension for that pool),
+    in which case bin_field is None and every ledger-row/tuple-match site
+    that reads it (guarded by `{% if pool_bin_field %}` in the jinja2
+    templates, `if bin_field:` in generators.py) renders exactly as before
+    this key existed (golden-diff-zero for a consumer that never declares
+    binField, e.g. proj_c's inventory_domain). This mirrors the same
+    schema-declares-camelCase / generator-internals-use-snake_case split as
+    the four required fields (`binField` -> `bin_field`) — see
+    cmd_990/991 design note: a prior attempt to read `domain.get('binField')`
+    directly (skipping this resolver) would have collided with the
+    internal snake_case dict this function returns.
     """
     domains = schema.get('x-ledger-entities') or {}
     if domain_key not in domains:
@@ -497,6 +510,8 @@ def resolve_ledger_domain(schema: dict, domain_key: str) -> dict:
         'location_field': domain['locationField'],
         'lot_field': domain['lotField'],
         'expiration_field': domain['expirationField'],
+        # cmd_991: OPT-IN — no required_key check, defaults to None.
+        'bin_field': domain.get('binField'),
     }
 
 

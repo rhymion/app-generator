@@ -1413,6 +1413,7 @@ def _build_ledger_reservation_allocation_code(
     location_field   = _domain['location_field']
     lot_field        = _domain['lot_field']
     expiration_field = _domain['expiration_field']
+    bin_field        = _domain.get('bin_field')  # cmd_991: OPT-IN
     # cmd_562: location_field is an id-FK on both the pool and ledger
     # entities (same shape as item_field) — the ledger row write is a plain
     # id copy, not a denormalized display-string snapshot. This removes the
@@ -1498,6 +1499,7 @@ def _build_ledger_reservation_allocation_code(
         f"              {location_field}: _candidate.{location_field},\n"
         f"              {lot_field}: _candidate.{lot_field},\n"
         f"              {expiration_field}: _candidate.{expiration_field},\n"
+        + (f"              {bin_field}: _candidate.{bin_field}, // cmd_991, opt-in\n" if bin_field else '') +
         f"              created_by_id: actorId,\n"
         f"              creator_id: actorId,\n"
         f"              updater_id: actorId,\n"
@@ -1759,6 +1761,7 @@ def _build_reservation_guard_and_resubmit_approval_lines(
     location_field = _domain['location_field']
     lot_field = _domain['lot_field']
     expiration_field = _domain['expiration_field']
+    bin_field = _domain.get('bin_field')  # cmd_991: OPT-IN
 
     def _order_entry(field: str, direction: str) -> str:
         if direction == 'asc_nulls_last':
@@ -1810,6 +1813,7 @@ def _build_reservation_guard_and_resubmit_approval_lines(
         f"                {location_field}: _candidate.{location_field},\n"
         f"                {lot_field}: _candidate.{lot_field},\n"
         f"                {expiration_field}: _candidate.{expiration_field},\n"
+        + (f"                {bin_field}: _candidate.{bin_field}, // cmd_991, opt-in\n" if bin_field else '') +
         f"                created_by_id: actorId,\n"
         f"                creator_id: actorId,\n"
         f"                updater_id: actorId,\n"

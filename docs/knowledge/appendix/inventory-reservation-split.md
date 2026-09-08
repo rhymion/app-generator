@@ -283,6 +283,68 @@ Two related decisions from the same location id-FK migration ruling:
   whom, and when; it does not (yet) capture the old/new name values or offer a per-entity history
   UI — both explicitly deferred to future work.
 
+### 7.3 `binField` — an opt-in fifth dimension
+
+Unlike the four fields in §7 (OD-1 required, no default — a domain missing one fails
+`resolve_ledger_domain` before any code generates), `binField` is genuinely optional: a domain
+may omit it entirely, and `resolve_ledger_domain()` resolves `bin_field: None` with no error.
+`generate.py`'s `_ledger_stub_field_vars()` mirrors this as `pool_bin_field` (also `None` when
+undeclared). Every site that reads it — the four §7 templates plus `generators.py`'s
+reserve-phase (`_build_ledger_reservation_allocation_code`) and per-line resubmit-claim
+(`_build_reservation_guard_and_resubmit_approval_lines`) ledger-row builders — is guarded (jinja2
+`{% if pool_bin_field %}`, Python `if bin_field:`), so a domain that never declares `binField`
+renders byte-identical output to before this key existed (verified empirically: `generate.py`
+run twice — unmodified generator vs. this change — against a real consumer's unmodified
+`json_schema.yaml`/`schema.prisma` (an app-template checkout that already declares
+`x-ledger-entities.inventory_domain` without `binField`), output trees diffed recursively across
+all 1259 generated files with zero differences besides an incidental schema-file-path
+bookkeeping field in `.generated-manifest.json`).
+
+```yaml
+x-ledger-entities:
+  inventory_domain:
+    pool: inventory
+    ledger: inventory_transaction
+    transactionable: inventory_transactionable
+    itemField: product_id
+    locationField: location_id
+    lotField: lot_number
+    expirationField: expiration_date
+    binField: bin_id   # opt-in -- omit entirely for a pool with no bin dimension
+```
+
+**Why opt-in rather than OD-1-required-with-null-sentinel (contrast with §10.4)**: §10.4 argues
+that making one of the *existing* four required fields silently optional would reintroduce the bug
+class §7 fixed (a schema author forgetting the key gets no error, just silently-disabled
+behavior). `binField` is not that case — it is a genuinely new fifth dimension that never existed
+in any consumer's schema before this change, so there is no pre-existing "everyone declares it"
+expectation for a missing key to silently violate. An absent `binField` reads unambiguously as
+"this pool has no bin dimension," which is the actual, common case (as of this change, every
+consumer's inventory pool: no bin column at all).
+
+**Two ambiguous-resolution bugs fixed while adding bin support**: two sites re-identify a pool row
+via a tuple match on item/location/lot/expiration with **no unique id** —
+`ledger_write_stub.ts.jinja2`'s `afterReject` `inventoryCache` re-identification (only reachable
+when the entity's `x-ledger-source.reject_event_type` is declared — zero consumers do today) and
+`split_action_route.ts.jinja2`'s parent reserved-inventory release (reachable today, e.g.
+`purchase_per_item`). Once bin is a real dimension, two pool rows can share the same
+item/location/lot/expiration and differ only by bin — the same ambiguous-resolution shape a prior
+fix (`release_hold.ts`) addressed for a different call site. Both sites now join
+`bin_field`/`pool_bin_field` into their where clause when the domain declares it, closing this gap
+before any consumer's `binField` declaration could trip it (verified against real
+`purchase_per_item`/`purchase_order` output derived from the same app-template checkout above:
+with `binField: bin_id` declared, the parent-release `updateMany` where clause gains
+`...(_row.bin_id != null ? { bin_id: _row.bin_id } : {})`).
+
+**Consumer-side migration** (adding bin to an existing consumer whose `inventory`/
+`inventory_transaction` already carry a real `bin_id` column pre-dating this generator support) is
+out of this change's scope — tracked separately. This section covers only the generator-side
+opt-in mechanism; declaring `binField` in an existing consumer's schema is safe to do
+independently (no `validate.py` allowlist rejects an unrecognized `x-ledger-entities.<domain>`
+key), but only the `split_action_route.ts.jinja2`-generated file regenerates automatically —
+every GENERATED ONCE stub (the four templates in §7, once already materialized on disk) requires
+the same hand-patch discipline any other write-once file does.
+
 ## 8. Reference-name vs. entity-name mismatch and `primary: true`
 
 `helper_context()`'s dependency resolution distinguishes a **reference name** (the property name

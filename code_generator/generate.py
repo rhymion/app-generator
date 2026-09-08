@@ -704,12 +704,18 @@ def _ledger_stub_field_vars(domain: dict, schema: dict) -> dict:
     `pool_location_relation`/`pool_location_target_entity` machinery cmd_550
     (PR #269) built to fix the previous denormalized-string design; that
     whole design (and its fix) is obsolete once the column is an id itself.
+
+    cmd_991: pool_bin_field is OPT-IN (None when the domain doesn't
+    declare binField) — every template site that reads it is guarded by
+    `{% if pool_bin_field %}`, so a consumer that never declares binField
+    renders byte-identical output to before this key existed.
     """
     return {
         'pool_item_field': domain['item_field'],
         'pool_location_field': domain['location_field'],
         'pool_lot_field': domain['lot_field'],
         'pool_expiration_field': domain['expiration_field'],
+        'pool_bin_field': domain.get('bin_field'),
     }
 
 
