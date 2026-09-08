@@ -3523,6 +3523,44 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         f", {child_service_args}" if child_service_args else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
 
+    # CSV import -> service.ts convergence (cmd_996 乙, Issue #93): the
+    # generated import route calls add{{parent_pascal}}/update{{parent_pascal}}
+    # -- the same functions REST route.ts / Server Action actions.ts call --
+    # instead of writing via a raw tx.model.create/update, so any guard
+    # inside validateOnAdd/validateOnUpdate (x-write-locked-values,
+    # x-approval, and every hand-written service_validation_custom.ts rule)
+    # now applies to CSV import too.
+    #
+    # Not feasible when add/update's signature carries a param a flat CSV
+    # row structurally cannot supply: embedded DataGrid children
+    # (child_params_for_add/_for_update -- one CSV cell cannot express an
+    # array of child objects) or a bridge-child parent selection
+    # (bridge_child_params_str). flatten-relation params are NOT a blocker:
+    # route.ts's own service_args_for_create/_for_update already pass a
+    # hardcoded `null` for every one of them ("API routes don't edit
+    # flatten rels inline") -- import does exactly the same via
+    # flatten_null_args below.
+    import_service_call_feasible = (
+        import_eligible
+        and not bridge_child_params_str
+        and not child_params_for_add
+        and not child_params_for_update
+    )
+    # One expression per add{{parent_pascal}}/update{{parent_pascal}} parent
+    # parameter, in parent_prop_infos order (the same order the signature
+    # itself is built in) -- reads the value off the row's already-merged
+    # write object (`action.data`, see api_import_route.ts.jinja2) and casts
+    # it from `unknown` to that parameter's real TS type. A cast, not a
+    # runtime conversion (e.g. a Date param stays a raw ISO string at
+    # runtime) -- Prisma's JS client already accepts that shape today via
+    # the raw tx.create/update path, so this changes nothing about what a
+    # value actually looks like on the wire, only what tsc accepts.
+    import_service_parent_args = ', '.join(
+        f"(action.data.{p['prop']} as {get_ts_type(p['def'])})"
+        for p in parent_prop_infos
+    )
+    flatten_null_args = _flatten_null_args
+
     # Named constants for x-internal entities (e.g. COMMENT_REACTION_TYPES)
     from generate_types import extract_named_constants
     from generators import reaction_type_ts
@@ -3670,6 +3708,10 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         all_body_fields_create=all_body_fields_create,
         service_args_for_create=service_args_for_create,
         service_args_for_update=service_args_for_update,
+        # CSV import -> service.ts convergence (cmd_996 乙, Issue #93)
+        import_service_call_feasible=import_service_call_feasible,
+        import_service_parent_args=import_service_parent_args,
+        flatten_null_args=flatten_null_args,
         # Field categories (FormUpsert / FormView)
         field_categories=field_categories,
         entity_select_options=_get_entity_options(schema),

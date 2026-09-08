@@ -12,6 +12,13 @@ import { formatLabelValue } from '@/lib/_format';
 {% if should_filter_by_org or any_dotted_fk_needs_org_filter %}
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 {% endif %}
+{% if import_service_call_feasible and (import_can_create or import_can_update) %}
+// cmd_996 (Issue #93): import writes through the same service.ts convergence
+// point REST route.ts / Server Action actions.ts use, instead of a raw
+// tx.model.create/update — see the commit loop below.
+import { {% if import_can_create %}add{{ parent_pascal }}{% endif %}{% if import_can_create and import_can_update %}, {% endif %}{% if import_can_update %}update{{ parent_pascal }}{% endif %} } from '@/lib/{{ parent }}/service';
+import { AppError } from '@/lib/_errors';
+{% endif %}
 
 const MAX_IMPORT_ROWS = Number(process.env.IMPORT_MAX_ROWS ?? '5000');
 const MAX_IMPORT_BYTES = Number(process.env.IMPORT_MAX_BYTES ?? String(10 * 1024 * 1024)); // 10MB
@@ -52,7 +59,7 @@ const KEY_COLUMNS: string[] = {{ import_key_specs | map(attribute='csv_col') | l
 // labelField, or read-only on screen) — presence in the CSV header is rejected
 // rather than silently accepted and discarded.
 const UNIMPORTABLE_COLUMNS: string[] = {{ import_unimportable_columns | tojson }};
-{% if write_locked_fields %}
+{% if write_locked_fields and not import_service_call_feasible %}
 // Write-locked values (see service_validation.ts's identical concept):
 // values a field may only receive through the system. CSV import writes
 // directly via a transaction call and never runs through
@@ -183,7 +190,9 @@ export async function POST(request: NextRequest) {
     if (headerFields.includes('{{ spec.csv_col }}')) {
       const _{{ spec.var_prefix }}_candidates = await prisma.{{ spec.lookup_entity }}.findMany({
         include: {{ spec.prisma_include | tojson }},
-{% if spec.lookup_entity_filter_by_org %}
+{% if spec.lookup_entity_filter_by_org and spec.lookup_entity_org_relationship_optional %}
+        where: { OR: [{ organization_id: { in: _importOrgIds } }, { organization_id: null }] },
+{% elif spec.lookup_entity_filter_by_org %}
         where: { organization_id: { in: _importOrgIds } },
 {% elif spec.lookup_entity_filter_by_self_id %}
         where: { id: { in: _importOrgIds } },
@@ -376,7 +385,7 @@ export async function POST(request: NextRequest) {
           errors.push({ row: rowNum, code: 'ACCESS_DENIED', message: 'Not permitted to create this entity' });
           continue;
         }
-{% if write_locked_fields %}
+{% if write_locked_fields and not import_service_call_feasible %}
         {
           // A newly-created row has no persisted value to fall back to, so
           // any locked value on CREATE is unconditionally rejected.
@@ -416,7 +425,7 @@ export async function POST(request: NextRequest) {
         errors.push({ row: rowNum, code: 'ACCESS_DENIED', message: 'Not permitted to update this row' });
         continue;
       }
-{% if write_locked_fields %}
+{% if write_locked_fields and not import_service_call_feasible %}
       {
         const _lockedViolation = findLockedViolation(data);
         if (_lockedViolation) {
@@ -487,6 +496,58 @@ export async function POST(request: NextRequest) {
 
     const commitErrors: ImportRowError[] = [];
     let succeeded = 0;
+{% if import_service_call_feasible %}
+    // cmd_996 (Issue #93): each row commits through add{{ parent_pascal }}/
+    // update{{ parent_pascal }} -- the same service.ts convergence point
+    // REST route.ts / Server Action actions.ts call -- instead of a raw
+    // tx.model.create/update, so validateOnAdd/validateOnUpdate (schema
+    // rules, x-write-locked-values, x-approval, and every hand-written
+    // service_validation_custom.ts rule) now guards CSV import too. Each
+    // call opens its own transaction (add/update{{ parent_pascal }}'s own
+    // `prisma.$transaction`), so rows commit and fail independently --
+    // there is deliberately no single outer transaction wrapping the whole
+    // batch here (there never really was one in effect: the prior single
+    // shared transaction still let one row's caught failure leave earlier
+    // rows in the same batch committed, since each row's error was caught
+    // per-iteration rather than re-thrown).
+    for (const action of actions) {
+      try {
+        if (action.op === 'create') {
+{% if import_can_create %}
+          await add{{ parent_pascal }}(actorId, {{ import_service_parent_args }}{% if flatten_null_args %}, {{ flatten_null_args }}{% endif %});
+{% else %}
+          // Unreachable: import_can_create is false for this entity, so no
+          // 'create' action is ever queued above -- kept only so this
+          // branch stays syntactically valid.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await prisma.{{ model }}.create({ data: action.data as any });
+{% endif %}
+        } else {
+{% if import_can_update %}
+          await update{{ parent_pascal }}(actorId, action.id, {{ import_service_parent_args }}{% if flatten_null_args %}, {{ flatten_null_args }}{% endif %}, null);
+{% else %}
+          // Unreachable: import_can_update is false for this entity, so no
+          // 'update' action is ever queued above -- kept only so this
+          // branch stays syntactically valid.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await prisma.{{ model }}.update({ where: { id: action.id }, data: action.data as any });
+{% endif %}
+        }
+        succeeded++;
+      } catch (err) {
+        if (err instanceof AppError) {
+          // Row-level translation of the service layer's exception (cmd_530:
+          // never let a rejected write silently read back as success).
+          commitErrors.push({
+            row: action.row, code: err.code,
+            message: `Row ${action.row}${err.field ? `, column '${err.field}'` : ''}: ${err.message}`,
+          });
+        } else {
+          commitErrors.push({ row: action.row, code: 'WRITE_FAILED', message: err instanceof Error ? err.message : String(err) });
+        }
+      }
+    }
+{% else %}
     await prisma.$transaction(async (tx) => {
       for (const action of actions) {
         try {
@@ -514,6 +575,7 @@ export async function POST(request: NextRequest) {
         }
       }
     });
+{% endif %}
 
     return NextResponse.json(
       {

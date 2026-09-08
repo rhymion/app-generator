@@ -9,9 +9,11 @@
 # service_validation.ts (WRITE_LOCKED_FIELDS create/update check -- the
 # shared mechanism cmd_857 generalized beyond x-approval, still exercised
 # here via this fixture's x-approval declaration -- shared by the REST API
-# route and the Server Action write path), and
-# api_import_route.ts.jinja2 (the CSV-side duplicate of the same check,
-# since CSV import bypasses the service layer entirely).
+# route, the Server Action write path, AND (cmd_996, Issue #93) CSV import,
+# which now commits through add/update{{parent_pascal}} -- the same
+# service.ts convergence point -- instead of a raw tx.model.create/update,
+# so the import route's own former WRITE_LOCKED_FIELDS/findLockedViolation
+# duplicate is gone (folded away, not merely dead).
 #
 # Why this exists: this repo's own json_schema.yaml declares no x-approval
 # entity, so test:e2e:build's own tsc pass never compiles any of the above
@@ -98,12 +100,22 @@ done
 if [ "$content_status" -eq 0 ]; then
   grep -q "WRITE_LOCKED_FIELDS" "$_SV" || { echo "FAILED: $_SV missing WRITE_LOCKED_FIELDS" >&2; content_status=1; }
   grep -q '"active"' "$_SV" || { echo "FAILED: $_SV missing locked value 'active'" >&2; content_status=1; }
-  grep -q "APPROVAL_LOCKED_VALUE" "$_IMPORT_ROUTE" || { echo "FAILED: $_IMPORT_ROUTE missing APPROVAL_LOCKED_VALUE" >&2; content_status=1; }
+  # cmd_996: the import route now commits through addApprovalLockdownGateItem/
+  # updateApprovalLockdownGateItem instead of a raw tx.*.create/update --
+  # validateOnAdd/validateOnUpdate (which call into the WRITE_LOCKED_FIELDS
+  # check just asserted against $_SV above) enforce this for CSV import too,
+  # so the import route's own former duplicate check must be ABSENT, not
+  # present -- its presence would mean the fold-away regressed back to a
+  # second, driftable copy of the same rule.
+  grep -q "findLockedViolation" "$_IMPORT_ROUTE" && { echo "FAILED: $_IMPORT_ROUTE still has its own findLockedViolation duplicate (should delegate to add/updateApprovalLockdownGateItem instead, cmd_996)" >&2; content_status=1; }
+  grep -q "await addApprovalLockdownGateItem(actorId," "$_IMPORT_ROUTE" || { echo "FAILED: $_IMPORT_ROUTE does not call addApprovalLockdownGateItem (service.ts convergence, cmd_996)" >&2; content_status=1; }
+  grep -q "await updateApprovalLockdownGateItem(actorId, action.id," "$_IMPORT_ROUTE" || { echo "FAILED: $_IMPORT_ROUTE does not call updateApprovalLockdownGateItem (service.ts convergence, cmd_996)" >&2; content_status=1; }
   grep -q "disabled: true" "$_FORM" || { echo "FAILED: $_FORM missing disabled: true option" >&2; content_status=1; }
 
   grep -q "WRITE_LOCKED_FIELDS" "$_WL_SV" || { echo "FAILED: $_WL_SV missing WRITE_LOCKED_FIELDS (x-write-locked-values without x-approval)" >&2; content_status=1; }
   grep -q '"in_underwriting"' "$_WL_SV" || { echo "FAILED: $_WL_SV missing locked value 'in_underwriting'" >&2; content_status=1; }
-  grep -q "APPROVAL_LOCKED_VALUE" "$_WL_IMPORT_ROUTE" || { echo "FAILED: $_WL_IMPORT_ROUTE missing APPROVAL_LOCKED_VALUE" >&2; content_status=1; }
+  grep -q "findLockedViolation" "$_WL_IMPORT_ROUTE" && { echo "FAILED: $_WL_IMPORT_ROUTE still has its own findLockedViolation duplicate (should delegate to add/updateWriteLockdownGateItem instead, cmd_996)" >&2; content_status=1; }
+  grep -q "await addWriteLockdownGateItem(actorId," "$_WL_IMPORT_ROUTE" || { echo "FAILED: $_WL_IMPORT_ROUTE does not call addWriteLockdownGateItem (service.ts convergence, cmd_996)" >&2; content_status=1; }
   grep -q "disabled: true" "$_WL_FORM" || { echo "FAILED: $_WL_FORM missing disabled: true option" >&2; content_status=1; }
 fi
 
