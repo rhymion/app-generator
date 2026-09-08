@@ -1203,9 +1203,23 @@ def actions_context(ctx: dict) -> dict:
                 )
             )
         else:  # create only
+            # Mirror the can_update-only branch's symmetric
+            # `if (!id) throw new Error('Create not supported');` guard. An
+            # orphaned edit page (left over from before this entity's
+            # x-generate.edit flipped to false, and no longer regenerated)
+            # can still render FormUpsert.tsx with an existing record's id,
+            # which form_upsert.tsx.jinja2 unconditionally stuffs into
+            # FormData (`formData.set('id', src.id)`) regardless of
+            # can_update. Without this guard, a create-only body never reads
+            # `id` at all and silently calls add{Parent}(), producing a
+            # duplicate row instead of surfacing the mismatch. `src.id` is
+            # `''` for a genuine new-entity form (page_new.tsx), so this
+            # never fires on the normal create path.
             _perm_block = f"  await requirePermission('{parent}', 'create');\n"
             return (
-                _wrap_block_with_catch(_perm_block, "  ")
+                f"  const id = data.get('id') as string | null;\n"
+                f"  if (id) throw new Error('Update not supported');\n"
+                + _wrap_block_with_catch(_perm_block, "  ")
                 + f"{form_data_gets}\n"
                 + (f"{child_form_data_extractions}\n" if has_ch else "")
                 + _ro_reject_unguarded +
