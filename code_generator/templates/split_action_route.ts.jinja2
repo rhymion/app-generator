@@ -155,10 +155,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           // cmd_562: {{ pool_location_field }} is an id on the ledger row
           // itself — no reverse label lookup needed to re-identify the
           // parent's reserved inventory row.
-          // cmd_991 [甲]: {{ pool_bin_field }} must join this tuple match
+          {% if pool_bin_field %}
+          // cmd_991: {{ pool_bin_field }} must join this tuple match
           // when the domain declares it — same ambiguous-resolution shape
           // as the ledger_write_stub afterReject fix (multiple bins can
           // share the same item/location/lot/expiration).
+          {% endif %}
           await tx.{{ pool_entity }}.updateMany({
             where: {
               {{ pool_item_field }}: _row.{{ pool_item_field }},

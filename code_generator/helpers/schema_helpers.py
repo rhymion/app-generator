@@ -479,7 +479,7 @@ def resolve_ledger_domain(schema: dict, domain_key: str) -> dict:
     wholesale in favor of the strictly simpler id-FK design (see
     docs/knowledge/appendix/inventory-reservation-split.md).
 
-    cmd_991 [甲]: bin_field is OPT-IN, unlike the four fields above — a
+    cmd_991: bin_field is OPT-IN, unlike the four fields above — a
     domain may omit `binField` entirely (no bin dimension for that pool),
     in which case bin_field is None and every ledger-row/tuple-match site
     that reads it (guarded by `{% if pool_bin_field %}` in the jinja2
@@ -510,7 +510,7 @@ def resolve_ledger_domain(schema: dict, domain_key: str) -> dict:
         'location_field': domain['locationField'],
         'lot_field': domain['lotField'],
         'expiration_field': domain['expirationField'],
-        # cmd_991 [甲]: OPT-IN — no required_key check, defaults to None.
+        # cmd_991: OPT-IN — no required_key check, defaults to None.
         'bin_field': domain.get('binField'),
     }
 

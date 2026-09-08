@@ -1,5 +1,5 @@
 """
-cmd_991 [甲]: bin_field is an OPT-IN dimension on x-ledger-entities.<domain>
+cmd_991: bin_field is an OPT-IN dimension on x-ledger-entities.<domain>
 (declared as `binField`, e.g. proj_g's inventory bin_id column) — unlike the
 four required fields (itemField/locationField/lotField/expirationField,
 OD-1: config required, no defaults), a domain may omit `binField` entirely.
@@ -213,7 +213,7 @@ class TestLedgerWriteStubBinFieldOptIn:
         assert "bin_id: source.bin_id," in rendered
 
     def test_bin_declared_joins_after_reject_reidentify_tuple_match(self):
-        """cmd_991 [甲] landmine fix: the afterReject inventoryCache findFirst
+        """cmd_991 landmine fix: the afterReject inventoryCache findFirst
         re-identifies the pool row via a tuple match with no unique id —
         ambiguous once bin is a real dimension. bin_id must join this where
         clause when declared."""
@@ -285,7 +285,7 @@ class TestSplitActionRouteBinFieldOptIn:
         assert "bin_id: _row.bin_id," in rendered
 
     def test_bin_declared_joins_parent_release_tuple_match(self):
-        """cmd_991 [甲] landmine fix: the parent reserved-inventory release
+        """cmd_991 landmine fix: the parent reserved-inventory release
         updateMany re-identifies the pool row via the same ambiguous tuple
         match shape as the ledger_write_stub afterReject fix above. bin_id
         must join this where clause when declared."""

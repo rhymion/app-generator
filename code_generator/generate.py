@@ -705,7 +705,7 @@ def _ledger_stub_field_vars(domain: dict, schema: dict) -> dict:
     (PR #269) built to fix the previous denormalized-string design; that
     whole design (and its fix) is obsolete once the column is an id itself.
 
-    cmd_991 [甲]: pool_bin_field is OPT-IN (None when the domain doesn't
+    cmd_991: pool_bin_field is OPT-IN (None when the domain doesn't
     declare binField) — every template site that reads it is guarded by
     `{% if pool_bin_field %}`, so a consumer that never declares binField
     renders byte-identical output to before this key existed.
