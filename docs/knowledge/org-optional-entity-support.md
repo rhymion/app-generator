@@ -101,21 +101,30 @@ model. **Lesson: when extending this pattern to a new call site, match the alrea
 at the sibling sites first; do not add a defensive-looking guard without checking whether every
 other site already made — and stuck with — the opposite choice.**
 
-**Still not touched (follow-up candidates, not yet fixed)**:
+**Since fixed** (the composite/dotted-label branch specifically — see below); the simple
+dotted-key and non-key FK lookup branches already carried the `OR ... IS NULL` form before this
+paragraph was first written (a mismatch with the wording originally here, corrected now rather
+than left standing):
 
-- The CSV-import FK-*lookup-target* org filters (`lookup_entity_filter_by_org` — whether a
+- The CSV-import FK-*lookup-target* org filter (`lookup_entity_filter_by_org` — whether a
   *referenced* entity like `role` is itself org-scoped — see
-  [`csv-import-dotted-fk-org-filter.md`](csv-import-dotted-fk-org-filter.md)) do not admit a
-  `NULL`-organization row on the lookup **target** side either: `api_import_route.ts.jinja2`
-  lines rendering `organization_id: { in: _importOrgIds }` for a dotted-FK/labelField lookup
-  (the simple dotted-key lookup, the non-key FK lookup, and the composite/dotted-label
-  candidate-map build) have no `OR ... IS NULL` branch, regardless of whether the *lookup
-  entity itself* has `organization` optional. If some other entity's CSV import resolves a
-  labelField FK into an org-optional entity (e.g. `parent1`), an org-less target row cannot be
-  resolved by natural key — a false `NOT_FOUND`/`MULTI_MATCH` on import. This is a distinct
-  computation (the target entity's own optionality, not the importing entity's) requiring new
-  plumbing in `build_context.py`'s `_lookup_entity_filter_by_org` logic — genuinely separate
-  scope from this pass, not fixed here.
+  [`csv-import-dotted-fk-org-filter.md`](csv-import-dotted-fk-org-filter.md)) needed an
+  `OR ... IS NULL` branch on the lookup **target** side too, gated by a second flag
+  (`lookup_entity_org_relationship_optional` — whether the target's *own* `organization_id`
+  column is nullable, a distinct question from whether the target is org-scoped at all).
+  `build_context.py` already computed and carried this flag on every `import_fk_specs` entry,
+  composite ones included; only the composite/dotted-label candidate-map query in
+  `api_import_route.ts.jinja2` (the third of the three org-filtered lookup query sites in that
+  template) had never been updated to consume it — the two dotted-key/non-key sibling sites had
+  already been fixed in an earlier pass, this one was missed in that same sweep. A CSV import
+  resolving a composite labelField into an org-optional entity whose real rows carry `NULL`
+  organization (a shared/global reference table intentionally seeded that way) produced zero
+  candidates and a false `NOT_FOUND` on every row, however correct its data — confirmed against
+  a real consumer's seeded demo data end to end (an import naming an existing row by composite
+  label, previously always rejected, now resolves) and via a template-level golden-diff (zero
+  changed output against a from-scratch generation of a real consumer schema with no
+  `organization_id`-bearing lookup targets, so entities untouched by this class of bug stay
+  byte-identical).
 
 ## Open design question: how far should NULL-organization visibility extend?
 
