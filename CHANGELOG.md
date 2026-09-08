@@ -284,6 +284,41 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   column are unaffected by this fix (a data-migration concern, out of
   scope here).
 
+- **An entity with `x-generate.edit: false` (create only, no update path)
+  now throws instead of silently creating a duplicate row when its
+  Server Action receives an existing record's id.** Previously, the
+  create-only branch of `upsert{Parent}()` never read `id` off the
+  incoming FormData at all and unconditionally called `add{Parent}()`.
+  `FormUpsert.tsx` unconditionally sets `id` in FormData regardless of
+  whether the entity is editable, so an orphaned edit page left over from
+  before the entity's `x-generate.edit` flipped to `false` (and no longer
+  regenerated) could still reach the create-only action with a real
+  record id -- and the action silently created a duplicate instead of
+  failing loudly. Reproduced against a real consumer's data: a
+  `purchase_order`-shaped entity's orphaned edit page created a second
+  row for the same purchase order instead of updating the original. The
+  fix mirrors the existing symmetric guard on the update-only branch
+  (`if (!id) throw new Error('Create not supported')`): a create-only
+  body now throws `Error('Update not supported')` when handed a non-empty
+  id, before any other work begins. Scoped to the create-only branch
+  only -- no entity in this repo's own schema uses that combination, and
+  a full generated-output diff before/after this change is byte-for-byte
+  identical; see `docs/knowledge/create-only-upsert-rejects-update-intent.md`.
+
+- **The generated view page no longer offers an Edit link for an
+  `x-generate.edit: false` entity, regardless of the caller's
+  `permissions.update` value.** Previously, `FormView.tsx` computed
+  `canEdit` purely from `permissions?.update ?? true`, never checking
+  whether the entity has an update path at all -- so an orphaned edit
+  page left over from before `x-generate.edit` flipped to `false` could
+  still be linked to from the regenerated view page whenever RBAC allowed
+  it. `canEdit` is now hardcoded to `false` at generation time for a
+  create-only entity, independent of `permissions.update`. Sibling fix to
+  the `upsert{Parent}()` guard above -- same incident, same root cause;
+  see `docs/knowledge/view-page-hides-edit-link-for-immutable-entities.md`.
+  `edit: true` entities are unaffected: golden-diff confirms the rendered
+  `FormView.tsx` is byte-for-byte identical to before this change.
+
 - **A readonly field (`x-readonly` / `x-readonly-fields`) is no longer read
   from client input at all on save -- not FormData, not a POST/PUT body, not
   even as a generated service function's own parameter (cmd_945).**

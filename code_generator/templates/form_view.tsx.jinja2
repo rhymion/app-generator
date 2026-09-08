@@ -69,7 +69,17 @@ export default function FormView({ src, permissions{% if comment_has_mention %},
 {% if view_enum_ns_hooks %}
 {{ view_enum_ns_hooks }}
 {% endif %}
+{% if can_update %}
   const canEdit = permissions?.update ?? true;
+{% else %}
+  // x-generate.edit: false -- this entity has no update path at all (see
+  // actions_context()'s create-only branch), so the view page must never
+  // surface an edit affordance regardless of the caller's update
+  // permission. An orphaned edit screen left over from before edit was
+  // turned off (not regenerated, so still present on disk) can no longer
+  // be reached from here even if RBAC would otherwise allow it.
+  const canEdit = false;
+{% endif %}
 {% if is_splittable and split_config %}
   const router = useRouter();
 {% endif %}
