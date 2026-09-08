@@ -155,12 +155,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           // cmd_562: {{ pool_location_field }} is an id on the ledger row
           // itself — no reverse label lookup needed to re-identify the
           // parent's reserved inventory row.
+          // cmd_991 [甲]: {{ pool_bin_field }} must join this tuple match
+          // when the domain declares it — same ambiguous-resolution shape
+          // as the ledger_write_stub afterReject fix (multiple bins can
+          // share the same item/location/lot/expiration).
           await tx.{{ pool_entity }}.updateMany({
             where: {
               {{ pool_item_field }}: _row.{{ pool_item_field }},
               {{ pool_location_field }}: _row.{{ pool_location_field }},
               ...(_row.{{ pool_lot_field }} != null ? { {{ pool_lot_field }}: _row.{{ pool_lot_field }} } : {}),
               ...(_row.{{ pool_expiration_field }} != null ? { {{ pool_expiration_field }}: _row.{{ pool_expiration_field }} } : {}),
+              {% if pool_bin_field %}
+              ...(_row.{{ pool_bin_field }} != null ? { {{ pool_bin_field }}: _row.{{ pool_bin_field }} } : {}),
+              {% endif %}
             },
             data: { reserved_quantity: { decrement: _row.reserved_delta } },
           });
@@ -174,6 +181,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               {{ pool_location_field }}: _row.{{ pool_location_field }},
               {{ pool_lot_field }}: _row.{{ pool_lot_field }},
               {{ pool_expiration_field }}: _row.{{ pool_expiration_field }},
+              {% if pool_bin_field %}
+              {{ pool_bin_field }}: _row.{{ pool_bin_field }},
+              {% endif %}
               creator_id: userId, updater_id: userId, created_by_id: userId,
             },
           });
@@ -215,7 +225,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             where: { id: _childInventoryId },
             select: { id: true, quantity: true, reserved_quantity: true,
                       {{ pool_item_field }}: true, {{ pool_location_field }}: true,
-                      {{ pool_lot_field }}: true, {{ pool_expiration_field }}: true },
+                      {{ pool_lot_field }}: true, {{ pool_expiration_field }}: true{% if pool_bin_field %},
+                      {{ pool_bin_field }}: true{% endif %} },
           });
           if (!_childInv) throw new ApiError(400, `Inventory not found: ${_childInventoryId}`);
           {% if split_item_field %}
@@ -247,6 +258,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               {{ pool_location_field }}: _childInv.{{ pool_location_field }},
               {{ pool_lot_field }}: _childInv.{{ pool_lot_field }},
               {{ pool_expiration_field }}: _childInv.{{ pool_expiration_field }},
+              {% if pool_bin_field %}
+              {{ pool_bin_field }}: _childInv.{{ pool_bin_field }},
+              {% endif %}
               creator_id: userId, updater_id: userId, created_by_id: userId,
             },
           });
@@ -282,6 +296,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                   {{ pool_location_field }}: _cand.{{ pool_location_field }},
                   {{ pool_lot_field }}: _cand.{{ pool_lot_field }},
                   {{ pool_expiration_field }}: _cand.{{ pool_expiration_field }},
+                  {% if pool_bin_field %}
+                  {{ pool_bin_field }}: _cand.{{ pool_bin_field }},
+                  {% endif %}
                   creator_id: userId, updater_id: userId, created_by_id: userId,
                 },
               });

@@ -73,6 +73,9 @@ export async function afterApprove(
       {{ pool_location_field }}: inventory.{{ pool_location_field }},   // O-6 (id copy, cmd_562)
       {{ pool_lot_field }}: inventory.{{ pool_lot_field }},     // O-6
       {{ pool_expiration_field }}: inventory.{{ pool_expiration_field }}, // O-6
+      {% if pool_bin_field %}
+      {{ pool_bin_field }}: inventory.{{ pool_bin_field }}, // O-6 (cmd_991, opt-in)
+      {% endif %}
       approved_via: approvableId,           // audit trail (R2)
       created_by_id: approvedByUserId,
       creator_id: approvedByUserId,
@@ -132,6 +135,9 @@ export async function afterReject(
       {{ pool_location_field }}: source.{{ pool_location_field }},
       {{ pool_lot_field }}: source.{{ pool_lot_field }},
       {{ pool_expiration_field }}: source.{{ pool_expiration_field }},
+      {% if pool_bin_field %}
+      {{ pool_bin_field }}: source.{{ pool_bin_field }}, // cmd_991, opt-in
+      {% endif %}
       created_by_id: rejectedByUserId,
       creator_id: rejectedByUserId,
       updater_id: rejectedByUserId,
@@ -140,12 +146,20 @@ export async function afterReject(
 
   // cmd_562: {{ pool_location_field }} is an id on the ledger row itself —
   // no reverse label lookup needed to re-identify the inventory cache row.
+  // cmd_991 [甲]: {{ pool_bin_field }} must join this tuple match when the
+  // domain declares it — item/location/lot/expiration alone can no longer
+  // uniquely re-identify a pool row once bin is a real dimension (multiple
+  // bins can share the same item/location/lot/expiration), same ambiguous-
+  // resolution shape cmd_989 fixed in release_hold.ts.
   const inventoryCache = await tx.{{ pool_entity }}.findFirst({
     where: {
       {{ pool_item_field }}: source.{{ pool_item_field }},
       {{ pool_location_field }}: source.{{ pool_location_field }},
       {{ pool_lot_field }}: source.{{ pool_lot_field }},
       {{ pool_expiration_field }}: source.{{ pool_expiration_field }},
+      {% if pool_bin_field %}
+      {{ pool_bin_field }}: source.{{ pool_bin_field }},
+      {% endif %}
     },
   });
   if (inventoryCache) {

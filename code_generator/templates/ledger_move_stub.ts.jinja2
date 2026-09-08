@@ -71,6 +71,9 @@ export async function afterApprove(
       {{ pool_location_field }}: fromInventory.{{ pool_location_field }},
       {{ pool_lot_field }}: fromInventory.{{ pool_lot_field }},
       {{ pool_expiration_field }}: fromInventory.{{ pool_expiration_field }},
+      {% if pool_bin_field %}
+      {{ pool_bin_field }}: fromInventory.{{ pool_bin_field }}, // cmd_991, opt-in
+      {% endif %}
       approved_via: approvableId,
       created_by_id: approvedByUserId,
       creator_id: approvedByUserId,
@@ -89,6 +92,9 @@ export async function afterApprove(
       {{ pool_location_field }}: toInventory.{{ pool_location_field }},
       {{ pool_lot_field }}: toInventory.{{ pool_lot_field }},
       {{ pool_expiration_field }}: toInventory.{{ pool_expiration_field }},
+      {% if pool_bin_field %}
+      {{ pool_bin_field }}: toInventory.{{ pool_bin_field }}, // cmd_991, opt-in
+      {% endif %}
       approved_via: approvableId,
       created_by_id: approvedByUserId,
       creator_id: approvedByUserId,
