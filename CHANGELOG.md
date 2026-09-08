@@ -6,6 +6,22 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Opt-in `binField` on `x-ledger-entities.<domain>`**, a fifth pool-entity
+  column name alongside the existing required `itemField`/`locationField`/
+  `lotField`/`expirationField` (all four unchanged, still required — this
+  key alone is optional). A domain that never declares `binField` renders
+  byte-identical output to before this key existed (verified against a
+  real consumer's inventory-domain schema: full generator output tree
+  diffed with and without this change, zero differences). When declared,
+  every ledger-row write across the four `ledger_*_stub.ts.jinja2`
+  templates, `split_action_route.ts.jinja2`, and `generators.py`'s
+  reserve/resubmit-claim code copies the bin column verbatim, and two
+  latent ambiguous-resolution bugs (a pool row re-identified by an
+  item/location/lot/expiration tuple match with no unique id, which
+  becomes genuinely ambiguous once bin is a real dimension) are closed at
+  the same time. See `docs/knowledge/appendix/inventory-reservation-split.md`
+  §7.3.
+
 - **New field-level schema key `x-fk-constrained`** for an optional
   many-to-one FK field whose valid values are constrained relative to
   another already-set field on the same row (an invariant only a
