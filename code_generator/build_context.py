@@ -2783,10 +2783,21 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             # to the union-typed FormUpsert `src` prop.
             if defn.get('_prisma_native_enum_type') and 'default' in defn:
                 return f"'{defn['default']}' as const"
+            if defn.get('_prisma_native_enum_type') and is_null and isinstance(defn.get('enum'), list) and defn['enum']:
+                # Nullable with no schema default (e.g. dashboard_widget's
+                # stack_mode/group_by_bucket on the DataGrid-child path,
+                # generators.py:_new_prop_val) — seeding with enum[0] would
+                # fabricate meaning that was never chosen (an untouched
+                # optional field silently becoming "the first listed
+                # reason"), so leave it unset instead (cmd_1010). Mirrors
+                # the nullable check generators.py's DataGrid-child seed
+                # already had; this top-level path was missing it.
+                return 'null'
             if defn.get('_prisma_native_enum_type') and isinstance(defn.get('enum'), list) and defn['enum']:
-                # No schema default (e.g. shift.status) — seed the "new" form
-                # with the first declared enum member so it still typechecks
-                # against the nativeEnum literal union.
+                # Required field with no schema default — a required
+                # column can't be left empty, so fall back to the first
+                # declared enum member so it still typechecks against the
+                # nativeEnum literal union.
                 return f"'{defn['enum'][0]}' as const"
             if isinstance(defn.get('enum'), list) and defn['enum']:
                 # Plain (non-nativeEnum) string-enum field, e.g.
@@ -2796,10 +2807,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 # forced-required whenever non-nullable (cmd_472/R-2:
                 # is_forced_required_field), so seeding '' here made the
                 # "new" page's own client-side validation reject its own
-                # untouched default value. Mirror the nativeEnum branches
-                # above: schema default first, else the first enum member.
+                # untouched default value for a required field. A nullable
+                # field never hits that forced-required check, so seeding
+                # enum[0] there had no such justification -- it only
+                # fabricated a choice nobody made (cmd_1010). Mirror the
+                # nativeEnum branches above: schema default first, else
+                # (nullable: '') or (required: the first enum member).
                 if 'default' in defn:
                     return f"'{defn['default']}'"
+                if is_null:
+                    return "''"
                 return f"'{defn['enum'][0]}'"
             # Plain (non-enum) string field with a Prisma `@default(...)`
             # (e.g. tenant_id String @default("default")): seed the writable

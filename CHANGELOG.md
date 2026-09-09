@@ -213,6 +213,47 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   already and is documented in the same section.
 
 ### Fixed
+- **The generated submit-for-approval Server Action (`submit_for_approval.ts.jinja2`,
+  the standalone action for `x-approval.submit_on` — the only path an
+  `edit: false` entity has to ever reach it) no longer throws across the
+  `'use server'` boundary, and its caller no longer discards the
+  result.** Two independent gaps had to close together: the action threw
+  every failure (including a reservation-capacity rejection) straight past
+  React's Server Components boundary, which strips the message in
+  production; and `ApprovalSection.tsx`'s Submit button fired the action
+  without `await`ing it or reading any result, so even a correctly
+  returned failure had nowhere to go. The action now returns the same
+  `ActionFailure` shape the ordinary create/update actions already use
+  (`AppError` → its own `code`/`field`/`reason`; the reservation-specific
+  capacity error → `CAPACITY`; anything else — deliberately, so a new
+  exception type never needs a template change — the field-less `UNKNOWN`
+  code, never re-thrown). `ApprovalSection.tsx` now awaits the action
+  inside its own pending-tracked transition, disables the button while in
+  flight, and displays the failure inline via a new shared
+  `getErrorMessage()` helper in `lib/_errors.ts`. See
+  `docs/knowledge/error-message-framework.md`. A side-effect regression
+  this surfaced and fixed: wrapping the Submit button in a `<span>` (the
+  standard pattern for a `Tooltip` whose child can become disabled) while
+  the button also carried its own `aria-label` produced two DOM elements
+  with the same accessible name — `Tooltip` clones its `title` onto an
+  immediate child that has none of its own. The button's now-redundant
+  explicit `aria-label` was dropped; its own visible text already supplies
+  it.
+- **Optional (nullable) enum fields with no `default:` no longer seed the
+  first enum member on the "new" form.** `build_context.py:_default_value()`
+  (top-level create page) and `generators.py:_new_prop_val()` (DataGrid-child
+  new-row seed) each had a gap where an untouched nullable enum field was
+  silently pre-filled with its first declared value -- for nativeEnum fields
+  only on the top-level path (the DataGrid-child path already checked
+  nullability correctly), and for plain (non-nativeEnum) string-enum fields
+  on both paths. An untouched optional field now stays unset (`null` for
+  nativeEnum, `''` for plain string-enum) instead of fabricating a choice
+  nobody made; fields with an explicit `default:` are unaffected, and
+  required fields still fall back to the first enum member. Verified via
+  golden-diff (regenerating this repo's own dogfood schema produces
+  byte-identical output across all 240 generated files) plus an empirical
+  before/after check on a temporary scratch field (reverted before commit)
+  on both a top-level and a DataGrid-child entity.
 - **`sharp`/`baseline-browser-mapping` CVEs resolved** via non-breaking
   `npm audit fix` (GHSA-rgj7-g3m4-5g8c, high, libheif via `next`'s
   transitive dep on `sharp`; GHSA-w5vr-8v7q-w6rv, moderate, via

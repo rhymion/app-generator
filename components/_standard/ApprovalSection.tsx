@@ -31,6 +31,7 @@ import { Fragment } from 'react';
 import type { ModelPermissions } from '@/lib/authz';
 import { approveApprovalRequest, rejectApprovalRequest, withdrawApprovalRequest } from '@/lib/approval_request/actions';
 import { canSubmitForApproval, canWithdrawApproval } from '@/lib/approval_request/submit_predicate';
+import { getErrorMessage, type ActionFailure } from '@/lib/_errors';
 
 const STATUS_LABELS = ['Pending', 'Approved', 'Rejected', 'TerminalRejected', 'Withdrawn'] as const;
 
@@ -80,7 +81,7 @@ type Props = {
   // always passes currentUserId to every view-target component, so no
   // template change was needed to make it available here again.
   currentUserId?: string | null;
-  onSubmitForApproval?: () => Promise<void>;
+  onSubmitForApproval?: () => Promise<ActionFailure | void>;
   // cmd_865: whether this entity declares x-approval.on_withdrawn
   // (generators.py's form_view_context, threaded via form_view.tsx.jinja2).
   // The server-side withdraw lockout (on_withdrawn_dispatch.ts's
@@ -116,8 +117,15 @@ function splitRounds(requests: ApprovalRequest[]): {
 export default function ApprovalSection({ src, currentUserRoleIds, currentUserId, onSubmitForApproval, hasOnWithdrawn }: Props) {
   const t = useTranslations('Fields');
   const tCommon = useTranslations('Common');
+  const tErr = useTranslations('Errors');
   const tStatus = useTranslations('ApprovalRequestStatus');
   const [, startTransition] = useTransition();
+  // cmd_1011: a dedicated transition/error pair for the submit-for-approval
+  // action -- kept separate from the approve/reject/withdraw transition
+  // above (unchanged, out of scope here) since submit has no confirmation
+  // dialog to gate it and needs its own inline error surface.
+  const [isSubmitPending, startSubmitTransition] = useTransition();
+  const [submitError, setSubmitError] = useState<ActionFailure | null>(null);
   const [dialog, setDialog] = useState<{ targetId: string; action: Action } | null>(null);
   const [message, setMessage] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
@@ -192,9 +200,20 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
     : t('withdraw');
 
   const handleSubmitForApproval = () => {
-    if (!onSubmitForApproval) return;
-    startTransition(() => {
-      onSubmitForApproval();
+    if (!onSubmitForApproval || isSubmitPending) return;
+    setSubmitError(null);
+    // cmd_1011: await the Server Action inside the transition (React keeps
+    // isSubmitPending true until this async callback's promise resolves)
+    // instead of firing-and-forgetting it -- the previous version called
+    // onSubmitForApproval() without awaiting or reading its result, so a
+    // rejected submit (e.g. reservation capacity exhausted) never reached
+    // the screen and nothing blocked a second click while the first was
+    // still in flight.
+    startSubmitTransition(async () => {
+      const result = await onSubmitForApproval();
+      if (result && !result.ok) {
+        setSubmitError(result);
+      }
     });
   };
 
@@ -277,10 +296,30 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
         // cmd_843: PD-3 ruling -- one label for both the first submission
         // and any later resubmission, no first-vs-again wording split.
         <Tooltip title={t('submit')}>
-          <Button variant="contained" aria-label={t('submit')} onClick={handleSubmitForApproval} sx={{ mb: 1 }}>
-            {t('submit')}
-          </Button>
+          {/* cmd_1011: wrapping span is the standard MUI pattern for a
+              Tooltip whose child can become disabled (a disabled element
+              fires no pointer events, so Tooltip can't attach to it
+              directly). No explicit aria-label on the Button itself --
+              its own visible text already supplies its accessible name,
+              and Tooltip clones one from `title` onto this span since the
+              span has none of its own; giving the Button one too just
+              produced two elements answering to the same accessible name. */}
+          <span>
+            <Button
+              variant="contained"
+              onClick={handleSubmitForApproval}
+              disabled={isSubmitPending}
+              sx={{ mb: 1 }}
+            >
+              {t('submit')}
+            </Button>
+          </span>
         </Tooltip>
+      )}
+      {submitError && (
+        <Typography color="error" variant="body2" sx={{ mb: 1 }}>
+          {getErrorMessage(submitError, tErr)}
+        </Typography>
       )}
       {currentRoundRequests.length === 0 ? null : (
       <>

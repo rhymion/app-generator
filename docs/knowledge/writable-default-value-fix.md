@@ -28,8 +28,13 @@ Three other field classes had the same root bug without the crash:
 - **plain (non-enum) string** with a literal default (e.g. `tenant_id String @default("default")`):
   seeded `''` unconditionally, ignoring the schema default.
 
-`nativeEnum`/plain-string-enum fields were already correct (an earlier pilot: `_default_value()` reads
-`defn.get('default')`, falling back to the first enum member).
+`nativeEnum`/plain-string-enum fields with a declared `default:` were already correct (an earlier
+pilot: `_default_value()` reads `defn.get('default')` first). The "falling back to the first enum
+member" half of that same pilot turned out to be its own bug for *nullable* enum fields with no
+`default:` at all -- an untouched optional field got silently pre-filled with the first declared
+enum value instead of staying blank. See `nullable-enum-default-fix.md` for that fix; it targets
+the opposite symptom from this doc (a default injected where none was asked for, rather than a
+real default getting dropped) but touches the same two functions.
 
 ## Why `'default' in defn` alone doesn't catch `now()`
 

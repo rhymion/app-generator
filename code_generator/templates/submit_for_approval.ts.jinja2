@@ -10,6 +10,18 @@
 // creation logic with the ordinary update-time edge trigger
 // (service.ts.jinja2) -- submitting via this action and submitting via an
 // ordinary edit are the same transition, reached two different ways.
+//
+// cmd_1011: like upsert{{ parent_pascal }}/update{{ parent_pascal }} in
+// actions.ts.jinja2, this action must never let a thrown value cross the
+// 'use server' boundary -- React strips the message in production
+// (docs/knowledge/error-message-framework.md). AppError and the
+// reservation-specific error convert to the same ActionFailure errorCode
+// that path already uses. Anything else -- including an exception type
+// this generator has never seen -- falls through to the field-less
+// 'UNKNOWN' code rather than being named here, by design: a new exception
+// type must never require a generator/template change to surface
+// correctly (see the framework doc's Disclosure Policy, "Internal /
+// unexpected -> generic message, no stack trace/detail").
 
 'use server';
 
@@ -19,6 +31,7 @@ import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
 import { createId } from '@paralleldrive/cuid2';
 import { canSubmitForApproval } from '@/lib/approval_request/submit_predicate';
 import { revalidatePath } from 'next/cache';
+import { AppError, type ActionFailure } from '@/lib/_errors';
 // cmd_923b: same convergence-point/absolute-path convention as
 // service.ts.jinja2's afterCreate import -- see generators.py's
 // service_context() utility_code for the full rationale.
@@ -28,10 +41,27 @@ import { afterSubmit } from '@/lib/{{ model }}/service_after_submit';
 import { InsufficientPoolCapacityError } from '@/lib/{{ reservation_error_import_model }}/service';
 {% endif %}
 
-export async function submitForApproval{{ parent_pascal }}(id: string): Promise<void> {
+export async function submitForApproval{{ parent_pascal }}(id: string): Promise<ActionFailure | void> {
   const actorId = await getSessionUserIdOrThrow();
-  await prisma.$transaction(async (tx) => {
+  try {
+    await prisma.$transaction(async (tx) => {
 {{ submit_for_approval_action_code }}
-  }, { isolationLevel: 'Serializable' });
+    }, { isolationLevel: 'Serializable' });
+  } catch (e) {
+    if (e instanceof AppError) {
+      return { ok: false, errorCode: e.code, field: e.field, reason: e.reason } satisfies ActionFailure;
+    }
+{% if reservation_error_import_model %}
+    if (e instanceof InsufficientPoolCapacityError) {
+      return { ok: false, errorCode: 'CAPACITY' } satisfies ActionFailure;
+    }
+{% endif %}
+    // cmd_1011: any other thrown value -- a genuinely unexpected failure,
+    // never a named class here -- still surfaces inline instead of
+    // crashing to error.tsx. Logged server-side only; the client only ever
+    // sees the field-less, detail-free 'UNKNOWN' code.
+    console.error('submitForApproval{{ parent_pascal }} error:', e);
+    return { ok: false, errorCode: 'UNKNOWN' } satisfies ActionFailure;
+  }
   revalidatePath('/{{ parent }}/' + id);
 }
