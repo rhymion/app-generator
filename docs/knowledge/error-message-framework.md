@@ -554,6 +554,111 @@ the reliable option found.
 
 ---
 
+## `submit_for_approval.ts.jinja2` joined this framework
+
+The explicit "(re)submit" Server Action (`submit_for_approval.ts.jinja2`,
+generated as `lib/{parent}/submit_actions.ts` — the standalone path for
+`x-approval.submit_on`, used unconditionally whenever the entity has that
+config, and the *only* path for an `edit: false` entity, which has no PUT
+route at all) was never wired into this framework. It declared `Promise<void>`
+and let every failure — including the reservation-specific
+`InsufficientPoolCapacityError` — throw straight across the `'use server'`
+boundary. Separately, its one caller (`components/_standard/ApprovalSection.tsx`'s
+Submit button) invoked it inside `startTransition(() => { onSubmitForApproval(); })`
+with no `await`, no pending-state tracking, and no result handling — so even
+a correctly-returned failure had nowhere to go. Two independent gaps, on
+either side of the same call, both had to close for either fix to be
+observable.
+
+**The fix**:
+
+- `submit_for_approval.ts.jinja2` now wraps its `prisma.$transaction()` call
+  in the same shape `_wrap_call_with_catch` already produces for
+  `upsertXxx`/`removeXxx`: catch `AppError` → `ActionFailure` with the
+  thrown error's own `code`/`field`/`reason`; catch the reservation-specific
+  `InsufficientPoolCapacityError` (only emitted when the entity's own
+  `reservation_error_import_model` context var is set) → `CAPACITY`. Returns
+  `Promise<ActionFailure | void>`.
+- **Deliberate divergence from `_wrap_call_with_catch`**: that helper
+  re-throws anything it doesn't recognize, so an unexpected error still
+  crashes to `error.tsx` for `upsertXxx`/`removeXxx`. This entity's version
+  does **not** re-throw — any other caught value falls back to the
+  field-less `UNKNOWN` code (already in the `ErrorCode` union and the
+  Disclosure Policy table above: "Internal / unexpected → generic message,
+  no stack traces, no internal detail") instead of propagating. This was a
+  requirement, verified by an acceptance test (see below), not a judgment
+  call: a genuinely new exception type appearing anywhere in this
+  transaction (a hand-written `service_after_submit.ts` hook,
+  `service_validation_custom.ts`, a future Prisma error shape) must be
+  visible to the user without ever requiring a template/generator change —
+  the alternative (naming each exception type in a `catch` here) is exactly
+  the per-exception-dispatch shape this framework's Disclosure Policy
+  already rejects for "Internal / unexpected".
+- `components/_standard/ApprovalSection.tsx`'s `handleSubmitForApproval`
+  now `await`s the action inside its own `useTransition` (kept separate
+  from the pre-existing approve/reject/withdraw transition, which this fix
+  does not touch), disables the Submit button while pending, and — on
+  failure — displays the message inline via a new shared
+  `getErrorMessage(err, terr)` helper added to `lib/_errors.ts`. That
+  helper is the exact same `errorCode → i18n key` mapping
+  `form_upsert.tsx.jinja2` already generates inline per entity, factored
+  out so a hand-written (non-generated) caller can reuse it instead of
+  duplicating the switch. `form_upsert.tsx.jinja2` itself was not changed —
+  its own inline copy still works and touching a template with this much
+  existing golden-diff/gate coverage for a pure refactor was not worth the
+  risk.
+- **Found and fixed as a side effect, not the main fix**: wrapping the
+  Submit `Button` in a `<span>` (the standard MUI pattern for a `Tooltip`
+  whose child can become `disabled` — a disabled element fires no pointer
+  events, so `Tooltip` can't attach its hover listeners directly) combined
+  with the `Button`'s own explicit `aria-label` produced **two** DOM
+  elements both answering to the same accessible name: `Tooltip` clones an
+  `aria-label` from its `title` prop onto its immediate child whenever that
+  child has none of its own, and the immediate child was now the `<span>`,
+  not the `Button`. `components/_standard/ApprovalSection.test.tsx`'s
+  existing `getByLabelText('submit')` caught this immediately (two
+  matches). Fixed by dropping the now-redundant `aria-label` from the
+  `Button` — its own visible text (`{t('submit')}`) already supplies its
+  accessible name, so only the `span` carries one now. Worth remembering
+  for any future `Tooltip` + conditionally-`disabled`-child pattern in this
+  codebase: giving the interactive child its own `aria-label` *and* letting
+  `Tooltip` wrap it in a `<span>` will silently create two elements with
+  the same name.
+
+**Acceptance test performed (not committed — the throwaway exception this
+required is exactly what the design must never need again)**: a one-off
+`class` extending `Error`, never seen by this generator, was thrown from a
+scratch consumer's `service_after_submit.ts` hook for its `inventory_reservation`
+entity (an `x-approval` + `x-reservation` + `edit: false` entity — the
+generator's own dogfood schema declares no `x-approval` entity at all, so
+this had to be verified against a real consumer schema in an isolated,
+disposable worktree, discarded after use — no schema/entity addition or
+generated output from this verification was committed anywhere). With zero
+changes to any template or to `generators.py`, the submit correctly showed
+the generic `unknown` message inline, `error.tsx` was never reached, and
+the record's status rolled back — confirming the catch-all needs no
+maintenance as new exception types appear anywhere in this transaction.
+The exception was removed immediately after.
+
+**Known gap, left open**: this generator's own dogfood schema
+(`code_generator/json_schema.yaml`) declares zero `x-approval` entities, so
+there is nowhere in this repo's own committed Cypress suite to attach a
+permanent UI e2e regression test for this exact mechanism (matching this
+doc's own "New hand-written UI e2e coverage" precedent above, which relies
+on `approval_flow`/`user` — plain CRUD entities, not `x-approval` ones).
+Verification for this change relied on a real consumer's schema
+(`inventory_reservation`) in an isolated, discarded worktree instead — real
+end-to-end coverage (screenshots of the reported capacity-exhausted
+scenario resolving inline, `tsc --noEmit` clean, full consumer build clean,
+zero unrelated entities' generated output changed) but not a regression
+test that runs on every future change to this template. Whoever revisits
+`submit_for_approval.ts.jinja2` next should either add a minimal
+`x-approval` dogfood entity to this schema (a real design decision, not
+made here) or accept that this path's regression coverage lives in
+individual consumer repos.
+
+---
+
 ## Implementation Checklist (for implementation cmd)
 
 1. `lib/_errors.ts` — create `AppError` class and `ErrorCode` / `ActionResult` types (write-once)

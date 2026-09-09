@@ -213,6 +213,32 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   already and is documented in the same section.
 
 ### Fixed
+- **The generated submit-for-approval Server Action (`submit_for_approval.ts.jinja2`,
+  the standalone action for `x-approval.submit_on` — the only path an
+  `edit: false` entity has to ever reach it) no longer throws across the
+  `'use server'` boundary, and its caller no longer discards the
+  result.** Two independent gaps had to close together: the action threw
+  every failure (including a reservation-capacity rejection) straight past
+  React's Server Components boundary, which strips the message in
+  production; and `ApprovalSection.tsx`'s Submit button fired the action
+  without `await`ing it or reading any result, so even a correctly
+  returned failure had nowhere to go. The action now returns the same
+  `ActionFailure` shape the ordinary create/update actions already use
+  (`AppError` → its own `code`/`field`/`reason`; the reservation-specific
+  capacity error → `CAPACITY`; anything else — deliberately, so a new
+  exception type never needs a template change — the field-less `UNKNOWN`
+  code, never re-thrown). `ApprovalSection.tsx` now awaits the action
+  inside its own pending-tracked transition, disables the button while in
+  flight, and displays the failure inline via a new shared
+  `getErrorMessage()` helper in `lib/_errors.ts`. See
+  `docs/knowledge/error-message-framework.md`. A side-effect regression
+  this surfaced and fixed: wrapping the Submit button in a `<span>` (the
+  standard pattern for a `Tooltip` whose child can become disabled) while
+  the button also carried its own `aria-label` produced two DOM elements
+  with the same accessible name — `Tooltip` clones its `title` onto an
+  immediate child that has none of its own. The button's now-redundant
+  explicit `aria-label` was dropped; its own visible text already supplies
+  it.
 - **Optional (nullable) enum fields with no `default:` no longer seed the
   first enum member on the "new" form.** `build_context.py:_default_value()`
   (top-level create page) and `generators.py:_new_prop_val()` (DataGrid-child

@@ -296,10 +296,17 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
         // cmd_843: PD-3 ruling -- one label for both the first submission
         // and any later resubmission, no first-vs-again wording split.
         <Tooltip title={t('submit')}>
+          {/* cmd_1011: wrapping span is the standard MUI pattern for a
+              Tooltip whose child can become disabled (a disabled element
+              fires no pointer events, so Tooltip can't attach to it
+              directly). No explicit aria-label on the Button itself --
+              its own visible text already supplies its accessible name,
+              and Tooltip clones one from `title` onto this span since the
+              span has none of its own; giving the Button one too just
+              produced two elements answering to the same accessible name. */}
           <span>
             <Button
               variant="contained"
-              aria-label={t('submit')}
               onClick={handleSubmitForApproval}
               disabled={isSubmitPending}
               sx={{ mb: 1 }}
