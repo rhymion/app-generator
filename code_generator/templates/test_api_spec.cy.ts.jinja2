@@ -1,5 +1,5 @@
 // AUTO-GENERATED - DO NOT EDIT
-import { TEST_API_KEY, TEST_CREDENTIALS } from '../../support/test-credentials';
+import { TEST_API_KEY{% if can_list and can_export %}, TEST_CREDENTIALS{% endif %} } from '../../support/test-credentials';
 
 const API_BASE = '{{ api_path }}';
 {% if round_trip_unimportable_columns %}

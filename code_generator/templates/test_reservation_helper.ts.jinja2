@@ -88,7 +88,7 @@ async function createPool(
   {{ criteria_pool_field }}: string,
   {{ pool_qty_field }}: number,
 {% if pool_extra_deps %}
-  extraDeps: Record<string, any>,
+  {% if pool_extra_fk_props %}extraDeps{% else %}_extraDeps{% endif %}: Record<string, any>,
 {% endif %}
 {% for f in orderby_sortable %}
   {{ f.field }}{% if f.is_nullable %}: string | null{% else %}: string{% endif %} = {% if f.is_nullable %}null{% else %}''{% endif %},

@@ -1,15 +1,11 @@
 // AUTO-GENERATED - DO NOT EDIT
 import { TEST_CREDENTIALS } from '../support/test-credentials';
-{% if has_datagrid_children and has_datagrid_fk_children %}
-import { fillDataGridRow, selectDataGridSingleSelect, {% if seed_count == 0 %}assertDataGridEmpty, {% endif %}getDataGridTotalRowCount } from '../support/datagrid-helpers';
-{% elif has_datagrid_children %}
-import { fillDataGridRow, {% if seed_count == 0 %}assertDataGridEmpty, {% endif %}getDataGridTotalRowCount } from '../support/datagrid-helpers';
-{% else %}
-{% if seed_count == 0 %}
-import { assertDataGridEmpty, getDataGridTotalRowCount } from '../support/datagrid-helpers';
-{% else %}
-import { getDataGridTotalRowCount } from '../support/datagrid-helpers';
-{% endif %}
+{% set needs_fill = (can_new or can_edit) and has_datagrid_children %}
+{% set needs_select = (can_new or can_edit) and has_datagrid_children and has_datagrid_fk_children %}
+{% set needs_empty = can_list and seed_count == 0 %}
+{% set needs_count = can_list %}
+{% if needs_fill or needs_select or needs_empty or needs_count %}
+import { {% if needs_fill %}fillDataGridRow{% if needs_select or needs_empty or needs_count %}, {% endif %}{% endif %}{% if needs_select %}selectDataGridSingleSelect{% if needs_empty or needs_count %}, {% endif %}{% endif %}{% if needs_empty %}assertDataGridEmpty{% if needs_count %}, {% endif %}{% endif %}{% if needs_count %}getDataGridTotalRowCount{% endif %} } from '../support/datagrid-helpers';
 {% endif %}
 
 // A dependency record's display name can share a substring with another
