@@ -185,3 +185,174 @@ desired.
   addition inert against any currently-tracked file, since the files it targets are gitignored) plus
   the two hand-written `audit_log` files (both now with fewer warnings than before, since they were
   already linted by CI regardless of `generate-code`).
+
+## 2026-09-09 follow-up: warnings only a real consumer schema exercises
+
+A later measurement inside a consumer's own generated output (its
+`json_schema.yaml` declares x-approval on several entities, plus
+commentable/mention/many-to-one-in-datagrid features this repo's own
+dogfood schema has none of) found 35 warnings — the ceiling this repo's
+own gate never sees, for the same structural reason as every fix above:
+none of the branches involved are exercised by this repo's own schema, so
+`npm run generate-code && npm run lint` here reports 0 for all of them.
+Root-caused and fixed each one, following the exact same method as the
+rest of this doc (find every real call site of the flagged identifier,
+compare against the condition guarding its import/declaration, narrow the
+guard to match):
+
+- **`actions.ts.jinja2`**: `getAssociatedOrganizations` was imported
+  whenever `should_filter_by_org && (can_create || can_update ||
+  can_delete)`, but its only call site is inside the `can_delete` branch.
+  An org-scoped entity that is create/update-able but not delete-able (the
+  common x-approval shape — approvable records are typically undeletable)
+  got an unused import. `getSessionUserIdOrThrow`/`requirePermission` had
+  the opposite problem: imported unconditionally, but only referenced
+  inside the upsert body (`can_create`/`can_update`), the invalidate
+  action (`can_invalidate`), or the comment-reaction action
+  (`has_commentable`) — an entity with none of those (e.g. a
+  create/update/delete-only settings-shaped entity) got both unused.
+
+- **`service.ts` utility imports (`generators.py`)**: `normalizeChildRefs`
+  was imported whenever the entity has embedded children
+  (`has_non_comment_ch`), but its only reference
+  (`snapshot_child_mappings`, inside `normalizeSnapshot()`) is itself
+  entirely gated on `can_update`. An entity with embedded children that
+  mutates only through a non-update path (e.g. an `x-splittable` entity's
+  split action) got an unused import.
+
+- **`search_helpers.ts.jinja2`**: `buildSearchQuery` always computed
+  `associatedOrgs`/`associatedOrgIds` via `getAssociatedOrganizations`, but
+  every reference to `associatedOrgIds` is inside an
+  `{% if entity.should_filter_by_org %}` branch (both the top-level
+  entity loop and the `no_page_children` loop). When no search entity is
+  org-scoped, both variables and the import went unused. A new
+  `has_org_filtered_search_entity` flag (computed once in `generate.py`
+  from `search_entities`) now gates all three.
+
+- **`chart_getters.ts.jinja2`**: `getModelPermissions()` destructured
+  `userId` alongside `permissions`, but the chart query has no per-user
+  branch at all — `userId` was dead in every chart getter,
+  unconditionally. Dropped it from the destructure.
+
+- **`column_def.tsx.jinja2`**: `DateTimeWrapper` was imported whenever a
+  date/time column exists, but this template's own date/time column
+  renders via a plain `type: 'dateTime'` + `dayjs` `valueFormatter` — it
+  never uses `<DateTimeWrapper>` (that component is used by
+  `form_view`/`form_upsert`/`getters`, entirely different templates with
+  their own, correct gating). Removed the import.
+  `GridRenderEditCellParams` was similarly over-gated on
+  `needs_datetime_imports || needs_entity_autocomplete_cell`, but its only
+  use (the many-to-one FK column's `renderEditCell`) is
+  entity-autocomplete-only; narrowed to `needs_entity_autocomplete_cell`.
+
+- **`form_upsert.tsx.jinja2`**: `MentionInput` was imported whenever
+  `has_mention_fields || comment_has_mention`, but the comment-mention path
+  only ever passes `searchUsers`/`renderMessage` props into
+  `CommentListWrapper` (which uses `MentionInput` internally, in its own
+  component file) — this template's own generated code only ever renders
+  a literal `<MentionInput>` for the `has_mention_fields` (the entity's
+  own field-level mention) case. Since `comment_has_mention` is
+  schema-wide (derived from the single shared `comment` entity, not
+  per-consuming-entity), any commentable entity without its own
+  mentionable field got an unused `MentionInput` import. Split the import:
+  `MentionInput` on `has_mention_fields` alone, `searchMentionUserOptions`
+  unchanged (genuinely needed by both paths).
+
+- **`form_view.tsx.jinja2`**: several imports were declared unconditionally
+  (`useRouter`) or over-broadly (comment-action imports, the reaction
+  type, `permissions`) relative to what the page's own JSX actually
+  reads — the view page renders `<CommentListWrapper>` read-only (no
+  handlers, no reaction-toggle UI), so the comment-action imports
+  (`add{Parent}Comment` etc.), the reaction type constant, and its type
+  import are dead there even though the equivalent edit-page template
+  genuinely needs them. `useRouter`'s only declaration site
+  (`is_splittable && split_config`) is narrower than its old import
+  condition (which also fired on `has_comment_children`, never a real use
+  of the router). `permissions` itself is dead whenever neither
+  `can_update` nor any `entity_view_components` entry needs it — the only
+  two real reads of that prop.
+  ⚠️ A first pass at this fix wrongly treated `CommentListWrapper` and
+  `MentionText` as dead too, because a grep of the static template text
+  for those identifiers found only the import lines and no direct JSX —
+  missing that their real usage comes through an opaque
+  `{{ child_view_grids }}` placeholder, a Python-rendered string built by
+  a *different* function than the one that assembles the page's own
+  static field JSX. A real consumer's generated output caught the mistake
+  immediately as two `react/jsx-no-undef` ESLint errors (undefined
+  components) — this repo's own mention-gate fixture did not catch it,
+  because its `tsc` scope is limited to `getters.ts` and the API route,
+  not `FormView.tsx`. **Lesson**: when a template inserts content via an
+  opaque `{{ some_variable }}` placeholder (rather than static Jinja
+  markup), grepping the `.jinja2` file's own text for a suspected-dead
+  identifier is not sufficient proof of dead code — trace every Python
+  function that populates that placeholder's value, or generate the real
+  output and check for compile errors, before removing an import.
+
+- **`getters.ts.jinja2`**: the `has_attachable` branch's attachment-decrypt
+  block destructured `name_iv` without the `_` prefix its own sibling
+  branch (`direct_attachment_rels`, a few lines down) already uses
+  correctly (`name_iv: _name_iv`) for the exact same encrypted-column-
+  stripping pattern — a plain copy/paste inconsistency between two nearly
+  identical blocks.
+
+- **Three `service_after_*_stub.ts.jinja2` write-once stubs**
+  (`approve`/`reject`/`withdraw`): these stubs' default (uncustomized)
+  bodies are `TODO` comments that don't reference their parameters,
+  unlike every sibling stub (`after_create`/`after_delete`/`after_submit`/
+  `after_update`, `before_approve`/`before_reject`/`before_withdraw`),
+  which already use this repo's `_`-prefix convention for intentionally-
+  unused bindings. Brought all three in line with their siblings. Since
+  these are "generated once" files, this only affects newly-generated
+  stubs — a consumer's already-materialized stub is untouched, and
+  customizing a newly-generated one just means dropping the leading `_`
+  from whichever parameters the implementation actually reads.
+
+- **Generated cypress test code** (`test_api_spec.cy.ts.jinja2`,
+  `test_spec_mobile.cy.ts.jinja2`, `test_spec.cy.ts.jinja2`,
+  `test_reservation_helper.ts.jinja2`): the same "import/declaration
+  condition broader than the real call site" shape recurs in
+  test-generation templates too, not just app templates —
+  `TEST_CREDENTIALS`'s one call site (the dual-auth session-cookie test on
+  the `/export` route) needs `can_list && can_export`, not an
+  unconditional import; the mobile spec's `exactRe()` helper is only
+  called from the `can_list`-gated "Card list" describe block, not
+  defined unconditionally at module scope; the datagrid-helpers import
+  (`fillDataGridRow`/`selectDataGridSingleSelect`/`assertDataGridEmpty`/
+  `getDataGridTotalRowCount`) was gated only on
+  `has_datagrid_children`/`has_datagrid_fk_children`/`seed_count`,
+  ignoring whether the entity can even reach the describe blocks
+  (Create/Edit for the first two, Display-list/Delete for the last two)
+  that call them at all; and the pool-reservation test helper's
+  `createPool()`/`createTestPool{Target}()` functions declare an
+  `extraDeps` parameter whenever the pool entity needs *any* extra
+  dependency records, but only read it when that specific dependency (or
+  the pool row itself) has an FK column referencing it — named `_extraDeps`
+  in the cases where it doesn't.
+
+**Verification for this round**: generating against the same consumer
+schema, full ESLint went from 48 problems (0 errors, 48 warnings) to 2
+warnings (0 errors) — the 2 remaining are in hand-written files under that
+consumer's own custom test directory, not generator template output, so
+out of this doc's scope. A manifest sha256 diff against the pre-fix
+baseline in that same worktree showed 0 files added, 0 removed, and
+exactly the entity-scoped files these fixes target changed — no unrelated
+entity's generated output moved. This repo's own full pytest suite, all
+its fixture/unit gates, and a full `tsc --noEmit` against both this
+repo's own generated output and the consumer's (0 errors on both, aside
+from two pre-existing errors in the consumer's `split_action_route.ts`
+output that predate this round and are untouched by it) all pass.
+
+**On the one-warning increment this round also explained**: an earlier
+measurement recorded 34 warnings in the same consumer environment; a
+later one recorded 35. The delta traces to a fix landed in between that
+added a `canEdit = false` branch to `form_view.tsx.jinja2` for
+`can_update: false` entities, replacing what had been an unconditional
+`permissions?.update ?? true` — before that fix, `permissions` was always
+referenced by `canEdit` regardless of `can_update`, so it could never go
+unused via that path; after it, an entity with `can_update: false` and no
+`entity_view_components` lost its only reference to `permissions`. That
+is exactly the `form_view.tsx.jinja2` `permissions` fix described above —
+the increment and one of this round's root causes are the same bug,
+confirmed by the affected entities matching (the consumer's
+`inventory_transaction`/`setting2`/`setting6`, all `can_update: false`
+with no `entity_view_components`).
