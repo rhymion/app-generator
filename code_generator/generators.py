@@ -5747,9 +5747,15 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                     # Plain (non-nativeEnum) string-enum field -- same gap as
                     # the nativeEnum branches above, mirrors
                     # build_context.py:_default_value's parallel branch
-                    # (cmd_594).
+                    # (cmd_594). Unlike the nativeEnum branch, this one had
+                    # no nullable check at all: an untouched optional field
+                    # (e.g. sales_order_line.cancellation_reason) was always
+                    # seeded with the first enum member, fabricating a
+                    # choice nobody made (cmd_1010).
                     if 'default' in defn:
                         return f"'{defn['default']}'"
+                    if nullable:
+                        return "''"
                     return f"'{defn['enum'][0]}'"
                 if 'default' in defn:
                     # Plain (non-enum) string field with a Prisma
