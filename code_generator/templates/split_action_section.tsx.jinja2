@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect{% if split_has_context_field %}, useCallback{% endif %} } from 'react';
+import { useState{% if split_has_relation_field %}, useEffect{% endif %}{% if split_has_context_field %}, useCallback{% endif %} } from 'react';
 import { AppButton, AppText, AppBox, AppIcon, AppIconButton, AppFieldInput, AppDialog } from '@/components/ui';
 {% if split_has_relation_field %}
 import EntityAutocomplete, { type EntityOption } from '@/components/_standard/EntityAutocomplete';

@@ -3972,6 +3972,19 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     parent_rels   = ctx['parent_rels']
     children_raw  = ctx['children_raw']
     use_dayjs     = False
+    # x-display.form (if declared) is also the set of fields this view
+    # actually renders -- a field present in filtered_props but absent from
+    # it never reaches _ordered_fields below. Computed up front (not just at
+    # the ordering step) so the per-field loops can skip building
+    # display-only side effects (option arrays, import-trigger flags) for a
+    # field that will never be emitted -- see cmd_1007 (22 unused-var lint
+    # warnings traced to this asymmetry: these loops used to run
+    # unconditionally for every field in filtered_props regardless of
+    # whether x-display.form would later drop it from the rendered output).
+    _x_display_form = (model_def.get('x-display') or {}).get('form')
+    _x_display_form_set = set(_x_display_form) if _x_display_form else None
+    def _displayed(p: str) -> bool:
+        return _x_display_form_set is None or p in _x_display_form_set
     # Set when any read-only TextField value uses formatLabelValue — the
     # generated FormView must then import it.
     uses_format_label_value = False
@@ -4084,7 +4097,14 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         else:
             other_flds.append(p)
 
-    needs_datetime_wrapper = bool(date_time_flds)
+    # Scoped to *displayed* date fields only (cmd_1007) -- date_time_flds is
+    # populated before x-display.form filtering, so an entity whose only
+    # date field(s) are excluded from x-display.form would otherwise still
+    # unconditionally import DateTimeWrapper despite never rendering it (the
+    # `needs_datetime_wrapper = True` a few lines below, inside the flatten
+    # loop, is a separate and unrelated trigger -- flatten accordion fields
+    # aren't gated by x-display.form, so that one stays unconditional).
+    needs_datetime_wrapper = any(_displayed(p) for p in date_time_flds)
     needs_image_display    = bool(image_flds)
     needs_link_display     = bool(link_uri_flds)
     needs_single_attachment_display = bool(file_uri_flds) or bool(direct_attachment_rels)
@@ -4122,26 +4142,41 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                 f"        readOnly\n      />"
             )
         else:
-            built = _readonly_display_field(p, filtered_props, rel_by_prop, schema, seen_ns)
+            # Option arrays / import-trigger flags / the useTranslations ns
+            # dedup set are only meaningful for a field that will actually
+            # be emitted below (_ordered_fields) -- x-display.form can
+            # exclude p from that even though it's still classified here
+            # (cmd_1007). An undisplayed field gets its own throwaway
+            # seen_ns so it can never consume the dedup slot a later
+            # *displayed* field sharing the same enum namespace still needs.
+            built = _readonly_display_field(
+                p, filtered_props, rel_by_prop, schema,
+                seen_ns if _displayed(p) else set(),
+            )
             jsx_by_field[p] = built['jsx']
-            if built['uses_format_label_value']:
-                uses_format_label_value = True
-            if built['uses_decimal_format']:
-                uses_decimal_format = True
-            enum_ns_hooks.extend(built['ns_hooks'])
-            enum_opt_setups.extend(built['opt_setups'])
+            if _displayed(p):
+                if built['uses_format_label_value']:
+                    uses_format_label_value = True
+                if built['uses_decimal_format']:
+                    uses_decimal_format = True
+                enum_ns_hooks.extend(built['ns_hooks'])
+                enum_opt_setups.extend(built['opt_setups'])
 
     # DateTime / Image / Boolean / Enum fields — same shared renderer as
     # above, dispatching by actual type (see `_readonly_display_field`).
     for p in date_time_flds + image_flds + boolean_flds + enum_integer_flds + enum_native_flds:
-        built = _readonly_display_field(p, filtered_props, rel_by_prop, schema, seen_ns)
+        built = _readonly_display_field(
+            p, filtered_props, rel_by_prop, schema,
+            seen_ns if _displayed(p) else set(),
+        )
         jsx_by_field[p] = built['jsx']
-        if built['use_dayjs']:
-            use_dayjs = True
-        if built['uses_decimal_format']:
-            uses_decimal_format = True
-        enum_ns_hooks.extend(built['ns_hooks'])
-        enum_opt_setups.extend(built['opt_setups'])
+        if _displayed(p):
+            if built['use_dayjs']:
+                use_dayjs = True
+            if built['uses_decimal_format']:
+                uses_decimal_format = True
+            enum_ns_hooks.extend(built['ns_hooks'])
+            enum_opt_setups.extend(built['opt_setups'])
 
     # x-uri-kind: link fields — a plain external link, not an image (the
     # template already carries a `needs_link_display`-gated
@@ -4187,7 +4222,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     # order). Either way, the type-bucket concatenation that used to
     # override this (text -> enum_int -> enum_native -> bool -> dt -> img ->
     # custom) is gone — the writer's declared order is authoritative.
-    _x_display_form = (model_def.get('x-display') or {}).get('form')
+    # (_x_display_form itself is computed at the top of this function.)
     if _x_display_form:
         _ordered_fields = [f for f in _x_display_form if f in jsx_by_field]
     else:
@@ -4560,6 +4595,25 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # select it.
     write_locked_values: dict = ctx.get('write_locked_values') or {}
 
+    # x-display.form (if declared) is also the set of fields this form
+    # actually renders an editable control for -- a field can stay in
+    # filtered_props/the category lists below (its current value is still
+    # read for submission, e.g. a system-set field round-tripped unchanged)
+    # while never reaching _ordered_fields at the bottom of this function.
+    # Computed here so the per-field loops can skip building *display-only*
+    # side effects (the setter half of a useState destructure, an enum
+    # options array, a relation's InitialOptions/SearchAction/CurrentOption/
+    # PermissionDenied hooks, import-trigger flags) for such a field, while
+    # still declaring its getter (needed by parent_form_data_sets and by
+    # live_state_var_by_field) -- see cmd_1007 (22 unused-var lint warnings
+    # traced to exactly this asymmetry: these were previously built
+    # unconditionally for every category-list field regardless of whether
+    # x-display.form would later drop it from the rendered form).
+    _x_display_form = (model_def.get('x-display') or {}).get('form')
+    _x_display_form_set = set(_x_display_form) if _x_display_form else None
+    def _displayed(p: str) -> bool:
+        return _x_display_form_set is None or p in _x_display_form_set
+
     parent_rels_raw = [
         r for r in parent_rels_raw
         if r['prop_name'] not in selector_oto_prop_names and r['prop_name'] not in readonly_field_names
@@ -4690,7 +4744,15 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             init = f"src.{p} ? dayjs(new Date(src.{p}).toISOString().slice(0, 10) + 'T00:00:00') : null"
         else:
             init = f"src.{p} ? dayjs(src.{p}) : null"
-        dt_state_lines.append(f"  const [{sn}, set{_setter(sn)}] = useState<Dayjs | null>({init});")
+        # Setter only destructured when the field is actually displayed
+        # (cmd_1007) -- an x-display.form-excluded date field's value is
+        # still read (parent_form_data_sets/live_state_var_by_field), but
+        # nothing ever calls its setter since no AppFieldSelect/DateTime
+        # control for it is ever rendered.
+        if _displayed(p):
+            dt_state_lines.append(f"  const [{sn}, set{_setter(sn)}] = useState<Dayjs | null>({init});")
+        else:
+            dt_state_lines.append(f"  const [{sn}] = useState<Dayjs | null>({init});")
     dt_states = '\n'.join(dt_state_lines)
     img_states = '\n'.join(
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<string>(src.{p} || '');"
@@ -4723,27 +4785,47 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<boolean>(Boolean(src.{p}));"
         for p in boolean_props
     )
-    enum_states = '\n'.join(
-        f"  const [{safe_var_name(p)}, set{_setter(safe_var_name(p))}] = useState<number | null>(src.{p} ?? null);"
-        for p in enum_int_props
-    )
+    def _enum_int_state_line(p: str) -> str:
+        sn = safe_var_name(p)
+        init = f"useState<number | null>(src.{p} ?? null)"
+        if _displayed(p):
+            return f"  const [{sn}, set{_setter(sn)}] = {init};"
+        return f"  const [{sn}] = {init};"
+    enum_states = '\n'.join(_enum_int_state_line(p) for p in enum_int_props)
+    # setter only destructured when displayed (cmd_1007) -- see date_time
+    # equivalent above for the same reasoning (getter still needed for
+    # parent_form_data_sets/live_state_var_by_field either way).
     def _enum_str_state_line(p: str) -> str:
         sn = safe_var_name(p)
         if _is_nullable(filtered_props.get(p, {})):
-            return f"  const [{sn}, set{_setter(sn)}] = useState<string | null>(src.{p} ?? null);"
-        return f"  const [{sn}, set{_setter(sn)}] = useState<string>(src.{p} ?? '');"
+            init = f"useState<string | null>(src.{p} ?? null)"
+        else:
+            init = f"useState<string>(src.{p} ?? '')"
+        if _displayed(p):
+            return f"  const [{sn}, set{_setter(sn)}] = {init};"
+        return f"  const [{sn}] = {init};"
     enum_str_states = '\n'.join(_enum_str_state_line(p) for p in enum_str_props)
     # Many-to-one: FK prop is in src type → initialize from src.{prop_name}
     # Selector OTO: FK prop is excluded from src type, but relation object is present → use src.{relation_name}?.id
-    rel_states_lines = [
-        f"  const [{safe_var_name(r['prop_name'])}, set{_setter(safe_var_name(r['prop_name']))}] = useState<string | null>(src.{r['prop_name']} || null);"
-        for r in parent_rels_raw
-    ]
+    # Setter only destructured when displayed (cmd_1007) -- an
+    # x-display.form-excluded relation still needs its id round-tripped for
+    # submission (rel_ds below reads the getter), but nothing ever calls
+    # its setter since no AppFieldRelation for it is ever rendered.
+    rel_states_lines = []
+    for r in parent_rels_raw:
+        sn = safe_var_name(r['prop_name'])
+        init = f"src.{r['prop_name']} || null"
+        if _displayed(r['prop_name']):
+            rel_states_lines.append(f"  const [{sn}, set{_setter(sn)}] = useState<string | null>({init});")
+        else:
+            rel_states_lines.append(f"  const [{sn}] = useState<string | null>({init});")
     for r in selector_oto_rels:
         sn = safe_var_name(r['prop_name'])
-        rel_states_lines.append(
-            f"  const [{sn}, set{_setter(sn)}] = useState<string | null>(src.{r['relation_name']}?.id || null);"
-        )
+        init = f"src.{r['relation_name']}?.id || null"
+        if _displayed(r['prop_name']):
+            rel_states_lines.append(f"  const [{sn}, set{_setter(sn)}] = useState<string | null>({init});")
+        else:
+            rel_states_lines.append(f"  const [{sn}] = useState<string | null>({init});")
     rel_states = '\n'.join(rel_states_lines)
     def _custom_state_line(p: str) -> str:
         defn = filtered_props.get(p, {})
@@ -5054,7 +5136,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         req       = p in (model_def.get('required') or []) or not _is_nullable(prop)
         _locked_vals = set(write_locked_values.get(p) or [])
 
-        if ns and ns not in enum_ns_set:
+        if ns and _displayed(p) and ns not in enum_ns_set:
             enum_ns_set.add(ns)
             enum_ns_hooks.append(f"  const t{ns} = useTranslations('{ns}');")
 
@@ -5072,7 +5154,12 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 _int_enum_option(v, i, disabled=(v if isinstance(v, (int, float)) else i) in _locked_vals)
                 for i, v in enumerate(enum_vals)
             )
-        enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
+        # Options array is display-only (only ever referenced from the
+        # AppFieldSelect JSX below) -- skip emitting it when x-display.form
+        # excludes this field, matching the setter half of its state line
+        # above (cmd_1007).
+        if _displayed(p):
+            enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
 
         _enum_int_width_cols = _ui_width_cols(prop)
         if _enum_int_width_cols:
@@ -5104,7 +5191,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         _locked_vals = set(write_locked_values.get(p) or [])
 
         if native_ns:
-            if native_ns not in enum_ns_set:
+            if _displayed(p) and native_ns not in enum_ns_set:
                 enum_ns_set.add(native_ns)
                 enum_ns_hooks.append(f"  const t{native_ns} = useTranslations('{native_ns}');")
             opts = ', '.join(
@@ -5117,7 +5204,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"{{ value: '{v}', label: '{v}'{', disabled: true' if v in _locked_vals else ''} }}"
                 for v in enum_vals
             )
-        enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
+        # Options array is display-only -- see the enum_int_props loop
+        # above for the same guard and reasoning (cmd_1007).
+        if _displayed(p):
+            enum_opt_setups.append(f"  const {opts_var} = [{opts}];")
 
         _enum_str_width_cols = _ui_width_cols(prop)
         if _enum_str_width_cols:
@@ -5164,7 +5254,11 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
         label_built = build_label_expression('item', label_field, target, schema)
         current_built = build_label_expression(f'src.{rel_name}', label_field, target, schema)
-        if label_built['has_format']:
+        # label_built/current_built['expression'] are only ever referenced
+        # from the rel_opt_setups blocks below, which themselves are only
+        # emitted when displayed (cmd_1007) -- gate the import trigger the
+        # same way.
+        if label_built['has_format'] and _displayed(prop_name):
             uses_format_label_value = True
 
         # DP-3 (cmd_377/379): forward callerEntity + selected sibling-field
@@ -5204,26 +5298,33 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             # narrow as the typed-search results. Seeded from the static
             # server fetch so the field isn't empty for the one render
             # before the effect resolves.
-            rel_opt_setups.append(
-                f"  const [{initial_var}, set{_setter(sn)}InitialOptions] = useState(() => ({prop_initial} ?? []).map((item) => ({{\n"
-                f"    id: item.id,\n"
-                f"    label: {label_built['expression']},\n"
-                f"  }})));\n"
-                f"  const {denied_var} = Boolean({prop_initial}PermissionDenied);\n"
-                f"  const {search_var} = useCallback(async (query: string, includeIds: string[]) => {{\n"
-                f"    const rows = (await {prop_search}?.({search_call_args})) ?? [];\n"
-                f"    return rows.map((item) => ({{ id: item.id, label: {label_built['expression']} }}));\n"
-                f"  }}, [{prop_search}{search_deps}]);\n"
-                f"  useEffect(() => {{\n"
-                f"    let cancelled = false;\n"
-                f"    {search_var}('', []).then((rows) => {{ if (!cancelled) set{_setter(sn)}InitialOptions(rows); }});\n"
-                f"    return () => {{ cancelled = true; }};\n"
-                f"  }}, [{search_var}]);\n"
-                f"  const {current_var} = useMemo(() => (\n"
-                f"    src.{rel_name} ? {{ id: src.{rel_name}.id, label: {current_built['expression']} }} : null\n"
-                f"  ), [src.{rel_name}]);"
-            )
-        else:
+            # rel_opt_setups' hooks (InitialOptions/PermissionDenied/
+            # SearchAction/CurrentOption) are only ever referenced from
+            # the AppFieldRelation JSX -- skip building them entirely when
+            # x-display.form excludes this relation (cmd_1007). The base
+            # getter/setter state line above already handles displayed-vs-
+            # not on its own.
+            if _displayed(prop_name):
+                rel_opt_setups.append(
+                    f"  const [{initial_var}, set{_setter(sn)}InitialOptions] = useState(() => ({prop_initial} ?? []).map((item) => ({{\n"
+                    f"    id: item.id,\n"
+                    f"    label: {label_built['expression']},\n"
+                    f"  }})));\n"
+                    f"  const {denied_var} = Boolean({prop_initial}PermissionDenied);\n"
+                    f"  const {search_var} = useCallback(async (query: string, includeIds: string[]) => {{\n"
+                    f"    const rows = (await {prop_search}?.({search_call_args})) ?? [];\n"
+                    f"    return rows.map((item) => ({{ id: item.id, label: {label_built['expression']} }}));\n"
+                    f"  }}, [{prop_search}{search_deps}]);\n"
+                    f"  useEffect(() => {{\n"
+                    f"    let cancelled = false;\n"
+                    f"    {search_var}('', []).then((rows) => {{ if (!cancelled) set{_setter(sn)}InitialOptions(rows); }});\n"
+                    f"    return () => {{ cancelled = true; }};\n"
+                    f"  }}, [{search_var}]);\n"
+                    f"  const {current_var} = useMemo(() => (\n"
+                    f"    src.{rel_name} ? {{ id: src.{rel_name}.id, label: {current_built['expression']} }} : null\n"
+                    f"  ), [src.{rel_name}]);"
+                )
+        elif _displayed(prop_name):
             rel_opt_setups.append(
                 f"  const {initial_var} = useMemo(() => ({prop_initial} ?? []).map((item) => ({{\n"
                 f"    id: item.id,\n"
@@ -5310,7 +5411,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # override this (text -> mention -> entity_select -> rel -> num ->
     # enum_int -> enum_str -> bool -> dt -> img -> custom -> readonly) is
     # gone — the writer's declared order is authoritative.
-    _x_display_form = (model_def.get('x-display') or {}).get('form')
+    # (_x_display_form itself is computed at the top of this function.)
     if _x_display_form:
         _ordered_fields = [f for f in _x_display_form if f in jsx_by_field]
     else:
@@ -6116,8 +6217,28 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     _readonly_rel_targets = {rel['target'] for _pn, rel in rel_by_prop.items() if _pn in readonly_field_names}
     _editable_rel_targets = {r['target'] for r in parent_rels_raw} | {r['target'] for r in selector_oto_rels}
     _readonly_only_targets = _readonly_rel_targets - _editable_rel_targets
-    selection_targets = [t for t in selection_targets if t not in _readonly_only_targets]
-    _all_targets = list(selection_targets) + [r['target'] for r in selector_oto_rels]
+    # cmd_1007: same reasoning as _readonly_only_targets just above, applied
+    # to x-display.form exclusion instead of readonly status -- a target
+    # reachable only through an editable-but-undisplayed parent_rels_raw/
+    # selector_oto_rels entry also has no live path in (rel_opt_setups for
+    # that relation is skipped above), so its initial{Xxx}s/
+    # search{Xxx}Options/PermissionDenied props would otherwise go unused
+    # the same way a readonly-only target's did (goods_receipt_line's
+    # inventory_id -> target inventory).
+    _displayed_editable_rel_targets = (
+        {r['target'] for r in parent_rels_raw if _displayed(r['prop_name'])}
+        | {r['target'] for r in selector_oto_rels if _displayed(r['prop_name'])}
+    )
+    _undisplayed_only_targets = (
+        _editable_rel_targets - _displayed_editable_rel_targets - _readonly_only_targets
+    )
+    selection_targets = [
+        t for t in selection_targets
+        if t not in _readonly_only_targets and t not in _undisplayed_only_targets
+    ]
+    _all_targets = list(selection_targets) + [
+        r['target'] for r in selector_oto_rels if _displayed(r['prop_name'])
+    ]
     # Dedupe while preserving order
     _seen: set[str] = set()
     _ordered_targets: list[str] = []
@@ -6642,7 +6763,20 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         # the 'DateTimeWrapper' substring fallback, so it silently bypassed
         # this gate and produced an unimported `dayjs` reference (cmd_704
         # [2-c]).
-        'has_datetime_props':       bool(date_time_props) or flatten_needs_datetime or 'DateTimeWrapper' in _rendered_body_text or 'dayjs(' in child_grid_setup,
+        'has_datetime_props':       bool(date_time_props) or flatten_needs_datetime or 'dayjs(' in child_grid_setup,
+        # Split from has_datetime_props (cmd_1007): `dayjs()` itself is
+        # called unconditionally in every date_time_props getter's
+        # initializer (even when the field's own setter/JSX widget is
+        # skipped below for being excluded from x-display.form -- its
+        # current value must still round-trip for submission), so
+        # has_datetime_props above stays keyed off the *unfiltered*
+        # date_time_props list. DateTimeWrapper's JSX, in contrast, is
+        # only emitted for a field that actually reaches _ordered_fields --
+        # an x-display.form-excluded date field needs the former without
+        # the latter (e.g. asn_status: a readonly date field elsewhere
+        # already needs DateTimeWrapper via the substring check below, but
+        # has zero editable date_time_props, so it must NOT import dayjs).
+        'needs_datetime_wrapper':   any(_displayed(p) for p in date_time_props) or flatten_needs_datetime or 'DateTimeWrapper' in _rendered_body_text or 'dayjs(' in child_grid_setup,
         'has_image_props':          bool(image_props),
         'has_single_attachment_upload': bool(file_uri_props) or bool(direct_attachment_rels),
         'has_direct_attachment_fk': bool(direct_attachment_rels),

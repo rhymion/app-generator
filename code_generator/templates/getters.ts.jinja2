@@ -480,7 +480,8 @@ export async function search{{ parent_pascal }}Options(
 {% endif %}
   const accessAnd = await build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
 
-  const trimmed = query.trim();
+  const matchOr: Record<string, unknown>[] = [];
+{% if searchable_text_fields or searchable_relation_fields %}
   // Token-split AND search: each whitespace-separated token must match at
   // least one searchable field (OR), and every token must match (AND) —
   // so "Test Location" (product-name-word + location-word) narrows instead
@@ -488,8 +489,8 @@ export async function search{{ parent_pascal }}Options(
   // filter(Boolean) drops empty tokens from leading/trailing/double spaces
   // (e.g. a null optional labelField segment) so `contains: ''` never
   // silently wildcard-matches every row.
+  const trimmed = query.trim();
   const tokens = trimmed.split(/\s+/).filter(Boolean);
-  const matchOr: Record<string, unknown>[] = [];
   if (tokens.length > 0) {
     const searchAnd = tokens.map((token) => {
       const orClauses: Record<string, unknown>[] = [];
@@ -503,6 +504,7 @@ export async function search{{ parent_pascal }}Options(
     });
     matchOr.push({ AND: searchAnd });
   }
+{% endif %}
   if (includeIds.length > 0) {
     // Always include currently-selected rows regardless of token search —
     // an OR sibling of the token-AND block, not ANDed with it, so a

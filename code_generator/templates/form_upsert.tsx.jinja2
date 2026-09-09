@@ -48,6 +48,8 @@ import {{ comp.name }} from '{{ comp.path if comp.path else "./" + comp.name }}'
 {% endfor %}
 {% if has_datetime_props %}
 import dayjs, { Dayjs } from 'dayjs';
+{% endif %}
+{% if needs_datetime_wrapper %}
 import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
 {% endif %}
 {% if has_image_props %}
