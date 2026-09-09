@@ -31,7 +31,7 @@ async function createTest{{ pool_fk_pascal }}(testUser: any, suffix: string) {
 }
 
 {% for dep in pool_extra_deps %}
-async function createTestPool{{ dep.pascal }}(testUser: any, extraDeps: Record<string, any>) {
+async function createTestPool{{ dep.pascal }}(testUser: any, {% if dep.fk_deps %}extraDeps{% else %}_extraDeps{% endif %}: Record<string, any>) {
 {% for b in dep.bridge_otos %}
   const {{ b.var_name }} = await prisma.{{ b.target }}.create({ data: {{ b.create_data }} });
 {% endfor %}
