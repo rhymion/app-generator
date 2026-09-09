@@ -3635,10 +3635,19 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         f"import prisma from '@/lib/prisma';\n"
         + (f"import {{ Prisma }} from '@/app/generated/prisma/client';\n" if has_item_reservation or can_create or can_update else '')
         + (
+            # normalizeChildRefs is only ever referenced inside
+            # snapshot_child_mappings (build_context.py), which is itself
+            # embedded in normalizeSnapshot() below -- entirely gated on
+            # can_update. Importing it merely because the entity has
+            # embedded children (has_non_comment_ch), independent of
+            # can_update, left it unused for entities with children that
+            # mutate only via a non-update path (e.g. x-splittable's split
+            # action) -- same failure shape as the normalizeSnapshot/
+            # getCurrentSnapshot fix below (lint finding).
             f"import {{ {'normalizeValue, ' if can_update else ''}"
-            f"{'normalizeChildRefs, ' if has_non_comment_ch else ''}"
+            f"{'normalizeChildRefs, ' if (can_update and has_non_comment_ch) else ''}"
             f"{'assertNotStale, type NormalizedSnapshot' if can_update else ''} }} from '@/lib/normalize';"
-            if (can_update or has_non_comment_ch) else ''
+            if can_update else ''
         )
         + (
             "\nimport { "

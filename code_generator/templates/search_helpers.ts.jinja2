@@ -1,8 +1,8 @@
 // AUTO-GENERATED - DO NOT EDIT
 import { Prisma } from '@/app/generated/prisma/client';
 import prisma from '@/lib/prisma';
-import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
-import { getModelPermissions } from '@/lib/authz';
+{% if has_org_filtered_search_entity %}import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+{% endif %}import { getModelPermissions } from '@/lib/authz';
 
 export interface SearchResult {
   entity_type: string;
@@ -41,8 +41,9 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
   const { q, entityTypes, userId, page, pageSize } = opts;
   const shouldCount = opts.count !== false;
 
-  const associatedOrgs = await getAssociatedOrganizations(userId);
+{% if has_org_filtered_search_entity %}  const associatedOrgs = await getAssociatedOrganizations(userId);
   const associatedOrgIds = associatedOrgs.map((o) => o.id);
+{% endif %}
 
 {% for entity in search_entities %}
   const {{ entity.perms_ts_var }} = await getModelPermissions('{{ entity.entity_type }}', userId);

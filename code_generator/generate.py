@@ -2540,7 +2540,18 @@ def generate(schema_path: str, output_dir: str) -> None:
         })
 
     if search_entities:
-        search_ctx = {'search_entities': search_entities}
+        # getAssociatedOrganizations/associatedOrgIds are only referenced
+        # inside {% if entity.should_filter_by_org %} branches of
+        # search_helpers.ts.jinja2 (top-level entities and no_page_children
+        # alike) -- computing them unconditionally left them unused whenever
+        # no search entity is org-scoped (lint finding).
+        has_org_filtered_search_entity = any(
+            e['should_filter_by_org'] for e in search_entities
+        )
+        search_ctx = {
+            'search_entities': search_entities,
+            'has_org_filtered_search_entity': has_org_filtered_search_entity,
+        }
         _write(
             out / 'lib' / 'search' / 'helpers.ts',
             _render(env, 'search_helpers.ts.jinja2', search_ctx),
