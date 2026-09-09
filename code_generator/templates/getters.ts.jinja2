@@ -185,7 +185,7 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
         { id: string; type: {{ attachment_type_ts }}; order: number; name: string; path: string; attachable_id: string; encrypted_original_name?: string | null; name_iv?: string | null }
       >
     ).map((raw) => {
-      const { encrypted_original_name, name_iv, ...rest } = raw;
+      const { encrypted_original_name, name_iv: _name_iv, ...rest } = raw;
       let displayName = rest.name;
       if (encrypted_original_name) {
         try {
