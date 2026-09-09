@@ -123,3 +123,26 @@ export function errorMessageKey(code: ErrorCode): string {
     default:                  return 'unknown';
   }
 }
+
+// cmd_1011: the same ActionFailure -> user-facing-message mapping
+// form_upsert.tsx.jinja2 defines inline (once per generated entity, via
+// `getErrorMessage` in that template) -- extracted here so hand-written,
+// non-generated callers (e.g. components/_standard/ApprovalSection.tsx's
+// submit-for-approval flow) can reuse the exact same convention instead of
+// inventing their own transport/wording. `terr` is the `next-intl`
+// `useTranslations('Errors')` function from the caller's own component.
+export function getErrorMessage(
+  err: ActionFailure,
+  terr: (key: string, values?: Record<string, string>) => string,
+): string {
+  switch (err.errorCode) {
+    case 'VALIDATION':
+      return err.field
+        ? (err.reason === 'invalid' ? terr('fieldInvalid', { field: err.field }) : terr('fieldRequired', { field: err.field }))
+        : terr('unknown');
+    case 'CONFLICT':
+      return err.field ? terr('fieldAlreadyLinked', { field: err.field }) : terr('staleMutation');
+    default:
+      return terr(errorMessageKey(err.errorCode));
+  }
+}
