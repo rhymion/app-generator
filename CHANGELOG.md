@@ -213,6 +213,32 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   already and is documented in the same section.
 
 ### Fixed
+- **`sharp`/`baseline-browser-mapping` CVEs resolved** via non-breaking
+  `npm audit fix` (GHSA-rgj7-g3m4-5g8c, high, libheif via `next`'s
+  transitive dep on `sharp`; GHSA-w5vr-8v7q-w6rv, moderate, via
+  `eslint-config-next`'s dependency on `baseline-browser-mapping`). Both
+  were newly-published advisories, not a regression from any change in
+  this repo. `npm ci` still exits 0 after the lockfile update.
+- **~13 more unused-variable lint-gate warning sources root-caused**,
+  continuing the pattern documented in
+  `docs/knowledge/cmd607-generator-lint-debt-fix.md` (an import or
+  parameter declared unconditionally, while the template branch that
+  actually reads it is narrower) — across `actions.ts.jinja2`, `service.ts`
+  utility imports, `search_helpers.ts.jinja2`, `chart_getters.ts.jinja2`,
+  `column_def.tsx.jinja2`, `form_view.tsx.jinja2`, `form_upsert.tsx.jinja2`,
+  `getters.ts.jinja2`, three `service_after_*_stub.ts.jinja2` write-once
+  stubs, and three generated-cypress-test templates plus the pool
+  reservation test helper template. None of these branches are exercised
+  by this repo's own `json_schema.yaml` (no x-approval/x-mention/
+  commentable/many-to-one-in-datagrid entity, per the approval-lockdown
+  fixture's own header comment), so this repo's own lint gate never saw
+  them; found and verified by generating against a real consumer schema in
+  an isolated worktree (48 ESLint warnings dropped to 2, both in
+  hand-written files outside generator scope; a manifest-hash diff
+  confirmed only the intended entity-scoped files changed output, none
+  added or removed). See
+  `docs/knowledge/cmd607-generator-lint-debt-fix.md` for the full
+  per-template breakdown.
 - **`.env.example` now documents `IMPORT_MAX_ROWS`/`IMPORT_MAX_BYTES`**, the
   two env vars `api_import_route.ts.jinja2` reads to override the CSV
   import row/byte ceilings (defaults `5000` / `10485760` — 10MB). Neither

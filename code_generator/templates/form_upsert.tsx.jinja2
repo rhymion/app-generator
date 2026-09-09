@@ -31,8 +31,10 @@ import { {% if uses_app_field_text %}AppFieldText, {% endif %}{% if uses_app_fie
 {% if has_comment_children %}
 import CommentListWrapper from '@/components/_standard/CommentListWrapper';
 {% endif %}
-{% if has_mention_fields or comment_has_mention %}
+{% if has_mention_fields %}
 import MentionInput from '@/components/_standard/MentionInput';
+{% endif %}
+{% if has_mention_fields or comment_has_mention %}
 import { searchMentionUserOptions } from '@/lib/mention/search';
 {% endif %}
 {% if comment_has_mention %}

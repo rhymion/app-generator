@@ -7,15 +7,18 @@ type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction'
 /**
  * Called after {{ snake_name }} is withdrawn.
  * Customize this function to implement post-withdrawal side effects.
+ * The `_`-prefixed parameter names below follow this repo's convention for
+ * intentionally-unused bindings (see eslint.config.mjs); drop the leading
+ * `_` from whichever ones your implementation actually reads.
  *
- * @param tx - Prisma transaction client
- * @param entityId - ID of the withdrawn {{ snake_name }}
- * @param approvableId - ID of the approvable record
+ * @param _tx - Prisma transaction client
+ * @param _entityId - ID of the withdrawn {{ snake_name }}
+ * @param _approvableId - ID of the approvable record
  */
 export async function afterWithdraw(
-  tx: Tx,
-  entityId: string,
-  approvableId: string,
+  _tx: Tx,
+  _entityId: string,
+  _approvableId: string,
 ): Promise<void> {
   // TODO: implement post-withdrawal effects here
 }
