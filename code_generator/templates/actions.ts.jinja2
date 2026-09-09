@@ -30,7 +30,7 @@ import { createReaction, deleteReaction } from '@/lib/reaction/service';
 {% if service_imports %}
 import { {{ service_imports }} } from './service';
 {% endif %}
-{% if should_filter_by_org and can_delete %}
+{% if should_filter_by_org and (can_update or can_delete) %}
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 {% endif %}
 {% if can_create or can_update %}
