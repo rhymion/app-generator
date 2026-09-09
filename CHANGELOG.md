@@ -22,17 +22,6 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   the same time. See `docs/knowledge/appendix/inventory-reservation-split.md`
   §7.3.
 
-- **New field-level schema key `x-fk-constrained`** for an optional
-  many-to-one FK field whose valid values are constrained relative to
-  another already-set field on the same row (an invariant only a
-  hand-written custom validator can enforce). Excludes the field from the
-  generated "adds optional data and child items" test's independent
-  per-field autofill, which has no way to satisfy a cross-field constraint
-  it doesn't know exists — the field's create-time coverage is unaffected,
-  since the "creates with full data" test fills it via the entity's own
-  full-data populate helper instead. See
-  `docs/knowledge/schema-yaml-configuration.md` §4.8.
-
 - **Seven more in-tx write hooks, completing the set `afterCreate` started:
   `afterUpdate`, `afterDelete`, `validateOnDelete`, `afterSubmit`,
   `beforeApprove`, `beforeReject`, `beforeWithdraw`.** Same contract as
@@ -211,6 +200,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   run against `next start` silently keeps serving the pre-edit bundle
   unless `next build` is run first — this bit the original fixture once
   already and is documented in the same section.
+
+### Removed
+- **Field-level schema key `x-fk-constrained`** (added in #484). The key
+  excluded an optional many-to-one FK field from the generated "3.1 adds
+  optional data and child items" test's per-field autofill when the
+  field's valid values depend on another field on the same row. Reverted:
+  no consumer schema declares it as of removal, and the one prior
+  consumer usage (an inventory-tracking app's `shipment_line.inventory_id`)
+  had already been made a required column with a different fix, which on
+  its own retired the need for the key (see that consumer's own schema
+  comment on the field). `code_generator/tests/test_fk_constrained.py`
+  (4 dedicated tests) is removed with it.
 
 ### Fixed
 - **`sharp`/`baseline-browser-mapping` CVEs resolved** via non-breaking
