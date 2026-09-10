@@ -28,8 +28,51 @@ const getUserRoleIds = vi.fn();
 vi.mock('@/lib/authz', () => ({ getSessionUserIdOrThrow, getUserRoleIds }));
 
 const { default: prisma } = await import('@/lib/prisma');
-const { approveApprovalRequest, rejectApprovalRequest, withdrawApprovalRequest } =
-  await import('@/lib/approval_request/actions');
+const { createApprovalActions } = await import('@/lib/approval_request/actions_core');
+const { resolveApprovableTarget } = await import('@/lib/approval_request/resolve_target');
+const { dispatchOnApproved } = await import('@/lib/approval_request/on_approved_dispatch');
+const { isTerminalReject, dispatchOnRejected } = await import('@/lib/approval_request/on_rejected_dispatch');
+const { dispatchOnWithdrawn } = await import('@/lib/approval_request/on_withdrawn_dispatch');
+const { dispatchBeforeApprove } = await import('@/lib/approval_request/on_before_approve_dispatch');
+const { dispatchBeforeReject } = await import('@/lib/approval_request/on_before_reject_dispatch');
+const { dispatchBeforeWithdraw } = await import('@/lib/approval_request/on_before_withdraw_dispatch');
+
+// cmd_1019: this repo's dogfood schema declares zero x-approval entities
+// with on_withdrawn, so the REAL generated ENTITIES_WITH_ON_WITHDRAWN
+// (on_withdrawn_dispatch.ts) is always empty and the REAL generated
+// resolveApprovableModel (resolve_target.ts) always returns null in this
+// checkout. Importing the production-wired singleton from actions.ts (as
+// this file previously did) therefore made every withdrawApprovalRequest
+// call fail here unconditionally -- worked around, before this fix, by
+// passing a real CONSUMER entity name ('goods_receipt_line', an
+// inventory-domain name this repo's own schema has never declared) into a
+// file this repo ships to every consumer via submodule, so it only ever
+// passed once prj:sync overlaid an inventory-domain consumer schema on
+// top (cmd_488-shaped leak; see docs/knowledge/proj-b-backlog-2026-09.md
+// section 9, cmd_969a). Per cmd_489 (unit tests must not depend on
+// generated artifacts -- use dependency injection instead of reaching for
+// a real consumer name), this test now builds its own approvalActions via
+// createApprovalActions() rather than importing the wired singleton,
+// injecting a resolveApprovableModel/hasOnWithdrawn pair scoped to a
+// fixture entity name that exists nowhere but this file -- every other
+// collaborator below is the real generated one (each a no-op for any
+// dogfood entity_name regardless of which name is passed, so wiring the
+// real ones costs nothing and keeps this closer to actions.ts's
+// production wiring than a fully mocked unit test would).
+const FIXTURE_WITHDRAWABLE_ENTITY = 'flow_test_withdrawable_entity';
+const { approveApprovalRequest, rejectApprovalRequest, withdrawApprovalRequest } = createApprovalActions({
+  resolveApprovableTarget,
+  resolveApprovableModel: (entityName: string) =>
+    entityName === FIXTURE_WITHDRAWABLE_ENTITY ? FIXTURE_WITHDRAWABLE_ENTITY : null,
+  dispatchOnApproved,
+  dispatchOnRejected,
+  isTerminalReject,
+  dispatchOnWithdrawn,
+  hasOnWithdrawn: (modelName: string) => modelName === FIXTURE_WITHDRAWABLE_ENTITY,
+  dispatchBeforeApprove,
+  dispatchBeforeReject,
+  dispatchBeforeWithdraw,
+});
 
 type Round = {
   approvableId: string;
@@ -50,17 +93,20 @@ type Round = {
  * submission (code_generator/generators.py).
  */
 // entityName defaults to 'user' -- an entity_name intentionally NOT
-// declared in ENTITIES_WITH_ON_WITHDRAWN/TERMINAL_REJECT_ENTITIES (see
-// on_withdrawn_dispatch.ts/on_rejected_dispatch.ts), which is exactly what
-// the reject-focused tests below need (they pin the "unrecognized
-// entity_name" non-terminal-reject path -- see the 4th test's own
-// comment). Callers that exercise withdrawApprovalRequest on a round with
-// a still-pending row (cmd_969a, Issue not filed -- docs/knowledge/
-// proj-b-backlog-2026-09.md §9) must instead pass a real
-// on_withdrawn-declaring entity name (e.g. 'goods_receipt_line') --
-// swapping the default here would silently flip isTerminalReject too
-// (every on_withdrawn entity in this schema is also terminal-reject),
-// breaking the reject tests' asserted 'rejected' (non-terminal) status.
+// recognized by the fake resolveApprovableModel/hasOnWithdrawn pair above
+// (see that pair's own comment), which is exactly what the reject-focused
+// tests below need (they pin the "unrecognized entity_name" non-terminal-
+// reject path -- see the 4th test's own comment). Callers that exercise
+// withdrawApprovalRequest on a round with a still-pending row must instead
+// pass FIXTURE_WITHDRAWABLE_ENTITY -- the only name the fake
+// resolveApprovableModel/hasOnWithdrawn pair recognizes as on_withdrawn-
+// declaring. isTerminalReject, unlike hasOnWithdrawn, is still the real
+// generated one and returns false for every entity_name in this schema
+// (TERMINAL_REJECT_ENTITIES is empty here) regardless of which name is
+// passed, so FIXTURE_WITHDRAWABLE_ENTITY cannot accidentally flip a
+// reject test's expected non-terminal status the way a real consumer
+// on_withdrawn entity name could (a real consumer schema may declare the
+// same entity both on_withdrawn and terminal-reject).
 async function build3StageRound(creatorId: string, entityName = 'user'): Promise<Round> {
   const approverRole1 = await prisma.role.create({
     data: { name: `MultistageApprover1_${createId()}`, creator_id: creatorId, updater_id: creatorId },
@@ -122,7 +168,7 @@ describe('multistage approval rounds (cmd_844)', () => {
   // PD-1 final ruling: round_id scoping alone -- approved rows are never
   // rewritten, only the round's remaining pending rows are closed.
   it('withdraw closes only the round\'s pending rows, leaving an already-approved stage untouched', async () => {
-    const round = await build3StageRound(creator.id, 'goods_receipt_line');
+    const round = await build3StageRound(creator.id, FIXTURE_WITHDRAWABLE_ENTITY);
     getSessionUserIdOrThrow.mockResolvedValue(creator.id);
     getUserRoleIds.mockResolvedValue([round.approverRole1.id]);
     await approveApprovalRequest(round.stage1.id);
@@ -239,7 +285,7 @@ describe('multistage approval rounds (cmd_844)', () => {
   // check, must never let an OLD (closed) round's approved row satisfy a
   // NEW round's own ordering/completeness requirement.
   it('a new round after a withdrawn round starts genuinely fresh -- old approved stage does not unblock the new round\'s later stage', async () => {
-    const round1 = await build3StageRound(creator.id, 'goods_receipt_line');
+    const round1 = await build3StageRound(creator.id, FIXTURE_WITHDRAWABLE_ENTITY);
     getSessionUserIdOrThrow.mockResolvedValue(creator.id);
     getUserRoleIds.mockResolvedValueOnce([round1.approverRole1.id]);
     await approveApprovalRequest(round1.stage1.id);
