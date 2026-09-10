@@ -6,6 +6,29 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`validate_submit_on_default_matches_prisma()`: a new pre-generation check
+  catching a value-level disagreement between an `x-approval.submit_on`
+  field's json schema `default:` and its Prisma `@default(...)`.** The
+  existing default cross-schema check only checks *presence* — a json
+  `default:` with no matching Prisma `@default()` at all — so it silently
+  passed a case where both sides declare a default but disagree in value
+  (e.g. json `default: draft` next to Prisma `@default(pending)`). Within
+  `x-approval.submit_on`, that particular disagreement is never
+  intentional: the generated edit-lockdown mechanism locks every row
+  whose value equals submit_on's own value, so a Prisma column default
+  that silently drifts to that same value means every freshly created
+  row is born already locked — a real-world drift found in a downstream
+  consumer schema and left undetected for several days before this
+  check existed. Scoped narrowly to submit_on fields only (a value
+  mismatch elsewhere is not inherently wrong under the generator's
+  existing default-reflection design, so a blanket check would
+  false-positive). Wired into the pre-generation validation pipeline and
+  the fast schema-only validation entrypoint alongside the other Prisma
+  cross-checks. Verified with both a synthetic unit-test injection and a
+  live injection into an existing generator fixture's Prisma schema,
+  reproducing the failure end-to-end through the real generation
+  pipeline before being reverted.
+
 - **Opt-in `binField` on `x-ledger-entities.<domain>`**, a fifth pool-entity
   column name alongside the existing required `itemField`/`locationField`/
   `lotField`/`expirationField` (all four unchanged, still required — this
