@@ -67,6 +67,7 @@ from generators_i18n import (
 from validate import (
     validate_schema, validate_prisma_indexes,
     validate_self_only_creator_id_columns, validate_defaults_cross_schema,
+    validate_submit_on_default_matches_prisma,
     validate_direct_attachment_prerequisite,
     validate_direct_attachment_reverse_fields,
     validate_write_once_stub_asymmetry,
@@ -888,6 +889,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         validate_prisma_indexes(Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_self_only_creator_id_columns(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_defaults_cross_schema(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
+        validate_submit_on_default_matches_prisma(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_direct_attachment_prerequisite(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_direct_attachment_reverse_fields(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
     except SchemaValidationError as exc:

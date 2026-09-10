@@ -3,7 +3,7 @@
 validate_schema_cli.py — Fast, generation-free schema validation entrypoint.
 
 Runs exactly the same checks generate.py runs immediately before writing any
-files (validate_schema + the three Prisma cross-checks), directly importing
+files (validate_schema + four Prisma cross-checks), directly importing
 and calling those same functions — no duplicated validation logic. Neither
 docker, `next build`, nor any code generation runs: the intermediate schema
 this reads is the same `.generated/json_schema.yaml` artifact `check:generated`
@@ -25,6 +25,7 @@ import yaml
 from validate import (
     validate_schema, validate_prisma_indexes,
     validate_self_only_creator_id_columns, validate_defaults_cross_schema,
+    validate_submit_on_default_matches_prisma,
     SchemaValidationError,
 )
 
@@ -53,11 +54,13 @@ def main(argv: list[str]) -> int:
         validate_prisma_indexes(prisma_schema_path)
         validate_self_only_creator_id_columns(schema, prisma_schema_path)
         validate_defaults_cross_schema(schema, prisma_schema_path)
+        validate_submit_on_default_matches_prisma(schema, prisma_schema_path)
     except SchemaValidationError as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
-    print('validate:schema: OK (schema, index, self-only, and default-sync checks passed)')
+    print('validate:schema: OK (schema, index, self-only, default-sync, and '
+          'submit_on-default checks passed)')
     return 0
 
 

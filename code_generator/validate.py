@@ -495,6 +495,93 @@ def validate_defaults_cross_schema(schema: dict, prisma_schema_path: str | Path)
         )
 
 
+def validate_submit_on_default_matches_prisma(schema: dict, prisma_schema_path: str | Path) -> None:
+    """Fail if an `x-approval.submit_on` entity's own json_schema.yaml
+    `default:` for the submit_on field disagrees in *value* with the actual
+    Prisma `@default(...)` for that column.
+
+    Deliberately narrower than validate_defaults_cross_schema() above: that
+    check only catches a json `default:` with NO matching Prisma `@default()`
+    at all (presence), never a *value*-level disagreement when both sides
+    declare a default (e.g. json `default: draft` vs Prisma
+    `@default(pending)` -- both "have" a default, so the presence check
+    passes). Comparing default *values* on every field generally would be
+    too broad: Category A/C (schema_deriver.py) makes an intentional
+    both-sides-differ-in-kind case unremarkable outside x-approval (e.g. a
+    field where Prisma carries a storage-layer default that the json schema
+    deliberately does not mirror into the UI).
+
+    Within `x-approval.submit_on`, though, a value mismatch is never
+    intentional: `approval_lockdown_context()` (generators.py) locks every
+    row whose value equals submit_on's own value, and json_schema.yaml's
+    `default:` for that same field is the pre-submission value new rows are
+    declared to start at. If Prisma's real column default silently drifts
+    to equal submit_on's value instead, every freshly created row is born
+    already locked -- exactly the drift found in goods_receipt_line /
+    inventory_reservation (`status`, commit `900ce04`, undetected for 5
+    days -- cmd_1016/cmd_1017).
+
+    Only entities that declare `x-approval.submit_on` are in scope, and
+    only for the one field submit_on names. A field with no json `default:`
+    declared at all is skipped (nothing to cross-check -- Category A
+    auto-reflection is fine here too), as is a Prisma column with no
+    `@default()` at all (that half of the gap is already covered by
+    validate_defaults_cross_schema() above).
+    """
+    path = Path(prisma_schema_path)
+    if not path.exists():
+        raise SchemaValidationError(
+            f"Prisma schema not found at {path} — required for submit_on default validation."
+        )
+    prisma_models = parse_prisma_schema(path)
+    defs = schema.get('definitions') or {}
+
+    errors: list[str] = []
+    for def_key, defn in defs.items():
+        if not isinstance(defn, dict) or not _SNAKE_CASE.match(def_key):
+            continue
+        # x-approval lives on the raw ('__'-prefixed) entity (generators.py
+        # `_raw_def()`); a paired view's own `defn` simply won't have it, so
+        # no dedup logic is needed here -- each submit_on is only ever
+        # findable once, straight off whichever definition declares it.
+        submit_on_raw = (defn.get('x-approval') or {}).get('submit_on') or {}
+        if not submit_on_raw:
+            continue
+        if len(submit_on_raw) != 1:
+            # Malformed shape (generators.py's resolve_approval_submit_on()
+            # raises ValueError on this during generation) -- not this
+            # check's job to report, skip and let that raise downstream.
+            continue
+        field_name = next(iter(submit_on_raw))
+        field_def = _own_properties(defn).get(field_name)
+        if not isinstance(field_def, dict) or 'default' not in field_def:
+            continue
+        model_name = _resolve_backing_model_name(def_key, defs)
+        model = prisma_models.get(model_name)
+        if model is None:
+            continue
+        pf = model.fields.get(field_name)
+        if pf is None or not pf.has_default or pf.default_is_dynamic:
+            continue
+        json_default = field_def['default']
+        if json_default != pf.default_value:
+            errors.append(
+                f"Definition '{def_key}', x-approval.submit_on field '{field_name}': "
+                f"json schema declares default={json_default!r} but Prisma model "
+                f"'{model_name}' has @default({pf.default_value!r}) — newly created "
+                f"rows would start already at (or drift toward) a locked value."
+            )
+
+    if errors:
+        bullet_list = '\n'.join(f"  • {e}" for e in errors)
+        raise SchemaValidationError(
+            f"x-approval.submit_on default value mismatch between json_schema.yaml and "
+            f"Prisma schema.prisma — {len(errors)} field(s):\n\n{bullet_list}\n\n"
+            f"Fix by aligning schema.prisma's @default(...) to match json_schema.yaml's "
+            f"declared default: for the submit_on field (json_schema.yaml is canonical).\n"
+        )
+
+
 # ---------------------------------------------------------------------------
 # x-import-key visibility contract (cmd_394 §8, DP-1a)
 # ---------------------------------------------------------------------------
