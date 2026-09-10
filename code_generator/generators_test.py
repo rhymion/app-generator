@@ -138,6 +138,7 @@ from helpers.schema_helpers import (
     get_entity_required,
     get_self_only_flags,
     derive_write_locked_values,
+    derive_post_decision_freeze_values,
     is_write_only_prop,
     resolve_set_fields,
 )
@@ -2764,38 +2765,64 @@ def helper_context(
     # (approval_lockdown_context(), cmd_846c/#439) locks -- 403ing the
     # generic CRUD tests (4.1/4.2/9.1/9.2/10.1/10.2) built on top of it
     # unconditionally, regardless of what those tests are actually
-    # exercising. Override the lockdown field's populate value to
-    # on_rejected.set_fields' resolved value instead: approval_lockdown_
-    # context() never adds on_rejected's value to locked_values regardless
-    # of terminal-ness (846b amendment), so it is always a safe non-locked
-    # escape hatch when declared -- no schema change needed (the schema's
-    # own default must stay locked for the reason above; this only changes
-    # what this test-only DB helper writes via prisma.model.create(),
-    # bypassing the service layer / real create route entirely, so it can
-    # never itself fire or skip approval-request creation).
+    # exercising.
+    #
+    # cmd_1022: the lockdown field's frozen-value set is no longer just
+    # submit_on + on_approved -- derive_post_decision_freeze_values() (the
+    # same helper approval_lockdown_context() itself now calls) also
+    # freezes a *terminal* on_rejected value. The old escape hatch
+    # (unconditionally override to on_rejected.set_fields' value) is no
+    # longer always safe: on an entity where on_rejected.terminal: true,
+    # that value is itself frozen. Fall back through:
+    #   1. on_rejected.set_fields' value, when it is not itself frozen
+    #      (the non-terminal case -- unchanged from before this cmd).
+    #   2. on_withdrawn.set_fields' value -- 846b never adds on_withdrawn
+    #      to the freeze set, so a declared on_withdrawn value is always
+    #      safe.
+    #   3. the schema's own declared default: for the field -- assumed
+    #      unfrozen (a default equal to a frozen value would itself be an
+    #      unrelated schema design problem, out of this helper's scope to
+    #      detect; see the design note this cmd's task carried).
+    # No schema change needed either way -- this only changes what this
+    # test-only DB helper writes via prisma.model.create(), bypassing the
+    # service layer / real create route entirely, so it can never itself
+    # fire or skip approval-request creation.
     _lockdown_field, _lockdown_submit_value = (
         resolve_approval_submit_on(parent_def) if parent_def.get('x-approval') else (None, None)
     )
     _lockdown_override_literal = None
     if _lockdown_field is not None:
         _lockdown_x_approval = parent_def['x-approval']
-        _lockdown_locked_values = {_lockdown_submit_value}
-        _lockdown_on_approved_sf = (_lockdown_x_approval.get('on_approved') or {}).get('set_fields') or {}
-        if _lockdown_field in _lockdown_on_approved_sf:
-            _lockdown_locked_values.add(resolve_set_fields(
-                parent_def.get('properties') or {},
-                {_lockdown_field: _lockdown_on_approved_sf[_lockdown_field]},
-            )[_lockdown_field])
+        _lockdown_props = parent_def.get('properties') or {}
+        _lockdown_freeze_values = derive_post_decision_freeze_values(parent_def).get(_lockdown_field, [])
+        _lockdown_candidate = None
+
         _lockdown_on_rejected_sf = (_lockdown_x_approval.get('on_rejected') or {}).get('set_fields') or {}
         if _lockdown_field in _lockdown_on_rejected_sf:
             _lockdown_rejected_value = resolve_set_fields(
-                parent_def.get('properties') or {},
+                _lockdown_props,
                 {_lockdown_field: _lockdown_on_rejected_sf[_lockdown_field]},
             )[_lockdown_field]
-            if _lockdown_rejected_value not in _lockdown_locked_values:
-                _lockdown_override_literal = (
-                    "'" + str(_lockdown_rejected_value).replace("\\", "\\\\").replace("'", "\\'") + "'"
-                )
+            if _lockdown_rejected_value not in _lockdown_freeze_values:
+                _lockdown_candidate = _lockdown_rejected_value
+
+        if _lockdown_candidate is None:
+            _lockdown_on_withdrawn_sf = (_lockdown_x_approval.get('on_withdrawn') or {}).get('set_fields') or {}
+            if _lockdown_field in _lockdown_on_withdrawn_sf:
+                _lockdown_candidate = resolve_set_fields(
+                    _lockdown_props,
+                    {_lockdown_field: _lockdown_on_withdrawn_sf[_lockdown_field]},
+                )[_lockdown_field]
+
+        if _lockdown_candidate is None:
+            _lockdown_default_value = (_lockdown_props.get(_lockdown_field) or {}).get('default')
+            if _lockdown_default_value is not None and _lockdown_default_value not in _lockdown_freeze_values:
+                _lockdown_candidate = _lockdown_default_value
+
+        if _lockdown_candidate is not None:
+            _lockdown_override_literal = (
+                "'" + str(_lockdown_candidate).replace("\\", "\\\\").replace("'", "\\'") + "'"
+            )
 
     def _enrich_field_prisma(field: dict, entity_title: str) -> dict:
         f = dict(field)
@@ -4908,6 +4935,22 @@ def api_spec_context(
             if _spare_value is not None:
                 resubmit_unsubmitted_value_literal = _resubmit_literal(_spare_value)
 
+    # cmd_1022, test (c): a value the lockdown field is frozen at via
+    # x-write-locked-values specifically (Source 2 of
+    # derive_post_decision_freeze_values), scoped to resubmit_target_field
+    # since that is the same field approval_lockdown_context() guards.
+    # Demonstrates a row can become frozen through a route OTHER than the
+    # approval flow itself (e.g. a scheduled task, or whatever system
+    # writer the x-write-locked-values declaration is meant to guard
+    # against) -- only generated when such a declaration actually exists,
+    # same "no room for the test -> no test" discipline as
+    # resubmit_unsubmitted_value_literal above.
+    lockdown_write_locked_sample_value_literal = None
+    if resubmit_target_field:
+        _lockdown_x_write_locked = (model_def.get('x-write-locked-values') or {}).get(resubmit_target_field) or []
+        if _lockdown_x_write_locked:
+            lockdown_write_locked_sample_value_literal = _resubmit_literal(_lockdown_x_write_locked[0])
+
     # cmd_841 ruling_5: x-approval.on_withdrawn.set_fields' value for
     # resubmit_target_field, when declared -- powers the new-form 14.4 test
     # (withdrawal itself sets the field, so no separate "away" edit is
@@ -5135,6 +5178,7 @@ def api_spec_context(
         'resubmit_unsubmitted_value_literal': resubmit_unsubmitted_value_literal,
         'on_withdrawn_value_literal': on_withdrawn_value_literal,
         'has_on_withdrawn': has_on_withdrawn,
+        'lockdown_write_locked_sample_value_literal': lockdown_write_locked_sample_value_literal,
         'put_body_resubmit': (
             _put_body_impl('              ', skip_field=resubmit_target_field, record_var='data.record')
             if resubmit_target_field else None

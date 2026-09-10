@@ -1192,7 +1192,14 @@ describe('API: {{ title }}', () => {
 {% endif %}
 {% if entity_on_rejected_terminal %}
 {% if can_edit and put_body_resubmit %}
-    it('14.2 editing {{ resubmit_target_field }} back to its open value after a terminal rejection does not create a new approval_request', () => {
+    // cmd_1022: before this cmd, editing back to the open value after a
+    // terminal rejection succeeded (200) but silently created no new
+    // approval_request -- the record could be resubmitted-looking without
+    // an actual live approval flow behind it. derive_post_decision_freeze_
+    // values() now freezes a terminal on_rejected's own value, so
+    // assertEditAllowed (called against the PRE-update row, service.ts)
+    // now rejects this edit outright, before the payload is even applied.
+    it('14.2 editing {{ resubmit_target_field }} back to its open value after a terminal rejection is forbidden by post-approval edit lockdown', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithTerminalRejectedApproval', {
           creatorId: setup.requestorUser.id,
@@ -1210,7 +1217,8 @@ describe('API: {{ title }}', () => {
             },
             failOnStatusCode: false,
           }).then((res) => {
-            expect(res.status).to.eq(200);
+            expect(res.status).to.eq(403);
+            expect(res.body.error).to.eq('edit_forbidden:approval_locked');
             cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
               .then((getRes) => {
                 const requests = getRes.body.approvable.approval_requests;
@@ -1291,6 +1299,37 @@ describe('API: {{ title }}', () => {
         });
       });
     });
+{% if can_edit and lockdown_write_locked_sample_value_literal %}
+
+    // cmd_1022: a row can become frozen through a route OTHER than the
+    // approval flow itself -- x-write-locked-values declares
+    // {{ resubmit_target_field }}: {{ lockdown_write_locked_sample_value_literal }}
+    // as a system-only value (e.g. written by a scheduled task or any
+    // other out-of-band writer this declaration guards against), and
+    // derive_post_decision_freeze_values() merges that declaration into
+    // the same frozen set post-approval editing itself locks against --
+    // no live approval_request is needed for the guard to fire.
+    it('14.3W a record whose {{ resubmit_target_field }} sits at an x-write-locked-values value is forbidden from being edited', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [],
+          overrides: { {{ resubmit_target_field }}: {{ lockdown_write_locked_sample_value_literal }} },
+        }).then((data) => {
+          cy.request({
+            method: 'PUT',
+            url: `{{ api_path }}/${data.record.id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: {},
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(403);
+            expect(res.body.error).to.eq('edit_forbidden:approval_locked');
+          });
+        });
+      });
+    });
+{% endif %}
 {% if can_delete and put_body_resubmit %}
 
     // cmd_846: the same lockdown as 14.3, for DELETE (assertDeleteAllowed,

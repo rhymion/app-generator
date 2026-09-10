@@ -36,7 +36,7 @@ import pytest
 from build_context import build_context
 from generators import form_upsert_context
 from generators_test import cypress_edit_value
-from helpers.schema_helpers import derive_write_locked_values
+from helpers.schema_helpers import derive_write_locked_values, derive_post_decision_freeze_values
 from validate import validate_schema, SchemaValidationError
 
 
@@ -558,3 +558,221 @@ class TestWriteLockedValuesFailClosedValidation:
         with pytest.raises(SchemaValidationError) as exc_info:
             validate_schema(schema)
         assert 'no enum' in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# derive_post_decision_freeze_values (helpers/schema_helpers.py, cmd_1022)
+#
+# The row-level "is this row frozen right now" set consumed by
+# approval_lockdown_context() (generators.py). Distinct from
+# derive_write_locked_values above: submit_on is always included, on_approved
+# is always included, on_rejected is included ONLY when terminal: true, and
+# on_withdrawn is NEVER included (846b amendment, preserved).
+# ---------------------------------------------------------------------------
+
+class TestDerivePostDecisionFreezeValues:
+    def test_no_x_approval_returns_empty(self):
+        assert derive_post_decision_freeze_values({'properties': {}}) == {}
+
+    def test_submit_on_and_on_approved_always_included(self):
+        raw_def = {
+            'properties': {'status': {'type': 'string', 'enum': ['draft', 'pending', 'approved']}},
+            'x-approval': {
+                'submit_on': {'status': 'pending'},
+                'on_approved': {'set_fields': {'status': 'approved'}},
+            },
+        }
+        assert derive_post_decision_freeze_values(raw_def) == {'status': ['pending', 'approved']}
+
+    def test_terminal_on_rejected_included(self):
+        raw_def = {
+            'properties': {'status': {'type': 'string', 'enum': ['draft', 'pending', 'approved', 'rejected']}},
+            'x-approval': {
+                'submit_on': {'status': 'pending'},
+                'on_approved': {'set_fields': {'status': 'approved'}},
+                'on_rejected': {'set_fields': {'status': 'rejected'}, 'terminal': True},
+            },
+        }
+        assert derive_post_decision_freeze_values(raw_def) == {
+            'status': ['pending', 'approved', 'rejected'],
+        }
+
+    def test_non_terminal_on_rejected_excluded(self):
+        """846b's core amendment: terminal: false must NOT freeze the
+        rejection value -- a non-terminal rejection is treated as if the
+        submission never happened."""
+        raw_def = {
+            'properties': {'status': {'type': 'string', 'enum': ['draft', 'pending', 'approved', 'rejected']}},
+            'x-approval': {
+                'submit_on': {'status': 'pending'},
+                'on_approved': {'set_fields': {'status': 'approved'}},
+                'on_rejected': {'set_fields': {'status': 'rejected'}, 'terminal': False},
+            },
+        }
+        assert derive_post_decision_freeze_values(raw_def) == {'status': ['pending', 'approved']}
+
+    def test_on_rejected_with_no_terminal_key_treated_as_non_terminal(self):
+        """terminal: absent must behave the same as terminal: false (the
+        collision-free default posture), not silently freeze."""
+        raw_def = {
+            'properties': {'status': {'type': 'string', 'enum': ['pending', 'approved', 'rejected']}},
+            'x-approval': {
+                'submit_on': {'status': 'pending'},
+                'on_approved': {'set_fields': {'status': 'approved'}},
+                'on_rejected': {'set_fields': {'status': 'rejected'}},
+            },
+        }
+        assert derive_post_decision_freeze_values(raw_def) == {'status': ['pending', 'approved']}
+
+    def test_on_withdrawn_never_included(self):
+        """846b: on_withdrawn's value must never appear, terminal-ness of
+        on_rejected notwithstanding -- no code path in this function reads
+        on_withdrawn at all."""
+        raw_def = {
+            'properties': {'status': {'type': 'string', 'enum': ['draft', 'pending', 'approved', 'rejected']}},
+            'x-approval': {
+                'submit_on': {'status': 'pending'},
+                'on_approved': {'set_fields': {'status': 'approved'}},
+                'on_rejected': {'set_fields': {'status': 'rejected'}, 'terminal': True},
+                'on_withdrawn': {'set_fields': {'status': 'draft'}},
+            },
+        }
+        result = derive_post_decision_freeze_values(raw_def)
+        assert 'draft' not in result.get('status', [])
+
+    def test_x_write_locked_values_merged(self):
+        """Source 2 (x-write-locked-values) merges in independently of
+        x-approval, same as derive_write_locked_values."""
+        raw_def = {
+            'properties': {'status': {'type': 'string', 'enum': ['pending', 'approved', 'expired']}},
+            'x-approval': {
+                'submit_on': {'status': 'pending'},
+                'on_approved': {'set_fields': {'status': 'approved'}},
+            },
+            'x-write-locked-values': {'status': ['expired']},
+        }
+        assert derive_post_decision_freeze_values(raw_def) == {
+            'status': ['pending', 'approved', 'expired'],
+        }
+
+    def test_duplicate_value_not_repeated(self):
+        raw_def = {
+            'properties': {'status': {'type': 'string', 'enum': ['pending', 'rejected']}},
+            'x-approval': {
+                'submit_on': {'status': 'pending'},
+                'on_rejected': {'set_fields': {'status': 'rejected'}, 'terminal': True},
+            },
+            'x-write-locked-values': {'status': ['rejected']},
+        }
+        assert derive_post_decision_freeze_values(raw_def) == {'status': ['pending', 'rejected']}
+
+    def test_legacy_int_enum_label_resolves_to_ordinal(self):
+        raw_def = {
+            'properties': {'status': {'type': 'integer', 'enum': ['Pending', 'Approved', 'Rejected']}},
+            'x-approval': {
+                'submit_on': {'status': 'Pending'},
+                'on_approved': {'set_fields': {'status': 'Approved'}},
+                'on_rejected': {'set_fields': {'status': 'Rejected'}, 'terminal': True},
+            },
+        }
+        assert derive_post_decision_freeze_values(raw_def) == {'status': [0, 1, 2]}
+
+
+# ---------------------------------------------------------------------------
+# validate.py section 11a: x-write-locked-values vs. submit_on/on_withdrawn/
+# non-terminal on_rejected collision (cmd_1022, cmd_476 injection-proof
+# style). Each test injects one concrete deviation and asserts the expected
+# outcome -- three collision sources must be REJECTED, and the fourth
+# (terminal on_rejected) must NOT be rejected, since that is the intended
+# use case this cmd introduces (a terminal rejection's own value is
+# deliberately meant to end up in x-write-locked-values' effective set of
+# system-only values, via derive_post_decision_freeze_values).
+# ---------------------------------------------------------------------------
+
+def _minimal_schema_with_approval_and_write_locked(x_approval, x_write_locked) -> dict:
+    return {
+        "definitions": {
+            "item": {
+                "type": "object",
+                "required": ["id", "status"],
+                "properties": {
+                    "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                    "status": {
+                        "type": "string",
+                        "enum": ["pending", "approved", "rejected", "withdrawn", "frozen"],
+                    },
+                },
+                "x-approval": x_approval,
+                "x-write-locked-values": x_write_locked,
+            },
+        }
+    }
+
+
+class TestSection11aCollisionValidation:
+    def test_submit_on_value_injection_rejected(self):
+        """(1) submit_on's own value injected into x-write-locked-values ->
+        rejected: a user could never submit at all."""
+        schema = _minimal_schema_with_approval_and_write_locked(
+            x_approval={'submit_on': {'status': 'pending'}},
+            x_write_locked={'status': ['pending']},
+        )
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        assert 'locks a value also reachable via' in str(exc_info.value)
+        assert "submit_on='pending'" in str(exc_info.value)
+
+    def test_on_withdrawn_value_injection_rejected(self):
+        """(2) on_withdrawn's value injected -> rejected: a user could
+        never withdraw."""
+        schema = _minimal_schema_with_approval_and_write_locked(
+            x_approval={
+                'submit_on': {'status': 'pending'},
+                'on_withdrawn': {'set_fields': {'status': 'withdrawn'}},
+            },
+            x_write_locked={'status': ['withdrawn']},
+        )
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        assert 'locks a value also reachable via' in str(exc_info.value)
+        assert "on_withdrawn='withdrawn'" in str(exc_info.value)
+
+    def test_non_terminal_on_rejected_value_injection_rejected(self):
+        """(3) a NON-terminal on_rejected's value injected -> rejected: a
+        user could never (non-terminally) reject."""
+        schema = _minimal_schema_with_approval_and_write_locked(
+            x_approval={
+                'submit_on': {'status': 'pending'},
+                'on_rejected': {'set_fields': {'status': 'rejected'}, 'terminal': False},
+            },
+            x_write_locked={'status': ['rejected']},
+        )
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        assert 'locks a value also reachable via' in str(exc_info.value)
+        assert "on_rejected='rejected' (non-terminal)" in str(exc_info.value)
+
+    def test_terminal_on_rejected_value_injection_not_rejected(self):
+        """(4) -- the branch this cmd's check exists to prove correct: a
+        TERMINAL on_rejected's value declared in x-write-locked-values must
+        NOT be rejected. Freezing a terminal rejection's own value is the
+        intended use case (cmd_1022 acceptance criteria), not a typo."""
+        schema = _minimal_schema_with_approval_and_write_locked(
+            x_approval={
+                'submit_on': {'status': 'pending'},
+                'on_rejected': {'set_fields': {'status': 'rejected'}, 'terminal': True},
+            },
+            x_write_locked={'status': ['rejected']},
+        )
+        validate_schema(schema)  # must not raise
+
+    def test_no_collision_control_case_passes(self):
+        schema = _minimal_schema_with_approval_and_write_locked(
+            x_approval={
+                'submit_on': {'status': 'pending'},
+                'on_approved': {'set_fields': {'status': 'approved'}},
+                'on_rejected': {'set_fields': {'status': 'rejected'}, 'terminal': False},
+            },
+            x_write_locked={'status': ['frozen']},
+        )
+        validate_schema(schema)  # must not raise

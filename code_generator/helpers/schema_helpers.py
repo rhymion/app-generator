@@ -71,6 +71,21 @@ def derive_write_locked_values(model_def: dict) -> dict[str, list]:
                     values.append(value)
 
     # Source 2: x-write-locked-values (new, x-approval-independent)
+    _merge_x_write_locked(locked, model_def)
+
+    return locked
+
+
+def _merge_x_write_locked(locked: dict[str, list], model_def: dict) -> None:
+    """Merge model_def['x-write-locked-values'] into `locked` in place.
+
+    Shared by derive_write_locked_values (Source 2 above) and
+    derive_post_decision_freeze_values (Source 2 below) so both
+    derivations agree on the exact same x-write-locked-values merge logic
+    (cmd_1022) -- field existence / enum-membership validity is
+    validate.py's responsibility (section 11), both callers trust the
+    declaration as-is.
+    """
     x_write_locked = model_def.get('x-write-locked-values')
     if x_write_locked and isinstance(x_write_locked, dict):
         for field, values in x_write_locked.items():
@@ -80,6 +95,74 @@ def derive_write_locked_values(model_def: dict) -> dict[str, list]:
             for v in values:
                 if v not in existing:
                     existing.append(v)
+
+
+def derive_post_decision_freeze_values(raw_def: dict) -> dict[str, list]:
+    """Per x-approval entity, the (field, value) pairs a *row* freezes into
+    once it reaches a genuinely decided state -- post-submission
+    (submit_on), approved (on_approved), or a *terminal* rejection
+    (on_rejected when terminal: true) -- plus any x-write-locked-values
+    declaration.
+
+    Deliberately excludes non-terminal on_rejected and on_withdrawn (846b
+    amendment): the original design treats a non-terminally-rejected or
+    withdrawn row as if the submission had never happened -- outside the
+    scope of a post-submission freeze entirely. A terminal rejection has
+    no such resubmission path back to submit_on (the fail-closed
+    unreachable-resubmission gate documented alongside 846b), so it stays
+    a decided, frozen record -- unlike the non-terminal case, this is NOT
+    a case 846b intended to leave open.
+
+    Distinct from derive_write_locked_values() above: that function
+    answers "what may the *payload* never write" (create/update
+    validation) and must keep its existing, wider meaning (it feeds
+    build_context.py's write_locked_values, unrelated to row-level
+    edit/delete lockdown). This function answers a narrower question --
+    "is the *row itself*, right now, in a decided state that forbids
+    editing/deleting/invalidating it at all" -- consumed only by
+    approval_lockdown_context() (generators.py) (cmd_1022).
+    """
+    locked: dict[str, list] = {}
+    x_approval = raw_def.get('x-approval')
+    if x_approval:
+        entity_props = raw_def.get('properties', {})
+
+        # submit_on (always included). Inlined rather than calling
+        # generators.py's resolve_approval_submit_on() -- that would create
+        # a circular import, since generators.py already imports from this
+        # module (schema_helpers.py). The "exactly one field" shape is
+        # trusted here, same as resolve_approval_submit_on() itself; a
+        # malformed multi-field submit_on is a schema authoring error out
+        # of scope for this function to detect.
+        submit_on_raw = x_approval.get('submit_on') or {}
+        if submit_on_raw:
+            resolved_submit = resolve_set_fields(entity_props, submit_on_raw)
+            submit_field, submit_value = next(iter(resolved_submit.items()))
+            values = locked.setdefault(submit_field, [])
+            if submit_value not in values:
+                values.append(submit_value)
+
+        # on_approved (unconditional -- unchanged from 846b's original
+        # scope).
+        on_approved_sf = (x_approval.get('on_approved') or {}).get('set_fields') or {}
+        for field, value in resolve_set_fields(entity_props, on_approved_sf).items():
+            values = locked.setdefault(field, [])
+            if value not in values:
+                values.append(value)
+
+        # on_rejected -- ONLY when terminal (cmd_1022's extension to 846b).
+        on_rejected_block = x_approval.get('on_rejected') or {}
+        if on_rejected_block.get('terminal'):
+            on_rejected_sf = on_rejected_block.get('set_fields') or {}
+            for field, value in resolve_set_fields(entity_props, on_rejected_sf).items():
+                values = locked.setdefault(field, [])
+                if value not in values:
+                    values.append(value)
+
+        # on_withdrawn: NEVER included (846b) -- no code path touches it.
+
+    # Source 2: x-write-locked-values (same merge as derive_write_locked_values above)
+    _merge_x_write_locked(locked, raw_def)
 
     return locked
 

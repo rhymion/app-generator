@@ -864,8 +864,11 @@ An approvable entity's `submit_on` field reaching its submitted or approved valu
 is treated as a locked state: further edits, deletes, or invalidations of that row are forbidden
 by default until a non-terminal rejection or withdrawal (`on_rejected`/`on_withdrawn.set_fields`,
 §16.11) moves the field away again. `approval_lockdown_context()` (`code_generator/generators.py`)
-computes the locked-value set — `[submit_on_value, on_approved.set_fields[lockdown_field]]` — and
-is gated identically to the edge trigger above: it requires both a `one_to_one_rels` bridge to
+computes the locked-value set via `derive_post_decision_freeze_values()`
+(`code_generator/helpers/schema_helpers.py`, §16.18) — `submit_on`'s value, `on_approved.
+set_fields`' value, a *terminal* `on_rejected.set_fields`' value, and any `x-write-locked-values`
+declaration for the same field — and is gated identically to the edge trigger above: it requires
+both a `one_to_one_rels` bridge to
 `approvable` (`has_approvable_bridge`) and a declared `submit_on`, returning `{}` otherwise. Like
 the edge trigger, this is resolved **per view_key, not per Prisma model** — a proxy view sharing
 the same underlying model but not itself declaring the approvable bridge gets no guard (the same
@@ -1054,4 +1057,59 @@ view or equivalent), not as a new pre-approval entity hook. It is recorded here 
 current factual shape of the code, so that a future attempt to add a "reject on the server side"
 control knows there is no existing seam to hook into and would need to design one from scratch —
 consistent with the ruling that any such control lives outside this mechanism.
+
+### 16.18 Freezing a terminal rejection (extends §16.15)
+
+Before this section, §16.15's row-level lockdown released as soon as `on_rejected`/`on_withdrawn`
+moved the field away from its submitted/approved value — **unconditionally**, regardless of
+whether that rejection was terminal (§16.13: a *terminal* rejection has no resubmission path back
+to `submit_on` at all). A row sitting at a terminal rejection's own value was therefore left fully
+editable/deletable/invalidatable, even though it can never be resubmitted through the ordinary
+approval flow again — a decided, permanent record with no lock on it.
+
+**The fix keeps §16.15's original amendment intact and adds one narrow case.** `derive_write_
+locked_values()` (`code_generator/helpers/schema_helpers.py`) is unchanged — it answers "what may
+the *payload* never write" (create/update validation feeding `build_context.py`'s `write_locked_
+values`) and must keep that existing, wider meaning. A sibling function, `derive_post_decision_
+freeze_values()`, was added next to it to answer the narrower, row-level question `approval_
+lockdown_context()` actually needs: "is the row itself, right now, in a decided state that
+forbids editing/deleting/invalidating it at all." It collects:
+
+- `submit_on`'s own value — always.
+- `on_approved.set_fields`' value — always (unchanged from §16.15's original scope).
+- `on_rejected.set_fields`' value — **only when `on_rejected.terminal: true`**. A non-terminal
+  rejection still releases the lock exactly as before; this is the one behavior this section adds.
+- `on_withdrawn`'s value — **never**. No code path in this function reads it at all; §16.15's
+  original amendment (a withdrawn row is "as if the submission never happened") is untouched.
+- Any `x-write-locked-values` declaration for the same field (see `docs/knowledge/x-write-locked-
+  values-field-lockdown.md`) — merged in via the same helper `derive_write_locked_values()` uses
+  for its own Source 2, so both derivations agree on the exact same merge logic. This means a row
+  can become frozen through a route other than the approval flow itself (e.g. a scheduled task
+  writing a terminal-looking value directly), not only through an actual rejection.
+
+**Validation: `validate.py` section 11a.** A value that `x-write-locked-values` marks as
+system-only, but that `submit_on`/`on_withdrawn`/a *non-terminal* `on_rejected` also names as a
+value a user transition writes, is rejected fail-closed (almost certainly a schema-authoring typo
+— it would make submitting, withdrawing, or non-terminally rejecting impossible). A *terminal*
+`on_rejected` value is deliberately exempt from this check: freezing a terminal rejection's own
+value via `x-write-locked-values` is a legitimate, intended declaration (the two sources naming
+the same value on purpose), not a collision.
+
+**Why this does not conflict with §16.15's non-terminal amendment.** The original design
+principle (confirmed by product ruling) is that a non-terminally-rejected or withdrawn row is
+treated as if the submission had never happened at all — structurally outside the scope of a
+post-submission freeze. A terminal rejection does not fit that description: there is no
+resubmission path back to `submit_on` for it to return through, so unlike the non-terminal case,
+it remains a decided, frozen record. Extending the freeze to that one case is additive, not a
+reversal of the original amendment — the non-terminal/withdrawn exclusion this section's own
+`derive_post_decision_freeze_values()` implements is copied verbatim from §16.15's original
+reasoning, not reopened.
+
+**Test scaffold implication.** The generic CRUD test populate helper (`generators_test.py`) used
+to pick `on_rejected.set_fields`' value unconditionally as a guaranteed-unlocked "escape hatch"
+record state — that assumption breaks for any `test: true` entity declaring `on_rejected.
+terminal: true`, since that value is now itself frozen. The helper now falls back through
+`on_rejected` (when not itself frozen) → `on_withdrawn` (never frozen, §16.15) → the field's own
+schema `default:` (assumed unfrozen), deriving the frozen set from `derive_post_decision_freeze_
+values()` itself rather than re-deriving a second, now-stale notion of "locked" by hand.
 

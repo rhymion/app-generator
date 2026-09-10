@@ -22,6 +22,7 @@ from helpers.schema_helpers import (
     get_write_only_field_names,
     get_self_only_flags,
     resolve_set_fields,
+    derive_post_decision_freeze_values,
 )
 from build_context import get_uri_kind
 
@@ -2829,15 +2830,11 @@ def approval_lockdown_context(ctx: dict, schema: dict | None) -> dict:
     if approvable_rel is None or not schema:
         return {}
     raw_def = _raw_def(model, schema)
-    lockdown_field, submit_on_value = resolve_approval_submit_on(raw_def)
+    lockdown_field, _submit_on_value = resolve_approval_submit_on(raw_def)
     if lockdown_field is None:
         return {}
-    locked_values = [submit_on_value]
-    entity_props = raw_def.get('properties', {})
-    on_approved_sf = (raw_def.get('x-approval') or {}).get('on_approved', {}).get('set_fields') or {}
-    resolved_oa = resolve_set_fields(entity_props, on_approved_sf)
-    if lockdown_field in resolved_oa and resolved_oa[lockdown_field] not in locked_values:
-        locked_values.append(resolved_oa[lockdown_field])
+    freeze_values = derive_post_decision_freeze_values(raw_def)
+    locked_values = freeze_values.get(lockdown_field, [])
     locked_values_ts = '[' + ', '.join(_ts_literal(v) for v in locked_values) + ']'
     return {
         'lockdown_field': lockdown_field,
