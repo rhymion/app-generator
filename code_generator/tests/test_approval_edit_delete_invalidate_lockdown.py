@@ -244,6 +244,34 @@ class TestApprovalLockdownContext:
         assert ctx['has_delete_guard'] is True
         assert ctx['has_invalidate_guard'] is True
 
+    def test_terminal_on_rejected_value_is_locked(self):
+        # cmd_1022: on_rejected.terminal: true is the new case --
+        # approval_lockdown_context() must now freeze the row on that
+        # value too (a terminal rejection has no resubmission path back
+        # to submit_on, so it stays a decided, frozen record).
+        schema = _lockdown_schema()
+        schema['definitions']['__widget']['x-approval']['on_rejected']['terminal'] = True
+        ctx = _lockdown_ctx(_entity('widget', 'widget'), schema)
+        assert ctx['lockdown_locked_values_ts'] == "['pending', 'approved', 'rejected']"
+
+    def test_non_terminal_on_rejected_stays_unlocked(self):
+        # Companion to the above -- the default fixture already declares
+        # terminal: False, so this pins the "not locked when non-terminal"
+        # branch as a regression guard alongside the terminal case.
+        schema = _lockdown_schema()
+        assert schema['definitions']['__widget']['x-approval']['on_rejected']['terminal'] is False
+        ctx = _lockdown_ctx(_entity('widget', 'widget'), schema)
+        assert ctx['lockdown_locked_values_ts'] == "['pending', 'approved']"
+
+    def test_x_write_locked_values_also_locked(self):
+        # cmd_1022: Source 2 (x-write-locked-values) must also flow into
+        # the row-level freeze set, not just submit_on/on_approved/
+        # terminal on_rejected.
+        schema = _lockdown_schema()
+        schema['definitions']['__widget']['x-write-locked-values'] = {'status': ['draft']}
+        ctx = _lockdown_ctx(_entity('widget', 'widget'), schema)
+        assert ctx['lockdown_locked_values_ts'] == "['pending', 'approved', 'draft']"
+
 
 class TestServiceTsGuardCallSites:
     """L4: the guard call must land inside service.ts's update{Parent}/

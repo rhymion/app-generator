@@ -6,6 +6,24 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Post-decision row freeze now includes a *terminal* rejection, not just approval.**
+  `derive_post_decision_freeze_values()` (`code_generator/helpers/schema_helpers.py`), consumed by
+  `approval_lockdown_context()`, extends the existing post-approval edit/delete/invalidate
+  lockdown (`docs/knowledge/appendix/approval-flow.md` §16.15/§16.18) to also freeze a row once
+  `on_rejected.terminal: true` fires -- a terminal rejection has no resubmission path back to
+  `submit_on`, so it stays a decided, permanent record just like an approval. A non-terminal
+  rejection or a withdrawal still releases the lock exactly as before (unchanged behavior). Any
+  `x-write-locked-values` declaration for the same field is also merged into this frozen set, so a
+  row can become frozen through a route other than the approval flow itself. **Consumer-visible
+  behavior change**: an entity declaring `on_rejected.terminal: true` will newly reject
+  edit/delete/invalidate (403 `*_forbidden:approval_locked`) on a row sitting at that terminal
+  value, where it previously allowed it.
+- **`validate.py` section 11a**: a new fail-closed schema check rejecting an `x-write-locked-values`
+  declaration that collides with `submit_on`/`on_withdrawn`/a *non-terminal* `on_rejected` value on
+  the same field (almost certainly a schema-authoring typo -- it would make submitting,
+  withdrawing, or non-terminally rejecting impossible). A *terminal* `on_rejected` value is exempt
+  by design -- freezing it via `x-write-locked-values` is the intended, additive declaration this
+  change introduces, not a collision.
 - **`validate_submit_on_default_matches_prisma()`: a new pre-generation check
   catching a value-level disagreement between an `x-approval.submit_on`
   field's json schema `default:` and its Prisma `@default(...)`.** The

@@ -1992,6 +1992,55 @@ def validate_schema(schema: dict) -> None:
                         )
 
     # -----------------------------------------------------------------------
+    # 11a. x-write-locked-values vs. submit_on/on_withdrawn/non-terminal
+    #      on_rejected collision (cmd_1022)
+    # -----------------------------------------------------------------------
+    # A value that x-write-locked-values marks as system-only, but that
+    # submit_on/on_withdrawn/a non-terminal on_rejected also names as a
+    # value a USER transition writes, is almost certainly a typo -- it
+    # would make submitting, withdrawing, or (non-terminally) rejecting
+    # impossible. A *terminal* on_rejected value is deliberately exempt:
+    # freezing a terminal rejection's own value is the intended use case
+    # (cmd_1022 acceptance criteria (2)), not a collision. Kept as an
+    # independent loop rather than folded into section 11 above -- section
+    # 11 is a structural check (field existence / enum membership), this is
+    # a semantic collision check between two different x-approval-adjacent
+    # declarations, and the two responsibilities are kept separate.
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        x_write_locked = defn.get('x-write-locked-values')
+        if not x_write_locked or not isinstance(x_write_locked, dict):
+            continue  # malformed shape already reported by section 11 above
+        x_approval = defn.get('x-approval') or {}
+        submit_on_raw = x_approval.get('submit_on') or {}
+        on_withdrawn_sf = (x_approval.get('on_withdrawn') or {}).get('set_fields') or {}
+        on_rejected_block = x_approval.get('on_rejected') or {}
+        on_rejected_terminal = bool(on_rejected_block.get('terminal'))
+        on_rejected_sf = {} if on_rejected_terminal else (on_rejected_block.get('set_fields') or {})
+        for field, values in x_write_locked.items():
+            if not isinstance(values, list):
+                continue  # already reported by section 11 above
+            collision_sources = []
+            if submit_on_raw.get(field) in values:
+                collision_sources.append(f"submit_on={submit_on_raw.get(field)!r}")
+            if on_withdrawn_sf.get(field) in values:
+                collision_sources.append(f"on_withdrawn={on_withdrawn_sf.get(field)!r}")
+            if on_rejected_sf.get(field) in values:
+                collision_sources.append(
+                    f"on_rejected={on_rejected_sf.get(field)!r} (non-terminal)")
+            if collision_sources:
+                errors.append(
+                    f"Definition '{def_key}': x-write-locked-values.{field} "
+                    f"locks a value also reachable via "
+                    f"{', '.join(collision_sources)} -- a user could never "
+                    f"submit, withdraw, or non-terminally reject this "
+                    f"entity. This is almost certainly a typo; remove the "
+                    f"value from x-write-locked-values or correct the "
+                    f"submit_on/on_withdrawn/on_rejected declaration."
+                )
+
+    # -----------------------------------------------------------------------
     # 14. x-relationship.searchField retired (cmd_552)
     # -----------------------------------------------------------------------
     # searchField used to opt an FK into cross-relation substring search
