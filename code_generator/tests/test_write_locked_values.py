@@ -262,6 +262,118 @@ class TestBuildContextWriteLockedValues:
         assert ctx["write_locked_fields"] == []
 
 
+def _schema_with_raw_and_proxy_view(raw_write_locked=None, view_write_locked=None) -> dict:
+    """cmd_1032: a raw entity ('item') plus a genuinely separate proxy
+    view of it ('item_proxy_view', allOf referencing 'item' directly —
+    the one-hop-from-raw shape a canonical entity uses, NOT the two-hop
+    shape a real proxy view uses in production (canonical view -> raw) —
+    is_canonical_model_view distinguishes the two by hop count, so using
+    the one-hop shape here for the proxy view would misclassify it as
+    canonical; this fixture instead gives 'item' itself the x-generate
+    split so 'item' becomes the canonical view over a synthesized
+    '__item' raw, and 'item_proxy_view' references 'item' — two hops from
+    '__item', the genuine-proxy-view shape).
+    """
+    props = {
+        "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+        "name": {"type": "string"},
+        "status": {
+            "type": "string",
+            "enum": ["pending", "active", "released", "rejected"],
+            "default": "pending",
+        },
+    }
+    raw_def: dict = {"type": "object", "required": ["id", "name", "status"], "properties": props}
+    if raw_write_locked is not None:
+        raw_def["x-write-locked-values"] = raw_write_locked
+
+    view_def: dict = {
+        "x-generate": {
+            "list": True, "view": True, "new": True, "edit": True,
+            "delete": True, "api": True, "test": False, "fields": None,
+        },
+        "allOf": [{"$ref": "#/definitions/__item"}],
+    }
+    proxy_view_def: dict = {
+        "x-generate": {
+            "list": True, "view": True, "new": False, "edit": True,
+            "delete": False, "api": True, "test": False, "fields": None,
+        },
+        "allOf": [{"$ref": "#/definitions/item"}],
+    }
+    if view_write_locked is not None:
+        proxy_view_def["x-write-locked-values"] = view_write_locked
+
+    return {
+        "definitions": {
+            "__item": raw_def,
+            "item": view_def,
+            "item_proxy_view": proxy_view_def,
+        }
+    }
+
+
+def _proxy_view_entity() -> dict:
+    return {
+        "parent": "item_proxy_view",
+        "model": "item",
+        "definition_key": "item_proxy_view",
+        "children": [],
+        "generate_config": {
+            "list": True, "view": True, "new": False, "edit": True,
+            "delete": False, "api": True, "test": False, "fields": None,
+        },
+    }
+
+
+def _canonical_view_entity() -> dict:
+    return {
+        "parent": "item",
+        "model": "item",
+        "definition_key": "item",
+        "children": [],
+        "generate_config": {
+            "list": True, "view": True, "new": True, "edit": True,
+            "delete": True, "api": True, "test": False, "fields": None,
+        },
+    }
+
+
+class TestBuildContextWriteLockedValuesProxyView:
+    """cmd_1032: x-write-locked-values is view-scoped for a genuine proxy
+    view -- proves both directions build_context() actually produces, the
+    layer every downstream generated surface (screen, service_validation.ts,
+    CSV import, generated tests) reads from."""
+
+    def test_proxy_view_does_not_inherit_raw_declaration(self):
+        """(i) a proxy view that declares nothing itself must NOT see the
+        raw entity's own locked values -- the "into" transition is
+        unlocked by default."""
+        schema = _schema_with_raw_and_proxy_view(raw_write_locked={'status': ['released']})
+        ctx = build_context(_proxy_view_entity(), schema)
+        assert ctx["write_locked_values"] == {}
+        assert ctx["write_locked_fields"] == []
+
+    def test_proxy_view_own_declaration_applies(self):
+        """(ii) a proxy view that declares its own x-write-locked-values
+        gets locked to exactly that -- NOT unioned with the raw's own
+        (unrelated) declaration."""
+        schema = _schema_with_raw_and_proxy_view(
+            raw_write_locked={'status': ['released']},
+            view_write_locked={'status': ['rejected']},
+        )
+        ctx = build_context(_proxy_view_entity(), schema)
+        assert ctx["write_locked_values"] == {'status': ['rejected']}
+        assert ctx["write_locked_fields"] == ['status']
+
+    def test_canonical_view_unaffected_by_sibling_proxy_view(self):
+        """The canonical screen's own behavior is unchanged by a sibling
+        proxy view existing at all -- raw's full union still applies."""
+        schema = _schema_with_raw_and_proxy_view(raw_write_locked={'status': ['released']})
+        ctx = build_context(_canonical_view_entity(), schema)
+        assert ctx["write_locked_values"] == {'status': ['released']}
+
+
 # ---------------------------------------------------------------------------
 # form_upsert_context(): screen — locked options render disabled, not
 # removed (an already-locked record must not go blank on open).
@@ -773,6 +885,79 @@ class TestSection11aCollisionValidation:
                 'on_approved': {'set_fields': {'status': 'approved'}},
                 'on_rejected': {'set_fields': {'status': 'rejected'}, 'terminal': False},
             },
+            x_write_locked={'status': ['frozen']},
+        )
+        validate_schema(schema)  # must not raise
+
+
+def _schema_with_approval_on_raw_and_write_locked_on_proxy_view(x_approval, x_write_locked) -> dict:
+    """Same shape as _minimal_schema_with_approval_and_write_locked above,
+    but x-write-locked-values is declared on a genuinely SEPARATE proxy
+    view entity (allOf referencing the raw 'item') instead of on 'item'
+    itself -- proves section 11a still resolves x-approval via the view's
+    backing raw model (cmd_1032's view-scoping change), not the view's
+    own (nonexistent) x-approval block.
+    """
+    return {
+        "definitions": {
+            "item": {
+                "type": "object",
+                "required": ["id", "status"],
+                "properties": {
+                    "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                    "status": {
+                        "type": "string",
+                        "enum": ["pending", "approved", "rejected", "withdrawn", "frozen"],
+                    },
+                },
+                "x-approval": x_approval,
+            },
+            "item_proxy_view": {
+                "x-write-locked-values": x_write_locked,
+                "allOf": [{"$ref": "#/definitions/item"}],
+            },
+        }
+    }
+
+
+class TestSection11aCollisionValidationOnProxyView:
+    """cmd_1032: the same collision checks as
+    TestSection11aCollisionValidation above, but x-write-locked-values
+    lives on a proxy view of the entity that declares x-approval rather
+    than on that entity itself -- the exact shape build_context.py's
+    view-scoping fix newly allows a schema author to write. Before
+    section 11a's cmd_1032 fix, this collision would have silently
+    passed: the view's own `defn` never carries x-approval (it lives only
+    on the raw entity), so submit_on_raw/on_withdrawn_sf/on_rejected_sf
+    would all have resolved empty and no collision would ever be found.
+    """
+
+    def test_submit_on_value_injection_rejected_via_proxy_view(self):
+        schema = _schema_with_approval_on_raw_and_write_locked_on_proxy_view(
+            x_approval={'submit_on': {'status': 'pending'}},
+            x_write_locked={'status': ['pending']},
+        )
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        assert 'locks a value also reachable via' in str(exc_info.value)
+        assert "submit_on='pending'" in str(exc_info.value)
+
+    def test_on_withdrawn_value_injection_rejected_via_proxy_view(self):
+        schema = _schema_with_approval_on_raw_and_write_locked_on_proxy_view(
+            x_approval={
+                'submit_on': {'status': 'pending'},
+                'on_withdrawn': {'set_fields': {'status': 'withdrawn'}},
+            },
+            x_write_locked={'status': ['withdrawn']},
+        )
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        assert 'locks a value also reachable via' in str(exc_info.value)
+        assert "on_withdrawn='withdrawn'" in str(exc_info.value)
+
+    def test_no_collision_control_case_passes_via_proxy_view(self):
+        schema = _schema_with_approval_on_raw_and_write_locked_on_proxy_view(
+            x_approval={'submit_on': {'status': 'pending'}},
             x_write_locked={'status': ['frozen']},
         )
         validate_schema(schema)  # must not raise

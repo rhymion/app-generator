@@ -138,6 +138,8 @@ from helpers.schema_helpers import (
     get_entity_required,
     get_self_only_flags,
     derive_write_locked_values,
+    derive_write_locked_values_for_view,
+    is_canonical_model_view,
     derive_post_decision_freeze_values,
     is_write_only_prop,
     resolve_set_fields,
@@ -3319,7 +3321,14 @@ def spec_context(
     if not parent_def or not parent_def.get('properties'):
         return {}
 
-    _write_locked_values = derive_write_locked_values(parent_def)
+    # View-scoped (cmd_1032): the exclusion set a generated "edit this
+    # field" Cypress step must avoid must match what the generated
+    # application actually enforces for THIS view — see
+    # derive_write_locked_values_for_view's docstring.
+    _spec_view_entry = schema['definitions'].get(definition_key, {}) or {}
+    _write_locked_values = derive_write_locked_values_for_view(
+        model_name, parent_def, _spec_view_entry, schema,
+    )
 
     title = to_title_case(parent)
     pascal = to_pascal_case(parent)
@@ -4947,7 +4956,15 @@ def api_spec_context(
     # resubmit_unsubmitted_value_literal above.
     lockdown_write_locked_sample_value_literal = None
     if resubmit_target_field:
-        _lockdown_x_write_locked = (model_def.get('x-write-locked-values') or {}).get(resubmit_target_field) or []
+        # View-scoped (cmd_1032): a proxy view's own x-write-locked-values
+        # declaration lives on the view entity itself, not the canonical
+        # screen's (raw) declaration -- see
+        # derive_write_locked_values_for_view's docstring. This test wants
+        # the raw Source-2 declaration dict specifically (not the merged
+        # x-approval union), so the canonical-view check is inlined rather
+        # than going through that helper.
+        _lockdown_source_def = model_def if is_canonical_model_view(model, _api_detail_def, schema) else _api_detail_def
+        _lockdown_x_write_locked = (_lockdown_source_def.get('x-write-locked-values') or {}).get(resubmit_target_field) or []
         if _lockdown_x_write_locked:
             lockdown_write_locked_sample_value_literal = _resubmit_literal(_lockdown_x_write_locked[0])
 
