@@ -76,6 +76,67 @@ def derive_write_locked_values(model_def: dict) -> dict[str, list]:
     return locked
 
 
+def is_canonical_model_view(model: str, view_entry: dict, schema: dict) -> bool:
+    """Whether `view_entry` IS the model's own canonical screen, as opposed
+    to a genuinely separate proxy view of the same underlying model.
+
+    Structural, not name-based (a raw/view-split canonical entity's view
+    name equals the model name today, e.g. `role` backed by `__role`, but
+    an older/hand-built intermediate schema may instead pair a bare raw
+    key like `item` with a `_detail`-suffixed view like `item_detail` --
+    matching `def_key == model` alone misclassifies that shape). Mirrors
+    `generate_types.py`'s `_resolve_raw_key` hop-counting: the canonical
+    view's own `allOf[0].$ref` -- if it has an allOf at all -- points
+    DIRECTLY at whichever key actually holds the raw entity (`__{model}`
+    when split, `model` itself otherwise); a proxy view's `allOf[0].$ref`
+    instead points at the canonical view (one hop further away), e.g. a
+    triage desk's `allOf: [{$ref: '#/definitions/service_request'}]`
+    referencing the canonical `service_request` view rather than
+    `__service_request` directly -- the same two-hop shape documented for
+    `setting -> user -> __user`.
+    """
+    defs = schema.get('definitions', {})
+    raw_key_used = f'__{model}' if f'__{model}' in defs else model
+    allof = view_entry.get('allOf') or []
+    if not allof:
+        return True  # no split at all -- view_entry IS the raw entity
+    first = allof[0] if isinstance(allof[0], dict) else {}
+    first_ref = (first.get('$ref') or '').split('/')[-1]
+    return first_ref == raw_key_used
+
+
+def derive_write_locked_values_for_view(
+    model: str, model_def: dict, view_entry: dict, schema: dict,
+) -> dict[str, list]:
+    """View-scoped variant of `derive_write_locked_values`.
+
+    The entity's own canonical screen (see `is_canonical_model_view`) gets
+    the full union (both sources) exactly as `derive_write_locked_values
+    (model_def)` always has -- `model_def` already resolves to wherever
+    that canonical screen's own x-write-locked-values declaration actually
+    lives (a Category C key moves onto the raw twin when the entity is
+    split).
+
+    A genuinely separate proxy view of the same Prisma model (e.g. a
+    triage desk proxying the raw request model) does NOT inherit the
+    canonical screen's Source 2 (x-write-locked-values) declaration by
+    default -- transitions into those values are unlocked unless the
+    proxy view declares its own x-write-locked-values, which locks the
+    value for that view only. Source 1 (x-approval.on_approved/
+    on_rejected) is intentionally left unchanged for every view for now --
+    always read off model_def regardless of which view is being built.
+    Unhooking Source 1 the same way needs a deeper change to
+    derive_write_locked_values()'s raw-fixed read of x-approval and is
+    tracked separately; not implemented here.
+    """
+    if is_canonical_model_view(model, view_entry, schema):
+        return derive_write_locked_values(model_def)
+    return derive_write_locked_values({
+        **model_def,
+        'x-write-locked-values': view_entry.get('x-write-locked-values'),
+    })
+
+
 def _merge_x_write_locked(locked: dict[str, list], model_def: dict) -> None:
     """Merge model_def['x-write-locked-values'] into `locked` in place.
 

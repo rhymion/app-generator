@@ -1940,7 +1940,13 @@ def validate_schema(schema: dict) -> None:
                 f"(got {type(x_write_locked).__name__})."
             )
             continue
-        props = defn.get('properties', {})
+        # get_entity_properties() (allOf-merge aware), not a plain
+        # `defn.get('properties', {})` -- a proxy view declaring
+        # x-write-locked-values on itself (cmd_1032) has no top-level
+        # `properties` key of its own; the field it names lives on the raw
+        # entity its allOf $ref chain resolves to, same raw/view gap the
+        # embedded-child-array check above this function works around.
+        props = get_entity_properties(def_key, schema)
         for field, values in x_write_locked.items():
             if field not in props:
                 errors.append(
@@ -2012,7 +2018,18 @@ def validate_schema(schema: dict) -> None:
         x_write_locked = defn.get('x-write-locked-values')
         if not x_write_locked or not isinstance(x_write_locked, dict):
             continue  # malformed shape already reported by section 11 above
-        x_approval = defn.get('x-approval') or {}
+        # x-approval lives on the entity's own raw backing model, not
+        # necessarily on `defn` itself (cmd_1032): a proxy view may now
+        # declare x-write-locked-values on itself, and its own `defn`
+        # never carries x-approval (that key lives only on the raw
+        # '__'-prefixed entity -- same resolution
+        # validate_submit_on_default_matches_prisma() above already uses).
+        # Reading `defn.get('x-approval')` directly here would find an
+        # empty dict for such a view and silently let every collision
+        # through instead of catching it.
+        _model_name = _resolve_backing_model_name(def_key, defs)
+        _raw_entry = defs.get(f'__{_model_name}') or defs.get(_model_name) or {}
+        x_approval = _raw_entry.get('x-approval') or {}
         submit_on_raw = x_approval.get('submit_on') or {}
         on_withdrawn_sf = (x_approval.get('on_withdrawn') or {}).get('set_fields') or {}
         on_rejected_block = x_approval.get('on_rejected') or {}

@@ -20,6 +20,7 @@ from helpers.schema_helpers import (
     get_internal_bridge_fk_prop_names,
     get_entity_properties, get_self_only_flags,
     derive_write_locked_values,
+    derive_write_locked_values_for_view,
     get_direct_attachment_fk_props,
     get_write_only_field_names,
 )
@@ -1498,7 +1499,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # value, not the whole field — CREATE still needs values like pending)
     # and per-entity (a value locked here may be ordinary elsewhere) — see
     # derive_write_locked_values for the full reasoning.
-    write_locked_values: dict[str, list] = derive_write_locked_values(model_def)
+    #
+    # x-write-locked-values itself is VIEW-scoped, not raw-wide (cmd_1032):
+    # a proxy view does not inherit the canonical screen's own declaration
+    # by default, but may declare its own. See
+    # derive_write_locked_values_for_view's docstring for the full
+    # canonical-vs-proxy reasoning (identical raw/view resolution problem
+    # as x-readonly-fields above, applied to this different key).
+    write_locked_values: dict[str, list] = derive_write_locked_values_for_view(
+        model, model_def, _view_entry, schema,
+    )
     write_locked_fields: list[str] = sorted(write_locked_values)
     # Select clause to fetch an existing row's current values for the
     # write-locked fields, so UPDATE / CSV-import UPDATE can allow a

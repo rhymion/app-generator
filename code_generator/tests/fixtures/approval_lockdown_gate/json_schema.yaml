@@ -114,3 +114,27 @@ definitions:
           - in_underwriting
           - issued
         default: draft
+
+  # cmd_1032: proves x-write-locked-values is VIEW-scoped, not raw-wide. A
+  # genuine proxy view (allOf referencing the canonical `write_lockdown_
+  # gate_item` view, not the raw entity directly) does NOT inherit the raw
+  # entity's own declaration by default -- 'in_underwriting'/'issued' stay
+  # unlocked here even though they are locked on write_lockdown_gate_item
+  # itself -- but the same mechanism still applies when the view declares
+  # its own x-write-locked-values (locking 'submitted', a value the raw
+  # entity leaves writable).
+  write_lockdown_gate_item_view:
+    x-generate:
+      list: true
+      view: true
+      new: false
+      edit: true
+      delete: false
+      invalidate: false
+      api: true
+      test: false
+    x-write-locked-values:
+      status:
+        - submitted
+    allOf:
+      - $ref: "#/definitions/write_lockdown_gate_item"
