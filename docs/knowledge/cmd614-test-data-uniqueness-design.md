@@ -3,11 +3,18 @@
 ## Note on this file
 
 This design doc is referenced by CHANGELOG entries for Phase 1
-(merged in PR #312) and Phase 2 (this change), but was never actually
+(merged in PR #312) and Phase 2, but was never actually
 committed to the repository — the referencing entries pointed at a doc that
 didn't exist on disk. This file reconstructs it from the Phase 1/Phase 2 task
 reports and the shipped code, and folds in Phase 2. Sections §1-§3 describe
-work already merged (Phase 1); §4 covers this change (Phase 2).
+work already merged (Phase 1); §4 covers Phase 2. **Scope note, corrected**:
+this "Note on this file" originally stopped describing scope at §4 — it
+predates §5 (Phase 3, "per-test-case callIndex reset", merged per PR #319)
+and §6 (Phase 3 follow-up), both added to this file later. Both sections
+were re-verified as still present and accurate against
+`code_generator/templates/`, `generate.py`, and
+`code_generator/tests/test_callindex_per_testcase_reset.py`. Read all of
+§1-§6 as the current, merged state — not just §1-§4.
 
 ## §1. The problem
 
