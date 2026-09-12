@@ -87,7 +87,7 @@ own foreign value.
 ## FK Permission / Cross-org coverage comment
 
 Every generated `cypress/e2e/api/<entity>.cy.ts` now carries a one-line comment near the top
-(`// FK Permission / Cross-org Test Coverage (cmd_520 batch A): 7.3=... 7.4=... 7.5=... 7.6=...
+(`// FK Permission / Cross-org Test Coverage: 7.3=... 7.4=... 7.5=... 7.6=...
 G3=...`) recording which of the five new test groups were actually generated for that entity and
 why (or why not) — so "covered" claims can be verified by `grep` against real generated output
 instead of assumed from the template diff alone. In the default `app-generator` schema, **no**
