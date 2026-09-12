@@ -24,12 +24,22 @@ repo root:
 }
 ```
 
-This is the *only* place the region needs to be set. There is no other
-config file, environment variable, or script in this repo that overrides or
-duplicates it — do not hardcode a region anywhere else. `vercel.json` is
-deploy configuration read directly by the Vercel platform on every deploy
-(dashboard region settings are not authoritative and can drift silently;
-the checked-in file always wins).
+This is the *only* place the region needs to be set for an actual deploy —
+`vercel.json` is deploy configuration read directly by the Vercel platform
+on every deploy (dashboard region settings are not authoritative and can
+drift silently; the checked-in file always wins). Do not hardcode a region
+anywhere else that could drift from this file.
+
+One existing exception, not a place to add a new one: `code_generator/generate.py`'s
+`_VERCEL_JSON_DEFAULTS` dict hardcodes `'regions': ['sin1']` as the fallback
+content used only when `vercel.json` doesn't already exist — normal
+`generate-code` runs read back and preserve the existing file's `regions`
+value verbatim (only the `crons` key is rewritten), so this fallback does
+not fight the checked-in file in practice. `code_generator/tests/test_vercel_json_crons.py`
+also asserts `regions == ['sin1']` as a test fixture. If the region is ever
+changed per the steps below, update `_VERCEL_JSON_DEFAULTS` and the test
+fixture too, or a future first-time `vercel.json` generation (or a stale
+test) would silently regress to `sin1`.
 
 ## Changing the region (e.g. customer provisions Neon in a different region)
 
