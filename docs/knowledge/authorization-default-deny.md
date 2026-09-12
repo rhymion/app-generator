@@ -113,8 +113,19 @@ specific entities.
 | `user`      | `seedTestDatabase`    | 1 (test user)                      |
 | all others  | neither               | 0                                  |
 
-N = number of base entities in `code_generator/json_schema.yaml` (entities without `_detail`
-or `_input` suffix that have `type: object` and an `id` property).
+N is **not** simply "every base entity in the schema" — it's the size of `ALL_ENTITIES`
+(`cypress/support/db-helpers.ts`), which `code_generator/generate.py`'s `db_helpers_context()`
+derives as the union of (a) entities with `x-generate.test: true` (the ones that get a generated
+Cypress spec at all) and (b) any entity referenced as a labelField target elsewhere in the schema —
+sorted and deduplicated. On the current default schema (12 total entities in
+`code_generator/json_schema.yaml`'s `definitions`), that union currently has **6** members
+(`approval_flow, dashboard, organization, permission, role, user`) — several default entities
+(`setting`, `approval_request`, `comment`, `reaction`, `attachment`, `dashboard_widget`) have no
+generated spec and aren't a labelField target, so they're outside `ALL_ENTITIES` and never get a
+`permission` row from `grantAllEntityPermissions()`. Treat the exact count and membership as
+something to re-check (`cypress/support/db-helpers.ts`'s `ALL_ENTITIES` is the live source of
+truth) rather than assume from this description — it changes whenever an entity's `test` flag or
+labelField references change.
 
 ### Solution: parameterized `seed_count` in the generator
 
@@ -153,15 +164,21 @@ email: `test-${i}-${Date.now()}@example.com`,
 
 ### Problem: desktop DataGrid virtual-scroll limitation
 
-The desktop Cypress specs use `getDataGridRowCount()` which counts rendered DOM rows
+`getDataGridRowCount()` (`cypress/support/datagrid-helpers.ts:207`) counts rendered DOM rows
 (`div[role="row"][data-rowindex]`). With a fixed-height 500px DataGrid container and MUI's
-default row height (~52px), only ~11 rows are rendered in the DOM at once. For `permission`
-(seed_count=9), test 1.3 expects 12 rows (9 + 3 populated) but the DOM shows only 11.
+default row height (~52px), only ~11 rows are rendered in the DOM at once — so this helper
+undercounts whenever an entity's actual row total exceeds that window (e.g. it would have
+undercounted `permission`'s test 1.3 back when `ALL_ENTITIES` — and so `permission`'s
+`seed_count` — was large enough to push `seed_count + 3` over ~11; see "N is not simply..."
+above for why that count now varies with schema/test-flag changes).
 
-**Solution**: Test 1.3 uses `getDataGridTotalRowCount()` (new helper in `datagrid-helpers.ts`)
-which reads MUI DataGrid's `aria-rowcount` attribute. MUI DataGrid sets
-`aria-rowcount = 1 (header) + total_data_rows` regardless of virtual-scroll state, so
-`getDataGridTotalRowCount()` correctly returns the full dataset size.
+**Solution, and current status**: `getDataGridTotalRowCount()` (`datagrid-helpers.ts:216`) reads
+MUI DataGrid's `aria-rowcount` attribute instead, which is `1 (header) + total_data_rows`
+regardless of virtual-scroll state. The generator template (`test_spec.cy.ts.jinja2`) now uses
+`getDataGridTotalRowCount()` unconditionally for every generated entity's tests 1.1/1.2/1.3 (lines
+~51/60/69, plus the split-related count assertions further down) — not only for entities that
+happen to exceed the ~11-row window today. The virtual-scroll undercount this fixed is real, but
+the fix is no longer entity-conditional; it's the standard row-count assertion generator-wide.
 
 ### Problem: mobile test 4.2 FK constraint violation for user entity
 

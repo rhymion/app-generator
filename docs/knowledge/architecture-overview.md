@@ -60,7 +60,13 @@ The `x-generate` block in the entity definition controls which outputs are activ
 Two cross-entity files are also regenerated on every run:
 
 - `lib/dashboard/catalog.ts` — aggregates all entities for the dashboard widget catalog
-- `lib/attachment/actions.ts` — polymorphic attachment bridge for entities that own `attachable`
+- `lib/attachment/bridge_actions.ts` — polymorphic attachment bridge for entities that own `attachable`,
+  always emitted (`components/_standard/AttachmentSection.tsx` unconditionally imports from it). This
+  file was renamed from `lib/attachment/actions.ts` — that name collided with the standard per-entity
+  actions file the `attachment` entity itself gets when directly generated, and whichever generation
+  step ran later used to silently clobber the other's exports (`code_generator/generate.py`, the
+  "Attachment bridge actions" section). A third file, `lib/attachment/direct_actions.ts`, is emitted
+  only when some entity declares an `x-relationship: {target: attachment, type: direct}` FK.
 
 ### cleanup.py
 
@@ -84,7 +90,9 @@ app-generator/
 │   ├── api/                  API routes
 │   │   ├── {entity}/         Generated REST endpoints (when api: true)
 │   │   └── auth/             Auth.js v5 route handlers (hand-written)
-│   └── generated/            (placeholder directory)
+│   └── generated/            Prisma Client output (`prisma/schema.prisma`'s
+│                             `output = "../app/generated/prisma"`); gitignored,
+│                             populated by `prisma generate`, not a placeholder
 ├── code_generator/           Python code generation pipeline
 │   ├── json_schema.yaml      Single source of truth: entity definitions
 │   ├── generate.py           Main orchestrator
@@ -134,15 +142,24 @@ will be lost on the next generation run. Put customizations in the designated ex
 
 ### Write-once stubs (preserved after first generation)
 
-`generate.py` calls `_write_stub()` for these files, which skips writing if the file already exists:
-
-- The stub template is `form_validation_stub.ts.jinja2`
+`generate.py` calls `_write_stub()` (skips writing if the file already exists) for well over a dozen
+opt-in extension points, not just one — `form_validation_stub.ts.jinja2` (`components/{entity}/`),
+`service_validation_custom_stub.ts.jinja2` (→ `lib/{entity}/service_validation_custom.ts`), the
+per-lifecycle hook stubs (`service_after_create_stub.ts.jinja2`, `..._after_update_stub`,
+`..._after_delete_stub`, `..._after_submit_stub`, `..._after_withdraw_stub`, `..._after_reject_stub`,
+`..._before_approve_stub`, `..._before_reject_stub`, `..._before_withdraw_stub`), the guard stubs
+(`autocomplete_filter_stub.ts.jinja2`, `list_filter_stub.ts.jinja2`, `invalidate_handler_stub.ts.jinja2`,
+`virtual_resolver.ts.jinja2`, `service_validation_delete_stub.ts.jinja2`), the scheduled-job stubs
+(`service_scheduled_handler_stub.ts.jinja2`, `..._scheduled_bulk_handler_stub`), and the Stripe
+integration stubs (`stripe_lib_stub.ts.jinja2`, `stripe_checkout_route_stub.ts.jinja2`,
+`stripe_webhook_route_stub.ts.jinja2`). This list drifts as new extension points are added — the
+living source of truth is `grep -n "_write_stub(" code_generator/generate.py`.
 
 ### Hand-written extension points
 
 | File | Purpose |
 |---|---|
-| `lib/{entity}/service_validation_stub.ts` | Custom validation logic (not overwritten once created) |
+| `lib/{entity}/service_validation_custom.ts` | Custom validation logic (not overwritten once created; written from `service_validation_custom_stub.ts.jinja2`) |
 | `custom/` | Per-tenant UI overrides and app-specific extensions |
 | `components/_standard/` | Shared UI components; not touched by the generator |
 | `lib/auth/`, `lib/mfa/`, `lib/account-link/` | Auth subsystem; entirely hand-written |
@@ -154,14 +171,14 @@ will be lost on the next generation run. Put customizations in the designated ex
 
 ## Tech stack
 
-| Layer | Package | Version |
+| Layer | Package | Version (as of this writing — `package.json` is authoritative) |
 |---|---|---|
-| Web framework | `next` | ^16.1.1 |
-| UI library | `react` | ^19.2.3 |
+| Web framework | `next` | ^16.3.4 |
+| UI library | `react` | ^19.2.8 |
 | Language | `typescript` | ^5 |
-| ORM | `@prisma/client` | ^7.8.0 |
-| Component library | `@mui/material` | ^7.3.7 |
-| Auth | `next-auth` (`Auth.js v5`) | ^5.0.0-beta.31 |
+| ORM | `@prisma/client` | ^7.10.0 |
+| Component library | `@mui/material` | ^9.2.0 |
+| Auth | `next-auth` (`Auth.js v5`) | ^5.0.0-beta.32 |
 | Auth adapter | `@auth/prisma-adapter` | (bundled with next-auth) |
 | Database | PostgreSQL | per docker-compose |
 | Code generator | Python + Jinja2 | see `requirements.txt` |
@@ -208,6 +225,15 @@ Accelerate is off by default in every environment, including production —
 connection. It has never successfully reached this environment's Cloud SQL
 instance (TLS verification failure against `GOOGLE_MANAGED_INTERNAL_CA`); see
 the comment in `lib/prisma.ts` for the current status.
+
+`lib/prisma.ts`'s connection selection is actually a three-way branch, not a
+plain Accelerate/direct binary: (1) `PRISMA_DATABASE_URL` set → Accelerate
+(above); (2) unset but `USE_NEON_ADAPTER=true` → a `PrismaNeon` adapter
+(Vercel Production/Preview against Neon only — deliberately not a
+`NODE_ENV` branch, since that gets baked into the Turbopack build); (3)
+neither set → the default `PrismaPg` direct-connection adapter, which is
+what every row in the table above (dev/test) and GCP Cloud Run/local/CI
+production actually take.
 
 Docker Compose files per environment:
 
