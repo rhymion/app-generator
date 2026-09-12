@@ -1,4 +1,4 @@
-# Proxy view sidebar nav + permission scope (cmd_813)
+# Proxy view sidebar nav + permission scope
 
 A proxy view is an entity whose `parent` (its own view/route name, e.g.
 `setting1`) differs from its `model` (the underlying Prisma model it
@@ -9,7 +9,7 @@ framework's own example; a consumer schema can declare more (a demo
 fixture like `setting1`/`setting2` sharing one model is the motivating
 case here).
 
-Before cmd_813, three things were gated on `parent == model`, which is
+Before this fix, three things were gated on `parent == model`, which is
 false for every proxy view, entity name notwithstanding -- none of these
 gates check *which* proxy view, they blanket-exclude the whole category:
 
@@ -62,7 +62,7 @@ model `xxxxx_xxxxx`.
 `_entity_nav()` resolves `x-nav` at the VIEW unit first -- a proxy view's
 own (pass-through, never raw/view-split) definitions entry, e.g.
 `definitions.setting1.x-nav` -- falling back to the raw model's `x-nav`
-(`_raw_def()`, cmd_744) only when the view declares none of its own. Do
+(`_raw_def()`) only when the view declares none of its own. Do
 not drop the raw-model fallback: it is what makes `x-nav` resolve at all
 for the common (non-proxy) paired-entity case, where `x-nav` lives on the
 raw `__`-prefixed entity, never the view.
