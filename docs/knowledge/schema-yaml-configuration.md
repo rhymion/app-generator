@@ -136,8 +136,12 @@ user:
     password:
       x-custom-component:
         target: [upsert]   # rendered by custom component, not default input
-    image:
-      format: uri
+    image_id:
+      x-relationship:
+        target: attachment
+        type: direct        # this repo's own schema uses a direct-attachment FK for
+                             # user.image today (§5); a plain `image: {format: uri}`
+                             # string field is an equally valid alternative per-schema choice
   required: [roles]
   properties:
     roles:
@@ -255,12 +259,12 @@ cases, verified directly against `code_generator/build_user_schema.py`:
 **1. Auto-derived — zero `fields:` entry needed.** If the entity's `properties:` block declares
 the *resolved relation object* (e.g. `role: {$ref: "#/definitions/role"}`) and the corresponding
 FK scalar column (`role_id`) is **not** listed under `fields:` at all, `_auto_infer_fk_fields()`
-(`code_generator/build_user_schema.py:181-198`) detects it: it scans `properties:` for relation-
+(`code_generator/build_user_schema.py:204-224`) detects it: it scans `properties:` for relation-
 object entries, looks up the Prisma model's `relation_fk_fields` for that relation
 (`code_generator/schema_deriver.py`'s `PrismaField.relation_fk_fields`, populated by parsing the
 Prisma `@relation(fields: [...])` clause), and injects `{role_id: {"x-relationship": {}}}` into
 the field spec before derivation runs. `_derive_relationship()`
-(`code_generator/schema_deriver.py:332-356`) then fills the empty override with the only two
+(`code_generator/schema_deriver.py:413-445`) then fills the empty override with the only two
 Prisma-derivable defaults: `type: many-to-one` and `labelField: name`.
 
   This is the live default schema's actual `permission` entity — `role_id` never appears under
@@ -301,7 +305,7 @@ Prisma-derivable defaults: `type: many-to-one` and `labelField: name`.
 
   Even when `target` is written explicitly, it is **cross-checked, not trusted**: if it
   contradicts what Prisma's own `@relation` says, `build_user_schema.py` raises a
-  `SchemaDivergenceError` and the build fails (`code_generator/schema_deriver.py:338-343`). You
+  `SchemaDivergenceError` and the build fails (`code_generator/schema_deriver.py:421-424`). You
   cannot declare a wrong target; you can only omit it (Prisma-derived) or confirm it.
 
 **A note on scope**: an initiative to further reduce the user-visible surface of pure
@@ -323,7 +327,7 @@ logic `generate.py` runs against the intermediate schema. In outline:
    An entity with none of those keys (e.g. `comment`, `reaction`, `attachment`,
    `dashboard_widget` in the default schema) has nothing to split and is reconstructed as a
    single "standalone raw" entity with no `__`-prefixed sibling at all
-   (`build_user_schema.py:236-249`).
+   (`build_user_schema.py:259-284`, `_build_standalone_raw`).
 2. `extract_entities()` treats any `__`-prefixed key with a `properties.id` as a raw model
    (`generate_types.py:90-95`), then resolves each view key to its raw entity by walking `allOf`
    `$ref` chains (`_resolve_raw_key`, lines 101-118) — usually one hop (`role` → `__role`), two
@@ -377,7 +381,7 @@ current, not legacy. `setting` (§1.1) is the framework's own example: it's a se
 the `user` Prisma model, so it's written as `allOf: [{$ref: user}, {...}]` rather than being
 mistaken for `user`'s own raw/view pair. Writing an entity whose name **does** match a Prisma
 model in this `allOf` pass-through shape is rejected at build time
-(`_validate_entity_names`, `build_user_schema.py:148-165`) — the builder assumes any
+(`_validate_entity_names`, `build_user_schema.py:172-201`) — the builder assumes any
 Prisma-model-named entity is that model's own single-file definition, and an `allOf` wrapper
 there would silently discard your intent instead of erroring cleanly, so it errors instead.
 
@@ -510,6 +514,8 @@ enum ApprovalRequestStatus {
   approved
   rejected
   terminal_rejected
+  withdrawn
+  split_invalidated
 }
 
 model approval_request {
@@ -528,15 +534,17 @@ approval_request:
         - approved
         - rejected
         - terminal_rejected
+        - withdrawn
+        - split_invalidated
 ```
 
 Member names must be lowercase snake_case (`code_generator/validate.py` rejects anything else at
 generation time — see `docs/knowledge/enum-member-naming.md`).
 
-`schema_deriver.py`'s `_json_type_for()` (lines 238-249) checks whether the Prisma column's type
+`schema_deriver.py`'s `_json_type_for()` (lines 290-301) checks whether the Prisma column's type
 is a name found in `prisma_enums` (parsed from `enum { ... }` blocks in `schema.prisma`); if so
 the JSON Schema `type` is `"string"` and a `_prisma_native_enum_type` marker is attached to the
-property (`derive_property`, lines 288-295) so downstream TypeScript generation emits a literal-
+property (`derive_property`, line 347) so downstream TypeScript generation emits a literal-
 union type (`'pending' | 'approved' | ...`) instead of a generic `string`, and forms/DataGrids
 render translated labels keyed off the enum member names
 (`code_generator/generators_i18n.py`'s `_collect_native_enum_namespaces`,
@@ -584,7 +592,7 @@ transaction call — with the entity-level `x-write-locked-values` key; see
 
 Every entity automatically gets an `id` property (`properties["id"] = {"type": "string",
 "pattern": "^c[a-z0-9]{24,}$"}`, added unconditionally by `derive_raw_entity`,
-`schema_deriver.py:374`) — you never declare `id` under `fields:`. The Prisma counterpart must
+`schema_deriver.py:463`) — you never declare `id` under `fields:`. The Prisma counterpart must
 use `@id @default(cuid())`; the pattern is a CUID format check used only to identify the ID
 field, not for client validation.
 
@@ -2088,7 +2096,7 @@ whose Prisma model has no `id` column is invisible to the generator.
 
 These fields are treated specially regardless of what the schema says, and are never written
 under `fields:` at all (they're Prisma-only, injected by the generator — §4.4,
-`code_generator/generators.py` line ~195: *"creator_id/updater_id are Prisma-only audit fields
+`code_generator/generators.py` line ~381: *"creator_id/updater_id are Prisma-only audit fields
 (not in json_schema.yaml)"*):
 
 | Field | Behaviour |
