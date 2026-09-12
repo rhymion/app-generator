@@ -21,10 +21,13 @@ This behavior is generic and template-driven
 entity with `has_assignee_id`, and the `notify` import is added
 conditionally for those entities only.
 
-Currently, the `procedure` and `leave_request` entities declare
-`assignee_id` in the schema, so this trigger fires for both. Adding
-`assignee_id` (with the matching `x-relationship`) to another entity's
-schema definition enables the same behavior for that entity.
+This repo's own default `json_schema.yaml` currently declares no entity
+with an `assignee_id` field — `procedure`/`leave_request` were consuming-
+schema entities that exercised this trigger before they were removed from
+the default schema (they no longer appear under `definitions:` at all).
+The mechanism itself is unaffected by that removal: adding `assignee_id`
+(with the matching `x-relationship`) to any entity's schema definition
+enables the same behavior for that entity.
 
 ## Approval request creation notification
 
