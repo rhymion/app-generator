@@ -237,10 +237,12 @@ schema) has zero `_detail`-suffixed entity names today — confirmed via
 `build_user_schema.py` (`_has_view_level_config()`) decides whether a
 Prisma-model-named entity needs a raw/view split by checking whether it
 carries at least one Category D / view-level key (`x-generate`, `x-audit`,
-`x-relationships`, `x-search`, `x-custom-components`) — not by looking for
-a name suffix, since there is no longer a suffix to look for. Three
-outcomes, all handled in `build_intermediate_schema()`
-(`code_generator/build_user_schema.py:251-285`):
+`x-relationships`, `x-search`, `x-custom-components`, `x-readonly-fields`,
+`x-filter-values`) — not by looking for a name suffix, since there is no
+longer a suffix to look for. Three outcomes, all handled in
+`build_intermediate_schema()` (`code_generator/build_user_schema.py:287`,
+currently ending at line 330 — line ranges drift with every edit, grep
+`def build_intermediate_schema` if this has moved again):
 
 1. **Paired** — a Prisma-model entity with at least one view-level key
    (e.g. `role`, `user`, `organization`). The machine-derived raw entity
@@ -249,16 +251,24 @@ outcomes, all handled in `build_intermediate_schema()`
    user's own entry becomes the view, wrapped as
    `allOf: [{$ref: "#/definitions/__role"}, {...}]`. Category C
    entity-level annotations (`x-import-key`, `x-bridge`, `x-display`,
-   `x-readonly-fields`, `x-internal`, `x-approval`, `x-approval-lines`,
+   `x-internal`, `x-approval`, `x-approval-lines`, `x-write-locked-values`,
    `x-ledger-source`, `x-splittable`, `x-reservation`, `x-gdpr-mode`,
-   `x-self-only`) move from the user's entry onto the synthesized raw
-   entity, matching where the legacy `_detail` split kept them (see
-   `_ENTITY_LEVEL_DATA_KEYS` in `code_generator/build_user_schema.py`
-   for the authoritative list — `x-bridge` was missing from both this
-   list and the code until a later fix, so a bridge-child entity that also
-   carried `x-generate` silently lost its `x-bridge` declaration on the
-   paired path above; only standalone-raw entities (outcome 2 below)
-   were unaffected, since that path copies every key through).
+   `x-self-only`, `x-payment`, `x-nav`, `x-scheduled-task`) move from the
+   user's entry onto the synthesized raw entity, matching where the
+   legacy `_detail` split kept them (see `_ENTITY_LEVEL_DATA_KEYS` in
+   `code_generator/build_user_schema.py` for the authoritative
+   list, which has grown several keys since this section was written —
+   `x-bridge` was missing from both this list and the code until a later
+   fix, so a bridge-child entity that also carried `x-generate` silently
+   lost its `x-bridge` declaration on the paired path above; only
+   standalone-raw entities (outcome 2 below) were unaffected, since that
+   path copies every key through. `x-readonly-fields` used to be on this
+   list too but was moved to the view-level list below it by a later fix:
+   copying it onto the shared raw entity meant one view's readonly
+   declaration leaked onto every other view of the same raw model, so it
+   now stays per-view (`code_generator/build_context.py` reads it from
+   the view, not the raw entity). `x-filter-values` is view-level for the
+   identical row-restriction-leak reason).
 2. **Standalone raw** — a Prisma-model entity with no view-level key at
    all (e.g. `comment`, `reaction`, `attachment`). Fully reconstructed
    from Prisma in place, with the user's own annotations merged directly
@@ -334,7 +344,7 @@ convert automatically, straight to the current single-file form; hand-
 editing ~94 entities is exactly the transcription risk the automated
 converter exists to avoid (Stage 3, above). This is `convert_to_user_schema.py`'s
 actual input contract, verified against
-`code_generator/convert_to_user_schema.py:192-196` (`paired_raw_names`
+`code_generator/convert_to_user_schema.py:193-197` (`paired_raw_names`
 only recognizes a `{model}_detail` key when a **bare `{model}` key with
 its own content also exists** in the same file — the Stage 3-only
 in-between shape, where the raw entity was never written to
@@ -346,7 +356,7 @@ python3 code_generator/convert_to_user_schema.py \
 ```
 
 Confirmed by reading the current implementation
-(`code_generator/convert_to_user_schema.py:189-223`): the converter
+(`code_generator/convert_to_user_schema.py:190-224`): the converter
 already folds a `{model}`/`{model}_detail` pair into a single `{model}`
 key in its output today — i.e. it emits the current single-file form, not
 the Stage 3 paired form its own `--help` text and module docstring still
