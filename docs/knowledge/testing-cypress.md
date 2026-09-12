@@ -199,22 +199,28 @@ correct — Cypress will retry until the count matches or the assertion times ou
 
 ### `fillDateTime`, `fillDate`, `fillTime`
 
-With `enableAccessibleFieldDOMStructure={false}`, MUI X exposes a single `<input>`
-with a **sectioned masked format** (`MM/DD/YYYY hh:mm aa`). Typing digits directly
-into this input causes MUI X to auto-advance through sections automatically:
-`MM → DD → YYYY → HH → MM → AM/PM`.
+**Corrected 2026-09-12 (`components/_standard/DateTimeWrapper.tsx` and `cypress/support/commands.ts`,
+commit `b6614149`, "follow up MUI v9 major bump")**: this section previously described a
+`enableAccessibleFieldDOMStructure={false}` single-`<input>`
+approach. That prop was **fully removed in `@mui/x-date-pickers` v9** — this repo's `DateTimeWrapper.tsx`
+no longer sets it, so the field always renders MUI X's accessible DOM structure: per-section
+`contentEditable` `[role="spinbutton"]` spans (month/day/year/hours/minutes/meridiem, as applicable)
+inside an outer `[role="group"]` wrapper. The single-masked-input approach and the whole
+"DOM detachment on focus" workaround below it no longer apply to the current implementation — both are
+kept here struck through for historical context; see the "Current implementation" subsection for what
+`cypress/support/commands.ts` actually does now.
 
 The calendar picker UI is **not used** — it is unreliable in headless Chromium.
 
-| Command | Type into input |
-|---|---|
-| `fillDateTime` | `month + day + year + hour + minute + ampmChar` (e.g. `011520250900a`) |
-| `fillDate` | `month + day + year` (e.g. `01152025`) |
-| `fillTime` | `hour + minute + ampmChar` (e.g. `0900a`) |
+~~| Command | Type into input |~~
+~~|---|---|~~
+~~| `fillDateTime` | `month + day + year + hour + minute + ampmChar` (e.g. `011520250900a`) |~~
+~~| `fillDate` | `month + day + year` (e.g. `01152025`) |~~
+~~| `fillTime` | `hour + minute + ampmChar` (e.g. `0900a`) |~~
 
-`ampmChar`: `'a'` for AM, `'p'` for PM.
+~~`ampmChar`: `'a'` for AM, `'p'` for PM.~~
 
-#### DOM detachment on focus — broken chain pattern
+#### DOM detachment on focus — broken chain pattern (historical, pre-v9 single-input structure)
 
 **Problem**: MUI X re-renders the input's internal structure when it receives
 focus (section highlight state, aria attributes). The DOM node Cypress obtained
@@ -225,8 +231,8 @@ element and throws:
 > command, but you tried to continue the command chain. The subject is no longer
 > attached to the DOM.
 
-**Fix**: break the chain between `.click()` and `.type()` so Cypress re-queries
-the input after the re-render:
+**Fix (superseded, see "Current implementation" below)**: break the chain between `.click()` and
+`.type()` so Cypress re-queries the input after the re-render:
 
 ```ts
 // BAD — stale reference after MUI re-render on focus:
@@ -237,19 +243,28 @@ cy.contains('label', label).parent().find('input').click();
 cy.contains('label', label).parent().find('input').type('...');
 ```
 
-#### `fillDateTime` implementation
+The same re-query-after-click principle survives into the current per-section implementation below —
+each section is clicked and typed as two separate, re-queried steps, not a single chained call — even
+though the target selector itself has changed.
+
+#### Current implementation — per-section `[role="spinbutton"]` typing
+
+Since the v9 migration, `cypress/support/commands.ts` types into each section span individually, in
+DOM order, re-querying by index on every step (MUI X re-renders each section span as its value
+changes, so a cached jQuery reference can point at a detached node) and using Cypress's default
+per-keystroke delay (not `{ delay: 0 }`, since each keystroke's `input` handler synchronously
+overwrites the section's `innerHTML`):
 
 ```ts
-Cypress.Commands.add('fillDateTime', (label: string, dateString: string) => {
-  const parts = dateString.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})\s+(AM|PM)$/i);
-  if (!parts) throw new Error(`fillDateTime: Expected "MM/DD/YYYY HH:MM AM/PM", got "${dateString}"`);
-  const [, month, day, year, hour, minute, ampm] = parts;
-  const ampmChar = ampm.toUpperCase() === 'AM' ? 'a' : 'p';
-
-  cy.contains('label', label).parent().find('input').click();
-  cy.contains('label', label).parent().find('input').type(month + day + year + hour + minute + ampmChar);
-});
+getFormLabel(label).parent().find('[role="group"] [role="spinbutton"]').eq(i).click();
+getFormLabel(label).parent().find('[role="group"] [role="spinbutton"]').eq(i).type(value);
 ```
+
+`fillDateTime`/`fillDate`/`fillTime` parse their `MM/DD/YYYY HH:MM AM/PM` / `MM/DD/YYYY` / `HH:MM AM/PM`
+string argument (unchanged from before) into per-section value tokens and drive this per-section helper,
+then assert every section actually holds a value afterward (via each section's `aria-valuenow`, which
+MUI leaves unset while a section is still empty) — catching a silently-failed fill immediately instead
+of surfacing later as a stuck `/new` URL or a null value saved to the DB.
 
 #### Debugging tip: `assert(false)` masks the real error
 
@@ -271,7 +286,9 @@ Cypress.Commands.add('clearDateTime', (label: string) => {
 
 > **Note:** The selector is `button[title="Clear"]`, **not**
 > `button[aria-label="Clear value"]`. The `aria-label` attribute does not appear
-> on this button in MUI X v8.
+> on this button (verified 2026-09-12 against the current `cypress/support/commands.ts`
+> implementation and `package.json`'s `@mui/x-date-pickers: ^9.12.0` — MUI X v9, corrected from
+> this note's original "v8" citation; the selector itself is unchanged by the v8→v9 migration).
 
 ### Sticky Header and `scrollBehavior`
 
@@ -400,7 +417,8 @@ immediately after `cy.visit()`. MUI DataGrid SSR rendering differs from client
 rendering (virtual scrolling recalculates on mount), causing a brief React
 hydration re-render that temporarily shows 0 rows.
 
-**Root cause**: `DataGridClient` (`components/DataGridClient.tsx`) is `'use client'` but still
+**Root cause**: `DataGridClient` (`components/_standard/DataGridClient.tsx` — corrected 2026-09-12,
+moved under `_standard/` since this note was written) is `'use client'` but still
 SSR'd by Next.js App Router. The `Paper sx={{ height: 500 }}` container means MUI DataGrid
 cannot compute virtual scroll dimensions server-side, so it re-renders on mount.
 React logs "Hydration failed" and does a full client re-render.
@@ -462,30 +480,42 @@ is a `datetime-local`-input-specific carve-out, not a general replacement).
 
 ### Version context
 
-- `@mui/x-date-pickers: ^8.26.0` (MUI X v8)
-- `@mui/x-data-grid: ^8.25.0`
+**Corrected 2026-09-12**: verified against `package.json` — this repo is on MUI X v9, not v8:
+
+- `@mui/x-date-pickers: ^9.12.0` (MUI X v9)
+- `@mui/x-data-grid: ^9.12.0`
 
 ### DateTimePicker Configuration (`DateTimeWrapper.tsx`)
 
+**Corrected 2026-09-12**: `enableAccessibleFieldDOMStructure={false}` was **removed** from
+`DateTimeWrapper.tsx` as part of the MUI v9 major-version migration (commit `b6614149`) — the prop
+itself was fully removed from `@mui/x-date-pickers` v9, so it can no longer be set either way. The
+field now always renders MUI X's accessible DOM structure (per-section `contentEditable` spans inside
+a `[role="group"]` container; the native `<input>` is visually hidden and not clickable). The
+sub-section below (1) is kept struck through for historical context (why the prop used to be set under
+v8); see "`fillDateTime`, `fillDate`, `fillTime`" above for how Cypress interacts with the field now.
+
+Current shape (`components/_standard/DateTimeWrapper.tsx`):
+
 ```tsx
 <DateTimePicker
-  enableAccessibleFieldDOMStructure={false}   // (1)
-  slotProps={{
-    field: { clearable: true },               // (2)
-    textField: { margin: 'normal' },
-  }}
+  views={['year', 'month', 'day', 'hours', 'minutes']}
+  label={label}
+  value={date_time ? dayjs(date_time) : null}
+  {...(readOnly ? { readOnly: true } : {})}
+  slotProps={{ field: { clearable: true }, textField: { margin: 'normal', required } }}
   {...other}
 />
 ```
 
-**(1) `enableAccessibleFieldDOMStructure={false}`**
+~~**(1) `enableAccessibleFieldDOMStructure={false}`**~~
 
-MUI X v8 changed the default to `true`, which renders each date section as a
-`<span>` element with a zero-size hidden `<input>`. Cypress cannot interact with
-that hidden input via `.clear()` or `.type()`.
+~~MUI X v8 changed the default to `true`, which renders each date section as a~~
+~~`<span>` element with a zero-size hidden `<input>`. Cypress cannot interact with~~
+~~that hidden input via `.clear()` or `.type()`.~~
 
-Setting to `false` restores the v6-style single visible `<input>` element that
-Cypress interacts with normally via `.find('input').first()`.
+~~Setting to `false` restores the v6-style single visible `<input>` element that~~
+~~Cypress interacts with normally via `.find('input').first()`.~~
 
 **(2) `field: { clearable: true }`**
 
@@ -518,21 +548,30 @@ MUI DateTimePicker respects `readOnly={true}`:
 
 ### AUTH_SECRET and `.env.test`
 
-`.env.test` is committed with a hardcoded `AUTH_SECRET`. The CI workflow must **not**
-override this with `AUTH_SECRET: ${{ secrets.AUTH_SECRET }}` unless the secret is
-actually configured in repository settings. If the secret is unset, GitHub Actions
-expands it to an empty string `""`, which takes process-level precedence over
-`.env.test`, giving NextAuth an empty key → HKDF throws:
+**Corrected 2026-09-12**: `.env.test` no longer carries a committed `AUTH_SECRET` at all — verified
+against the current `.env.test` (no `AUTH_SECRET` line) and `.github/workflows/ci.yml`. The mechanism
+described below (a hardcoded value in `.env.test`, with a rule about when to override it from a repo
+secret) has been superseded by a different fix for the same underlying risk.
 
-```
-TypeError: "ikm" must be at least one byte in length
-```
+**Current mechanism**: the CI workflow generates a disposable, test-only `AUTH_SECRET` in-workflow —
+`echo "AUTH_SECRET=$(openssl rand -base64 32)" >> .env.test.local` — instead of reading it from a
+repository secret. This is deliberate: GitHub does not pass repository secrets to Dependabot-authored
+`pull_request` runs or to fork PRs (Dependabot/forks have their own separate secrets store), so a
+`secrets.AUTH_SECRET` reference resolved empty for those PR types, got written to `.env.test.local`
+anyway, and only surfaced much later as a NextAuth `MissingSecret`-shaped failure deep into the UI test
+suite (the same downstream symptom this section originally described: HKDF's `"ikm" must be at least
+one byte in length`, no session cookie, "Sign Out" never appears). Generating the value in-workflow
+removes CI's dependency on repository secrets entirely and keeps behavior identical for every PR type
+(first-party, fork, and Dependabot).
 
-This causes the NextAuth JWT to not be created, so the session cookie is never
-issued, login appears to succeed but "Sign Out" never appears, and Cypress fails.
+**Fail-closed guard**: immediately after generating it, the workflow asserts the value is non-empty in
+`.env.test.local` and fails the job (`exit 1`) if it resolved empty — catching a future accidental
+regression at env-generation time instead of letting it resurface as a confusing downstream test
+failure.
 
-**Rule**: Only add `AUTH_SECRET` to the CI env block if the corresponding GitHub
-repository secret is configured. Otherwise omit it and let `.env.test` provide it.
+**Rule (updated)**: do not reintroduce a `secrets.AUTH_SECRET` reference into the CI workflow for this
+job — it reproduces the exact failure mode above for Dependabot/fork PRs. If a local/worktree run needs
+`AUTH_SECRET`, provide it via the local env setup, not by committing a value to `.env.test`.
 
 ### Database
 
@@ -551,6 +590,19 @@ Run E2E suites sequentially, not in parallel.
 ---
 
 ## Cypress version held back
+
+**Important update, verified 2026-09-12**: `package.json` now pins `"cypress": "^16.0.0"` — a
+**major**-version bump past the 15.16.0 baseline this whole section is about (landed via a plain
+dependabot PR, "build(deps-dev): bump cypress from 15.16.0 to 16.0.0", merged as PR #495). This is not
+a contradiction of the `dependabot.yml` rule below: that `ignore:` block only silences
+`version-update:semver-minor`/`semver-patch` for cypress, so a semver-**major** dependabot PR was never
+blocked by it and went through normally. Whether the underlying `group_by_field`/`dashboard.cy.ts`
+timeout this section documents still reproduces on cypress 16.0.0 is **unknown** — no follow-up
+investigation, fix commit, or CHANGELOG entry documenting a re-verification was found in this repo, and
+verifying it would require actually running `test:e2e:cy:ui`'s `dashboard.cy.ts` spec, which was out of
+scope for this documentation crosscheck. Whoever next touches `dashboard.cy.ts` or this dependabot rule
+should re-run the same single-variable control experiment described below against cypress 16.0.0 before
+assuming either "still broken" or "fixed."
 
 `.github/dependabot.yml` excludes `cypress` from `npm-minor-and-patch` grouping
 and additionally `ignore`s its routine minor/patch updates (both the `main`
@@ -601,7 +653,9 @@ regression, not a product regression.
 **Un-holding cypress later**: `datagrid-helpers.ts` likely needs a
 robustness fix (e.g. an explicit horizontal scroll before
 `scrollIntoView()`) before cypress can move again. That fix is out of
-scope for this investigation and not yet scheduled.
+scope for this investigation and not yet scheduled — **but see the "Important update" note above**:
+cypress moved to 16.0.0 anyway (a major-version dependabot PR the minor/patch-only `ignore` rule never
+covered), independent of whether this robustness fix ever landed.
 
 ---
 
