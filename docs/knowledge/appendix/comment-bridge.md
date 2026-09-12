@@ -140,45 +140,96 @@ Both patterns produce identical runtime behavior for the end user.
 The reaction system extends comments with a lightweight engagement model. Reactions are
 implemented as a sub-entity of `comment` with generator-driven UI and a dedicated toggle endpoint.
 
-### 2.1 Schema definition (integer enum)
+### 2.1 Schema definition (native string enum — promoted from a legacy integer enum)
 
-Reaction types are represented as integer enums in `json_schema.yaml`:
+This section originally described `reaction.type` as an integer enum with an
+`x-enum-labels` index→label map. That has since been promoted to a Prisma
+nativeEnum (string) — the same integer-enum-to-nativeEnum promotion pattern
+that later affected DataGrid-child default handling elsewhere in this
+generator. `x-enum-labels` no longer appears anywhere in this field's
+declaration. This repo's own `code_generator/json_schema.yaml` (single-file
+format, no `_detail` suffix) declares it as (~line 396):
 
 ```yaml
 reaction:
-  type: object
   x-internal:
     page: false
     embed: false
     api: custom
-  required: [id, type, comment_id]
-  properties:
-    id:
-      type: string
-      pattern: "^c[a-z0-9]{24,}$"
+  fields:
     type:
-      type: integer
-      minimum: 1
-      maximum: 5
-      x-enum-labels: [like, heart, laugh, wow, sad]
+      enum:
+        - like
+        - love
+        - laugh
+        - surprised
+        - sad
+    user_id:
+      x-relationship: {}
     comment_id:
-      type: string
-      pattern: "^c[a-z0-9]{24,}$"
+      x-relationship:
+        labelField: id
+        constantParent: true
 ```
 
-The `x-enum-labels` array maps each integer value to a human-readable label (index 0 = value 1).
-The generator produces `lib/{entity}/reaction_constants.ts` with named constants:
+Note the actual label set is `like/love/laugh/surprised/sad` — two of the five differ
+from what this doc previously showed (`heart`→`love`, `wow`→`surprised`).
+
+`prisma/schema.prisma` declares the matching Prisma enum and model:
+
+```prisma
+enum ReactionType {
+  like
+  love
+  laugh
+  surprised
+  sad
+}
+
+model reaction {
+  id          String       @id @default(cuid())
+  type        ReactionType
+  user_id     String
+  user        user         @relation("ReactionUser", fields: [user_id], references: [id])
+  comment_id  String
+  comment     comment      @relation(fields: [comment_id], references: [id], onDelete: Cascade)
+  created_at  DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime     @updatedAt @db.Timestamptz(0)
+
+  @@unique([comment_id, user_id, type])
+  @@index([user_id])
+  @@index([comment_id])
+}
+```
+
+The reactor's FK is `user_id`/`user` (relation name `"ReactionUser"`), not
+`creator_id`/`creator` as this doc previously showed (see §2.6 below, also fixed).
+
+`code_generator/generate_types.py`'s `extract_named_constants()` (accepts both
+the legacy plain-integer shape and the current nativeEnum/string shape — its own
+docstring names this exact promotion path) produces one constant per
+`x-internal` entity with an enum field, named `{PARENT}_{ENTITY}_TYPES` where
+`{PARENT}` is whichever FK target is marked `x-relationship: {constantParent: true}`
+— here, `comment` (via `comment_id`). So the generated file is:
 
 ```typescript
-// Auto-generated — do not edit
-export const REACTION_LIKE  = 1;
-export const REACTION_HEART = 2;
-export const REACTION_LAUGH = 3;
-export const REACTION_WOW   = 4;
-export const REACTION_SAD   = 5;
+// Auto-generated — do not edit manually.
+export const COMMENT_REACTION_TYPES = [
+  { value: 'like', label: 'like' },
+  { value: 'love', label: 'love' },
+  { value: 'laugh', label: 'laugh' },
+  { value: 'surprised', label: 'surprised' },
+  { value: 'sad', label: 'sad' },
+] as const;
+export type COMMENT_REACTION_TYPE = typeof COMMENT_REACTION_TYPES[number];
 ```
 
-UI, API handlers, and tests all import from this file, preventing label-to-integer drift.
+Not five separate `REACTION_LIKE = 1`-style numeric constants — one array
+constant of `{value, label}` pairs, string-valued, named after the constant
+parent entity rather than the reaction entity itself
+(`code_generator/templates/reaction_constants.ts.jinja2`). UI, API handlers, and
+tests all import from `lib/reaction_constants.ts` (not `lib/{entity}/reaction_constants.ts`
+— it's a single project-wide file, not per-entity), preventing label drift.
 
 ### 2.2 x-internal classification
 
@@ -206,61 +257,71 @@ POST /api/comment/{commentId}/reactions/toggle
 
 **Request body:**
 ```json
-{ "type": 1 }
+{ "type": "like" }
 ```
+(a string value now that `type` is a nativeEnum — see §2.1 — not the integer `1` shown here
+previously)
 
-**Response:**
+**Response** — confirmed against `code_generator/templates/comment_reactions_api_route.ts.jinja2`'s
+`CommentReactionSummary` type and its `GET` handler:
 ```json
 {
+  "commentId": "...",
+  "type": "like",
   "active": true,
-  "counts": { "1": 5, "2": 3 }
+  "counts": [ { "type": "like", "count": 5 }, { "type": "love", "count": 3 } ],
+  "myTypes": ["like"]
 }
 ```
+`counts` is an **array** of `{ type, count }` pairs, not an object keyed by reaction type as this
+doc previously showed — computed via `prisma.reaction.groupBy({ by: ['type'], where: { comment_id },
+_count: { type: true } })`, mapped to `{ type: r.type, count: r._count.type }`.
 
 The handler checks whether the authenticated user already has a reaction of the given type on the
 comment. If absent, it inserts; if present, it deletes. Either path returns the updated `active`
-flag and the full counts map keyed by reaction type integer.
+flag and the full counts array.
 
 ### 2.4 Batched groupBy aggregation
 
 Fetching reaction counts uses a batched `groupBy` strategy to avoid N+1 queries:
 
-**Comment list (batch):**
+**After toggle / single comment (confirmed, `comment_reactions_api_route.ts.jinja2`):**
 ```typescript
-// One query for all visible comment ids
-const counts = await prisma.reaction.groupBy({
-  by: ['comment_id', 'type'],
-  where: { comment_id: { in: commentIds } },
-  _count: { _all: true },
-});
-```
-
-**After toggle (single comment):**
-```typescript
-const counts = await prisma.reaction.groupBy({
+const rawCounts = await prisma.reaction.groupBy({
   by: ['type'],
   where: { comment_id: commentId },
-  _count: { _all: true },
+  _count: { type: true },
 });
+const counts = rawCounts.map((r) => ({ type: r.type, count: r._count.type }));
 ```
+`_count: { type: true }`, not `_count: { _all: true }` as this doc previously showed.
+
+**Comment list (batch, `getCommentReactions`):** the function is registered in
+`build_context.py` (`reaction_batch_query`, `strategy: "batched_group_by"`) but its
+generated body was not located in this pass — its exact `groupBy` call shape (whether it
+also uses `_count: { type: true }` and a `by: ['comment_id', 'type']` grouping) is **unknown**,
+not independently re-confirmed here. Treat the doc's previous `by: ['comment_id', 'type']` /
+`_count: { _all: true }` shape for this specific batch path as unverified rather than corrected.
 
 This eliminates denormalized counter columns (and their consistency risks) while keeping query
 count to O(1) per page load regardless of comment count.
 
 ### 2.5 Named constants generation
 
-The generator reads `x-enum-labels` from the reaction schema and emits:
-
-```
-lib/{parent_entity}/reaction_constants.ts
-```
-
-The file is regenerated on every `generate-code` run. Consumers import from it:
+Superseded by §2.1 above (this used to be a separate claim but described the same
+mechanism): the generator no longer reads `x-enum-labels` for this field — it reads the
+plain `enum:` list off whichever `x-internal` entity has an enum-typed field, string or
+integer (`generate_types.py`'s `extract_named_constants()`). The output path is a single
+project-wide `lib/reaction_constants.ts` (not `lib/{parent_entity}/reaction_constants.ts`
+— there is one constants file for the whole project, not one per parent entity), and the
+constant inside it is named after the constant-parent entity
+(`COMMENT_REACTION_TYPES`), not after the reaction entity itself
+(`REACTION_LIKE`/`REACTION_HEART` don't exist):
 ```typescript
-import { REACTION_LIKE, REACTION_HEART } from '@/lib/post/reaction_constants';
+import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 ```
-
-This ensures UI, API routes, and test fixtures stay in sync with the schema definition.
+This still ensures UI, API routes, and test fixtures stay in sync with the schema definition —
+only the constant's name, shape, and file path have changed.
 
 ### 2.6 Cascade behavior
 
@@ -269,22 +330,15 @@ Reaction records are low-value interaction state and are deleted automatically:
 | Trigger | Cascade target |
 |---------|----------------|
 | `comment` deleted | All reactions for that comment |
-| `user` deleted | All reactions created by that user |
+| `user` deleted | All reactions by that user |
 
-The Prisma schema uses `onDelete: Cascade` on both foreign keys:
-
-```prisma
-model reaction {
-  id         String  @id @default(cuid())
-  type       Int
-  comment_id String
-  comment    comment @relation(fields: [comment_id], references: [id], onDelete: Cascade)
-  creator_id String
-  creator    user    @relation(fields: [creator_id], references: [id], onDelete: Cascade)
-
-  @@unique([comment_id, creator_id, type])
-}
-```
+The actual field name for the reacting user is `user_id`/`user` (relation name
+`"ReactionUser"`), not `creator_id`/`creator` as previously shown — see the full model in
+§2.1. `onDelete: Cascade` is on the `comment` FK; the `user` relation as declared in this
+repo's `prisma/schema.prisma` (§2.1) has no explicit `onDelete` modifier, which defaults to
+`Restrict` in Prisma, not `Cascade` — this doc's "user deleted → reactions cascade" claim is
+not confirmed against this repo's actual schema and should be treated as **unknown** for the
+`user_id` FK specifically (the `comment_id` FK's cascade is confirmed).
 
 ### 2.7 Read authorization
 
@@ -295,34 +349,35 @@ Reaction visibility follows the parent comment's access rules:
 - **Toggle (add/remove)**: any authenticated user may toggle a reaction, subject to the parent
   entity's read permission being satisfied first.
 
-The generator emits an authorization check in the toggle handler that resolves the parent entity's
-read permission before allowing the operation.
+This doc previously claimed "the generator emits an authorization check in the toggle handler
+that resolves the parent entity's read permission." That is not accurate for the API route
+specifically: `comment_reactions_api_route.ts.jinja2`'s own comment states this owner-entity
+read check is **not implemented** in that route — it authenticates via API key only and
+explicitly defers the parent-entity read-permission check to the server-action layer
+(`actions.ts`), tracking the API-route version as a pending, undecided item. Read-permission
+enforcement for the toggle happens at the server-action call site, not inside a
+generically-emitted check in the toggle handler itself.
 
 ### 2.8 CommentReactionBar component
 
-The generator produces a `CommentReactionBar` component embedded in every comment list:
-
-```tsx
-// Auto-generated component
-export function CommentReactionBar({ commentId, counts, myReactions }: CommentReactionBarProps) {
-  const reactionTypes = [REACTION_LIKE, REACTION_HEART, REACTION_LAUGH, REACTION_WOW, REACTION_SAD];
-  return (
-    <Stack direction="row" spacing={0.5}>
-      {reactionTypes.map((type) => (
-        <ReactionButton
-          key={type}
-          type={type}
-          count={counts[type] ?? 0}
-          active={myReactions.includes(type)}
-          onToggle={() => toggleReaction(commentId, type)}
-        />
-      ))}
-    </Stack>
-  );
-}
+`CommentReactionBar` is a **hand-written shared component**
+(`components/_standard/CommentReactionBar.tsx`), not a per-entity generated one — it carries
+no "Auto-generated" marker and isn't rendered from a `.jinja2` template; every entity's
+generated JSX imports and calls this same fixed component (analogous to `EditableListWrapper`
+in the many-to-many doc). Its actual exported types are:
+```typescript
+export type CommentReactionCount = { type: string | number; count: number };
+export type CommentReactionSummary = {
+  commentId: string;
+  type: string | number;
+  active: boolean;
+  counts: CommentReactionCount[];
+  myTypes: (string | number)[];
+};
+export type ReactionType = { value: string | number; label: string };
 ```
-
-The component receives:
-- `counts`: the groupBy aggregation result (type → count map)
-- `myReactions`: the current user's active reaction types for this comment
-- `onToggle`: calls `POST /api/comment/{commentId}/reactions/toggle`
+`counts` is a `CommentReactionCount[]` array (`{ type, count }` pairs), not a `type → count`
+map, and the "active reaction types" field is named `myTypes`, not `myReactions`. The
+component's actual prop/rendering internals were not traced line-by-line in this pass; treat
+the illustrative JSX previously shown here as unconfirmed pseudocode, superseded by the type
+shapes above.
