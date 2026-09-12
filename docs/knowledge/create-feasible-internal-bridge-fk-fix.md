@@ -7,7 +7,7 @@ An entity with a required FK to an internal bridge model (e.g. `approvable_id`,
 `False`, even though the bridge row is created and wired by the service layer
 at CREATE time and was never meant to come from a CSV row. Combined with
 `x-generate.edit: false` (which makes `import_can_update` structurally
-`False` too), `api_import_route.ts.jinja2:24`'s
+`False` too), `api_import_route.ts.jinja2:44`'s
 `{% if not import_can_create and not import_can_update %}` collapsed the
 *entire* generated `app/api/<entity>/import/route.ts` to the
 `ENTITY_IMPORT_NOT_SUPPORTED` 400 stub — not just CREATE, the whole route.
@@ -21,8 +21,11 @@ under a pending "no update" ruling for that entity).
 `import_can_create`) only ever excluded seven hardcoded system/auto column
 names (`_SYSTEM_AND_AUTO_IDS`) from the "required fields with no CSV source"
 set. It never called `get_internal_bridge_fk_prop_names()` — the shared
-helper `validate.py:326` and `generators_test.py:3551` already use for the
-same class of field. A required bridge FK is correctly excluded from
+helper `validate.py:618` and `generators_test.py:4473` already use for the
+same class of field (their surrounding comments, `validate.py:615-617` and
+`generators_test.py:4470-4471`, document the same "invisible to
+`get_parent_relationships()` alone" gap this fix closes for
+`_create_feasible`). A required bridge FK is correctly excluded from
 `export_scalar_fields` (it must never appear as a CSV column), but
 subtracting `export_scalar_fields` from the required-fields set only removes
 names that *are* in it — it does nothing for a name that's required but
@@ -43,7 +46,7 @@ disguised as a passing, "structural verification" test.
 `get_internal_bridge_fk_prop_names(model_def, schema)` from the required-gap
 set — the same shared helper `validate.py` and `generators_test.py` already
 call, not a hand-maintained parallel name list (that pattern has already
-caused one prior miss; see `validate.py:323-325`'s own comment).
+caused one prior miss; see `validate.py:615-617`'s own comment).
 
 This only excludes FKs pointing at true internal bridge models (zero
 `x-generate` surface anywhere across the target's variants — see
