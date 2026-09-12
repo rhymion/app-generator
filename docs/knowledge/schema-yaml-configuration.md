@@ -741,7 +741,7 @@ server-side guard. Treat DataGrid child fields as currently unprotectable by eit
 annotation. See `docs/knowledge/readonly-field-form-rendering.md` for the full rendering
 type-dispatch table and the cross-view scoping fix's test coverage.
 
-**Server-side invariant (cmd_945)**: for a parent-level readonly field (this section — not the
+**Server-side invariant**: for a parent-level readonly field (this section — not the
 DataGrid-child limitation above), the generated Server Action and REST routes never read the
 client's submitted value at all — not `data.get()` on the FormData, not a destructure off a
 POST/PUT body. The field is never a parameter of the generated service function either
