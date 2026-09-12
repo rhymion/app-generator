@@ -83,7 +83,11 @@ Calling it with a 4th argument would be a TypeScript compile error
 
 The fix is not a runtime branch or a schema flag — it is a type-level cast
 at the one call site (`service_validation.ts.jinja2`, which is fully
-regenerated on every run, unlike the stub):
+regenerated on every run, unlike the stub). At the time this call site was
+added it was 4 parameters (`tx`, `data`, `currentId`, `prevRow`); a later,
+independent change (forwarding the acting user's id, `actorId` — see
+`git log -S"actorId" -- code_generator/templates/service_validation.ts.jinja2`,
+commit `caac0f6a`) widened it once more, to 5:
 
 ```ts
 type CustomRulesFn = (
@@ -91,21 +95,23 @@ type CustomRulesFn = (
   data: Record<string, unknown>,
   currentId: string | null,
   prevRow: Record<string, unknown> | null,
+  actorId: string,
 ) => Promise<void>;
 
-await (validateCustomRules as CustomRulesFn)(tx, data, currentId, prevRow);
+await (validateCustomRules as CustomRulesFn)(tx, data, currentId, prevRow, actorId);
 ```
 
 A function type with *fewer* parameters is always structurally assignable
 to one with *more* — the same rule that lets `(x) => x` satisfy an
 `Array.prototype.map` callback typed to take `(item, index, array)`. So
-this cast typechecks against both an old 3-parameter implementation and a
-new 4-parameter one. At runtime, JavaScript silently discards a call's
-trailing arguments a function doesn't declare — an old stub simply never
-binds `prevRow`; a new one receives it. No back-compat branch, no version
-flag: the callee's own signature is what decides whether `prevRow` gets
-used, exactly the same "generator provides a socket, hand-written code
-decides" split as the rest of this mechanism.
+this cast typechecks against a 3-parameter implementation, a 4-parameter
+one, or the current 5-parameter one alike. At runtime, JavaScript silently
+discards a call's trailing arguments a function doesn't declare — a stub
+that only declares 3 or 4 parameters simply never binds the newer ones; a
+5-parameter one receives all of them. No back-compat branch, no version
+flag: the callee's own signature is what decides which of `prevRow`/
+`actorId` get used, exactly the same "generator provides a socket,
+hand-written code decides" split as the rest of this mechanism.
 
 Verified empirically, not just by construction: this repo's own two
 tracked write-once stubs predating this change
@@ -113,7 +119,10 @@ tracked write-once stubs predating this change
 `lib/dashboard/service_validation_custom.ts`) both still declare the old
 3-parameter signature and were **not** touched by it (GENERATED-ONCE
 honored it) — `npm run test:e2e:build`'s `next build` compiles this repo
-cleanly against both of them unmodified.
+cleanly against both of them unmodified. Still true after the later
+`actorId` widening above (re-verified against the current tree): both
+files still declare only 3 parameters, and the same structural-subtyping
+argument applies one widening further.
 
 ### Impact on existing consumers (measured, not guessed)
 
