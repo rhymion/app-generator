@@ -598,19 +598,25 @@ field, not for client validation.
 
 ### 4.5 `x-internal` Field Classification
 
-Setting `x-internal: true` on a field's `fields:` override marks it as internally managed. The
-generator excludes such fields from UI forms and list columns while keeping them in the Prisma
-model and writable by server actions.
+`x-internal` is an **entity-level key only** — every generator reference to it reads an entity
+definition (`generate_types.py`'s "Skip x-internal entities" check, its named-constant
+extraction for x-internal enum entities), never a property. Declaring it under a `fields:`
+override (`fields: {<col>: {x-internal: true}}`) is rejected by `validate.py` as a field-level
+misuse of an entity-level key — it is never a way to hide a single field.
 
-**Use cases:**
-- Fields the generator controls internally that users should not edit directly
-- Examples: reaction aggregation counters, system-generated metadata flags
+There is currently no dedicated flag for "hide this one scalar field from forms and list
+columns while keeping it in the Prisma model and writable by server-side code." The closest
+real tools, depending on what's actually needed:
+- **The field only needs to be non-editable, not invisible** (e.g. a counter users may see but
+  never set directly): use `x-readonly` / `x-readonly-fields` (§4.7) — the field stays visible
+  but is excluded from the client payload entirely, so only server-side code can change it.
+- **The field belongs on a support/bridge record that is never surfaced to users at all**
+  (e.g. `reaction`, `approvable`): give the whole *entity* `x-internal` (below), not the field.
 
-```yaml
-fields:
-  status_count:
-    x-internal: true   # managed by server action; hidden from forms and list columns
-```
+*(An earlier revision of this section presented the field-level form above as valid. The
+generator never read `x-internal` off a property — it silently did nothing — and a later
+fail-closed validation pass added the explicit rejection above so a schema author gets an
+error instead of a no-op.)*
 
 **`x-internal` at the entity level**
 
