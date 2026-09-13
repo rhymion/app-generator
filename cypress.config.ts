@@ -112,7 +112,7 @@ export default defineConfig({
           const { createApiUserWithPermission } = require('./cypress/support/db-helpers');
           return await createApiUserWithPermission(params.entityName, params.flags, params.label, params.organizationId);
         },
-        // cmd_520 G3: cross-org isolation fixture — orgA (test user is a
+        // G3: cross-org isolation fixture — orgA (test user is a
         // member), orgB (test user is not), optionally reassigning an
         // existing entity row into orgB.
         async 'db:createCrossOrgScenario'(params: { entityName: string; entityId?: string }) {

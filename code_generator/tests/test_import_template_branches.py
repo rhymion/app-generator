@@ -187,7 +187,7 @@ def test_key_fk_now_also_written_on_update(env):
 
 
 def test_unimportable_column_present_in_header_ignored_not_rejected(env):
-    """cmd_964 (殿ご裁定): an exported FK display column with no write path can
+    """cmd_964: an exported FK display column with no write path can
     never have been written by import in the first place (definitionally --
     it has no resolvable target), unlike a *writable* column dropped by
     mistake (cmd_530's concern, a different failure mode). Its presence in
@@ -373,8 +373,8 @@ def test_composite_fk_written_to_fkdata_and_updatedata(env):
 
 def test_create_without_oto_rels_uses_plain_form_unchanged(env):
     """No auto_create_oto_rels on this entity (the common case, e.g. `item`)
-    → commit-time create is the original bare form, byte for byte. Guards
-    (甲): non-bridge entities must render identically to before cmd_614."""
+    → commit-time create is the original bare form, byte for byte. Guard:
+    non-bridge entities must render identically to before cmd_614."""
     ctx = _ctx()  # _BASE_CTX carries no one_to_one_pre_creates/fk_data_lines
     rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
     assert "await tx.test_entity.create({ data: action.data as any });" in rendered
@@ -388,7 +388,7 @@ def test_create_with_auto_create_oto_rels_prepends_bridge_pre_create(env):
     create data alongside the dry-run-computed action.data — mirroring
     service.ts.jinja2's one_to_one_pre_creates / parent_data_obj wiring via
     the same shared context vars (build_context.py), not a hand-listed
-    entity name. Guards (乙): x-approval import create must populate
+    entity name. Guard: x-approval import create must populate
     approvable_id instead of failing commit-time with a missing-FK error."""
     ctx = _ctx(
         one_to_one_pre_creates=(
@@ -570,7 +570,7 @@ def test_format_label_value_not_imported_when_no_spec_needs_it(env):
 
 
 def test_format_label_value_imported_when_composite_spec_needs_it(env):
-    """cmd_621 regression guard (甲 direction): a composite labelField whose
+    """cmd_621 regression guard (import-present direction): a composite labelField whose
     import_label_expr calls formatLabelValue (real case: proj_g
     goods_receipt_line's product.code + lot_number + expiration_date, which
     broke PR#16's TS build with 'Cannot find name formatLabelValue') must
@@ -594,7 +594,7 @@ def test_format_label_value_imported_when_composite_spec_needs_it(env):
 
 
 def test_format_label_value_import_absent_when_flag_false_even_with_composite_spec(env):
-    """乙 direction, isolating the flag itself: import_uses_format_label_value
+    """The import-absent direction, isolating the flag itself: import_uses_format_label_value
     is the sole gate on the IMPORT STATEMENT — a composite spec present with
     the flag left False (e.g. a build_context.py regression that forgets to
     set it) must still omit the import line, even though spec.import_label_expr

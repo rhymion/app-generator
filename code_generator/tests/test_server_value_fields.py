@@ -16,7 +16,7 @@ Verifies:
     resolution + an "overridden" flag for the REST transparency response.
   - Both forms make the field readonly (excluded from form input, protected
     by the existing PUT AP-3=B reject, excluded from the update SET clause).
-  - CREATE-time x-readonly guard (cmd_565 乙): a *plain* readonly field (no
+  - CREATE-time x-readonly guard (cmd_565): a *plain* readonly field (no
     x-server-value) is hard-rejected if the client supplies any value on
     create, via both the REST route and the server action — and x-server-value
     fields are exempted from that same generic reject (they have their own
@@ -138,7 +138,7 @@ class TestServerValueStringForm:
         assert "applicant_id" not in ctx["parent_data_obj"]
 
     def test_excluded_from_generic_create_reject(self):
-        """乙's guard is for plain readonly fields only — server-value fields
+        """The CREATE-time guard is for plain readonly fields only — server-value fields
         have their own resolution and must never appear in this list."""
         ctx = build_context(_entity(), _schema("actor"))
         assert "applicant_id" not in ctx["readonly_fields_create_reject"]
@@ -272,7 +272,7 @@ class TestApiRoutePostRendering:
 
 
 # ---------------------------------------------------------------------------
-# cmd_565 乙: CREATE-time readonly guard (plain readonly fields, REST)
+# cmd_565: CREATE-time readonly guard (plain readonly fields, REST)
 # ---------------------------------------------------------------------------
 
 class TestReadonlyCreateRejectRest:
@@ -310,7 +310,7 @@ class TestReadonlyCreateRejectRest:
 
 
 # ---------------------------------------------------------------------------
-# cmd_565 乙: CREATE-time readonly guard (server action)
+# cmd_565: CREATE-time readonly guard (server action)
 # ---------------------------------------------------------------------------
 
 class TestReadonlyCreateRejectAction:

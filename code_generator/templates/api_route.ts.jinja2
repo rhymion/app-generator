@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 {% if readonly_fields_create_reject %}
     // Read-only fields can never be supplied by the client, even on create
-    // (cmd_565 乙 — CREATE has no existing row to compare against, unlike
+    // (cmd_565 — CREATE has no existing row to compare against, unlike
     // PUT's AP-3=B, so any submitted value is rejected outright).
 {% for f in readonly_fields_create_reject %}
     if (body.{{ f }} !== undefined) {

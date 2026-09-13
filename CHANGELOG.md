@@ -6,6 +6,21 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`x-write-locked-values` now defaults to *unlocked* on a proxy view (a screen whose `allOf`
+  references another screen entity rather than the raw model directly), instead of silently
+  inheriting the raw entity's locked-value set.** A proxy view exists precisely to bypass the
+  restrictions of the original screen, so unconditionally inheriting its value lockdown defeated
+  that purpose. A proxy view may still opt a value back into lockdown by declaring
+  `x-write-locked-values` on itself; the canonical screen's own behavior and the raw entity's
+  `x-approval`-derived locked values are unchanged. `validate.py` section 11a's collision check
+  (`submit_on`/`on_withdrawn`/non-terminal `on_rejected` vs. `x-write-locked-values`) is fixed in
+  the same change to resolve `x-approval` via the declaration's actual backing raw model rather
+  than the declaring (possibly proxy-view) entity's own definition, which would otherwise always
+  be empty for a proxy view and silently let every collision through; section 11's field-existence/
+  enum check now uses the allOf-merge-aware `get_entity_properties()` for the same reason. Verified
+  byte-identical generated output against an existing consumer schema's 3 `x-approval` entities
+  (no behavior change), plus a scratch-entity run through both the REST and Server Action write
+  paths confirming the new unlock-by-default behavior end to end.
 - **Post-decision row freeze now includes a *terminal* rejection, not just approval.**
   `derive_post_decision_freeze_values()` (`code_generator/helpers/schema_helpers.py`), consumed by
   `approval_lockdown_context()`, extends the existing post-approval edit/delete/invalidate
@@ -446,7 +461,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 - **A readonly field (`x-readonly` / `x-readonly-fields`) is no longer read
   from client input at all on save -- not FormData, not a POST/PUT body, not
-  even as a generated service function's own parameter (cmd_945).**
+  even as a generated service function's own parameter.**
   Previously, `_build_form_data_gets()` still emitted a `data.get(<field>)`
   line for every readonly field, and the REST routes still destructured it
   off the request body -- the value never reached Prisma (an existing,

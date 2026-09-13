@@ -37,7 +37,7 @@ jobs:
           submodules: recursive
       - name: Diff this file's body against app-generator's canonical source
         # Machine-checked, not a human "I copied it verbatim" claim — same
-        # reasoning as the detect-changes job below (cmd_498: "a condition
+        # reasoning as the detect-changes job below ("a condition
         # the machine doesn't see is a hole, not an exemption"). Both sides
         # are extracted from "name: CI" onward: this file's own body (per
         # the canonical source's header, everything from that line IS what
@@ -79,7 +79,7 @@ jobs:
           fetch-depth: 0
       - name: Classify this diff as docs-only or not (machine-checked path judgment)
         # Path-based, not a human "this is docs-only" claim in the commit
-        # message or PR text (cmd_498: "a condition the machine doesn't see
+        # message or PR text ("a condition the machine doesn't see
         # is a hole, not an exemption"). e2e-tests below is gated on this
         # job's output via needs:+if:, not a top-level `paths-ignore:`
         # trigger filter — paths-ignore would make the workflow (and its

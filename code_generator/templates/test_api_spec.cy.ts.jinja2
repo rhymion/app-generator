@@ -20,7 +20,7 @@ function _stripRoundTripUnimportableCsvColumns(csv: string): string {
 }
 {% endif %}
 
-// FK Permission / Cross-org Test Coverage (cmd_520 batch A): 7.3(PUT denied)={{ 'yes' if can_edit else 'no(can_edit=false)' }}, 7.4(DELETE denied)={{ 'yes' if can_delete else 'no(can_delete=false)' }}, 7.5(export denied)={{ 'yes' if (can_list and can_export) else 'no(can_export=false)' }}, 7.6(import denied)={{ 'yes' if import_eligible else 'no(import_eligible=false)' }}, G3(cross-org isolation)={{ 'yes' if should_filter_by_org else 'no(should_filter_by_org=false)' }}
+// FK Permission / Cross-org Test Coverage: 7.3(PUT denied)={{ 'yes' if can_edit else 'no(can_edit=false)' }}, 7.4(DELETE denied)={{ 'yes' if can_delete else 'no(can_delete=false)' }}, 7.5(export denied)={{ 'yes' if (can_list and can_export) else 'no(can_export=false)' }}, 7.6(import denied)={{ 'yes' if import_eligible else 'no(import_eligible=false)' }}, G3(cross-org isolation)={{ 'yes' if should_filter_by_org else 'no(should_filter_by_org=false)' }}
 
 describe('API: {{ title }}', () => {
   beforeEach(() => {
@@ -797,7 +797,7 @@ describe('API: {{ title }}', () => {
     // foreign organization (orgB) the actor does not belong to — the PUT
     // analogue of G3.1's POST-with-foreign-organization_id check. Expected
     // response is unified to 404 (existence hidden), matching G3.1-G3.3's
-    // policy (cmd_520/PR#239): a foreign org_id must never be distinguishable
+    // policy: a foreign org_id must never be distinguishable
     // from a not-found response.
 {% if primary_is_fk and not primary_fk_is_ua %}
     it('G3.4 PUT setting organization_id to a foreign org returns 404 (existence hidden)', () => {

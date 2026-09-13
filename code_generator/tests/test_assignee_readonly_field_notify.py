@@ -4,7 +4,7 @@ exclusion that broke service.ts.jinja2's should_filter_by_org guard
 (fixed by cmd_946d / org_id_client_writable -- see
 test_org_readonly_field_write_guard.py) also breaks the assignee
 notification trigger -- a separate hardcoded reference in the same
-template, discovered when the Lord hit it live in proj_h
+template, discovered when this was hit live in proj_h
 (service_request_offer_response, which declares assignee_id in
 x-readonly-fields).
 
@@ -16,9 +16,9 @@ exists as a parameter for an entity with assignee_id in x-readonly-fields
 -- TS2304, the same failure class as organizationId, just a different
 identifier.
 
-Fix direction (the Lord's own guidance, cmd_947): do NOT just delete the
+Fix direction (per cmd_947): do NOT just delete the
 reference (that would silently drop the assignment notification -- "gate
-green, harm silent", the worst kind of failure per his own standing
+green, harm silent", the worst kind of failure per the project's standing
 doctrine). Read the value off the PERSISTED row instead of a client
 parameter:
   - add{Parent}(): the transaction's returned object now carries
@@ -149,7 +149,7 @@ def test_readonly_assignee_id_has_no_bare_parameter_reference():
 
 
 def test_readonly_assignee_id_notification_is_not_silently_dropped():
-    """The Lord's explicit anti-requirement: fixing the compile error must
+    """Explicit anti-requirement: fixing the compile error must
     not come at the cost of deleting the notify trigger outright. Both
     add() and update() must still call notify(...) for an assignee change,
     reading the value off the persisted row."""
