@@ -306,6 +306,35 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   the real `build_user_schema.py` -> `generate.py` -> `prisma generate` -> `tsc --noEmit`
   pipeline: the generated service's add/update functions no longer reference the child, `tsc`
   is clean, and no dead props remain.
+- **Two real-schema-only regressions from the independent-read-only-grid-child fix above
+  (issue #520/PR#530), plus a pre-existing, unrelated generated-test-helper defect it exposed
+  (issues #531, #532):**
+  - A generated Cypress test helper (`cypress/support/<entity>/helper.ts`) could throw
+    `ReferenceError` at runtime: the datagrid-child FK-dependency-extension loop in
+    `generators_test.py` re-derived a sibling FK's already-registered dep variable name as
+    `to_camel_case(<target>)` instead of looking it up, producing a dangling reference whenever
+    a self-referencing child shares that target through its own relations (e.g. a
+    `destination_bin_id -> bin` FK alongside a `parent_line_id` self-reference on the same
+    child). Pre-existing in `generators_test.py`, unrelated to PR#530 — reproduces identically
+    against the commit immediately before it.
+  - `normalizeChildRefs` could be imported into a generated `service.ts` with nothing left to
+    reference it: the import gate checked the unnarrowed `has_non_comment_ch` instead of
+    whether the actually-rendered `snapshot_child_mappings` (built from `write_ch`, which
+    PR#530 narrows) is non-empty.
+  - A generated `FormUpsert.tsx` could destructure unused `initial{Xxx}s`/`search{Xxx}Options`
+    props: `FormUpsertProps`' target-exclusion logic already dropped a target reachable only
+    through a readonly or undisplayed *parent-level* relation, but had no equivalent exclusion
+    for a target reachable only through a read-only independent grid child's *own* FK field.
+  Both PR#530-introduced cases are fixed by keying off the actual narrowed
+  (`write_ch`/`readonly_indep_grid_ch`-aware) state instead of the unnarrowed one; the
+  pre-existing helper.ts defect is fixed by looking up each FK dependency's registered variable
+  name instead of re-deriving it.
+- **An embedded DataGrid child's column order now follows its own `x-display.form` declaration
+  when present** — order only; which columns are shown is unchanged (still governed by the
+  existing exclusion rules: `id`/`{parent}_id`/`created_at`/`updated_at`/`creator_id`,
+  `one-to-one_bridge` FKs, unrelated `*able_id` FKs). Any field not named in `x-display.form`
+  keeps being shown, appended after the named ones in their original schema order; a name in
+  `x-display.form` this child has no property for (e.g. parent info) is never newly shown.
 - **The generated submit-for-approval Server Action (`submit_for_approval.ts.jinja2`,
   the standalone action for `x-approval.submit_on` — the only path an
   `edit: false` entity has to ever reach it) no longer throws across the
