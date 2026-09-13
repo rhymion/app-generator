@@ -283,6 +283,29 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   (4 dedicated tests) is removed with it.
 
 ### Fixed
+- **An independent child (own `x-generate` permitting new/edit) embedded in a parent with a
+  non-`list` `x-outputType` is now read-only from the parent's edit form too, not just its view
+  page** (issue #520/PR#528 follow-up). PR#528's own verification above covered only the view
+  page's `FieldsViewGrid` rendering; the edit page (`FormUpsert.tsx`) still built a fully
+  writable `DataGridClient` for such a child (add/edit/delete, `EntityAutocompleteCellConfig`
+  FK pickers), and the parent's own service still emitted `child_nested_create`/
+  `child_nested_update` for it. Root cause: `build_context.py`'s `is_independent` flag was
+  gated on `output_type == 'list'` -- harmless before PR#528 (that combination was previously
+  impossible), stale once PR#528 allowed it. Fixed by removing the gate and narrowing a new
+  `write_ch` (excludes an independent, non-connect child from every write-path site regardless
+  of output_type) while leaving the broader `embedded_ch`/`ctx['non_comment_ch']` (needed for
+  column-hook generation) unchanged; `FormUpsert.tsx` now renders such a child via the same
+  read-only `FieldsViewGrid` + `use{Prop}Columns(false)` FormView.tsx already used. Two related
+  dead-prop leaks sharing the same root cause (a self-referencing child's own relation target
+  leaking into places that assume a target is never the child's own name) were found and fixed
+  alongside it: `context.py`'s `all_option_targets`/`child_rel_targets` and
+  `build_context.py`'s `_get_selection_targets()` both produced a dead
+  `initial{Child}s`/`search{Child}Options` `FormUpsertProps` pair nothing in the generated
+  component ever used. Verified end-to-end through an isolated scratch fixture (independent
+  non-list child sharing an FK name with its parent, plus a self-referencing FK) run through
+  the real `build_user_schema.py` -> `generate.py` -> `prisma generate` -> `tsc --noEmit`
+  pipeline: the generated service's add/update functions no longer reference the child, `tsc`
+  is clean, and no dead props remain.
 - **The generated submit-for-approval Server Action (`submit_for_approval.ts.jinja2`,
   the standalone action for `x-approval.submit_on` — the only path an
   `edit: false` entity has to ever reach it) no longer throws across the

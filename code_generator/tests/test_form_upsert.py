@@ -839,7 +839,14 @@ class TestChildGridCreateNewIntegerDefault:
                                    "delete": True, "api": False, "test": False},
                     "allOf": [{"$ref": "#/definitions/__dashboard"}],
                 },
-                "__widget": {
+                # widget deliberately has NO x-generate (no own page): this test
+                # exercises the DataGrid-child createNew() default-value seed,
+                # which only runs for a child still embedded EDITABLE via the
+                # parent. A child with its own x-generate is independent and
+                # (cmd_1047 "Otsu" ruling) read-only from the parent regardless
+                # of output_type -- it would never reach child_grid_setup's
+                # createNew()/_new_prop_val() call at all.
+                "widget": {
                     "type": "object",
                     "required": ["id", "chart_type", "dashboard_id"],
                     "properties": {
@@ -867,11 +874,6 @@ class TestChildGridCreateNewIntegerDefault:
                             },
                         },
                     },
-                },
-                "widget": {
-                    "x-generate": {"list": True, "view": True, "new": True, "edit": True,
-                                   "delete": True, "api": False, "test": False},
-                    "allOf": [{"$ref": "#/definitions/__widget"}],
                 },
             }
         }
