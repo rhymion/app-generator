@@ -21,7 +21,7 @@ import {
 
 const API_BASE = '/api/approval_flow';
 
-// FK Permission / Cross-org Test Coverage (cmd_520 batch A): 7.3(PUT denied)=yes, 7.4(DELETE denied)=yes, 7.5(export denied)=yes, 7.6(import denied)=yes, G3(cross-org isolation)=no(should_filter_by_org=false)
+// FK Permission / Cross-org Test Coverage: 7.3(PUT denied)=yes, 7.4(DELETE denied)=yes, 7.5(export denied)=yes, 7.6(import denied)=yes, G3(cross-org isolation)=no(should_filter_by_org=false)
 
 describe('API: Approval Flow (hand-written port, cmd_665)', () => {
   beforeEach(() => {

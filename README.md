@@ -579,7 +579,6 @@ All architectural documentation lives in `docs/knowledge/`:
 | Dashboard charts (x-display.dashboard) | ✅ Implemented |
 | Inventory reservation (x-reservation) | ✅ Implemented |
 | Inventory ledger (x-ledger-source) | ✅ Implemented |
-| Receiving workflow | ✅ Implemented |
 | Split action (x-splittable) | ✅ Implemented |
 | Approval-lines helpers (x-approval-lines) | ✅ Implemented |
 | Terminal rejection (x-readonly-fields) / rejection event dispatch (on_rejected_dispatch) | ✅ Implemented |

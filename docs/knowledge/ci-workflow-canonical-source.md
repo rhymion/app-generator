@@ -299,13 +299,31 @@ today.
 
 Separate from the consumer-side gate documented above: this repo's own
 `.github/workflows/ci.yml` gained the same `concurrency` +
-`detect-changes`/`needs:`+`if:` shape, gating only its own
-`e2e-tests` job — `lint`/`unit-tests`/`audit`/`audit-full-scope`/
-`pytest`/`mention-gate-fixture`/`decimal-gate-fixture`/
-`oto-mandatory-gate-fixture` always run regardless of `docs_only`,
-both because `e2e-tests` is the dominant cost here too (~57-60 min)
-and as a safety net against a path-judgment mistake in this
-job.
+`detect-changes`/`needs:`+`if:` shape, gating **only** its own
+`e2e-tests` job (verified: it is the only job in the file carrying
+`needs: detect-changes`) — every other job always runs regardless of
+`docs_only`. **This list has grown since it was first written and will
+keep growing** as new fixture-gate jobs are added (each x-* generator
+feature tends to get its own); re-verify against the current job list
+in `.github/workflows/ci.yml` rather than trusting a name enumerated
+here. As measured 2026-09-12: `example-file-credential-leak-check`,
+`lint`, `unit-tests`, `audit`, `audit-full-scope`, `pytest`,
+`mention-gate-fixture`, `mention-gate-plain-image-fixture`,
+`decimal-gate-fixture`, `oto-mandatory-gate-fixture`,
+`oto-decimal-gate-fixture`, `chart-decimal-gate-fixture`,
+`chart-scalar-gate-fixture`, `approval-lockdown-gate-fixture`,
+`payment-gate-fixture`, `direct-attachment-gate-fixture`, and
+`uri-kind-gate-fixture`. Gating only `e2e-tests` (rather than a
+`paths-ignore:`-style skip of the whole workflow) was originally
+because `e2e-tests` was the dominant cost here too; measured directly
+against 4 real runs on `develop` (2026-09-10/11, `gh run view
+--json jobs`), the `E2E Tests` job itself now completes in ~11-13
+minutes, not the ~57-60 min this section previously stated (that
+older figure may predate a since-landed speedup, or was simply wrong
+when written — not established which) — the remaining jobs stay
+gated-off-of-`docs_only` as a safety net against a path-judgment
+mistake in `detect-changes`, independent of whichever number is
+currently accurate for any one job's wall-clock cost.
 
 **This repo's exempt (docs-only) path list differs from the consumer
 list above in two ways:**
@@ -469,20 +487,31 @@ is nothing a partial/structural check would be protecting that a full
 match doesn't already cover for free.
 
 **Internal cmd-number annotations (e.g. task-tracking references
-found in the first distributed copy) — not a vocabulary violation**:
-checked against `scripts/vocab_patterns.sh` (this control repo's SoT
-for internal-vocabulary leaks into public repos), which has no pattern
-matching a bare `cmd_NNN` token in file *content* — only a cmd number
-immediately fused to a round-label kanji character is a content-leak
-pattern there, and a separate filename-only pattern for `cmd_NNN`
-matches only a file's *path*, never its body. A bare `cmd_NNN`-shaped token sitting
-inside a YAML comment matches neither. This is consistent with public
-commit titles in this repo's own history already carrying the same
-shape (`feat(scripts/cmd_NNN): ...`) without being flagged. So: the
-reason those annotations must not survive in a consumer's copy is
-**only** "the canonical source doesn't have them and the file is a
-verbatim copy by design" (enforced by the full-body match above) — not
-an internal-vocabulary rule. A future distribution or review of this
-file should not cite vocabulary-leak policy as additional justification
-for stripping them; the drift check alone is sufficient and correctly
-scoped.
+found in the first distributed copy) — not a vocabulary violation for
+*this* file**: checked against `scripts/vocab_patterns.sh` (this
+control repo's SoT for internal-vocabulary leaks into public repos).
+**Correction to this section's original claim**: it is no longer
+accurate to say this script "has no pattern matching a bare `cmd_NNN`
+token in file *content*" — `scripts/vocab_patterns.sh`'s
+`VOCAB_PROSE_ONLY_PATTERNS` array (added by a later change than this
+section, `[^A-Za-z]cmd_[0-9]+`) does match a bare `cmd_NNN` in
+content, but only when the write target's path is a "prose path"
+(`docs/*`, `README*`, `CHANGELOG*` at the target repo root — see that
+array's own header comment in `vocab_patterns.sh`); every other
+target, including `.github/workflows/ci.yml`, is explicitly exempted
+from it. So the underlying conclusion for *this specific file* still
+holds — a bare `cmd_NNN`-shaped token inside `ci.yml`'s own YAML
+comments is not classified as a prose path and matches none of
+`vocab_patterns.sh`'s three arrays (the kanji-fused content pattern,
+the filename-only pattern, or the prose-only content pattern) — but
+the broader "no pattern... in file content at all" framing is stale
+and should not be repeated or generalized to other file types. This is
+consistent with public commit titles in this repo's own history
+already carrying the same shape (`feat(scripts/cmd_NNN): ...`) without
+being flagged. So: the reason those annotations must not survive in a
+consumer's copy of `ci.yml` is **only** "the canonical source doesn't
+have them and the file is a verbatim copy by design" (enforced by the
+full-body match above) — not an internal-vocabulary rule. A future
+distribution or review of this file should not cite vocabulary-leak
+policy as additional justification for stripping them; the drift check
+alone is sufficient and correctly scoped.

@@ -202,15 +202,27 @@ guard to match):
 
 - **`actions.ts.jinja2`**: `getAssociatedOrganizations` was imported
   whenever `should_filter_by_org && (can_create || can_update ||
-  can_delete)`, but its only call site is inside the `can_delete` branch.
-  An org-scoped entity that is create/update-able but not delete-able (the
-  common x-approval shape — approvable records are typically undeletable)
-  got an unused import. `getSessionUserIdOrThrow`/`requirePermission` had
-  the opposite problem: imported unconditionally, but only referenced
-  inside the upsert body (`can_create`/`can_update`), the invalidate
-  action (`can_invalidate`), or the comment-reaction action
+  can_delete)`, but its only *statically visible* call site is inside the
+  `can_delete` branch. An org-scoped entity that is create/update-able but
+  not delete-able (the common x-approval shape — approvable records are
+  typically undeletable) got an unused import. `getSessionUserIdOrThrow`/
+  `requirePermission` had the opposite problem: imported unconditionally,
+  but only referenced inside the upsert body (`can_create`/`can_update`),
+  the invalidate action (`can_invalidate`), or the comment-reaction action
   (`has_commentable`) — an entity with none of those (e.g. a
   create/update/delete-only settings-shaped entity) got both unused.
+  >
+  > **Correction (a later fix, subtask_1005/PR#505)**: narrowing the guard
+  > to `can_delete` alone was itself wrong — it missed that
+  > `getAssociatedOrganizations` is also called from the `can_update`
+  > branch's upsert body, reached only through the opaque
+  > `{{ upsert_body }}` placeholder (a Python-assembled string, not static
+  > Jinja text — the same class of blind spot as the `form_view.tsx.jinja2`
+  > `CommentListWrapper`/`MentionText` mistake described further below).
+  > A delete-disabled but update-enabled, org-scoped entity (the common
+  > x-approval shape this very fix was written for) lost the import
+  > entirely, breaking the TS build with `TS2304` across several entities.
+  > The guard is now `should_filter_by_org and (can_update or can_delete)`.
 
 - **`service.ts` utility imports (`generators.py`)**: `normalizeChildRefs`
   was imported whenever the entity has embedded children

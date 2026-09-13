@@ -98,24 +98,26 @@ The project uses `proxy.ts` as its middleware entry point (not `middleware.ts`).
 2. **Auth protection** — non-public paths require a valid JWT; unauthenticated users are redirected to `/{locale}/login`
 
 ```ts
-// proxy.ts (simplified)
+// proxy.ts (simplified — current implementation wraps with Auth.js v5's
+// `auth()` from `auth.ts`'s `NextAuth(authConfig)`, not the older next-auth
+// `getToken()` helper; the real file also handles /api/auth/* rate-limiting
+// and an MFA challenge redirect, omitted here)
 const intlMiddleware = createIntlMiddleware(routing);
 const PUBLIC_PATHS = ['/login', '/register'];
 
-export async function proxy(req: NextRequest) {
+export const proxy = auth((req) => {
   // determine path without locale prefix
   const isPublicPath = PUBLIC_PATHS.some(p => pathnameWithoutLocale === p);
   const intlResponse = intlMiddleware(req);   // handles locale redirect/rewrite
 
   if (isPublicPath) return intlResponse;
 
-  const token = await getToken({ req, secret: process.env.AUTH_SECRET });
-  if (!token) {
+  if (!req.auth) {
     url.pathname = `/${locale}/login`;
     return NextResponse.redirect(url);
   }
   return intlResponse;
-}
+});
 
 export const config = {
   matcher: ['/((?!api|_next|_vercel|.*\\..*).*)'],
@@ -185,23 +187,20 @@ export default async function LocaleLayout({ children, params }) {
 
 2. Create the message file `messages/fr.json` with all required keys (copy `en.json` as a starting template).
 
-3. Update the `localeLabels` map in `app/[locale]/@header/page.tsx`:
-   ```ts
-   const localeLabels: Record<string, string> = {
-     en: "EN",
-     ja: "日本語",
-     fr: "FR",
-   };
-   ```
-
-4. Update `i18n/request.ts` — widen the type guard to include the new locale:
+3. Update `i18n/request.ts` — widen the type guard to include the new locale:
    ```ts
    if (!locale || !routing.locales.includes(locale as 'en' | 'ja' | 'fr')) {
    ```
 
-That's all — next-intl handles the rest automatically.
+That's all — next-intl handles the rest automatically. The header's locale
+switcher (`app/[locale]/@header/page.tsx`) no longer needs a manual update:
+a hardcoded `localeLabels` map (`en: "EN"`, `ja: "日本語"`, ...) was replaced
+by `getLocaleLabel()`, which derives each option's display name from
+`Intl.DisplayNames` — adding a locale to `routing.locales` above is the only
+change needed to expose it in the picker (commit `237b8c6b`, "Replace EN/JA
+buttons with locale autocomplete in header").
 
-> This 4-step procedure is for the **site UI locale** (chrome, labels,
+> This 3-step procedure is for the **site UI locale** (chrome, labels,
 > forms). It does not apply to Terms of Service / Privacy Policy content
 > locales, which are resolved independently of `routing.locales` — see
 > [legal-documents.md](./legal-documents.md#design-document-locale-is-decoupled-from-the-site-ui-locale).

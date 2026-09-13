@@ -199,7 +199,7 @@ def _child_svc(has_submit_on: bool = True):
 
 # ---------------------------------------------------------------------------
 # 変更1: post-create approval_request loop value-checks submit_on lines
-# (cmd_871 [乙]: a bare call -- no reservation_config, matching the update
+# (cmd_871: a bare call -- no reservation_config, matching the update
 # call site -- generates the value-checked block instead of skipping
 # outright; only a line actually created in its submit_on state fires
 # approval_request creation.)
@@ -400,7 +400,7 @@ class TestReservationSpecContextSubmitOn:
 
 
 # ---------------------------------------------------------------------------
-# cmd_871 [乙]: a line created directly in its submit_on state must fire
+# cmd_871: a line created directly in its submit_on state must fire
 # both approval_request creation AND the reservation claim in the same
 # edge -- previously the whole block was skipped by declaration alone,
 # leaving a "pending" line with neither an approval_request nor a

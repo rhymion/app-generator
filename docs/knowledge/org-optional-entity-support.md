@@ -17,7 +17,7 @@ about the schema shape alone.
 ```typescript
 const _createOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
 if (!_createOrgIds.includes(organizationId)) {
-  throw new ApiError(404, 'Not found');
+  throw new AppError('NOT_FOUND', 'Not found');
 }
 ```
 

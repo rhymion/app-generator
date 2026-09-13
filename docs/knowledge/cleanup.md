@@ -54,10 +54,20 @@ cleanup preserves the file.
 
 After all listed files are removed, cleanup deletes the manifest itself.
 
-Appended files (`messages/*.json`, `lib/site-config.ts`,
-`app/[locale]/@sidebar/page.tsx`) are **never in the manifest** and are never
-deleted outright. Cleanup strips only the generator-injected entries from them,
-preserving any surrounding content you wrote by hand.
+`lib/site-config.ts` and `app/[locale]/@sidebar/page.tsx` are **never in the
+manifest** and are never deleted outright — cleanup strips only the
+generator-injected nav entries from them, preserving any surrounding content
+you wrote by hand.
+
+`messages/*.json` (`en.json`, `ja.json`, ...) is handled differently: cleanup
+does **not touch it at all**, not even at the entry level. It carries
+human-translated content, and cleanup has no way to distinguish "entity
+genuinely removed from the project" from "this run also happens to be tearing
+down an unrelated temp fixture" — deleting by current-schema-membership
+previously wiped translations wholesale. `generators_i18n.py`'s own
+`_update_json` already treats these files as append-only (never removes an
+existing key); `cleanup.py` honors the same invariant by leaving them alone
+entirely.
 
 ### 2. Schema-derived fallback (legacy)
 
@@ -76,8 +86,8 @@ The manifest path is always preferred; the fallback is a safety net for old tree
 |-----------|---------------|-------------|
 | **Hash guard** (manifest mode) | All manifest-listed files | File is kept when `sha256(on-disk) ≠ sha256(recorded)` — any edit, even reformatting, keeps the file. |
 | **`AUTO-GENERATED` marker check** | Schema-global files (e.g. `lib/dashboard/catalog.ts`) | File is deleted only when the first five lines contain `AUTO-GENERATED`. Strip that header to keep your fork. |
-| **Boilerplate equality check** | `lib/<entity>/service_after_create.ts` | Deleted only when the file still exactly matches the original stub template. Any user content preserves it. |
 | **`--keep-stubs` flag** | `lib/<entity>/service_validation.ts`, `components/<entity>/form_validation.ts` | These stubs are skipped when `--keep-stubs` is passed — useful if you have not yet customized them but do not want to lose an empty file you rely on. |
+| **Permanent write-once hook stub (never swept)** | `lib/<entity>/service_after_create.ts` and its seven siblings (`service_after_update.ts`, `service_after_delete.ts`, `service_validation_delete.ts`, `service_after_submit.ts`, `service_before_approve.ts`, `service_before_reject.ts`, `service_before_withdraw.ts`), plus `service_validation_custom.ts` | None of these are ever deleted by cleanup, even under `--prune-orphans` on an orphaned entity — a hand-customized copy is indistinguishable from a pristine one without re-rendering it per entity, unlike the true boilerplate stubs above. |
 | **`HANDWRITTEN_ALLOWLIST`** | Files listed in `cleanup.HANDWRITTEN_ALLOWLIST` | Never deleted by `--prune-orphans`, regardless of schema state. |
 
 ---
@@ -111,7 +121,6 @@ any entity in the current schema, then deletes them.
 |-------------|-----------------|-------|
 | `lib/<entity>/types.ts`, `getters.ts`, `actions.ts`, `service.ts`, `chart-getters.ts` | Presence of `types.ts` or `getters.ts` in the directory | Identifies an entity lib dir; system lib dirs lack these names and are skipped. |
 | `lib/<entity>/service_validation.ts` | Same detection; skipped if `--keep-stubs` | |
-| `lib/<entity>/service_after_create.ts` | Same detection; boilerplate equality check applies | Kept if the user customized it. |
 | `components/<entity>/FormUpsert.tsx`, `FormView.tsx` | Presence of `FormUpsert.tsx` or `FormView.tsx` | |
 | `components/<entity>/form_validation.ts` | Same detection; skipped if `--keep-stubs` | |
 | `components/<entity>/column_def.tsx` | Any components dir not in schema, or entity whose children list is now empty | |

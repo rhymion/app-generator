@@ -43,11 +43,19 @@ which Prisma also rejects when serializing the `DateTime` argument.
 
 ## Why this shape (non-nullable + not required) always has a default
 
-`derive_raw_entity`'s only path into the JSON schema's `required:` list is
-`not pf.nullable and not pf.has_default` — so a field that's DB-level
+`derive_raw_entity` (`code_generator/schema_deriver.py:478`) adds a field to
+the JSON schema's `required:` list when `forced_required or (not pf.nullable
+and not pf.has_default)` — `forced_required` is a per-field `_required`
+override escape hatch for the rare case where a Prisma-level default exists
+but the field is still a genuine product-level requirement (e.g.
+`attachment.type`, which has `@default(0)` *and* is required). That escape
+hatch only ever pulls a field **into** `required:`, never excludes one — so
+the contrapositive this doc relies on still holds: a field that's DB-level
 `NOT NULL` but excluded from `required:` necessarily carries a Prisma
-`@default(...)` (static, or dynamic like `now()`). That default is what
-makes "cleared" a legal state to fall back to instead of a hard rejection.
+`@default(...)` (static, or dynamic like `now()`), because if it didn't, the
+`not pf.nullable and not pf.has_default` branch would have added it. That
+default is what makes "cleared" a legal state to fall back to instead of a
+hard rejection.
 
 ## The fix (single location, `_build_form_data_gets`)
 

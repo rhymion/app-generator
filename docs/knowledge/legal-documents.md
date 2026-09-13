@@ -14,8 +14,10 @@ document itself (`Legal.templateDisclaimer`), not only here.
 
 This is the key decision and the reason these pages don't follow the normal
 ["Adding a New Locale"](./i18n-locale-routing.md#adding-a-new-locale)
-4-step procedure (editing `i18n/routing.ts`, `i18n/request.ts`, the header's
-`localeLabels`, etc).
+3-step procedure (editing `i18n/routing.ts`, adding `messages/<locale>.json`,
+widening the `i18n/request.ts` type guard — the header's locale switcher no
+longer needs a manual update since `localeLabels` was replaced by
+`getLocaleLabel()`, see that doc for the current step count and history).
 
 - The site's UI chrome locale (`en`/`ja`, gated by `i18n/routing.ts`) still
   only supports what's listed there — adding a legal-document translation

@@ -839,7 +839,7 @@ def actions_context(ctx: dict) -> dict:
     should_filter_by_org = bool(ctx.get('should_filter_by_org'))
     org_relationship_optional = bool(ctx.get('org_relationship_optional'))
 
-    # cmd_565 乙: mirror the REST POST guard — a plain read-only field can never
+    # cmd_565: mirror the REST POST guard — a plain read-only field can never
     # be supplied by the client, even on create. x-server-value fields are
     # excluded (own dedicated resolution, see service.ts.jinja2).
     readonly_fields_create_reject = ctx.get('readonly_fields_create_reject') or []
@@ -1627,7 +1627,7 @@ def _build_reservation_mutation_guard_update_ledger(rc: dict, model: str, schema
 
     A line counts as "allocated" once it has a non-null lineTransactionableField.
 
-    cmd_847 [丁]: when the lines_entity itself declares x-approval (e.g.
+    cmd_847: when the lines_entity itself declares x-approval (e.g.
     purchase_order.items -> purchase_per_item -- see get_approval_lines_props),
     delegates to _build_reservation_guard_and_resubmit_approval_lines instead
     of the bulk "any line allocated -> block every structural change" check
@@ -1710,7 +1710,7 @@ def _build_reservation_guard_and_resubmit_approval_lines(
     select_fields_str: str,
     select_fields_set: list[str],
 ) -> str:
-    """cmd_847 [丁] (per subtask_847e/847h design): per-line mutation guard +
+    """cmd_847 (per subtask_847e/847h design): per-line mutation guard +
     resubmission for x-approval-lines lines under a ledger_transaction
     reservation (e.g. purchase_order.items -> purchase_per_item).
 
@@ -1904,7 +1904,7 @@ def _build_reservation_guard_and_resubmit_approval_lines(
 
     return (
         f"    // Reservation mutation guard + resubmission (ledger_transaction,\n"
-        f"    // per-line -- cmd_847 [丁]): a line's own net ledger allocation\n"
+        f"    // per-line -- cmd_847): a line's own net ledger allocation\n"
         f"    // gates its own value change; a withdrawn, net-zero line resubmits.\n"
         f"    const _existingLines = await tx.{lines_entity}.findMany({{\n"
         f"      where: {{ {model}_id: id }},\n"
@@ -2500,7 +2500,7 @@ def _build_approval_lines_per_line_reservation_code(
 ) -> str:
     """Reservation claim for a single already-created line row.
 
-    cmd_871 [乙]: companion to _build_approval_lines_post_create_code's new
+    cmd_871: companion to _build_approval_lines_post_create_code's new
     value-checked submit_on branch — when a line is created directly in its
     submit_on state (e.g. purchase_per_item with status: 'pending'), the
     reservation claim must fire in the *same* edge as the approval_request,
@@ -2670,7 +2670,7 @@ def _build_approval_lines_post_create_code(
         lines_raw_def = _raw_def(lines_entity, schema or {})
         lines_submit_on_field, lines_submit_on_value = resolve_approval_submit_on(lines_raw_def)
         if lines_submit_on_field is not None:
-            # cmd_871 [乙]: a submit_on declaration on the lines entity no
+            # cmd_871: a submit_on declaration on the lines entity no
             # longer means "always skip" (that made a line created directly
             # in its submit_on state — e.g. purchase_per_item with
             # status: 'pending' — submit for approval without ever being
@@ -3087,7 +3087,7 @@ def _build_submit_for_approval_action_code(
         f"    if (!canSubmitForApproval(_latestRoundRequests)) {{\n"
         f"      return;\n"
         f"    }}\n"
-        # cmd_923b [変更8/乙7]: submit_for_approval previously wrote directly
+        # cmd_923b: submit_for_approval previously wrote directly
         # via tx.model.update() below with no validation at all -- the only
         # write path in the generator that skipped validateCustomRules
         # entirely. Routes through the SAME hook add{Parent}/update{Parent}
@@ -3172,7 +3172,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     # (this entity has no x-reservation of its own; has_reservation stays
     # False for it, so the import can't key off has_reservation here).
     reservation_error_import_model = ''
-    # cmd_847 [乙]: has_reservation AND has_submit_on moves the allocation
+    # cmd_847: has_reservation AND has_submit_on moves the allocation
     # phase from create-time (tx.model.create(), below) to the submit_on
     # edge -- a draft save must not reserve inventory the entity may never
     # actually submit for. Declaring submit_on with no reservation, or a
@@ -3540,7 +3540,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     flatten_nested_creates = '\n'.join(flatten_nested_create_lines)
 
     # Reservation count mode: build allocation code block
-    # cmd_847 [乙]: skipped here (and built into the submit_on edge trigger
+    # cmd_847: skipped here (and built into the submit_on edge trigger
     # instead, above) when has_submit_on -- see that comment for why.
     reservation_allocation_code = ''
     reservation_self_case_notifies = False

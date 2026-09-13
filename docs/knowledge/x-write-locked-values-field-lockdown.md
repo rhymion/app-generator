@@ -176,7 +176,7 @@ trigger (because the value it names can never legally reach the field in the fir
   (non-terminally) rejecting the entity impossible, and is almost certainly a typo. A
   **terminal** `on_rejected` is deliberately exempt from this check: freezing a terminal
   rejection's own value is exactly the use case `x-write-locked-values` is for, not a collision
-  (`code_generator/validate.py` lines 1995-2041).
+  (`code_generator/validate.py` lines 2001-2057, section "11a").
 
 Because `x-approval` is declared on an entity's raw (`__`-prefixed) backing model, not
 necessarily on a pass-through proxy view's own definition, the collision check above resolves

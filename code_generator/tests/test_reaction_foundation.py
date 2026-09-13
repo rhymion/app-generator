@@ -378,7 +378,7 @@ class TestExtractNamedConstants:
     def test_unmarked_candidate_fk_fails_closed(self):
         """An x-internal enum entity with a candidate non-user many-to-one FK
         but no `constantParent: True` declaration must raise, not silently fall
-        back to declaration order (cmd_794 AC4, option 乙)."""
+        back to declaration order (cmd_794 AC4)."""
         reaction = _reaction_defn()
         reaction["properties"]["comment_id"] = _fk_field("comment", label="id")  # unmark it
         schema = {

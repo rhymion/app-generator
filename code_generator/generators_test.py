@@ -5164,7 +5164,7 @@ def api_spec_context(
         'put_body_update': _put_body_impl('            '),
         'put_body_update_fk': _put_body_impl('              '),
         'i7_post_body': _post_body_impl(None, f'{I}      '),
-        # cmd_520 G3.1: same shape as i7_post_body, minus organization_id — the
+        # G3.1: same shape as i7_post_body, minus organization_id — the
         # G3.1 test injects its own (foreign) organization_id value after this.
         'org_cross_post_body': _post_body_impl('organization_id', f'{I}      '),
         # cmd_640 G3.4: same shape as put_body_update/put_body_update_fk, minus

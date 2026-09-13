@@ -136,8 +136,12 @@ user:
     password:
       x-custom-component:
         target: [upsert]   # rendered by custom component, not default input
-    image:
-      format: uri
+    image_id:
+      x-relationship:
+        target: attachment
+        type: direct        # this repo's own schema uses a direct-attachment FK for
+                             # user.image today (§5); a plain `image: {format: uri}`
+                             # string field is an equally valid alternative per-schema choice
   required: [roles]
   properties:
     roles:
@@ -255,12 +259,12 @@ cases, verified directly against `code_generator/build_user_schema.py`:
 **1. Auto-derived — zero `fields:` entry needed.** If the entity's `properties:` block declares
 the *resolved relation object* (e.g. `role: {$ref: "#/definitions/role"}`) and the corresponding
 FK scalar column (`role_id`) is **not** listed under `fields:` at all, `_auto_infer_fk_fields()`
-(`code_generator/build_user_schema.py:181-198`) detects it: it scans `properties:` for relation-
+(`code_generator/build_user_schema.py:204-224`) detects it: it scans `properties:` for relation-
 object entries, looks up the Prisma model's `relation_fk_fields` for that relation
 (`code_generator/schema_deriver.py`'s `PrismaField.relation_fk_fields`, populated by parsing the
 Prisma `@relation(fields: [...])` clause), and injects `{role_id: {"x-relationship": {}}}` into
 the field spec before derivation runs. `_derive_relationship()`
-(`code_generator/schema_deriver.py:332-356`) then fills the empty override with the only two
+(`code_generator/schema_deriver.py:413-445`) then fills the empty override with the only two
 Prisma-derivable defaults: `type: many-to-one` and `labelField: name`.
 
   This is the live default schema's actual `permission` entity — `role_id` never appears under
@@ -301,7 +305,7 @@ Prisma-derivable defaults: `type: many-to-one` and `labelField: name`.
 
   Even when `target` is written explicitly, it is **cross-checked, not trusted**: if it
   contradicts what Prisma's own `@relation` says, `build_user_schema.py` raises a
-  `SchemaDivergenceError` and the build fails (`code_generator/schema_deriver.py:338-343`). You
+  `SchemaDivergenceError` and the build fails (`code_generator/schema_deriver.py:421-424`). You
   cannot declare a wrong target; you can only omit it (Prisma-derived) or confirm it.
 
 **A note on scope**: an initiative to further reduce the user-visible surface of pure
@@ -323,7 +327,7 @@ logic `generate.py` runs against the intermediate schema. In outline:
    An entity with none of those keys (e.g. `comment`, `reaction`, `attachment`,
    `dashboard_widget` in the default schema) has nothing to split and is reconstructed as a
    single "standalone raw" entity with no `__`-prefixed sibling at all
-   (`build_user_schema.py:236-249`).
+   (`build_user_schema.py:259-284`, `_build_standalone_raw`).
 2. `extract_entities()` treats any `__`-prefixed key with a `properties.id` as a raw model
    (`generate_types.py:90-95`), then resolves each view key to its raw entity by walking `allOf`
    `$ref` chains (`_resolve_raw_key`, lines 101-118) — usually one hop (`role` → `__role`), two
@@ -377,7 +381,7 @@ current, not legacy. `setting` (§1.1) is the framework's own example: it's a se
 the `user` Prisma model, so it's written as `allOf: [{$ref: user}, {...}]` rather than being
 mistaken for `user`'s own raw/view pair. Writing an entity whose name **does** match a Prisma
 model in this `allOf` pass-through shape is rejected at build time
-(`_validate_entity_names`, `build_user_schema.py:148-165`) — the builder assumes any
+(`_validate_entity_names`, `build_user_schema.py:172-201`) — the builder assumes any
 Prisma-model-named entity is that model's own single-file definition, and an `allOf` wrapper
 there would silently discard your intent instead of erroring cleanly, so it errors instead.
 
@@ -510,6 +514,8 @@ enum ApprovalRequestStatus {
   approved
   rejected
   terminal_rejected
+  withdrawn
+  split_invalidated
 }
 
 model approval_request {
@@ -528,15 +534,17 @@ approval_request:
         - approved
         - rejected
         - terminal_rejected
+        - withdrawn
+        - split_invalidated
 ```
 
 Member names must be lowercase snake_case (`code_generator/validate.py` rejects anything else at
 generation time — see `docs/knowledge/enum-member-naming.md`).
 
-`schema_deriver.py`'s `_json_type_for()` (lines 238-249) checks whether the Prisma column's type
+`schema_deriver.py`'s `_json_type_for()` (lines 290-301) checks whether the Prisma column's type
 is a name found in `prisma_enums` (parsed from `enum { ... }` blocks in `schema.prisma`); if so
 the JSON Schema `type` is `"string"` and a `_prisma_native_enum_type` marker is attached to the
-property (`derive_property`, lines 288-295) so downstream TypeScript generation emits a literal-
+property (`derive_property`, line 347) so downstream TypeScript generation emits a literal-
 union type (`'pending' | 'approved' | ...`) instead of a generic `string`, and forms/DataGrids
 render translated labels keyed off the enum member names
 (`code_generator/generators_i18n.py`'s `_collect_native_enum_namespaces`,
@@ -584,25 +592,31 @@ transaction call — with the entity-level `x-write-locked-values` key; see
 
 Every entity automatically gets an `id` property (`properties["id"] = {"type": "string",
 "pattern": "^c[a-z0-9]{24,}$"}`, added unconditionally by `derive_raw_entity`,
-`schema_deriver.py:374`) — you never declare `id` under `fields:`. The Prisma counterpart must
+`schema_deriver.py:463`) — you never declare `id` under `fields:`. The Prisma counterpart must
 use `@id @default(cuid())`; the pattern is a CUID format check used only to identify the ID
 field, not for client validation.
 
 ### 4.5 `x-internal` Field Classification
 
-Setting `x-internal: true` on a field's `fields:` override marks it as internally managed. The
-generator excludes such fields from UI forms and list columns while keeping them in the Prisma
-model and writable by server actions.
+`x-internal` is an **entity-level key only** — every generator reference to it reads an entity
+definition (`generate_types.py`'s "Skip x-internal entities" check, its named-constant
+extraction for x-internal enum entities), never a property. Declaring it under a `fields:`
+override (`fields: {<col>: {x-internal: true}}`) is rejected by `validate.py` as a field-level
+misuse of an entity-level key — it is never a way to hide a single field.
 
-**Use cases:**
-- Fields the generator controls internally that users should not edit directly
-- Examples: reaction aggregation counters, system-generated metadata flags
+There is currently no dedicated flag for "hide this one scalar field from forms and list
+columns while keeping it in the Prisma model and writable by server-side code." The closest
+real tools, depending on what's actually needed:
+- **The field only needs to be non-editable, not invisible** (e.g. a counter users may see but
+  never set directly): use `x-readonly` / `x-readonly-fields` (§4.7) — the field stays visible
+  but is excluded from the client payload entirely, so only server-side code can change it.
+- **The field belongs on a support/bridge record that is never surfaced to users at all**
+  (e.g. `reaction`, `approvable`): give the whole *entity* `x-internal` (below), not the field.
 
-```yaml
-fields:
-  status_count:
-    x-internal: true   # managed by server action; hidden from forms and list columns
-```
+*(An earlier revision of this section presented the field-level form above as valid. The
+generator never read `x-internal` off a property — it silently did nothing — and a later
+fail-closed validation pass added the explicit rejection above so a schema author gets an
+error instead of a no-op.)*
 
 **`x-internal` at the entity level**
 
@@ -727,7 +741,7 @@ server-side guard. Treat DataGrid child fields as currently unprotectable by eit
 annotation. See `docs/knowledge/readonly-field-form-rendering.md` for the full rendering
 type-dispatch table and the cross-view scoping fix's test coverage.
 
-**Server-side invariant (cmd_945)**: for a parent-level readonly field (this section — not the
+**Server-side invariant**: for a parent-level readonly field (this section — not the
 DataGrid-child limitation above), the generated Server Action and REST routes never read the
 client's submitted value at all — not `data.get()` on the FormData, not a destructure off a
 POST/PUT body. The field is never a parameter of the generated service function either
@@ -1208,10 +1222,14 @@ model parent1_list {
 
 ### 7.3 Independent children (`x-generate` on child, `x-outputType: list` on parent)
 
-When a child entity has its own `x-generate` (its own list/view/edit pages), it must appear
-in the parent's `properties:` with `x-outputType: list`. The generator **validates** this:
-a child with `x-generate` that appears as `x-outputType: table` or `x-outputType: comments`
-is a configuration error.
+When a child entity has its own `x-generate` (its own list/view/edit pages), it appears in
+the parent's `properties:` with either `x-outputType: list` (this section) or any other
+non-`list`, non-`comments` `x-outputType` such as `None` (§7.4 below — a read-only embedded
+grid, regardless of the child's own new/edit/delete capability). The generator **validates**
+only one combination as a configuration error: a child with `x-generate` that appears with
+`x-outputType: comments` — the comment-thread rendering path is not the read-only grid used
+by every other non-`list` value, so it stays restricted to children that disable
+new/edit/delete entirely.
 
 ```yaml
 epic:
@@ -1219,7 +1237,7 @@ epic:
   properties:
     features:
       type: array
-      x-outputType: list     # required when child has x-generate
+      x-outputType: list     # editable/autocomplete embedding — see Rules 1-2 below
       items:
         $ref: "#/definitions/feature"
 ```
@@ -1297,6 +1315,44 @@ model bug {
 ```
 
 ---
+
+### 7.4 Read-only embedded grid for independent children (non-`list`, non-`comments` `x-outputType`)
+
+An independent child (has its own `x-generate`, its own list/view/new/edit/delete pages and
+API/Server Action routes) may also be embedded in the parent's view with any `x-outputType`
+other than `list` or `comments` (e.g. `None`) — regardless of whether the child's own
+`x-generate` permits new/edit/delete. Unlike §7.3's `x-outputType: list` case, this is not
+conditioned on the FK being mandatory or optional; it is always read-only:
+
+```yaml
+dashboard:
+  x-generate: { list: true, view: true, ... }
+  properties:
+    widgets:
+      type: array                # embedded (no x-generate) child — unaffected by this section
+      items:
+        $ref: "#/definitions/dashboard_widget"
+    scratch_children:
+      type: array
+      x-outputType: 'None'        # independent child, embedded read-only regardless of its own CRUD
+      items:
+        $ref: "#/definitions/scratch_child"
+```
+
+**Why this is always safe**: the parent's embedded display for any such `x-outputType`
+renders through the same read-only `FieldsViewGrid` (`components/_standard/
+FieldsViewGrid.tsx`) used for every other non-`list`, non-`comments` child — its columns are
+generated with `editable: false` hardcoded at the call site
+(`use{Prop}Columns(false)`), and `FieldsViewGrid` itself never renders Add/Edit/Delete UI. No
+write path is exposed by the embedding itself, no matter what the child's own `x-generate`
+declares. The child's own standalone CRUD routes (`app/api/{child}/...`,
+`lib/{child}/actions.ts`), if any, are generated independently and are the sole write path —
+unaffected by whether or how it is embedded in a parent's view.
+
+`x-outputType: comments` is the one exception that keeps the original restriction (a child
+with `x-generate` must disable new/edit/delete entirely to use it) — the comment-thread
+rendering path is not `FieldsViewGrid`, so an independently write-capable child there is
+unverified-safe and stays a configuration error (`generate_types.py`'s `extract_entities()`).
 
 ## 7.6 Polymorphic Bridge Children (`x-bridge`)
 
@@ -1444,11 +1500,15 @@ properties:
 | `list` | Many-to-many | Read-only list | Autocomplete — add/delete only (no edit) |
 | `list` | Independent child (has `x-generate`), **mandatory** FK | Read-only list | Read-only list — no buttons |
 | `list` | Independent child (has `x-generate`), **optional** FK | Read-only list | Autocomplete — add/delete only (no edit) |
+| any other value (e.g. `None`) | Independent child (has `x-generate`), any FK — see §7.4 | Read-only `FieldsViewGrid` | Read-only `FieldsViewGrid` — no buttons |
 | `comments` | Comment thread | Comment list | Comment input + list with edit/delete per item |
 
-**Validation rule:** if a child entity has `x-generate`, it _must_ use `x-outputType: list`
-under the parent's `properties:`. Using `table` or `comments` for a generated child is a
-configuration error caught at generator run time.
+**Validation rule:** if a child entity has `x-generate`, using `x-outputType: comments` for
+it requires disabling new/edit/delete entirely — otherwise it is a configuration error
+caught at generator run time. Every other `x-outputType` (including `list`, `table`, or
+omitting it entirely so it resolves to `None`) is always allowed for a generated child,
+regardless of its own new/edit/delete capability, because every non-`list`, non-`comments`
+value renders through the read-only `FieldsViewGrid` embedding (§7.4).
 
 ### Non-array `$ref` properties — `x-outputType: flatten`
 
@@ -2088,7 +2148,7 @@ whose Prisma model has no `id` column is invisible to the generator.
 
 These fields are treated specially regardless of what the schema says, and are never written
 under `fields:` at all (they're Prisma-only, injected by the generator — §4.4,
-`code_generator/generators.py` line ~195: *"creator_id/updater_id are Prisma-only audit fields
+`code_generator/generators.py` line ~381: *"creator_id/updater_id are Prisma-only audit fields
 (not in json_schema.yaml)"*):
 
 | Field | Behaviour |

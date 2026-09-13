@@ -225,15 +225,22 @@ export type ErrorCode =
   | 'VALIDATION'          // field-level input error (missing, invalid, OTO conflict)
   | 'CONFLICT'            // stale-update (assertNotStale snapshot mismatch), field-less
   | 'RESERVATION_LOCKED'  // reservation criteria changed after allocation, field-less
+  | 'RELATED_RECORD_INVALID' // 1-to-many/many-to-many related row fails a precondition, field-less — see below
   | 'CAPACITY'            // pool / inventory exhausted
   | 'UNKNOWN';            // unexpected internal error
+
+// VALIDATION only: distinguishes a genuinely missing field from a present-
+// but-rejected value (added after this framework's original implementation
+// — see "VALIDATION/no-field also covers..." below).
+export type ValidationReason = 'missing' | 'invalid';
 
 export class AppError extends Error {
   readonly name = 'AppError';
   constructor(
     public readonly code: ErrorCode,
     message: string,           // internal debug message — never sent to UI
-    public readonly field?: string,  // affected form field key (for VALIDATION)
+    public readonly field?: string,  // affected form field key (for VALIDATION / CONFLICT)
+    public readonly reason?: ValidationReason,  // VALIDATION only
   ) {
     super(message);
   }
@@ -241,9 +248,16 @@ export class AppError extends Error {
 
 // Discriminated union for server action return
 export type ActionSuccess = { ok: true };
-export type ActionFailure = { ok: false; errorCode: ErrorCode; field?: string };
+export type ActionFailure = { ok: false; errorCode: ErrorCode; field?: string; reason?: ValidationReason };
 export type ActionResult  = ActionSuccess | ActionFailure;
 ```
+
+**Current state (verified against `lib/_errors.ts`, 2026-09-12)**: the block above still matches the
+shipped `ErrorCode`/`AppError`/`ActionFailure` shapes. The real file additionally exports three helpers
+not shown here: `p2002Field(meta)` (documented under "NEW-2" below), `errorMessageKey(code)` (the
+field-less `ErrorCode → i18n key` mapping, used by list-level actions with no form field), and
+`getErrorMessage(err, terr)` (documented under "`submit_for_approval.ts.jinja2` joined this framework"
+below). See that file directly for their exact signatures.
 
 ---
 
@@ -349,11 +363,17 @@ export function handleApiError(error: unknown): NextResponse {
       VALIDATION:        422,
       CONFLICT:          409,
       RESERVATION_LOCKED: 409,
+      RELATED_RECORD_INVALID: 422,
       CAPACITY:          409,
       UNKNOWN:           500,
     };
     return NextResponse.json(
-      { error: error.message, code: error.code, ...(error.field ? { field: error.field } : {}) },
+      {
+        error: error.message,
+        code: error.code,
+        ...(error.field ? { field: error.field } : {}),
+        ...(error.reason ? { reason: error.reason } : {}),
+      },
       { status: statusMap[error.code] ?? 500 },
     );
   }
@@ -364,6 +384,17 @@ export function handleApiError(error: unknown): NextResponse {
 
 This fixes wrong status codes (validation → 422, stale → 409, org isolation → 404) and adds
 the `code` field for programmatic handling by API consumers.
+
+**Current state (verified against `lib/api-auth.ts`, 2026-09-12)**: `RELATED_RECORD_INVALID: 422` and
+the `reason` field were added later (alongside the `ValidationReason`/`RELATED_RECORD_INVALID`
+additions described elsewhere in this document) and match the block above. One further change the
+block above does **not** show: the final catch-all branch (for a plain, non-`AppError`/`ApiError`
+throw — e.g. a hand-written business-rule check, or a generated required-field check) now returns
+`error.message` verbatim instead of the generic `'Internal server error'` string. This was a
+deliberate, later decision: those plain-`Error` throw sites' message text IS the intended
+caller-facing text, and `handleApiError` produces a JSON response (not a React render), so the
+`AppError` message-hiding rationale (React stripping `error.message` at the Server Components render
+boundary) does not apply to this path.
 
 ### 5. FK autocomplete disabled state (integration with an earlier fix)
 
@@ -402,9 +433,11 @@ entity-agnostic — `{field}` and `{entity}` are runtime interpolation params, n
     "permissionDenied":       "You do not have permission to perform this action.",
     "notFound":               "The record could not be found. It may have been deleted.",
     "fieldRequired":          "{field} is required.",
+    "fieldInvalid":           "{field} has an invalid or disallowed value.",
     "fieldAlreadyLinked":     "{field} is already linked to another record.",
     "staleMutation":          "This record has been updated since you opened it. Please reload to compare with the latest changes.",
     "reservationLocked":      "This row's reservation has already been allocated and its quantity or criteria can no longer be changed.",
+    "relatedRecordInvalid":   "This action cannot be completed because a related record does not meet the required condition.",
     "invalidSnapshot":        "The form data is outdated. Please reload the page.",
     "reservationConflict":    "This action conflicts with an existing reservation.",
     "capacityExhausted":      "No capacity is available. Please try a different selection.",
@@ -418,6 +451,10 @@ entity-agnostic — `{field}` and `{entity}` are runtime interpolation params, n
 ```
 
 `messages/ja.json` equivalents must also be provided at implementation time.
+
+**Current state (verified against `messages/en.json`, 2026-09-12)**: `fieldInvalid` and
+`relatedRecordInvalid` were added later (matching the `VALIDATION` "invalid" reason and the
+`RELATED_RECORD_INVALID` code described elsewhere in this document) and now match the block above.
 
 ---
 
