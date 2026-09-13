@@ -2470,6 +2470,7 @@ def helper_context(
                     'var_name': var_name,
                     'title': to_title_case(prop_stem),
                     'fk_deps': self_ref_fk_deps,
+                    'is_self_ref_dep': True,
                 })
             entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
 
@@ -2507,6 +2508,7 @@ def helper_context(
                 'title': title_str,
                 'fk_deps': self_ref_fk_deps,
                 'label_field': label_field,
+                'is_self_ref_dep': True,
             })
 
     # Enrich deps with extra_required_fields, has_user_accounts, needs_second.
@@ -2629,9 +2631,34 @@ def helper_context(
             'has_updater_id': _entity_has_updater_id(dep['target'], schema),
         })
 
-    # Separate self-ref deps (target == model) from non-self deps for _createBaseDeps() split.
-    non_self_deps = [d for d in enriched_deps if d['target'] != model_name]
-    self_ref_deps = [d for d in enriched_deps if d['target'] == model_name]
+    # Separate self-ref deps from non-self deps for _createBaseDeps() split.
+    # Classify strictly on the explicit is_self_ref_dep tag set by the two
+    # deliberate self-ref-injection blocks above (direct self-ref FK fields,
+    # editable-list-autocomplete self-ref children) -- NOT on `target ==
+    # model_name` alone. A dep can legitimately end up with target ==
+    # model_name without being a genuine self-ref of THIS entity: the
+    # datagrid-children FK-dep extension loop above calls
+    # resolve_dependencies(target, schema) for a CHILD's own self-ref target
+    # (e.g. goods_receipt_line's parent_goods_receipt_line_id), and that
+    # nested resolution has no notion of the outer model_name -- if the child
+    # entity's own required FK chain leads back to the outer model (e.g.
+    # goods_receipt_line.goods_receipt_id -> goods_receipt), it gets pulled
+    # in as an ordinary transitive dep whose target just happens to equal
+    # model_name. Classifying that as a "self-ref dep" deferred it to
+    # populate{{pascal}}Dependencies() (rendered AFTER _create{{pascal}}
+    # BaseDeps() returns), while the child dep needing it as an fk_dep
+    # (e.g. parentGoodsReceiptLine) is rendered non-self, INSIDE
+    # _create{{pascal}}BaseDeps() -- a forward reference to a not-yet-declared
+    # variable, throwing `ReferenceError: goodsReceipt is not defined` at
+    # runtime (cmd_1047k; goods_receipt.cy.ts, all 26 tests). Treating it as
+    # an ordinary non-self dep instead renders it in the same function, in
+    # the same list-order position it was appended at (before the child dep
+    # that needs it), fixing the ordering with no change to the values or
+    # lookup keys _get_dep_populate_fields/_dep_lookup_columns already
+    # compute for it (both keep keying off `dep['target'] == model_name`
+    # directly, unaffected by this tag).
+    non_self_deps = [d for d in enriched_deps if not d.get('is_self_ref_dep')]
+    self_ref_deps = [d for d in enriched_deps if d.get('is_self_ref_dep')]
     has_self_ref_deps = bool(self_ref_deps)
 
     # When a self-ref record's uniqueness is keyed partly on a required fk_dep

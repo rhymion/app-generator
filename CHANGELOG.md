@@ -329,6 +329,28 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   (`write_ch`/`readonly_indep_grid_ch`-aware) state instead of the unnarrowed one; the
   pre-existing helper.ts defect is fixed by looking up each FK dependency's registered variable
   name instead of re-deriving it.
+- **A second, previously-masked `ReferenceError` in the same generated test helper (issue
+  #531), exposed only after the `bin` fix above let execution reach it:** `helper_context()`'s
+  datagrid-child FK-dependency-extension loop calls `resolve_dependencies()` for a child's own
+  self-referencing FK target (e.g. `goods_receipt_line.parent_goods_receipt_line_id ->
+  goods_receipt_line`). That nested call has no notion of the *outer* model the whole helper is
+  for, so when the child also carries an ordinary required FK back to that outer model (e.g.
+  `goods_receipt_line.goods_receipt_id -> goods_receipt`), the nested resolution walks straight
+  through it and injects a dep entry whose `target` happens to equal the outer model's own name
+  — indistinguishable, by the existing `target == model_name` check, from a genuine
+  self-referencing FK on the outer model itself. That misclassification deferred the dep's
+  creation to `populate{Pascal}Dependencies()` (run *after* `_create{Pascal}BaseDeps()`
+  returns), while the child's own dep that needs it as an FK is non-self and rendered *inside*
+  `_create{Pascal}BaseDeps()` — a forward reference to a not-yet-declared variable, thrown only
+  at runtime. Fixed by classifying self-ref deps on an explicit tag set only by the two
+  deliberate self-ref-injection code paths, instead of on `target == model_name` alone; a dep
+  that reaches that shape via nested transitive resolution is now treated as an ordinary
+  non-self dep, created in the same function, in the list-order position it was already
+  appended at (always before the dependent that needs it). Regression test:
+  `code_generator/tests/test_datagrid_child_selfref_grandparent_backref_ordering.py`.
+  A related, separately-tracked defect this fix exposes in turn (the same decoy record now
+  created successfully also counts toward the outer entity's own-organization row totals in two
+  generic CRUD/export tests) remains open — see issue #531 for status.
 - **An embedded DataGrid child's column order now follows its own `x-display.form` declaration
   when present** — order only; which columns are shown is unchanged (still governed by the
   existing exclusion rules: `id`/`{parent}_id`/`created_at`/`updated_at`/`creator_id`,
