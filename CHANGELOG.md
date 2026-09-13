@@ -528,6 +528,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   declares `x-readonly-fields`/`x-readonly` on a DataGrid child entity, so
   this is a fix with no observable effect on any existing schema; see
   `docs/knowledge/readonly-field-form-rendering.md` for the full writeup.
+- **A CSV-import match key on an optional (nullable) plain scalar column no
+  longer treats an empty cell and a stored `NULL` as different values.**
+  `import_key_specs`' non-dotted branch hardcoded nullability to `false`
+  regardless of the column's actual schema type (unlike the dotted branch and
+  `import_field_specs`, which both compute it correctly for the same column),
+  so re-importing a row whose key column was left blank never matched the
+  existing `NULL` (or a legacy `''`) row and created a duplicate instead. The
+  generated import route now normalizes an empty cell to `null` for the
+  write, and matches either a stored `NULL` or `''` via a dedicated
+  `keyMatchConds` array kept separate from the org-filter branches' own `OR`
+  usage so the two conditions never collide. See
+  `docs/knowledge/import-key-null-empty-equivalence.md`.
 ### Security
 - **`.env.vercel.production.local.example` no longer carries a real Vercel
   team ID.** A previous commit had left a real value in `VERCEL_ORG_ID`;
