@@ -216,6 +216,16 @@ export async function POST(request: NextRequest) {
       const raw = rows[i];
 
       const keyWhere: Record<string, unknown> = {};
+      // Issue #525: per-key match conditions, AND'd together for the
+      // findMany() below (kept separate from `keyWhere`'s flat CREATE-data
+      // values). A nullable key column contributes an `OR` clause here so
+      // an empty CSV cell matches an existing row stored as either NULL or
+      // '' -- the actual defect was an incoming '' never matching a
+      // pre-existing NULL row. Using a dedicated `AND` array (rather than
+      // spreading an `OR` key straight onto the where object) avoids
+      // colliding with the unrelated top-level `OR` the org-filter branches
+      // below already use for their own purpose.
+      const keyMatchConds: Record<string, unknown>[] = [];
 {% for spec in import_key_specs %}
 {% if spec.is_dotted %}
       // Dotted FK: {{ spec.raw }} → lookup {{ spec.lookup_entity }} by {{ spec.lookup_field }}
@@ -246,8 +256,26 @@ export async function POST(request: NextRequest) {
         _{{ spec.result_col }} = _{{ spec.var_prefix }}_rows[0].id;
       }
       keyWhere.{{ spec.result_col }} = _{{ spec.result_col }};
+      keyMatchConds.push({ {{ spec.result_col }}: _{{ spec.result_col }} });
+{% else %}
+{% if spec.fk_nullable %}
+      {
+        const _{{ spec.csv_col }}_val = unescapeImportValue(raw['{{ spec.csv_col }}'] ?? '');
+        if (_{{ spec.csv_col }}_val === '') {
+          // Issue #525: empty cell on a nullable key column -- normalize
+          // to null for CREATE, and match either NULL or '' on lookup (a
+          // pre-fix row may have persisted '' instead of NULL).
+          keyWhere.{{ spec.csv_col }} = null;
+          keyMatchConds.push({ OR: [{ {{ spec.csv_col }}: null }, { {{ spec.csv_col }}: '' }] });
+        } else {
+          keyWhere.{{ spec.csv_col }} = _{{ spec.csv_col }}_val;
+          keyMatchConds.push({ {{ spec.csv_col }}: _{{ spec.csv_col }}_val });
+        }
+      }
 {% else %}
       keyWhere.{{ spec.csv_col }} = unescapeImportValue(raw['{{ spec.csv_col }}'] ?? '');
+      keyMatchConds.push({ {{ spec.csv_col }}: keyWhere.{{ spec.csv_col }} });
+{% endif %}
 {% endif %}
 {% endfor %}
 
@@ -345,9 +373,9 @@ export async function POST(request: NextRequest) {
       // hit TS7022 (self-referential implicit-any) against generic Prisma
       // args typing.
 {% if org_relationship_optional %}
-      const _matchWhere: Record<string, unknown> = { ...keyWhere, OR: [{ organization_id: { in: _importOrgIds } }, { organization_id: null }], creator_id: actorId };
+      const _matchWhere: Record<string, unknown> = { AND: keyMatchConds, OR: [{ organization_id: { in: _importOrgIds } }, { organization_id: null }], creator_id: actorId };
 {% else %}
-      const _matchWhere: Record<string, unknown> = { ...keyWhere, organization_id: { in: _importOrgIds }, creator_id: actorId };
+      const _matchWhere: Record<string, unknown> = { AND: keyMatchConds, organization_id: { in: _importOrgIds }, creator_id: actorId };
 {% endif %}
       const matches = await prisma.{{ model }}.findMany({
         where: _matchWhere,
@@ -355,9 +383,9 @@ export async function POST(request: NextRequest) {
       });
 {% elif should_filter_by_org %}
 {% if org_relationship_optional %}
-      const _matchWhere: Record<string, unknown> = { ...keyWhere, OR: [{ organization_id: { in: _importOrgIds } }, { organization_id: null }] };
+      const _matchWhere: Record<string, unknown> = { AND: keyMatchConds, OR: [{ organization_id: { in: _importOrgIds } }, { organization_id: null }] };
 {% else %}
-      const _matchWhere: Record<string, unknown> = { ...keyWhere, organization_id: { in: _importOrgIds } };
+      const _matchWhere: Record<string, unknown> = { AND: keyMatchConds, organization_id: { in: _importOrgIds } };
 {% endif %}
       const matches = await prisma.{{ model }}.findMany({
         where: _matchWhere,
@@ -369,13 +397,13 @@ export async function POST(request: NextRequest) {
       // MULTI_MATCH or silently update it; it's treated as no match (falls
       // through to CREATE, which then fails on the DB's own uniqueness
       // constraint if one exists — a generic write error, not a leak).
-      const _matchWhere: Record<string, unknown> = { ...keyWhere, creator_id: actorId };
+      const _matchWhere: Record<string, unknown> = { AND: keyMatchConds, creator_id: actorId };
       const matches = await prisma.{{ model }}.findMany({
         where: _matchWhere,
         select: {{ item_context_select }},
       });
 {% else %}
-      const matches = await prisma.{{ model }}.findMany({ where: keyWhere, select: {{ item_context_select }} });
+      const matches = await prisma.{{ model }}.findMany({ where: { AND: keyMatchConds }, select: {{ item_context_select }} });
 {% endif %}
 
       if (matches.length > 1) {

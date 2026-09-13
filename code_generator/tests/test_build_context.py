@@ -1165,6 +1165,65 @@ class TestImportKeySpecsAliasedFkLookup:
 
 
 # ---------------------------------------------------------------------------
+# Issue #525: a non-dotted (plain scalar) x-import-key column's nullable
+# status was previously hardcoded False regardless of the column's actual
+# schema type — unlike the dotted branch and import_field_specs, which both
+# compute it correctly for the same underlying column. An optional key
+# column's empty CSV cell therefore never matched an existing NULL (or a
+# legacy '') row on re-import, producing duplicate rows instead of an
+# update/no-op. Modeled on the real inventory_reservation entity
+# (item_id required, label optional) that first exposed the defect.
+# ---------------------------------------------------------------------------
+
+class TestImportKeySpecsNonDottedNullable:
+    def _specs_by_raw(self, label_type):
+        schema = {
+            "definitions": {
+                "inventory_reservation": {
+                    "type": "object",
+                    "required": ["id", "item_id"],
+                    "x-import-key": ["item_id", "label"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "item_id": {"type": "string"},
+                        "label": {"type": label_type},
+                    },
+                },
+            }
+        }
+        entity = {
+            "parent": "inventory_reservation", "model": "inventory_reservation",
+            "definition_key": "inventory_reservation", "children": [],
+            "generate_config": {
+                "list": True, "view": True, "new": True, "edit": True,
+                "delete": True, "api": True, "test": False, "fields": None,
+            },
+        }
+        ctx = build_context(entity, schema)
+        return {s["raw"]: s for s in ctx["import_key_specs"]}
+
+    def test_nullable_non_dotted_key_computed_true(self):
+        """A key column typed ['string', 'null'] must resolve fk_nullable=True
+        -- the previous hardcoded False is the actual root cause of issue #525's
+        duplicate-row defect (see subtask_1046a's report)."""
+        specs = self._specs_by_raw(["string", "null"])
+        assert specs["label"]["fk_nullable"] is True
+
+    def test_required_non_dotted_key_computed_false(self):
+        """Non-regression: a plain required 'string' key column stays False --
+        required-column matching behavior must not change (out of scope)."""
+        specs = self._specs_by_raw("string")
+        assert specs["label"]["fk_nullable"] is False
+
+    def test_non_dotted_required_key_alongside_nullable_key_unaffected(self):
+        """item_id (required, non-key-nullable) must keep its own correct
+        (False) value independent of label's nullability -- nullability is
+        computed per-column, not entity-wide."""
+        specs = self._specs_by_raw(["string", "null"])
+        assert specs["item_id"]["fk_nullable"] is False
+
+
+# ---------------------------------------------------------------------------
 # cmd_530: import_fk_specs generalizes dotted-FK CSV-import resolution from
 # "x-import-key entries only" to "every screen-editable, simple-labelField
 # FK relation" — closing the gap where a FK visible+editable on screen (e.g.

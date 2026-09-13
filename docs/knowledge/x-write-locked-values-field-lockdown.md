@@ -182,11 +182,10 @@ Because `x-approval` is declared on an entity's raw (`__`-prefixed) backing mode
 necessarily on a pass-through proxy view's own definition, the collision check above resolves
 the backing model via `_resolve_backing_model_name()` before reading `x-approval` off it.
 Reading `defn.get('x-approval')` directly on a proxy view would find an empty dict there and
-silently let every collision through — this matters because a proxy view may declare
-`x-write-locked-values` on itself while `x-approval` lives only on the raw entity (the same
-raw/view resolution the field-existence check earlier in this section relies on via
-`get_entity_properties()`, since a proxy view declaring `x-write-locked-values` has no top-level
-`properties` of its own either).
+silently let every collision through — this was fixed by PR #511, which also switched the field
+existence check earlier in this section from a plain `defn.get('properties', {})` to
+`get_entity_properties()` for the same raw/view reason (a proxy view declaring
+`x-write-locked-values` on itself has no top-level `properties` of its own either).
 
 ## Related, but distinct: the post-approval operation lockdown (§16.15)
 

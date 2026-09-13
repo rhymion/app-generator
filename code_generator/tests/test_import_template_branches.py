@@ -612,3 +612,92 @@ def test_format_label_value_import_absent_when_flag_false_even_with_composite_sp
     )
     rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
     assert "import { formatLabelValue } from '@/lib/_format';" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# Issue #525: a non-dotted (plain scalar) nullable x-import-key column's
+# empty CSV cell must match an existing row stored as either NULL or ''
+# (three-way equivalence: null-vs-null, empty-vs-null, empty-vs-empty are
+# all the same "no value"). The three combinations are a runtime data-state
+# question, not a template-rendering one -- the emitted OR condition below
+# structurally covers all three in one shot (see the fix's own report for
+# the live-DB proof against a real Prisma model). What these template tests
+# pin down is the CODE SHAPE that makes that possible: a nullable key
+# contributes an OR clause to a dedicated `keyMatchConds` AND-array, kept
+# separate from the org-filter branches' own (unrelated) top-level `OR`
+# usage so the two never collide and silently drop one another.
+# ---------------------------------------------------------------------------
+
+_NULLABLE_KEY_SPECS = [
+    {'csv_col': 'item_id', 'is_dotted': False, 'lookup_field': 'item_id',
+     'result_col': 'item_id', 'fk_nullable': False, 'raw': 'item_id'},
+    {'csv_col': 'label', 'is_dotted': False, 'lookup_field': 'label',
+     'result_col': 'label', 'fk_nullable': True, 'raw': 'label'},
+]
+
+
+def test_nullable_key_empty_cell_normalizes_to_null_and_matches_or_condition(env):
+    """The empty-CSV-cell branch for a nullable key column must (1) write
+    `null` into keyWhere (the CREATE-data value -- never a leaked ''), and
+    (2) push an OR condition matching either NULL or '' into keyMatchConds
+    (the match-query value) -- this is the actual fix for issue #525's
+    duplicate-row defect."""
+    ctx = _ctx(import_key_specs=_NULLABLE_KEY_SPECS, import_key_fields=['item_id', 'label'])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert "keyWhere.label = null;" in rendered
+    assert "keyMatchConds.push({ OR: [{ label: null }, { label: '' }] });" in rendered
+
+
+def test_nullable_key_non_empty_cell_uses_plain_equality(env):
+    """The non-empty branch (a real value was supplied) is NOT the
+    equivalence-class case -- it must still resolve to plain equality in
+    both keyWhere and keyMatchConds, exactly as an unfixed non-nullable key
+    column always has."""
+    ctx = _ctx(import_key_specs=_NULLABLE_KEY_SPECS, import_key_fields=['item_id', 'label'])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert "keyWhere.label = _label_val;" in rendered
+    assert "keyMatchConds.push({ label: _label_val });" in rendered
+
+
+def test_required_key_column_unaffected_scope_boundary(env):
+    """Non-regression / scope boundary: a REQUIRED (non-nullable) key column
+    (item_id here) must render the original unconditional assignment with no
+    OR/null-normalization branching at all -- this task's scope is optional
+    key columns only."""
+    ctx = _ctx(import_key_specs=_NULLABLE_KEY_SPECS, import_key_fields=['item_id', 'label'])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert "keyWhere.item_id = unescapeImportValue(raw['item_id'] ?? '');" in rendered
+    assert "keyMatchConds.push({ item_id: keyWhere.item_id });" in rendered
+
+
+def test_plain_match_query_uses_and_array_not_bare_keywhere(env):
+    """No org-filter / no self-only: the findMany() where-clause must be
+    built from `{ AND: keyMatchConds }`, not a bare `keyWhere` spread --
+    keyWhere alone (holding `label: null` for the empty case) would only
+    ever match a stored NULL row, silently missing a legacy stored ''
+    row and reintroducing the exact defect this fix closes."""
+    ctx = _ctx(import_key_specs=_NULLABLE_KEY_SPECS, import_key_fields=['item_id', 'label'])
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert 'const matches = await prisma.test_entity.findMany({ where: { AND: keyMatchConds }, select:' in rendered
+    assert 'where: keyWhere' not in rendered
+
+
+def test_org_filter_optional_or_does_not_collide_with_key_equivalence_or(env):
+    """Design check flagged during this fix's own design review: an entity
+    that is BOTH should_filter_by_org (with an optional org relationship,
+    which itself needs a top-level OR for organization_id) AND has a
+    nullable non-dotted key column must not have one OR silently overwrite
+    the other. Using a dedicated `AND: keyMatchConds` array (rather than
+    spreading an `OR` key straight onto keyWhere) keeps the two concerns on
+    different top-level keys (`AND` vs `OR`) so both survive in the same
+    _matchWhere object."""
+    ctx = _ctx(
+        import_key_specs=_NULLABLE_KEY_SPECS, import_key_fields=['item_id', 'label'],
+        should_filter_by_org=True, org_relationship_optional=True,
+    )
+    rendered = env.get_template('api_import_route.ts.jinja2').render(**ctx)
+    assert (
+        "const _matchWhere: Record<string, unknown> = "
+        "{ AND: keyMatchConds, OR: [{ organization_id: { in: _importOrgIds } }, "
+        "{ organization_id: null }] };"
+    ) in rendered

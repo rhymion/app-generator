@@ -2021,6 +2021,17 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 'lookup_entity_org_relationship_optional': _lookup_org_relationship_optional,
             })
         else:
+            # Issue #525: a non-dotted (plain scalar) key column must
+            # resolve nullable the same way import_field_specs already
+            # does for this same column (below, `_nullable = 'null' in
+            # _types`) — this was previously hardcoded False, so an
+            # optional key column's empty CSV cell never matched an
+            # existing NULL (or legacy '') row, producing spurious
+            # duplicate rows on re-import. Reuses the 'fk_nullable' key
+            # name for symmetry with the dotted branch above, even though
+            # this column isn't an FK — the template already branches on
+            # `spec.fk_nullable` regardless of is_dotted.
+            _key_nullable = _is_nullable(model_def.get('properties', {}).get(_raw, {}))
             import_key_specs.append({
                 'raw':           _raw,
                 'is_dotted':     False,
@@ -2028,7 +2039,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 'lookup_entity': None,
                 'lookup_field':  _raw,
                 'result_col':    _raw,
-                'fk_nullable':   False,
+                'fk_nullable':   _key_nullable,
                 'lookup_entity_filter_by_org': False,
                 'lookup_entity_filter_by_self_id': False,
                 'lookup_entity_org_relationship_optional': False,
