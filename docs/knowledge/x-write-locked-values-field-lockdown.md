@@ -170,6 +170,24 @@ A typo'd field name or an out-of-range value fails generation immediately, namin
 entity and key, instead of quietly producing a locked-value branch that can never actually
 trigger (because the value it names can never legally reach the field in the first place).
 
+- A locked value must not collide with a value the same field's `x-approval.submit_on`,
+  `on_withdrawn.set_fields`, or a **non-terminal** `on_rejected.set_fields` writes as part of a
+  normal user-initiated transition — such a collision would make submitting, withdrawing, or
+  (non-terminally) rejecting the entity impossible, and is almost certainly a typo. A
+  **terminal** `on_rejected` is deliberately exempt from this check: freezing a terminal
+  rejection's own value is exactly the use case `x-write-locked-values` is for, not a collision
+  (`code_generator/validate.py` lines 2001-2057, section "11a").
+
+Because `x-approval` is declared on an entity's raw (`__`-prefixed) backing model, not
+necessarily on a pass-through proxy view's own definition, the collision check above resolves
+the backing model via `_resolve_backing_model_name()` before reading `x-approval` off it.
+Reading `defn.get('x-approval')` directly on a proxy view would find an empty dict there and
+silently let every collision through — this matters because a proxy view may declare
+`x-write-locked-values` on itself while `x-approval` lives only on the raw entity (the same
+raw/view resolution the field-existence check earlier in this section relies on via
+`get_entity_properties()`, since a proxy view declaring `x-write-locked-values` has no top-level
+`properties` of its own either).
+
 ## Related, but distinct: the post-approval operation lockdown (§16.15)
 
 `docs/knowledge/appendix/approval-flow.md` §16.15 documents a different mechanism that is easy

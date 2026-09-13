@@ -164,8 +164,16 @@ entity created already at its `x-approval.submit_on` target value, or with
 no `submit_on` declared at all), on an ordinary edit that crosses the
 `submit_on` edge, and from the standalone `submit_for_approval` action.
 All three paths build their `approval_request` row(s) through the same
-shared code path, so `afterSubmit` is called from that one place rather
-than being duplicated at each of the three call sites.
+shared helper (`generators.py`'s `_build_approval_create_block_for_entity()`)
+-- but that helper only builds the row-creation block itself
+(`_creator`/`_creatorRoleIds`/`_approvalFlows` lookups plus the per-flow
+`approval_request.create()` calls). The `await afterSubmit(...)` call is
+**not** inside that shared helper -- each of the three call sites
+(`_build_approval_edge_trigger_create_code`, `_build_approval_edge_trigger_
+update_code`, and the `submit_for_approval` body builder) appends its own
+literal `await afterSubmit(...)` line after invoking the shared helper, so
+the hook call itself is duplicated three times in the generator source, one
+per site, not centralized.
 
 ### `submit_for_approval` now validates
 

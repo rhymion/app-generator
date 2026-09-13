@@ -16,10 +16,12 @@ Two places didn't have this guard, and both do an unconditional `create()`:
    `self_ref_deps` loop) — e.g. `goods_receipt_line`'s `parent_goods_receipt_line_id` split-lineage
    decoy. Once the entity itself gains a composite `@@unique` (e.g.
    `@@unique([goods_receipt_id, item_id])`), a second call to the populate helper in the same spec
-   creates a duplicate decoy with the identical key and crashes with P2002.
+   creates a duplicate decoy with the identical key and crashes with P2002. **This fix is still in
+   place today** (`test_helper.ts.jinja2`'s self-ref loop still renders `findFirst`/create-if-absent).
 2. **The entity's own per-iteration record** in `populate{{pascal}}Data()` /
    `populate{{pascal}}FullData()` — the same class of gap, just on the entity's own composite/single
-   `@unique` columns instead of a dependency's.
+   `@unique` columns instead of a dependency's. **This part of the fix was later reverted** — see
+   "Superseded: the entity's-own-record fix was replaced, not kept" below.
 
 ## Why the fix isn't a copy-paste of the existing pattern
 
@@ -33,16 +35,32 @@ would emit references to undefined local variables. The self-ref lookup is recom
 primary-display FK), not before: that rename mutates the same `fk_deps` dict entries the lookup
 reads, so computing the lookup earlier would bake in a stale, pre-rename variable name.
 
-The entity's-own-record lookup (`record_lookup_where`) deliberately excludes `internal_fk_deps`
-(bridge FKs like `approvable_id`) from lookup-key candidacy, even though they're in scope for
-*rendering* the `create()` call. An internal bridge FK is always freshly created per iteration —
-keying a `findFirst` on it would never find anything and would silently do nothing (worse than no
-guard at all, since it looks like protection but isn't). Composite/single-unique candidacy is
-checked only against `primary_fk_dep` (the var that varies per loop iteration) and other
-dep-backed FKs in `required_fields_prisma` — columns the `create()` doesn't actually write (e.g.
-nullable/DB-defaulted, hence absent from those two sources) fall through and the entity gets no
-lookup at all, exactly like the pre-existing non-self-dep behavior when a constraint mentions an
-unwritten column.
+*(Historical: the entity's-own-record lookup, `record_lookup_where`, originally deliberately
+excluded `internal_fk_deps` (bridge FKs like `approvable_id`) from lookup-key candidacy the same
+way — see "Superseded" section below for why this whole mechanism no longer exists.)*
+
+## Superseded: the entity's-own-record fix was replaced, not kept
+
+**`record_lookup_where` no longer exists anywhere in the codebase** (confirmed by grep across
+`code_generator/`, 2026-09-12). It was entirely removed by a later commit, `46c94cf8`
+("full isolation of primary-FK-dep namespace (Option β Phase2)", 2026-08-08) — after this doc was
+written. That commit's own message explains why: instead of using find-or-create to make the
+entity's own per-iteration record idempotent across repeated calls to the same populate helper, it
+made **every** per-iteration create fully unconditional again (both the entity's own record and
+`primary_fk_dep`'s own row — `lookup_where_unique`, a second, related lookup this doc didn't
+originally describe, was removed at the same time), and instead prevents the underlying collision
+with a per-entity monotonic `callIndex` (a module-scope counter in the generated helper, shared
+between `populate{{pascal}}Data`/`FullData`) spliced into `primary_fk_dep`'s loop-indexed value:
+`` `Test X ${i}` `` becomes `` `Test X ${callIndex}_${i}` ``. `callIndex` is always `0` for a
+generated spec's own calls (each `it()` calls a given populate helper at most once), so this is
+invisible in generated fixtures beyond the literal string — it only matters for hand-written specs
+or composite helpers that call the same populate function more than once in one test/DB session,
+which now get disjoint rows per call instead of find-or-create collapsing them onto the same row.
+`test_helper.ts.jinja2`'s current per-iteration record create is a plain, unconditional
+`prisma.<model>.create(...)` — confirmed no `findFirst` guard around it.
+
+The self-referential-dependency fix (item 1 above) was **not** affected by this later change and
+remains in place — this revert was scoped to the entity's-own-record lookup (item 2) only.
 
 ## A fixed decoy can still collide with a differently-named test scenario
 
@@ -62,12 +80,31 @@ tests (4.1, 9.1, 9.2), and left them unfixed for the same reason: a real fix nee
 instance (or some other disambiguation), which is more than "the narrow overlap" this cmd's scope
 covers.
 
-## `cy.contains()` anchoring only needed for one call shape
+## `cy.contains()` anchoring — superseded by a cell-scoped fix
+
+**The specific fix described below (bare `cy.contains(exactRe(...))` +
+`.closest('.MuiDataGrid-row')`) no longer exists in the generator templates — it was itself found
+buggy and replaced.** Kept here for the reasoning trail; see the current state at the end.
 
 `cy.contains(deps.X.name)` (single string arg) resolves to the most specific matching DOM node —
-wrapping it in an anchored regex (`exactRe()`) works directly. `cy.contains('.MuiDataGrid-row',
-deps.X.name)` (selector + text) restricts candidates to elements matching the selector *and* whose
-aggregated text (all descendant cells concatenated) matches — a DataGrid row has multiple cells, so
-its full text is never equal to a single cell's value, and an anchored regex against that
-never matches. The fix for that shape is `cy.contains(exactRe(...)).closest('.MuiDataGrid-row')`:
-find the exact cell first, then walk up to the row.
+wrapping it in an anchored regex (`exactRe()`) works directly, *except* when the page also contains
+an unrelated exact match elsewhere (see below). `cy.contains('.MuiDataGrid-row', deps.X.name)`
+(selector + text) restricts candidates to elements matching the selector *and* whose aggregated
+text (all descendant cells concatenated) matches — a DataGrid row has multiple cells, so its full
+text is never equal to a single cell's value, and an anchored regex against that never matches.
+The fix applied at the time (`cy.contains(exactRe(...)).closest('.MuiDataGrid-row')`: find the
+exact cell first, then walk up to the row) was itself superseded by a later fix
+(`code_generator/templates/test_spec.cy.ts.jinja2`) after real-schema verification (an entity
+whose dependency's display name coincided with the logged-in test user's own name, e.g. a `user`
+FK seeded as "Test User" matching the header nav's own "Test User" badge) surfaced two successive
+bugs in it: (1) the bare, page-wide `cy.contains(exactRe(...))` preferred the header's own
+tight text-node match over the DataGrid cell, so `.closest('.MuiDataGrid-row')` failed outright and
+a bare `.click()` navigated to the user's own `/setting/view/<id>` instead of the intended row; (2)
+a first attempted fix, scoping to `cy.contains('.MuiDataGrid-row', exactRe(...))`, broke almost
+everything else for the reason already given above (a row's concatenated multi-cell text never
+equals a single anchored value). **The fix that actually landed and remains current** scopes every
+`exactRe` call site to the individual cell instead of the row: `cy.contains('.MuiDataGrid-cell',
+exactRe(...))`, with `.find('a').first().click()` directly on the matched cell (no `.closest()`
+needed — the cell is the link's direct parent). Verified via DOM inspection that each MUI DataGrid
+cell (`data-field="..."`) holds only its own field's text, so an anchored match against one cell
+excludes the header while still hitting the intended field.

@@ -59,7 +59,8 @@ An entity gets automatic org-scoped filtering when both conditions hold:
 1. The entity has an `organization_id` FK field pointing to `organization` (declared in `code_generator/json_schema.yaml` via `x-relationship`)
 2. The model name is NOT `organization` or `user`
 
-This is computed in `code_generator/build_context.py:596-597`:
+This is computed in `code_generator/build_context.py:1707-1708` (line numbers have
+shifted since this doc was written as the file grew; the logic itself is unchanged):
 
 ```python
 has_org_rel          = any(r['target'] == 'organization' for r in parent_rels)
@@ -115,7 +116,7 @@ The filter activates when ALL of the following are true at code-generation time:
 
 - The entity's JSON schema definition includes an `organization_id` property with `x-relationship: { type: 'many-to-one', target: 'organization' }`
 - The model name is not `organization` or `user`
-- The `organization_id` field has an `@@index([organization_id])` in `prisma/schema.prisma` (enforced by `validate.py`, `code_generator/validate.py:21`)
+- The `organization_id` field has an `@@index([organization_id])` in `prisma/schema.prisma` (enforced by `validate.py`'s `_REQUIRED_INDEX_COLUMNS` check, `code_generator/validate.py:40`/125-153 — not line 21 as an earlier version of this doc had it; line numbers have shifted as the file grew)
 
 At runtime, the filter is always applied — there is no per-request bypass.
 
@@ -128,7 +129,7 @@ At runtime, the filter is always applied — there is no per-request bypass.
 ```typescript
 // lib/authz.ts
 
-export type Operation = 'create' | 'read' | 'update' | 'delete';
+export type Operation = 'create' | 'read' | 'update' | 'delete' | 'import';
 export type OperationFlags = Record<Operation, boolean>;
 
 export interface RichPermissions extends OperationFlags {
@@ -138,12 +139,20 @@ export interface RichPermissions extends OperationFlags {
 }
 ```
 
-`OperationFlags` is the four boolean flags. `RichPermissions` adds sub-objects for item-level resolution.
+**Update**: `Operation` gained a fifth member, `'import'`, since this doc was written
+(`lib/authz.ts:23`) — `OperationFlags` is now five boolean flags, not four (the
+in-code comment on the adjacent `ModelPermissions` type alias still says "four", which
+is itself stale, but that's a source-code comment, not this doc's claim to fix). The
+`import` flag is checked via `assertPermission(permissions, 'import', ...)` in CSV
+import routes (`api_import_route.ts.jinja2`) — a distinct permission from `create`,
+gating whether a user may bulk-import rows even if they can't otherwise create them
+one at a time (or vice versa). `RichPermissions` adds sub-objects for item-level
+resolution as before.
 
 ### `getModelPermissions()` — the entry point
 
 ```typescript
-// lib/authz.ts:141
+// lib/authz.ts:151 (line shifted since this doc was written; was 141)
 export const getModelPermissions = cache(async (
   model: ModelName,
   userId?: string | null,
@@ -164,7 +173,7 @@ This function:
 
 ### Creator and Assignee roles
 
-Two role names are treated specially: `Creator` and `Assignee` (defined in `lib/authz.ts:30` as `SPECIAL_ROLE_NAMES`).
+Two role names are treated specially: `Creator` and `Assignee` (defined in `lib/authz.ts:57` as `SPECIAL_ROLE_NAMES` — line shifted since this doc was written; was 30).
 
 These roles grant item-level access — they apply only to records the user created or is assigned to, not to all records of that type.
 
@@ -173,7 +182,7 @@ Top-level flags on `RichPermissions` (without item context) include these roles 
 ### `resolvePermissions()` — item-level resolution
 
 ```typescript
-// lib/authz.ts:72
+// lib/authz.ts:79 (line shifted since this doc was written; was 72)
 export async function resolvePermissions(
   perms: RichPermissions,
   item: ItemContext,   // { creator_id?, assignee_id?, ... } | null
@@ -201,18 +210,18 @@ if (item.assignee_id === userId && perms.assignee) {
 ### `requirePermission()` and `assertPermission()`
 
 ```typescript
-// lib/authz.ts:245 — throws Error("Access denied: model.operation")
+// lib/authz.ts:296 — throws Error("Access denied: model.operation") (line shifted; was 245)
 export async function requirePermission(
   model, operation, item?, userId?,
 ): Promise<RichPermissions>
 
-// lib/authz.ts:261 — same but takes pre-fetched permissions
+// lib/authz.ts:312 — same but takes pre-fetched permissions (line shifted; was 261)
 export async function assertPermission(
   permissions: OperationFlags, operation, model?,
 ): Promise<void>
 ```
 
-Both throw `Error("Access denied: {model}.{operation}")`. API routes catch this via `requireApiPermission()` in `lib/api-auth.ts:86` and convert it to a 403 response.
+Both throw `Error("Access denied: {model}.{operation}")`. API routes catch this via `requireApiPermission()` in `lib/api-auth.ts:132` (line shifted since this doc was written; was 86) and convert it to a 403 response.
 
 ### Permission cache
 
@@ -280,15 +289,23 @@ error through `handleApiError`). `authenticateApiKey()` itself is API-key-only �
 header is absent — so dual-auth routes always branch on header presence before calling it, rather
 than calling it unconditionally.
 
-Currently, the dual-auth routes are: `app/api/search/route.ts` (inline, the original
-implementation these helpers were extracted from), `api_export_route.ts.jinja2`,
-`api_import_route.ts.jinja2`, `split_action_route.ts.jinja2` (all via `resolveActorId`/
-`requireDualAuth`), and the static `app/api/approval_request/[id]/approve/route.ts` /
-`.../reject/route.ts` (via `requireDualAuth`). Everything else under `app/api/<entity>/` is either
-plain API-key-only (`authenticateApiKey`, the entity CRUD/bulk/detail routes — the browser UI
-reaches these through server actions, not this REST surface) or plain session-only
-(`app/api/notifications/*` is session-only — not in that dual-auth rollout's scope). There is no
-`app/api/approval_request/[id]/resubmit/route.ts` — the dedicated resubmit action/route was
+Currently, the dual-auth routes are: `api_export_route.ts.jinja2`, `api_import_route.ts.jinja2`,
+`split_action_route.ts.jinja2` (all via `resolveActorId`/`requireDualAuth`), and the static
+`app/api/approval_request/[id]/approve/route.ts` / `.../reject/route.ts` / `.../withdraw/route.ts`
+(via `requireDualAuth` — the `withdraw` route was added after this doc was originally written and
+is not a later omission from the design, just an undocumented addition). Everything else under
+`app/api/<entity>/` is either plain API-key-only (`authenticateApiKey`, the entity CRUD/bulk/detail
+routes — the browser UI reaches these through server actions, not this REST surface) or plain
+session-only (`app/api/notifications/*` is session-only — not in that dual-auth rollout's scope).
+
+**Update**: `app/api/search/route.ts` (generated by `search_route.ts.jinja2`, so absent from a
+worktree until `generate-code` has run) no longer uses `resolveActorId`/`requireDualAuth` at all —
+it now inlines its own dual check directly (`authenticateApiKey()` first, falling back to
+`auth()` from `@/auth` for the session case), rather than going through the shared helpers it was
+originally extracted from. Functionally still dual-auth (API key or session cookie), just no
+longer routed through `lib/api-auth.ts`'s two dedicated helper functions.
+
+There is no `app/api/approval_request/[id]/resubmit/route.ts` — the dedicated resubmit action/route was
 retired; re-submission is now an ordinary edit through the entity's own routes (see
 `docs/knowledge/appendix/approval-flow.md` §16.4/§16.6).
 
@@ -309,7 +326,7 @@ export async function GET(request: NextRequest) {
 }
 ```
 
-`requireApiPermission` (`lib/api-auth.ts:82`) calls `requirePermission` with the resolved `userId` and wraps any `Error("Access denied: ...")` into `ApiError(403, ...)`.
+`requireApiPermission` (`lib/api-auth.ts:132`, line shifted since this doc was written; was 82) calls `requirePermission` with the resolved `userId` and wraps any `Error("Access denied: ...")` into `ApiError(403, ...)`.
 
 ### Middleware protection
 

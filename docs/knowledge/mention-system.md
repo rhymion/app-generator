@@ -57,11 +57,15 @@ schema field has `x-mention: true`, not per-entity.
   this application's org-isolation model: general `read` permission on
   `user` never substitutes for org membership as a candidate-visibility
   gate.
-- **Permission**: uses the same Option B graceful-degradation contract as
+- **Permission**: uses the same Option B graceful-degradation *philosophy* as
   `searchXxxOptions()` (the established Option B pattern) — a `user` read-permission denial
-  returns `Object.assign([], { permissionDenied: true })` rather than
+  returns `{ options: [], permissionDenied: true }` rather than
   throwing, so the picker can render an "unavailable" state instead of
-  crashing.
+  crashing. **Not the identical shape**: unlike `searchXxxOptions()`'s
+  array-with-ad-hoc-property trick (`Object.assign([], { permissionDenied:
+  true })`), this function returns a plain object — see "Comment-compose
+  wiring implemented" below for why that array-based shape was replaced
+  here (an RSC-serialization defect) but left as-is in `searchXxxOptions()`.
 - **Same-name collision**: solved structurally — the picker shows
   `{ id, name, email }` and the user selects by id, so no name-based
   hash collision is possible in the stored marker.
@@ -88,7 +92,7 @@ Fires on `add/updateXxxComment()` alongside the existing
   `docs/knowledge/notification-triggers.md`), **not** at the mentioned
   user's own profile.
 - **Deleted-user FK edge case**: handled by that same notification mechanism's existing
-  fire-and-forget `catch(() => {})` — no action needed here.
+  best-effort write path (`writeToDb()` in `lib/_notifier.ts` catches the FK-violation error, logs a `console.warn`, and never rethrows — not a literal empty `catch`) — no action needed here.
 
 Two generated shapes:
 
@@ -361,7 +365,9 @@ not a manual audit), but the count alone rules out "this is a one-off."
 
 The creator-include fix's recommendation above was implemented as-is: `npm run
 test:mention-gate` (`scripts/check_mention_gate_fixture.sh`), wired into
-both the Gate SoT (`.claude/commands/update-generator.md` step 3) and CI
+both the Gate SoT (`.claude/commands/update-generator.md` step 4 — the
+Completion gate's numbered list has grown since this cmd; re-verify the
+number rather than trusting this citation) and CI
 (`.github/workflows/ci.yml`'s `mention-gate-fixture` job, no path filter —
 same reasoning as the `unit-tests`/`pytest` jobs). ~4s per run (measured:
 3.7-4.0s wall clock across several runs on this machine, dominated by

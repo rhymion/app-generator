@@ -31,16 +31,16 @@ Property 'my_relation' does not exist on type 'MyEntity'.
 3. Open `prisma/schema.prisma` and find the matching `model`.
 4. Compare relation field names:
    - JSON schema `x-relationships` key → must exactly match the Prisma field name.
-   - For auto-derived one-to-many children (not declared in JSON schema): the Prisma field must be `{child_model_name}s` (e.g., `ai_agent_versions` for model `ai_agent_version`). See `docs/knowledge/prisma-schema-conventions.md:115`.
+   - For auto-derived one-to-many children (not declared in JSON schema): the Prisma field must be `{child_model_name}s` (e.g., `ai_agent_versions` for model `ai_agent_version`). See `docs/knowledge/prisma-schema-conventions.md:116`.
 5. Run `npm run db:generate` to regenerate the Prisma client.
 6. Run `npm run generate-code` to regenerate TypeScript from the updated schema.
 7. Re-run `npx tsc --noEmit` to confirm.
 
 **Specific known patterns**:
 
-- **Relation name mismatch**: Using a shortened Prisma field name (`versions`) when the JSON schema derives it as `ai_agent_versions`. Fix: rename the Prisma field to match the derived name (`docs/knowledge/prisma-schema-conventions.md:115`).
-- **Embedded model with `creator_id`/`updater_id`**: Adding `creator_id` and `creator` to an embedded child model (no `x-generate`) causes a build error because the generated service never writes those columns. Fix: remove `creator_id`, `creator`, `updater_id`, `updater` from the embedded model (`docs/knowledge/prisma-schema-conventions.md:166`).
-- **Comment child without `message` field**: An entity used with `x-outputType: comments` must have a `message: string` field. Missing it causes a TypeScript error in the generated actions. See `validate.py:264` for the validation error message.
+- **Relation name mismatch**: Using a shortened Prisma field name (`versions`) when the JSON schema derives it as `ai_agent_versions`. Fix: rename the Prisma field to match the derived name (`docs/knowledge/prisma-schema-conventions.md:116`).
+- **Embedded model with `creator_id`/`updater_id`**: Adding `creator_id` and `creator` to an embedded child model (no `x-generate`) causes a build error because the generated service never writes those columns. Fix: remove `creator_id`, `creator`, `updater_id`, `updater` from the embedded model (`docs/knowledge/prisma-schema-conventions.md:179`).
+- **Comment child without `message` field**: An entity used with `x-outputType: comments` must have a `message: string` field. Missing it causes a TypeScript error in the generated actions. See `validate.py:1034` for the validation error message.
 
 ### 1.2 "Module not found" or "Cannot find module"
 
@@ -141,7 +141,7 @@ AssertionError: Timed out retrying after 4000ms:
 
 Row count assertion fires before the MUI DataGrid finishes hydrating.
 
-**Root cause**: `DataGridClient` (`components/DataGridClient.tsx`) is `'use client'` but is still SSR'd by Next.js App Router. The `Paper sx={{ height: 500 }}` container means the DataGrid cannot compute virtual-scroll dimensions server-side, causing a re-render on mount that briefly shows 0 rows.
+**Root cause**: `DataGridClient` (`components/_standard/DataGridClient.tsx`) is `'use client'` but is still SSR'd by Next.js App Router. The `Paper sx={{ height: 500 }}` container means the DataGrid cannot compute virtual-scroll dimensions server-side, causing a re-render on mount that briefly shows 0 rows.
 
 **Fix**: Assert a named item is visible before checking row count:
 
@@ -186,11 +186,11 @@ expected response status to equal 403 but got 401
 
 1. **`TEST_API_KEY` not seeded**: `cypress/support/test-credentials.ts` defines `TEST_CREDENTIALS`. The `cy.task('db:seed')` task (`cypress/support/db-helpers.ts`) must write `TEST_CREDENTIALS.apiKey` to the test user's `user.api_key`. Run `npm run migrate:reset:test` to re-seed.
 
-2. **`db:createLimitedApiUser(modelName)` task missing**: Test 7.1/7.2 uses `cy.task('db:createLimitedApiUser', 'my_entity')`. This task must be registered in `cypress/support/generated-tasks.ts`. Re-run `npm run generate-code` to regenerate the task registry.
+2. **`db:createLimitedApiUser(modelName)` task missing**: Test 7.1/7.2 uses `cy.task('db:createLimitedApiUser', 'my_entity')`. Unlike per-entity `db:populateXxxDependencies`-style tasks, this one is **hand-written**, not part of the auto-generated task registry (`cypress/support/generated-tasks.ts`) — it is registered directly in `cypress.config.ts` and implemented in the hand-edited section of `cypress/support/db-helpers.ts` (the file's own header marks `createLimitedApiUser` as one of its `AUTO-GENERATED - DO NOT EDIT (hand-edited sections: ...)` exceptions). If it's missing, `npm run generate-code` will **not** restore it — check `cypress.config.ts`'s `db:createLimitedApiUser` handler and that hand-edited block directly.
 
 3. **Permission cache stale**: In development builds (`NODE_ENV !== 'production'`), the permission cache is disabled. If tests fail in production builds but pass in dev, check that `db:reset` calls `invalidatePermissionCache()`. The `/api/test-utils/reset-caches` endpoint does this — verify it is called by `cy.task('db:reset')` in `cypress.config.ts`.
 
-4. **AUTH_SECRET empty in CI**: If the `AUTH_SECRET` environment variable is set to an empty string (e.g., an unset GitHub Actions secret), NextAuth will fail to issue the session cookie. Login appears to succeed but the session is never created. Fix: omit `AUTH_SECRET` from the CI env block and let `.env.test` provide it. See `docs/knowledge/testing-cypress.md` → "CI/CD".
+4. **AUTH_SECRET empty**: If the `AUTH_SECRET` environment variable resolves to an empty string, NextAuth will fail to issue the session cookie — login appears to succeed but the session is never created. **This exact failure mode is closed at the root for this repo's own CI**: `.github/workflows/ci.yml` generates a disposable, run-scoped `AUTH_SECRET` in-workflow (`openssl rand -base64 32`), because referencing a real `secrets.AUTH_SECRET` resolves empty for Dependabot/fork PRs, and fail-closed asserts the value is non-empty before the job proceeds. If you hit this symptom outside this repo's mandatory CI job (a different pipeline, or a local reproduction), the underlying fix still applies: make sure whatever env file/step your run reads actually sets a non-empty `AUTH_SECRET`. See `docs/knowledge/testing-cypress.md` → "CI/CD".
 
 ### 2.4 Vitest unit test subject statically importing generator-emitted code
 
@@ -273,21 +273,23 @@ SchemaValidationError: Schema validation failed — N error(s) must be fixed bef
 
 Full catalog of error messages from `code_generator/validate.py`:
 
+**Line numbers below are current as of 2026-09-12** — `validate.py` has grown to 2,295 lines (it was much smaller when this table was first written) and its line numbers shift with every edit; if these have drifted again, grep for the message-fragment text rather than trusting the number alone.
+
 | Error message fragment | Location | Fix |
 |---|---|---|
-| `name must be lowercase snake_case` | `validate.py:124` | Rename definition key to `snake_case` |
-| `FK fields that carry x-relationship must end in '_id'` | `validate.py:150` | Rename property to `xxx_id` |
-| `x-relationship target '...' is not defined` | `validate.py:161` | Add target definition or fix target name |
-| `labelField '...' is invalid` | `validate.py:178` | Fix `labelField` to resolve through target properties |
-| `relationship target '...' has no 'name' field and no labelField` | `validate.py:185` | Add `name` field to target or set `labelField` |
-| `many-to-many target '...' has no 'name' field` | `validate.py:220` | Same as above, for `x-relationships` |
-| `x-display.chart references start_field '...' but that field does not exist` | `validate.py:248` | Add the field or fix `start_field` |
-| `x-display.chart references end_field '...' but that field does not exist` | `validate.py:256` | Add the field or fix `end_field` |
-| `child '...' uses x-outputType: comments but has no 'message' field` | `validate.py:270` | Add `message: { type: string, minLength: 1 }` to the child |
-| `Prisma index validation failed — ... missing required @@index([creator_id])` | `validate.py:104` | Add `@@index([creator_id])` to the model or run `scripts/add_required_indexes.py` |
-| `Prisma schema not found at ...` | `validate.py:83` | Run `generate.py` from the project root, not from `code_generator/` |
-| `unbalanced braces starting at offset ...` | `validate.py:49` | Syntax error in `prisma/schema.prisma` |
-| `No entities found in schema` | `generate.py:108` | No definition has `x-generate` set |
+| `name must be lowercase snake_case` | `validate.py:683` | Rename definition key to `snake_case` |
+| `FK fields that carry x-relationship must end in '_id'` | `validate.py:777` | Rename property to `xxx_id` |
+| `x-relationship target '...' is not defined` | `validate.py:807` | Add target definition or fix target name |
+| `labelField path '...' on target '...': segment '...' is not a property of ...` | `code_generator/helpers/label_field.py:131` (`resolve_label_paths()`) — **moved out of `validate.py` entirely**, and the message wording changed from the older `labelField '...' is invalid` form | Fix `labelField` to resolve through target properties (same remedy, different message text) |
+| `relationship target '...' has no 'name' field and no labelField` | `validate.py:873` | Add `name` field to target or set `labelField` |
+| `many-to-many target '...' has no 'name' field` | `validate.py:982` | Same as above, for `x-relationships` |
+| `x-display.chart references start_field '...' but that field does not exist` | `validate.py:1013` | Add the field or fix `start_field` |
+| `x-display.chart references end_field '...' but that field does not exist` | `validate.py:1020` | Add the field or fix `end_field` |
+| `child '...' uses x-outputType: comments but has no 'message' field` | `validate.py:1034` | Add `message: { type: string, minLength: 1 }` to the child |
+| `Prisma index validation failed — ... missing required @@index([creator_id])` | `validate.py:148` | Add `@@index([creator_id])` to the model or run `scripts/add_required_indexes.py` |
+| `Prisma schema not found at ...` | `validate.py:137` (this message is raised at several other validation entry points too — e.g. `:201`, `:260`, `:328`, `:463`, `:534` — not a single fixed call site) | Run `generate.py` from the project root, not from `code_generator/` |
+| `unbalanced braces starting at offset ...` | `validate.py:72` | Syntax error in `prisma/schema.prisma` |
+| `No entities found in schema` | `generate.py:901` | No definition has `x-generate` set |
 
 ### 3.2 Discovering undocumented implicit rules
 

@@ -43,8 +43,8 @@ leave_request:
 The relationship type is `one-to-one_bridge`, not the plain `one-to-one` used for a
 regular selector FK — `one-to-one_bridge` marks the FK as server-managed plumbing
 (auto-created alongside the parent, never user-selected), which is what excludes it
-from `get_parent_relationships()` while `get_one_to_one_rels()` still picks it up
-(`code_generator/helpers/schema_helpers.py:271-294`, `:346-358`).
+from `get_parent_relationships()` (`code_generator/helpers/schema_helpers.py:1131-1160`)
+while `get_one_to_one_rels()` (`:731-805`) still picks it up.
 
 **Step 2 — detail entity**: include the resolved `approvable` object and mount `ApprovalSection`:
 
@@ -235,7 +235,7 @@ ordering-gate describe block for the mocked-collaborator unit coverage.
 
 ### 16.7 Prisma models required
 
-Verified against the generated `prisma/schema.prisma:168-236` (models trimmed to the fields
+Verified against the generated `prisma/schema.prisma:181-267` (models trimmed to the fields
 this document discusses; indexes omitted):
 
 ```prisma
@@ -267,13 +267,16 @@ model approval_flow {
   updater           user       @relation("ApprovalFlowUpdater", ...)
 }
 
-// prisma/schema.prisma:201-206
+// prisma/schema.prisma:215-227
 enum ApprovalRequestStatus {
   pending
   approved
   rejected
   terminal_rejected
   withdrawn
+  split_invalidated  // a split invalidates the parent's current round
+                      // (updateMany on the round's rows, not a delete) —
+                      // see §16.12 below for canSubmitForApproval's handling
 }
 
 model approval_request {
@@ -302,17 +305,22 @@ model approval_history {
 ```
 
 **`status` is a string enum, not an integer.** `approval_request.status` is
-`ApprovalRequestStatus` (`pending` / `approved` / `rejected` / `terminal_rejected`), matching
-`code_generator/json_schema.yaml:338-343`'s `enum:` list for the field. Application code reads
-and writes the lower-case string values directly (e.g. `data: { status: 'approved' }` in
-`lib/approval_request/actions_core.ts:144`, `app/api/approval_request/[id]/approve/route.ts:35`).
+`ApprovalRequestStatus` (`pending` / `approved` / `rejected` / `terminal_rejected` /
+`withdrawn` / `split_invalidated`), matching `code_generator/json_schema.yaml:376-388`'s
+`enum:` list for the field — a second, independent enum declaration kept in sync by hand
+with the Prisma enum above (it drives the TS type in `types.ts.jinja2`/`getters.ts.jinja2`).
+Application code reads and writes the lower-case string values directly (e.g.
+`data: { status: 'approved' }` in `lib/approval_request/actions_core.ts:189`,
+`app/api/approval_request/[id]/approve/route.ts:56`).
 
 `approval_history.pre_status`/`post_status` are a **separate, still-integer** pair of columns —
 a legacy ordinal snapshot, out of scope for the string-enum migration. `statusOrdinal()` in
-`lib/approval_request/actions_core.ts:9-12` maps the enum back to its historical ordinal index
-(`['pending', 'approved', 'rejected', 'terminal_rejected']`) when a history row needs to record
-one; some call sites (e.g. the approve API route) just hard-code the known literal instead
-(`app/api/approval_request/[id]/approve/route.ts:44`, `pre_status: 0, post_status: 1`).
+`lib/approval_request/actions_core.ts:9-15` maps the enum back to its historical ordinal index
+(`['pending', 'approved', 'rejected', 'terminal_rejected', 'withdrawn']` — note `split_invalidated`
+is absent from this array: nothing ever calls `statusOrdinal('split_invalidated')`, since a split
+invalidates a round via a bare `approval_request.updateMany` with no matching `approval_history`
+row); some call sites (e.g. the approve API route) just hard-code the known literal instead
+(`app/api/approval_request/[id]/approve/route.ts:66`, `pre_status: 0, post_status: 1`).
 
 ### 16.8 Data flow summary
 
@@ -354,15 +362,15 @@ generator emits a single shared dispatch module,
 **`lib/approval_request/on_approved_dispatch.ts`** (overwritten on every `generate-code` run,
 built from every qualifying entity — not one file per entity), and wires it into both the API
 route (`approve/route.ts`) and server action approval paths
-(`code_generator/generate.py:1063-1135`, template `on_approved_dispatch.ts.jinja2`).
+(`code_generator/generate.py:1988-1991`, template `on_approved_dispatch.ts.jinja2`).
 
 Fire-once idempotency is guaranteed by `approvable.approved_at`: the dispatch runs only once
 **all** of the approvable's `approval_request` rows have reached `status: 'approved'` (an
 approvable can carry more than one, e.g. a multi-step chain ordered by `preceded_by`/
 `followed_by`) **and** `approved_at` is still `null`, then sets `approved_at` to the current
 timestamp in the same transaction before dispatching
-(`lib/approval_request/actions_core.ts:160-178`,
-`app/api/approval_request/[id]/approve/route.ts:46-60`).
+(`lib/approval_request/actions_core.ts:205-230`,
+`app/api/approval_request/[id]/approve/route.ts:74-87`).
 
 #### Schema: `on_approved.set_fields`
 
@@ -377,8 +385,9 @@ purchase_order:
 ```
 
 `set_fields` is a **mapping** of `field_name: value` — matching §16.11's `on_rejected.set_fields`
-below, and the only form `_resolve_set_fields()` (`code_generator/generate.py:289`) accepts (it
-iterates `raw.items()`). A list-of-`{field, value}` form is rejected before generation runs by
+below, and the only form `resolve_set_fields()` (defined in
+`code_generator/helpers/schema_helpers.py:16`, imported into `generate.py` as
+`_resolve_set_fields`) accepts (it iterates `raw.items()`). A list-of-`{field, value}` form is rejected before generation runs by
 `validate_schema()`'s `x-approval.set_fields` check (`code_generator/validate.py`), with an error
 naming the entity, the offending key, and the correct mapping form.
 
@@ -400,7 +409,9 @@ purchase_order:
 ```
 
 Generated stub (`lib/purchase_order/service_after_approve.ts`, trimmed to the non-ledger case —
-`code_generator/templates/service_after_approve_stub.ts.jinja2:9-34`):
+`code_generator/templates/service_after_approve_stub.ts.jinja2:10,26-31,53,55`; the template also
+carries an `is_ship_skeleton` branch, not shown here, that pre-fills netting-logic comments for
+ledger-domain entities):
 
 ```typescript
 import type { PrismaClient } from '@/app/generated/prisma/client';
@@ -408,14 +419,18 @@ import type { PrismaClient } from '@/app/generated/prisma/client';
 type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
 export async function afterApprove(
-  tx: Tx,
-  entityId: string,
-  approvableId: string,
-  approvedByUserId: string,
+  _tx: Tx,
+  _entityId: string,
+  _approvableId: string,
+  _approvedByUserId: string,
 ): Promise<void> {
   // TODO: implement post-approval effects here
 }
 ```
+
+(Parameter names are underscore-prefixed by convention — matching every other once-stub this
+generator emits — until the implementation actually reads one, per `eslint.config.mjs`'s
+unused-var rule.)
 
 #### Generated `on_approved_dispatch.ts`
 
@@ -526,7 +541,7 @@ receiving_receipt_line:
 ```
 
 **`lib/approval_request/on_rejected_dispatch.ts`** — one shared, generated module (not one file
-per entity; generated, `code_generator/generate.py:1186-1215`, template
+per entity; generated, `code_generator/generate.py:2083-2091`, template
 `on_rejected_dispatch.ts.jinja2`) — exposes `dispatchOnRejected(tx, entityType, approvableId,
 rejectedByUserId)`, called from the reject path after `approval_request.status` is updated,
 plus `isTerminalReject(entityType)` — a lookup against every entity marked `terminal: true`. For
@@ -590,6 +605,7 @@ export function canSubmitForApproval(latestRoundRequests: { status: string }[]):
   if (statuses.some((s) => s === 'pending')) return false;
   if (statuses.every((s) => s === 'approved')) return false;
   if (statuses.some((s) => s === 'terminal_rejected')) return false;
+  if (statuses.some((s) => s === 'split_invalidated')) return false;
   return true;
 }
 
@@ -605,6 +621,19 @@ is gone entirely — `x-approval.on_rejected.terminal` still exists and still de
 a rejection writes (`rejectApprovalRequest`/the reject REST route still call
 `deps.isTerminalReject(modelName)` for that), it just no longer needs threading through to the
 eligibility predicate as a second parameter.
+
+**`split_invalidated`** (added after this section was first written; §16.7's `ApprovalRequestStatus`
+enum carries it too) is a later, permanent-close status alongside `terminal_rejected` in
+`canSubmitForApproval`'s guard: a split rewrites the parent's current round's `approval_request`
+rows to `status: 'split_invalidated'` via a bare `updateMany` (see the split action route,
+`code_generator/templates/split_action_route.ts.jinja2`) rather than deleting them — the rows,
+and any `approval_history` linked to them, survive the split for audit purposes, but the round can
+never clear `canSubmitForApproval` again. Before this status existed, a split deleted the round's
+`approval_request` rows outright, which made an invalidated round indistinguishable from "never
+submitted" (case 1 in the seven-state comment above) and let a split-then-invalid parent pass this
+predicate and resubmit. `canWithdrawApproval` needs no equivalent change: a round already carrying
+`split_invalidated` has nothing left `pending` (the split's `updateMany` targets every row of the
+round), so it is already ineligible for withdrawal through the existing `pending`-only check.
 
 A round that reached partial approval (some stages `approved`) before being closed by a
 withdrawal or a non-terminal rejection is still eligible for resubmission — resubmission always
@@ -1018,15 +1047,16 @@ block that natural flow.
 and the *`approval_request`'s own workflow state* only:
 
 - Role check: the user holds `approval_flow.approver_role_id`
-  (`app/api/approval_request/[id]/approve/route.ts:25-28`).
+  (`app/api/approval_request/[id]/approve/route.ts:26-29`).
 - Ordering check: `assertApprovalOrder(id)` — every `preceded_by` flow's sibling request in the
-  same round is already `approved` (`app/api/approval_request/[id]/approve/route.ts:30`,
+  same round is already `approved` (`app/api/approval_request/[id]/approve/route.ts:31`,
   §16.6.1).
 
 Neither check reads any field of the approvable entity itself (`leave_request.status` or
-equivalent). The route's only interaction with the entity happens after the `approval_request`
-row is already updated, when `dispatchOnApproved`/`dispatchOnRejected` run
-(`app/api/approval_request/[id]/approve/route.ts:66-75`, §16.9/§16.11).
+equivalent). The route's only interaction with the entity *after* the `approval_request` row is
+updated happens when `dispatchOnApproved`/`dispatchOnRejected` run
+(`app/api/approval_request/[id]/approve/route.ts:74-87`, §16.9/§16.11) — see the update below for
+an interaction that was later added *before* that row is updated.
 
 **Why this is intentional.** Requiring the entity's current field state to still match
 `submit_on`'s value at approval time would mean any legitimate intermediate transition made while
@@ -1043,20 +1073,33 @@ proxy view, or equivalent entity-side logic), not as a field check added to
 `approveApprovalRequest`/the approve route. This section is not asking for that check to be added
 here.
 
-**Fact, not a call to close anything: there is currently no "before" hook on the entity side.**
-The only entity-side hooks the generator emits for the approval lifecycle are *after*-hooks —
-`service_after_approve.ts`, `service_after_reject.ts`, `service_after_withdraw.ts`
-(`code_generator/templates/service_after_{approve,reject,withdraw}_stub.ts.jinja2`, emitted as
-once-stubs when `x-approval.on_{approved,rejected,withdrawn}.emit_hook: true`, §16.9/§16.11) —
-and each runs only once the corresponding `approval_request` status transition has already
-committed. No template or route queries the entity for permission to approve/reject before that
-transition (confirmed by grep: no `before_approve`/`beforeApprove`/`before_reject`/`beforeReject`
-hook exists anywhere in `code_generator/`, `lib/`, or `app/`). Per the ruling above, this is not a
-seam that needs closing — a state-based approval veto belongs on the record's read side (proxy
-view or equivalent), not as a new pre-approval entity hook. It is recorded here only as the
-current factual shape of the code, so that a future attempt to add a "reject on the server side"
-control knows there is no existing seam to hook into and would need to design one from scratch —
-consistent with the ruling that any such control lives outside this mechanism.
+**Update: a "before" hook now exists on the entity side (it did not when this section was first
+written).** Alongside the after-hooks above, the generator also emits `beforeApprove`/
+`beforeReject`/`beforeWithdraw` once-stubs
+(`code_generator/templates/service_before_{approve,reject,withdraw}_stub.ts.jinja2`), dispatched
+through generated `lib/approval_request/on_before_{approve,reject,withdraw}_dispatch.ts` modules
+(templates `on_before_{approve,reject,withdraw}_dispatch.ts.jinja2`) — called from inside the same
+transaction *before* `approval_request.status` is written, from both the REST routes
+(`app/api/approval_request/[id]/{approve,reject,withdraw}/route.ts`) and the Server Action path
+(`lib/approval_request/actions_core.ts`); a throw there rolls back the entire
+approve/reject/withdraw attempt before any row is written. Unlike the after-hooks (opt-in via
+`emit_hook`), `beforeApprove`/`beforeReject` are generated **unconditionally** for every entity
+declaring `x-approval` — approve/reject are always reachable regardless of what `x-approval`
+configures. `beforeWithdraw` is narrower: generated only for entities declaring
+`x-approval.on_withdrawn`, since withdrawal is already blocked upstream (§16.16's
+`hasOnWithdrawn`/`ENTITIES_WITH_ON_WITHDRAWN`) for any entity that doesn't declare it.
+
+**This narrows the ruling above; it does not reverse it.** The default (unedited) stub is a no-op
+— nothing calls it with entity-field logic by default, the same "TODO: implement" shape as the
+after-hooks (§16.9). The ruling's substance — the generic `approveApprovalRequest`/
+`rejectApprovalRequest` gate itself checks only role, ordering, and round state, never an
+approvable's own field values, and that is the deliberate default — is still accurate. What has
+changed is narrower and purely factual: there is now a seam available for a schema author to hook
+custom pre-approval/rejection/withdrawal validation into (by editing the once-stub and throwing to
+reject), where previously none existed and one would have had to be designed from scratch. Whether
+to use it for a state-based approval veto, versus the read-side/proxy-view placement the ruling
+above still names as the mechanism's own default answer, remains the schema author's per-entity
+call — this section does not take a position on which is correct for a given entity.
 
 ### 16.18 Freezing a terminal rejection (extends §16.15)
 

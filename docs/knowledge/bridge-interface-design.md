@@ -11,11 +11,15 @@ See also: `docs/knowledge/schema-yaml-configuration.md` §7.6 for the schema dec
 ## AP-1: Parent Label Resolution
 
 Each parent type listed in `x-bridge.parents` may use a different field as its display label.
-The resolution priority is:
+The resolution priority is (`code_generator/build_context.py:1599-1626`, explicitly labeled AP-1-A/B in
+the source comments):
 
-1. `labelField` declared in `x-bridge.parents[].labelField` — highest priority, always wins
-2. `x-display.primary` field on the parent entity — second priority
-3. Fallback scan in order: `name` → `title` → `label` → `id`
+1. `labelField` declared in `x-bridge.parents[].labelField` — highest priority, always wins (AP-1-A)
+2. The field marked `primary: true` inside the parent entity's `x-display.table` column list —
+   second priority (AP-1-B; this is a per-column flag within `x-display.table`, not a separate
+   top-level `x-display.primary` key)
+3. Fallback scan in order: `name` → `title` → `label` → `id` (whichever exists first on the target;
+   `id` if none do)
 
 **Schema example:**
 
@@ -69,15 +73,23 @@ list columns, and the bridge context header.
 
 ## AP-3: Read-Only Parent Fields in Child Forms
 
-**Decision: parent fields are always read-only in child context; submit rejects any mutation.**
+**Decision: parent fields are always read-only in child context; there is nothing in the edit form
+that could submit a different parent.**
 
-When a child form is opened from a parent's edit page, all parent-identifying fields
-(parent type, parent label) are displayed as read-only. The child's `service.ts` validates
-on submit: if the incoming `parentType` / `parentId` differs from the stored bridge value,
-the request is rejected with a validation error.
+The actual mechanism is stronger than a runtime submit-time check — it's a structural exclusion,
+not a validation rule. `parent_type` / `parent_label` are virtual, computed-only fields (added by
+`code_generator/context.py:307-317`, populated in `getters.ts` from the bridge parent's own
+include, never stored as a writable Prisma column). In the child's edit form
+(`code_generator/generators.py:5418-5433`) they render as two plain read-only `AppFieldText`
+fields (`tf('parentType')` / `tf('parentLabel')`) with no `Ref` wiring them into `formData` — there
+is no input for a user to change, and no `parentType`/`parentId` value is ever submitted from the
+edit form at all. Separately, the bridge's own FK column (the real link to the parent row) is
+auto-added to the child's `readonly_fields` (`build_context.py`'s "Stage 2: auto-add bridge FK prop
+to readonly_fields"), so it follows the same generic write-exclusion as any other readonly field.
 
 This prevents silent parent-switching via form manipulation. The child's parent is permanently
-fixed at creation time.
+fixed at creation time — enforced by there being no writable field for it in the edit form, not by
+a service-layer comparison-and-reject check.
 
 ---
 
@@ -103,22 +115,28 @@ carry `x-readonly: true` so the generator automatically makes them non-editable.
 
 ---
 
-## Extension 2: Parent Always Read-Only in Child Edit Page
+## Extension 2: Parent Context in Child Edit Page (edit only — not a single combined header)
 
-When a child edit page is opened in bridge context, the page header always shows:
+The actual generated UI (`code_generator/generators.py:5418-5433`) is two separate read-only
+`AppFieldText` fields, not one combined "Parent: {type} ({label})" header line:
 
+```tsx
+<AppFieldText label={tf('parentType')} value={src.parent_type ?? ''} readOnly />
+<AppFieldText label={tf('parentLabel')} value={src.parent_label ?? ''} readOnly />
 ```
-Parent: {parentType} ({parentLabel})
-```
-
-Example: `Parent: work (My Story Arc)`
 
 This context display:
-- Is rendered at the top of the child form, above the editable fields.
-- Uses the resolved label from AP-1 for `{parentLabel}`.
-- Is never an editable field — it is purely informational.
-- Appears in both the child's `new` and `edit` pages when `parentType` / `parentId` are present
-  as query parameters or stored bridge data.
+- Is rendered at the top of the child form's field list (`all_parent_fields_jsx`), above the other
+  editable fields — **only in edit mode (`isEdit`)**.
+- `src.parent_label` is pre-resolved server-side using AP-1's priority (`getters.ts` builds it from
+  the bridge parent's own include; see AP-1 above); the client does not compute it.
+- Is never an editable field — the two fields carry no `Ref`, so nothing about them is ever
+  submitted (see AP-3).
+- **Does not appear on the child's `new` page.** In new-page/create context, `parentType` and
+  `parentId` are carried as **hidden inputs** (`selectedParentTypeRef`/`selectedParentIdRef`,
+  defaulting from the `initialParentType`/`initialParentId` query-param props) — there is no
+  visible parent-context display shown to the user while creating a child; the label only becomes
+  visible once the row exists and its edit page is opened.
 
 ---
 
@@ -141,8 +159,14 @@ grid columns explicitly.
 
 On the parent's **view page** (`FormView.tsx`):
 
-- Enum fields are displayed as their string label (e.g. `"In Progress"` not `2`).
-  The generator maps the stored integer index to the `enum` label array at render time.
+- Enum fields are displayed as their string label (e.g. `"In Progress"` not `2`), but the mechanism
+  now differs by enum kind (`code_generator/generators.py`'s `form_view_context()`,
+  `enum_integer_flds`/`enum_native_flds`): a legacy **integer**-backed enum (`x-enum-labels`) maps
+  the stored index into a label array at render time as described; a **nativeEnum** (Prisma string
+  enum, increasingly the default for new/promoted fields — see
+  `docs/knowledge/schema-yaml-configuration.md`) stores the label string itself and resolves it
+  through a translation namespace hook instead of an index lookup. Don't assume every enum field on
+  a bridge parent's detail page is still integer-indexed.
 - The bridge child list is rendered as a read-only DataGrid (no add/edit/delete buttons),
   showing the same columns as `x-display.table`.
 
@@ -169,11 +193,11 @@ context must be removed during the child's page generation.
 
 | Decision | Ruling |
 |----------|--------|
-| AP-1: Parent label source | `labelField` → `x-display primary` → name/title/label/id |
+| AP-1: Parent label source | `labelField` → `x-display.table`'s `primary: true` column → name/title/label/id |
 | AP-2: Child CRUD location | Parent edit page only; child form = separate page with parent context |
-| AP-3: Read-only enforcement | Parent fields always read-only; submit rejects parent mutation |
+| AP-3: Read-only enforcement | `parent_type`/`parent_label` are computed-only virtual fields with no writable input at all — structural exclusion, not a submit-time reject |
 | Extension 1: `x-readonly` | Field-level property; generator renders non-editable display field |
-| Extension 2: Parent context header | Always shown at top of child new/edit when in bridge context |
+| Extension 2: Parent context fields | Two read-only `AppFieldText` fields, edit page only; new page uses invisible hidden inputs instead |
 | Child list rendering | DataGrid in parent `FormUpsert` + `FormView`; columns from `x-display.table` |
-| Parent detail enum display | String label, not integer index |
+| Parent detail enum display | String label; via index lookup for legacy integer enums, via translation namespace for nativeEnum |
 | Generic "+" removal | Removed; child creation only via parent-context entry points |

@@ -64,15 +64,28 @@ resolve a CSV cell back to. This is **no longer true**: a later change made comp
 import-resolvable via full-label-text matching against a pre-built map. See
 `docs/knowledge/csv-import-composite-labelfield.md`.
 
-## Fail-loud companion: `UNIMPORTABLE_COLUMN`
+## Fail-loud companion: `UNIMPORTABLE_COLUMN` (superseded — see below)
 
 Independent of root cause, a route that answers `200 succeeded` while quietly discarding a
 column it can't write is a trap for the next schema author. `import_unimportable_columns` lists
 every exported FK display column that has **no** entry in `import_fk_specs` (read-only; composite
-labelField no longer lands here as of that later change). The generated route checks the CSV header against
-this list **before** processing any row — same convention as the existing `MISSING_COLUMN` check
-(`row: 0`, blocks the whole request) — and returns a new `UNIMPORTABLE_COLUMN` error instead of a
-false "succeeded".
+labelField no longer lands here as of that later change). At the time this task shipped, the
+generated route checked the CSV header against this list **before** processing any row — same
+convention as the existing `MISSING_COLUMN` check (`row: 0`, blocks the whole request) — and
+returned a new `UNIMPORTABLE_COLUMN` error instead of a false "succeeded".
+
+**Superseded by a later ruling**: this reject-the-whole-file behavior was replaced with an
+ignore-and-report design. The generated route no longer emits an `UNIMPORTABLE_COLUMN` error at
+all — a column listed in `UNIMPORTABLE_COLUMNS` that's present in the CSV header is filtered into
+a `skippedColumns` array (`const skippedColumns = UNIMPORTABLE_COLUMNS.filter((c) =>
+headerFields.includes(c));`, `code_generator/templates/api_import_route.ts.jinja2`) and the import
+proceeds normally — every other code path only ever reads a column it knows how to handle, so the
+unimportable column in the raw row is simply never looked at again. `skippedColumns` is echoed
+back in the response (success or error) whenever non-empty, so the omission stays visible instead
+of silent, but it no longer blocks the request the way `MISSING_COLUMN` still does. See
+`code_generator/tests/test_import_template_branches.py::test_unimportable_column_present_in_header_ignored_not_rejected`
+(asserts `code: 'UNIMPORTABLE_COLUMN'` is **absent** from the rendered output) and
+`::test_skipped_columns_reported_even_when_other_rows_error`.
 
 ## Known gap NOT fixed by this task: KEY-field null→value creates a phantom duplicate row
 
@@ -119,5 +132,6 @@ extended correctly to non-key FKs.
 
 `code_generator/tests/test_import_template_branches.py` — non-key FK resolved once and written
 to both CREATE and UPDATE; key FK now also written to UPDATE (not just merged via `keyWhere` into
-CREATE); `UNIMPORTABLE_COLUMN` rejects a present-but-unwritable header column; the common case
-(no unimportable columns) still renders a valid empty array.
+CREATE); a present-but-unwritable header column is ignored and reported via `skippedColumns`
+rather than rejected (see the superseded-behavior note above); the common case (no unimportable
+columns) still renders a valid empty array.

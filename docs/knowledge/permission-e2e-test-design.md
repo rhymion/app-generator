@@ -43,13 +43,19 @@ New `describe('Cross-organization isolation (G3)', ...)` block, gated on
 
 - **G3.1** — POST with a foreign `organization_id` in the body returns 404, existence hidden
   (`{% if can_new %}`). **Fixed in a follow-up**: `service.ts.jinja2`'s `add<Parent>`/`update<Parent>`
-  org-membership checks now `throw new ApiError(404, 'Not found')` (imported from
-  `@/lib/api-auth`) instead of a plain `Error('Organization access denied')` — `handleApiError()`
-  maps `ApiError` to its explicit `statusCode`, so this now returns the same 404 + generic
-  `{"error":"Not found"}` body as G3.2/G3.3, instead of falling through to a 500 that echoed the
-  literal string "Organization access denied" (a cross-org existence leak). The assertion is now
-  a strict `expect(res.status).to.eq(404)` plus `expect(JSON.stringify(res.body)).to.not.match(/organization/i)`,
-  matching G3.2/G3.3's style.
+  org-membership checks now `throw new AppError('NOT_FOUND', 'Not found')` (imported from
+  `@/lib/_errors` — this doc originally said `ApiError(404, ...)` from `@/lib/api-auth`; `ApiError`
+  predates the `AppError` refactor, 2026-08-15, and `service.ts.jinja2` throws no `ApiError` at all
+  today, `lib/api-auth.ts:8` vs `lib/_errors.ts:41`) instead of a plain
+  `Error('Organization access denied')` — `handleApiError()` (`lib/api-auth.ts:157-170`) still exists
+  and now branches on `AppError` too, mapping its `code` via `APP_ERROR_STATUS_MAP`
+  (`lib/api-auth.ts:146-155`, `NOT_FOUND: 404`) to the same 404 as G3.2/G3.3, instead of falling
+  through to a 500 that echoed the literal string "Organization access denied" (a cross-org
+  existence leak). The response body is `{"error":"Not found","code":"NOT_FOUND"}` — a `code`
+  field alongside `error`, not the bare `{"error":"Not found"}` this doc originally showed — but
+  the assertion (`expect(res.status).to.eq(404)` plus
+  `expect(JSON.stringify(res.body)).to.not.match(/organization/i)`) still holds unchanged, matching
+  G3.2/G3.3's style.
 - **G3.2** — GET on a row in a foreign org returns 404, not 403 (existence hidden) (`{% if can_view %}`).
 - **G3.3** — PUT on a row in a foreign org returns 404 (`{% if can_edit %}`).
 
@@ -96,14 +102,21 @@ an org-scoped entity are the first place either actually renders. This was verif
 rendering `test_api_spec.cy.ts.jinja2` against a synthetic org-scoped entity (see the
 design report for the entity fixture and rendered output).
 
-## CSV import dotted-FK org filter gap (tracked separately — OQ-2)
+## CSV import dotted-FK org filter gap — fixed the same day this doc was written
 
-`api_import_route.ts.jinja2`'s dotted-FK lookup (`prisma.<lookup_entity>.findMany({ where: {
-<lookup_field>: <csv value> } })`) is not scoped by the actor's organization: a natural-key value
-that collides across organizations can resolve to a row outside the actor's org. This design
-deliberately does **not** add a test asserting the (currently incorrect) org-filtered behavior —
-a permanently-red test would violate the SKIP=FAIL spirit and effectively freeze the bug as
-intended behavior. Instead, a `// TODO(dotted FK org filter gap...)` comment is emitted
-directly in the generated route (gated on `should_filter_by_org`, appearing in every consumer's
-`app/api/<entity>/import/route.ts` that has both a dotted FK import key and org scoping) pointing
-at this doc. Fix belongs in the separate cmd that scopes that `findMany()` by `organization_id`.
+This section originally tracked a real gap as deliberately unfixed (OQ-2): the dotted-FK lookup's
+`findMany()` in `api_import_route.ts.jinja2` had no `organization_id` scoping, so a natural-key
+value colliding across organizations could resolve to a row outside the actor's org, and no
+`// TODO(dotted FK org filter gap...)` marker or test asserted the (then-incorrect) behavior.
+
+That gap was closed a few hours after this doc's initial write-up, in the same-day fix
+"fix(security/cmd521): scope CSV import dotted-FK lookups by organization" — no `TODO` comment of
+that form exists in the template today. `api_import_route.ts.jinja2:233` and `:306` (the dotted-
+key and non-key FK lookup sites) now gate their `findMany()`'s `where` on
+`spec.lookup_entity_filter_by_org` (plain `organization_id: { in: _importOrgIds }`, or an
+`OR ... IS NULL` branch when `spec.lookup_entity_org_relationship_optional` is also true — see
+[`org-optional-entity-support.md`](org-optional-entity-support.md)). The third (composite/dotted-
+label) lookup site (`:197-202`) was fixed in that same commit for the plain org-scoped case; its
+`lookup_entity_org_relationship_optional` (OR-null) variant was the one gap that same
+`org-optional-entity-support.md` doc closed later, on 2026-08-08. No dotted-FK org-filter gap of
+this shape remains open as of this pass.

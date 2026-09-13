@@ -8,6 +8,37 @@
 > **Related**: `appendix/inventory-reservation-split.md` (current behavior reference, prerequisite migration item 5)
 > `docs/generic-primitives-redesign.md` (upstream design rationale)
 
+> **Currency note (verified against `origin/develop` HEAD, 2026-09-12): this design is now fully
+> implemented — treat the body below as a historical design record, not an open plan.**
+> - Phase 1 (P0 config-read fix): `lineTransactionableField` is read from
+>   `x-reservation.result.lineTransactionableField` (`code_generator/generate.py`,
+>   `helpers/schema_helpers.py`) — no literal `'inventory_transactionable_id'` membership check remains.
+> - Phase 2 (`x-ledger-entities` top-level declarations): implemented and since generalized further —
+>   `helpers/schema_helpers.py:590-658` (`resolve_ledger_domain()`), `code_generator/validate.py:1079-1098`,
+>   required everywhere via `ledgerDomain` (`generate.py`, `generators.py`, `build_context.py`). x-receiving
+>   is fully abolished: `x-receiving`, `ReceivingConfirmForm.tsx`, and the confirm route no longer exist
+>   anywhere in this tree (confirmed absent by search).
+> - Phase 3 (rename + richer ship skeleton): `InsufficientInventoryError` no longer exists anywhere in
+>   this tree; `InsufficientPoolCapacityError` is the class name throughout `code_generator/generators.py`,
+>   `templates/service.ts.jinja2`, `templates/api_route.ts.jinja2`, etc.
+> - Phase 5 (movement/adjustment): `templates/ledger_move_stub.ts.jinja2` and `templates/ledger_adjust_stub.ts.jinja2`
+>   exist and are wired in `generate.py` (`event_type == 'move'` / `'adjust'` branches).
+> - The `x-ledger-entities` mechanism was subsequently generalized **beyond** what this document
+>   describes: four more required keys (`itemField`/`locationField`/`lotField`/`expirationField`) and
+>   an opt-in fifth (`binField`) were added on top of the `pool`/`ledger`/`transactionable` triad this
+>   document defines. See `appendix/inventory-reservation-split.md` §7-7.3 for the current,
+>   actively-maintained description of the mechanism as it exists today — that document, not this
+>   one, is the current-behavior reference. Phase 4 (warehouse/location entity + FK) is reflected in
+>   that same document's §7.1 as a more general "any consumer's `locationField`" id-FK mechanism
+>   rather than the literal new `warehouse`/`location` top-level entities sketched in §3 below — this
+>   repository's own dogfood schema (`code_generator/json_schema.yaml`) does not itself declare a
+>   `location`/`warehouse` entity, so §3's exact schema snippet was not verified against a live
+>   example here; the underlying FK mechanism it relies on (plain `x-relationship` many-to-one) is
+>   unchanged and standard.
+> This document's own historical design rationale (why OD-1~8 were decided the way they were) remains
+> accurate and is kept for that reason — do not delete it (`appendix/cmd562-location-id-fk-consumer-migration.md`
+> and `inventory-reservation-split.md` §7 both cite it as the "declare, don't infer" precedent).
+
 ---
 
 ## 0. North Star
