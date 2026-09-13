@@ -210,7 +210,7 @@ class TestServiceScheduledBulkTemplate:
         assert rendered.count('export async function') == 1  # only `run`
 
     def test_no_claim_then_process_needed_no_row_selection_to_race_on(self):
-        """cmd_886 AC-甲 (bulk-applicability check): the entity-level
+        """cmd_886 (bulk-applicability check): the entity-level
         template's double-dispatch race exists because two overlapping
         invocations can both see the same row from their own `findMany`
         before either processes it, so the row must be *claimed* (updateMany

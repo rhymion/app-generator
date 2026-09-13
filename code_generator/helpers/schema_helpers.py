@@ -1160,7 +1160,7 @@ def get_parent_relationships(parent_def: dict, schema: dict | None = None) -> li
 
 def get_direct_attachment_fk_props(parent_def: dict) -> list[dict]:
     """Returns direct-attachment FK metadata: fields declaring
-    `x-relationship: { target: attachment, type: direct }` (cmd_788/subtask_780a乙).
+    `x-relationship: { target: attachment, type: direct }` (cmd_788/subtask_780a).
 
     Deliberately separate from get_parent_relationships() (which only matches
     `type in ('many-to-one', 'one-to-one')`): a direct-attachment FK is NOT a

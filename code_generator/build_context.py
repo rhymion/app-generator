@@ -145,7 +145,7 @@ def _get_actual_type(defn: dict) -> str | None:
 def get_uri_kind(prop: dict) -> str | None:
     """Return the uri kind for a format:uri property. Default is 'image'.
 
-    'file' (cmd_776(3)/subtask_780a乙) is a URL-string field like 'image' —
+    'file' (cmd_776(3)/subtask_780a) is a URL-string field like 'image' —
     still uploaded via /api/upload and stored as a plain string, not an
     attachment FK — but for a non-image file (e.g. proj_h's file_uri): the
     upload widget must not render it as an <img>. Rendered via the same
@@ -1483,7 +1483,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         '{ ' + ', '.join(f'{f}: true' for f in _api_ro_in_props) + ' }'
         if _api_ro_in_props else None
     )
-    # CREATE-time reject list (cmd_565 乙): unlike PUT's AP-3=B (compare against
+    # CREATE-time reject list (cmd_565): unlike PUT's AP-3=B (compare against
     # the persisted row), POST has no existing row to compare against — any
     # client-submitted value for a plain readonly field is rejected outright.
     # x-server-value fields are excluded here: they have their own dedicated
@@ -1554,7 +1554,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     selector_oto_rels    = [r for r in one_to_one_rels if r['is_selector']]
     oto_prop_names = {r['prop_name'] for r in one_to_one_rels}
 
-    # Direct-attachment FK rels (cmd_788/subtask_780a乙): `x-relationship:
+    # Direct-attachment FK rels (cmd_788/subtask_780a): `x-relationship:
     # { target: attachment, type: direct }` fields. Deliberately NOT folded
     # into parent_rels_raw/one_to_one_rels — see
     # get_direct_attachment_fk_props()'s docstring for why keeping it a
@@ -3597,7 +3597,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         f", {child_service_args}" if child_service_args else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
 
-    # CSV import -> service.ts convergence (cmd_996 乙, Issue #93): the
+    # CSV import -> service.ts convergence (cmd_996, Issue #93): the
     # generated import route calls add{{parent_pascal}}/update{{parent_pascal}}
     # -- the same functions REST route.ts / Server Action actions.ts call --
     # instead of writing via a raw tx.model.create/update, so any guard
@@ -3792,7 +3792,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         all_body_fields_create=all_body_fields_create,
         service_args_for_create=service_args_for_create,
         service_args_for_update=service_args_for_update,
-        # CSV import -> service.ts convergence (cmd_996 乙, Issue #93)
+        # CSV import -> service.ts convergence (cmd_996, Issue #93)
         import_service_call_feasible=import_service_call_feasible,
         import_service_parent_args=import_service_parent_args,
         flatten_null_args=flatten_null_args,

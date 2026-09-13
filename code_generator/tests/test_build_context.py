@@ -1241,7 +1241,7 @@ class TestImportFkSpecsScreenEditableGeneralization:
         )
 
     def test_composite_labelfield_fk_importable_via_full_label_match(self):
-        """cmd_548 (option 甲): a composite/dotted labelField has no single
+        """cmd_548: a composite/dotted labelField has no single
         lookup field, but it IS import-resolvable by matching the whole
         rendered label text against a pre-built label→id map — see
         the earlier design + is_composite/import_label_expr/prisma_include
