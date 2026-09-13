@@ -62,12 +62,24 @@ unconditionally in its `gcloud run deploy` step (Step 4).
 gcloud projects describe $PROJECT_ID --format='value(projectNumber)'
 ```
 
-### 6. Vercel Fresh Provisioning — Run vercel-setup.sh Before First Deploy
+### 6. Vercel Fresh Provisioning — three separate stages, not one script
 
-For a fresh Vercel provisioning (new project, not yet deployed), `app-template/scripts/vercel-setup.sh`
-must be run before the first `vercel deploy`. It handles migration and seeding for both
-environments so no separate manual seed step is needed: Step 4 seeds the production DB
-and Step 5.5 seeds the staging DB (`db:seed-baseline`, idempotent). Skipping this step
-leaves the staging DB without a default tenant/admin user, making the first preview
-deploy unusable for manual testing. See `app-template/docs/vercel-automation-design.md`
-§5 for the full step-by-step breakdown.
+**Update**: `vercel-setup.sh` no longer runs migration or seeding itself. It used to
+(as Steps 3/4/5/5.5), but that was removed — `vercel-build` already runs
+`migrate:deploy` on every deploy, making an earlier owner of that step redundant, and
+seeding before any deploy has ever run means seeding a database with no schema yet.
+The corrected flow is three separate scripts, run in order:
+
+1. `scripts/vercel-setup.sh` (`app-template/scripts/vercel-setup.sh`, a symlink into
+   the `app-generator` submodule) — provisions Neon/Upstash/Blob, links the Vercel
+   project, injects env vars. Does **not** touch the database.
+2. `scripts/vercel-deploy.sh [--prod]` — first deploy; `vercel-build` creates the schema
+   via `migrate:deploy`.
+3. `scripts/vercel-seed.sh [--prod]` — bootstraps tenant/admin data (`db:seed-baseline`,
+   idempotent). Must run after step 2 — running it before any deploy fails because the
+   target tables don't exist yet. Defaults to seeding the staging DB; `--prod` seeds
+   production. Skipping this step for staging leaves it without a default tenant/admin
+   user, making the first preview deploy unusable for manual testing.
+
+See `app-template/docs/vercel-automation-design.md` for the full step-by-step breakdown
+(§18/§19 cover the corrected three-stage ordering specifically).

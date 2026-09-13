@@ -31,7 +31,8 @@ not in scope for this iteration.
 │   if siteConfig allows       │  buildAdapter() wraps
 │   && env vars present        │     PrismaAdapter(prisma) — overrides
 │     → register provider      │     createUser to fill domain-required
-│                              │     fields (name, creator_id, updater_id)
+│                              │     fields (name, creator_id, updater_id,
+│                              │     tenant_id); drops the OAuth `image`
 │                              │  session.strategy: 'jwt' (pinned)
 │                              │  exports { handlers, auth, signIn, signOut }
 └──────────────┬───────────────┘
@@ -184,8 +185,11 @@ On the first Google sign-in for a given email:
 2. If `signIn()` returns true, `buildAdapter().createUser()` (our
    wrapper around `PrismaAdapter`) inserts the `user` row with:
    pre-generated cuid, `email`, `name = profile.name ?? email`,
-   `emailVerified`, `image`, and self-referencing `creator_id` /
-   `updater_id` matching the new id. The wrapper exists because the
+   `emailVerified`, self-referencing `creator_id` / `updater_id`
+   matching the new id, and `tenant_id` bound to the default tenant.
+   The OAuth provider's `image` (avatar URL) is deliberately **not**
+   written — intake of an OAuth profile image is intentionally out of
+   scope (`lib/auth/create-user.ts`). The wrapper exists because the
    default `PrismaAdapter` only writes the NextAuth-shape fields, but
    our `user` table requires non-null `name` plus the audit-bootstrap
    pattern shared with `/api/auth/register`. Note: v5 passes

@@ -264,10 +264,19 @@ This was replaced by passing the raw value to the client with `format: 'date-tim
 ### Explicit timezone selection
 
 If an explicit timezone selector is added to the UI (e.g., for admins managing shifts across regions):
-- A `TimeZoneSelect` component already exists at `components/TimeZoneSelect.tsx`
+- A `TimeZoneSelect` component already exists at `components/_standard/TimeZoneSelect.tsx`
 - It uses `Intl.supportedValuesOf('timeZone')` with a static fallback list
 - The `copyShiftTemplatesToShifts` server action already accepts a `timeZone` parameter
 - The `ShiftGanttChart` client component can accept a `timeZone` prop (currently auto-detects)
+
+Note: `shift`/`shift_template`, `copy-shifts.ts`, `localTimeIn()`, `copyShiftTemplatesToShifts`,
+and `ShiftGanttChart` are a downstream consumer's shift-scheduling domain, illustrating this
+repo's generic timezone machinery — they are not part of this repo's own `json_schema.yaml` or
+codebase. The generic patterns they illustrate (`Intl.DateTimeFormat.formatToParts`, `dayjs.tz`,
+the date-only-field conversion, and the `DisplayFieldConfig.format` table) are real and current
+in this repo's own generic components: `components/_standard/GanttChart.tsx` (`fmtTimeInTz`,
+dayjs `utc`/`timezone` plugins), `lib/_format.ts` (`formatLabelValue`), and
+`components/_standard/{DataGridClient,CardListClient}.tsx`.
 
 ### Daylight Saving Time
 

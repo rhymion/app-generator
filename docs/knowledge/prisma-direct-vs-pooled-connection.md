@@ -47,11 +47,14 @@ datasource: {
 
 This is deliberately **not** Prisma's classic `directUrl` datasource field —
 that field does not exist in this project's Prisma config API. Confirmed
-empirically (2026-08-12): the installed `@prisma/config` (7.9.1) types
-`Datasource` as `{ url?: string; shadowDatabaseUrl?: string; }` only; adding
-a `directUrl` key to `defineConfig({ datasource: {...} })` fails
+empirically (2026-08-12): the installed `@prisma/config` (7.9.1 at the time)
+types `Datasource` as `{ url?: string; shadowDatabaseUrl?: string; }` only;
+adding a `directUrl` key to `defineConfig({ datasource: {...} })` fails
 `tsc --noEmit` with `TS2353: Object literal may only specify known
-properties, and 'directUrl' does not exist in type ...`. The classic
+properties, and 'directUrl' does not exist in type ...`. `@prisma/config`
+has since moved to 7.10.0 (`package-lock.json`, checked 2026-09-12); the
+type shape was not re-verified against that version — natural library
+version drift, not itself re-checked for this batch. The classic
 schema.prisma `directUrl` datasource field is likewise unavailable here:
 Prisma 7's `schema.prisma` `datasource db` block no longer carries a `url`
 at all (see `datasource db { provider = "postgresql" }` in

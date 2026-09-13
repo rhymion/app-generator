@@ -143,12 +143,18 @@ const [{ permissions: userPermissions, userId }, items] = await Promise.all([
 ### Type design
 `getModelPermissions` returns `RichPermissions` (includes `general/creator/assignee`
 sub-objects for item-level resolution). Components receive `ModelPermissions`
-(= `OperationFlags` — just 4 booleans) after stripping via `toPermissions()`.
+(= `OperationFlags`) after stripping via `toPermissions()`.
 This keeps the public API of components simple.
 
 ```ts
-export type ModelPermissions = OperationFlags;  // { read, create, update, delete }
+export type ModelPermissions = OperationFlags;  // { create, read, update, delete, import }
+```
 
+(`OperationFlags` was 4 booleans when this section was first written;
+`import` was added as a fifth `Operation` value later — see `lib/authz.ts:23`.
+The type-design point this section makes is unaffected by the flag count.)
+
+```ts
 export interface RichPermissions extends OperationFlags {
   general: OperationFlags;
   creator: OperationFlags | null;   // null if no creator role defined
@@ -157,17 +163,22 @@ export interface RichPermissions extends OperationFlags {
 ```
 
 ### Creator/Assignee list filtering
-When a user only has creator or assignee read (not general read), the list is
-filtered after fetching rather than via a DB-level filter. This keeps DB queries
-simple at the cost of filtering in application code:
+This used to be an application-level `items.filter(...)` step run after an
+unscoped fetch (as this section originally described), but that was replaced
+by a DB-level filter (`getters.ts.jinja2`'s `build{Parent}AccessWhere()`,
+introduced 2026-05-04, well after this doc's original write-up) once the
+`AccessWhere`-based query rewrite landed. When a user only has creator or
+assignee read (not general read), the where clause pushed into the `findMany`
+call itself already scopes the rows returned — there is no unscoped fetch to
+filter after the fact:
 
 ```ts
-const filtered = userPermissions.general.read
-  ? items
-  : items.filter(item =>
-      (userPermissions.creator?.read && item.creator_id === userId) ||
-      (userPermissions.assignee?.read && (item as any).assignee_id === userId)
-    );
+if (!perms.general.read) {
+  const or: Record<string, unknown>[] = [];
+  if (perms.creator?.read && userId) or.push({ creator_id: userId });
+  if (perms.assignee?.read && userId) or.push({ assignee_id: userId }); // has_assignee_id entities only
+  and.push(or.length === 0 ? { id: '__no_access__' } : { OR: or });
+}
 ```
 
 ---
@@ -303,7 +314,11 @@ revalidatePath(`/[locale]/${entityName}/edit/${targetId}`, 'page');
 "Server Functions: Updates the UI immediately (if viewing the affected path). **Currently,
 it also causes all previously visited pages to refresh when navigated to again. This
 behavior is temporary and will be updated in the future to apply only to the specific
-path.**" On today's Next.js (16.2.x), calling `revalidatePath` with *any* argument — even
+path.**" On the Next.js version installed when this note was written (`^16.1.1`; `16.3.4` is
+currently installed per `package-lock.json` — whether the upstream caveat above still holds
+verbatim on `16.3.4` was not re-verified for this pass, since it would require re-testing
+`revalidatePath`'s runtime behavior, not a code-crosscheck), calling `revalidatePath` with
+*any* argument — even
 one that matches nothing — still refreshes previously-visited pages on next visit, so a
 wrong path argument does not currently reproduce as a visible stale-page bug. It will once
 Next.js ships the narrower, path-matching-only behavior the docs describe as planned —

@@ -51,6 +51,17 @@ No schema flag decides whether this call happens — it happens for every
 entity, every time. The default stub is a no-op; nothing changes for
 entities that don't need custom validation.
 
+**Note (2026-09-12, drift from later changes):** the call site above shows
+this mechanism's shape as of this doc's own writing. Two later, separate
+changes widened the same call site further — a pre-edit row snapshot
+(`prevRow`) and then the acting user's id (`actorId`) — so the real,
+current call is
+`await (validateCustomRules as CustomRulesFn)(tx, data, currentId, prevRow, actorId);`.
+See `docs/knowledge/pre-edit-row-handoff-to-custom-validation.md` for that
+mechanism; it does not change anything described in this doc — the
+same-entity-name check below only ever needed `data`, and still only reads
+`data`.
+
 `data` includes every connect-style (m2m / optional-FK-list) child's
 selected id array under its property name — `build_context.py`'s
 `validation_data_obj` now exposes this unconditionally for every such child

@@ -65,7 +65,23 @@ string is treated as a one-element list) and keeps a path only if **all** of the
 
 - **Not a dotted path** (`approver_role.name`) — resolving a second hop (the target's own FK to
   yet another entity) would need a second nested `where`, which `getters.ts.jinja2` does not
-  render. One-hop only; no schema case has needed a second hop so far.
+  render within `derive_searchable_relation_fields()` itself. One-hop only *for this function*.
+
+  **Update**: a second, additive function closes part of this gap from the other direction.
+  `derive_cross_entity_searchable_fields()` (`code_generator/helpers/schema_helpers.py:395`)
+  scans *other* entities' composite `labelField` declarations for dotted paths that target the
+  current entity through one of the current entity's own relations — e.g.
+  `goods_receipt_line.inventory_id` declaring `labelField: [item.sku, location.code, ...]` makes
+  `location.code` searchable on `inventory`'s own `searchInventoryOptions()`, even though nothing
+  on `inventory` itself declares that path. This exists specifically because
+  `derive_searchable_relation_fields()` only reads an entity's own `properties` block and can
+  never see a dotted-path declaration that lives on a different, referencing entity — without the
+  second pass, the Cypress test-fixture generator and the runtime search generator could silently
+  disagree on what's searchable, the same class of drift the `labelField`-sourcing consolidation
+  above was meant to make impossible, just one hop further out. A downstream consumer's
+  `goods_receipt_line` entity and a self-referencing `approval_flow.preceded_by` case are the
+  concrete schemas that now exercise this path (per that function's own docstring, which names
+  this doc's older "no schema case needs it today" claim as the thing it supersedes).
 - **Resolves to a real property** on the target entity (`target_props.get(path)` returns a dict)
   — this is the check that excludes `id`, per above.
 - **Is a string-typed property** (`is_string_prop`) — `contains` is a string-only Prisma operator.

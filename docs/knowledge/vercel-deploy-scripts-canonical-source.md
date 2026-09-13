@@ -4,9 +4,13 @@
 `.env.vercel.production.local.example` in this repo are the canonical
 copies of the Vercel deployment tooling used by apps generated from
 this repo (app-generator itself deploys its own demo via
-`scripts/gcp-*.sh` + `.env.production.local.example`, a separate,
-unrelated GCP path — the two are not the same deployment target and
-must not be merged into one file).
+`scripts/gcp-*.sh`, a separate, unrelated GCP path that reads its own
+`.env.production.local` — the two are not the same deployment target
+and must not be merged into one file. Note: `scripts/gcp-env.sh` and
+`scripts/vercel-env.sh` both reference a `.env.production.local.example`
+file in their own error messages, but no such example file is actually
+committed in this repo today — only `.env.vercel.production.local.example`
+and `.env.example` exist at repo root).
 
 Previously, three consumer repos (app-template / inventory-app /
 insurance-app) each carried their own independent copy of these files.

@@ -3,9 +3,11 @@
 ## Problem
 
 `scripts/seed-baseline.ts` (`npm run db:seed-baseline`) is a required step of
-every provisioning path — `vercel-build`, `build:full`, and GCP's
-`scripts/gcp-seed.sh` (via the `app-migrate` Cloud Run Job) all run it. Before
-this change it unconditionally created:
+every provisioning path — `build:full` and GCP's `scripts/gcp-seed.sh` (via
+the `app-migrate` Cloud Run Job) run it directly; the Vercel path runs it via
+`scripts/vercel-seed.sh` as a separate step (`vercel-build` itself no longer
+runs it — see "Wiring per provisioning target" below for the current split).
+Before this change it unconditionally created:
 
 - an admin user `admin@example.com` / password `password123`
 - a fixed `api_key` literal (`mk_78d1e51a47f40912f5a1787367e3f7f6ed17c314590eac84edc5b3f785a527b1`)
@@ -59,9 +61,9 @@ actions_core.ts` (see `docs/knowledge/troubleshooting.md` §2.4).
 | `SEED_ADMIN_EMAIL` | `NODE_ENV=production` | Any valid email; becomes the bootstrap admin's login. |
 | `SEED_ADMIN_PASSWORD` | `NODE_ENV=production` | Plain text in the env var; hashed with bcrypt before storage, never persisted in plaintext or logged. |
 
-Provisioning scripts (Vercel's `vercel-build`, `scripts/build:full`, GCP's
-`gcp-seed.sh`/`app-migrate` Job) must have these two vars available in the
-environment they run in — set them the same way other provisioning secrets
+Provisioning scripts (Vercel's `scripts/vercel-seed.sh`, `scripts/build:full`,
+GCP's `gcp-seed.sh`/`app-migrate` Job) must have these two vars available in
+the environment they run in — set them the same way other provisioning secrets
 (`DATABASE_URL`, `AUTH_SECRET`) are set for that target. `api_key` is never
 supplied by the operator; it is always generated.
 
@@ -83,15 +85,25 @@ supplied by the operator; it is always generated.
   `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` unset fails fast with the
   expected message; setting both succeeds (see this task's report for the
   exact commands and output).
-- **Vercel** (`vercel-build`): there is **no dedicated `vercel-setup.sh`
-  script in this repo** — Vercel's build pipeline runs `npm run
-  vercel-build` directly per `vercel.json`'s `buildCommand`, with
-  `NODE_ENV=production` set automatically by Vercel's build environment (for
-  both Production and Preview deployments). Set `SEED_ADMIN_EMAIL` and
-  `SEED_ADMIN_PASSWORD` as Vercel Environment Variables (Project Settings →
-  Environment Variables) the same way `AUTH_SECRET`/`DATABASE_URL` already
-  are for that project — no script change is needed or possible on the
-  Vercel side.
+- **Vercel** (`scripts/vercel-seed.sh`): **this changed since the credential
+  hardening was written.** `vercel-build`'s own npm script
+  (`"run-s prj:sync python-generate migrate:deploy db:generate build"`) no
+  longer runs `db:seed-baseline` at all — it was pulled out of the build
+  chain by a later commit (`fbf68b96`), and `build:full` is the only npm
+  script that still runs it directly. Seeding for Vercel now happens via a
+  separate, explicit step the operator runs after `scripts/vercel-setup.sh`
+  (which **does exist** in this repo, contrary to what this section
+  previously said — `vercel-setup.sh` itself prints the exact next command
+  rather than running it): `bash scripts/vercel-seed.sh [--prod]`, which
+  defaults `SEED_COMMAND=db:seed-baseline`. `NODE_ENV=production` is still
+  set automatically by Vercel's build
+  environment for both Production and Preview deployments. Set
+  `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` as Vercel Environment
+  Variables (Project Settings → Environment Variables) the same way
+  `AUTH_SECRET`/`DATABASE_URL` already are for that project — no additional
+  script change is needed for the credential-hardening guard itself, since
+  `scripts/vercel-seed.sh` still ultimately runs `db:seed-baseline`, which is
+  where the `NODE_ENV`-gated logic in this doc lives.
 
 ## Remediation runbook: a deployment already seeded with the default credentials
 

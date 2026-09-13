@@ -205,8 +205,9 @@ This repo's own `json_schema.yaml` declares no `x-payment` entity by
 default, so the stubs are never emitted by this repo's own
 `test:e2e:build`/`test:e2e:cy:api` gate runs — by design (opt-in, not a
 default-schema feature) -- `test:payment-gate` above exists specifically
-to cover that gap. The `stripe` npm package (`^22.5.0`) was added
-as a runtime dependency since `lib/stripe.ts` imports it unconditionally
+to cover that gap. The `stripe` npm package (originally added at `^22.5.0`,
+currently `^22.6.1` in `package.json` after subsequent dependency bumps) was
+added as a runtime dependency since `lib/stripe.ts` imports it unconditionally
 once written.
 
 ## Deliberately out of scope for this task

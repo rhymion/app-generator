@@ -72,8 +72,13 @@ npm run migrate:reset:test
 npm run test:e2e
 
 # Or hot-reload mode (no build required)
-npm run test:e2e:dev
+npm run test:e2e:dev:run
 ```
+(`npm run test:e2e:dev`, no `:run` suffix, does not run Cypress at all — its
+final step is the plain `dev` script, so it only provisions the test DB and
+serves the app. `test:e2e:dev:run` is the script that chains DB setup +
+`test:e2e:cy:dev`, the actual Cypress-only runner — verified against
+`package.json`, 2026-09-12.)
 
 **Unit Tests (Vitest)**
 
@@ -216,27 +221,37 @@ This project uses **Prisma 7**, which has important changes from Prisma 6:
 - ✅ Now in `prisma.config.ts` (`datasource.url`)
 - ✅ Environment variables loaded via `@next/env` in `prisma.config.ts` (matches Next.js NODE_ENV-based loading)
 
-**PrismaClient Configuration**:
-- Must provide `accelerateUrl` to constructor (required by `@prisma/extension-accelerate`)
-- The extension handles both direct connections and Accelerate connections
-- Use `DATABASE_URL` for direct connections
-- Use `PRISMA_DATABASE_URL` for Accelerate connections
+**PrismaClient Configuration**: `lib/prisma.ts`'s `createPrismaClient()` is a
+3-way branch, only one of which touches `accelerateUrl` (re-verified against
+`lib/prisma.ts`, 2026-09-12 — this replaces an older single-branch
+description that predates the adapter split):
+1. `PRISMA_DATABASE_URL` set → Accelerate: `new PrismaClient({ accelerateUrl })`,
+   `.$extends(withAccelerate())`. Only this branch requires `accelerateUrl`.
+2. Else `USE_NEON_ADAPTER === 'true'` → `new PrismaClient({ adapter })` with a
+   `PrismaNeon` adapter (Vercel+Neon deployments only; deliberately not gated
+   on `NODE_ENV` — see the file's own comment on why).
+3. Else (the default everywhere else, including local/CI/GCP Cloud Run) →
+   `new PrismaClient({ adapter })` with a `PrismaPg` adapter over `DATABASE_URL`.
+
+None of the three branches ever passes both `accelerateUrl` and `adapter` —
+"must provide `accelerateUrl` to the constructor" only holds for branch 1.
 
 ### How Prisma Accelerate Works
 
-With `@prisma/extension-accelerate` installed, the PrismaClient requires an `accelerateUrl`:
-
-**Development/Production** (lib/prisma.ts):
-- Uses `accelerateUrl: process.env.PRISMA_DATABASE_URL || process.env.DATABASE_URL || ''`
-- Falls back to direct connection if `PRISMA_DATABASE_URL` is not set
-- Accelerate extension detects URL format and uses caching only for `prisma+postgres://` URLs
+**Development/Production** (`lib/prisma.ts`):
+- Branch 1 above fires only when `PRISMA_DATABASE_URL` is set, and validates
+  it starts with `prisma://` or `prisma+postgres://` (throws otherwise —
+  catches a placeholder left over from `docs/knowledge/manual-ops.md` §1).
 - **Off by default in every environment, including production**: `PRISMA_DATABASE_URL`
-  is currently unset, so this always falls back to the direct connection. It has never
-  successfully reached this environment's Cloud SQL instance (TLS verification failure
+  is currently unset, so branch 3 (or 2, on Vercel+Neon) is taken instead. Accelerate has
+  never successfully reached this environment's Cloud SQL instance (TLS verification failure
   against `GOOGLE_MANAGED_INTERNAL_CA`); see the comment in `lib/prisma.ts`.
 
-**Testing** (cypress/support/db-helpers.ts, scripts/seed-test-db.ts):
-- Uses `new PrismaClient()` without Accelerate extension
+**Testing** (`cypress/support/db-helpers.ts`, `scripts/seed-baseline.ts` — not
+`scripts/seed-test-db.ts`, an old filename that no longer exists, renamed away
+long ago via an intermediate `seed-tenant.ts`):
+- Uses `new PrismaClient({ adapter })` with a `PrismaPg` adapter (the same
+  adapter shape as branch 3 above, not a bare `new PrismaClient()`)
 - Direct connection to local test database via `DATABASE_URL` from `.env.test`
 - No `accelerateUrl` parameter needed
 - Faster and simpler for local testing

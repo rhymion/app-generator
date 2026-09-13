@@ -106,7 +106,7 @@ demonstration for this fix was therefore done against a temporary, worktree-loca
 addition (giving `permission` and `dashboard` a synthetic `organization_id` relation and a
 `dashboard.name` dotted key) — reverted before the final commit, evidence preserved in the
 an earlier investigation report — while the permanent, CI-enforced regression coverage is the
-`build_context_test.py` unit test below, since this generator's own mandatory e2e gate cannot
+`test_build_context.py` unit test below, since this generator's own mandatory e2e gate cannot
 exercise `should_filter_by_org` end-to-end until a *consuming* project's org-scoped schema does.
 
 ## Permanent regression coverage

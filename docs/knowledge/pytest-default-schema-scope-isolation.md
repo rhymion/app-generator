@@ -11,6 +11,18 @@ frozen reference fixture, or against the on-disk `json_schema_internal.yaml`:
 - `test_phase_a_golden_diff_zero`
 - `test_default_schema_bridge_entities_are_unaffected_by_internal_file`
 
+**Update (2026-09-12): a fourth test now carries the same guard.** A later,
+independent change (breaking the golden-diff tests' coupling to the live
+schema, 2026-08-12, after this note was first written) added
+`test_live_schema_derivation_does_not_raise` — a deliberately
+content-free check ("did building the live default schema raise, not what
+it produced") — and gave it the identical guard call for the identical
+reason: it also builds from the on-disk default schema, so it is equally
+meaningless once a consumer's schema may be overlaid. Read every mention of
+"the three tests" below as descriptive of the guard's origin, not an
+exhaustive count of who carries it today — this fourth test calls
+`_fail_if_prj_synced_tree()` exactly like the other three.
+
 `scripts/prj_sync.py` overlays a consuming project's own schema onto this repo whenever a
 sibling `../prj` directory exists (submodule-mount layout: `<consumer>/app-generator` +
 `<consumer>/prj`) — it copies `prj/code_generator/json_schema.yaml` and `prj/prisma/schema.prisma`

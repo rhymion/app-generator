@@ -25,7 +25,7 @@ or once a shipped doc asserts it as a "current fact" about the base template's o
 ## The default entity set
 
 The generator's own baseline schema (`code_generator/json_schema.yaml` +
-`code_generator/json_schema_internal.yaml`) defines exactly 15 entities: `approvable`,
+`code_generator/json_schema_internal.yaml`) defines exactly 16 entities: `approvable`,
 `approval_flow`, `approval_request`, `attachable`, `attachment`, `comment`, `commentable`,
 `dashboard`, `dashboard_widget`, `notification`, `organization`, `permission`, `reaction`,
 `role`, `setting`, `user`.
@@ -75,16 +75,15 @@ hardcoded into the shared `cypress.config.ts`.
   `app-generator` submodule pointer is bumped to include this commit, or the
   `purchase_order`-domain reservation e2e specs will break at that point (decoupled by the
   submodule pin, not immediately). See the report for the exact registrations to add.
-- **Known gap, not fixed here (needs generator design work, filed as follow-up)**:
-  `code_generator/templates/ledger_write_stub.ts.jinja2` and `split_action_route.ts.jinja2` both
-  contain a literal `tx.location.findFirst(...)` Prisma call in their `afterReject`/split-reject
-  paths. `location` is not part of the `x-ledger-entities` domain config (`pool`/`ledger`/
-  `transactionable` only) — it is hardcoded, not schema-driven, contradicting
-  `docs/knowledge/appendix/inventory-domain-generalization-design.md`'s own stated design intent
-  ("target: whatever the customer names their location entity"). Any consumer generating this
-  stub for an `x-ledger-source` entity with `reject_event_type` set, without a literal `location`
-  Prisma model, would get a template that fails to type-check. Proper fix requires adding a
-  `location`-equivalent key to the `x-ledger-entities` domain resolution
-  (`schema_helpers.py::resolve_ledger_domain`) and threading it through `generate.py`/
-  `build_context.py` into both templates — schema-config design work beyond this triage cmd's
-  scope, recommended as a dedicated follow-up cmd.
+- **Known gap at the time — since closed by a follow-up**: `code_generator/templates/
+  ledger_write_stub.ts.jinja2` and `split_action_route.ts.jinja2` used to contain a literal
+  `tx.location.findFirst(...)` Prisma call in their `afterReject`/split-reject paths, hardcoded
+  rather than schema-driven, contradicting `docs/knowledge/appendix/
+  inventory-domain-generalization-design.md`'s stated design intent ("target: whatever the
+  customer names their location entity"). This has since been fixed exactly the way this section
+  recommended: `resolve_ledger_domain` (`code_generator/helpers/schema_helpers.py:589`) now
+  resolves a `location_field` key (alongside `item_field`/`lot_field`/`expiration_field`) from the
+  `x-ledger-entities` domain config, and both templates render `{{ pool_location_field }}`
+  wherever the literal `location` model/column name used to appear — no literal
+  `tx.location.findFirst`/`.location.` reference remains in either template. The domain config's
+  own docstring documents the earlier hardcoding as the reason for the change.

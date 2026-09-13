@@ -76,10 +76,23 @@ branches/PRs, closed/deleted after measurement):
   decision logic (single canonical copy, lives here). `cd ..`, resolve
   `VERCEL_GIT_PREVIOUS_SHA` as the diff base (fail closed / build if
   empty or not resolvable in this shallow clone), then
-  `git diff --quiet` against the base with the same excluded-path list
-  used by this repo's own CI `detect-changes` job: `docs/**`,
+  `git diff --quiet` against the base excluding: `docs/**`,
   `README.md`, `README_ja.md`, `CHANGELOG.md`, `AGENTS.md`, `CLAUDE.md`,
   `LICENSE`. Exit 0 (docs-only) to skip, non-zero to build.
+  **This list is not identical to this repo's own CI `detect-changes`
+  job's exclude list**: CI deliberately excludes `AGENTS.md` from its
+  own docs-only exemption (`.github/workflows/ci.yml`'s `detect-changes`
+  job does not list it, because `AGENTS.md`/`.claude/commands/*.md`
+  carry this repo's own gate definitions -- a change there is a real,
+  non-docs change from CI's point of view). This script includes
+  `AGENTS.md` in its own exclude list because a consumer's deployed
+  Next.js app does not read or execute `AGENTS.md` the way this repo's
+  own CI gate does -- editing it has no effect on what gets served, so
+  it is safely docs-only from the Vercel/build-skip question's point of
+  view even though it is not docs-only from CI's gate-integrity
+  question. The two checks intentionally diverge on this one path for
+  the same reason the "docs-only" question itself differs between them
+  (see the `docs/consumer-commands/**` carve-out note below).
 - **`app-generator/vercel-ignore.json`** -- a tiny stub,
   `{"ignoreCommand": "sh scripts/vercel-ignore-check.sh"}`, kept here as
   the readable single source of what each consumer's root file should

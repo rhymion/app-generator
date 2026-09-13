@@ -124,13 +124,25 @@ remains the durable mechanism for anyone who isn't manually exporting.
   by `npm run docker:up:test` with a dedicated, isolated project name and
   ports.
 - `docker:up:test` confirmed to succeed (exit 0, fallback project name) in a
-  tree with no `.env.test.local` present at all.
-- Full mandatory gate (`.claude/commands/update-generator.md`'s 9 steps —
-  pytest, vitest, `test:e2e:build`, `check:generated`, `test:e2e:cy:api`,
-  `test:e2e:cy:ui`, lint, `npm audit --omit=dev --audit-level=high`,
-  `pip-audit`) passed with zero regressions in an isolated worktree with
-  dedicated ports, `check:generated` confirming zero golden diff (this cmd
-  touches only env-file loading, no generator/template code).
+  tree with no `.env.test.local` present at all, **at the time of this
+  verification**. A later, unrelated change (`scripts/docker-compose-env.js`,
+  commit `7fa08b47` / PR #420) replaced that silent basename-fallback with a
+  fail-closed guard: today, the same scenario (no `.env.test.local`, no
+  `COMPOSE_PROJECT_NAME` in the shell or either env file, and not `CI=true`)
+  makes `docker:up:test` refuse to run (exit 1) instead of falling back —
+  see the "COMPOSE_PROJECT_NAME fail-closed guard" comment block at the top
+  of `scripts/docker-compose-env.js`. The `.local`-layering behavior itself
+  (this doc's actual subject) is unaffected by that later change.
+- Full mandatory gate (`.claude/commands/update-generator.md`'s Completion
+  gate — 9 steps at the time of this verification: pytest, vitest,
+  `test:e2e:build`, `check:generated`, `test:e2e:cy:api`, `test:e2e:cy:ui`,
+  lint, `npm audit --omit=dev --audit-level=high`, `pip-audit`; the gate has
+  since grown to 20 steps, adding ten fixture-schema generate-code→tsc gates
+  and a README-sync check — see the current `.claude/commands/
+  update-generator.md` for the full list) passed with zero regressions in
+  an isolated worktree with dedicated ports, `check:generated` confirming
+  zero golden diff (this cmd touches only env-file loading, no generator/
+  template code).
 - The gate run itself is a live demonstration of the underlying goal: the
   git-tracked `.env.test` in this repo has never contained `AUTH_SECRET` or
   any other secret (it only has non-secret test settings — ports, the fixed

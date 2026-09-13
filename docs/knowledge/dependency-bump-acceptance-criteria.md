@@ -269,6 +269,19 @@ Closing the tier-one gap still needs a design that does not encode a
 specific branch name into committed workflow trigger config, which is
 outside this task's scope to decide unilaterally.
 
+**Update — the tier-one gap has since closed on its own, as a side effect of
+an unrelated branch-topology change, not a targeted fix for this doc's
+finding**: `doreen/import` no longer exists as a branch (confirmed absent
+from `git ls-remote --heads origin`), and this repo's real merge target is
+now `develop`. `.github/workflows/ci.yml`'s `on:` trigger currently reads
+`push`/`pull_request` → `branches: [master, main, develop]` — every subtask
+PR that targets `develop` directly now gets its own per-PR CI run, which is
+exactly the "tier-one" coverage this section found missing for
+`doreen/import`. The two-tier (`subtask PR → doreen/import`, then
+`doreen/import → main`) topology this whole subsection describes is
+historical as of this update; it is kept here for the incident record, not
+as a description of current CI trigger scope.
+
 ### Recommendation
 
 No further CI trigger change is recommended by this document at this
@@ -276,10 +289,10 @@ time — the previously recommended fix conflicted with the policy above
 and has been withdrawn. Keep **(a)** (already landed) as cheap,
 always-on, complementary defense in depth: it makes toolchain drift
 visible locally the moment it happens, for anyone who happens to check
-warnings before pushing. Whether and how to close the tier-one
-(`doreen/import`) detection-latency gap described above is left open for
-a future proposal that does not require committing a branch name into
-workflow trigger config.
+warnings before pushing. The tier-one (`doreen/import`) detection-latency
+gap described above no longer applies now that subtask PRs target
+`develop` directly and receive their own per-PR CI run (see the Update
+note above) — nothing further is open here.
 
 ## CI Audit Gate Design: Blocking + Non-Blocking Split (Option 5)
 
