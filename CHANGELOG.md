@@ -6,6 +6,19 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **An independent child (its own `x-generate`) may now be embedded in a parent's view with
+  any non-`list`, non-`comments` `x-outputType` (e.g. `None`), regardless of whether its own
+  `x-generate` permits new/edit/delete** (issue #520). Previously `generate_types.py`'s
+  `extract_entities()` unconditionally rejected this combination as a configuration error
+  unless the child disabled new/edit/delete entirely. Verified this is always safe: every
+  such embedding renders through the existing read-only `FieldsViewGrid`
+  (`use{Prop}Columns(false)` hardcodes `editable: false`, and `FieldsViewGrid` itself has no
+  Add/Edit/Delete UI) regardless of the child's own write capability, so the parent-embedded
+  display can never expose a write path — the child's own standalone CRUD routes, if any,
+  remain the sole write path and are unaffected. `x-outputType: comments` is unchanged and
+  keeps the original restriction (its rendering path is not `FieldsViewGrid`, so an
+  independently write-capable child there stays unverified-safe). See
+  `docs/knowledge/schema-yaml-configuration.md` §7.4.
 - **`x-write-locked-values` now defaults to *unlocked* on a proxy view (a screen whose `allOf`
   references another screen entity rather than the raw model directly), instead of silently
   inheriting the raw entity's locked-value set.** A proxy view exists precisely to bypass the

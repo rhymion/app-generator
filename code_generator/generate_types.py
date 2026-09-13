@@ -189,16 +189,23 @@ def extract_entities(schema: dict) -> list[dict]:
             if child in child_to_parents.get(parent_model, []):
                 m2m_pairs.add('<->'.join(sorted([parent_model, child])))
 
-    # Validate: if a generated entity appears as a child, it must use x-outputType:
-    # list — UNLESS the child entity is read-only (its x-generate disables new,
-    # edit AND delete). A read-only child (e.g. an approval-only detail page that
-    # only lets users approve/reject in the view) may appear with a non-list
-    # x-outputType such as 'None', since it never renders a mutable list DataGrid.
+    # Validate: if a generated entity appears as a child with x-outputType:
+    # comments, it must be read-only (its x-generate disables new, edit AND
+    # delete) — the 'comments' rendering path is not a FieldsViewGrid and its
+    # write-safety for an independently write-capable child is unverified, so
+    # this restriction stays.  Any OTHER non-'list' x-outputType (e.g. 'None')
+    # is always allowed regardless of the child's own new/edit/delete
+    # capability: such a child is rendered in the parent's view as a
+    # read-only FieldsViewGrid (see generators.py's child_view_grids /
+    # use{Prop}Columns(editable=False)) no matter what its own x-generate
+    # declares, so the embedded display can never expose a write UI — the
+    # child's own standalone CRUD routes, if any, remain the sole write path
+    # and are unaffected by this parent-embedded display.
     generated_models = {e['model'] for e in results}
     model_to_config = {e['model']: e['generate_config'] for e in results}
     for entity in results:
         for child in entity['children']:
-            if child['name'] in generated_models and child['output_type'] != 'list':
+            if child['name'] in generated_models and child['output_type'] == 'comments':
                 child_cfg = model_to_config.get(child['name'], {})
                 if not (child_cfg.get('new') or child_cfg.get('edit') or child_cfg.get('delete')):
                     continue
