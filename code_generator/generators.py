@@ -3640,9 +3640,18 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
             # can_update, left it unused for entities with children that
             # mutate only via a non-update path (e.g. x-splittable's split
             # action) -- same failure shape as the normalizeSnapshot/
-            # getCurrentSnapshot fix below (lint finding).
+            # getCurrentSnapshot fix below (lint finding). Gating on
+            # has_non_comment_ch left the same failure shape in a second
+            # case (cmd_1047i): has_non_comment_ch reflects the UNNARROWED
+            # embedded_ch (kept unchanged for column-hook generation), while
+            # snapshot_child_mappings itself is built from write_ch, which
+            # PR#530 narrows to exclude a read-only independent grid child
+            # (cmd_1047 "Otsu") -- an entity whose embedded children are ALL
+            # such read-only children keeps has_non_comment_ch=True while
+            # snapshot_child_mappings renders empty, importing an unused
+            # normalizeChildRefs. Check the actual rendered string instead.
             f"import {{ {'normalizeValue, ' if can_update else ''}"
-            f"{'normalizeChildRefs, ' if (can_update and has_non_comment_ch) else ''}"
+            f"{'normalizeChildRefs, ' if (can_update and snapshot_child_mappings) else ''}"
             f"{'assertNotStale, type NormalizedSnapshot' if can_update else ''} }} from '@/lib/normalize';"
             if can_update else ''
         )
@@ -3805,10 +3814,41 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
         # property validation in one place.
         readonly_field_names: set = child_raw.get('readonly_field_names') or set()
 
+        # cmd_1047i: embedded DataGrid column ORDER follows the child's own
+        # x-display.form declared order when present -- what gets shown (the
+        # exclusions below: id/{parent}_id/created_at/updated_at/creator_id,
+        # one-to-one_bridge, unrelated *able_id) stays exactly as before.
+        # Mirrors build_context.py's export_scalar_fields order source
+        # (~L1912: "Order source: x-display.form (if declared) takes the
+        # declared order, followed by any remaining scalar properties in
+        # schema order") -- ORDER ONLY, appending fields not named in
+        # x-display.form after it in their original schema order, rather
+        # than the form-view/CSV-export pattern (`_ordered_fields = [f for f
+        # in _x_display_form if f in jsx_by_field]`), which also narrows the
+        # rendered SET to x-display.form's membership -- that set-narrowing
+        # is deliberate there (x-display.form is documented as "also the set
+        # of fields this view renders" for those renderers), but pulling
+        # that same behavior into this DataGrid column loop would silently
+        # drop a currently-shown column absent from x-display.form. Nothing
+        # here re-derives the shown set from x-display.form at all.
+        _child_x_display_form = (child_def.get('x-display') or {}).get('form')
+        if _child_x_display_form:
+            # x-display.form may name a field this child has no property for
+            # at all (e.g. parent-level info) -- filter to child_props FIRST
+            # so the loop below never does a bare child_props[key] lookup on
+            # a name that was never a column here (point (2) from the ruling:
+            # such a name must never newly appear as a shown column either).
+            _column_order_source = [k for k in _child_x_display_form if k in child_props] + [
+                k for k in child_props if k not in _child_x_display_form
+            ]
+        else:
+            _column_order_source = list(child_props.keys())
+
         columns = []
         col_ns_hooks: list[str] = []
         col_seen_ns: set[str] = set()
-        for key, prop in child_props.items():
+        for key in _column_order_source:
+            prop = child_props[key]
             if key in ('id', f'{model}_id', 'created_at', 'updated_at', 'creator_id'):
                 continue
 
@@ -6306,9 +6346,36 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     _undisplayed_only_targets = (
         _editable_rel_targets - _displayed_editable_rel_targets - _readonly_only_targets
     )
+    # cmd_1047i: same reasoning again, applied to a read-only independent grid
+    # child (cmd_1047 "Otsu" -- own x-generate, embedded read-only via
+    # FieldsViewGrid straight from src.<prop>, no per-column
+    # EntityAutocompleteCellConfig wiring at all). _get_selection_targets()
+    # (build_context.py) walks EVERY non-list/non-comment/non-m2m child's own
+    # many-to-one relations to build child_entity_rel_targets, with no
+    # awareness of PR#530's is_independent/write_ch narrowing -- a target
+    # reachable only through such a child's own FK field (e.g.
+    # goods_receipt_line's destination_bin_id -> bin, purchase_order_line_id
+    # -> purchase_order_line, asn_line_id -> asn_line, item_id -> item,
+    # inventory_id -> inventory) has no live initial{Xxx}s/search{Xxx}Options
+    # consumer either, since FieldsViewGrid reads the labelField value
+    # already embedded in src, not a separate autocomplete prop.
+    _indep_grid_child_rel_targets: set[str] = set()
+    for _c in readonly_indep_grid_ch:
+        _c_def = _raw_def(_c['name'], schema)
+        _c_parent_fk_props = get_parent_fk_props(_c_def, model)
+        _indep_grid_child_rel_targets |= {
+            r['target']
+            for r in get_parent_relationships(_c_def)
+            if r['prop_name'] not in _c_parent_fk_props
+            and r['target'] != _c['name']
+        }
+    _indep_grid_only_targets = (
+        _indep_grid_child_rel_targets - _editable_rel_targets - _readonly_only_targets - _undisplayed_only_targets
+    )
     selection_targets = [
         t for t in selection_targets
         if t not in _readonly_only_targets and t not in _undisplayed_only_targets
+        and t not in _indep_grid_only_targets
     ]
     _all_targets = list(selection_targets) + [
         r['target'] for r in selector_oto_rels if _displayed(r['prop_name'])
