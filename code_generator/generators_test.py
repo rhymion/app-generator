@@ -2401,10 +2401,24 @@ def helper_context(
                         if not any(d['target'] == td['target'] for d in deps):
                             deps.append(td)
                     target_def = _raw_def(target, schema)
+                    # Look up each relation's ALREADY-RESOLVED dep var_name instead of
+                    # re-deriving it as to_camel_case(r['target']) -- a sibling datagrid-
+                    # child FK field processed earlier in this same loop (e.g.
+                    # destination_bin_id -> bin) may have registered its dep under a
+                    # prop-stem var_name (destinationBin) rather than the target's own
+                    # name (bin). Re-deriving the naive name here produced a generated
+                    # test helper that assigns `const destinationBin = ...` but then
+                    # reads an undefined `bin` variable (ReferenceError) whenever a
+                    # self-referencing/nested dep (e.g. a self-ref child) shares that
+                    # target through its own relations (cmd_1047i, pre-existing defect
+                    # exposed by proj_g's real schema; empirically confirmed unrelated
+                    # to subtask_1047g/PR#530 -- identical generated output reproduces
+                    # with generators_test.py from before that PR).
+                    _dep_var_by_target = {d['target']: d['var_name'] for d in deps}
                     target_fk_deps = [
-                        {'prop_name': r['prop_name'], 'dep_var_name': to_camel_case(r['target'])}
+                        {'prop_name': r['prop_name'], 'dep_var_name': _dep_var_by_target[r['target']]}
                         for r in get_parent_relationships(target_def, schema)
-                        if any(d['target'] == r['target'] for d in deps)
+                        if r['target'] in _dep_var_by_target
                     ]
                     deps.append({'target': target, 'var_name': var_name, 'title': to_title_case(prop_stem), 'fk_deps': target_fk_deps})
 
