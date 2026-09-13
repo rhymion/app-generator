@@ -415,6 +415,28 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             _fields.append(FieldInfo('creator_id', 'string | null'))
         _inline_flatten_types.append({'name': _t, 'fields': _fields})
 
+    # Names of children whose type will be declared LOCALLY in this file (mirrors
+    # the is_independent check the children loop below applies per child_raw).
+    # A self-referencing child (x-splittable FK back to itself) has its own
+    # target name equal to its own child_name, and that target can leak into
+    # child_rels_early/import_targets below once the child is non-list — computed
+    # here, ahead of import_targets, so both the initial build and the loop's
+    # own import_targets.append() can exclude it and avoid `import type {X}` +
+    # `export type X = {...}` coexisting in the same file (TS2440).
+    _locally_declared_child_names: set[str] = set()
+    for _cr in children_raw:
+        _cn = _cr['name']
+        _cdef = _raw_def(_cn, schema)
+        if not _cdef.get('properties'):
+            continue
+        _is_indep = (
+            _cr.get('output_type') == 'list'
+            and (_cr.get('relationship') or {}).get('type') != 'many-to-many'
+            and bool(schema['definitions'].get(_cn, {}).get('x-generate'))
+        )
+        if not _is_indep:
+            _locally_declared_child_names.add(_cn)
+
     # Import targets = union of parent + child + auto-create OTO nested rel targets + selector OTO + reverse OTO + flatten
     all_import_targets = _dedupe_ordered([
         *[r['target'] for r in relationship_targets],
@@ -424,7 +446,10 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         *[r['target'] for r in _reverse_oto_early],
         *_flatten_non_detail_targets,
     ])
-    import_targets = [t for t in all_import_targets if t != model]
+    import_targets = [
+        t for t in all_import_targets
+        if t != model and t not in _locally_declared_child_names
+    ]
 
     # XxxOption types — parent rels (including selector OTO) whose target is not the model (deduplicated)
     _seen_option_targets: set[str] = set()
@@ -477,8 +502,16 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             declared_child_types.add(child_name)
             # When this child's type is declared inline, its FK targets are
             # referenced as types inside this file — they must be imported.
+            # Exclude targets that are themselves locally-declared children
+            # (including a self-referencing FK back to child_name) — those
+            # get `declare_type=True` below, not an import (see
+            # _locally_declared_child_names above; TS2440 otherwise).
             for rel in child_rels:
-                if rel.target != model and rel.target not in import_targets:
+                if (
+                    rel.target != model
+                    and rel.target not in _locally_declared_child_names
+                    and rel.target not in import_targets
+                ):
                     import_targets.append(rel.target)
 
         children.append(ChildContext(
@@ -503,7 +536,19 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             and (c.get('relationship') or {}).get('type') != 'many-to-many'
             and is_optional_fk_to_parent(schema['definitions'].get(c['name'], {}), model))
     ]
-    child_rel_targets = _dedupe_ordered(r['target'] for r in child_rels_early)
+    # Exclude _locally_declared_child_names for the same reason import_targets
+    # does above: a self-referencing child's own relation target (e.g.
+    # goods_receipt_line's parent_line_id -> goods_receipt_line) is that
+    # child's own name, not a genuine pickable "option target" -- without
+    # this, FormUpsertProps grew a dead initial{Child}s/search{Child}Options
+    # prop pair that nothing in the generated component ever uses (found via
+    # subtask_1047g's own empirical fixture verification, a sibling of Bug B
+    # sharing the same child_rels_early root cause but surfacing in
+    # all_option_targets/FormUpsertProps instead of import_targets/types.ts).
+    child_rel_targets = _dedupe_ordered(
+        r['target'] for r in child_rels_early
+        if r['target'] not in _locally_declared_child_names
+    )
     # For bridge-child entities (new-form x-bridge), include bridge parent targets in FormUpsertProps
     x_bridge = model_def.get('x-bridge')
     bridge_parent_targets = (

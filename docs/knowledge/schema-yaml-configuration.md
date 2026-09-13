@@ -1339,15 +1339,25 @@ dashboard:
         $ref: "#/definitions/scratch_child"
 ```
 
-**Why this is always safe**: the parent's embedded display for any such `x-outputType`
-renders through the same read-only `FieldsViewGrid` (`components/_standard/
+**Why this is always safe**: BOTH the parent's view page and its edit page render such a
+child through the same read-only `FieldsViewGrid` (`components/_standard/
 FieldsViewGrid.tsx`) used for every other non-`list`, non-`comments` child — its columns are
-generated with `editable: false` hardcoded at the call site
-(`use{Prop}Columns(false)`), and `FieldsViewGrid` itself never renders Add/Edit/Delete UI. No
-write path is exposed by the embedding itself, no matter what the child's own `x-generate`
-declares. The child's own standalone CRUD routes (`app/api/{child}/...`,
-`lib/{child}/actions.ts`), if any, are generated independently and are the sole write path —
-unaffected by whether or how it is embedded in a parent's view.
+generated with `editable: false` hardcoded at the call site (`use{Prop}Columns(false)`, no
+`EntityAutocompleteCellConfig` args), and `FieldsViewGrid` itself never renders Add/Edit/Delete
+UI. No write path is exposed by the embedding itself, no matter what the child's own
+`x-generate` declares — this holds for the parent's own service too (no
+`child_nested_create`/`child_nested_update`, no add/update params for it). The child's own
+standalone CRUD routes (`app/api/{child}/...`, `lib/{child}/actions.ts`), if any, are generated
+independently and are the sole write path — unaffected by whether or how it is embedded in a
+parent's view or edit page.
+
+> The edit-page half of this guarantee (the parent's `FormUpsert.tsx`/service never treating
+> such a child as writable) was a follow-up fix, not part of this section's original landing —
+> see this file's own changelog entry for the fix and its empirical verification. Before that
+> fix, `FormUpsert.tsx` built a fully writable `DataGridClient` for such a child regardless of
+> its independence, which could produce a `service.ts` type error for a child with its own
+> required relation fields the generic nested-create body never supplied (e.g. an
+> `x-approval`-bearing, self-referencing line child).
 
 `x-outputType: comments` is the one exception that keeps the original restriction (a child
 with `x-generate` must disable new/edit/delete entirely to use it) — the comment-thread

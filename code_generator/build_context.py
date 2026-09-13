@@ -504,10 +504,24 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             and is_optional_fk_to_parent(child_def, model)
         )
         use_connect = is_many_to_many or child_name == model or is_optional_fk_list
-        # Independent list child: has its own view definition with x-generate.
-        # These are managed on their own pages; the parent form shows them read-only.
+        # Independent child: has its own view definition with x-generate --
+        # managed on its own page(s); the parent form shows it read-only.
+        #
+        # Not gated on output_type == 'list': before issue #520/PR#528, an
+        # independent (own x-generate) child could only ever be output_type
+        # 'list' (generate_types.py's extract_entities() rejected any other
+        # combination), so gating this on output_type == 'list' was an
+        # equivalent, harmless simplification. PR#528 lifted that
+        # restriction to allow a non-'list' output_type (grid-style embed)
+        # for an independent child too, but this gate was never updated to
+        # match -- every independent, non-'list' child (e.g. goods_receipt_line,
+        # x-approval + self-referencing FK, once x-outputType: list is
+        # removed) silently fell through to is_independent=False, which
+        # embedded_ch's own child_nested_create/child_nested_update
+        # generation (below) then treated as writable via the parent's own
+        # service, producing a TS2322 (cmd_1047 "Otsu" ruling, subtask_1047g).
         is_independent = (
-            output_type == 'list' and not is_many_to_many
+            not is_many_to_many
             and bool(schema['definitions'].get(child_name, {}).get('x-generate'))
         )
         child_props_dict = child_def.get('properties', {})
@@ -1050,6 +1064,15 @@ def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict]
         if (model_props.get(r['prop_name'], {}).get('x-relationship') or {}).get('type') == 'many-to-one'
     ]
 
+    # `r['target'] != child_raw['name']`: a self-referencing child (e.g.
+    # goods_receipt_line's parent_line_id -> goods_receipt_line) must not
+    # add its own name as a "selection target" -- that produced a dead
+    # initial{Child}s/search{Child}Options FormUpsertProps param pair
+    # nothing in the generated FormUpsert component ever used (found via
+    # subtask_1047g's empirical fixture verification; same child_rels-style
+    # root cause as context.py's own child_rels_early -> import_targets/
+    # all_option_targets fix, a separate downstream consumer of the same
+    # "collect each non-list child's own m2o relations" pattern).
     child_entity_rel_targets = []
     for child_raw in children_raw:
         output_type  = child_raw.get('output_type')
@@ -1062,6 +1085,7 @@ def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict]
             child_entity_rel_targets.extend(
                 r['target'] for r in get_parent_relationships(child_def)
                 if r['prop_name'] not in parent_fk_props
+                and r['target'] != child_raw['name']
                 and ((child_def.get('properties', {}).get(r['prop_name'], {}).get('x-relationship') or {}).get('type') == 'many-to-one')
             )
 
@@ -2620,21 +2644,43 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # Embedded children: exclude independent list children (have own pages; shown read-only here).
     # Non-independent mandatory-FK list children (no own page) are embedded with full CRUD.
     # Many-to-many and optional-FK list children (use_connect=True) use connect/set.
+    #
+    # `embedded_ch` still includes an independent child once its output_type
+    # is no longer 'list' (a grid-style embed, issue #520/PR#528) -- that
+    # inclusion is needed downstream (generators.py's column_def_context /
+    # form_upsert_context) so the read-only grid columns hook and JSX still
+    # get generated for it. It is exported as ctx['non_comment_ch'] below,
+    # unchanged.
     embedded_ch      = [c for c in non_comment_ch if c['use_connect'] or c.get('output_type') != 'list' or not c['is_independent']]
 
-    child_form_data_extractions = _build_child_form_data_extractions(embedded_ch)
+    # `write_ch` narrows `embedded_ch` further for every write-path plumbing
+    # site below (service nested-create/update, route/action body fields,
+    # add/update params, staleness snapshot): an independent child (own
+    # x-generate permits new/edit) must be READ-ONLY from the parent
+    # regardless of its output_type -- only the child's own CRUD route/
+    # actions may write it (cmd_1047 "Otsu" ruling, issue #520/PR#528
+    # follow-up). PR#528 lifted the restriction on an independent child
+    # rendering embedded with a non-'list' output_type, but left this
+    # write-path plumbing still treating it as writable -- e.g.
+    # goods_receipt_line (x-approval + self-referencing FK) triggered a
+    # TS2322 in lib/goods_receipt/service.ts because its own
+    # goods_receipt_lineCreateWithoutGoods_receiptInput requires fields
+    # (item, approvable) this generic nested-create body never supplies.
+    write_ch = [c for c in embedded_ch if c['use_connect'] or not c['is_independent']]
+
+    child_form_data_extractions = _build_child_form_data_extractions(write_ch)
 
     child_params_for_add    = ', '.join(
         f"{c['child_var']}Ids: string[]" if c['use_connect'] else f"{c['child_var']}Items: {c['field_type']}[]"
-        for c in embedded_ch
+        for c in write_ch
     )
     child_params_for_update = ', '.join(
         f"{c['child_var']}Ids: string[]" if c['use_connect'] else f"{c['child_var']}Items: {c['field_type_with_id']}[]"
-        for c in embedded_ch
+        for c in write_ch
     )
     child_args_for_call = ', '.join(
         f"{c['child_var']}Ids" if c['use_connect'] else f"{c['child_var']}Items"
-        for c in embedded_ch
+        for c in write_ch
     )
 
     # cmd_652: expose every connect-style child's selected id list to
@@ -2647,19 +2693,19 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # hand-written hook opts in.
     _connect_child_data_lines = '\n'.join(
         f"      {c['property_name']}: {c['child_var']}Ids,"
-        for c in embedded_ch
+        for c in write_ch
         if c['use_connect']
     )
     if _connect_child_data_lines:
         validation_data_obj = validation_data_obj + '\n' + _connect_child_data_lines
 
-    child_nested_create = _build_child_nested_create(embedded_ch)
-    child_nested_update = _build_child_nested_update(embedded_ch)
+    child_nested_create = _build_child_nested_create(write_ch)
+    child_nested_update = _build_child_nested_update(write_ch)
     child_assignee_notify_create_code = _build_child_assignee_notify_create_code(
-        embedded_ch, parent, to_pascal_case(parent)
+        write_ch, parent, to_pascal_case(parent)
     )
     child_assignee_notify_update_code = _build_child_assignee_notify_update_code(
-        embedded_ch, parent, to_pascal_case(parent)
+        write_ch, parent, to_pascal_case(parent)
     )
 
     # Self-parent relationship (for tree structures)
@@ -2679,16 +2725,19 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     else:
         comment_actions_code = _build_comment_actions(comment_children, parent, model, has_assignee_id, comment_has_mention)
 
-    # Snapshot child mappings (for service)
+    # Snapshot child mappings (for service). Uses write_ch, not embedded_ch:
+    # an independent child is never touched by update{{parent}}'s own write,
+    # so it must not participate in that update's stale-snapshot comparison
+    # either (its own route/actions has its own concurrency handling).
     snapshot_child_mappings = '\n'.join(
         f"    {c['property_name']}: normalizeChildRefs(safeSnapshot.{c['property_name']}),"
-        for c in embedded_ch
+        for c in write_ch
     )
     snapshot_include_props = (
         ',\n    include: {\n      ' +
-        ',\n      '.join(f"{c['property_name']}: {{ select: {{ id: true }} }}" for c in embedded_ch) +
+        ',\n      '.join(f"{c['property_name']}: {{ select: {{ id: true }} }}" for c in write_ch) +
         '\n    }'
-        if embedded_ch else ''
+        if write_ch else ''
     )
 
     # Selection targets (page_new, page_edit)
@@ -3055,7 +3104,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     )
     child_service_args = ', '.join(
         f"{c['child_var']}_ids ?? []" if c['use_connect'] else f"{c['property_name']} ?? []"
-        for c in embedded_ch
+        for c in write_ch
     )
 
     # Getters: include entries (list page).
@@ -3593,7 +3642,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         *(p['prop'] if p['prop'] == p['var_name'] else f"{p['prop']}: {p['var_name']}"
           for p in client_prop_infos),
         *(f"{c['child_var']}_ids" if c['use_connect'] else c['property_name']
-          for c in embedded_ch),
+          for c in write_ch),
     ])
     # Null placeholders for flatten rel params (API routes don't edit flatten rels inline)
     _flatten_null_args = ', '.join(

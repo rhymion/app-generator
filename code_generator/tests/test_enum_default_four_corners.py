@@ -73,7 +73,16 @@ def _plain_enum_defn(nullable: bool, has_default: bool) -> dict:
 
 def _dashboard_widget_schema(field_name: str, defn: dict, nullable: bool) -> dict:
     """Parent (dashboard) + DataGrid-child (widget) schema, mirroring
-    test_form_upsert.py's TestChildGridCreateNewIntegerDefault fixture."""
+    test_form_upsert.py's TestChildGridCreateNewIntegerDefault fixture.
+
+    `widget` deliberately has NO `x-generate` (no own page): these tests
+    exercise generators.py:_new_prop_val's DataGrid-child new-row default
+    seeding, which only runs for a child still embedded EDITABLE via the
+    parent. A child with its own x-generate is an independent child and (per
+    cmd_1047 "Otsu" ruling) is read-only from the parent regardless of
+    output_type -- giving it x-generate here would route it through the
+    read-only FieldsViewGrid path instead, where child_grid_setup never
+    builds a createNew()/_new_prop_val() call at all."""
     return {
         "definitions": {
             "__dashboard": {"type": "object", "required": ["id", "name"], "properties": _base_props()},
@@ -82,7 +91,7 @@ def _dashboard_widget_schema(field_name: str, defn: dict, nullable: bool) -> dic
                                "delete": True, "api": False, "test": False},
                 "allOf": [{"$ref": "#/definitions/__dashboard"}],
             },
-            "__widget": {
+            "widget": {
                 "type": "object",
                 "required": ["id", "dashboard_id"] + ([] if nullable else [field_name]),
                 "properties": {
@@ -94,11 +103,6 @@ def _dashboard_widget_schema(field_name: str, defn: dict, nullable: bool) -> dic
                         "x-relationship": {"type": "many-to-one", "target": "dashboard", "labelField": "name"},
                     },
                 },
-            },
-            "widget": {
-                "x-generate": {"list": True, "view": True, "new": True, "edit": True,
-                               "delete": True, "api": False, "test": False},
-                "allOf": [{"$ref": "#/definitions/__widget"}],
             },
         }
     }

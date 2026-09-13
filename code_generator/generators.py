@@ -5549,6 +5549,24 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         if c.get('output_type') != 'list' and (c.get('relationship') or {}).get('type') != 'many-to-many'
     ]
 
+    # Independent grid-style children (own x-generate, output_type != 'list') are
+    # read-only from the parent too, same as indep_list_ch above -- only the
+    # child's own CRUD route/actions may write it (cmd_1047 "Otsu" ruling,
+    # issue #520/PR#528 follow-up). col_fn_names above is computed from the
+    # UNNARROWED non_comment_ch on purpose: the read-only rendering built for
+    # these children below still needs their use{Prop}Columns hook imported.
+    # Every loop from here on, though, must not treat them as part of the
+    # editable/writable grid machinery -- narrow non_comment_ch now so each
+    # remaining site (child_variables, child_grid_setup, child_entity_rel_opt,
+    # child_form_data_handling, params, child_grid_components, ...) picks this
+    # up for free without needing its own separate exclusion.
+    readonly_indep_grid_ch = [
+        c for c in non_comment_ch
+        if c.get('is_independent') and not c.get('use_connect')
+    ]
+    has_readonly_indep_grid_ch = bool(readonly_indep_grid_ch)
+    non_comment_ch = [c for c in non_comment_ch if c not in readonly_indep_grid_ch]
+
     # Flatten arrays (e.g., pre_check_detail.symptoms) need EditableListWrapper
     # too — detect early so the import is included alongside the standard
     # list-child case.
@@ -5608,6 +5626,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         child_imports_parts.append(f"import {{ {', '.join(col_fn_names)} }} from '../{parent}/column_def';")
     if has_indep_list_children:
         child_imports_parts.append("import ListWrapper from '@/components/_standard/ListWrapper';")
+    if has_readonly_indep_grid_ch:
+        child_imports_parts.append("import FieldsViewGrid from '@/components/_standard/FieldsViewGrid';")
     child_imports = '\n'.join(child_imports_parts)
 
     # Child variables (useRef)
@@ -5790,12 +5810,38 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"  }});"
         )
 
+    # Column-hook calls for independent grid-style children (read-only from the
+    # parent, cmd_1047 "Otsu" ruling) -- called unconditionally at the top level
+    # like every other column-hook call above (React hooks rules), with NO
+    # EntityAutocompleteCellConfig args: use{Prop}Columns(false) alone already
+    # renders every column non-editable and every FK column via its labelField
+    # (column_def_context's ternary falls to the read-only branch whenever no
+    # {prop}Config is passed in) -- exactly what FormView.tsx's own read-only
+    # grid already does for these same children. The JSX that references
+    # {child_var}Columns is built below into indep_list_readonly_jsx.
+    for c in readonly_indep_grid_ch:
+        prop_name = c['property_name']
+        child_var = safe_var_name(prop_name)
+        child_grid_setup_parts.append(
+            f"  const {child_var}Columns = use{to_pascal_case(prop_name)}Columns(false);"
+        )
+
     child_grid_setup = '\n'.join(child_grid_setup_parts)
 
     # For each child grid m2o relation, build an EntityAutocompleteCellConfig.
     # The label-lookup map is seeded from src.{child}.{relation} (the FK-included rows
     # already on screen) and from initial{Target}s (the limited initial fetch).
-    parent_rel_prop_names = {r['prop_name'] for r in parent_rels_raw}
+    #
+    # Exclusion set here must match the one used to build child_rels/rel_args_str
+    # above (parent_fk_props_cdef only) -- these EntityAutocompleteCellConfig
+    # declarations are exactly what child_rels' useMemo hook names reference.
+    # A parent-level relation of the same prop_name is NOT interchangeable: since
+    # commit b9afc7be the parent level uses a different variable shape
+    # ({prop}SearchAction/{prop}CurrentOption) than the child grid's
+    # EntityAutocompleteCellConfig, so excluding on parent_rel_prop_names here
+    # (as before b9afc7be) silently dropped the child's own declaration whenever
+    # the parent happened to have a same-named relation (e.g. organization_id),
+    # leaving child_rels' call site reference a useMemo that was never declared.
     processed_rels: set[str] = set()
     child_entity_rel_opt = []
     for c in non_comment_ch:
@@ -5805,7 +5851,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         parent_fk_props_cdef = get_parent_fk_props(cdef, model)
         child_prop_name = c['property_name']
         for r in get_parent_relationships(cdef):
-            if r['prop_name'] in parent_fk_props_cdef or r['prop_name'] in parent_rel_prop_names:
+            if r['prop_name'] in parent_fk_props_cdef:
                 continue
             if r['prop_name'] in processed_rels:
                 continue
@@ -6199,6 +6245,31 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"      )}}"
             )
         indep_list_readonly_parts.append(_maybe_box_wrap(_indep_jsx, _indep_width_cols))
+
+    # Read-only JSX for independent grid-style children (own x-generate,
+    # output_type != 'list') -- reuses FieldsViewGrid + use{Prop}Columns(false),
+    # the exact same read-only rendering FormView.tsx already uses for these
+    # children (see form_view_context's grid_children/column_variables above),
+    # rather than the editable DataGridClient/EntityAutocompleteCellConfig path
+    # child_grid_setup/child_entity_rel_opt build for a WRITABLE grid child.
+    for c in readonly_indep_grid_ch:
+        prop = c['property_name']
+        child_camel = to_camel_case(prop)
+        child_var = safe_var_name(prop)
+        _ro_prop_def = model_def.get('properties', {}).get(prop, {})
+        _ro_width_cols = _ui_width_cols(_ro_prop_def)
+        if _ro_width_cols:
+            has_box_import = True
+        _ro_jsx = (
+            f"      {{isEdit && (\n"
+            f"        <div>\n"
+            f"          <h2>{{tf('{child_camel}')}}</h2>\n"
+            f"          <FieldsViewGrid fields={{src.{prop}}} columns={{{child_var}Columns}} />\n"
+            f"        </div>\n"
+            f"      )}}"
+        )
+        indep_list_readonly_parts.append(_maybe_box_wrap(_ro_jsx, _ro_width_cols))
+
     indep_list_readonly_jsx = '\n'.join(indep_list_readonly_parts)
 
     # FormUpsert params signature.
