@@ -1222,10 +1222,14 @@ model parent1_list {
 
 ### 7.3 Independent children (`x-generate` on child, `x-outputType: list` on parent)
 
-When a child entity has its own `x-generate` (its own list/view/edit pages), it must appear
-in the parent's `properties:` with `x-outputType: list`. The generator **validates** this:
-a child with `x-generate` that appears as `x-outputType: table` or `x-outputType: comments`
-is a configuration error.
+When a child entity has its own `x-generate` (its own list/view/edit pages), it appears in
+the parent's `properties:` with either `x-outputType: list` (this section) or any other
+non-`list`, non-`comments` `x-outputType` such as `None` (§7.4 below — a read-only embedded
+grid, regardless of the child's own new/edit/delete capability). The generator **validates**
+only one combination as a configuration error: a child with `x-generate` that appears with
+`x-outputType: comments` — the comment-thread rendering path is not the read-only grid used
+by every other non-`list` value, so it stays restricted to children that disable
+new/edit/delete entirely.
 
 ```yaml
 epic:
@@ -1233,7 +1237,7 @@ epic:
   properties:
     features:
       type: array
-      x-outputType: list     # required when child has x-generate
+      x-outputType: list     # editable/autocomplete embedding — see Rules 1-2 below
       items:
         $ref: "#/definitions/feature"
 ```
@@ -1311,6 +1315,44 @@ model bug {
 ```
 
 ---
+
+### 7.4 Read-only embedded grid for independent children (non-`list`, non-`comments` `x-outputType`)
+
+An independent child (has its own `x-generate`, its own list/view/new/edit/delete pages and
+API/Server Action routes) may also be embedded in the parent's view with any `x-outputType`
+other than `list` or `comments` (e.g. `None`) — regardless of whether the child's own
+`x-generate` permits new/edit/delete. Unlike §7.3's `x-outputType: list` case, this is not
+conditioned on the FK being mandatory or optional; it is always read-only:
+
+```yaml
+dashboard:
+  x-generate: { list: true, view: true, ... }
+  properties:
+    widgets:
+      type: array                # embedded (no x-generate) child — unaffected by this section
+      items:
+        $ref: "#/definitions/dashboard_widget"
+    scratch_children:
+      type: array
+      x-outputType: 'None'        # independent child, embedded read-only regardless of its own CRUD
+      items:
+        $ref: "#/definitions/scratch_child"
+```
+
+**Why this is always safe**: the parent's embedded display for any such `x-outputType`
+renders through the same read-only `FieldsViewGrid` (`components/_standard/
+FieldsViewGrid.tsx`) used for every other non-`list`, non-`comments` child — its columns are
+generated with `editable: false` hardcoded at the call site
+(`use{Prop}Columns(false)`), and `FieldsViewGrid` itself never renders Add/Edit/Delete UI. No
+write path is exposed by the embedding itself, no matter what the child's own `x-generate`
+declares. The child's own standalone CRUD routes (`app/api/{child}/...`,
+`lib/{child}/actions.ts`), if any, are generated independently and are the sole write path —
+unaffected by whether or how it is embedded in a parent's view.
+
+`x-outputType: comments` is the one exception that keeps the original restriction (a child
+with `x-generate` must disable new/edit/delete entirely to use it) — the comment-thread
+rendering path is not `FieldsViewGrid`, so an independently write-capable child there is
+unverified-safe and stays a configuration error (`generate_types.py`'s `extract_entities()`).
 
 ## 7.6 Polymorphic Bridge Children (`x-bridge`)
 
@@ -1458,11 +1500,15 @@ properties:
 | `list` | Many-to-many | Read-only list | Autocomplete — add/delete only (no edit) |
 | `list` | Independent child (has `x-generate`), **mandatory** FK | Read-only list | Read-only list — no buttons |
 | `list` | Independent child (has `x-generate`), **optional** FK | Read-only list | Autocomplete — add/delete only (no edit) |
+| any other value (e.g. `None`) | Independent child (has `x-generate`), any FK — see §7.4 | Read-only `FieldsViewGrid` | Read-only `FieldsViewGrid` — no buttons |
 | `comments` | Comment thread | Comment list | Comment input + list with edit/delete per item |
 
-**Validation rule:** if a child entity has `x-generate`, it _must_ use `x-outputType: list`
-under the parent's `properties:`. Using `table` or `comments` for a generated child is a
-configuration error caught at generator run time.
+**Validation rule:** if a child entity has `x-generate`, using `x-outputType: comments` for
+it requires disabling new/edit/delete entirely — otherwise it is a configuration error
+caught at generator run time. Every other `x-outputType` (including `list`, `table`, or
+omitting it entirely so it resolves to `None`) is always allowed for a generated child,
+regardless of its own new/edit/delete capability, because every non-`list`, non-`comments`
+value renders through the read-only `FieldsViewGrid` embedding (§7.4).
 
 ### Non-array `$ref` properties — `x-outputType: flatten`
 

@@ -256,7 +256,11 @@ class TestXGenerateFlags:
 
 
 # ---------------------------------------------------------------------------
-# Validation: generated child must use x-outputType: list
+# Validation: a generated child may use a non-'list' x-outputType as long as
+# the parent's embedded display always renders it read-only. 'comments' is
+# the one x-outputType still restricted to read-only-only generated children
+# (its rendering path is not the read-only FieldsViewGrid, so an
+# independently write-capable child there is unverified-safe).
 # ---------------------------------------------------------------------------
 
 class TestXGenerateChildValidation:
@@ -282,7 +286,12 @@ class TestXGenerateChildValidation:
         # Should not raise
         extract_entities(schema)
 
-    def test_generated_child_with_table_output_type_raises(self):
+    def test_generated_child_with_table_output_type_allowed(self):
+        """A non-'list', non-'comments' x-outputType (e.g. 'table') is allowed even
+        for a fully write-capable (new/edit/delete) generated child: the parent's
+        embedded display always renders such a child as a read-only FieldsViewGrid
+        regardless of the child's own x-generate capability, so no ValueError is
+        raised. The child's own standalone CRUD routes are unaffected."""
         schema = _schema(
             ("__epic", _base_entity("epic")),
             ("epic", {
@@ -292,7 +301,7 @@ class TestXGenerateChildValidation:
                     {"type": "object", "properties": {
                         "features": {
                             "type": "array",
-                            "x-outputType": "table",  # invalid for generated child
+                            "x-outputType": "table",
                             "items": {"$ref": "#/definitions/feature"},
                         }
                     }}
@@ -301,8 +310,10 @@ class TestXGenerateChildValidation:
             ("__feature", _base_entity("feature")),
             ("feature", {**_detail_entity("feature"), "x-generate": _x_gen()}),
         )
-        with pytest.raises(ValueError, match="must be 'list'"):
-            extract_entities(schema)
+        # Should not raise — 'table' is a non-'comments' non-'list' output_type
+        models = {e["model"] for e in extract_entities(schema)}
+        assert "epic" in models
+        assert "feature" in models
 
     def test_generated_child_with_comments_output_type_raises(self):
         schema = _schema(
@@ -382,12 +393,17 @@ class TestXGenerateChildValidation:
         assert "epic" in models
         assert "feature" in models
 
-    def test_mutable_generated_child_with_non_list_output_type_raises(self):
-        """A generated child that still permits any mutation (new/edit/delete) must
-        use x-outputType: list — a non-list embedding raises."""
+    def test_mutable_generated_child_with_non_list_non_comments_output_type_allowed(self):
+        """A generated child that permits mutation (new/edit/delete) may still
+        appear with a non-'list', non-'comments' x-outputType (e.g. no
+        x-outputType at all, resolving to None) without raising — issue #520:
+        the parent's embedded display always renders such a child read-only
+        (FieldsViewGrid), so the child's own independent write capability (its
+        own CRUD routes) is unaffected and safe to allow."""
         for flag in ("new", "edit", "delete"):
             schema = self._epic_with_readonly_feature_child(
                 {"new": False, "edit": False, "delete": False, flag: True}
             )
-            with pytest.raises(ValueError, match="must be 'list'"):
-                extract_entities(schema)
+            models = {e["model"] for e in extract_entities(schema)}
+            assert "epic" in models
+            assert "feature" in models
