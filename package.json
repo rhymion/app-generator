@@ -161,8 +161,9 @@
     "vitest": "^5.0.0"
   },
   "allowScripts": {
-    "@prisma/engines@7.9.1": true,
-    "prisma@7.9.1": true,
-    "@swc/core@1.15.47": true
+    "@prisma/engines@7.10.0": true,
+    "@swc/core@1.16.1": true,
+    "cypress@16.0.0": true,
+    "prisma@7.10.0": true
   }
 }
