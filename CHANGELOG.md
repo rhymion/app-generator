@@ -22,7 +22,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   (`goods_receipt_line`, `inventory_reservation`, `shipment_line`, `asn_line` — 10 affected FK
   relations across 4 embedding parents) and proj_c (`purchase_per_item`, `receiving_receipt_line`,
   `asset_component` — 3 affected FK relations across 3 embedding parents) now produce Prisma
-  includes byte-identical to the corresponding independent entity's own getter.
+  includes byte-identical to the corresponding independent entity's own getter. Regression
+  covered by `code_generator/tests/test_embedded_datagrid_child_dotted_labelfield_include.py`
+  (nested-include boundary, and cross-checked against the independent entity's own include).
 - **`format: date`/`time` on an embedded DataGrid child's own field always displayed a
   fixed `YYYY-MM-DD HH:mm` (issue #540)**: `generators.py`'s `column_def_context` (the
   embedded-child `GridColDef` builder) hard-coded `dayjs(value).format('YYYY-MM-DD HH:mm')`
@@ -37,6 +39,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   removed. `date-time` columns render identically to before (unaffected). Confirmed on real
   schemas: proj_g (`purchase_order_line.requested_delivery_date`, `asn_line.expiry_date`,
   `goods_receipt_line.expiry_date`) and proj_c (`parent1_child2.start_date`/`end_date`).
+  Regression covered by `code_generator/tests/test_embedded_datagrid_column_date_format.py`
+  (`date`/`date-time`/`time` MUI column type and formatter, `date-time` unaffected).
 - Investigated a third, related gap flagged during the above (embedded-child DataGrid columns
   never call `get_uri_kind()`, so an `x-uri-kind: link` field would render as plain text
   inside an embedded DataGrid while the independent list page renders it as a link) and
