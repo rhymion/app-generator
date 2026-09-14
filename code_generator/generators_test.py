@@ -1286,6 +1286,24 @@ def get_child_render_type(child: dict, schema: dict = None, parent_model_name: s
         return 'editable-list-text'
     if child.get('output_type') == 'comments':
         return 'comments'
+    # issue #538 (cmd_1047 "Otsu" ruling follow-up, cmd_1058): an independent
+    # child (own x-generate — own list/view/new/edit/delete pages) that is
+    # NOT self-referencing renders read-only from the parent — generators.py's
+    # form_upsert_context() narrows it out of the editable-grid machinery
+    # (readonly_indep_grid_ch) and build_context.py's write_ch excludes it
+    # from nested create/update, same as build_context.py's own
+    # `is_independent` flag (mirrored here: `not is_many_to_many and
+    # bool(x-generate)` on the child's raw schema entry). A self-referencing
+    # independent child (child['name'] == parent_model_name) is excluded from
+    # this narrowing on the generator side too (build_context.py's
+    # `use_connect` gates on `child_name == model`), so it keeps the normal
+    # writable 'datagrid' render type here.
+    if (
+        schema is not None
+        and child['name'] != parent_model_name
+        and bool((schema.get('definitions') or {}).get(child['name'], {}).get('x-generate'))
+    ):
+        return 'readonly-datagrid'
     return 'datagrid'
 
 
@@ -1840,13 +1858,15 @@ def gen_assert_commands(
 
 def _child_datetime_iso_value(value: str, fmt: str | None) -> str:
     """Convert a cypress_create_value/cypress_edit_value 'datetime' result
-    into the ISO `YYYY-MM-DDThh:mm` cy.type() requires for a native
-    `datetime-local` input.
+    into the cy.type() string the field's actual native input expects.
 
     DataGrid-child date/date-time/time columns (generators.py's column_def
-    codegen) all render as MUI's built-in `type: 'dateTime'` with no
-    renderEditCell override, so editing goes through the browser's native
-    datetime-local input — unlike the top-level form, whose DateTimeWrapper
+    codegen, issue #540) render two different native input types depending
+    on `fmt`: a `date`-format column gets MUI's dedicated `type: 'date'`
+    GridColDef (native `<input type="date">`, `YYYY-MM-DD`); `date-time`
+    and `time` columns have no dedicated MUI type and keep `type:
+    'dateTime'` (native `<input type="datetime-local">`,
+    `YYYY-MM-DDThh:mm`) — unlike the top-level form, whose DateTimeWrapper
     accepts keyboard-sectioned typing (MM/DD/YYYY, "05:00 PM", ...) via
     cy.fillDate/cy.fillTime. value_fn's human-readable format matches the
     top-level convention; this reformats it for the DataGrid-child case
@@ -1858,11 +1878,13 @@ def _child_datetime_iso_value(value: str, fmt: str | None) -> str:
         # input still requires one even though the field itself is
         # time-only, so pair it with a fixed placeholder date.
         dt = datetime.strptime(value, '%I:%M %p').replace(year=2025, month=1, day=15)
+        return dt.strftime('%Y-%m-%dT%H:%M')
     elif fmt == 'date':
         dt = datetime.strptime(value, '%m/%d/%Y')
+        return dt.strftime('%Y-%m-%d')
     else:
         dt = datetime.strptime(value, '%m/%d/%Y %I:%M %p')
-    return dt.strftime('%Y-%m-%dT%H:%M')
+        return dt.strftime('%Y-%m-%dT%H:%M')
 
 
 def _child_scalar_entries(fields: list, title: str, value_fn) -> list[str]:
@@ -3551,6 +3573,13 @@ def spec_context(
     has_self_ref_deps = any(d['target'] == model_name for d in deps)
 
     datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
+    # Independent grid-style children (own x-generate) render read-only from
+    # the parent (cmd_1047 "Otsu" ruling, issue #520/PR#528/PR#530) -- no
+    # 'Add {{ title }}' control exists for them at all. Generate a negative
+    # assertion guarding exactly that fact (test 3.1, test_spec.cy.ts.jinja2)
+    # instead of the removed write-flow assertions (issue #538, cmd_1058) --
+    # rewritten to match the read-only grid, not deleted outright.
+    readonly_datagrid_children = [c for c in child_metas if c['render_type'] == 'readonly-datagrid']
     # Datagrid children may have FK deps not on the parent (e.g. field.reference_id → db_table).
     # A self-referencing FK on the datagrid child's own entity type
     # (dep_target == c['child']['name']) never resolves to a real dependency (see
@@ -3962,6 +3991,13 @@ def spec_context(
             'native_enum_full_calls': native_enum_full_calls,
         })
 
+    # Read-only independent grid children data (issue #538, cmd_1058): only
+    # a title is needed -- the generated assertion is a single negative
+    # check (no 'Add {title}' control exists), not a fill/edit flow.
+    readonly_datagrid_children_data = [
+        {'title': c['names']['title']} for c in readonly_datagrid_children
+    ]
+
     # List children data
     list_children_data = []
     for child_meta in list_children:
@@ -4270,6 +4306,7 @@ def spec_context(
         'required_assert_cmds_no_bool': required_assert_cmds_no_bool,
         'all_assert_cmds_no_bool': all_assert_cmds_no_bool,
         'datagrid_children_data': datagrid_children_data,
+        'readonly_datagrid_children_data': readonly_datagrid_children_data,
         'list_children_data': list_children_data,
         'comment_children_data': comment_children_data,
         'comment_has_mention': comment_has_mention,

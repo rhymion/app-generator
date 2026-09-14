@@ -273,6 +273,13 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
         cy.url().should('include', '/{{ parent }}/edit');
+{% for child in readonly_datagrid_children_data %}
+        // {{ child.title }} is an independent child (own list/view/new/edit
+        // pages) -- rendered read-only here (FieldsViewGrid, cmd_1047 "Otsu"
+        // ruling); only its own CRUD route may write it, so no 'Add' control
+        // exists on this page at all.
+        cy.get(`button[aria-label="Add {{ child.title }}"]`).should('not.exist');
+{% endfor %}
 {% for cmd in opt_fill_cmds_3_1 %}
 {{ cmd }}
 {% endfor %}
