@@ -45,7 +45,7 @@ child items" test renders one negative assertion per such child --
 directly encoding the FieldsViewGrid-no-add-control fact confirmed by
 reading generators.py's `readonly_indep_grid_ch` JSX. This is a real
 regression guard: if a future change ever restores editable rendering for
-these children (reverting the "Otsu" ruling), this assertion fails.
+these children (reverting issue #520/PR#528/PR#530), this assertion fails.
 """
 from generators_test import get_child_render_type, analyze_children, spec_context
 
