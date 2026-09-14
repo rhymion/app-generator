@@ -40,8 +40,29 @@ exercised "self-referencing datagrid child" + "another sibling FK field to a
 shared target under a prop-stem-renamed var name" at the same time until
 proj_g's schema grew to include it.
 
-Fix: look up each relation's ALREADY-REGISTERED dep var_name from the
-current `deps` list (a `{target: var_name}` map) instead of re-deriving it.
+Fix (PR#530-adjacent, since superseded for the self-ref case -- see cmd_1050
+update below): look up each relation's ALREADY-REGISTERED dep var_name from
+the current `deps` list (a `{target: var_name}` map) instead of
+re-deriving it.
+
+cmd_1050 update: this fix's own `fk_deps` construction only ran for a
+self-referencing datagrid-child FK (`parent_doc_line_id -> doc_line`)
+because, at the time, walking into a self-ref target's own relations to
+build a `fk_deps` list was still happening at all. cmd_1050 found a
+separate, deeper defect in that same self-ref walk (it also pulled in the
+OUTER model as an independent, org-blind dependency -- see
+`test_datagrid_child_selfref_grandparent_backref_ordering.py`'s cmd_1050
+update) and fixed it by skipping a datagrid-child field's `dep_target`
+entirely whenever it equals the child's own type, before any resolution
+(including this file's `fk_deps`-var-name-lookup fix) ever runs. The
+self-ref dep (`doc_line`) this file's remaining two tests looked up no
+longer exists at all -- there is nothing left to build `fk_deps` for, so
+the ReferenceError shape this file guards against cannot recur (the
+generated helper never declares a self-ref var to misuse in the first
+place). The ordinary, non-self-ref case this fix was really about --
+multiple sibling FK fields on a datagrid child sharing a target under
+prop-stem-renamed var names -- is unaffected and still covered by
+`test_bin_dep_registered_under_prop_stem_var_name` below.
 """
 from generators_test import helper_context
 
@@ -133,30 +154,18 @@ def test_bin_dep_registered_under_prop_stem_var_name():
     assert "bin" not in var_names
 
 
-def test_selfref_dep_fk_deps_reference_only_existing_dep_var_names():
-    """The self-ref (`doc_line`) dep's fk_deps must reference var_names that
-    actually exist among the resolved deps -- never a dangling name like
-    `bin` that was never registered (the ReferenceError shape)."""
+def test_selfref_dep_is_not_created_at_all():
+    """cmd_1050: a self-referencing FK on the datagrid child's own type
+    (parent_doc_line_id -> doc_line) is now skipped entirely -- no dep
+    named `doc_line` (or any var_name derived from it, e.g. parentDocLine)
+    is registered, so there is no fk_deps list left to build var names for
+    in the first place. The sibling destination_bin_id -> bin FK is
+    unaffected: its dep is still registered under its prop-stem var name
+    (destinationBin), covered by test_bin_dep_registered_under_prop_stem_var_name
+    above."""
     ctx = _ctx()
     deps_by_target = {d["target"]: d for d in ctx["deps"]}
+    assert "doc_line" not in deps_by_target
     var_names = {d["var_name"] for d in ctx["deps"]}
-    self_ref_dep = deps_by_target["doc_line"]
-    for fk in self_ref_dep["fk_deps"]:
-        assert fk["dep_var_name"] in var_names, (
-            f"self-ref dep's fk_deps references undefined var "
-            f"'{fk['dep_var_name']}' (fields: {fk})"
-        )
-
-
-def test_selfref_dep_fk_deps_uses_prop_stem_var_for_bin():
-    """Specifically: the self-ref dep's fk_deps entry for destination_bin_id
-    must point at `destinationBin`, not the target entity's raw name `bin`."""
-    ctx = _ctx()
-    deps_by_target = {d["target"]: d for d in ctx["deps"]}
-    self_ref_dep = deps_by_target["doc_line"]
-    bin_fk = next(
-        (fk for fk in self_ref_dep["fk_deps"] if fk["prop_name"] == "destination_bin_id"),
-        None,
-    )
-    assert bin_fk is not None
-    assert bin_fk["dep_var_name"] == "destinationBin"
+    assert "parentDocLine" not in var_names
+    assert "destinationBin" in var_names

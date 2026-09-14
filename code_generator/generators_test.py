@@ -2391,6 +2391,28 @@ def helper_context(
         for field in child_meta['fields']:
             target = field.get('dep_target')
             if field['category'] == 'autocomplete' and target and target != 'user':
+                # cmd_1050: a self-referencing FK on the datagrid child's
+                # OWN entity type (e.g. goods_receipt_line.
+                # parent_goods_receipt_line_id -> goods_receipt_line, an
+                # x-splittable parentField) is a decoy: the referenced row
+                # is a sibling of the same collection being populated,
+                # never a separate fixture. Walking
+                # resolve_dependencies(target, schema) for it recurses
+                # into the child's OWN transitive deps (e.g.
+                # goods_receipt_line's own goods_receipt_id ->
+                # goods_receipt), registering the datagrid's own
+                # parent/ancestor entity as an independent, org-blind
+                # dependency and inflating populateXxxDependencies()'s
+                # created-row count outside any org scope.
+                #
+                # This is a DIFFERENT shape from the child referencing the
+                # OUTER model itself (e.g. field.reference_id -> db_table,
+                # where db_table IS the entity whose own helper_context
+                # this loop runs inside): that case is target ==
+                # model_name, not target == the child's own type, and is
+                # intentionally left untouched below.
+                if target == child_meta['child']['name']:
+                    continue
                 prop_stem = re.sub(r'_id$', '', field['prop_name'])
                 var_name = to_camel_case(prop_stem)
                 if not any(d['var_name'] == var_name for d in deps):
