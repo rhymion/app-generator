@@ -5,6 +5,52 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Composite/dotted `labelField` on an embedded DataGrid child's own FK relation rendered
+  blank (issue #539)**: `build_context.py`'s `child_include_entries` builder gave every FK
+  relation on an embedded (`x-outputType != list`) child a flat `true` Prisma include,
+  regardless of whether that relation's own `labelField` walks a nested relation (e.g.
+  `inventory_id`'s `labelField: [item.sku, location.code, bin.code, ...]`). A flat `true`
+  only fetches the FK target's own scalar columns, so any dotted `labelField` segment on the
+  target's own relation (`item`, `location`, `bin`) rendered as `undefined` at runtime — the
+  row displayed with 2-3 of its label segments blank. The same relation's independent list
+  page (its own `get{Entity}Detail` getter) already built the correct nested include via
+  `_include_entry_for_rel()`/`build_label_expression()`; the embedded-child code path never
+  reused that logic. Now each embedded child's own FK relations get the same nested-include
+  resolution, reusing the existing `_merge_into_child()` helper — simple (non-dotted)
+  `labelField`s are unaffected (stay a flat `true`). Confirmed on real schemas: proj_g
+  (`goods_receipt_line`, `inventory_reservation`, `shipment_line`, `asn_line` — 10 affected FK
+  relations across 4 embedding parents) and proj_c (`purchase_per_item`, `receiving_receipt_line`,
+  `asset_component` — 3 affected FK relations across 3 embedding parents) now produce Prisma
+  includes byte-identical to the corresponding independent entity's own getter. Regression
+  covered by `code_generator/tests/test_embedded_datagrid_child_dotted_labelfield_include.py`
+  (nested-include boundary, and cross-checked against the independent entity's own include).
+- **`format: date`/`time` on an embedded DataGrid child's own field always displayed a
+  fixed `YYYY-MM-DD HH:mm` (issue #540)**: `generators.py`'s `column_def_context` (the
+  embedded-child `GridColDef` builder) hard-coded `dayjs(value).format('YYYY-MM-DD HH:mm')`
+  and MUI column `type: 'dateTime'` for every `format: date`/`date-time`/`time` field,
+  ignoring the field's own declared `format`. A `format: date` column showed a spurious time
+  component, and a `format: time` column showed a spurious date component. Now reuses the
+  shared `formatLabelValue()` helper (`lib/_format.ts`, already used by the independent list
+  page's `DataGridClient`) so the displayed format matches the field's own `format`; the MUI
+  `type` is aligned too (`'date'` for `format: date`, unchanged `'dateTime'` for
+  `date-time`/`time`, since MUI's DataGrid has no dedicated `time` column type). The dead
+  `show_date_str` variable (computed but never interpolated into the generated output) is
+  removed. `date-time` columns render identically to before (unaffected). Confirmed on real
+  schemas: proj_g (`purchase_order_line.requested_delivery_date`, `asn_line.expiry_date`,
+  `goods_receipt_line.expiry_date`) and proj_c (`parent1_child2.start_date`/`end_date`).
+  Regression covered by `code_generator/tests/test_embedded_datagrid_column_date_format.py`
+  (`date`/`date-time`/`time` MUI column type and formatter, `date-time` unaffected).
+- Investigated a third, related gap flagged during the above (embedded-child DataGrid columns
+  never call `get_uri_kind()`, so an `x-uri-kind: link` field would render as plain text
+  inside an embedded DataGrid while the independent list page renders it as a link) and
+  confirmed it is **not a bug**: this exact branch was already deliberately decided and gated
+  (PR#406) — `column_def_context` keeps both `link` and `image` URI kinds as a plain editable
+  text cell in every embedded-child DataGrid, on the ruling that a URL is legitimate to type
+  into an editable cell (unlike an image, which never renders inside any grid cell anywhere in
+  this codebase). Covered by the existing `test:uri-kind-gate` fixture (gate step 13). No code
+  change made for this item.
+
 ### Added
 - **An independent child (its own `x-generate`) may now be embedded in a parent's view with
   any non-`list`, non-`comments` `x-outputType` (e.g. `None`), regardless of whether its own

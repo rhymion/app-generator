@@ -3927,19 +3927,26 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
             elif is_int:
                 columns.append(f"    {{ field: '{key}', headerName: t('{header_camel}'), width: 100, editable: {col_editable}, type: 'number' }},")
             elif actual == 'string' and fmt in ('date', 'date-time', 'time'):
-                needs_datetime_imports = True
-                show_date_str = "\n      show_date={false}" if fmt == 'time' else ''
+                # issue #540: valueFormatter must follow the field's own
+                # `format` (date/date-time/time) instead of a fixed
+                # 'YYYY-MM-DD HH:mm' -- reuse the shared formatLabelValue()
+                # helper (lib/_format.ts) already used by the independent
+                # list page's DataGridClient, rather than a second
+                # hand-rolled dayjs format string here. MUI's built-in
+                # column `type` is aligned too: 'date' gets its own type so
+                # the built-in filter UI offers a date (not date-time)
+                # range; 'time' has no dedicated MUI GridColDef type, so it
+                # keeps 'dateTime' (unchanged from before this fix).
+                uses_format_label_value = True
+                mui_col_type = 'date' if fmt == 'date' else 'dateTime'
                 columns.append(
                     f"    {{\n"
                     f"      field: '{key}',\n"
                     f"      headerName: t('{header_camel}'),\n"
                     f"      width: 250,\n"
                     f"      editable: {col_editable},\n"
-                    f"      type: 'dateTime',\n"
-                    f"      valueFormatter: (value) => {{\n"
-                    f"        if (!value) return '';\n"
-                    f"        return dayjs(value).format('YYYY-MM-DD HH:mm');\n"
-                    f"      }},\n"
+                    f"      type: '{mui_col_type}',\n"
+                    f"      valueFormatter: (value) => formatLabelValue(value, '{fmt}'),\n"
                     f"    }},"
                 )
             elif actual == 'string' and isinstance(enum_vals, list) and _native_enum_ns(prop):

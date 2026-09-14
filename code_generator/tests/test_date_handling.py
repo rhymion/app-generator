@@ -225,6 +225,24 @@ class TestCypressEditValueTimeFormat:
 # "Typing into a datetime input with `cy.type()` requires a valid datetime
 # with the format `YYYY-MM-DDThh:mm`..." (cmd_632/cmd_634's parent1.cy.ts
 # 2.1/2.2/3.1 failures — end_date is a DataGrid-child `format: date` field).
+#
+# STALE PREMISE FLAG (issue #540 follow-up): the "MUI's built-in
+# `type: 'dateTime'` DataGrid column" sentence above is no longer true for
+# `format: date` columns specifically. Since issue #540's fix, a
+# `format: date` DataGrid-child column renders MUI `type: 'date'`, not
+# `'dateTime'` — see test_embedded_datagrid_column_date_format.py. MUI's own
+# GridEditDateCell branches its rendered <input> element on `colDef.type`
+# (`type: isDateTime ? 'datetime-local' : 'date'`,
+# node_modules/@mui/x-data-grid/components/cell/GridEditDateCell.js), so a
+# `format: date` DataGrid-child cell now edits through a native
+# `<input type="date">`, which expects a 10-character `YYYY-MM-DD` value —
+# not the 16-character `YYYY-MM-DDThh:mm` this file's own
+# test_date_format_create_value_converted_to_iso /
+# test_date_format_edit_value_converted_to_iso below still assert. This
+# mismatch was found while adding regression tests for issues #539/#540 and
+# reported for a separate task to fix — deliberately NOT changed here (out
+# of scope for this file's own change, which only adds/updates tests). See
+# the task report for the full write-up.
 # ---------------------------------------------------------------------------
 class TestChildDatetimeIsoValue:
     def test_date_format_create_value_converted_to_iso(self):

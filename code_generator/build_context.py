@@ -3299,8 +3299,59 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             if not child_rels:
                 child_include_entries.append(f"{prop}: true")
             else:
-                # Base include map from the child's own parent relationships
+                # Merge nested includes into the child's include map. Shared
+                # by both the child's-own-FK-labelField pass below and the
+                # parent's label_field-on-this-child pass that follows it.
+                def _merge_into_child(ci: dict, src: dict):
+                    for k, v in src.items():
+                        if v is True:
+                            ci[k] = True
+                        else:
+                            include_val = v.get('include') if isinstance(v, dict) and 'include' in v else v
+                            existing = ci.get(k)
+                            if existing is True or existing is None:
+                                ci[k] = {'include': include_val}
+                            elif isinstance(existing, dict) and 'include' in existing:
+                                # merge inner include dicts
+                                inner = existing['include']
+                                for kk, vv in (include_val.items() if isinstance(include_val, dict) else []):
+                                    if kk not in inner:
+                                        inner[kk] = vv
+                                    else:
+                                        # prefer richer nested dicts when possible
+                                        if isinstance(inner[kk], dict) and isinstance(vv, dict):
+                                            inner[kk].setdefault('include', {}).update(vv.get('include', vv))
+
+                # Base include map from the child's own parent relationships.
+                # Each relation starts as flat `true`, then gets deepened
+                # below if ITS OWN labelField walks a nested relation (e.g.
+                # inventory_id's labelField `item.sku` on a goods_receipt_line
+                # child) -- a flat `true` only fetches the FK target's own
+                # scalar columns, so a labelField segment on the target's own
+                # relation renders as undefined at runtime (issue #539).
+                # Simple (non-dotted) labelFields are left as flat `true` --
+                # same scope _include_entry_for_rel() applies for an
+                # independent entity's own getter.
                 child_include_map: dict = {r['prop_name'].removesuffix('_id'): True for r in child_rels}
+                for r in child_rels:
+                    r_label_field = r.get('label_field')
+                    r_target = r.get('target')
+                    if not r_target or not r_label_field or r_label_field == 'name':
+                        continue
+                    r_relation_name = r['prop_name'].removesuffix('_id')
+                    try:
+                        built_r = build_label_expression('item', r_label_field, r_target, schema)
+                        nested_r = built_r.get('prisma_include') or {}
+                    except ValueError:
+                        nested_r = {}
+                    if nested_r:
+                        # nested_r's keys are the FK TARGET's own relations
+                        # (e.g. inventory's `item`/`location`/`bin`) -- they
+                        # must nest *under* this relation's own key, not
+                        # merge as siblings into child_include_map (whose
+                        # keys are the CHILD's own relations, a different
+                        # namespace).
+                        _merge_into_child(child_include_map, {r_relation_name: {'include': nested_r}})
 
                 # If the parent declared a label_field on this child that walks
                 # deeper relations (e.g. 'buyer.user.name'), merge the built
@@ -3314,27 +3365,6 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                         nested = built.get('prisma_include') or {}
                     except ValueError:
                         nested = {}
-
-                    # Merge nested includes into the child's include map
-                    def _merge_into_child(ci: dict, src: dict):
-                        for k, v in src.items():
-                            if v is True:
-                                ci[k] = True
-                            else:
-                                include_val = v.get('include') if isinstance(v, dict) and 'include' in v else v
-                                existing = ci.get(k)
-                                if existing is True or existing is None:
-                                    ci[k] = {'include': include_val}
-                                elif isinstance(existing, dict) and 'include' in existing:
-                                    # merge inner include dicts
-                                    inner = existing['include']
-                                    for kk, vv in (include_val.items() if isinstance(include_val, dict) else []):
-                                        if kk not in inner:
-                                            inner[kk] = vv
-                                        else:
-                                            # prefer richer nested dicts when possible
-                                            if isinstance(inner[kk], dict) and isinstance(vv, dict):
-                                                inner[kk].setdefault('include', {}).update(vv.get('include', vv))
 
                     if nested:
                         _merge_into_child(child_include_map, nested)
