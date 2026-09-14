@@ -32,7 +32,7 @@ helper then reads goodsReceipt.id before const goodsReceipt = ... is ever
 declared -- a ReferenceError at runtime, not a compile-time error, so it
 surfaces only when the generated test actually executes.
 
-Fix (PR#531/#534, since superseded -- see cmd_1050 update below): classify
+Fix (PR#531/#534, since superseded -- see the issue #531 follow-up below): classify
 self-ref deps by an explicit is_self_ref_dep tag set only by the two
 deliberate self-ref-injection blocks (direct self-ref FK fields,
 editable-list-autocomplete self-ref children), not by target == model_name
@@ -47,10 +47,10 @@ still triggered `resolve_dependencies('doc_line', schema)`, which still
 walked through `doc_line`'s own `doc_id -> doc` FK and registered `doc` (the
 OUTER model itself) as an independent, org-blind extra dependency --
 inflating `populateXxxDependencies()`'s created-row count outside any org
-scope (cmd_1050, three symptoms: goods_receipt.cy.ts's "1.2 returns page
+scope (issue #531, three symptoms: goods_receipt.cy.ts's "1.2 returns page
 with items" and "N3 only returns rows from the caller's own organization").
 
-cmd_1050 update: the root problem was never the ORDERING of this dep (what
+Issue #531 follow-up: the root problem was never the ORDERING of this dep (what
 PR#531/#534 fixed) -- it was that a self-referencing FK on the datagrid
 child's own type should never trigger dependency resolution at all. The
 referenced row is a sibling of the same collection being populated, never a
@@ -166,7 +166,7 @@ def test_grandparent_backref_dep_is_not_classified_as_self_ref():
 
 
 def test_grandparent_backref_and_selfref_dep_are_not_created_at_all():
-    """cmd_1050: a self-referencing FK on the datagrid child's own type
+    """A self-referencing FK on the datagrid child's own type
     (parent_doc_line_id -> doc_line) must be skipped entirely -- neither the
     self-ref dep itself (doc_line / parentDocLine) nor the outer model it
     would have transitively pulled in (doc, via doc_line's own doc_id FK)

@@ -40,19 +40,19 @@ exercised "self-referencing datagrid child" + "another sibling FK field to a
 shared target under a prop-stem-renamed var name" at the same time until
 proj_g's schema grew to include it.
 
-Fix (PR#530-adjacent, since superseded for the self-ref case -- see cmd_1050
-update below): look up each relation's ALREADY-REGISTERED dep var_name from
-the current `deps` list (a `{target: var_name}` map) instead of
-re-deriving it.
+Fix (PR#530-adjacent, since superseded for the self-ref case -- see the
+issue #531 follow-up below): look up each relation's ALREADY-REGISTERED dep
+var_name from the current `deps` list (a `{target: var_name}` map) instead
+of re-deriving it.
 
-cmd_1050 update: this fix's own `fk_deps` construction only ran for a
+Issue #531 follow-up: this fix's own `fk_deps` construction only ran for a
 self-referencing datagrid-child FK (`parent_doc_line_id -> doc_line`)
 because, at the time, walking into a self-ref target's own relations to
-build a `fk_deps` list was still happening at all. cmd_1050 found a
-separate, deeper defect in that same self-ref walk (it also pulled in the
+build a `fk_deps` list was still happening at all. A separate, deeper
+defect was found in that same self-ref walk (it also pulled in the
 OUTER model as an independent, org-blind dependency -- see
-`test_datagrid_child_selfref_grandparent_backref_ordering.py`'s cmd_1050
-update) and fixed it by skipping a datagrid-child field's `dep_target`
+`test_datagrid_child_selfref_grandparent_backref_ordering.py`'s own
+issue #531 follow-up) and fixed by skipping a datagrid-child field's `dep_target`
 entirely whenever it equals the child's own type, before any resolution
 (including this file's `fk_deps`-var-name-lookup fix) ever runs. The
 self-ref dep (`doc_line`) this file's remaining two tests looked up no
@@ -155,7 +155,7 @@ def test_bin_dep_registered_under_prop_stem_var_name():
 
 
 def test_selfref_dep_is_not_created_at_all():
-    """cmd_1050: a self-referencing FK on the datagrid child's own type
+    """A self-referencing FK on the datagrid child's own type
     (parent_doc_line_id -> doc_line) is now skipped entirely -- no dep
     named `doc_line` (or any var_name derived from it, e.g. parentDocLine)
     is registered, so there is no fk_deps list left to build var names for

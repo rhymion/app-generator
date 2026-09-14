@@ -2391,7 +2391,7 @@ def helper_context(
         for field in child_meta['fields']:
             target = field.get('dep_target')
             if field['category'] == 'autocomplete' and target and target != 'user':
-                # cmd_1050: a self-referencing FK on the datagrid child's
+                # A self-referencing FK on the datagrid child's
                 # OWN entity type (e.g. goods_receipt_line.
                 # parent_goods_receipt_line_id -> goods_receipt_line, an
                 # x-splittable parentField) is a decoy: the referenced row
@@ -2988,7 +2988,7 @@ def helper_context(
         for f in child_meta['fields']:
             target = f.get('dep_target')
             if f['category'] == 'autocomplete' and target and target != 'user':
-                # cmd_1050: a self-referencing FK on the datagrid child's OWN
+                # A self-referencing FK on the datagrid child's OWN
                 # entity type (e.g. goods_receipt_line.parent_goods_receipt_line_id
                 # -> goods_receipt_line) is never populated here, mirroring the
                 # skip added to helper_context()'s dependency-registration loop
@@ -3552,7 +3552,7 @@ def spec_context(
 
     datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
     # Datagrid children may have FK deps not on the parent (e.g. field.reference_id → db_table).
-    # cmd_1050: a self-referencing FK on the datagrid child's own entity type
+    # A self-referencing FK on the datagrid child's own entity type
     # (dep_target == c['child']['name']) never resolves to a real dependency (see
     # the same skip in helper_context()'s deps-registration loop and in
     # enriched_datagrid_children's fields_prisma loop above) -- excluded here too
