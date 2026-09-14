@@ -1,15 +1,15 @@
 """
-Regression tests for issue #538 (cmd_1058), a generators_test.py-side gap in
-the cmd_1047 "Otsu" ruling (issue #520/PR#528, PR#530).
+Regression tests for issue #538, a generators_test.py-side gap in
+the "Otsu" ruling (issue #520/PR#528, PR#530).
 
 Background
 ----------
-PR#530 (subtask_1047g) taught the UI generator (build_context.py's
+PR#530 taught the UI generator (build_context.py's
 `write_ch`, generators.py's `form_upsert_context()`) that an INDEPENDENT
 datagrid child (one with its own `x-generate` -- own list/view/new/edit/
 delete pages) renders READ-ONLY from the parent: no "Add"/edit/delete
 controls, just a `FieldsViewGrid` display gated on `isEdit`. Only the
-child's own CRUD route may write it. cmd_1047i's follow-up fixes (see
+child's own CRUD route may write it. Follow-up fixes (see
 `test_normalize_child_refs_import_and_readonly_grid_props.py`,
 `test_datagrid_child_selfref_shared_fk_target_var_name.py`) confirm this
 live against proj_g's asn/goods_receipt/purchase_order/sales_order/shipment
@@ -45,7 +45,7 @@ child items" test renders one negative assertion per such child --
 directly encoding the FieldsViewGrid-no-add-control fact confirmed by
 reading generators.py's `readonly_indep_grid_ch` JSX. This is a real
 regression guard: if a future change ever restores editable rendering for
-these children (reverting cmd_1047 "Otsu"), this assertion fails.
+these children (reverting the "Otsu" ruling), this assertion fails.
 """
 from generators_test import get_child_render_type, analyze_children, spec_context
 

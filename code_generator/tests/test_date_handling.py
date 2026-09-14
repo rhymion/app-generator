@@ -230,7 +230,7 @@ class TestCypressEditValueTimeFormat:
 # actually rendered — typing '01/16/2025' (the top-level DateTimeWrapper's
 # keyboard-sectioned format) throws "Typing into a datetime input with
 # `cy.type()` requires a valid datetime with the format
-# `YYYY-MM-DDThh:mm`..." (cmd_632/cmd_634's parent1.cy.ts 2.1/2.2/3.1
+# `YYYY-MM-DDThh:mm`..." (parent1.cy.ts 2.1/2.2/3.1
 # failures — end_date is a DataGrid-child `format: date` field), while
 # typing a 16-character value into the now-`type: 'date'` input throws the
 # native-input equivalent (issue #542, found once #540 switched `format:
