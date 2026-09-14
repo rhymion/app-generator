@@ -32,14 +32,40 @@ helper then reads goodsReceipt.id before const goodsReceipt = ... is ever
 declared -- a ReferenceError at runtime, not a compile-time error, so it
 surfaces only when the generated test actually executes.
 
-Fix: classify self-ref deps by an explicit is_self_ref_dep tag set only by
-the two deliberate self-ref-injection blocks (direct self-ref FK fields,
+Fix (PR#531/#534, since superseded -- see the issue #531 follow-up below): classify
+self-ref deps by an explicit is_self_ref_dep tag set only by the two
+deliberate self-ref-injection blocks (direct self-ref FK fields,
 editable-list-autocomplete self-ref children), not by target == model_name
 alone. A dep that reaches target == model_name via nested transitive
-resolution (this case) is now treated as an ordinary non-self dep, rendered
-in the same function, in the same list-order position it was appended at --
+resolution (this case) was treated as an ordinary non-self dep, rendered in
+the same function, in the same list-order position it was appended at --
 which is always before the datagrid-child dep that needs it, since Python
-list order is preserved through to template rendering.
+list order is preserved through to template rendering. This fixed the
+ReferenceError, but left the underlying transitive walk in place: the
+datagrid child's OWN self-referencing FK (`parent_doc_line_id -> doc_line`)
+still triggered `resolve_dependencies('doc_line', schema)`, which still
+walked through `doc_line`'s own `doc_id -> doc` FK and registered `doc` (the
+OUTER model itself) as an independent, org-blind extra dependency --
+inflating `populateXxxDependencies()`'s created-row count outside any org
+scope (issue #531, three symptoms: goods_receipt.cy.ts's "1.2 returns page
+with items" and "N3 only returns rows from the caller's own organization").
+
+Issue #531 follow-up: the root problem was never the ORDERING of this dep (what
+PR#531/#534 fixed) -- it was that a self-referencing FK on the datagrid
+child's own type should never trigger dependency resolution at all. The
+referenced row is a sibling of the same collection being populated, never a
+separate fixture; walking into it to pull in the child's own transitive
+deps (here, its parent `doc`) is never correct, regardless of ordering. The
+`helper_context()` loop now skips a datagrid-child field's `dep_target`
+entirely when it equals the child's own type
+(`target == child_meta['child']['name']`), before any resolution happens --
+so `doc` is never registered as a dep of any kind (self-ref or non-self),
+and the self-ref dep itself (`doc_line` / `parentDocLine`) no longer exists
+either. This is a strictly narrower behavior than the ordering fix: it does
+not reintroduce the ReferenceError (there is nothing left to misorder) and
+it removes the org-blind extra-row creation this file's tests originally
+missed because they only checked ordering, not whether the dep should exist
+in the first place.
 """
 from generators_test import helper_context
 
@@ -139,16 +165,23 @@ def test_grandparent_backref_dep_is_not_classified_as_self_ref():
     assert "doc" not in self_ref_targets
 
 
-def test_grandparent_backref_dep_created_before_its_dependent_in_non_self_deps():
-    """The doc dep and the datagrid-child dep that references it
-    (parentDocLine) must both live in non_self_deps (created inside the
-    same _createXxxBaseDeps() function), with doc appearing BEFORE
-    parentDocLine -- the create() call order the generated JS executes."""
+def test_grandparent_backref_and_selfref_dep_are_not_created_at_all():
+    """A self-referencing FK on the datagrid child's own type
+    (parent_doc_line_id -> doc_line) must be skipped entirely -- neither the
+    self-ref dep itself (doc_line / parentDocLine) nor the outer model it
+    would have transitively pulled in (doc, via doc_line's own doc_id FK)
+    may appear anywhere in deps/non_self_deps/self_ref_deps. The ordering
+    fix this test previously checked (doc before parentDocLine) is now
+    moot: neither var_name is created."""
     ctx = _ctx()
+    all_var_names = [d["var_name"] for d in ctx["deps"]]
+    assert "doc" not in all_var_names
+    assert "parentDocLine" not in all_var_names
     non_self_var_names = [d["var_name"] for d in ctx["non_self_deps"]]
-    assert "doc" in non_self_var_names
-    assert "parentDocLine" in non_self_var_names
-    assert non_self_var_names.index("doc") < non_self_var_names.index("parentDocLine")
+    assert "doc" not in non_self_var_names
+    assert "parentDocLine" not in non_self_var_names
+    # the ordinary sibling FK (destination_bin_id -> bin) is untouched
+    assert "destinationBin" in non_self_var_names
 
 
 def test_no_non_self_dep_fk_references_a_self_ref_only_var_name():

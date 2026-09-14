@@ -283,6 +283,40 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   (4 dedicated tests) is removed with it.
 
 ### Fixed
+- **A datagrid child's self-referencing FK (e.g. `goods_receipt_line.parent_goods_receipt_line_id
+  -> goods_receipt_line`, an `x-splittable` `parentField`) no longer pulls the datagrid's own
+  parent/ancestor entity in as an extra, org-blind dependency row** (issue #531). The "FK deps
+  needed by datagrid children" loop in `helper_context()`
+  (`code_generator/generators_test.py`) walked `resolve_dependencies(target, schema)` for every
+  autocomplete FK target unconditionally, including a self-referencing FK whose target is the
+  datagrid child's own entity type. That walk followed the child's own other required FKs (e.g.
+  `goods_receipt_line`'s own `goods_receipt_id -> goods_receipt`) and registered the datagrid's
+  own parent entity as an independent dependency outside any org scope, inflating
+  `populateXxxDependencies()`'s created-row count every time it ran and breaking org-count
+  assumptions in generated tests (`goods_receipt.cy.ts`'s "1.2 returns page with items" and "N3
+  only returns rows from the caller's own organization"). Fixed by skipping a datagrid-child
+  field's `dep_target` entirely when it equals the child's own entity type, before any
+  resolution happens -- narrower than a prior related fix (issue #531) for a related
+  `ReferenceError`, which reordered this same dependency without removing it. Two regression
+  tests locking in the ordering fix's specific behavior are updated to assert the new (narrower)
+  behavior instead.
+
+  The same unconditional "target is a real dependency" assumption was independently duplicated
+  in two more places in `generators_test.py` that also iterate a datagrid child's autocomplete
+  FK fields, and both had to be given the identical skip: the `fields_prisma` builder for
+  `populate{Parent}{Child}Data()` (the generated "add a child row to an existing parent" test
+  helper) still emitted `parent_goods_receipt_line_id: deps.parentGoodsReceiptLine.id` even
+  after the fix above removed `parentGoodsReceiptLine` from `deps` -- a dangling reference that
+  crashed every UI e2e spec exercising datagrid-child add/edit (`goods_receipt.cy.ts`'s "2.1"
+  through "6.2") with `TypeError: Cannot read properties of undefined (reading 'id')`; and the
+  `has_child_fk_deps` flag (gates whether a `deps` object is declared and populated at all)
+  still counted a self-referencing FK as a real dependency, which would have produced a false
+  `has_deps: true` for the (currently hypothetical) case of a datagrid child whose *only*
+  autocomplete FK is such a self-reference. Since this class of FK is always nullable (a
+  splittable `parentField` cannot be required -- the first, unsplit row has nothing to point
+  at), the correct behavior in the row-creation helper is to omit the field from the `create()`
+  call entirely, leaving it at its natural `null`.
+
 - **An independent child (own `x-generate` permitting new/edit) embedded in a parent with a
   non-`list` `x-outputType` is now read-only from the parent's edit form too, not just its view
   page** (issue #520/PR#528 follow-up). PR#528's own verification above covered only the view
