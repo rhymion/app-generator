@@ -2988,6 +2988,19 @@ def helper_context(
         for f in child_meta['fields']:
             target = f.get('dep_target')
             if f['category'] == 'autocomplete' and target and target != 'user':
+                # cmd_1050: a self-referencing FK on the datagrid child's OWN
+                # entity type (e.g. goods_receipt_line.parent_goods_receipt_line_id
+                # -> goods_receipt_line) is never populated here, mirroring the
+                # skip added to helper_context()'s dependency-registration loop
+                # above -- there is no "deps.<var>" for it any more (no dependency
+                # was ever registered for it) since the referenced row would be a
+                # sibling of the same collection being populated, not a separate
+                # fixture. Such a field is always nullable (a splittable
+                # `parentField` FK cannot be required -- the first, unsplit row
+                # would have nothing to point at), so simply omitting it from the
+                # create() call (leaving it at its natural null) is correct.
+                if target == child_name:
+                    continue
                 # Use prop-stem var name so self-ref FKs (e.g. reference_id → db_table)
                 # get their own dep (e.g. deps.reference) distinct from the parent itself.
                 prop_stem = re.sub(r'_id$', '', f['prop_name'])
@@ -3538,9 +3551,16 @@ def spec_context(
     has_self_ref_deps = any(d['target'] == model_name for d in deps)
 
     datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
-    # Datagrid children may have FK deps not on the parent (e.g. field.reference_id → db_table)
+    # Datagrid children may have FK deps not on the parent (e.g. field.reference_id → db_table).
+    # cmd_1050: a self-referencing FK on the datagrid child's own entity type
+    # (dep_target == c['child']['name']) never resolves to a real dependency (see
+    # the same skip in helper_context()'s deps-registration loop and in
+    # enriched_datagrid_children's fields_prisma loop above) -- excluded here too
+    # so an entity whose ONLY datagrid-child autocomplete FK is such a self-ref
+    # doesn't incorrectly report has_child_fk_deps (and therefore has_deps) as True.
     has_child_fk_deps = any(
         f['category'] == 'autocomplete' and f.get('dep_target') and f.get('dep_target') != 'user'
+        and f.get('dep_target') != c['child']['name']
         for c in datagrid_children
         for f in c['fields']
     )
