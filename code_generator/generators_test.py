@@ -1286,7 +1286,8 @@ def get_child_render_type(child: dict, schema: dict = None, parent_model_name: s
         return 'editable-list-text'
     if child.get('output_type') == 'comments':
         return 'comments'
-    # issue #538 (the "Otsu" ruling follow-up): an independent
+    # issue #538 (a follow-up to the read-only embed decision, issue
+    # #520/PR#528/PR#530): an independent
     # child (own x-generate — own list/view/new/edit/delete pages) that is
     # NOT self-referencing renders read-only from the parent — generators.py's
     # form_upsert_context() narrows it out of the editable-grid machinery
@@ -3574,7 +3575,7 @@ def spec_context(
 
     datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
     # Independent grid-style children (own x-generate) render read-only from
-    # the parent (the "Otsu" ruling, issue #520/PR#528/PR#530) -- no
+    # the parent (issue #520/PR#528/PR#530) -- no
     # 'Add {{ title }}' control exists for them at all. Generate a negative
     # assertion guarding exactly that fact (test 3.1, test_spec.cy.ts.jinja2)
     # instead of the removed write-flow assertions (issue #538) --

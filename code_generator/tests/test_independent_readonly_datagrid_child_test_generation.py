@@ -1,6 +1,6 @@
 """
 Regression tests for issue #538, a generators_test.py-side gap in
-the "Otsu" ruling (issue #520/PR#528, PR#530).
+the read-only embed decision (issue #520/PR#528, PR#530).
 
 Background
 ----------
