@@ -6970,7 +6970,7 @@ def _seed_entity_is_internal_only(bare_key: str, defs: dict) -> bool:
 
 def _seed_entity_is_self_only_admin_bypass(bare_key: str, defs: dict) -> bool:
     """True when `bare_key` (or its raw twin) declares
-    `x-self-only: {admin_bypass: true}` (cmd_813 ③) — the schema-driven,
+    `x-self-only: {admin_bypass: true}` — the schema-driven,
     entity-name-agnostic reason 'setting' alone is excluded: an
     Administrator already reaches it via trySelfOnlyAdminBypass()
     (lib/authz.ts, driven by lib/self_only_admin_bypass_entities.ts), so a
@@ -7119,8 +7119,8 @@ def seed_entities_context(schema: dict) -> dict:
     2. It either has an 'id' property directly (bare 'entity', or the
        '__entity' raw twin of a raw/view split pair — same resolution
        db_helpers_context uses for its deletion-order base_entities), OR
-       it is a proxy view (an allOf-wrapper referencing another entity,
-       cmd_813 ③) — the latter is what makes setting1/setting2-shaped
+       it is a proxy view (an allOf-wrapper referencing another entity)
+       — the latter is what makes setting1/setting2-shaped
        demo fixtures newly eligible; a raw '__'-prefixed entity is never
        itself treated as a proxy view (it IS the id-bearing side).
     3. It is not an x-bridge junction table target (defn.x-bridge.name).

@@ -179,7 +179,7 @@ def test_x_bridge_target_excluded() -> None:
 
 def test_self_only_admin_bypass_proxy_view_excluded() -> None:
     """A 'setting'-shaped proxy view stays excluded via x-self-only
-    admin_bypass, not via a blanket proxy-view exclusion (cmd_813)."""
+    admin_bypass, not via a blanket proxy-view exclusion."""
     schema = _minimal_schema({
         'setting': {
             'x-generate': {
