@@ -143,6 +143,116 @@ describe('MFA (TOTP + Recovery Code)', () => {
     });
   });
 
+  // === (4b) app-generator#563 — settings edit form's embedded MFA toggle
+  // must not re-enable MFA on Save right after an inline disable ===
+  //
+  // This is a DIFFERENT surface than tests (3)/(4) above: those exercise the
+  // dedicated /setting/mfa page (mfa-client.tsx), which is self-contained
+  // and has no separate "Save" step. The regression is in
+  // components/setting/mfa_enabled.tsx, the custom_upsert widget embedded
+  // in the general settings edit form (/setting/edit/[id], reached via the
+  // header's account-name link -> the "Edit" button) — that form keeps its
+  // own local `mfaEnabled` React state, seeded once from the page's initial
+  // props. Before the fix, disabling MFA inline never told the parent form
+  // this state had changed, so a "Save" click immediately afterwards wrote
+  // the stale mfa_enabled=true back over the mfa_secret=null the disable
+  // action had just committed -- flag on, no working secret, account
+  // locked out of its own MFA challenge on the next sign-in.
+  it('does not re-enable MFA when Save is clicked right after an inline disable (credentials account)', () => {
+    cy.task('db:reset');
+    cy.task<MfaUserSeed>('db:seedMfaUser').then(({ email, password, secret }) => {
+      doMfaLogin(email, password, secret);
+      cy.contains('MFA Test User').click();
+      cy.get('a[aria-label="Edit"]').click();
+      cy.url().should('include', '/setting/edit/');
+
+      cy.contains('MFA Enabled').should('be.visible');
+      cy.contains('Disable MFA').click();
+      cy.task('generateTotp', secret).then((code) => {
+        cy.get('input[autocomplete="one-time-code"]:visible').first().type(code as string);
+        cy.contains('Disable MFA').click();
+      });
+
+      // The fix: the widget must reflect the disable immediately, without
+      // waiting on the server round trip from a page refresh.
+      cy.contains('Enable MFA').should('be.visible');
+      cy.contains('MFA Enabled').should('not.exist');
+
+      // FormWithChildGrid's submit control is an icon button (SaveIcon),
+      // not text -- it exposes 'Save' only via aria-label/tooltip. This
+      // Save is deliberately NOT asserted to redirect/succeed: the record
+      // legitimately changed server-side (mfa_secret/mfa_enabled, via the
+      // disable click above) since the page's own optimistic-concurrency
+      // snapshot was taken, so the generated update action's stale-mutation
+      // guard (assertNotStale, lib/setting/service.ts) may reject this
+      // exact Save with "This record has been updated since you opened it"
+      // -- a safe, visible rejection, not the silent bad-write #563
+      // reported. See the task report for why this residual friction
+      // wasn't eliminated outright.
+      cy.get('button[aria-label="Save"]').click();
+
+      // The invariant that actually matters (#563): whether or not this
+      // Save itself succeeds, MFA must already be truly off server-side
+      // (disableMfaAction() committed that independently of Save) --
+      // sign out and back in must never re-arm an MFA challenge for an
+      // account that just turned MFA off from this screen.
+      Cypress.session.clearAllSavedSessions();
+      cy.clearCookies();
+      cy.visit(LOGIN_URL);
+      cy.get('input[name="email"]').type(email);
+      cy.get('input[name="password"]').type(password);
+      cy.get('button[type="submit"]').click();
+      cy.contains('MFA Test User').should('be.visible');
+      cy.get('[data-testid="mfa_code"]').should('not.exist');
+    });
+  });
+
+  // === (4c) app-generator#563 — same regression, SSO-provisioned account ===
+  //
+  // #563 was originally reported specifically against an SSO (Google) + MFA
+  // account, and the credentials-auth path was reported to NOT hit this
+  // lockout in manual testing. This test exercises the exact SSO account
+  // shape the issue describes; see the task report for what the asymmetry
+  // investigation found.
+  it('does not re-enable MFA when Save is clicked right after an inline disable (SSO account)', () => {
+    cy.task('db:reset');
+    cy.task<SsoMfaUserSeed>('db:seedSsoMfaUser').then(({ email, secret }) => {
+      mockGoogleSignIn(email);
+      cy.visit(PROTECTED_URL);
+      cy.url().should('include', MFA_CHALLENGE_URL);
+      cy.task('generateTotp', secret).then((code) => {
+        cy.get('[data-testid="mfa_code"]').type(code as string);
+        cy.get('button[type="submit"]').click();
+      });
+      cy.url().should('include', PROTECTED_URL);
+
+      cy.contains('SSO MFA Test User').click();
+      cy.get('a[aria-label="Edit"]').click();
+      cy.url().should('include', '/setting/edit/');
+
+      cy.contains('MFA Enabled').should('be.visible');
+      cy.contains('Disable MFA').click();
+      cy.task('generateTotp', secret).then((code) => {
+        cy.get('input[autocomplete="one-time-code"]:visible').first().type(code as string);
+        cy.contains('Disable MFA').click();
+      });
+
+      cy.contains('Enable MFA').should('be.visible');
+      cy.contains('MFA Enabled').should('not.exist');
+
+      // See the credentials-account test above for why this Save is not
+      // asserted to redirect/succeed.
+      cy.get('button[aria-label="Save"]').click();
+
+      Cypress.session.clearAllSavedSessions();
+      cy.clearCookies();
+      mockGoogleSignIn(email);
+      cy.visit(PROTECTED_URL);
+      cy.url().should('not.include', MFA_CHALLENGE_URL);
+      cy.contains('Sign Out').should('be.visible');
+    });
+  });
+
   // === (5) MFA login success — valid TOTP ===
   it('logs in successfully with valid TOTP after MFA enrollment', () => {
     cy.task('db:reset');

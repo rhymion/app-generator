@@ -58,6 +58,13 @@ export async function POST(request: NextRequest) {
       });
       url = blob.url;
     } else {
+      // BLOB_READ_WRITE_TOKEN is unset -- falling back to local disk, which
+      // is not writable/persistent on Vercel's serverless runtime outside
+      // /tmp. Warn loudly so a deployment missing the storage integration
+      // sees this in its logs, instead of only the unrelated downstream
+      // error the fallback eventually produces (app-generator#562).
+      console.warn('BLOB_READ_WRITE_TOKEN is not set -- falling back to local filesystem storage, which will not persist on Vercel. Connect the Blob storage integration to fix this.');
+
       // Fallback to local filesystem (development)
       const bytes = await file.arrayBuffer();
       const buffer = Buffer.from(bytes);
@@ -66,8 +73,16 @@ export async function POST(request: NextRequest) {
       const uploadsDir = path.join(process.cwd(), 'public', 'uploads', uniqueDir);
       try {
         await mkdir(uploadsDir, { recursive: true });
-      } catch {
-        // Directory might already exist, ignore error
+      } catch (mkdirError) {
+        // EEXIST (directory already exists) is safe to ignore. Anything
+        // else (e.g. a read-only-filesystem/permission error on a
+        // serverless runtime) must not be discarded -- swallowing it here
+        // lets execution fall through to writeFile, which then fails with
+        // an unrelated "no such file or directory" error that masks the
+        // real cause (app-generator#562).
+        if ((mkdirError as NodeJS.ErrnoException)?.code !== 'EEXIST') {
+          throw mkdirError;
+        }
       }
 
       // Save file with original filename
