@@ -302,6 +302,59 @@ describe('DataGridClient', () => {
       });
     });
 
+    it('hides the create button when allowCreate is false even though permissions.create is true (x-generate.new: false means no /new page exists)', async () => {
+      const mockData = createMockData(2);
+      renderWithIntl(
+        <DataGridClient
+          src={mockData}
+          basePath="/test"
+          removeAction={mockRemoveAction}
+          entityLabel="Book"
+          permissions={{ create: true, read: true, update: true, delete: true, import: true }}
+          allowCreate={false}
+        />
+      );
+
+      expect(screen.queryByRole('button', { name: /create new book/i })).not.toBeInTheDocument();
+    });
+
+    it('hides the edit icon when allowEdit is false even though permissions.update is true (x-generate.edit: false means no /edit page exists)', async () => {
+      const mockData = createMockData(2);
+      renderWithIntl(
+        <DataGridClient
+          src={mockData}
+          basePath="/test"
+          removeAction={mockRemoveAction}
+          entityLabel="Book"
+          permissions={{ create: true, read: true, update: true, delete: true, import: true }}
+          allowEdit={false}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole('link', { name: 'Item 1' })).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('link', { name: 'Edit' })).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Edit')).not.toBeInTheDocument();
+    });
+
+    it('shows the edit icon when allowEdit defaults true and permissions.update is true', async () => {
+      const mockData = createMockData(2);
+      renderWithIntl(
+        <DataGridClient
+          src={mockData}
+          basePath="/test"
+          removeAction={mockRemoveAction}
+          entityLabel="Book"
+          permissions={{ create: true, read: true, update: true, delete: true, import: true }}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getAllByLabelText('Edit').length).toBeGreaterThan(0);
+      });
+    });
+
     it('renders delete selected button', async () => {
       const mockData = createMockData(2);
       renderWithIntl(

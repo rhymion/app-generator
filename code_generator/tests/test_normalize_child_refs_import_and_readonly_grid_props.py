@@ -1,6 +1,6 @@
 """
 Regression tests for cmd_1047i (subtask_1047h QC, real-schema regressions in
-PR#530/subtask_1047g's "Otsu" independent-readonly-grid-child feature --
+PR#530/subtask_1047g's independent-readonly-grid-child feature --
 confirmed as PR#530-introduced side effects, unlike the `bin` ReferenceError
 fix in test_datagrid_child_selfref_shared_fk_target_var_name.py which is a
 pre-existing generators_test.py defect).
@@ -25,7 +25,7 @@ only through a readonly PARENT-level relation or an undisplayed
 PARENT-level relation, but had no equivalent exclusion for a target
 reachable only through a read-only INDEPENDENT GRID CHILD's own FK field
 (e.g. goods_receipt_line's destination_bin_id -> bin) -- such a child
-(cmd_1047 "Otsu") renders via FieldsViewGrid straight from `src.<prop>`,
+(cmd_1047, an independent read-only grid child) renders via FieldsViewGrid straight from `src.<prop>`,
 with no per-column EntityAutocompleteCellConfig wiring, so its
 initial{Xxx}s/search{Xxx}Options props go unused the same way a
 readonly-only or undisplayed-only parent-level target's did (confirmed

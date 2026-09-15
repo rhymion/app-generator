@@ -2,8 +2,8 @@
 Regression test for cmd_1047k (goods_receipt.cy.ts, all 26 API e2e tests
 failing with ReferenceError: goodsReceipt is not defined at helper.ts:219,
 surfaced only after PR#533 fixed the unrelated `bin` ReferenceError that had
-been masking this one -- see
-queue/reports/subtask_1047j_pr533_realschema_verification_checkpoint_ashigaru5.yaml).
+been masking this one -- confirmed during PR#533's real-schema
+verification).
 
 Background
 ----------

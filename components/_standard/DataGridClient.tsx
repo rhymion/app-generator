@@ -70,8 +70,14 @@ interface DataGridClientProps<T extends BaseEntity> {
   /** When true, edit and create links open in a new tab. Use in parent-embedded bridge grids. */
   openLinksInNewTab?: boolean;
   /** When false, the "+" create button is hidden even if the user has create permission.
-   * Used for bridge-child entities, which cannot be created standalone (only via a parent). */
+   * Used for bridge-child entities, which cannot be created standalone (only via a parent),
+   * and for entities whose x-generate.new is false (no /new page exists to link to). */
   allowCreate?: boolean;
+  /** When false, the edit icon is hidden even if the user has update permission.
+   * Used for entities whose x-generate.edit is false (no /edit page exists to link to) --
+   * without this, a role granted `update` (e.g. via grant-all-permissions.ts) sees an
+   * edit icon that 404s when clicked. */
+  allowEdit?: boolean;
 }
 
 export default function DataGridClient<T extends BaseEntity>({
@@ -90,6 +96,7 @@ export default function DataGridClient<T extends BaseEntity>({
   primaryField = 'name' as keyof T,
   openLinksInNewTab,
   allowCreate = true,
+  allowEdit = true,
 }: DataGridClientProps<T>) {
   const serverMode = typeof fetchPage === 'function';
   const initialItems: T[] = (serverMode ? initialRows : src) ?? [];
@@ -250,7 +257,7 @@ export default function DataGridClient<T extends BaseEntity>({
   });
 
   const columns: GridColDef<T>[] = dataColumns;
-  if (permissions.update || invalidateAction) columns.push(
+  if ((permissions.update && allowEdit) || invalidateAction) columns.push(
     {
       field: 'actions',
       headerName: tf('actions'),
@@ -260,7 +267,7 @@ export default function DataGridClient<T extends BaseEntity>({
       renderCell: (params) => {
         return (
           <span style={{ display: 'flex', gap: 4 }}>
-            {permissions.update && (
+            {permissions.update && allowEdit && (
               <NextLink href={`${basePath}/edit/${params.id}`} target={openLinksInNewTab ? '_blank' : undefined} rel={openLinksInNewTab ? 'noopener noreferrer' : undefined}>
                 <Tooltip title="Edit">
                   <IconButton size="small" aria-label="Edit" color="primary">
