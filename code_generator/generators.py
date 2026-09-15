@@ -6993,18 +6993,121 @@ def _seed_entity_is_self_only_admin_bypass(bare_key: str, defs: dict) -> bool:
     return is_self_only and admin_bypass
 
 
+def _seed_entity_x_generate(bare_key: str, defs: dict) -> dict:
+    """Resolve `bare_key`'s x-generate block, same two-level lookup order
+    used elsewhere in this file and in context.py's `_target_has_module()`:
+    the view/pass-through key first (where a proxy view carries its own
+    x-generate directly), falling back to the raw ('__'-prefixed) twin for
+    the ordinary split-pair case."""
+    gen = defs.get(bare_key, {}).get('x-generate')
+    if not isinstance(gen, dict):
+        gen = defs.get(f'__{bare_key}', {}).get('x-generate')
+    return gen if isinstance(gen, dict) else {}
+
+
+def _seed_entity_is_primary(bare_key: str, view_defn: dict) -> bool:
+    """True when `bare_key` names its own underlying Prisma model
+    (build_context.py's `parent == model`, the gate `import_eligible`
+    requires) rather than rerouting to a DIFFERENT entity's model (a
+    cmd_813 ③ proxy view, e.g. 'setting1' -> 'user'). An ordinary raw/view
+    split pair's view half (allOf referencing its own '__{bare_key}' raw
+    twin) is still primary -- only a proxy view whose allOf target is some
+    OTHER entity's name is not."""
+    all_of = view_defn.get('allOf')
+    if not all_of:
+        return True  # bare 'entity' with a direct id: no split, no proxy
+    own_raw_ref = f'#/definitions/__{bare_key}'
+    for item in all_of:
+        ref = item.get('$ref') if isinstance(item, dict) else None
+        if ref and ref != own_raw_ref:
+            return False
+    return True
+
+
+def _seed_entity_grant_flags(bare_key: str, defs: dict, is_primary: bool) -> dict:
+    """Per-operation grant flags for `bare_key`, mirroring the exact
+    can_create/can_update/can_delete/can_list/can_view boolean derivation
+    build_context.py's per-entity context builder uses (build_context.py
+    ~line 1548-1554: `gen_cfg.get(<key>, True) is not False`) — this is
+    the SAME formula, not a re-guess, so a route/button build_context.py
+    would omit is never granted here either.
+
+    grant-all-permissions.ts's job is to grant Administrator only what the
+    generated app can actually do, never more:
+      create -> x-generate.new     (gates app/[locale]/{entity}/new/page.tsx
+                                     and the POST route — build_context.py
+                                     `can_create`)
+      update -> x-generate.edit    (gates .../edit/[id]/page.tsx and the
+                                     PUT route — `can_update`)
+      delete -> x-generate.delete  (gates the DELETE route and, in the
+                                     generated list page, whether
+                                     `removeAction` is even passed to the
+                                     shared DataGrid component —
+                                     `can_delete`)
+      read   -> x-generate.list OR x-generate.view (a single Permission.read
+                                     column backs both the list-page GET and
+                                     the detail-page GET; granting it is
+                                     meaningful as long as either page/route
+                                     exists — `can_list`, `can_view`)
+      import -> x-generate.import  (build_context.py's own
+                                     `import_eligible` formula,
+                                     build_context.py ~line 1966-1977:
+                                     primary entity AND x-import-key AND
+                                     x-generate.import AND (can_create OR
+                                     can_update); `is_primary` is this
+                                     candidate's own has_direct_id/
+                                     is_proxy_view classification from the
+                                     caller, the same distinction that
+                                     drives build_context.py's `parent ==
+                                     model` check)
+    """
+    gen = _seed_entity_x_generate(bare_key, defs)
+    can_create = gen.get('new',    True) is not False
+    can_update = gen.get('edit',   True) is not False
+    can_delete = gen.get('delete', True) is not False
+    can_list   = gen.get('list',   True) is not False
+    can_view   = gen.get('view',   True) is not False
+    import_flag = gen.get('import', True) is not False
+
+    has_import_key = bool(
+        defs.get(bare_key, {}).get('x-import-key')
+        or defs.get(f'__{bare_key}', {}).get('x-import-key')
+    )
+    import_eligible = (
+        is_primary and has_import_key and import_flag and (can_create or can_update)
+    )
+
+    return {
+        'create': can_create,
+        'read':   can_list or can_view,
+        'update': can_update,
+        'delete': can_delete,
+        'import': import_eligible,
+    }
+
+
 def seed_entities_context(schema: dict) -> dict:
     """Build context for scripts/generated/seed-entities.ts.
 
     Derives the "independent entity" population `scripts/grant-all-
     permissions.ts` (a development / verification tool, NOT the production
-    seed) grants full Administrator CRUD on. requirePermission() (lib/
-    authz.ts, called from actions.ts.jinja2) checks permissions keyed to
+    seed) grants Administrator CRUD on -- and, per entity, WHICH of
+    create/read/update/delete/import that grant may actually include
+    (`seed_entity_grants`, see `_seed_entity_grant_flags`). requirePermission()
+    (lib/authz.ts, called from actions.ts.jinja2) checks permissions keyed to
     each entity's own VIEW/route name (`parent`), not the underlying
     Prisma model — so a proxy view sharing a model with other views (e.g.
     a demo fixture like 'setting1' sharing a model with 'setting2') needs
     its own grant; granting only the shared raw model's name would leave
     every proxy view's own route ungranted.
+
+    Grant-all-permissions must never grant an operation the generated app
+    cannot actually perform for that entity (x-generate.new/edit/delete
+    false suppresses the corresponding page/route entirely -- see
+    _seed_entity_grant_flags for the exact per-operation mapping) --
+    otherwise a button that should not exist (e.g. the "+" create button
+    when x-generate.new is false) renders anyway because Permission.create
+    is true, and 404s when clicked.
 
     An entity name is independent (i.e. gets its own grant) when it
     satisfies all of:
@@ -7037,6 +7140,7 @@ def seed_entities_context(schema: dict) -> dict:
             xbridge_table_names.add(bridge_name)
 
     candidates: set[str] = set()
+    is_primary_by_name: dict[str, bool] = {}
     for key, defn in defs.items():
         if key.endswith('_input'):
             continue
@@ -7054,7 +7158,17 @@ def seed_entities_context(schema: dict) -> dict:
         if _seed_entity_is_self_only_admin_bypass(bare_key, defs):
             continue
         candidates.add(bare_key)
+        # The view-side definition (bare_key itself, falling back to the
+        # raw twin for an entity with no separate view entry) is where
+        # allOf lives -- see _seed_entity_is_primary.
+        view_defn = defs.get(bare_key) or defs.get(f'__{bare_key}') or {}
+        is_primary_by_name[bare_key] = _seed_entity_is_primary(bare_key, view_defn)
 
+    entity_names = sorted(candidates)
     return {
-        'seed_entity_names': sorted(candidates),
+        'seed_entity_names': entity_names,
+        'seed_entity_grants': {
+            name: _seed_entity_grant_flags(name, defs, is_primary_by_name[name])
+            for name in entity_names
+        },
     }

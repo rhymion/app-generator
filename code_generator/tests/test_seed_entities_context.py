@@ -238,6 +238,141 @@ def test_two_proxy_views_sharing_model_both_included_independently() -> None:
     assert 'setting2' in ctx['seed_entity_names']
 
 
+def test_grant_flags_reflect_x_generate_new_and_delete_false() -> None:
+    """cmd_1067: grant-all-permissions must never grant an operation
+    x-generate has disabled for that entity, or the Administrator UI shows
+    an affordance (a "+" create button, a delete action) that 404s when
+    clicked because generate.py never wrote the page/route for it. The
+    fixture's own 'user' entity (new: False, delete: False, edit: True)
+    is the exact real-world shape this task exists to fix."""
+    schema = _minimal_schema()
+    ctx = seed_entities_context(schema)
+    assert ctx['seed_entity_grants']['user'] == {
+        'create': False,   # x-generate.new: False -> no /new page, no POST route
+        'read': True,       # x-generate.list/view: True
+        'update': True,      # x-generate.edit: True
+        'delete': False,   # x-generate.delete: False -> no DELETE route
+        'import': False,    # no x-import-key on this fixture
+    }
+
+
+def test_grant_flags_default_true_when_x_generate_omits_a_key() -> None:
+    """'comment' has no x-generate block at all -- every operation defaults
+    to grantable (list/view/new/edit/delete default True per
+    generate_types.py's own `.get(key, True) is not False` formula), since
+    the generator itself would generate every page/route by default."""
+    schema = _minimal_schema()
+    ctx = seed_entities_context(schema)
+    assert ctx['seed_entity_grants']['comment'] == {
+        'create': True,
+        'read': True,
+        'update': True,
+        'delete': True,
+        'import': False,  # no x-import-key present -- import never eligible regardless
+    }
+
+
+def test_grant_flags_read_true_when_only_list_or_only_view_enabled() -> None:
+    """A single Permission.read column backs both the list-page GET and the
+    detail-page GET -- granting it is correct as long as EITHER page/route
+    exists, not only when both do."""
+    schema = _minimal_schema({
+        'list_only_entity': {
+            'type': 'object',
+            'properties': {'id': {'type': 'string'}},
+            'x-generate': {
+                'list': True, 'view': False, 'new': False, 'edit': False,
+                'delete': False, 'api': False, 'test': False,
+            },
+        },
+    })
+    ctx = seed_entities_context(schema)
+    assert ctx['seed_entity_grants']['list_only_entity']['read'] is True
+
+
+def test_grant_flags_import_requires_import_key_and_create_or_update() -> None:
+    """import mirrors build_context.py's own import_eligible formula: a
+    primary entity, x-import-key present, x-generate.import not explicitly
+    False, and (can_create or can_update). Missing x-import-key alone must
+    keep import withheld even though new/edit are both enabled."""
+    schema = _minimal_schema({
+        'importable_widget': {
+            'type': 'object',
+            'properties': {'id': {'type': 'string'}, 'code': {'type': 'string'}},
+            'x-import-key': 'code',
+            'x-generate': {
+                'list': True, 'view': True, 'new': True, 'edit': True,
+                'delete': True, 'api': True, 'test': False,
+            },
+        },
+    })
+    ctx = seed_entities_context(schema)
+    assert ctx['seed_entity_grants']['importable_widget']['import'] is True
+
+
+def test_grant_flags_import_withheld_when_new_and_edit_both_false() -> None:
+    """Even with x-import-key present, import must stay withheld when
+    neither create nor update is possible (build_context.py's Tier1
+    `(can_create or can_update)` clause) -- an import route that could only
+    ever reject every row is not something to grant."""
+    schema = _minimal_schema({
+        'readonly_importable': {
+            'type': 'object',
+            'properties': {'id': {'type': 'string'}, 'code': {'type': 'string'}},
+            'x-import-key': 'code',
+            'x-generate': {
+                'list': True, 'view': True, 'new': False, 'edit': False,
+                'delete': False, 'api': True, 'test': False,
+            },
+        },
+    })
+    ctx = seed_entities_context(schema)
+    assert ctx['seed_entity_grants']['readonly_importable']['import'] is False
+
+
+def test_grant_flags_import_withheld_for_non_primary_proxy_view() -> None:
+    """A proxy view (allOf referencing a DIFFERENT entity's model, e.g.
+    setting1 -> user, cmd_813 ③) is never the import-eligible 'primary
+    entity' (build_context.py's `parent == model` check) even if it
+    happened to declare its own x-import-key -- import always targets the
+    real underlying model, never an alias route."""
+    schema = _minimal_schema({
+        'setting1': {
+            'x-import-key': 'name',
+            'x-generate': {
+                'list': True, 'view': True, 'new': True, 'edit': True,
+                'delete': True, 'api': True, 'test': True,
+            },
+            'allOf': [{'$ref': '#/definitions/user'}],
+        },
+    })
+    ctx = seed_entities_context(schema)
+    assert ctx['seed_entity_grants']['setting1']['import'] is False
+
+
+def test_grant_flags_ordinary_split_pair_view_is_still_primary() -> None:
+    """The ordinary raw/view split pair (view half's allOf referencing its
+    OWN '__{name}' raw twin) must NOT be misclassified as a non-primary
+    proxy view -- 'user' itself (allOf -> __user) stays import-eligible
+    when it otherwise qualifies."""
+    schema = _minimal_schema({
+        '__importable_user': {
+            'type': 'object',
+            'properties': {'id': {'type': 'string'}, 'code': {'type': 'string'}},
+        },
+        'importable_user': {
+            'x-import-key': 'code',
+            'x-generate': {
+                'list': True, 'view': True, 'new': True, 'edit': True,
+                'delete': True, 'api': True, 'test': False,
+            },
+            'allOf': [{'$ref': '#/definitions/__importable_user'}],
+        },
+    })
+    ctx = seed_entities_context(schema)
+    assert ctx['seed_entity_grants']['importable_user']['import'] is True
+
+
 def test_self_only_without_admin_bypass_not_excluded() -> None:
     """x-self-only: true (admin_bypass defaults False) must NOT be
     excluded -- excluding it would deny Administrator access outright,
