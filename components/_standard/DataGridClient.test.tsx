@@ -302,7 +302,7 @@ describe('DataGridClient', () => {
       });
     });
 
-    it('hides the create button when allowCreate is false even though permissions.create is true (cmd_1067)', async () => {
+    it('hides the create button when allowCreate is false even though permissions.create is true (x-generate.new: false means no /new page exists)', async () => {
       const mockData = createMockData(2);
       renderWithIntl(
         <DataGridClient
@@ -318,7 +318,7 @@ describe('DataGridClient', () => {
       expect(screen.queryByRole('button', { name: /create new book/i })).not.toBeInTheDocument();
     });
 
-    it('hides the edit icon when allowEdit is false even though permissions.update is true (cmd_1067: x-generate.edit: false means no /edit page exists)', async () => {
+    it('hides the edit icon when allowEdit is false even though permissions.update is true (x-generate.edit: false means no /edit page exists)', async () => {
       const mockData = createMockData(2);
       renderWithIntl(
         <DataGridClient

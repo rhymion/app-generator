@@ -7009,7 +7009,7 @@ def _seed_entity_is_primary(bare_key: str, view_defn: dict) -> bool:
     """True when `bare_key` names its own underlying Prisma model
     (build_context.py's `parent == model`, the gate `import_eligible`
     requires) rather than rerouting to a DIFFERENT entity's model (a
-    cmd_813 ③ proxy view, e.g. 'setting1' -> 'user'). An ordinary raw/view
+    proxy view, e.g. 'setting1' -> 'user'). An ordinary raw/view
     split pair's view half (allOf referencing its own '__{bare_key}' raw
     twin) is still primary -- only a proxy view whose allOf target is some
     OTHER entity's name is not."""

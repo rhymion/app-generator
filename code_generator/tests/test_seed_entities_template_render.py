@@ -1,5 +1,5 @@
 """
-Regression test for cmd_1067: seed_entities.ts.jinja2 rendered
+Regression test: seed_entities.ts.jinja2 rendered
 `seed_entity_grants[entity].update` using Jinja2's `.` attribute accessor.
 Jinja2 resolves `.` by trying `getattr()` before falling back to
 `__getitem__()` -- and Python dicts have their own built-in `update()`

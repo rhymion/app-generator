@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { grantAllPermissions } from './grant-all-permissions';
 import { SEED_ENTITIES, SEED_ENTITY_GRANTS } from './generated/seed-entities';
 
-// cmd_1067: grant-all-permissions.ts must never grant Administrator an
+// grant-all-permissions.ts must never grant Administrator an
 // operation x-generate has disabled for that entity (e.g. `create` when
 // x-generate.new is false) -- otherwise the generated UI shows an
 // affordance (the list page's "+" button, an edit icon) that 404s when

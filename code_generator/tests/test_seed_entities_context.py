@@ -239,12 +239,12 @@ def test_two_proxy_views_sharing_model_both_included_independently() -> None:
 
 
 def test_grant_flags_reflect_x_generate_new_and_delete_false() -> None:
-    """cmd_1067: grant-all-permissions must never grant an operation
+    """grant-all-permissions must never grant an operation
     x-generate has disabled for that entity, or the Administrator UI shows
     an affordance (a "+" create button, a delete action) that 404s when
     clicked because generate.py never wrote the page/route for it. The
     fixture's own 'user' entity (new: False, delete: False, edit: True)
-    is the exact real-world shape this task exists to fix."""
+    is the exact real-world shape this guards against."""
     schema = _minimal_schema()
     ctx = seed_entities_context(schema)
     assert ctx['seed_entity_grants']['user'] == {
@@ -332,7 +332,7 @@ def test_grant_flags_import_withheld_when_new_and_edit_both_false() -> None:
 
 def test_grant_flags_import_withheld_for_non_primary_proxy_view() -> None:
     """A proxy view (allOf referencing a DIFFERENT entity's model, e.g.
-    setting1 -> user, cmd_813 ③) is never the import-eligible 'primary
+    setting1 -> user) is never the import-eligible 'primary
     entity' (build_context.py's `parent == model` check) even if it
     happened to declare its own x-import-key -- import always targets the
     real underlying model, never an alias route."""

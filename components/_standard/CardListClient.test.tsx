@@ -89,7 +89,7 @@ describe('CardListClient', () => {
       expect(screen.getByText('Alpha')).toBeInTheDocument();
     });
 
-    it('hides create button when allowCreate=false even though permissions.create=true (cmd_1067: x-generate.new: false means no /new page exists)', () => {
+    it('hides create button when allowCreate=false even though permissions.create=true (x-generate.new: false means no /new page exists)', () => {
       render(<CardListClient src={[]} basePath={basePath} permissions={allPerms} allowCreate={false} />);
       expect(screen.queryByRole('button', { name: 'Create New Item' })).not.toBeInTheDocument();
     });
@@ -112,7 +112,7 @@ describe('CardListClient', () => {
       expect(editLink).toHaveAttribute('href', '/items/edit/1');
     });
 
-    it('hides edit button when allowEdit=false even though permissions.update=true (cmd_1067: x-generate.edit: false means no /edit page exists)', () => {
+    it('hides edit button when allowEdit=false even though permissions.update=true (x-generate.edit: false means no /edit page exists)', () => {
       render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} allowEdit={false} />);
       expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
     });
