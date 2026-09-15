@@ -9,6 +9,7 @@ from build_context import (
     _categorize_form_fields,
     _build_form_data_gets,
     get_uri_kind,
+    _normalized_value_expr,
 )
 
 
@@ -2603,3 +2604,63 @@ class TestDetailSelectForFieldsRestrictedEntity:
         assert "    include: {" in first_query
         assert "    select: {" not in first_query
         assert "AND: [\n      ...accessAnd," in rendered
+
+
+class TestNormalizedValueExprWriteOnly:
+    """app-generator#576: a write-only field (password, api_key -- string
+    fields with x-custom-component target: [upsert], no 'view') must never
+    have an untouched ('') client submission coerced to NULL the way an
+    ordinary nullable plain-text field's is. The client never receives a
+    write-only field's real persisted value on any read path, so its form
+    state starts at '' and stays '' unless the user takes an explicit
+    action (change password, regenerate key) -- '' here means "never
+    touched", not "the user observed and cleared a real value" the way it
+    does for an ordinary field (e.g. image_id, which must still resolve to
+    `null` so the "remove avatar" flow keeps working). See
+    _normalized_value_expr's docstring for the full incident writeup:
+    confirmed empirically (subtask_1068a) that the pre-fix `null` behavior
+    silently wiped a real admin account's password to NULL on a plain Save
+    that touched nothing."""
+
+    def _write_only_defn(self, nullable: bool = True) -> dict:
+        return {
+            "type": ["string", "null"] if nullable else "string",
+            "x-custom-component": {"target": ["upsert"]},
+        }
+
+    def test_write_only_field_uses_undefined_not_null_on_empty(self):
+        expr = _normalized_value_expr("password", "password", self._write_only_defn())
+        assert expr == "password === '' ? undefined : password"
+
+    def test_write_only_field_api_key_var_name(self):
+        expr = _normalized_value_expr("api_key", "apiKey", self._write_only_defn())
+        assert expr == "apiKey === '' ? undefined : apiKey"
+
+    def test_write_only_field_with_view_target_is_NOT_treated_as_write_only(self):
+        """A field declaring target: [upsert, view] has an author-provided
+        safe view widget -- is_write_only_prop excludes it on purpose, so
+        it must keep the ordinary nullable-string null-coalescing rule."""
+        defn = {
+            "type": ["string", "null"],
+            "x-custom-component": {"target": ["upsert", "view"]},
+        }
+        expr = _normalized_value_expr("badge", "badge", defn)
+        assert expr == "badge === '' ? null : badge"
+
+    def test_ordinary_nullable_plain_string_field_unaffected_still_uses_null(self):
+        """image_id (no x-custom-component at all) must keep resolving ''
+        to null -- the "remove avatar" flow depends on this NOT changing:
+        '' there is the user's real, explicit choice to clear the FK, not
+        an artifact of a masked write-only field."""
+        defn = {"type": ["string", "null"], "x-relationship": {"target": "attachment", "type": "direct"}}
+        expr = _normalized_value_expr("image_id", "imageId", defn)
+        assert expr == "imageId === '' ? null : imageId"
+
+    def test_non_nullable_write_only_field_still_uses_undefined(self):
+        """Even if a write-only field were declared non-nullable, there is
+        no legitimate reason for an untouched form submission to overwrite
+        it -- undefined (skip) is correct regardless of nullability, unlike
+        the ordinary-field branch which is deliberately scoped to nullable
+        columns only."""
+        expr = _normalized_value_expr("password", "password", self._write_only_defn(nullable=False))
+        assert expr == "password === '' ? undefined : password"
