@@ -60,8 +60,12 @@ interface CardListClientProps<T extends BaseEntity> {
   /** Which field to display prominently as the card title. Defaults to 'name'. */
   primaryField?: keyof T;
   /** When false, the "+" create button is hidden even if the user has create permission.
-   * Used for bridge-child entities, which cannot be created standalone (only via a parent). */
+   * Used for bridge-child entities, which cannot be created standalone (only via a parent),
+   * and for entities whose x-generate.new is false (no /new page exists to link to). */
   allowCreate?: boolean;
+  /** When false, the edit icon is hidden even if the user has update permission.
+   * Used for entities whose x-generate.edit is false (no /edit page exists to link to). */
+  allowEdit?: boolean;
 }
 
 function formatValue<T>(item: T, field: keyof T, format?: 'date-time' | 'date' | 'time', showSeconds?: boolean): string {
@@ -90,6 +94,7 @@ export default function CardListClient<T extends BaseEntity>({
   permissions = { create: true, read: true, update: true, delete: true, import: true },
   primaryField = 'name' as keyof T,
   allowCreate = true,
+  allowEdit = true,
 }: CardListClientProps<T>) {
   const [items, setItems] = useState<T[]>(initialRows ?? src ?? []);
   const [page, setPage] = useState<number>(initialPage ?? 0);
@@ -245,7 +250,7 @@ export default function CardListClient<T extends BaseEntity>({
                     );
                   })}
                 </CardContent>
-                {permissions.update && (
+                {permissions.update && allowEdit && (
                   <CardActions sx={{ justifyContent: 'flex-end' }}>
                     <NextLink href={`${basePath}/edit/${item.id}`}>
                       <Tooltip title="Edit">
