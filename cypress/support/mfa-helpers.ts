@@ -19,6 +19,46 @@ export const MFA_TEST_CREDENTIALS = {
   name: 'MFA Test User',
 };
 
+/**
+ * Grants a seeded MFA test user read/update access to their own `setting`
+ * row (app-generator#563 regression coverage needs to reach
+ * /setting/view/[id] and /setting/edit/[id], not just the dedicated
+ * /setting/mfa page these fixtures originally supported).
+ *
+ * `setting` is x-self-only with no ordinary permission grant (see
+ * lib/authz.ts's rows.length === 0 fallback) -- the supported route to a
+ * non-admin user's own setting.read/update is the special-cased 'Creator'
+ * role (lib/authz.ts SPECIAL_ROLE_NAMES), resolved by ownership
+ * (creator_id === userId) rather than by role membership. scripts/seed-
+ * baseline.ts seeds exactly this Creator role + its setting permission row
+ * once per worktree, but cy.task('db:reset') (called at the top of every
+ * test in this spec) wipes it along with everything else, so it must be
+ * re-created per-test -- same pattern as cypress/support/db-helpers.ts's
+ * createSessionUserWithPermission for other entities.
+ */
+async function grantOwnSettingAccess(userId: string): Promise<void> {
+  const role = await prisma.role.create({
+    data: {
+      name: 'Creator',
+      creator_id: userId,
+      updater_id: userId,
+    },
+  });
+  await prisma.permission.create({
+    data: {
+      name: 'setting',
+      role_id: role.id,
+      create: false,
+      read: true,
+      update: true,
+      delete: false,
+      import: false,
+      creator_id: userId,
+      updater_id: userId,
+    },
+  });
+}
+
 export type MfaUserSeed = {
   email: string;
   password: string;
@@ -72,6 +112,8 @@ export async function seedMfaTestUser(): Promise<MfaUserSeed> {
     })),
   });
 
+  await grantOwnSettingAccess(userId);
+
   return {
     email: MFA_TEST_CREDENTIALS.email,
     password: MFA_TEST_CREDENTIALS.password,
@@ -118,6 +160,8 @@ export async function seedSsoMfaTestUser(): Promise<SsoMfaUserSeed> {
       code_hash: c.hash,
     })),
   });
+
+  await grantOwnSettingAccess(userId);
 
   return {
     email: SSO_MFA_TEST_CREDENTIALS.email,
