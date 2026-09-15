@@ -23,6 +23,7 @@ from helpers.schema_helpers import (
     derive_write_locked_values_for_view,
     get_direct_attachment_fk_props,
     get_write_only_field_names,
+    is_write_only_prop,
 )
 from helpers.label_field import build_label_expression, render_prisma_include
 from helpers.bridge_direction import (
@@ -204,7 +205,30 @@ def _normalized_value_expr(prop: str, var_name: str, defn: dict) -> str:
     `var_name` untouched, or (for a nullable plain-text field only)
     `var_name === '' ? null : var_name` so an empty string never reaches
     the DB as a value distinct from NULL. See _is_nullable_plain_string.
+
+    A write-only field (is_write_only_prop -- password, api_key, ...) takes
+    a different empty-string rule: `undefined`, not `null`, and Prisma
+    omits an `undefined` data entry entirely rather than writing SQL NULL
+    (app-generator#576). The upsert-only form component for a write-only
+    field never receives the persisted value on any read path (that is the
+    point of write-only), so its client-side state -- and therefore this
+    var_name -- starts at '' on every load and stays '' unless the user
+    takes an explicit action to supply a new value (verify+set a new
+    password, generate a new api_key). '' here is never the client
+    reporting a real observed blank, the way it can be for an ordinary
+    nullable string field -- it is indistinguishable from "field never
+    touched". Treating it as "clear to NULL" (the _is_nullable_plain_string
+    rule) means every update that does not touch the field wipes it,
+    independent of what the user actually changed -- confirmed empirically
+    (subtask_1068a): a plain Save with zero field changes reset an admin's
+    password to NULL, breaking that account's credentials login outright.
+    Skipping the write (Prisma's `undefined`-omits-the-key behavior)
+    preserves the existing column value instead, which is the only
+    reading consistent with there being no explicit "clear this" action
+    exposed by either the password or api_key form component.
     """
+    if is_write_only_prop(defn):
+        return f"{var_name} === '' ? undefined : {var_name}"
     if _is_nullable_plain_string(defn):
         return f"{var_name} === '' ? null : {var_name}"
     return var_name
@@ -2448,9 +2472,14 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     #
     # parent_prop_infos itself stays the FULL set (readonly fields included):
     # normalizeSnapshot()/getCurrentSnapshot() (snapshot_field_mappings below)
-    # need every persisted column, readonly ones included, for assertNotStale's
-    # staleness comparison — that is a read of the *persisted* value, not of
-    # client input, so it is unaffected by this exclusion. client_prop_infos is
+    # need every persisted column a client could actually have seen, readonly
+    # ones included, for assertNotStale's staleness comparison — that is a
+    # read of the *persisted* value, not of client input, so it is unaffected
+    # by this exclusion. The one deliberate narrowing of that "every column"
+    # rule is write-only fields (see snapshot_field_mappings below,
+    # app-generator#576): the client never sees those at all, on any read
+    # path, so there is no "value the client saw" to compare against.
+    # client_prop_infos is
     # the narrower set for every consumer that reads a value the client supplied:
     # the service function's own parameter list, the object passed to
     # validate()/validateCustomRules, and the FormData/JSON-body extraction
@@ -2590,10 +2619,38 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     )
     one_to_one_include = ''  # not used with explicit creation approach
 
-    # Snapshot
+    # Snapshot (app-generator#576): a write-only field (is_write_only_prop --
+    # password, api_key, ...) is never returned to the client on any read
+    # path (get{{Parent}}Detail(), getters.ts.jinja2 -- see
+    # write_only_field_names above), so the `src` prop a form component
+    # receives, and therefore the `srcSnapshotRaw` it round-trips back on
+    # Save, structurally has no key for that field at all. normalizeValue()
+    # maps that always-missing key to `null` regardless of the field's real
+    # persisted value, while getCurrentSnapshot() below reads the real
+    # column straight off the row. For any actor whose write-only field is
+    # ever non-null (every credentials-registered user has a non-null
+    # `password` from day one; any user who has generated an api_key has a
+    # non-null `api_key`), that guarantees expectedSnapshot != currentSnapshot
+    # on that single field alone -- assertNotStale() then throws CONFLICT on
+    # literally every update, independent of what the user actually changed.
+    # Confirmed empirically (subtask_1068a): reproduces on a plain Save with
+    # zero field changes, for a credentials account, at both 6e8028ef and
+    # 7fb11bbc (i.e. it predates PR#564/#563 -- not a regression from either).
+    #
+    # A write-only field can only ever be legitimately changed via this same
+    # update path (there is no separate route that writes password/api_key
+    # out-of-band), and the client can never truthfully report its current
+    # value to compare against in the first place -- so unlike every other
+    # compared column, including it here can never detect a real concurrent
+    # edit, only manufacture a guaranteed false positive. Excluding it here
+    # completes cmd_801's own read-path fix (get_write_only_field_names) by
+    # applying the same predicate to this second consumer of
+    # parent_prop_infos, rather than weakening assertNotStale()'s protection
+    # for any field a legitimate race can actually occur on.
     snapshot_field_mappings = '\n'.join(
         f"    {p['prop']}: normalizeValue(safeSnapshot.{p['prop']}, '{_normalize_kind(p['def'])}'),"
         for p in parent_prop_infos
+        if p['prop'] not in write_only_field_names
     )
 
     # Form data gets (for actions / API POST). Never emits a data.get() line

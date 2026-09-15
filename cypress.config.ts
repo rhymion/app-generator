@@ -127,6 +127,19 @@ export default defineConfig({
           const { seedSsoMfaTestUser } = require('./cypress/support/mfa-helpers');
           return await seedSsoMfaTestUser();
         },
+        // app-generator#576 regression coverage (cypress/e2e/auth/settings_avatar_save.cy.ts)
+        async 'db:seedSettingsSaveUser'() {
+          const { seedSettingsSaveTestUser } = require('./cypress/support/settings-save-helpers');
+          return await seedSettingsSaveTestUser();
+        },
+        async 'db:seedSsoSettingsSaveUser'() {
+          const { seedSsoSettingsSaveTestUser } = require('./cypress/support/settings-save-helpers');
+          return await seedSsoSettingsSaveTestUser();
+        },
+        async 'db:getCredentialState'(email: string) {
+          const { getCredentialState } = require('./cypress/support/settings-save-helpers');
+          return await getCredentialState(email);
+        },
         async 'generateTotp'(secret: string) {
           const otplib = require('otplib');
           return otplib.generateSync({ secret });
