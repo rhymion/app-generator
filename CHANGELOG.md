@@ -6,6 +6,64 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **`grant-all-permissions.ts` (dev/verification tool) granted an operation regardless of
+  that entity's own `x-generate` configuration**: it iterated every `SEED_ENTITIES` name and
+  granted a blanket `{create, read, update, delete, import: true}`, never consulting
+  `x-generate.new`/`.edit`/`.delete`/`.list`/`.view`/`.import`. When an operation is disabled
+  (e.g. `x-generate.new: false`), `generate.py` never writes the corresponding page/route, but
+  the Administrator role still received the permission — so the generated UI showed an
+  affordance (the list page's "+" button, and the edit icon) that 404s when clicked, directly
+  undermining demo usability. `seed_entities_context()` (`code_generator/generators.py`) now
+  derives a per-entity, per-operation grant from each entity's real `x-generate` block (the
+  same `can_create`/`can_update`/`can_delete`/`can_list`/`can_view` formula
+  `build_context.py`'s own per-entity context builder uses, plus `build_context.py`'s own
+  `import_eligible` formula for `import`), exported as `SEED_ENTITY_GRANTS` in the generated
+  `scripts/generated/seed-entities.ts` alongside the existing `SEED_ENTITIES` name list.
+  `grant-all-permissions.ts` now upserts each entity's own resolved grant instead of a
+  blanket `true`, and its `DRY_RUN` output reports granted/withheld per operation. Confirmed
+  on real schemas: this repo's own `user` entity (`x-generate.new: false`, `delete: false`)
+  and, re-measured directly against the generated `SEED_ENTITY_GRANTS` object for
+  inventory-app: `purchase_order`/`inventory_adjustment`/`inventory_movement`/
+  `inventory_reservation`/`sales_order`/`supplier_return`/`goods_receipt_line_amendment`/
+  `inventory`/`inventory_transaction` (`x-generate.edit: false`, 9 entities) and
+  `asn_status`/`inventory_transaction`/`supplier_return_status`/`user`
+  (`x-generate.new: false`, 4 entities) now
+  correctly withhold `create`/`update` instead of granting it. Regression covered by
+  `code_generator/tests/test_seed_entities_context.py` and a new
+  `scripts/grant-all-permissions.test.ts` vitest suite.
+- **`seed_entities.ts.jinja2` silently rendered `update` as always `true`**: the template
+  read each entity's grant with Jinja2's `.` attribute accessor
+  (`seed_entity_grants[entity].update`). Jinja2 resolves `.` by trying `getattr()` before
+  falling back to `__getitem__()` — and Python dicts have their own built-in `update()`
+  method, so the accessor returned that bound method object (always truthy) instead of the
+  dict's `'update'` key, defeating the fix above for exactly the one operation
+  (`x-generate.edit` → `update`) it exists to scope correctly. `create`/`read`/`delete`/
+  `import` do not collide with any dict method name, so they were unaffected by the same
+  accessor style. This repo's own schema never exercises the buggy branch (no
+  `SEED_ENTITIES`-eligible entity here has `x-generate.edit: false`), so it surfaced only
+  when generating a real consumer schema and reading the actual rendered TypeScript text.
+  Fixed by switching all five fields to explicit `['key']` item access. Regression covered
+  by a new `code_generator/tests/test_seed_entities_template_render.py`, which renders the
+  real template and asserts the output text (not just the Python context dict) — the prior
+  test coverage never exercised the rendering step itself, which is exactly where this bug
+  lived.
+- **The generated list page's create ("+") button and edit icon rendered regardless of
+  `x-generate.new`/`.edit`**: independently of the `grant-all-permissions.ts` fix above, the
+  shared `DataGridClient`/`CardListClient`/`ResponsiveListClient` components gated the "+"
+  button only on `permissions.create && allowCreate` (`allowCreate` previously reflected only
+  whether the entity was a bridge child) and the edit icon only on `permissions.update`, with
+  no structural check against `x-generate.new`/`.edit` at all — so any role granted
+  create/update permission (via the Permissions UI directly, not only via
+  `grant-all-permissions.ts`) saw an affordance that 404s when clicked. This is a second,
+  independent defense layer: `allowCreate` now also reflects `x-generate.new`, and a new
+  `allowEdit` prop (mirroring `allowCreate`'s shape) reflects `x-generate.edit`, both threaded
+  from `page_list.tsx.jinja2` through all three shared list components. Delete was not part of
+  this fix: the list page already omits `removeAction` when `x-generate.delete` is `false`, so
+  `DataGridClient`'s `permissions.delete && removeAction` check already suppressed that button
+  — this is a pre-existing, correct pattern this fix extends to create/edit, not a new
+  mechanism. Confirmed with a live screenshot on inventory-app's `purchase_order`
+  (`x-generate.edit: false`): with the Administrator role's `update` permission deliberately
+  forced to `true` (simulating a hand-granted permission), the edit icon does not render.
 - **Composite/dotted `labelField` on an embedded DataGrid child's own FK relation rendered
   blank (issue #539)**: `build_context.py`'s `child_include_entries` builder gave every FK
   relation on an embedded (`x-outputType != list`) child a flat `true` Prisma include,
