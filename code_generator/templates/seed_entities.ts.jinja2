@@ -28,11 +28,11 @@ export interface SeedEntityGrant {
 export const SEED_ENTITY_GRANTS: Record<string, SeedEntityGrant> = {
 {% for entity in seed_entity_names %}
   '{{ entity }}': {
-    create: {{ 'true' if seed_entity_grants[entity].create else 'false' }},
-    read: {{ 'true' if seed_entity_grants[entity].read else 'false' }},
-    update: {{ 'true' if seed_entity_grants[entity].update else 'false' }},
-    delete: {{ 'true' if seed_entity_grants[entity].delete else 'false' }},
-    import: {{ 'true' if seed_entity_grants[entity].import else 'false' }},
+    create: {{ 'true' if seed_entity_grants[entity]['create'] else 'false' }},
+    read: {{ 'true' if seed_entity_grants[entity]['read'] else 'false' }},
+    update: {{ 'true' if seed_entity_grants[entity]['update'] else 'false' }},
+    delete: {{ 'true' if seed_entity_grants[entity]['delete'] else 'false' }},
+    import: {{ 'true' if seed_entity_grants[entity]['import'] else 'false' }},
   },
 {% endfor %}
 };
