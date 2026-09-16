@@ -98,3 +98,62 @@ def test_unchanged_content_is_not_rewritten(tmp_path):
     _write_vercel_json_crons(path, [_ENTITY_A])
 
     assert path.stat().st_mtime_ns == mtime_before
+
+
+def test_missing_regions_key_is_backfilled(tmp_path):
+    """cmd_1080 self-heal: an existing vercel.json that predates the
+    `regions` key (or otherwise lost it) gets the single-region default
+    backfilled."""
+    path = tmp_path / 'vercel.json'
+    path.write_text(json.dumps({
+        '$schema': 'https://openapi.vercel.sh/vercel.json',
+        'framework': 'nextjs',
+        'buildCommand': 'npm run vercel-build',
+    }), encoding='utf-8')
+
+    _write_vercel_json_crons(path, [])
+
+    data = json.loads(path.read_text(encoding='utf-8'))
+    assert data['regions'] == ['sin1']
+    assert data['framework'] == 'nextjs'
+
+
+def test_existing_regions_value_is_preserved_verbatim(tmp_path):
+    """cmd_1080 self-heal must never overwrite an existing `regions` value,
+    including one that differs from the generator's own default -- a
+    consumer is free to point at a different region without the generator
+    fighting it on every regenerate."""
+    path = tmp_path / 'vercel.json'
+    path.write_text(json.dumps({
+        '$schema': 'https://openapi.vercel.sh/vercel.json',
+        'framework': 'nextjs',
+        'buildCommand': 'npm run vercel-build',
+        'regions': ['fra1'],
+    }), encoding='utf-8')
+
+    _write_vercel_json_crons(path, [_ENTITY_A])
+
+    data = json.loads(path.read_text(encoding='utf-8'))
+    assert data['regions'] == ['fra1']
+
+
+def test_missing_regions_backfill_alone_triggers_rewrite(tmp_path, capsys):
+    """Even with no crons change at all, a missing `regions` key must
+    still cause the file to be rewritten (not silently skipped as
+    'up to date'). Asserted via the printed status line rather than
+    mtime -- some filesystems' mtime resolution is too coarse to
+    distinguish a same-tick rewrite from a no-op skip."""
+    path = tmp_path / 'vercel.json'
+    path.write_text(json.dumps({
+        '$schema': 'https://openapi.vercel.sh/vercel.json',
+        'framework': 'nextjs',
+        'buildCommand': 'npm run vercel-build',
+    }), encoding='utf-8')
+
+    _write_vercel_json_crons(path, [])
+
+    out = capsys.readouterr().out
+    assert 'Wrote' in out
+    assert 'Skipped' not in out
+    data = json.loads(path.read_text(encoding='utf-8'))
+    assert data['regions'] == ['sin1']
