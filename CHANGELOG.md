@@ -148,21 +148,41 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   keeps the original restriction (its rendering path is not `FieldsViewGrid`, so an
   independently write-capable child there stays unverified-safe). See
   `docs/knowledge/schema-yaml-configuration.md` §7.4.
-- **`x-write-locked-values` now defaults to *unlocked* on a proxy view (a screen whose `allOf`
+- **New entity-level schema key `x-write-locked-values` declares field values that only the
+  system may write, independently of `x-approval`.** `{field_name: [value, ...]}`; works on any
+  entity, with or without `x-approval`. `derive_write_locked_values()` (`helpers/schema_helpers.py`,
+  renamed from `derive_approval_locked_values` — the old name remains as a one-line backward-compat
+  alias) returns the **union** of `x-approval`'s `on_approved`/`on_rejected.set_fields` values and
+  `x-write-locked-values`'s own declarations, so the two sources compose rather than one replacing
+  the other; behavior is unchanged for existing `x-approval` entities, since the union with an
+  absent `x-write-locked-values` is exactly the old `x-approval`-only set. The five downstream
+  consumers of the derived set were renamed to match (`approval_locked_*` → `write_locked_*`
+  context variables; `APPROVAL_LOCKED_FIELDS`/`ApprovalLockedField` →
+  `WRITE_LOCKED_FIELDS`/`WriteLockedField` in `service_validation.ts` and the CSV import route —
+  the CSV import route's `APPROVAL_LOCKED_VALUE` error code string is intentionally kept as-is, an
+  external contract). `validate.py` fail-closed checks a declared field actually exists on the
+  entity, is a list of values, and every value is a real member of that field's enum (section 11),
+  plus a collision check (section 11a) rejecting a declaration that collides with
+  `submit_on`/`on_withdrawn`/a *non-terminal* `on_rejected` value on the same field (almost
+  certainly a schema-authoring typo — it would make submitting, withdrawing, or non-terminally
+  rejecting impossible); a *terminal* `on_rejected` value is exempt by design, since freezing it
+  via `x-write-locked-values` is the intended, additive use. `build_user_schema.py`/
+  `convert_to_user_schema.py`'s entity-level key passthrough allowlist includes the new key (a gap
+  the design missed and the generate-code fixture gate caught empirically — the key was silently
+  dropped at Stage 4 without it). **Defaults to *unlocked* on a proxy view** (a screen whose `allOf`
   references another screen entity rather than the raw model directly), instead of silently
-  inheriting the raw entity's locked-value set.** A proxy view exists precisely to bypass the
-  restrictions of the original screen, so unconditionally inheriting its value lockdown defeated
-  that purpose. A proxy view may still opt a value back into lockdown by declaring
-  `x-write-locked-values` on itself; the canonical screen's own behavior and the raw entity's
-  `x-approval`-derived locked values are unchanged. `validate.py` section 11a's collision check
-  (`submit_on`/`on_withdrawn`/non-terminal `on_rejected` vs. `x-write-locked-values`) is fixed in
-  the same change to resolve `x-approval` via the declaration's actual backing raw model rather
-  than the declaring (possibly proxy-view) entity's own definition, which would otherwise always
-  be empty for a proxy view and silently let every collision through; section 11's field-existence/
-  enum check now uses the allOf-merge-aware `get_entity_properties()` for the same reason. Verified
-  byte-identical generated output against an existing consumer schema's 3 `x-approval` entities
-  (no behavior change), plus a scratch-entity run through both the REST and Server Action write
-  paths confirming the new unlock-by-default behavior end to end.
+  inheriting the raw entity's locked-value set — a proxy view exists precisely to bypass the
+  restrictions of the original screen, so unconditionally inheriting its value lockdown would
+  defeat that purpose; a proxy view may still opt a value back into lockdown by declaring
+  `x-write-locked-values` on itself, and the canonical screen's own behavior and the raw entity's
+  `x-approval`-derived locked values are unchanged. Both the section 11a collision check and
+  section 11's field-existence/enum check resolve `x-approval`/entity properties via the
+  declaration's actual backing raw model rather than the declaring (possibly proxy-view) entity's
+  own definition, which would otherwise always be empty for a proxy view and silently let every
+  collision through. Verified byte-identical generated output against an existing consumer
+  schema's 3 `x-approval` entities (no behavior change), plus a scratch-entity run through both
+  the REST and Server Action write paths confirming the unlock-by-default behavior end to end. See
+  `docs/knowledge/x-write-locked-values-field-lockdown.md`.
 - **Post-decision row freeze now includes a *terminal* rejection, not just approval.**
   `derive_post_decision_freeze_values()` (`code_generator/helpers/schema_helpers.py`), consumed by
   `approval_lockdown_context()`, extends the existing post-approval edit/delete/invalidate
@@ -175,12 +195,6 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   behavior change**: an entity declaring `on_rejected.terminal: true` will newly reject
   edit/delete/invalidate (403 `*_forbidden:approval_locked`) on a row sitting at that terminal
   value, where it previously allowed it.
-- **`validate.py` section 11a**: a new fail-closed schema check rejecting an `x-write-locked-values`
-  declaration that collides with `submit_on`/`on_withdrawn`/a *non-terminal* `on_rejected` value on
-  the same field (almost certainly a schema-authoring typo -- it would make submitting,
-  withdrawing, or non-terminally rejecting impossible). A *terminal* `on_rejected` value is exempt
-  by design -- freezing it via `x-write-locked-values` is the intended, additive declaration this
-  change introduces, not a collision.
 - **`validate_submit_on_default_matches_prisma()`: a new pre-generation check
   catching a value-level disagreement between an `x-approval.submit_on`
   field's json schema `default:` and its Prisma `@default(...)`.** The
@@ -220,58 +234,49 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   the same time. See `docs/knowledge/appendix/inventory-reservation-split.md`
   §7.3.
 
-- **Seven more in-tx write hooks, completing the set `afterCreate` started:
-  `afterUpdate`, `afterDelete`, `validateOnDelete`, `afterSubmit`,
-  `beforeApprove`, `beforeReject`, `beforeWithdraw`.** Same contract as
-  `afterCreate` throughout — run inside the write's own transaction, a
-  throw rolls back everything, default stub is a no-op — verified
-  empirically for each one (a temporary throwing stub, before/after row
-  count, restored to no-op immediately after). `afterUpdate`/`afterDelete`
-  mirror `afterCreate` exactly; `delete{Entity}` for a non-audited entity
-  is now wrapped in its own transaction for the first time (previously
-  several independent `prisma.*` calls with no shared rollback). `
-  validateOnDelete` is the delete-side counterpart to `validateCustomRules`
-  — a hand-written check can now reject a delete before it happens.
-  `afterSubmit` fires once per approval-flow submission, regardless of
-  whether it was reached via create, an ordinary edit, or the standalone
-  `submit_for_approval` action. The `submit_for_approval` action itself now
-  calls `validateCustomRules` before its write — previously the only
-  mutating path in the generator with no validation hook at all.
-  `beforeApprove`/`beforeReject`/`beforeWithdraw` are the pre-action
-  counterparts to the existing `afterApprove`/`afterReject`/`afterWithdraw`,
-  called from both the REST approval routes and the Server Action path
-  before `approval_request.status` is written. See
-  `docs/knowledge/post-create-side-effect-hook.md`.
+- **Eight in-tx write hooks now exist: `afterCreate`, `afterUpdate`, `afterDelete`,
+  `validateOnDelete`, `afterSubmit`, `beforeApprove`, `beforeReject`, `beforeWithdraw`.** Every
+  `can_create` entity gets a write-once, no-op-by-default stub for each
+  (`lib/{entity}/service_after_create.ts` for `afterCreate`, and companions), called inside the
+  write's own transaction — a throw rolls back everything, verified empirically for each hook (a
+  temporary throwing stub, before/after row count, restored to no-op immediately after).
+  `afterCreate(tx, entityId)` is called from inside `add{Parent}()`'s own `prisma.$transaction()`,
+  after the row and its own nested-create machinery are fully written; this particular file name
+  and function existed once before for a different, narrower purpose (creating `approval_request`
+  rows on create) and was retired when that moved to inline generated code — this is an unrelated
+  reinstatement, and approval-request creation is untouched and still lives entirely in that
+  inline code. `afterUpdate`/`afterDelete` mirror `afterCreate` exactly; `delete{Entity}` for a
+  non-audited entity is now wrapped in its own transaction for the first time (previously several
+  independent `prisma.*` calls with no shared rollback). `validateOnDelete` is the delete-side
+  counterpart to `validateCustomRules` — a hand-written check can now reject a delete before it
+  happens. `afterSubmit` fires once per approval-flow submission, regardless of whether it was
+  reached via create, an ordinary edit, or the standalone `submit_for_approval` action. The
+  `submit_for_approval` action itself now calls `validateCustomRules` before its write — previously
+  the only mutating path in the generator with no validation hook at all. `beforeApprove`/
+  `beforeReject`/`beforeWithdraw` are the pre-action counterparts to the existing `afterApprove`/
+  `afterReject`/`afterWithdraw`, called from both the REST approval routes and the Server Action
+  path before `approval_request.status` is written. See `docs/knowledge/post-create-side-effect-hook.md`.
 
-- **Post-create side-effect hook (`lib/{entity}/service_after_create.ts`,
-  `afterCreate(tx, entityId)`) reinstated for every `can_create` entity,
-  called in-tx.** A write-once, no-op-by-default stub — same convention as
-  `service_validation_custom.ts` — called from inside `add{Parent}()`'s own
-  `prisma.$transaction()`, after the row and its own nested-create machinery
-  are fully written. A throw inside it rolls back the entire create,
-  including the row itself, verified empirically (a temporary throwing stub
-  left zero rows and zero leaked data after the call failed). This is the
-  first of eight post-create/pre-mutation hooks required to share this
-  in-tx, throw-rolls-back-everything contract, matching the existing
-  `afterApprove` pattern; the other seven follow in later changes. This
-  particular file name and function existed once before for a different,
-  narrower purpose (creating `approval_request` rows on create) and was
-  retired when that moved to inline generated code — this is an unrelated
-  reinstatement; approval-request creation is untouched and still lives
-  entirely in that inline code. See
-  `docs/knowledge/post-create-side-effect-hook.md`.
-
-- **`validateCustomRules()` (`lib/{entity}/service_validation_custom.ts`)
-  now also receives `actorId`, the id of the user performing the write.**
-  A hand-written rule can now stamp a system-owned row (e.g. an
-  `inventory_transaction` ledger entry with a required `created_by_id` FK)
-  as a side effect of a save, without duplicating the caller's own actor
-  resolution. `actorId` is added as a 5th parameter, using the same
-  structural-widening cast already used for the pre-edit row parameter —
-  every already-generated hand-written file keeps its old signature and
-  needs no edit. Unlike the pre-edit row, `actorId` is never `null`: both
-  the Server Action and REST entry points already require a resolved
-  caller before reaching this far. See
+- **`validateCustomRules()` (`lib/{entity}/service_validation_custom.ts`) now also receives the
+  row as it stood immediately before the write, and the id of the user performing the write.**
+  A hand-written rule can now reject a save based on what a field WAS (e.g. "status may not change
+  once it reaches `closed`") — something the submitted values alone can never answer; the row is
+  fetched once per update and reused for both this call and, on entities with an approval edge
+  trigger, that trigger's own previous-state check (previously a second, separately-selected
+  query). On create, the pre-edit-row argument is always `null` (there is no previous row). A
+  hand-written rule can also now stamp a system-owned row (e.g. an `inventory_transaction` ledger
+  entry with a required `created_by_id` FK) with `actorId`, added as a 5th parameter using the
+  same structural-widening cast, without duplicating the caller's own actor resolution — unlike
+  the pre-edit row, `actorId` is never `null` (both the Server Action and REST entry points already
+  require a resolved caller before reaching this far). Every already-generated hand-written file
+  keeps its old signature and needs no edit — the generated call site accepts either shape without
+  a compatibility branch. The real-DB regression fixture proving the pre-edit-row behavior end to
+  end does not live in this repo — it moved to app-template's `prj/` after review flagged that a
+  test-only fixture had no business sitting inside the generator's own generated output. Note for
+  anyone editing a write-once `service_validation_custom.ts` stub in any consumer: a subsequent
+  e2e run against `next start` silently keeps serving the pre-edit bundle unless `next build` is
+  run first — this bit the original fixture once already. See
+  `docs/knowledge/pre-edit-row-handoff-to-custom-validation.md` and
   `docs/knowledge/actor-id-handoff-to-custom-validation.md`.
 
 - **README.md/README_ja.md sync gate (`npm run check:readme-sync`,
@@ -348,56 +353,6 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   round). Verified directly against the real `x-approval` entities in two
   consumer repos' current schemas (seven entities in one, three in the
   other) to confirm none are newly rejected.
-- **New entity-level schema key `x-write-locked-values` declares field
-  values that only the system may write, independently of `x-approval`.**
-  `{field_name: [value, ...]}`; works on any entity, with or without
-  `x-approval`. `derive_write_locked_values()`
-  (`helpers/schema_helpers.py`, renamed from `derive_approval_locked_values`
-  — the old name remains as a one-line backward-compat alias) now returns
-  the **union** of `x-approval`'s `on_approved`/`on_rejected.set_fields`
-  values and `x-write-locked-values`'s own declarations, so the two sources
-  compose rather than one replacing the other. The five downstream
-  consumers of the derived set were renamed to match
-  (`approval_locked_*` → `write_locked_*` context variables;
-  `APPROVAL_LOCKED_FIELDS`/`ApprovalLockedField` →
-  `WRITE_LOCKED_FIELDS`/`WriteLockedField` in `service_validation.ts` and
-  the CSV import route) — behavior is unchanged for existing `x-approval`
-  entities, since the union with an absent `x-write-locked-values` is
-  exactly the old `x-approval`-only set. The CSV import route's
-  `APPROVAL_LOCKED_VALUE` error code string is intentionally kept as-is
-  (external contract; a future breaking-change rename is a separate
-  decision). `validate.py` fail-closed checks a declared field actually
-  exists on the entity, is a list of values, and every value is a real
-  member of that field's enum. `build_user_schema.py` /
-  `convert_to_user_schema.py`'s entity-level key passthrough allowlist
-  gained the new key (a gap the design missed and the generate-code
-  fixture gate caught empirically — the key was silently dropped at Stage
-  4 without it). See
-  `docs/knowledge/x-write-locked-values-field-lockdown.md` for the full
-  mechanism writeup, including the no-op-resubmission rule and the direct-
-  transaction escape hatch used to legitimately write a locked value.
-- **`validateCustomRules()` (`lib/{entity}/service_validation_custom.ts`)
-  now receives the row as it stood immediately before the write, not just
-  the values being submitted.** A hand-written rule can now reject a save
-  based on what a field WAS (e.g. "status may not change once it reaches
-  `closed`") — something the submitted values alone can never answer. The
-  row is fetched once per update and reused for both this call and, on
-  entities with an approval edge trigger, that trigger's own previous-state
-  check (previously a second, separately-selected query). Every
-  already-generated entity's hand-written file keeps its old 3-parameter
-  signature and needs no edit — the generated call site accepts either
-  shape without a compatibility branch (see
-  `docs/knowledge/pre-edit-row-handoff-to-custom-validation.md`). On
-  create, the new argument is always `null` (there is no previous row).
-  The real-DB regression fixture proving this end to end does not live in
-  this repo — it moved to app-template's `prj/` after review flagged that
-  a test-only fixture had no business sitting inside the generator's own
-  generated output (see the doc above, "Where the regression fixture
-  actually lives"). Note for anyone editing a write-once
-  `service_validation_custom.ts` stub in any consumer: a subsequent e2e
-  run against `next start` silently keeps serving the pre-edit bundle
-  unless `next build` is run first — this bit the original fixture once
-  already and is documented in the same section.
 
 ### Removed
 - **Field-level schema key `x-fk-constrained`** (added in #484). The key
@@ -2663,39 +2618,33 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   the public-path exclusion list (`/login`, `/register`, `/docs`, `/legal`, static assets) is
   unchanged and was re-verified to produce no redirect loop. See
   `docs/knowledge/unauthenticated-page-redirect.md`.
-- **`@mention` server-side support** (server side of a two-part feature —
-  client-side `MentionInput`/`MentionText` UI ships separately): a new schema-global
-  `searchMentionUserOptions()` server action (`lib/mention/search.ts`) returns org-scoped
-  candidates (via the same organization-membership relation as `getAssociatedOrganizations()`,
-  since `user` has no `organization_id` FK) with Option B graceful degradation on a `user`
-  read-permission denial. `encodeMentions()` is retired from the comment save path — the
-  picker now inserts `@[user_id:<id>]` markers directly, so `add/updateXxxComment()` store the
-  raw client text (the function itself is kept, deprecated, for backward compatibility and unit
-  tests). New `'mentioned_in_comment'` notification fires on newly-mentioned users (self-mentions
-  excluded; edits notify only newly-added mentions, diffed against the prior message). Detail
-  getters add a `canViewUserProfile` flag (viewer's `user` read permission) for the display layer
-  to decide whether a mentioned name links to their profile. See
-  `docs/knowledge/mention-system.md`.
-- **`@mention` client UI** (client side of the two-part feature above): new
-  always-present `MentionInput`/`MentionText` components (`components/_standard/`) — an
+- **`@mention` support, server and client.** A new schema-global `searchMentionUserOptions()`
+  server action (`lib/mention/search.ts`) returns org-scoped candidates (via the same
+  organization-membership relation as `getAssociatedOrganizations()`, since `user` has no
+  `organization_id` FK) with Option B graceful degradation on a `user` read-permission denial.
+  New always-present `MentionInput`/`MentionText` components (`components/_standard/`) provide an
   `@`-triggered candidate picker inserting `@[user_id:<id>]` markers, and a renderer that turns
   them into profile links or plain chips depending on the viewer's `canViewUserProfile`.
   `MentionInput` wires into any entity's own `x-mention: true` field on its edit form
-  (`mention_fields`); `MentionText` wires into the comment display when `comment_has_mention`,
-  via a new `renderMessage` render-prop on `CommentListWrapper`. Fixed a latent conflict this
-  exposed: the shared comment getter was already decoding `@[user_id:<id>]` to a plain name
-  server-side (pre-dating the mention feature), which left no id for `MentionText` to link — decoding moved to
+  (`mention_fields`), including the "write a comment"/edit-comment textareas inside
+  `CommentListWrapper` (`form_upsert.tsx.jinja2` passes `searchMentionUserOptions` down and
+  threads `canViewUserProfile`/`mentionUserContext` to the edit page, previously wired only for
+  the read-only `form_view.tsx.jinja2` path). `MentionText` wires into the comment display when
+  `comment_has_mention`, via a new `renderMessage` render-prop on `CommentListWrapper`.
+  `encodeMentions()` is retired from the comment save path — the picker now inserts
+  `@[user_id:<id>]` markers directly, so `add/updateXxxComment()` store the raw client text (the
+  function itself is kept, deprecated, for backward compatibility and unit tests). New
+  `'mentioned_in_comment'` notification fires on newly-mentioned users (self-mentions excluded;
+  edits notify only newly-added mentions, diffed against the prior message). Detail getters add a
+  `canViewUserProfile` flag (viewer's `user` read permission) for the display layer to decide
+  whether a mentioned name links to their profile. Fixed a latent conflict this exposed: the
+  shared comment getter was already decoding `@[user_id:<id>]` to a plain name server-side
+  (pre-dating the mention feature), which left no id for `MentionText` to link — decoding moved to
   the REST API route only (keeping its JSON contract unchanged), while the page/FormView path now
   gets the raw text plus a `mentionUserContext` id→name map. Also fixed: `context.py` (the
   `types.ts.jinja2`-only context builder) never normalized either x-bridge form before detecting
   one-to-one relations, so bridge-based comment threads were invisible to it — now mirrors
   `build_context.py`'s normalization. See `docs/knowledge/mention-system.md`.
-- **`@mention` comment-compose picker wiring**: the "write a comment"/edit-comment
-  textareas inside `CommentListWrapper` now use `MentionInput` — typing `@` opens real candidate
-  suggestions — instead of a plain `TextField`, completing the client-UI scope the mention feature explicitly
-  deferred. `form_upsert.tsx.jinja2` now passes `searchMentionUserOptions` down and threads
-  `canViewUserProfile`/`mentionUserContext` to the edit page (previously wired only for the
-  read-only `form_view.tsx.jinja2` path). See `docs/knowledge/mention-system.md`.
 - **Generated permission-denial and cross-org isolation API tests** (batch A): every
   generated `cypress/e2e/api/<entity>.cy.ts` now includes PUT/DELETE/export/import
   permission-denial tests (7.3–7.6, gated on `can_edit`/`can_delete`/`can_export`/
