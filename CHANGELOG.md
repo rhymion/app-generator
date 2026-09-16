@@ -1179,6 +1179,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   task is actually firing).
 
 ### Internal
+- Dependabot no longer proposes routine cypress minor/patch bumps — the
+  15.16.0 -> 15.19.0 jump broke `dashboard.cy.ts` in CI (test-infra only, no
+  product regression). See
+  [docs/knowledge/testing-cypress.md](docs/knowledge/testing-cypress.md#cypress-version-held-back).
 - **Fixed a silent output-path collision between the polymorphic attachable-bridge
   actions and a standard per-entity CRUD actions file when `attachment` is
   independently generated** (`generate.py`, `generators.py`). Once a consumer
