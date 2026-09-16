@@ -73,13 +73,20 @@ export function getDataGridCell(rowIndex: number, field: string, childTitle?: st
  */
 // MUI DataGrid's built-in `type: 'dateTime'` column (no renderEditCell
 // override — see column_def codegen) edits through a native datetime-local
-// input. Cypress validates the *entire* string passed to .type() against a
-// strict ISO regex for these inputs before consuming any special key
-// sequence, so the `{selectall}` prefix used below for every other field
-// type makes even a correctly ISO-formatted value throw. .clear() is the
+// input; a `type: 'date'` column (issue #540/#542, `format: date` fields)
+// edits through a native date input. Cypress validates the *entire* string
+// passed to .type() against a strict ISO regex for both of these native
+// input types before consuming any special key sequence — for `type:
+// 'date'` this regex accepts only bare `YYYY-MM-DD` and rejects anything
+// else (including a locale-specific `MM/DD/YYYY`, confirmed empirically:
+// Cypress's own error for a mismatched value names the required format as
+// `YYYY-MM-DD`, independent of the browser's locale) — so the `{selectall}`
+// prefix used below for every other field type makes even a correctly
+// ISO-formatted value throw (issue #583). .clear() is the
 // native-input-safe equivalent of `{selectall}` here (a no-op if the cell is
 // already empty).
 const ISO_DATETIME_LOCAL_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/;
+const ISO_DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function editDataGridCell(
   rowIndex: number,
@@ -91,7 +98,7 @@ export function editDataGridCell(
   getDataGridCell(rowIndex, field, childTitle).scrollIntoView();
   getDataGridCell(rowIndex, field, childTitle).dblclick();
   const input = getDataGridCell(rowIndex, field, childTitle).find('input').should('be.visible');
-  if (ISO_DATETIME_LOCAL_RE.test(String(value))) {
+  if (ISO_DATETIME_LOCAL_RE.test(String(value)) || ISO_DATE_ONLY_RE.test(String(value))) {
     input.clear().type(String(value));
   } else {
     input.type('{selectall}' + String(value));

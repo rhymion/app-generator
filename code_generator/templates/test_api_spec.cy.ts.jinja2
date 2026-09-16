@@ -855,6 +855,19 @@ describe('API: {{ title }}', () => {
   // Approval operations
   // -------------------------------------------------------------------------
 
+  // app-generator#584: 11.1/11.2 exercise approval-request creation via a
+  // direct POST to this entity's own create route -- that route only
+  // exists when can_new is true (x-generate.new, gated in
+  // api_route.ts.jinja2). An entity can have x-approval declared while
+  // new:false (e.g. it is only ever created as another entity's side
+  // effect, then later submitted for approval through its own PUT/submit
+  // route) -- for those, 11.1/11.2 as written always fail: the POST hits
+  // a route with no POST handler and 405s before ever reaching the
+  // approval-flow logic under test. Falling through to no test at all
+  // would silently drop coverage instead of fixing the mismatch, so the
+  // can_new:false branch below asserts the create route is genuinely
+  // closed instead.
+{% if can_new %}
   // cmd_846(c): 11.1/11.2's POST body now explicitly includes
   // {{ resubmit_target_field or 'the submit_on field' }} at submit_on's
   // own value when submit_on is declared -- relying on the schema
@@ -926,6 +939,21 @@ describe('API: {{ title }}', () => {
       });
     });
   });
+{% else %}
+  describe('Approval request creation (POST {{ api_path }})', () => {
+    it('11.1 POST is not available -- the entity has no create route (x-generate.new: false)', () => {
+      cy.request({
+        method: 'POST',
+        url: API_BASE,
+        headers: { 'X-API-Key': TEST_API_KEY },
+        body: {},
+        failOnStatusCode: false,
+      }).then((res) => {
+        expect(res.status).to.eq(405);
+      });
+    });
+  });
+{% endif %}
 
   describe('Approve (POST /api/approval_request/:id/approve)', () => {
     it('12.1 approver can approve a pending request', () => {

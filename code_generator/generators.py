@@ -3260,8 +3260,27 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         # the PARENT's reservation config (pool/policy/ledgerDomain) --
         # found via _find_reservation_lines_parent since that config lives
         # on a different entity's raw schema def than this one's own ctx.
+        #
+        # app-generator#584-related fix: the assumption above ("has
+        # neither an add{Parent} nor update{Parent} route") holds only for
+        # the reservation lines-child case this branch was written for --
+        # it does not hold in general. new:false does not imply edit:false;
+        # an entity can have new:false, edit:true (e.g. always created as a
+        # side effect of another entity, but still directly PUT-editable
+        # thereafter). Such an entity DOES have an update{Parent} route,
+        # so the update-time edge trigger must still be built when
+        # can_update is true -- mirroring the can_create branch above.
         raw_def_by_model = _raw_def(model, schema) if schema else {}
         x_approval_submit_on_field, x_approval_submit_on_value = resolve_approval_submit_on(raw_def_by_model)
+        if can_update and x_approval_submit_on_field is not None:
+            _reservation_code_for_update = (
+                _build_reservation_allocation_code(reservation_config, model, schema, row_var='updated')
+                if has_reservation and has_submit_on and reservation_config is not None else ''
+            )
+            approval_edge_trigger_update_code = _build_approval_edge_trigger_update_code(
+                approvable_rel, parent, model, x_approval_submit_on_field, x_approval_submit_on_value,
+                reservation_code=_reservation_code_for_update,
+            )
         if x_approval_submit_on_field is not None:
             _reservation_code_for_submit_action = ''
             if schema is not None:
