@@ -110,23 +110,50 @@ export function createRedisRateLimiter(
       const member = `${now}:${++callCounter}`;
       const cacheKey = `rl:${bucket}:${key}`;
 
-      const raw = (await client.eval(
-        SLIDING_WINDOW_LUA,
-        1,
-        cacheKey,
-        String(now),
-        String(cfg.windowMs),
-        String(cfg.limit),
-        member,
-      )) as [number, number, number, number];
+      // Issue #587: an unreachable/erroring Redis must not take auth down
+      // with it. The rate limiter is a defensive gate in front of auth, not
+      // auth itself — availability outweighs the marginal brute-force
+      // protection lost while Redis is down. Fail OPEN, but never silently:
+      // every fail-open is logged so the degraded window is visible in
+      // server logs / audit tooling rather than only inferred after the
+      // fact from an absence of 429s.
+      try {
+        const raw = (await client.eval(
+          SLIDING_WINDOW_LUA,
+          1,
+          cacheKey,
+          String(now),
+          String(cfg.windowMs),
+          String(cfg.limit),
+          member,
+        )) as [number, number, number, number];
 
-      const [allowedNum, remaining, retryMs, resetAt] = raw;
-      return {
-        allowed: allowedNum === 1,
-        remaining: Number(remaining),
-        retryAfterSeconds: Math.ceil(Number(retryMs) / 1000),
-        resetAt: Number(resetAt),
-      };
+        const [allowedNum, remaining, retryMs, resetAt] = raw;
+        return {
+          allowed: allowedNum === 1,
+          remaining: Number(remaining),
+          retryAfterSeconds: Math.ceil(Number(retryMs) / 1000),
+          resetAt: Number(resetAt),
+        };
+      } catch (err) {
+        // Same "log and continue" contract as lib/audit-log.ts's DB-hiccup
+        // handling: a broken Redis must never take auth down with it, but
+        // the degraded window must be visible in server logs, not silent.
+        console.error(
+          '[rate-limit:fail_open]',
+          JSON.stringify({
+            at: new Date().toISOString(),
+            bucket,
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+        return {
+          allowed: true,
+          remaining: Number.POSITIVE_INFINITY,
+          retryAfterSeconds: 0,
+          resetAt: now,
+        };
+      }
     },
   };
 }
