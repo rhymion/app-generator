@@ -3,7 +3,7 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
-## [Unreleased]
+## [4.0.0] - 2026-09-16
 
 ### Fixed
 - **A `vercel.json` that lost its `regions` key (or predates it) was never
