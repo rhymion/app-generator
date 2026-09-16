@@ -135,224 +135,58 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   change made for this item.
 
 ### Added
-- **An independent child (its own `x-generate`) may now be embedded in a parent's view with
-  any non-`list`, non-`comments` `x-outputType` (e.g. `None`), regardless of whether its own
-  `x-generate` permits new/edit/delete** (issue #520). Previously `generate_types.py`'s
-  `extract_entities()` unconditionally rejected this combination as a configuration error
-  unless the child disabled new/edit/delete entirely. Verified this is always safe: every
-  such embedding renders through the existing read-only `FieldsViewGrid`
-  (`use{Prop}Columns(false)` hardcodes `editable: false`, and `FieldsViewGrid` itself has no
-  Add/Edit/Delete UI) regardless of the child's own write capability, so the parent-embedded
-  display can never expose a write path — the child's own standalone CRUD routes, if any,
-  remain the sole write path and are unaffected. `x-outputType: comments` is unchanged and
-  keeps the original restriction (its rendering path is not `FieldsViewGrid`, so an
-  independently write-capable child there stays unverified-safe). See
+- **An independent child (own `x-generate`) may now be embedded in a parent's view with any
+  non-`list`, non-`comments` `x-outputType`, even when its own `x-generate` disallows
+  new/edit/delete** (issue #520). The parent-embedded display stays read-only regardless.
+  `x-outputType: comments` keeps its prior restriction. See
   `docs/knowledge/schema-yaml-configuration.md` §7.4.
 - **New entity-level schema key `x-write-locked-values` declares field values that only the
-  system may write, independently of `x-approval`.** `{field_name: [value, ...]}`; works on any
-  entity, with or without `x-approval`. `derive_write_locked_values()` (`helpers/schema_helpers.py`,
-  renamed from `derive_approval_locked_values` — the old name remains as a one-line backward-compat
-  alias) returns the **union** of `x-approval`'s `on_approved`/`on_rejected.set_fields` values and
-  `x-write-locked-values`'s own declarations, so the two sources compose rather than one replacing
-  the other; behavior is unchanged for existing `x-approval` entities, since the union with an
-  absent `x-write-locked-values` is exactly the old `x-approval`-only set. The five downstream
-  consumers of the derived set were renamed to match (`approval_locked_*` → `write_locked_*`
-  context variables; `APPROVAL_LOCKED_FIELDS`/`ApprovalLockedField` →
-  `WRITE_LOCKED_FIELDS`/`WriteLockedField` in `service_validation.ts` and the CSV import route —
-  the CSV import route's `APPROVAL_LOCKED_VALUE` error code string is intentionally kept as-is, an
-  external contract). `validate.py` fail-closed checks a declared field actually exists on the
-  entity, is a list of values, and every value is a real member of that field's enum (section 11),
-  plus a collision check (section 11a) rejecting a declaration that collides with
-  `submit_on`/`on_withdrawn`/a *non-terminal* `on_rejected` value on the same field (almost
-  certainly a schema-authoring typo — it would make submitting, withdrawing, or non-terminally
-  rejecting impossible); a *terminal* `on_rejected` value is exempt by design, since freezing it
-  via `x-write-locked-values` is the intended, additive use. `build_user_schema.py`/
-  `convert_to_user_schema.py`'s entity-level key passthrough allowlist includes the new key (a gap
-  the design missed and the generate-code fixture gate caught empirically — the key was silently
-  dropped at Stage 4 without it). **Defaults to *unlocked* on a proxy view** (a screen whose `allOf`
-  references another screen entity rather than the raw model directly), instead of silently
-  inheriting the raw entity's locked-value set — a proxy view exists precisely to bypass the
-  restrictions of the original screen, so unconditionally inheriting its value lockdown would
-  defeat that purpose; a proxy view may still opt a value back into lockdown by declaring
-  `x-write-locked-values` on itself, and the canonical screen's own behavior and the raw entity's
-  `x-approval`-derived locked values are unchanged. Both the section 11a collision check and
-  section 11's field-existence/enum check resolve `x-approval`/entity properties via the
-  declaration's actual backing raw model rather than the declaring (possibly proxy-view) entity's
-  own definition, which would otherwise always be empty for a proxy view and silently let every
-  collision through. Verified byte-identical generated output against an existing consumer
-  schema's 3 `x-approval` entities (no behavior change), plus a scratch-entity run through both
-  the REST and Server Action write paths confirming the unlock-by-default behavior end to end. See
+  system may write, independent of `x-approval`.** Composes (union) with `x-approval`'s locked
+  values — existing `x-approval` entities are unaffected. **Defaults to *unlocked* on a proxy
+  view** (opt back in by declaring the key on the view itself). See
   `docs/knowledge/x-write-locked-values-field-lockdown.md`.
-- **Post-decision row freeze now includes a *terminal* rejection, not just approval.**
-  `derive_post_decision_freeze_values()` (`code_generator/helpers/schema_helpers.py`), consumed by
-  `approval_lockdown_context()`, extends the existing post-approval edit/delete/invalidate
-  lockdown (`docs/knowledge/appendix/approval-flow.md` §16.15/§16.18) to also freeze a row once
-  `on_rejected.terminal: true` fires -- a terminal rejection has no resubmission path back to
-  `submit_on`, so it stays a decided, permanent record just like an approval. A non-terminal
-  rejection or a withdrawal still releases the lock exactly as before (unchanged behavior). Any
-  `x-write-locked-values` declaration for the same field is also merged into this frozen set, so a
-  row can become frozen through a route other than the approval flow itself. **Consumer-visible
-  behavior change**: an entity declaring `on_rejected.terminal: true` will newly reject
-  edit/delete/invalidate (403 `*_forbidden:approval_locked`) on a row sitting at that terminal
-  value, where it previously allowed it.
-- **`validate_submit_on_default_matches_prisma()`: a new pre-generation check
-  catching a value-level disagreement between an `x-approval.submit_on`
-  field's json schema `default:` and its Prisma `@default(...)`.** The
-  existing default cross-schema check only checks *presence* — a json
-  `default:` with no matching Prisma `@default()` at all — so it silently
-  passed a case where both sides declare a default but disagree in value
-  (e.g. json `default: draft` next to Prisma `@default(pending)`). Within
-  `x-approval.submit_on`, that particular disagreement is never
-  intentional: the generated edit-lockdown mechanism locks every row
-  whose value equals submit_on's own value, so a Prisma column default
-  that silently drifts to that same value means every freshly created
-  row is born already locked — a real-world drift found in a downstream
-  consumer schema and left undetected for several days before this
-  check existed. Scoped narrowly to submit_on fields only (a value
-  mismatch elsewhere is not inherently wrong under the generator's
-  existing default-reflection design, so a blanket check would
-  false-positive). Wired into the pre-generation validation pipeline and
-  the fast schema-only validation entrypoint alongside the other Prisma
-  cross-checks. Verified with both a synthetic unit-test injection and a
-  live injection into an existing generator fixture's Prisma schema,
-  reproducing the failure end-to-end through the real generation
-  pipeline before being reverted.
-
-- **Opt-in `binField` on `x-ledger-entities.<domain>`**, a fifth pool-entity
-  column name alongside the existing required `itemField`/`locationField`/
-  `lotField`/`expirationField` (all four unchanged, still required — this
-  key alone is optional). A domain that never declares `binField` renders
-  byte-identical output to before this key existed (verified against a
-  real consumer's inventory-domain schema: full generator output tree
-  diffed with and without this change, zero differences). When declared,
-  every ledger-row write across the four `ledger_*_stub.ts.jinja2`
-  templates, `split_action_route.ts.jinja2`, and `generators.py`'s
-  reserve/resubmit-claim code copies the bin column verbatim, and two
-  latent ambiguous-resolution bugs (a pool row re-identified by an
-  item/location/lot/expiration tuple match with no unique id, which
-  becomes genuinely ambiguous once bin is a real dimension) are closed at
-  the same time. See `docs/knowledge/appendix/inventory-reservation-split.md`
-  §7.3.
-
-- **Eight in-tx write hooks now exist: `afterCreate`, `afterUpdate`, `afterDelete`,
-  `validateOnDelete`, `afterSubmit`, `beforeApprove`, `beforeReject`, `beforeWithdraw`.** Every
-  `can_create` entity gets a write-once, no-op-by-default stub for each
-  (`lib/{entity}/service_after_create.ts` for `afterCreate`, and companions), called inside the
-  write's own transaction — a throw rolls back everything, verified empirically for each hook (a
-  temporary throwing stub, before/after row count, restored to no-op immediately after).
-  `afterCreate(tx, entityId)` is called from inside `add{Parent}()`'s own `prisma.$transaction()`,
-  after the row and its own nested-create machinery are fully written; this particular file name
-  and function existed once before for a different, narrower purpose (creating `approval_request`
-  rows on create) and was retired when that moved to inline generated code — this is an unrelated
-  reinstatement, and approval-request creation is untouched and still lives entirely in that
-  inline code. `afterUpdate`/`afterDelete` mirror `afterCreate` exactly; `delete{Entity}` for a
-  non-audited entity is now wrapped in its own transaction for the first time (previously several
-  independent `prisma.*` calls with no shared rollback). `validateOnDelete` is the delete-side
-  counterpart to `validateCustomRules` — a hand-written check can now reject a delete before it
-  happens. `afterSubmit` fires once per approval-flow submission, regardless of whether it was
-  reached via create, an ordinary edit, or the standalone `submit_for_approval` action. The
-  `submit_for_approval` action itself now calls `validateCustomRules` before its write — previously
-  the only mutating path in the generator with no validation hook at all. `beforeApprove`/
-  `beforeReject`/`beforeWithdraw` are the pre-action counterparts to the existing `afterApprove`/
-  `afterReject`/`afterWithdraw`, called from both the REST approval routes and the Server Action
-  path before `approval_request.status` is written. See `docs/knowledge/post-create-side-effect-hook.md`.
-
-- **`validateCustomRules()` (`lib/{entity}/service_validation_custom.ts`) now also receives the
-  row as it stood immediately before the write, and the id of the user performing the write.**
-  A hand-written rule can now reject a save based on what a field WAS (e.g. "status may not change
-  once it reaches `closed`") — something the submitted values alone can never answer; the row is
-  fetched once per update and reused for both this call and, on entities with an approval edge
-  trigger, that trigger's own previous-state check (previously a second, separately-selected
-  query). On create, the pre-edit-row argument is always `null` (there is no previous row). A
-  hand-written rule can also now stamp a system-owned row (e.g. an `inventory_transaction` ledger
-  entry with a required `created_by_id` FK) with `actorId`, added as a 5th parameter using the
-  same structural-widening cast, without duplicating the caller's own actor resolution — unlike
-  the pre-edit row, `actorId` is never `null` (both the Server Action and REST entry points already
-  require a resolved caller before reaching this far). Every already-generated hand-written file
-  keeps its old signature and needs no edit — the generated call site accepts either shape without
-  a compatibility branch. The real-DB regression fixture proving the pre-edit-row behavior end to
-  end does not live in this repo — it moved to app-template's `prj/` after review flagged that a
-  test-only fixture had no business sitting inside the generator's own generated output. Note for
-  anyone editing a write-once `service_validation_custom.ts` stub in any consumer: a subsequent
-  e2e run against `next start` silently keeps serving the pre-edit bundle unless `next build` is
-  run first — this bit the original fixture once already. See
+- **Post-decision row freeze now also applies to a *terminal* rejection, not just approval.**
+  **Behavior change**: an entity declaring `on_rejected.terminal: true` now rejects
+  edit/delete/invalidate (`403 *_forbidden:approval_locked`) on a row at that terminal value,
+  where it previously allowed it. A non-terminal rejection or withdrawal still releases the lock
+  as before. See `docs/knowledge/appendix/approval-flow.md` §16.15/§16.18.
+- **New pre-generation check (`validate_submit_on_default_matches_prisma()`) flags a
+  value-level mismatch between an `x-approval.submit_on` field's JSON `default:` and its Prisma
+  `@default(...)`** — the existing cross-schema check only checked *presence*, not value
+  agreement. Scoped to `submit_on` fields only.
+- **Opt-in `binField` on `x-ledger-entities.<domain>`**, a fifth pool-entity column alongside
+  the existing required `itemField`/`locationField`/`lotField`/`expirationField` (all still
+  required; this key alone is optional). Omitting it is a no-op (byte-identical output). See
+  `docs/knowledge/appendix/inventory-reservation-split.md` §7.3.
+- **Eight in-tx write hooks now exist**: `afterCreate`, `afterUpdate`, `afterDelete`,
+  `validateOnDelete`, `afterSubmit`, `beforeApprove`, `beforeReject`, `beforeWithdraw` — every
+  `can_create` entity gets a no-op-by-default stub for each, called inside the write's own
+  transaction (a throw rolls back everything). **Behavior change**: a non-audited entity's
+  `delete{Entity}` is now wrapped in its own transaction for the first time (previously several
+  independent, non-rollback-linked calls). See `docs/knowledge/post-create-side-effect-hook.md`.
+- **`validateCustomRules()` now also receives the pre-edit row and the acting user's id
+  (`actorId`) as a 5th parameter** — lets a hand-written rule reject a save based on what a
+  field WAS, or stamp a system-owned row with the actor. Existing hand-written
+  `service_validation_custom.ts` files need no edit. See
   `docs/knowledge/pre-edit-row-handoff-to-custom-validation.md` and
   `docs/knowledge/actor-id-handoff-to-custom-validation.md`.
-
-- **README.md/README_ja.md sync gate (`npm run check:readme-sync`,
-  `scripts/check_readme_sync.sh`).** Fails closed if a branch's diff touches
-  README.md relative to its base without also touching README_ja.md (or the
-  reverse) — added as a Completion gate step in `add-component.md`,
-  `generate-schema.md`, `update-code.md`, and `update-generator.md`. Local
-  only, no CI dependency. Content parity (do the two files actually say the
-  same thing) is still an agent procedure, not something this script checks
-  — see `docs/knowledge/readme-en-ja-sync-gate.md` for the full two-tier
-  design and why they aren't merged into one mechanism.
-
-- **`x-filter-values`: view-scoped row restriction, enforced server-side across
-  read and write.** A view entity can now declare
-  `x-filter-values: { field: [allowed values, ...], ... }` (map form,
-  multiple fields AND, multiple values per field IN) to restrict which
-  rows it shows and can write to — e.g. an "active orders" view of a
-  shared `order` model. Enforcement covers all 4 read paths (list/export
-  via `build{Entity}AccessWhere()` in `getters.ts`, detail GET's own
-  inline `where`, and the cross-entity full-text search union in
-  `search_helpers.ts`) plus the write paths: `service.ts`'s
-  `update{Entity}` (the convergence point both the REST route and the
-  Server Action funnel through for update), and — since `delete{Entity}`
-  has no equivalent internal check, mirroring the existing `x-self-only`
-  precedent — each of `api_detail_route.ts`, `api_bulk_route.ts`, and
-  `actions.ts`'s `remove{Entity}` individually. All write-path checks
-  judge the row's **pre-image** (its state before the write), not the
-  incoming request body, so a legitimate transition out of the filtered
-  view still succeeds — only a row already outside the view is rejected
-  (404). Composes with org isolation and `x-self-only` via AND, never OR.
-  `x-filter-values` is entity-level, view-scoped metadata (added to
-  `_VIEW_LEVEL_CONFIG_KEYS` in `build_user_schema.py`, same as
-  `x-readonly-fields`), so one proxy view's declaration never leaks onto
-  another view of the same underlying model. See
-  `docs/knowledge/filter-values-row-scope.md` for the full design and
-  `.claude/commands/generate-schema.md`'s "x-filter-values" section for
-  schema-author-facing usage.
-
-- **Withdraw lockout for entities that never declare `x-approval.on_withdrawn`, plus a
-  structural combination check on `x-approval` clauses.** An entity without
-  `on_withdrawn` has no safe path back into the workflow after a
-  withdrawal (a locked `submit_on` field freezes the row forever, or —
-  with no `submit_on` at all — the row can never be resubmitted).
-  Withdrawal is now blocked for such entities at the API
-  (`app/api/approval_request/[id]/withdraw/route.ts`, 400) and Server
-  Action (`lib/approval_request/actions_core.ts`'s
-  `withdrawApprovalRequest()`, fail-fast inside the transaction before any
-  write) layers, keyed by the resolved Prisma model name via a new
-  `ENTITIES_WITH_ON_WITHDRAWN` Set/`hasOnWithdrawn()` exported from the
-  generated `on_withdrawn_dispatch.ts`. The Withdraw button
-  (`components/_standard/ApprovalSection.tsx`) is hidden for the same
-  entities via a new generator-computed `hasOnWithdrawn` prop
-  (`form_view_context()` in `generators.py`, wired through
-  `form_view.tsx.jinja2`).
-
-  A new `_validate_x_approval_combinations()` (`code_generator/generate.py`)
-  runs once per `x-approval`-declaring entity before any approval-related
-  file is generated, enforcing a combination truth table over four axes —
-  `S`=`submit_on` declared, `W`=`on_withdrawn` declared, `T`=`on_rejected`
-  terminal, `E`=editable via any generated write path. `S=true` is valid
-  unconditionally; `S=false` is valid only for exactly `W=false, T=true,
-  E=false` (no withdrawal, a terminal rejection, and no way to edit the
-  request's content post-submission) — every other `S=false` combination
-  raises a `ValueError` naming the entity and which condition failed. `E`
-  is determined empirically (a new `_entity_is_write_reachable()` helper)
-  rather than from `x-generate.edit` alone, since a one-to-many list child
-  with no `x-generate` of its own can still be rewritten through an
-  ancestor entity's nested `create`/`update` regardless of its own edit
-  flag. A second, independent check flags the same `(field, resolved
-  value)` pair used by 2+ distinct `submit_on`/`on_approved.set_fields`/
-  `on_rejected.set_fields`/`on_withdrawn.set_fields` declarations (e.g. a
-  rejection writing a field back to `submit_on`'s own value would
-  re-trigger the update-side edge trigger, creating an infinite approval
-  round). Verified directly against the real `x-approval` entities in two
-  consumer repos' current schemas (seven entities in one, three in the
-  other) to confirm none are newly rejected.
+- **README.md/README_ja.md sync gate** (`npm run check:readme-sync`) — fails closed if a
+  branch's diff touches one file without the other. Added as a Completion gate step in
+  `add-component.md`, `generate-schema.md`, `update-code.md`, `update-generator.md`. See
+  `docs/knowledge/readme-en-ja-sync-gate.md`.
+- **`x-filter-values`: view-scoped row restriction, enforced server-side on read and write.** A
+  view entity can declare `x-filter-values: { field: [values], ... }` to restrict which rows it
+  shows and can write to. A write to a row already outside the view is rejected (`404`).
+  Composes with org isolation and `x-self-only` via AND. See
+  `docs/knowledge/filter-values-row-scope.md` and `.claude/commands/generate-schema.md`'s
+  "x-filter-values" section.
+- **Withdraw lockout for entities that never declare `x-approval.on_withdrawn`**, plus a new
+  structural validation (`_validate_x_approval_combinations()`) enforcing a truth table over
+  `submit_on`/`on_withdrawn`/terminal-`on_rejected`/editability. Withdrawal is blocked at the
+  API (`400`) and Server Action layers for entities lacking `on_withdrawn`, and the Withdraw
+  button is hidden for them. **Breaking for schema authors**: an invalid combination now raises
+  a generation-time `ValueError` naming the entity and failed condition. See
+  `docs/knowledge/appendix/approval-flow.md` §16.16.
 
 ### Removed
 - **Field-level schema key `x-fk-constrained`** (added in #484). The key
@@ -990,37 +824,22 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   why `robots.txt` `Disallow` was rejected, and consumer-impact notes.
 
 ### Added
-- **`x-relationship: { target: attachment, type: direct }`** — a new field
-  declaration for a single-file FK (a profile picture, a signed contract):
-  the entity holds its own `{field}_id` pointing at exactly one `attachment`
-  row, nullable or required, rendered via a new `SingleAttachmentUpload`
-  form widget (create/edit) and `SingleAttachmentDisplay` (view). Unlike the
-  existing `attachable_id` bridge (multiple files) and the one-to-one
-  selector pattern (a target with its own pages), `attachment` here has no
-  list/view/new/edit pages of its own. `attachment.attachable_id` is now
-  nullable (`onDelete: SetNull`) to allow this — a direct-attachment FK
-  creates an attachment row with no bridge owner at all. See
-  `docs/knowledge/schema-yaml-configuration.md` (Direct Attachment FK).
-- **`x-uri-kind: file`** — a third `format: uri` field kind alongside
-  `image` and `link`: like `image`, the field still uploads through
-  `/api/upload` and stores a plain URL string, but displays as a download
-  link/icon instead of an `<img>` once set (for a non-image uploaded file,
-  e.g. a URL-stored document). Shares the same `SingleAttachmentUpload` /
-  `SingleAttachmentDisplay` components as the direct-attachment FK above.
-- **`NEXT_PUBLIC_APP_TITLE` / `NEXT_PUBLIC_APP_COPYRIGHT`** — optional env vars
-  in `lib/site-config.ts` for overriding the app title and footer copyright
-  text without touching the file. Both are inlined at build time (Vercel
-  needs a rebuild, not just an env var edit, to pick up a change). See
+- **`x-relationship: { target: attachment, type: direct }`** — new single-file FK field
+  declaration (a profile picture, a signed contract), rendered via `SingleAttachmentUpload`/
+  `SingleAttachmentDisplay`. Unlike the existing `attachable_id` bridge, this `attachment` has
+  no list/view/new/edit pages of its own. `attachment.attachable_id` is now nullable to allow
+  this. See `docs/knowledge/schema-yaml-configuration.md` (Direct Attachment FK).
+- **`x-uri-kind: file`** — a third `format: uri` field kind alongside `image`/`link`: uploads
+  via `/api/upload` like `image`, but displays as a download link/icon instead of an `<img>`.
+  Shares components with the direct-attachment FK above.
+- **`NEXT_PUBLIC_APP_TITLE` / `NEXT_PUBLIC_APP_COPYRIGHT`** — optional env vars overriding the
+  app title and footer copyright text without a code change. Inlined at build time (a Vercel
+  rebuild, not just an env var edit, is needed to pick up a change). See
   `docs/knowledge/noindex-default-and-branding-env-vars.md`.
-- **`x-scheduled-tasks`** (top-level, plural) — a bulk, entity-agnostic
-  sibling of `x-scheduled-task`: registers a recurring task with no row
-  selection at all, for operations that span many entities/tables or an
-  entire table with no filter (a full demo-data reset was the motivating
-  case), where the existing single-entity filtered row scan doesn't fit.
-  Shares one task_id namespace, one `TASK_REGISTRY`, and one `vercel.json`
-  `crons` array with entity-level `x-scheduled-task` — both are dispatched
-  through the same `/api/scheduled-tasks/[task]` route. See "Bulk mode" in
-  `docs/knowledge/scheduled-task-operations.md`.
+- **`x-scheduled-tasks`** (top-level, plural) — a bulk, entity-agnostic sibling of
+  `x-scheduled-task`, for operations spanning many entities or an entire table with no row
+  filter. Shares the task registry and `vercel.json` `crons` array with the entity-level form.
+  See "Bulk mode" in `docs/knowledge/scheduled-task-operations.md`.
 
 ### Fixed
 - **An `x-internal` entity's named-constant parent prefix (e.g.
@@ -1788,26 +1607,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `generate-code`.
 
 ### Added
-- **CSV export/import and approve/reject now accept `X-API-Key` as well as a browser session**:
-  `api_export_route.ts.jinja2`, `api_import_route.ts.jinja2`,
-  `split_action_route.ts.jinja2`, and the two static `app/api/approval_request/[id]/{approve,reject}/route.ts`
-  routes previously resolved the caller exclusively via `getSessionUserId()`/`requireSession()`,
-  so an external API-key client could never call them — only a logged-in browser session could.
-  Added `resolveActorId()`/`requireDualAuth()` to `lib/api-auth.ts` (same dual-auth pattern
-  already used by `app/api/search/route.ts`: `X-API-Key`/`Authorization: Bearer` header when
-  present, session cookie otherwise) and switched all five routes to it. Verified both paths
-  behaviorally: API-key-only calls now succeed (export 200, import reaches CSV validation instead
-  of 401, approve/reject reach their 404-not-found business logic instead of 401), and the
-  pre-existing session-only path is unchanged. `split_action_route.ts.jinja2` has no exercised
-  entity in this repo's own `json_schema.yaml` (no `x-splittable` declaration) — verified instead
-  via direct Jinja2 template-render assertion and the existing `code_generator/tests/test_reservation.py`
-  / `test_ledger_location_id_fk.py` / `test_ledger_item_naming_generalization.py` suites that
-  already render this template with full context.
-- **New API-only regression test for FK read-permission graceful degradation**: added
-  "4.5 returns 200 for GET (list and detail) when the acting user cannot read `<fk target>`" to
-  `test_api_spec.cy.ts.jinja2`, alongside the pre-existing "4.4 preserves `<fk>_id` ... omits it
-  from the PUT body" — both pure `X-API-Key` (`cy.request`), no browser. Together they are the
-  API-gate-covered counterpart of `fk_read_permission_graceful_degradation.cy.ts`.
+- **CSV export/import and approve/reject now accept `X-API-Key` as well as a browser session**
+  — these five routes previously resolved the caller only via a session, so an external
+  API-key client could never call them. Added `resolveActorId()`/`requireDualAuth()` to
+  `lib/api-auth.ts` (same dual-auth pattern as `app/api/search/route.ts`). See
+  `docs/knowledge/testing-cypress.md`.
+- **New API-only regression test**: `test_api_spec.cy.ts.jinja2` gains "4.5 returns 200 for GET
+  when the acting user cannot read `<fk target>`", alongside the pre-existing 4.4. See
+  `docs/knowledge/fk-read-permission-graceful-degradation.md`.
 
 ### Changed
 - **Generated API test spec (`test_api_spec.cy.ts.jinja2`) no longer authenticates via
@@ -2265,16 +2072,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   and `docs/knowledge/schema-restructuring-build-order.md`.
 
 ### Added
-- **`x-server-value` now supports actor delegation** (extending an earlier delegation revision): a field
-  declared `x-server-value: {source: actor, override_permission: <Operation>}` still defaults to
-  writing the authenticated actor's id on create, but an actor holding `override_permission` (any
-  `lib/authz.ts` `Operation`) may now supply an explicit value that is honored as-is — e.g. an
-  admin filing a request on someone else's behalf. An actor without that permission who submits a
-  value has it silently replaced with their own id rather than the request being rejected (the
-  create still succeeds, just attributed to the real actor); the REST create response gains an
-  optional `_server_value_overrides` flag so a caller can tell when this happened. The original
-  string form `x-server-value: "actor"` is unchanged (no override capability, client value fully
-  discarded). See `docs/knowledge/x-server-value-actor-delegation.md`.
+- **`x-server-value` now supports actor delegation**: `x-server-value: {source: actor,
+  override_permission: <Operation>}` lets an actor holding that permission supply an explicit
+  value on create instead of always defaulting to their own id (e.g. filing on someone else's
+  behalf). The REST create response gains an optional `_server_value_overrides` flag when this
+  happens. The plain string form `x-server-value: "actor"` is unchanged. See
+  `docs/knowledge/x-server-value-actor-delegation.md`.
 
 ### Security
 - **CREATE had no read-only field enforcement at all**: PUT's existing AP-3=B rejects a
@@ -2565,114 +2368,40 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `db:populatePersonalNote*` tasks).
 
 ### Added
-- **FK autocomplete search now derives from `labelField`, `searchField` retired**: the
-  generated `search{Entity}Options` getter's cross-relation substring match (e.g. searching
-  `booking` also matching on `resource.name`) used to require a separate
-  `x-relationship.searchField` declaration, independent of the `labelField` that actually
-  renders on screen — nothing stopped the two from drifting apart. `searchField` is removed;
-  `derive_searchable_relation_fields()` (`helpers/schema_helpers.py`) now derives the same
-  `{relation, field}` list from `labelField` itself, sharing its origin with the CSV-import
-  full-match (`build_label_expression`), so the searched field and the displayed field can never
-  disagree. Only string-typed, non-dotted `labelField` elements qualify — enum (translated
-  on-screen label vs. untranslated stored value, the same trap seen elsewhere), date/time, number, and
-  CUID-pattern id fields are excluded, and a composite `labelField` is evaluated per element.
-  `validate.py` now rejects any schema that still declares `searchField` by name. See
-  `docs/knowledge/schema-yaml-configuration.md` §5 ("`labelField` is also the autocomplete
-  search source").
-- **CSV import for composite/dotted labelField FK columns**: a FK relation whose
-  display label is composite (`[product.name, location.name]`) or a single dotted path used to be
-  export-only — there was no single scalar to resolve a CSV cell back to, so the column landed in
-  `UNIMPORTABLE_COLUMN`. It is now resolved by matching the CSV cell against the full rendered
-  label text, via a lookup map built once per import (not per row) from the same label-building
-  helper the export getter already uses, so export and import can never disagree on what a label
-  looks like. Ambiguous labels (two rows sharing the same rendered text) are rejected at row
-  granularity (`MULTI_MATCH`, naming the column/value/match-count), not for the whole CSV. See
-  `docs/knowledge/csv-import-composite-labelfield.md`.
-- **`x-self-only`: permission-independent per-user data isolation, Stage 1**: a new
-  entity-level schema flag for data that must be visible/editable only by its own creator as a
-  fixed invariant — no permission grant (including `general.read`) can widen it, unlike the
-  existing `creator` permission scope which is just a configurable option. Every affected
-  generated code path (`getters.ts`, `search_helpers.ts`, `actions.ts`, `api_bulk_route.ts`,
-  `api_detail_route.ts`, `service.ts`, CSV import/export, FK-candidate search) drops the
-  `general.*` escape and checks `creator_id === actorId` unconditionally; a non-owner's row reads
-  as `404 Not Found`. `x-self-only: { admin_bypass: true }` lets a privileged (`Administrator`)
-  role read across all rows, but only with an audit row written for the access — the write and the
-  bypass are inseparable (fail-closed: if the audit write fails, the bypass is denied too).
-  `validate.py` rejects a self-only entity whose backing Prisma model lacks `creator_id`, and
-  rejects `creator_id` appearing in `x-import-key`. The account **Settings** page (`setting`) now
-  uses this mechanism (`admin_bypass: true`) — other users' settings are no longer reachable
-  through any permission grant, while other entities' references to `user` (mentions, comment
-  authorship, approver pickers, etc.) are unaffected. A new `personal_note` sample entity ships as
-  the generator's own worked example and regression fixture. See
-  `docs/knowledge/self-only-entity.md`. Row-Level Security (Stage 2) is not implemented — the
-  current dev/test DB role is a superuser and bypasses RLS regardless, so it requires a dedicated
-  non-superuser DB role as a prerequisite (an operations task, out of scope here).
-- **Post-login redirect-back with open-redirect protection**: unauthenticated
-  page requests were already redirected to `/login` by `proxy.ts` before this change, but
-  always landed on `/` after signing in, losing the user's original destination. `proxy.ts`
-  now carries the originally-requested path via `?redirect=`, and `app/[locale]/login/page.tsx`
-  navigates there after a successful sign-in (credentials or Google). The new
-  `lib/auth/safe-redirect.ts` (`safeRedirectPath()`) validates the param is a same-origin,
-  path-absolute value before use — off-site, protocol-relative, and backslash-trick values
-  are rejected and fall back to `/`. API routes are unaffected (still return JSON `401`/`404`);
-  the public-path exclusion list (`/login`, `/register`, `/docs`, `/legal`, static assets) is
-  unchanged and was re-verified to produce no redirect loop. See
-  `docs/knowledge/unauthenticated-page-redirect.md`.
-- **`@mention` support, server and client.** A new schema-global `searchMentionUserOptions()`
-  server action (`lib/mention/search.ts`) returns org-scoped candidates (via the same
-  organization-membership relation as `getAssociatedOrganizations()`, since `user` has no
-  `organization_id` FK) with Option B graceful degradation on a `user` read-permission denial.
-  New always-present `MentionInput`/`MentionText` components (`components/_standard/`) provide an
-  `@`-triggered candidate picker inserting `@[user_id:<id>]` markers, and a renderer that turns
-  them into profile links or plain chips depending on the viewer's `canViewUserProfile`.
-  `MentionInput` wires into any entity's own `x-mention: true` field on its edit form
-  (`mention_fields`), including the "write a comment"/edit-comment textareas inside
-  `CommentListWrapper` (`form_upsert.tsx.jinja2` passes `searchMentionUserOptions` down and
-  threads `canViewUserProfile`/`mentionUserContext` to the edit page, previously wired only for
-  the read-only `form_view.tsx.jinja2` path). `MentionText` wires into the comment display when
-  `comment_has_mention`, via a new `renderMessage` render-prop on `CommentListWrapper`.
-  `encodeMentions()` is retired from the comment save path — the picker now inserts
-  `@[user_id:<id>]` markers directly, so `add/updateXxxComment()` store the raw client text (the
-  function itself is kept, deprecated, for backward compatibility and unit tests). New
-  `'mentioned_in_comment'` notification fires on newly-mentioned users (self-mentions excluded;
-  edits notify only newly-added mentions, diffed against the prior message). Detail getters add a
-  `canViewUserProfile` flag (viewer's `user` read permission) for the display layer to decide
-  whether a mentioned name links to their profile. Fixed a latent conflict this exposed: the
-  shared comment getter was already decoding `@[user_id:<id>]` to a plain name server-side
-  (pre-dating the mention feature), which left no id for `MentionText` to link — decoding moved to
-  the REST API route only (keeping its JSON contract unchanged), while the page/FormView path now
-  gets the raw text plus a `mentionUserContext` id→name map. Also fixed: `context.py` (the
-  `types.ts.jinja2`-only context builder) never normalized either x-bridge form before detecting
-  one-to-one relations, so bridge-based comment threads were invisible to it — now mirrors
-  `build_context.py`'s normalization. See `docs/knowledge/mention-system.md`.
-- **Generated permission-denial and cross-org isolation API tests** (batch A): every
-  generated `cypress/e2e/api/<entity>.cy.ts` now includes PUT/DELETE/export/import
-  permission-denial tests (7.3–7.6, gated on `can_edit`/`can_delete`/`can_export`/
-  `import_eligible`) and, for organization-scoped entities, cross-organization isolation tests
-  (G3.1–G3.3: foreign-org CREATE rejected, foreign-org GET/PUT return 404). Adds the
-  `db:createCrossOrgScenario` test-fixture task. Adds a one-line coverage comment to every
-  generated spec recording which of these tests were actually generated. See
-  `docs/knowledge/permission-e2e-test-design.md`.
-- **Graceful degradation for foreign-key read-permission gaps**: a role that
-  can create/edit an entity but lacks read on one of its FK targets (e.g.
-  can manage `approval_flow` but not `role`) previously crashed the create
-  and edit pages entirely (`search{Entity}Options()` threw inside the
-  page's data-fetching `Promise.all`). The affected field now renders
-  disabled instead — read-only for a required FK (which also blocks `/new`
-  entirely with an explanatory message, since there's no way to populate
-  it), clearable for an optional FK. A required FK omitted from an update
-  because of this now falls back to the record's existing value rather
-  than failing validation. Template-layer change only, no Prisma schema
-  change — regenerate to pick it up, no migration needed. See
+- **FK autocomplete search now derives from `labelField`; `x-relationship.searchField` is
+  removed.** The two used to be independent declarations that could silently drift apart.
+  **Breaking for schema authors**: `validate.py` now rejects any schema still declaring
+  `searchField`. See `docs/knowledge/schema-yaml-configuration.md` §5.
+- **CSV import now supports composite/dotted `labelField` FK columns** (previously export-only)
+  — a CSV cell is matched against the full rendered label text. An ambiguous match is rejected
+  at row granularity (`MULTI_MATCH`). See `docs/knowledge/csv-import-composite-labelfield.md`.
+- **`x-self-only`: new entity-level flag for permission-independent, per-creator data
+  isolation (Stage 1).** No permission grant (including `general.read`) can widen it; a
+  non-owner's row reads as `404 Not Found`. `x-self-only: { admin_bypass: true }` allows
+  privileged read, with a mandatory (fail-closed) audit write. The account **Settings** page now
+  uses this (other users' settings are no longer reachable via any permission grant). Row-Level
+  Security (Stage 2) is not implemented. See `docs/knowledge/self-only-entity.md`.
+- **Post-login redirect-back with open-redirect protection** — signing in now returns to the
+  originally-requested page (`?redirect=`) instead of always landing on `/`.
+  `safeRedirectPath()` rejects off-site/protocol-relative/backslash-trick values, falling back
+  to `/`. See `docs/knowledge/unauthenticated-page-redirect.md`.
+- **`@mention` support, server and client.** New `MentionInput`/`MentionText` components and a
+  `searchMentionUserOptions()` server action; wires into any entity's `x-mention: true` field
+  and comment threads. Fires a new `'mentioned_in_comment'` notification. See
+  `docs/knowledge/mention-system.md`.
+- **Generated permission-denial and cross-org isolation API tests (batch A)**: every generated
+  `cypress/e2e/api/<entity>.cy.ts` now includes PUT/DELETE/export/import permission-denial
+  tests and, for org-scoped entities, cross-organization isolation tests. Adds the
+  `db:createCrossOrgScenario` test-fixture task. See `docs/knowledge/permission-e2e-test-design.md`.
+- **Graceful degradation for foreign-key read-permission gaps** — a role that can create/edit
+  an entity but lacks read on one of its FK targets used to crash the create/edit page entirely;
+  the affected field now renders disabled instead (read-only + blocks `/new` if required,
+  clearable if optional). No Prisma/migration change. See
   `docs/knowledge/fk-read-permission-graceful-degradation.md`.
 - **Terms of Service / Privacy Policy pages** (`/[locale]/legal/terms`,
-  `/[locale]/legal/privacy`), linked from the registration page. Content is
-  plain Markdown, one file per document/locale under `content/legal/`,
-  resolved independently of the site's UI locale via a `?lang=` query
-  parameter — adding a new document language is adding two Markdown files,
-  no code change. See `docs/knowledge/legal-documents.md`. Both documents
-  are explicitly labeled templates requiring legal review and
-  deployment-specific `[PLACEHOLDER]` values before real use.
+  `/[locale]/legal/privacy`), linked from registration. Per-locale plain Markdown under
+  `content/legal/`; both are explicitly labeled templates requiring legal review before real
+  use. See `docs/knowledge/legal-documents.md`.
 
 ### Fixed
 - **Mention-collection loops read the wrong field off the comment relation**
