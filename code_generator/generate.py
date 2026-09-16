@@ -478,7 +478,7 @@ _VERCEL_JSON_DEFAULTS = {
 def _write_vercel_json_crons(path: Path, scheduled_task_entities: list) -> None:
     """Write vercel.json's `crons` array from x-scheduled-task declarations
     (cmd_781) — the only generator-owned key in this otherwise hand-authored
-    file. Every other key (framework/buildCommand/regions/...) is read back
+    file. Every other key (framework/buildCommand/...) is read back
     verbatim and left untouched. `crons` is fully replaced, not merged, each
     run, so a task_id removed from the schema also disappears from
     vercel.json — same "no orphaned entries" contract as
@@ -486,12 +486,25 @@ def _write_vercel_json_crons(path: Path, scheduled_task_entities: list) -> None:
     unlike registry.ts, this file's other keys are meant to be hand-edited —
     the file has no "GENERATED — do not edit" contract as a whole, only this
     one key does.
+
+    `regions` is a second, narrower self-heal (cmd_1080): if an existing
+    vercel.json is missing `regions` entirely, it is backfilled with the
+    single-region default below. An existing `regions` value — whatever it
+    is — is never touched. This is not a path toward multi-region fan-out:
+    per cmd_1080, if the single sin1 region hits the Vercel WAF request
+    cap, the fix is to raise the cap, not spread load across regions. The
+    default here exists only to self-heal a file that was written before
+    `regions` existed, or otherwise lost the key.
     """
     if path.exists():
         with open(path, encoding='utf-8') as f:
             data = json.load(f)
     else:
         data = dict(_VERCEL_JSON_DEFAULTS)
+
+    regions_added = 'regions' not in data
+    if regions_added:
+        data['regions'] = list(_VERCEL_JSON_DEFAULTS['regions'])
 
     crons = [
         {'path': f"/api/scheduled-tasks/{ent['task_id']}", 'schedule': ent['interval']}
@@ -500,11 +513,13 @@ def _write_vercel_json_crons(path: Path, scheduled_task_entities: list) -> None:
     ]
 
     if crons:
-        changed = data.get('crons') != crons
+        crons_changed = data.get('crons') != crons
         data['crons'] = crons
     else:
-        changed = 'crons' in data
+        crons_changed = 'crons' in data
         data.pop('crons', None)
+
+    changed = crons_changed or regions_added
 
     if changed or not path.exists():
         with open(path, 'w', encoding='utf-8') as f:

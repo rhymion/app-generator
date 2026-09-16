@@ -32,14 +32,34 @@ anywhere else that could drift from this file.
 
 One existing exception, not a place to add a new one: `code_generator/generate.py`'s
 `_VERCEL_JSON_DEFAULTS` dict hardcodes `'regions': ['sin1']` as the fallback
-content used only when `vercel.json` doesn't already exist — normal
-`generate-code` runs read back and preserve the existing file's `regions`
-value verbatim (only the `crons` key is rewritten), so this fallback does
-not fight the checked-in file in practice. `code_generator/tests/test_vercel_json_crons.py`
-also asserts `regions == ['sin1']` as a test fixture. If the region is ever
-changed per the steps below, update `_VERCEL_JSON_DEFAULTS` and the test
-fixture too, or a future first-time `vercel.json` generation (or a stale
-test) would silently regress to `sin1`.
+content used both when `vercel.json` doesn't already exist yet, and as a
+self-heal backfill when an existing `vercel.json` is missing the `regions`
+key entirely (e.g. a file written before this key existed, or one that
+lost it by hand-edit). Normal `generate-code` runs read back and preserve
+an *existing* `regions` value verbatim, whatever it is — only a genuinely
+absent key gets the default filled in, and only the `crons` key is
+otherwise rewritten. `code_generator/tests/test_vercel_json_crons.py`
+covers both directions: a missing `regions` key gets backfilled with
+`['sin1']`, and an existing value (including one that differs from the
+default, e.g. `['fra1']`) is left untouched. It also asserts
+`regions == ['sin1']` as a test fixture for the default itself. If the
+region is ever changed per the steps below, update `_VERCEL_JSON_DEFAULTS`
+and the test fixture too, or a future first-time `vercel.json` generation
+(or the self-heal path) would silently regress to `sin1`.
+
+**Consumers also carry `regions` directly now**: `proj_c`/`proj_g`/`proj_h`
+each got their `vercel.json`'s `regions` key added or confirmed explicitly,
+as a separate, parallel change to this generator-side self-heal. The
+generator-side self-heal above is a safety net for the case a consumer's
+`vercel.json` loses or never had the key — it is not the primary mechanism
+consumers are expected to rely on.
+
+**Multi-region fan-out is not an approved path around the Vercel WAF
+request cap**: the project's design deliberately keeps a single region
+(`sin1`) per deploy. If that single region's traffic approaches the
+platform's WAF request-rate cap, the fix is to request a higher cap for
+that region, not to spread requests across multiple regions. Do not
+reintroduce a multi-region `regions` array as a cap workaround.
 
 ## Changing the region (e.g. customer provisions Neon in a different region)
 

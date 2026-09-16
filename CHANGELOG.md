@@ -6,6 +6,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **A `vercel.json` that lost its `regions` key (or predates it) was never
+  repaired by `generate-code`**: `_write_vercel_json_crons` in
+  `code_generator/generate.py` already reads back and patches this
+  otherwise hand-authored file (for the `crons` key), but a missing
+  `regions` key was previously left absent forever. It now self-heals: a
+  missing `regions` key is backfilled with the single-region default
+  (`['sin1']`); an existing value -- whatever it is -- is never touched.
+  Covered by new cases in `code_generator/tests/test_vercel_json_crons.py`.
+  See `docs/knowledge/vercel-region-alignment.md`.
 - **An unreachable Redis crashed the whole `/api/auth/*` surface instead of degrading**
   (Issue #587): `lib/rate-limit/redis.ts`'s `check()` had no error handling around its
   `ioredis` `eval` call, so a Redis outage produced an uncaught exception on every
