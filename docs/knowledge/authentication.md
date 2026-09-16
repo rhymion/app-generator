@@ -284,6 +284,40 @@ Acceptable for a generated-app baseline; revisit with caching (careful —
 caching would reintroduce the exact revocation delay this field exists
 to close) if it shows up in profiling for a specific deployment.
 
+**Rate limiting the challenge itself (Issue #588):** `proxy.ts`'s
+rate-limit matcher only covers `/api/auth/*` — `/mfa-challenge` is a
+normal page route whose Server Action (`completeMfaChallenge`,
+`app/[locale]/mfa-challenge/actions.ts`) sat entirely outside it, so an
+attacker holding a stolen first-factor session could brute-force the
+TOTP/recovery code with no rate limit at all. `completeMfaChallenge` now
+checks a dedicated `auth:mfa:challenge` bucket (`lib/rate-limit/index.ts`,
+10 attempts / 5 min) before calling `verifyMfaCode`. Unlike every other
+bucket in that module, it's keyed by the session's **user id**, not IP:
+the attacker in this scenario already holds a valid session (so IP
+rotation is trivial) but can't change which user id that session belongs
+to. A blocked attempt returns `{ ok: false, error: 'RATE_LIMITED',
+retryAfterSeconds }` without ever calling `verifyMfaCode` — no guess is
+spent against the DB while blocked.
+
+The same "Server Action outside the `/api/auth/*` matcher" shape exists
+in `lib/mfa/enrollment.ts`'s `completeEnrollment`/`disableMfa`/
+`regenerateRecoveryCodes` (backing `/setting/mfa`) — flagged but left
+unfixed by this change, since those all operate on the caller's *own*
+account code (materially lower severity than a stolen-session attacker
+against someone else's second factor) and were out of the fix's stated
+scope.
+
+**Fail-open on a Redis outage (Issue #587):** the rate limiter is a
+defensive gate in front of auth, not auth itself. `lib/rate-limit/
+redis.ts`'s `check()` now catches any error from the underlying
+`ioredis` `eval` call (connection refused, timeout, …) and returns an
+`allowed: true` decision instead of throwing — an unreachable Redis must
+never take the entire `/api/auth/*` surface down with a 500. Every
+fail-open is logged (`console.error`, tagged `[rate-limit:fail_open]`,
+same "log and continue" contract as `lib/audit-log.ts`'s DB-write
+fail-open) so the degraded window is visible in server logs rather than
+silently inferred from an absence of 429s.
+
 **API keys are unaffected by any of this.** `authenticateApiKey()`
 (`lib/api-auth.ts`) has no MFA check by design — API keys are
 machine-to-machine, long-lived credentials with their own secret; MFA
