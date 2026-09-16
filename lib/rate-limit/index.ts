@@ -18,9 +18,15 @@
  *   - `auth:callback`           — OAuth callback handling
  *
  * The key inside each bucket is whatever uniquely identifies the abuser —
- * today, the caller's IP. Future enhancements (per-account ceilings, per-email
- * brute-force tracking) can layer additional buckets without changing the
- * interface.
+ * for the three buckets above, the caller's IP. `auth:mfa:challenge`
+ * (Issue #588) is the first per-account bucket: it's keyed by the
+ * authenticated user's id rather than IP, because the second-factor
+ * Server Action (`app/[locale]/mfa-challenge/actions.ts`) is only reachable
+ * after a valid first-factor session exists — an attacker brute-forcing a
+ * stolen session's TOTP/recovery code can rotate IPs, but not the session's
+ * user id. Future enhancements (per-email brute-force tracking on the
+ * unauthenticated surfaces) can layer additional buckets without changing
+ * the interface.
  *
  * Choosing the implementation
  * ---------------------------
@@ -73,6 +79,12 @@ const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
   // 60 callback hits per IP per minute. Callbacks are exchange-driven so
   // genuine traffic is bounded; allow a comfortable burst.
   'auth:callback':           { limit: 60, windowMs: 60_000 },
+  // 10 second-factor attempts per user per 5 minutes (Issue #588). Keyed by
+  // user id, not IP — see the module doc above. A genuine user fat-fingering
+  // a 6-digit code a few times in a row is well under this; a script
+  // spraying candidates against the 10^6 TOTP space or the recovery-code
+  // list is not.
+  'auth:mfa:challenge':      { limit: 10, windowMs: 5 * 60_000 },
 };
 
 // The Cypress UI suite intentionally logs in fresh for every `it()` (each

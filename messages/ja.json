@@ -170,6 +170,7 @@
     "mfaRequired": "サインインを完了するため、認証アプリの 6 桁コードを入力してください。",
     "mfaChallengeTitle": "本人確認",
     "mfaInvalid": "コードが一致しません。新しい 6 桁コードを入力するか、リカバリーコードを使用してください。",
+    "mfaRateLimited": "試行回数が上限に達しました。数分待ってから再度お試しください。",
     "legalAgreementNotice": "アカウントを作成すると、<terms>利用規約</terms>および<privacy>プライバシーポリシー</privacy>に同意したものとみなされます。"
   },
   "Legal": {
