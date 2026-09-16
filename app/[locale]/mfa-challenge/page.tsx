@@ -67,7 +67,13 @@ export default function MfaChallengePage() {
     try {
       const result = await completeMfaChallenge(code);
       if (!result.ok) {
-        setError(result.error === "SESSION_REQUIRED" ? t("loginError") : t("mfaInvalid"));
+        if (result.error === "SESSION_REQUIRED") {
+          setError(t("loginError"));
+        } else if (result.error === "RATE_LIMITED") {
+          setError(t("mfaRateLimited"));
+        } else {
+          setError(t("mfaInvalid"));
+        }
         setSubmitting(false);
         return;
       }

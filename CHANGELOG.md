@@ -15,6 +15,22 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   (`['sin1']`); an existing value -- whatever it is -- is never touched.
   Covered by new cases in `code_generator/tests/test_vercel_json_crons.py`.
   See `docs/knowledge/vercel-region-alignment.md`.
+- **An unreachable Redis crashed the whole `/api/auth/*` surface instead of degrading**
+  (Issue #587): `lib/rate-limit/redis.ts`'s `check()` had no error handling around its
+  `ioredis` `eval` call, so a Redis outage produced an uncaught exception on every
+  credential/OAuth sign-in and callback request. The Redis adapter now fails OPEN on any
+  error — availability over the marginal brute-force protection lost while Redis is down —
+  and always logs the degraded window (`console.error`, tagged `[rate-limit:fail_open]`) so
+  the fallback is never silent. Covered by a new test in `lib/rate-limit/redis.test.ts`.
+- **OAuth+MFA second-factor Server Action had no rate limiting** (Issue #588):
+  `completeMfaChallenge` (`app/[locale]/mfa-challenge/actions.ts`) isn't reachable through
+  `proxy.ts`'s `/api/auth/*` rate-limit matcher — it's a normal page route's Server Action —
+  so it had zero protection against a stolen-session attacker brute-forcing the
+  TOTP/recovery code. Added a new `auth:mfa:challenge` rate-limit bucket (10 attempts / 5
+  min, `lib/rate-limit/index.ts`), keyed by the session's user id rather than IP: the
+  attacker already holds a valid first-factor session and can rotate IPs, but not the
+  session's user id. Surfaces a new `RATE_LIMITED` error on the challenge page. Covered by
+  a new `app/[locale]/mfa-challenge/actions.test.ts`.
 - **`grant-all-permissions.ts` (dev/verification tool) granted an operation regardless of
   that entity's own `x-generate` configuration**: it iterated every `SEED_ENTITIES` name and
   granted a blanket `{create, read, update, delete, import: true}`, never consulting
