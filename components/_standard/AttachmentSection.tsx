@@ -8,7 +8,7 @@ import Link from '@mui/material/Link';
 import { useTranslations } from 'next-intl';
 import EditableListWrapper, { EditableListWrapperItem } from './EditableListWrapper';
 import OrderedEditableListWrapper from './OrderedEditableListWrapper';
-import { setAttachmentsForBridge } from '@/lib/attachment/actions';
+import { setAttachmentsForBridge } from '@/lib/attachment/bridge_actions';
 import type { ModelPermissions } from '@/lib/authz';
 
 const TYPE_IMAGE = 'image';
@@ -70,11 +70,11 @@ function ReadOnlyAttachmentList({
             </Link>
             {variant === 'image' && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img
+              (<img
                 src={a.path}
                 alt={a.name}
                 style={{ display: 'block', maxWidth: 80, maxHeight: 80, objectFit: 'contain', marginTop: 4 }}
-              />
+              />)
             )}
           </Box>
         ))}

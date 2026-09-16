@@ -1,4 +1,4 @@
-# Env File Loading Paths and the Scope of `.local` Overrides (cmd_503)
+# Env File Loading Paths and the Scope of `.local` Overrides
 
 **Status: Adopted**
 **Date: 2026-07-31**
@@ -23,7 +23,7 @@ file — defeating the purpose of the `.local` convention for that variable.
 | `scripts/run-next-dev.js` | `@next/env` `loadEnvConfig()` | Yes |
 | `scripts/run-next-start.js` | `@next/env` `loadEnvConfig()` | Yes |
 | `scripts/run-e2e.js` | `@next/env` `loadEnvConfig()` | Yes |
-| `scripts/seed.ts`, `scripts/seed-tenant.ts` | `@next/env` `loadEnvConfig()` | Yes |
+| `scripts/seed-baseline.ts` | `@next/env` `loadEnvConfig()` | Yes |
 | `next build` / `next dev` / `next start` (invoked directly, outside the scripts above) | Next.js's own internal `@next/env` call | Yes — same rule, see the NODE_ENV trap below |
 | `npm run docker:up:test` / `docker:down:test` / `docker:up:dev` / `docker:down:dev` / `docker:up:prod` / `docker:down:prod` | `docker compose --env-file` (was: single file) | **Fixed in this cmd** — now layers `.local` when present |
 | `npm run pretest:e2e:cy:api` | same `docker compose --env-file` path as above | **Fixed in this cmd** (now routed through the same wrapper) |
@@ -115,7 +115,7 @@ shell session, but it is a workaround for that session only — it does not
 change what a fresh shell (or CI) resolves, so the `.local`-file fix above
 remains the durable mechanism for anyone who isn't manually exporting.
 
-## Verification performed (subtask_503a)
+## Verification performed
 
 - `.env.test.local`-only variable (`COMPOSE_PROJECT_NAME`) confirmed absent
   from `docker compose ... config` output before the fix (single
@@ -124,13 +124,25 @@ remains the durable mechanism for anyone who isn't manually exporting.
   by `npm run docker:up:test` with a dedicated, isolated project name and
   ports.
 - `docker:up:test` confirmed to succeed (exit 0, fallback project name) in a
-  tree with no `.env.test.local` present at all.
-- Full mandatory gate (`.claude/commands/update-generator.md`'s 9 steps —
-  pytest, vitest, `test:e2e:build`, `check:generated`, `test:e2e:cy:api`,
-  `test:e2e:cy:ui`, lint, `npm audit --omit=dev --audit-level=high`,
-  `pip-audit`) passed with zero regressions in an isolated worktree with
-  dedicated ports, `check:generated` confirming zero golden diff (this cmd
-  touches only env-file loading, no generator/template code).
+  tree with no `.env.test.local` present at all, **at the time of this
+  verification**. A later, unrelated change (`scripts/docker-compose-env.js`,
+  commit `7fa08b47` / PR #420) replaced that silent basename-fallback with a
+  fail-closed guard: today, the same scenario (no `.env.test.local`, no
+  `COMPOSE_PROJECT_NAME` in the shell or either env file, and not `CI=true`)
+  makes `docker:up:test` refuse to run (exit 1) instead of falling back —
+  see the "COMPOSE_PROJECT_NAME fail-closed guard" comment block at the top
+  of `scripts/docker-compose-env.js`. The `.local`-layering behavior itself
+  (this doc's actual subject) is unaffected by that later change.
+- Full mandatory gate (`.claude/commands/update-generator.md`'s Completion
+  gate — 9 steps at the time of this verification: pytest, vitest,
+  `test:e2e:build`, `check:generated`, `test:e2e:cy:api`, `test:e2e:cy:ui`,
+  lint, `npm audit --omit=dev --audit-level=high`, `pip-audit`; the gate has
+  since grown to 20 steps, adding ten fixture-schema generate-code→tsc gates
+  and a README-sync check — see the current `.claude/commands/
+  update-generator.md` for the full list) passed with zero regressions in
+  an isolated worktree with dedicated ports, `check:generated` confirming
+  zero golden diff (this cmd touches only env-file loading, no generator/
+  template code).
 - The gate run itself is a live demonstration of the underlying goal: the
   git-tracked `.env.test` in this repo has never contained `AUTH_SECRET` or
   any other secret (it only has non-secret test settings — ports, the fixed

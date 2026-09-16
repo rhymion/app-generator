@@ -1,0 +1,36 @@
+// GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
+import type { PrismaClient } from '@/app/generated/prisma/client';
+
+type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+
+/**
+ * Called before an approval_request for {{ snake_name }} is marked approved
+ * (before approval_request.status is written), inside the same Prisma
+ * transaction as that write -- the pre-approval convergence point,
+ * symmetric to validateCustomRules() on the create/update side. Customize
+ * this function to reject an approval by throwing.
+ *
+ * Throwing here rolls back the entire approve action -- both the REST route
+ * (app/api/approval_request/[id]/approve/route.ts) and the Server Action
+ * path (lib/approval_request/actions_core.ts) await this call from inside
+ * their own prisma.$transaction() callback, before any row is written, so
+ * an uncaught error prevents the approval entirely.
+ *
+ * Default (unedited) stub is a no-op -- unlike afterApprove (opt-in via
+ * x-approval.on_approved.emit_hook, a rare side effect), this hook is
+ * unconditional on every entity declaring x-approval, matching
+ * validateCustomRules's own unconditional default.
+ *
+ * @param _tx - Prisma transaction client
+ * @param _entityId - ID of the {{ snake_name }} about to be approved
+ * @param _approvableId - ID of the approvable record
+ * @param _actorId - ID of the user performing the approval
+ */
+export async function beforeApprove(
+  _tx: Tx,
+  _entityId: string,
+  _approvableId: string,
+  _actorId: string,
+): Promise<void> {
+  // TODO: implement pre-approval validation here
+}

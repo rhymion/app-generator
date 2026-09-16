@@ -3,11 +3,12 @@ import { NextResponse, NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import { routing } from './i18n/routing';
 import { getRateLimiter } from '@/lib/rate-limit';
+import { safeRedirectPath } from '@/lib/auth/safe-redirect';
 
 const intlMiddleware = createIntlMiddleware(routing);
 
 // Paths that do not require authentication (matched after stripping locale prefix)
-const PUBLIC_PATHS = ['/login', '/register', '/docs'];
+const PUBLIC_PATHS = ['/login', '/register', '/docs', '/legal'];
 
 // Map a request to the rate-limit bucket name. Returns null when the request
 // shouldn't be rate-limited (e.g. `/api/auth/session` is hit on every page
@@ -84,10 +85,12 @@ function normalizeIntlRedirect(req: NextRequest, response: NextResponse): NextRe
 }
 
 // Auth.js v5 proxy. `auth()` wraps the handler and exposes `req.auth` (the
-// resolved Session, or null). With `session.strategy = "database"` for
-// OAuth users, this resolution involves a DB lookup against the Session
-// table — `runtime: "nodejs"` below ensures Prisma works here. Credentials
-// users still arrive with a JWT cookie and resolve without a DB hit.
+// resolved Session, or null). `session.strategy` is pinned to "jwt" for
+// every provider (auth.ts — see docs/knowledge/authentication.md "Session
+// strategy"), so this resolution decodes the JWT cookie rather than hitting
+// the Session table. `runtime: "nodejs"` below is still required: auth.ts's
+// jwt() callback does its own Prisma reads (mfa_enabled / mfa_token_version,
+// cmd_527) on every request, independent of the session strategy.
 export const proxy = auth(async (req) => {
   const { pathname } = req.nextUrl;
 
@@ -150,7 +153,40 @@ export const proxy = auth(async (req) => {
   // for credentials, both resolved by the auth() wrapper).
   if (!req.auth) {
     const locale = localePrefix ?? routing.defaultLocale;
-    return NextResponse.redirect(buildExternalUrl(req, `/${locale}/login`));
+    const loginUrl = buildExternalUrl(req, `/${locale}/login`);
+    // buildExternalUrl clones req.nextUrl.href wholesale and only overrides
+    // pathname, so it carries over the *original* page's query string (e.g.
+    // "?tab=2") onto the /login URL. Clear it before adding our own param —
+    // that string belongs on the redirect target, not on /login itself.
+    loginUrl.search = '';
+    // Carry the originally-requested path so the login page can send the
+    // user back where they were headed. This value always originates from
+    // our own req.nextUrl (never attacker input) so it's inherently safe to
+    // write here — safeRedirectPath is still run for defense in depth and
+    // because it's the single source of truth the login page also uses to
+    // validate this same query param when reading it back.
+    const returnTo = safeRedirectPath(pathname + req.nextUrl.search);
+    if (returnTo && returnTo !== `/${locale}/login`) {
+      loginUrl.searchParams.set('redirect', returnTo);
+    }
+    return NextResponse.redirect(loginUrl);
+  }
+
+  // MFA challenge gate (cmd_527). auth.ts's jwt() callback sets
+  // `mfa_pending` when the first factor succeeded (OAuth sign-in for an
+  // mfa_enabled user, or a version-bump detected on an existing session)
+  // but the second factor hasn't been verified yet. Every protected route
+  // redirects to /mfa-challenge until that flag clears — except
+  // /mfa-challenge itself, to avoid a redirect loop. Unlike PUBLIC_PATHS,
+  // this still requires `req.auth` above: an unauthenticated visitor can't
+  // reach /mfa-challenge at all, only a user with a pending session can.
+  const isMfaChallengePath =
+    pathnameWithoutLocale === '/mfa-challenge' || pathnameWithoutLocale.startsWith('/mfa-challenge/');
+  if (req.auth.mfa_pending && !isMfaChallengePath) {
+    const locale = localePrefix ?? routing.defaultLocale;
+    const url = buildExternalUrl(req, `/${locale}/mfa-challenge`);
+    url.searchParams.set('callbackUrl', pathname);
+    return NextResponse.redirect(url);
   }
 
   return normalizeIntlRedirect(req, intlResponse);

@@ -1,0 +1,80 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+format-version: 3.0
+
+# Fixture design note (cmd_754[2]): a NEW fixture, not an extension of
+# decimal_gate or oto_mandatory. decimal_gate (code_generator/tests/
+# fixtures/decimal_gate/) exercises an entity's OWN Decimal columns
+# (getters.ts's decimal_display_columns .toString() override) and a Decimal
+# column reached through an embedded many-to-one relation (relationship_
+# mapping's deepStringifyDecimals wrap). oto_mandatory (code_generator/
+# tests/fixtures/oto_mandatory/) exercises a REQUIRED one-to-one selector
+# FK's initial-var naming split in page_new.tsx.jinja2 -- unrelated to
+# Decimal entirely. Neither covers the branch this fixture exists for:
+# `getAvailable{Target}sFor{Parent}` (getters.ts.jinja2), the one-to-one
+# selector's "available options" getter, returns raw
+# `prisma.{target}.findMany(...)` rows straight to a Client Component prop
+# typed against the generated (Decimal-as-string) interface -- when the
+# selector's target entity carries a Decimal column, this is a TS2322 at
+# build time, and it is untouched by decimal_display_columns (that only
+# stringifies THIS entity's own columns) or relationship_mapping's
+# deepStringifyDecimals wrap (that only covers parent_rels_raw/selector_oto_
+# rels embeds returned by THIS entity's own getters, not the target
+# entity's own getAvailable... getter). A third, self-contained fixture
+# keeps each fixture's purpose legible from its own json_schema.yaml,
+# matching the existing precedent of oto_mandatory being its own fixture
+# rather than folded into mention_gate.
+
+definitions:
+  user:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name: {}
+      email: {}
+
+  # The one-to-one selector's target -- has its own identity (own list/
+  # view/new/edit pages, api/test off) and, crucially, a Decimal column
+  # (amount) so `getAvailableOtoDecimalGateTargetsForOtoDecimalGateItem`
+  # (getters.ts.jinja2) returns rows that must be serialized before crossing
+  # the Server-to-Client Component boundary.
+  oto_decimal_gate_target:
+    x-generate:
+      api: false
+      test: false
+    fields:
+      name: {}
+      amount: {}
+
+  # The entity this fixture exists to exercise: a can_new/can_edit entity
+  # with a (nullable) `type: one-to-one` selector FK to
+  # oto_decimal_gate_target -- the exact shape that drives
+  # `getAvailable{Target}sFor{Parent}` in getters.ts.jinja2 and the
+  # `initialAvailable{Target}s` prop page_new.tsx.jinja2/page_edit.tsx.jinja2
+  # pass straight to FormUpsert.
+  oto_decimal_gate_item:
+    x-generate:
+      list: false
+      view: false
+      new: true
+      edit: true
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name: {}
+      oto_decimal_gate_target_id:
+        x-relationship:
+          type: one-to-one
+          target: oto_decimal_gate_target
+          labelField: name
+    properties:
+      oto_decimal_gate_target:
+        $ref: "#/definitions/oto_decimal_gate_target"

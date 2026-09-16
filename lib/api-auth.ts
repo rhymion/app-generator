@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { requirePermission, getSessionUserId, type RichPermissions, type Operation, type ItemContext } from '@/lib/authz';
 import { TtlLruCache } from '@/lib/_ttl_lru';
+import { AppError, type ErrorCode } from '@/lib/_errors';
+import { SCHEDULED_TASK_ROLE_NAME } from '@/lib/scheduled-tasks/system-actor';
 
 export class ApiError extends Error {
   constructor(
@@ -86,6 +88,47 @@ export async function requireSession(): Promise<{ userId: string }> {
   return { userId };
 }
 
+/**
+ * Resolve the caller's user id via X-API-Key/Authorization header when
+ * present, falling back to the NextAuth session cookie otherwise. Mirrors
+ * the dual-auth pattern in app/api/search/route.ts. Returns null when
+ * neither credential is present; throws ApiError(401) when an API key
+ * header is present but the key itself is invalid.
+ */
+export async function resolveActorId(request: NextRequest): Promise<string | null> {
+  const apiKey =
+    request.headers.get('X-API-Key') ||
+    request.headers.get('Authorization')?.replace('Bearer ', '');
+  if (apiKey) {
+    const { userId } = await authenticateApiKey(request);
+    return userId;
+  }
+  return getSessionUserId();
+}
+
+/** Same as {@link resolveActorId}, but throws ApiError(401) instead of
+ * returning null when neither an API key nor a session is present. */
+export async function requireDualAuth(request: NextRequest): Promise<{ userId: string }> {
+  const userId = await resolveActorId(request);
+  if (!userId) throw new ApiError(401, 'Authentication required. Provide X-API-Key header or sign in.');
+  return { userId };
+}
+
+/** Same dual-auth resolution as {@link requireDualAuth}, plus a check that
+ * the resolved caller holds {@link SCHEDULED_TASK_ROLE_NAME}. Throws
+ * ApiError(401) for no/invalid credential (same as requireDualAuth) or
+ * ApiError(403) when authenticated but not a member of the dedicated role. */
+export async function requireScheduledTaskRole(request: NextRequest): Promise<{ userId: string }> {
+  const { userId } = await requireDualAuth(request);
+  const roleCount = await prisma.role.count({
+    where: { name: SCHEDULED_TASK_ROLE_NAME, users: { some: { id: userId } } },
+  });
+  if (roleCount === 0) {
+    throw new ApiError(403, `Scheduled task access requires the '${SCHEDULED_TASK_ROLE_NAME}' role.`);
+  }
+  return { userId };
+}
+
 export async function requireApiPermission(
   userId: string,
   model: string,
@@ -100,11 +143,44 @@ export async function requireApiPermission(
   }
 }
 
+const APP_ERROR_STATUS_MAP: Record<ErrorCode, number> = {
+  SESSION_EXPIRED: 401,
+  PERMISSION_DENIED: 403,
+  NOT_FOUND: 404,
+  VALIDATION: 422,
+  CONFLICT: 409,
+  RESERVATION_LOCKED: 409,
+  RELATED_RECORD_INVALID: 422,
+  CAPACITY: 409,
+  UNKNOWN: 500,
+};
+
 export function handleApiError(error: unknown): NextResponse {
   if (error instanceof ApiError) {
     return NextResponse.json({ error: error.message }, { status: error.statusCode });
   }
+  if (error instanceof AppError) {
+    return NextResponse.json(
+      {
+        error: error.message,
+        code: error.code,
+        ...(error.field ? { field: error.field } : {}),
+        ...(error.reason ? { reason: error.reason } : {}),
+      },
+      { status: APP_ERROR_STATUS_MAP[error.code] ?? 500 },
+    );
+  }
   console.error('API error:', error);
+  // Plain `throw new Error(...)` sites (e.g. hand-written custom validation
+  // in service_validation_custom.ts, and the generated REQUIRED_FIELDS
+  // checks) are not converted to AppError — their message is the intended
+  // caller-facing text (cmd_613/cmd_646's convention, exercised by
+  // cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts's
+  // (API) specs). The AppError message-hiding rationale from cmd_695
+  // (React stripping error.message at the Server Components render
+  // boundary) does not apply here — this handler produces a plain JSON
+  // HTTP response, not a React render, so forwarding the message is safe
+  // and was the pre-cmd_695 behavior this restores.
   const message = error instanceof Error ? error.message : 'Internal server error';
   return NextResponse.json({ error: message }, { status: 500 });
 }

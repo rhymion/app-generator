@@ -1120,8 +1120,15 @@ class TestItemModeOverlapAvailability:
     def test_start_end_check_is_before_find_many_in_generated_code(self):
         """start >= end validation must appear before candidates findMany (not inside try/catch)."""
         code = self._service_code(include_exclude_statuses=True)
-        pos_start_check = code.find('Start date must be before end date')
-        pos_find_many = code.find('findMany')
+        # cmd_923b: scoped to the reservation section (reserve{Parent}Core
+        # onward) -- a bare code.find('findMany') from index 0 would instead
+        # match delete{Parent}()'s own unrelated findMany (validateOnDelete's
+        # pre-delete row fetch), which now precedes the reservation section
+        # in the rendered file.
+        reservation_section_start = code.find('Reservation: item mode')
+        assert reservation_section_start != -1, "Reservation section not found in generated code"
+        pos_start_check = code.find('Start date must be before end date', reservation_section_start)
+        pos_find_many = code.find('findMany', reservation_section_start)
         assert pos_start_check != -1, "Start date check not found in generated code"
         assert pos_find_many != -1, "findMany not found in generated code"
         assert pos_start_check < pos_find_many, (
@@ -1140,6 +1147,92 @@ class TestItemModeOverlapAvailability:
         assert pos_start_check < pos_for_loop, (
             "start >= end check must be before the candidates loop to avoid being swallowed"
         )
+
+
+# ---------------------------------------------------------------------------
+# 6b. cmd_603: self-overlap exclude-id fix — reserve*Core's
+# assertNoDuplicateReservation calls must exclude the very row currently being
+# reserved (requestId), covering BOTH generated branches (overlap-availability
+# candidate loop, and status-mode single findFirst). Without this, add{Entity}
+# creates the row (with its allocatedField already set, e.g. a user-picked
+# room) *before* reserve*Core runs in the same transaction, so the overlap
+# check finds its own just-created row as a false self-conflict — real-DB
+# reproduction (an earlier report) showed this manifests as either a
+# silent reassignment to a different candidate (multiple matching candidates)
+# or InsufficientPoolCapacityError (single matching candidate) for the
+# overlap-availability branch, since that branch's try/catch swallows the
+# raw "Reservation overlaps..." error; the status-mode branch has no
+# try/catch, so it throws that raw error directly and unconditionally.
+# update{Entity}'s separate re-validation path
+# (_build_item_reservation_update_check_code) already passed the row's own
+# `id` correctly pre-cmd_603 — reserve*Core never runs on update.
+# ---------------------------------------------------------------------------
+
+class TestSelfOverlapExcludeId:
+    """cmd_603: pin the exclude-self fix at the generated-code level for both
+    branches reserve*Core can render."""
+
+    def _render(self, entity_def: dict) -> str:
+        from jinja2 import Environment, FileSystemLoader
+        import os
+        schema = _room_schema({"room_reservation": entity_def})
+        entity = _entity_spec("room_reservation", schema)
+        ctx = build_context(entity, schema)
+        svc_ctx = service_context(ctx, schema)
+        template_dir = os.path.join(os.path.dirname(__file__), "..", "templates")
+        env = Environment(loader=FileSystemLoader(template_dir), keep_trailing_newline=True)
+        tmpl = env.get_template("service.ts.jinja2")
+        return tmpl.render({**ctx, **svc_ctx})
+
+    def test_overlap_branch_candidate_loop_excludes_request_id(self):
+        """(service.ts.jinja2:285 branch, availabilitySource: overlap — proj_c's
+        real room_reservation config): the per-candidate assertNoDuplicateReservation
+        call inside the try/catch loop must pass requestId, or every add{Entity}
+        whose first-ordered candidate is the room the user picked either silently
+        reassigns to a different room or (single-candidate case) throws
+        InsufficientPoolCapacityError."""
+        code = self._render(_overlap_mode_def())
+        assert (
+            "        await assertNoDuplicateReservation(\n"
+            "          tx as unknown as Pick<typeof prisma, 'room_reservation'>,\n"
+            "          candidate.id,\n"
+            "          dateRange,\n"
+            "          requestId\n"
+            "        );\n"
+            "      } catch {"
+        ) in code
+
+    def test_status_branch_single_candidate_excludes_request_id(self):
+        """(service.ts.jinja2:324 branch, status-mode item reservation with
+        dateRange, no availabilitySource): this call is NOT wrapped in try/catch,
+        so without excludeId it throws 'Reservation overlaps with an existing
+        booking' directly and unconditionally on every create."""
+        code = self._render(_item_mode_no_lines_def(with_date_range=True))
+        assert (
+            "    await assertNoDuplicateReservation(\n"
+            "      tx as unknown as Pick<typeof prisma, 'room_reservation'>,\n"
+            "      candidate.id,\n"
+            "      dateRange,\n"
+            "      requestId\n"
+            "    );"
+        ) in code
+
+    def test_update_path_unaffected_still_uses_own_id(self):
+        """update{Entity} never calls reserve*Core (only add{Entity} and the
+        standalone exported wrapper do) — it re-validates via a separate code
+        path that already passed the row's own `id` as excludeId before
+        cmd_603. Guards against a future refactor collapsing the two paths and
+        losing this distinction."""
+        code = self._render(_item_mode_no_lines_def(with_date_range=True))
+        assert (
+            "      if (_existingReservation?.room_id) {\n"
+            "        await assertNoDuplicateReservation(\n"
+            "          tx,\n"
+            "          _existingReservation.room_id as string,\n"
+            "          { check_in: checkIn, check_out: checkOut },\n"
+            "          id\n"
+            "        );\n"
+        ) in code
 
 
 # ---------------------------------------------------------------------------
@@ -1246,12 +1339,33 @@ def _make_ledger_schema() -> dict:
         "type": ["string", "null"],
         "pattern": "^c[a-z0-9]{24,}$",
     }
+    # cmd_562: inventory's own location_id FK — location identity is copied
+    # by id, not rendered as a denormalized display string, so the ledger
+    # domain resolver no longer inspects this x-relationship at all. It's
+    # still declared here for realism (generic UI label rendering elsewhere
+    # reads it independently of the ledger domain).
+    schema["definitions"]["inventory"]["properties"]["location_id"] = {
+        "type": "string",
+        "x-relationship": {"type": "many-to-one", "target": "location", "labelField": "name"},
+    }
+    schema["definitions"]["location"] = {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+            "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+            "name": {"type": "string"},
+        },
+    }
     # OD-1: top-level domain declaration resolved via transaction.ledgerDomain
     schema["x-ledger-entities"] = {
         "inventory_domain": {
             "pool": "inventory",
             "ledger": "inventory_transaction",
             "transactionable": "inventory_transactionable",
+            "itemField": "product_id",
+            "locationField": "location_id",
+            "lotField": "lot_number",
+            "expirationField": "expiration_date",
         }
     }
     return schema
@@ -1323,6 +1437,29 @@ class TestLedgerTransactionReservePath:
         code = _ledger_allocation_code()
         for field in ("product_id", "location", "lot_number", "expiration_date"):
             assert field in code
+
+
+class TestLedgerTransactionLocationIdCopy:
+    """cmd_562: the ledger row's location column is an id-FK
+    (location_id) copied verbatim from the claimed pool row — not a
+    denormalized display-string snapshot (cmd_550/PR #269's now-removed
+    labelField rendering), and not gated by any location entity's display
+    field naming at all."""
+
+    def test_location_id_copied_verbatim_from_candidate(self):
+        code = _ledger_allocation_code()
+        assert "location_id: _candidate.location_id" in code
+
+    def test_no_label_rendering_or_null_coalescing_on_location(self):
+        code = _ledger_allocation_code()
+        assert "location?." not in code
+        assert "location_id: _candidate.location_id ?? ''" not in code
+
+    def test_no_include_clause_needed_for_location(self):
+        """location_id is a plain scalar column on the pool entity — no
+        Prisma relation include is needed to read it."""
+        code = _ledger_allocation_code()
+        assert "include:" not in code
 
 
 class TestLedgerTransactionMutationGuards:

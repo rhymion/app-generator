@@ -1,7 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import bcrypt from "bcryptjs";
-import path from "path";
-import fs from "fs";
 
 // Mock the Prisma client
 const mockPrisma = {
@@ -29,9 +27,6 @@ const mockPrisma = {
 vi.mock("@/lib/prisma", () => ({
   default: mockPrisma,
 }));
-
-// Create a test database path
-const testDbPath = path.join(process.cwd(), ".test-db-auth");
 
 // Simulate the authorize function from auth.ts
 async function simulateAuthorize(credentials: {
@@ -141,7 +136,6 @@ describe("Registration Backend Integration Tests", () => {
       email: credentials.email,
       password: hashedPassword,
       api_key: null,
-      image: null,
     };
 
     // Mock the database calls
@@ -190,7 +184,6 @@ describe("Registration Backend Integration Tests", () => {
       email: firstCredentials.email,
       password: await bcrypt.hash(firstCredentials.password, 10),
       api_key: null,
-      image: null,
     };
 
     // Mock the database - user exists with different password
@@ -223,7 +216,6 @@ describe("Registration Backend Integration Tests", () => {
       email: credentials.email,
       password: hashedPassword,
       api_key: null,
-      image: null,
     };
 
     // Mock the database - user exists with correct password

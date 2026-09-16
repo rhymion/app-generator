@@ -15,6 +15,11 @@
 /cypress/videos
 /cypress/screenshots
 
+# e2e test-harness sentinel for the mock Google OAuth provider (cmd_528) —
+# written only by scripts/write-mock-oauth-sentinel.js, never committed.
+# See auth.ts's isMockGoogleOAuthTestEnabled().
+.mock-oauth-test-sentinel
+
 # Claude Code: personal, machine-specific permission overrides (defaultMode,
 # extra allow/deny rules). Never shared — see docs/knowledge/claude-code-settings-consumer-side.md
 .claude/settings.local.json
@@ -43,6 +48,7 @@ yarn-error.log*
 !.env.development
 !.env.test
 !.env.example
+!.env.vercel.production.local.example
 # .env.local, .env.*.local, .env.production remain ignored
 
 # GCP production secrets
@@ -91,6 +97,63 @@ __pycache__/
 # so it's a build artifact like the rest of the generated code, not a source file.
 code_generator/.generated/
 
+# mention-gate fixture check (cmd_535) scratch output — scripts/check_mention_gate_fixture.sh
+# regenerates this from code_generator/tests/fixtures/mention_gate/ on every run.
+.generated-mention-gate/
+
+# mention-gate-plain-image fixture check (cmd_803) scratch output —
+# scripts/check_mention_gate_plain_image_fixture.sh regenerates this from
+# code_generator/tests/fixtures/mention_gate_plain_image/ on every run.
+.generated-mention-gate-plain-image/
+
+# decimal-gate fixture check (cmd_705) scratch output — scripts/check_decimal_gate_fixture.sh
+# regenerates this from code_generator/tests/fixtures/decimal_gate/ on every run.
+.generated-decimal-gate/
+
+# oto-mandatory-gate fixture check (cmd_704 [2-a]) scratch
+# output — scripts/check_oto_mandatory_gate_fixture.sh regenerates this from
+# code_generator/tests/fixtures/oto_mandatory/ on every run.
+.generated-oto-mandatory-gate/
+
+# payment-gate fixture check (cmd_753) scratch output —
+# scripts/check_payment_gate_fixture.sh regenerates this from
+# code_generator/tests/fixtures/payment_gate/ on every run.
+.generated-payment-gate/
+
+# oto-decimal-gate fixture check (cmd_754[2]) scratch output —
+# scripts/check_oto_decimal_gate_fixture.sh regenerates this from
+# code_generator/tests/fixtures/oto_decimal_gate/ on every run.
+.generated-oto-decimal-gate/
+
+# chart-decimal-gate fixture check (cmd_755[1]) scratch output —
+# scripts/check_chart_decimal_gate_fixture.sh regenerates this from
+# code_generator/tests/fixtures/chart_decimal_gate/ on every run.
+.generated-chart-decimal-gate/
+
+# chart-scalar-gate fixture check scratch output —
+# scripts/check_chart_scalar_gate_fixture.sh regenerates this from
+# code_generator/tests/fixtures/chart_scalar_gate/ on every run.
+.generated-chart-scalar-gate/
+
+# approval-lockdown-gate fixture check (cmd_732) scratch output —
+# scripts/check_approval_lockdown_gate_fixture.sh regenerates this from
+# code_generator/tests/fixtures/approval_lockdown_gate/ on every run.
+# (pre-existing gap alongside its seven siblings above, noticed while
+# running the update-generator gate for cmd_781 — unrelated to that task.)
+.generated-approval-lockdown-gate/
+
+# uri-kind-gate fixture check (cmd_792) scratch output —
+# scripts/check_uri_kind_gate_fixture.sh regenerates this from
+# code_generator/tests/fixtures/uri_kind_gate/ on every run.
+.generated-uri-kind-gate/
+
+# direct-attachment-gate fixture check (cmd_788) scratch output —
+# scripts/check_direct_attachment_gate_fixture.sh regenerates this from
+# code_generator/tests/fixtures/direct_attachment_gate/ on every run.
+# (pre-existing gap alongside its siblings above, noticed while running the
+# update-generator gate for the user.image direct-FK migration.)
+.generated-direct-attachment-gate/
+
 # sample data
 custom/
 memory/
@@ -114,16 +177,22 @@ lib/dashboard/getters.ts
 lib/dashboard/service.ts
 lib/dashboard/types.ts
 !lib/organization/getters_associated.ts
+!lib/approval_flow/autocomplete_filter.ts
+!lib/approval_flow/service_validation_custom.ts
 !lib/approval_request/actions.ts
 !lib/approval_request/actions.test.ts
 !lib/approval_request/actions_core.ts
 !lib/approval_request/order-check.ts
+!lib/approval_request/submit_predicate.ts
+!lib/approval_request/submit_predicate.test.ts
 !lib/setting/password-actions.ts
 !lib/audit_log/getters.ts
 !lib/audit_log/types.ts
 !lib/audit_log/virtual_resolvers.ts
 !lib/compliance/**
 !lib/mention/**
+!lib/legal/**
+!lib/scheduled-tasks/system-actor.ts
 
 # ── app/[locale]/ ──
 app/\[locale\]/*/
@@ -139,6 +208,8 @@ app/\[locale\]/*/
 !app/\[locale\]/audit_log/**
 !app/\[locale\]/login/
 !app/\[locale\]/login/**
+!app/\[locale\]/mfa-challenge/
+!app/\[locale\]/mfa-challenge/**
 !app/\[locale\]/register/
 !app/\[locale\]/register/**
 !app/\[locale\]/setting/
@@ -151,6 +222,8 @@ app/\[locale\]/setting/view/
 !app/\[locale\]/docs/layout.tsx
 app/\[locale\]/docs/page.mdx
 app/\[locale\]/docs/*/
+!app/\[locale\]/legal/
+!app/\[locale\]/legal/**
 
 # ── app/api/ ──
 app/api/*/
@@ -176,24 +249,33 @@ app/api/approval_request/bulk/route.ts
 
 # ── components/ ──
 components/*/*
-!components/*/form_validation.ts
 !components/_standard/**
 !components/ui/**
 !components/setting/**
 components/setting/FormUpsert.tsx
 components/setting/FormView.tsx
 components/setting/column_def.tsx
+components/setting/form_validation.ts
 !components/audit_log/FormView.tsx
+!components/legal/**
 
 # ── cypress/e2e/ ──
 cypress/e2e/*.cy.ts
 !cypress/e2e/auth.cy.ts
+!cypress/e2e/auth_redirect.cy.ts
 !cypress/e2e/search_page.cy.ts
 !cypress/e2e/audit_log.cy.ts
 !cypress/e2e/import_modal.cy.ts
+!cypress/e2e/legal_pages.cy.ts
+!cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts
+!cypress/e2e/approval_flow_self_referential_children.cy.ts
+!cypress/e2e/approval_flow_desktop_crud.cy.ts
+!cypress/e2e/error_message_delivery.cy.ts
+!cypress/e2e/datagrid_native_date_input_typing.cy.ts
 cypress/e2e/mobile/*.cy.ts
 !cypress/e2e/mobile/layout.cy.ts
 !cypress/e2e/mobile/audit_log.cy.ts
+!cypress/e2e/mobile/approval_flow_crud.cy.ts
 cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/search.cy.ts
 !cypress/e2e/api/user_invalidate.cy.ts
@@ -202,8 +284,15 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/user_import.cy.ts
 !cypress/e2e/api/import_batch2.cy.ts
 !cypress/e2e/api/round_trip.cy.ts
+!cypress/e2e/api/fk_read_permission_graceful_degradation.cy.ts
+!cypress/e2e/api/approval_flow_crud.cy.ts
 !cypress/e2e/api/notification_approval.cy.ts
 !cypress/e2e/api/receiving_receipt_notification.cy.ts
+!cypress/e2e/api/multi_stage_approval_order_reached.cy.ts
+!cypress/e2e/api/self_only_access_control.cy.ts
+!cypress/e2e/api/self_only_setting_access_control.cy.ts
+!cypress/e2e/api/approval_request_resubmit_notification.cy.ts
+!cypress/e2e/api/write_once_side_effect_roundtrip_probe.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/

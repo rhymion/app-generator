@@ -1,13 +1,13 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-{% if has_comment_children or (is_splittable and split_config) %}
+{% if is_splittable and split_config %}
 import { useRouter } from 'next/navigation';
 {% endif %}
-{% if has_grid_children or children_raw %}
+{% if has_grid_children %}
 import type { GridColDef } from '@/components/ui/data';
 {% endif %}
-import type { FormViewProps{% if has_comment_children and named_constants %}, CommentReactionSummary{% endif %} } from '@/lib/{{ parent }}/types';
+import type { FormViewProps } from '@/lib/{{ parent }}/types';
 {% if has_grid_children %}
 import FieldsViewGrid from '@/components/_standard/FieldsViewGrid';
 {% if col_fn_names %}
@@ -23,27 +23,35 @@ import ImageDisplay from '@/components/_standard/ImageDisplay';
 {% if needs_link_display %}
 import AppFieldExternalLink from '@/components/_standard/AppFieldExternalLink';
 {% endif %}
+{% if needs_single_attachment_display %}
+import SingleAttachmentDisplay from '@/components/_standard/SingleAttachmentDisplay';
+{% endif %}
 {% if uses_format_label_value %}
 import { formatLabelValue } from '@/lib/_format';
+{% endif %}
+{% if uses_decimal_format %}
+import { formatDecimalDisplay } from '@/lib/_decimal_format';
 {% endif %}
 {% if has_list_children %}
 import ListWrapper from '@/components/_standard/ListWrapper';
 {% endif %}
 {% if has_comment_children %}
 import CommentListWrapper from '@/components/_standard/CommentListWrapper';
-import { add{{ parent_pascal }}Comment, update{{ parent_pascal }}Comment, delete{{ parent_pascal }}Comment{% if named_constants %}, toggle{{ parent_pascal }}CommentReaction{% endif %} } from '@/lib/{{ parent }}/actions';
-{% if named_constants %}
-import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 {% endif %}
+{% if comment_has_mention %}
+import MentionText from '@/components/_standard/MentionText';
 {% endif %}
 import AuditInfo from '@/components/_standard/AuditInfo';
-import { AppDetailShell, AppDetailHeader, AppFieldText, AppFieldBoolean{% if has_rel_links %}, AppFieldRelation{% endif %}{% if needs_accordion %}, AppSection{% endif %} } from '@/components/ui';
+import { AppDetailShell, AppDetailHeader, AppFieldText{% if uses_app_field_boolean %}, AppFieldBoolean{% endif %}{% if has_rel_links %}, AppFieldRelation{% endif %}{% if needs_accordion %}, AppSection{% endif %} } from '@/components/ui';
 {% if custom_view_imports %}
 {{ custom_view_imports }}
 {% endif %}
 {% for comp in entity_view_components %}
 import {{ comp.name }} from '{{ comp.path if comp.path else "./" + comp.name }}';
 {% endfor %}
+{% if submit_for_approval_needed %}
+import { submitForApproval{{ parent_pascal }} } from '@/lib/{{ parent }}/submit_actions';
+{% endif %}
 {% if is_splittable and split_config %}
 import { SplitActionSection } from './SplitActionSection';
 {% endif %}
@@ -51,13 +59,23 @@ import { SplitActionSection } from './SplitActionSection';
 import dayjs from 'dayjs';
 {% endif %}
 
-export default function FormView({ src, permissions{% if entity_view_components %}, currentUserRoleIds, currentUserId{% endif %} }: FormViewProps) {
+export default function FormView({ src, {% if can_update or entity_view_components %}permissions{% else %}permissions: _permissions{% endif %}{% if comment_has_mention %}, canViewUserProfile, mentionUserContext{% endif %}{% if entity_view_components %}, currentUserRoleIds, currentUserId{% endif %} }: FormViewProps) {
   const tf = useTranslations('Fields');
   const te = useTranslations('EntityLabel');
 {% if view_enum_ns_hooks %}
 {{ view_enum_ns_hooks }}
 {% endif %}
+{% if can_update %}
   const canEdit = permissions?.update ?? true;
+{% else %}
+  // x-generate.edit: false -- this entity has no update path at all (see
+  // actions_context()'s create-only branch), so the view page must never
+  // surface an edit affordance regardless of the caller's update
+  // permission. An orphaned edit screen left over from before edit was
+  // turned off (not regenerated, so still present on disk) can no longer
+  // be reached from here even if RBAC would otherwise allow it.
+  const canEdit = false;
+{% endif %}
 {% if is_splittable and split_config %}
   const router = useRouter();
 {% endif %}
@@ -66,6 +84,20 @@ export default function FormView({ src, permissions{% if entity_view_components 
 {% endif %}
 {% if column_variables %}
 {{ column_variables }}
+{% endif %}
+{% if submit_for_approval_needed %}
+  // cmd_841 ruling_4: onSubmitForApproval is wired only to the
+  // ApprovalSection entry below (not every entity_view_components entry --
+  // other custom components don't declare this prop, and passing it
+  // unconditionally would be a tsc excess-property error against those).
+  // The actual canSubmitForApproval() evaluation happens inside the
+  // component itself, over the current round it derives (round_id
+  // grouping) from the full approval_requests array it already receives
+  // via src -- cmd_844 gives that array a guaranteed `orderBy: {
+  // created_at: 'asc' }` (see build_context.py's approval_request child
+  // include), so the component can safely identify "the current round" as
+  // the round_id of the last element.
+  const _onSubmitForApproval = () => submitForApproval{{ parent_pascal }}(src.id);
 {% endif %}
   return (
     <AppDetailShell>
@@ -103,7 +135,7 @@ export default function FormView({ src, permissions{% if entity_view_components 
       />
 {% endif %}
 {% for comp in entity_view_components %}
-      <{{ comp.name }} src={src}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId} />
+      <{{ comp.name }} src={src}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId}{% if submit_for_approval_needed and comp.name == 'ApprovalSection' %} onSubmitForApproval={_onSubmitForApproval}{% endif %}{% if comp.name == 'ApprovalSection' %} hasOnWithdrawn={ {{ 'true' if has_on_withdrawn else 'false' }} }{% endif %} />
 {% endfor %}
     </AppDetailShell>
   );

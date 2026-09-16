@@ -9,7 +9,8 @@
 #   DRY_RUN=true ./scripts/gcp-setup.sh  # echo all write commands, no GCP changes
 #
 # Prerequisites: gcloud CLI, curl, docker
-# Must run after: scripts/gcp-deploy.sh (builds and pushes Docker images)
+# Must run before: scripts/gcp-deploy.sh (this script creates the Artifact
+# Registry repository that gcp-deploy.sh pushes images into)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -325,6 +326,8 @@ upsert_secret "app-database-url"        "$DATABASE_URL"
 upsert_secret "app-nextauth-secret"     "$AUTH_SECRET"
 upsert_secret "app-auth-secret"         "$AUTH_SECRET"
 upsert_secret "app-gcs-bucket-name"     "$GCS_BUCKET"
+upsert_secret "app-seed-admin-email"    "$SEED_ADMIN_EMAIL"
+upsert_secret "app-seed-admin-password" "$SEED_ADMIN_PASSWORD"
 
 if [[ -n "${REDIS_URL:-}" && "$REDIS_URL" != "rediss://<DRY_RUN_PLACEHOLDER>" ]]; then
   upsert_secret "app-redis-url" "$REDIS_URL"

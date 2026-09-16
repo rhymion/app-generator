@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireSession, handleApiError, ApiError } from '@/lib/api-auth';
+import { requireDualAuth, handleApiError, ApiError } from '@/lib/api-auth';
 import prisma from '@/lib/prisma';
 {% if has_approvable %}
 import { notifyApprovalRequestCreated } from '@/lib/_notifyApprovalRequest';
+import { createId } from '@paralleldrive/cuid2';
 {% endif %}
 
 const SPLIT_STATUS = '{{ status_split_value }}';
@@ -22,7 +23,9 @@ type SplitPart = {
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { userId } = await requireSession();
+    // cmd_648: dual-auth — X-API-Key/Authorization header when present,
+    // session cookie otherwise (see app/api/search/route.ts).
+    const { userId } = await requireDualAuth(req);
     {% if not has_approvable %}
     void userId;
     {% endif %}
@@ -44,7 +47,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       {% if has_approvable %}
       // cmd_439 F1: approval_requests included so split children can inherit
       // the parent's flow IDs (Option A — see _parentARFlowIds below).
-      include: { approvable: { include: { approval_requests: true } } },
+      // cmd_847 [③]: orderBy created_at asc added so the last element of the
+      // array is always the latest round's row — required by the
+      // pre-submission split guard's _latestRoundRequests below; the
+      // existing _parentARFlowIds derivation (a plain .map() over every
+      // row) is unaffected by row order.
+      include: { approvable: { include: { approval_requests: { orderBy: { created_at: 'asc' } } } } },
       {% endif %}
     });
     if (!parent) throw new ApiError(404, 'Not found');
@@ -57,6 +65,32 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (parent.approvable?.approved_at != null) {
       throw new ApiError(400, 'Cannot split an already-approved entity');
     }
+    {% if has_submit_on %}
+    // cmd_847 [③]: pre-submission guard — a draft (never submitted for
+    // approval) entity has no round to inherit into a split child, so
+    // splitting it would silently produce a child with zero approval
+    // requests (see subtask_847c design). Scoped to has_submit_on entities
+    // only: an x-approval-lines child (e.g. purchase_per_item) gets its
+    // approval_request(s) unconditionally at its PARENT's create time, with
+    // no submit_on transition of its own — an empty approval_requests array
+    // there means no approval_flow matched its entity_name, not "still
+    // draft", so this guard would reject a legitimately-configured split
+    // for the wrong reason (subtask_847f verification finding). Same
+    // round-based state basis as canSubmitForApproval/canWithdrawApproval
+    // (844c/847c) — the array is sorted created_at asc (include above), so
+    // its last element belongs to the latest round.
+    const _allRequests = (parent.approvable?.approval_requests ?? []) as
+      Array<{ round_id: string; status: string }>;
+    const _latestRoundId = _allRequests.length > 0
+      ? _allRequests[_allRequests.length - 1].round_id
+      : null;
+    const _latestRoundRequests = _latestRoundId
+      ? _allRequests.filter((r) => r.round_id === _latestRoundId)
+      : [];
+    if (_latestRoundRequests.length === 0) {
+      throw new ApiError(400, 'Cannot split an entity that has not yet been submitted for approval');
+    }
+    {% endif %}
     {% endif %}
     {% for f in per_part_required_mandatory %}
     // Each part must specify {{ f }}
@@ -85,11 +119,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     await prisma.$transaction(async (tx) => {
       // 1. Set parent status = split. approvable_id is mandatory (per cmd_296 ruling) — it is
       // never null'd and the approvable record is never deleted (history/audit
-      // trail preserved). Only the still-pending approval_requests are removed
-      // so the invalidated parent no longer shows as awaiting approval.
+      // trail preserved). The parent's approval_request rows are invalidated
+      // (not deleted, cmd_963) so the round no longer shows as awaiting
+      // approval, but the rows -- and any approval_history linked to them via
+      // onDelete: Cascade -- survive the split. canSubmitForApproval treats
+      // 'split_invalidated' as a permanent close, so the parent can never be
+      // resubmitted (see lib/approval_request/submit_predicate.ts).
       {% if has_approvable %}
       if (parent.approvable_id) {
-        await tx.approval_request.deleteMany({ where: { approvable_id: parent.approvable_id } });
+        await tx.approval_request.updateMany({
+          where: { approvable_id: parent.approvable_id },
+          data: { status: 'split_invalidated' },
+        });
       }
       {% endif %}
       await tx.{{ entity_name }}.update({
@@ -111,22 +152,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           where: { {{ bridge_fk_field }}: _parentBridgeId, event_type: 'reserve' },
         });
         for (const _row of _parentReserveRows) {
-          // Phase4: inventory.location_id FK — denormalized name from the
-          // ledger needs to be reverse-looked-up to a location_id before
-          // re-identifying the parent's reserved inventory row.
-          const _rowLocName = _row.location === '' ? null : _row.location;
-          const _rowLoc = _rowLocName
-            ? await tx.location.findFirst({ where: { name: _rowLocName } })
-            : null;
+          // cmd_562: {{ pool_location_field }} is an id on the ledger row
+          // itself — no reverse label lookup needed to re-identify the
+          // parent's reserved inventory row.
+          {% if pool_bin_field %}
+          // cmd_991: {{ pool_bin_field }} must join this tuple match
+          // when the domain declares it — same ambiguous-resolution shape
+          // as the ledger_write_stub afterReject fix (multiple bins can
+          // share the same item/location/lot/expiration).
+          {% endif %}
           await tx.{{ pool_entity }}.updateMany({
             where: {
-              product_id: _row.product_id,
-              // O-6 denormalization: inventory_transaction.location stores '' for null-location
-              // lots (written as `?? ''` at PO creation). inventory.location_id is NULL in the DB.
-              // Must undo the normalization — same pattern as service_after_reject.ts:105.
-              location_id: _rowLoc?.id ?? null,
-              ...(_row.lot_number != null ? { lot_number: _row.lot_number } : {}),
-              ...(_row.expiration_date != null ? { expiration_date: _row.expiration_date } : {}),
+              {{ pool_item_field }}: _row.{{ pool_item_field }},
+              {{ pool_location_field }}: _row.{{ pool_location_field }},
+              ...(_row.{{ pool_lot_field }} != null ? { {{ pool_lot_field }}: _row.{{ pool_lot_field }} } : {}),
+              ...(_row.{{ pool_expiration_field }} != null ? { {{ pool_expiration_field }}: _row.{{ pool_expiration_field }} } : {}),
+              {% if pool_bin_field %}
+              ...(_row.{{ pool_bin_field }} != null ? { {{ pool_bin_field }}: _row.{{ pool_bin_field }} } : {}),
+              {% endif %}
             },
             data: { reserved_quantity: { decrement: _row.reserved_delta } },
           });
@@ -136,10 +179,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               event_type: 'cancel',
               quantity_delta: 0,
               reserved_delta: -_row.reserved_delta,
-              product_id: _row.product_id,
-              location: _row.location ?? '',
-              lot_number: _row.lot_number,
-              expiration_date: _row.expiration_date,
+              {{ pool_item_field }}: _row.{{ pool_item_field }},
+              {{ pool_location_field }}: _row.{{ pool_location_field }},
+              {{ pool_lot_field }}: _row.{{ pool_lot_field }},
+              {{ pool_expiration_field }}: _row.{{ pool_expiration_field }},
+              {% if pool_bin_field %}
+              {{ pool_bin_field }}: _row.{{ pool_bin_field }},
+              {% endif %}
               creator_id: userId, updater_id: userId, created_by_id: userId,
             },
           });
@@ -171,24 +217,26 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         // invalid inventory_id FK.
         const _childInventoryIdRaw = (part as Record<string, unknown>).{{ pool_fk_field }} as string | undefined;
         const _childInventoryId: string | undefined = _childInventoryIdRaw === '' ? undefined : _childInventoryIdRaw;
-        let _childBridgeId: string;
 
         {% if split_reserves_inventory %}
+        let _childBridgeId: string;
+
         if (_childInventoryId) {
           // Specified lot: validate availability and reserve exactly that lot
           const _childInv = await tx.{{ pool_entity }}.findUnique({
             where: { id: _childInventoryId },
             select: { id: true, quantity: true, reserved_quantity: true,
-                      product_id: true, location_id: true, location: { select: { name: true } },
-                      lot_number: true, expiration_date: true },
+                      {{ pool_item_field }}: true, {{ pool_location_field }}: true,
+                      {{ pool_lot_field }}: true, {{ pool_expiration_field }}: true{% if pool_bin_field %},
+                      {{ pool_bin_field }}: true{% endif %} },
           });
           if (!_childInv) throw new ApiError(400, `Inventory not found: ${_childInventoryId}`);
-          {% if product_id_field %}
+          {% if split_item_field %}
           // item3: hard-fail a specified lot that doesn't belong to this part's
           // product — the pre-fix code only checked existence, so a lot from an
           // unrelated product could be reserved against this line.
-          const _childEffectiveProductId = (part.{{ product_id_field }} ?? parent.{{ product_id_field }}) as string;
-          if (_childInv.product_id !== _childEffectiveProductId) {
+          const _childEffectiveProductId = (part.{{ split_item_field }} ?? parent.{{ split_item_field }}) as string;
+          if (_childInv.{{ pool_item_field }} !== _childEffectiveProductId) {
             throw new ApiError(400, `Inventory ${_childInventoryId} belongs to a different product than this split part`);
           }
           {% endif %}
@@ -208,10 +256,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               event_type: 'reserve',
               quantity_delta: 0,
               reserved_delta: _childQty,
-              product_id: _childInv.product_id,
-              location: _childInv.location?.name ?? '',
-              lot_number: _childInv.lot_number,
-              expiration_date: _childInv.expiration_date,
+              {{ pool_item_field }}: _childInv.{{ pool_item_field }},
+              {{ pool_location_field }}: _childInv.{{ pool_location_field }},
+              {{ pool_lot_field }}: _childInv.{{ pool_lot_field }},
+              {{ pool_expiration_field }}: _childInv.{{ pool_expiration_field }},
+              {% if pool_bin_field %}
+              {{ pool_bin_field }}: _childInv.{{ pool_bin_field }},
+              {% endif %}
               creator_id: userId, updater_id: userId, created_by_id: userId,
             },
           });
@@ -220,9 +271,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           const _childQty = part.{{ quantity_field }} as number;
           const _parentForProduct = parent as Record<string, unknown>;
           const _candidates = await tx.{{ pool_entity }}.findMany({
-            where: { product_id: _parentForProduct.{{ product_id_field }} as string, quantity: { gt: 0 } },
-            orderBy: [{ expiration_date: { sort: 'asc', nulls: 'last' } }, { lot_number: 'asc' }, { id: 'asc' }],
-            include: { location: true },
+            where: { {{ pool_item_field }}: _parentForProduct.{{ split_item_field }} as string, quantity: { gt: 0 } },
+            orderBy: [{ {{ pool_expiration_field }}: { sort: 'asc', nulls: 'last' } }, { {{ pool_lot_field }}: 'asc' }, { id: 'asc' }],
           });
           const _childBridge = await tx.{{ transactionable_entity }}.create({ data: {} });
           _childBridgeId = _childBridge.id;
@@ -244,10 +294,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                   event_type: 'reserve',
                   quantity_delta: 0,
                   reserved_delta: _claim,
-                  product_id: _cand.product_id,
-                  location: _cand.location?.name ?? '',
-                  lot_number: _cand.lot_number,
-                  expiration_date: _cand.expiration_date,
+                  {{ pool_item_field }}: _cand.{{ pool_item_field }},
+                  {{ pool_location_field }}: _cand.{{ pool_location_field }},
+                  {{ pool_lot_field }}: _cand.{{ pool_lot_field }},
+                  {{ pool_expiration_field }}: _cand.{{ pool_expiration_field }},
+                  {% if pool_bin_field %}
+                  {{ pool_bin_field }}: _cand.{{ pool_bin_field }},
+                  {% endif %}
                   creator_id: userId, updater_id: userId, created_by_id: userId,
                 },
               });
@@ -261,24 +314,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         // 'receive') — split does not reserve existing inventory; afterApprove
         // writes the receive ledger row at approval time. The child still
         // gets its own empty bridge so that hook has something to attach to.
-        {% if product_id_field %}
+        {% if split_item_field %}
         if (_childInventoryId) {
           // item3: hard-fail a specified lot that doesn't belong to this part's
           // product here too — otherwise the mismatch would only surface later,
           // silently, when afterApprove writes the receive ledger.
           const _childInv = await tx.{{ pool_entity }}.findUnique({
             where: { id: _childInventoryId },
-            select: { product_id: true },
+            select: { {{ pool_item_field }}: true },
           });
           if (!_childInv) throw new ApiError(400, `Inventory not found: ${_childInventoryId}`);
-          const _childEffectiveProductId = (part.{{ product_id_field }} ?? parent.{{ product_id_field }}) as string;
-          if (_childInv.product_id !== _childEffectiveProductId) {
+          const _childEffectiveProductId = (part.{{ split_item_field }} ?? parent.{{ split_item_field }}) as string;
+          if (_childInv.{{ pool_item_field }} !== _childEffectiveProductId) {
             throw new ApiError(400, `Inventory ${_childInventoryId} belongs to a different product than this split part`);
           }
         }
         {% endif %}
         const _childBridge = await tx.{{ transactionable_entity }}.create({ data: {} });
-        _childBridgeId = _childBridge.id;
+        const _childBridgeId = _childBridge.id;
         {% endif %}
         {% endif %}
         {% if has_approvable %}const _splitChild = {% endif %}await tx.{{ entity_name }}.create({
@@ -295,7 +348,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             // `part.inventory_id ?? parent.inventory_id` — the child must
             // never inherit the parent's inventory_id (auto-allocate can
             // span multiple lots, so a single inherited id would be wrong).
+            {% if f in per_part_required_mandatory %}
+            // cmd_734: {{ f }} is schema-required (non-nullable column) —
+            // the per_part_required_mandatory check above already threw a
+            // 400 for any part missing it, before this transaction started,
+            // so `_childInventoryId` is guaranteed defined here. TypeScript
+            // can't see across that earlier loop, so this cast documents
+            // (not creates) the guarantee — `?? null` would violate the
+            // column's NOT NULL type instead.
+            {{ f }}: _childInventoryId as string,
+            {% else %}
             {{ f }}: _childInventoryId ?? null,
+            {% endif %}
             {% else %}
             {{ f }}: part.{{ f }} ?? parent.{{ f }},
             {% endif %}
@@ -307,6 +371,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             {{ split_result_field }}: true,
             {% endif %}
             status: 'pending', // pending
+            creator_id: userId,
+            updater_id: userId,
             {% if has_approvable %}
             approvable_id: childApprovable.id,
             {% endif %}

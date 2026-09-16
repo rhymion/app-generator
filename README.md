@@ -39,7 +39,12 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - Account linking (multiple OAuth providers per user)
 - Role-based access control (per-model CRUD permissions)
 - Creator/Assignee-based access control
-- Organization-based access scoping — entities with organization_id are automatically filtered to organizations the user belongs to
+- `x-self-only` — permission-independent per-user data isolation: unlike Creator/Assignee scoping (a configurable option a permission grant can widen), `x-self-only` entities restrict every row to its own creator unconditionally, with an optional audited admin bypass (`admin_bypass: true`) for a privileged role; see [`docs/knowledge/self-only-entity.md`](docs/knowledge/self-only-entity.md)
+- `x-filter-values` — view-scoped row restriction: `{ field: [allowed values, ...], ... }` (AND across fields, IN per field) limits a view to a subset of its underlying model's rows, enforced unconditionally across list/detail/export/search reads and update/delete writes (pre-image-judged, so a legitimate transition out of the filtered view still succeeds); see [`docs/knowledge/filter-values-row-scope.md`](docs/knowledge/filter-values-row-scope.md)
+- Organization-based access scoping — entities with organization_id are automatically filtered to organizations the user belongs to, including CSV import's dotted natural-key FK lookups (e.g. `role.name`) when the lookup target is itself organization-scoped; see [`docs/knowledge/csv-import-dotted-fk-org-filter.md`](docs/knowledge/csv-import-dotted-fk-org-filter.md). An `organization` relationship may itself be declared optional (removed from `required`) rather than mandatory — see [`docs/knowledge/org-optional-entity-support.md`](docs/knowledge/org-optional-entity-support.md)
+- CSV import for FK columns whose display label is composite or dotted (e.g. joined from multiple related fields) — resolved by matching the full rendered label text against a pre-built lookup map (row-level `NOT_FOUND`/`MULTI_MATCH` errors, org-isolation-aware); see [`docs/knowledge/csv-import-composite-labelfield.md`](docs/knowledge/csv-import-composite-labelfield.md)
+- Graceful degradation for foreign-key read-permission gaps — if a role can create/edit an entity but lacks read on one of its FK targets (e.g. can manage `approval_flow` but not `role`), the affected field renders disabled instead of crashing the page; see [`docs/knowledge/fk-read-permission-graceful-degradation.md`](docs/knowledge/fk-read-permission-graceful-degradation.md) when assigning permissions
+- `x-server-value` — a field whose value is always server-computed (currently `source: actor`, the authenticated user's id), never client-writable, and automatically read-only. The dict form adds optional delegation: `{source: actor, override_permission: <Operation>}` lets an actor holding that permission supply an explicit value on create (e.g. an admin filing something on someone else's behalf); anyone else's submitted value is silently replaced with their own id rather than the request failing, with an optional `_server_value_overrides` response flag so a caller can detect it. Plain `x-readonly`/`x-readonly-fields` fields (no delegation) are hard-rejected if a client submits any value for them on create — CREATE has no persisted row to compare against the way PUT does, so unlike an update mismatch there is no legitimate fallback value. See [`docs/knowledge/x-server-value-actor-delegation.md`](docs/knowledge/x-server-value-actor-delegation.md)
 
 ### Built-in Systems
 
@@ -47,12 +52,13 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - **Attachment management** — file and image upload via polymorphic bridge; image/file previews can be opted out independently per entity (`AttachmentSection` `showImages`/`showFiles` props, both default `true`)
 - **Inventory reservation** — schema-level `x-reservation` for capacity and inventory management (count and item modes); lifecycle transitions for the owning entity go through the Approval Flow System's approve/(terminal) reject rather than a bespoke reservation-lifecycle mechanism
 - **Inventory ledger** (`x-ledger-source`) — an `inventory_transaction` ledger entity and `transactionable` bridge, generated when a ledger top-level declaration is present in the schema; annotate a receiving-receipt or billing-detail entity with `x-ledger-source` to emit write/adjust/move stub templates
-- **Receiving workflow** — top-level `ledger` / `transactionable` / `pool` entity declarations plus a generated receiving-confirmation route for receiving-receipt schemas
 - **Split action** (`x-splittable`) — annotate an entity to generate a split-action UI section and API route for lot-level split operations from the list or edit page
 - **Dashboard charts** — per-entity chart widgets (column, bar, line, pie) generated from schema; stacking modes, time bucketing, typed filters, CSV/Excel export, and REST aggregate endpoints
 - **Cross-entity search** — `GET /api/search` with UNION ALL across searchable entities; facets, highlight, Japanese pg_bigm support; header search icon and full search page generated
 - **Approval event dispatch** — post-approval hooks (`x-approval.on_approved.set_fields`, `x-approval.on_approved.emit_hook`) with fire-once idempotency via `approvable.approved_at`; `x-approval-lines` generates matching pre-/post-create helpers that wire approval-line entities to inventory ledger operations
+- **Declarative write-locked values** (`x-write-locked-values`) — annotate an entity with `{field_name: [value, ...]}` to reject a plain create/update that writes one of those values directly (screen, REST API, Server Action, and CSV import all enforce it), while still rendering the value as a disabled — not hidden — form option; composes with `x-approval`'s own locked values as a union, so a field can be protected by either or both mechanisms at once, with no schema-authoring dependency between them; see [`docs/knowledge/x-write-locked-values-field-lockdown.md`](docs/knowledge/x-write-locked-values-field-lockdown.md)
 - **Terminal rejection** (`x-readonly-fields`) — annotate fields to lock them once an entity reaches a terminal rejected state; rejection fires a once-stub (`service_after_reject_stub.ts`) via `on_rejected_dispatch` for custom post-rejection logic (e.g. notifications, inventory adjustments)
+- **Stripe payments** (`x-payment`, opt-in) — declaring `x-payment: true` on any entity generates write-once stubs for Stripe Checkout Session creation and webhook handling (`lib/stripe.ts`, `app/api/payment/checkout/route.ts`, `app/api/webhooks/stripe/route.ts`), fail-closed on missing secrets; one-time purchases only, no entity/authz/UI generated — see [Payments](#payments-stripe-opt-in) below
 
 ### Performance
 
@@ -77,6 +83,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 
 - **Audit log** — schema-agnostic, read-only viewer (`app/[locale]/audit_log/page.tsx`) over all generated entities' create/update/delete actions
 - **GDPR / data protection** — `x-pii` field classification (`direct`/`sensitive`/`indirect`), an `anonymizeUser()` erasure function, `x-gdpr-mode` data-subject-scope classification (`internal`/`consumer`/`both`; schema-validated, not yet consumed by codegen), AES-256-GCM at-rest attachment filename encryption, and `x-mention` user-mention parsing in comments
+- **Terms of Service / Privacy Policy** (`/[locale]/legal/terms`, `/[locale]/legal/privacy`) — Markdown template documents linked from the registration page; adding a document language is dropping a `content/legal/<doc>.<locale>.md` file, independent of the site's UI locale list (see `docs/knowledge/legal-documents.md`)
 
 ### Other
 
@@ -154,7 +161,7 @@ code_generator/json_schema.yaml
         └── templates/*.jinja2   — Jinja2 templates (one per output file type)
 ```
 
-For each entity defined in `code_generator/json_schema.yaml`, the pipeline generates CRUD pages, service/getter modules, API routes, Cypress test specs, and entity documentation. All generated files are overwritten on each run — customizations belong in the designated extension points (`lib/{entity}/service_after_create.ts`, `components/_standard/`, `custom/`).
+For each entity defined in `code_generator/json_schema.yaml`, the pipeline generates CRUD pages, service/getter modules, API routes, Cypress test specs, and entity documentation. All generated files are overwritten on each run — customizations belong in the designated extension points (`lib/{entity}/service_validation.ts`, `components/_standard/`, `custom/`).
 
 See [docs/knowledge/architecture-overview.md](docs/knowledge/architecture-overview.md) for the full pipeline reference and generated-vs-hand-written boundary documentation.
 
@@ -208,7 +215,7 @@ After installing dependencies, a single command starts the database, generates c
 npm run dev:full
 ```
 
-`dev:full` runs: `docker:up:dev` → `generate-code` → `migrate:dev` → `db:generate` → `db:seed-tenant` → `dev`
+`dev:full` runs: `docker:up:dev` → `generate-code` → `migrate:dev` → `db:generate` → `db:seed-baseline` → `dev`
 
 For a production build:
 
@@ -216,7 +223,7 @@ For a production build:
 npm run build:full
 ```
 
-`build:full` runs: `docker:up:prod` → `generate-code` → `migrate:deploy` → `db:generate` → `db:seed-tenant` → `build`
+`build:full` runs: `docker:up:prod` → `generate-code` → `migrate:deploy` → `db:generate` → `db:seed-baseline` → `build`
 
 > **Important**: Before running `build:full` for the first time, run `dev:full` at least once. `dev:full` uses `migrate:dev` to create Prisma migration files; `build:full` uses `migrate:deploy` which only applies existing ones.
 
@@ -231,7 +238,7 @@ npm run docker:up:dev    # starts postgres-dev (port 5433, DB: my_next_dev)
 ### Generate Code, Push Schema, and Seed
 
 ```bash
-npm run setup            # generate-code → db:push → db:generate → db:seed-tenant
+npm run setup            # generate-code → db:push → db:generate → db:seed-baseline
 ```
 
 ### Start the Development Server
@@ -266,7 +273,9 @@ See [docs/knowledge/appendix/approval-flow.md](docs/knowledge/appendix/approval-
 
 A polymorphic bridge pattern allows comment threads to be attached to any entity without schema changes to each entity. Comments are displayed inline on view pages, and each comment supports reaction buttons (a per-comment toggle endpoint with batched aggregation and parent-owner read authorization).
 
-See [docs/knowledge/appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md).
+Any comment field annotated `x-mention: true` also gets `@mention` support: an org-scoped candidate picker (`MentionInput`), GDPR-safe id-based storage (`@[user_id:<id>]`), a permission-aware profile-linking renderer (`MentionText`), and a notification to newly-mentioned users (self-mentions excluded; edits only notify on newly-added mentions). Any other field annotated `x-mention: true` on any entity also gets the `MentionInput` picker on its edit form.
+
+See [docs/knowledge/appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) and [docs/knowledge/mention-system.md](docs/knowledge/mention-system.md).
 
 ### Attachment Management
 
@@ -286,11 +295,15 @@ See [docs/knowledge/appendix/inventory-reservation-split.md](docs/knowledge/appe
 
 **CSRF protection** is applied to all state-changing API routes.
 
-**Organization-scoped filtering** is applied at the query layer: every list query applies an automatic `organization_id` filter, scoping data to the authenticated user's organization. Mutation paths (update/delete/CSV-import-update) on organization-scoped entities also deny cross-organization access by ID — a request targeting another organization's record resolves to a deny (`404` on API routes, silent no-op on session actions) rather than succeeding on `creator_id`/`assignee_id` permission alone. Tenant-level isolation (cross-tenant data separation) is not yet implemented — see the Roadmap section.
+**Organization-scoped filtering** is applied at the query layer: every list query applies an automatic `organization_id` filter, scoping data to the authenticated user's organization. Mutation paths (update/delete/CSV-import-update) on organization-scoped entities also deny cross-organization access by ID — a request targeting another organization's record resolves to a deny (`404` on API routes, silent no-op on session actions) rather than succeeding on `creator_id`/`assignee_id` permission alone. If an organization-scoped entity's own `organization` relationship is declared *optional* (not in `required`), a row with no organization is treated as unassigned rather than invisible — it's admitted alongside the user's own organizations in every read/write scope filter, not excluded by them, so it remains reachable by any authenticated actor with the relevant permission rather than becoming orphaned the moment it's created without an organization. Tenant-level isolation (cross-tenant data separation) is not yet implemented — see the Roadmap section.
 
 **Role-based access control** is defined per-model in the schema. The `authz.ts` module enforces per-model CRUD permissions on every request.
 
-**Default-deny**: new users start with zero permissions. An Administrator must explicitly assign roles to grant access. The `Administrator` role (seeded by `seed-tenant.ts`) grants full CRUD on all entities. See [docs/knowledge/authorization-default-deny.md](docs/knowledge/authorization-default-deny.md) for the permission model and test classification rules.
+**Default-deny**: new users start with zero permissions. An Administrator must explicitly assign roles to grant access. The `Administrator` role (seeded by `seed-baseline.ts`) grants full CRUD on all entities. See [docs/knowledge/authorization-default-deny.md](docs/knowledge/authorization-default-deny.md) for the permission model and test classification rules.
+
+**Unauthenticated page requests** are redirected to `/login` by `proxy.ts` before any page renders, and the user is sent back to their original destination after signing in (open-redirect protected — off-site `redirect` values are rejected). API routes are unaffected and continue returning JSON `401`/`404`. See [docs/knowledge/unauthenticated-page-redirect.md](docs/knowledge/unauthenticated-page-redirect.md).
+
+**Generated permission E2E coverage** includes per-entity permission-denial tests (GET/POST/PUT/DELETE/export/import, 4xx) and cross-organization isolation tests (create/update/read blocked across org boundaries) in `cypress/e2e/api/<entity>.cy.ts`. See [docs/knowledge/permission-e2e-test-design.md](docs/knowledge/permission-e2e-test-design.md).
 
 See [docs/knowledge/multi-tenancy-and-permissions.md](docs/knowledge/multi-tenancy-and-permissions.md).
 
@@ -308,12 +321,30 @@ See [docs/knowledge/multi-tenancy-and-permissions.md](docs/knowledge/multi-tenan
 
 ---
 
+## Payments (Stripe, opt-in)
+
+Not a default-schema feature. Declaring `x-payment: true` on any entity in
+`json_schema.yaml` causes `generate-code` to write three write-once stub
+files the first time it runs (same convention as
+`lib/<parent>/invalidate_handler.ts` — edits survive regeneration):
+`lib/stripe.ts` (SDK init, fails closed if `STRIPE_SECRET_KEY` is unset),
+`app/api/payment/checkout/route.ts` (Checkout Session creation), and
+`app/api/webhooks/stripe/route.ts` (webhook receiver, signature-verified,
+fails closed if `STRIPE_WEBHOOK_SECRET` is unset). The generator does not
+generate a `Plan`/`Product`/`Purchase`-style entity, an authz/entitlement
+layer, or any payment UI — model those as ordinary schema entities and
+wire them into the stub routes. Scope is one-time purchases only (Checkout
+Session `mode: payment`); subscriptions are left for a consumer to add. See
+[docs/knowledge/stripe-payment-integration.md](docs/knowledge/stripe-payment-integration.md).
+
+---
+
 ## Performance
 
 - **Streaming Suspense**: pages stream HTML to the browser immediately, reducing TTFB. Data is loaded asynchronously in Suspense boundaries.
 - **Skeleton screens**: every generated list and view page renders a skeleton while data loads, preventing layout shift.
 - **Parallel fetching**: data and permission checks are fetched in parallel using `Promise.all`, minimizing server round-trips.
-- **Query timeout** (`lib/prisma.ts`): the direct-connection (PrismaPg) path applies a default 30-second `statement_timeout`, configurable via `STATEMENT_TIMEOUT_MS` (`0` disables it). Not applied on the Accelerate path (Vercel), which does not forward `statement_timeout`.
+- **Query timeout** (`lib/prisma.ts`): the direct-connection (PrismaPg) path applies a default 30-second `statement_timeout`, configurable via `STATEMENT_TIMEOUT_MS` (`0` disables it). This is the default path in every environment — Accelerate (`PRISMA_DATABASE_URL`) is opt-in and off by default; if enabled, `statement_timeout` is not forwarded and has no effect.
 - **FK index coverage**: `scripts/add_required_indexes.py` auto-detects `@relation` FK columns and adds `@@index` for them (the generator's demo schema grew from 18 to 36 indexes).
 - **pg_trgm GIN indexes for search**: `generate-code` emits `scripts/create-gin-indexes.sql`, applied manually with `psql` — kept outside `prisma/schema.prisma` to avoid a `prisma migrate dev` drift loop on `gin_trgm_ops`.
 - **Search `COUNT(*)` opt-out**: `SearchOpts.count: false` skips both `COUNT(*)` queries in cross-entity search (returns `total: -1`).
@@ -345,7 +376,7 @@ npm run lint
 ### E2E Tests — Full Pipeline
 
 ```bash
-npm run test:e2e:build   # docker:up:test runs automatically; generate-code + db:push + db:generate + db:seed-tenant + build
+npm run test:e2e:build   # docker:up:test runs automatically; generate-code + db:push + db:generate + db:seed-baseline + build
 npm run test:e2e:cy:api  # API-only Cypress specs
 npm run test:e2e         # full Cypress suite (build + start + run)
 npm run docker:down:test # stop the test database when done
@@ -405,6 +436,12 @@ Running `build:full` locally requires `.env.production` and `.env.production.loc
 
 **Vercel** is the default deployment target — no configuration needed.
 
+**Search-engine indexing is blocked by default.** Generated apps are
+primarily internal tools, and a Vercel *production* deployment gets no
+automatic crawler protection (unlike a preview deployment). `lib/site-config.ts`'s
+`seo.noindex` defaults to `true`; set it to `false` to allow indexing. See
+[docs/knowledge/noindex-default-and-branding-env-vars.md](docs/knowledge/noindex-default-and-branding-env-vars.md).
+
 **GCP Cloud Run** is opt-in via the `x-cloud` annotation in `code_generator/json_schema.yaml` (commented out by default). It only activates when both `enabled: true` and `provider: gcp` are set explicitly; without it, generated output is unaffected.
 
 When enabled, `generate-code` additionally emits:
@@ -413,7 +450,9 @@ When enabled, `generate-code` additionally emits:
 - A GCS Signed URL upload route (overrides the default Vercel Blob upload route) and a V4 Signed URL proxy route (`app/api/gcs/[...path]/route.ts`)
 - `proxy.ts` header rewriting so Cloud Run's internal `:8080` port never leaks into a redirect `Location` header
 
-Idempotent automation scripts in `scripts/` drive the GCP side:
+Idempotent automation scripts in `scripts/` drive the GCP side, run in this
+order — `x-cloud` enable → `generate-code` → `gcp-setup.sh` → `gcp-deploy.sh` →
+`gcp-seed.sh` (optional):
 
 | Script | Purpose |
 |---|---|
@@ -423,9 +462,15 @@ Idempotent automation scripts in `scripts/` drive the GCP side:
 | `gcp-seed.sh` | Seed the database |
 | `gcp-teardown.sh` | Tear down GCP resources (two-step confirmation) |
 
-GCP connects to the database directly (`DATABASE_URL`, `PrismaPg`, no pooler, `STATEMENT_TIMEOUT_MS` applied); Vercel uses `PRISMA_DATABASE_URL` (Accelerate), where `STATEMENT_TIMEOUT_MS` has no effect since Accelerate does not forward `statement_timeout`.
+`gcp-deploy.sh` needs the `Dockerfile` that `generate-code` emits — run
+`generate-code` after enabling `x-cloud`, before `gcp-deploy.sh`.
+`gcp-setup.sh` has no such dependency and may run before or after
+`generate-code`. See
+[docs/knowledge/gcp-automation-design.md](docs/knowledge/gcp-automation-design.md)
+for the full runbook, including why the order matters and how each step was
+verified.
 
-See [docs/knowledge/gcp-automation-design.md](docs/knowledge/gcp-automation-design.md) for the full runbook.
+GCP connects to the database directly (`DATABASE_URL`, `PrismaPg`, no pooler, `STATEMENT_TIMEOUT_MS` applied). Accelerate (`PRISMA_DATABASE_URL`) is off by default in every environment, including production — see `docs/knowledge/architecture-overview.md`'s "Environment configuration" section and the comment in `lib/prisma.ts`.
 
 ---
 
@@ -464,8 +509,7 @@ app-generator/
 │   ├── schema.prisma         Authoritative DB schema (hand-written)
 │   └── migrations/           Prisma migration history
 ├── scripts/                  Utility scripts
-│   ├── seed.ts               DB seeding
-│   ├── seed-tenant.ts        Tenant-specific seeding
+│   ├── seed-baseline.ts      Baseline data seeding
 │   └── run-next-dev.js       Dev server launcher
 ├── cypress/                  E2E tests
 │   ├── e2e/                  Generated per-entity specs + hand-written flow tests
@@ -508,6 +552,7 @@ All architectural documentation lives in `docs/knowledge/`:
 | [cleanup.md](docs/knowledge/cleanup.md) | Removing generated files: default cleanup, manifest vs schema-driven, `--prune-orphans`, orphan handling |
 | [gcp-automation-design.md](docs/knowledge/gcp-automation-design.md) | GCP Cloud Run deployment: `x-cloud` opt-in, Dockerfile, GCS uploads, environment automation scripts |
 | [claude-code-settings-consumer-side.md](docs/knowledge/claude-code-settings-consumer-side.md) | `.claude/settings.json` discovery rules, OS-independent permission syntax, the compound-command matching trap, and how to verify a settings file actually loaded — read this before editing `.claude/settings.json` here or in `app-template` |
+| [legal-documents.md](docs/knowledge/legal-documents.md) | Terms of Service / Privacy Policy pages: why document locale is decoupled from the site UI locale, Markdown-over-JSON/MDX rationale, and how to add a document language |
 
 ---
 
@@ -534,7 +579,6 @@ All architectural documentation lives in `docs/knowledge/`:
 | Dashboard charts (x-display.dashboard) | ✅ Implemented |
 | Inventory reservation (x-reservation) | ✅ Implemented |
 | Inventory ledger (x-ledger-source) | ✅ Implemented |
-| Receiving workflow | ✅ Implemented |
 | Split action (x-splittable) | ✅ Implemented |
 | Approval-lines helpers (x-approval-lines) | ✅ Implemented |
 | Terminal rejection (x-readonly-fields) / rejection event dispatch (on_rejected_dispatch) | ✅ Implemented |
@@ -556,6 +600,7 @@ All architectural documentation lives in `docs/knowledge/`:
 | GDPR / data protection (x-pii, anonymizeUser, x-gdpr-mode) | ✅ Implemented |
 | Attachment display opt-out (showImages/showFiles) | ✅ Implemented |
 | Performance hardening (statement_timeout, FK indexes, GIN indexes, COUNT opt-out) | ✅ Implemented |
+| Declarative write-locked values (x-write-locked-values) | ✅ Implemented |
 
 > **Backward compatibility (v1.4 → v1.5)**: Non-breaking. Existing schemas work unchanged. Cross-entity search is opt-in per entity (`x-generate.search: true`). Approval event dispatch activates only when `x-approval.on_approved` is set in the schema.
 

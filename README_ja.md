@@ -43,7 +43,12 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - アカウントリンク（ユーザーごとに複数の OAuth プロバイダー）
 - ロールベースアクセス制御（モデルごとの CRUD 権限）
 - 作成者/担当者ベースのアクセス制御
-- 組織スコープフィルタリング — organization_id を持つエンティティは、ユーザーが所属する組織に自動的にフィルタリングされます
+- `x-self-only` — 権限設定に依存しないユーザー単位のデータ分離。作成者/担当者スコープ(権限付与で緩められる設定値)と異なり、`x-self-only` を宣言したエンティティは常に自分が作成した行のみへアクセス可能で、`admin_bypass: true` により特権ロールへ監査付きの例外アクセスを許可できます。詳細は [`docs/knowledge/self-only-entity.md`](docs/knowledge/self-only-entity.md) を参照してください
+- `x-filter-values` — ビュー単位の行制限: `{ field: [許可される値, ...], ... }` （フィールド間はAND条件、各フィールド内はIN条件）。ビューの対象となる行を、基となるモデルの行のサブセットに制限します。この制限は、リスト・詳細・エクスポート・検索などの読み取り操作や、更新・削除などの書き込み操作において無条件に適用されます（更新・削除時は変更前の状態で判定されるため、フィルタリングされたビューの範囲外へ移行する正当な操作は成功します）。詳細は [`docs/knowledge/filter-values-row-scope.md`](docs/knowledge/filter-values-row-scope.md) を参照してください。
+- 組織スコープフィルタリング — organization_id を持つエンティティは、ユーザーが所属する組織に自動的にフィルタリングされます。CSV インポートのドット付き自然キー FK 解決（例: `role.name`）も、参照先エンティティ自体が組織スコープを持つ場合は同様にフィルタリングされます。詳細は [`docs/knowledge/csv-import-dotted-fk-org-filter.md`](docs/knowledge/csv-import-dotted-fk-org-filter.md) を参照してください。`organization` リレーション自体を必須ではなく任意（`required` から除外）として宣言することも可能です。詳細は [`docs/knowledge/org-optional-entity-support.md`](docs/knowledge/org-optional-entity-support.md) を参照してください
+- 表示ラベルが複合または複数階層（ドット区切り）のFK列に対するCSVインポート — 事前構築したルックアップマップに対しレンダリング済みラベル全文を照合して解決します（行単位の `NOT_FOUND`/`MULTI_MATCH` エラー、組織分離対応）。詳細は [`docs/knowledge/csv-import-composite-labelfield.md`](docs/knowledge/csv-import-composite-labelfield.md) を参照してください
+- FK 参照先の閲覧権限が不足している場合のグレースフルデグラデーション — あるロールがエンティティの作成・編集はできても、その FK 参照先の閲覧権限がない場合（例: `approval_flow` は管理できるが `role` は閲覧できない）、該当フィールドはページをクラッシュさせず無効化表示になります。権限付与の際は [`docs/knowledge/fk-read-permission-graceful-degradation.md`](docs/knowledge/fk-read-permission-graceful-degradation.md) を参照してください
+- `x-server-value` — 常にサーバー側で計算される値を持つフィールド（現状は `source: actor`、認証済みユーザーのID）で、クライアントからは書き込み不可、かつ自動的に読み取り専用になります。dict形式では委任機能を追加できます: `{source: actor, override_permission: <Operation>}` により、その権限を持つ actor は作成時に明示的な値を指定でき（例: 管理者が他者の代わりに申請する場合）、権限を持たぬ actor が値を送った場合はリクエスト失敗ではなく自分自身のIDへ静かに置き換えられ、この置き換えの有無はレスポンスの `_server_value_overrides` フラグで判別できます。委任を伴わぬ通常の `x-readonly`/`x-readonly-fields` フィールドは、作成時にクライアントが何らかの値を送ると即座に拒否されます — CREATE には PUT と異なり比較対象となる既存行が無いため、更新時の不一致と違い妥当な代替値が存在しないためです。詳細は [`docs/knowledge/x-server-value-actor-delegation.md`](docs/knowledge/x-server-value-actor-delegation.md) を参照してください
 
 ### 組み込みシステム
 
@@ -51,12 +56,13 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - **添付ファイル管理** — ポリモーフィックブリッジ経由のファイル・画像アップロード；画像・ファイルのプレビューはエンティティごとに個別にオプトアウト可能（`AttachmentSection` の `showImages`/`showFiles` props、両方デフォルト `true`）
 - **インベントリ予約** — スキーマレベルの `x-reservation` による容量・在庫管理（count モードと item モード）；予約元エンティティのライフサイクル遷移は独自の予約ライフサイクル機構ではなく承認フローシステムの承認/（terminal）却下を経由
 - **インベントリ台帳**（`x-ledger-source`） — スキーマにledgerトップレベル宣言がある場合に生成される `inventory_transaction` 台帳エンティティと `transactionable` ブリッジ；入荷伝票や請求明細エンティティに `x-ledger-source` を付与すると write/adjust/move のスタブテンプレートを生成
-- **入荷ワークフロー** — 入荷伝票スキーマ向けに生成される `ledger` / `transactionable` / `pool` トップレベルエンティティ宣言と入荷確定ルート
 - **分割アクション**（`x-splittable`） — エンティティに付与すると、一覧・編集ページからロット単位の分割操作を行う分割アクション UI セクションと API ルートを生成
 - **ダッシュボードチャート** — スキーマから生成されるエンティティごとのチャートウィジェット（カラム・バー・ライン・パイ）；スタッキング・時間バケット・型付きフィルター・CSV/Excel エクスポート・REST アグリゲートエンドポイント
 - **エンティティ横断検索** — オプトインしたエンティティへの UNION ALL による `GET /api/search`；ファセット・ハイライト・日本語 pg_bigm 対応；ヘッダー検索アイコンと検索ページを生成
 - **承認後イベント発火** — `x-approval.on_approved.set_fields`（フィールド更新）および `x-approval.on_approved.emit_hook`（生成 `service_after_approve.ts` による カスタムロジック）；`approvable.approved_at` による冪等性保証。`x-approval-lines` は承認明細エンティティをインベントリ台帳操作に接続する作成前後のヘルパーを生成
+- **宣言的な書き込みロック値**（`x-write-locked-values`） — エンティティに `{field_name: [value, ...]}` 形式で注釈すると、通常の作成・更新がその値を直接書き込もうとした際に拒否される（画面・REST API・Server Action・CSV インポートすべてで強制）。値自体は選択肢として表示されたまま選択不可（disabled）になり、非表示にはならない；`x-approval` 由来のロック値との和集合として合成されるため、両方の仕組みが依存関係なく同一フィールドを同時に保護できる。詳細は [`docs/knowledge/x-write-locked-values-field-lockdown.md`](docs/knowledge/x-write-locked-values-field-lockdown.md) を参照してください
 - **終端却下**（`x-readonly-fields`） — エンティティが終端の却下状態に達した後にフィールドをロックするための注釈；却下時は `on_rejected_dispatch` 経由でワンスタブ（`service_after_reject_stub.ts`）を発火し、通知や在庫調整などのカスタムロジックに対応
+- **Stripe 決済**（`x-payment`、オプトイン） — 任意のエンティティへ `x-payment: true` を宣言すると、Stripe Checkout Session 作成と Webhook 処理の write-once スタブ（`lib/stripe.ts`、`app/api/payment/checkout/route.ts`、`app/api/webhooks/stripe/route.ts`）を生成、鍵未設定時は fail-closed；対応は一回払いのみで、エンティティ・認可・UI は生成しない — 詳細は後述の[決済](#決済stripeオプトイン)を参照
 
 ### パフォーマンス
 
@@ -81,6 +87,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 
 - **監査ログ** — 全エンティティの作成・更新・削除操作を横断表示する、スキーマ非依存の read-only ビューア（`app/[locale]/audit_log/page.tsx`）
 - **GDPR / データ保護** — `x-pii` フィールド分類（`direct`/`sensitive`/`indirect`）、`anonymizeUser()` 消去関数、`x-gdpr-mode` によるデータ主体区分の分類（`internal`/`consumer`/`both`。スキーマ検証のみで生成コードへの反映は未実装）、添付ファイル名の AES-256-GCM at-rest 暗号化、コメント内の `x-mention` ユーザーメンション解析
+- **利用規約 / プライバシーポリシー**（`/[locale]/legal/terms`、`/[locale]/legal/privacy`）— 登録画面から導線を張ったMarkdown雛形文書。文書の言語追加は `content/legal/<doc>.<locale>.md` ファイルを追加するのみで、サイトUIの言語一覧とは独立（詳細は `docs/knowledge/legal-documents.md`）
 
 ### その他
 
@@ -134,7 +141,7 @@ code_generator/json_schema.yaml
         └── templates/*.jinja2   — Jinja2 テンプレート（出力ファイルタイプごと）
 ```
 
-`code_generator/json_schema.yaml` で定義された各エンティティに対して、パイプラインは CRUD ページ、サービス/ゲッターモジュール、API ルート、Cypress テストスペック、エンティティドキュメントを生成します。生成されたファイルは毎回の実行で上書きされます — カスタマイズは指定の拡張ポイント（`lib/{entity}/service_after_create.ts`、`components/_standard/`、`custom/`）に配置してください。
+`code_generator/json_schema.yaml` で定義された各エンティティに対して、パイプラインは CRUD ページ、サービス/ゲッターモジュール、API ルート、Cypress テストスペック、エンティティドキュメントを生成します。生成されたファイルは毎回の実行で上書きされます — カスタマイズは指定の拡張ポイント（`lib/{entity}/service_validation.ts`、`components/_standard/`、`custom/`）に配置してください。
 
 パイプライン全体のリファレンスおよび生成コードと手書きコードの境界については [docs/knowledge/architecture-overview.md](docs/knowledge/architecture-overview.md) を参照してください。
 
@@ -188,7 +195,7 @@ openssl rand -base64 32
 npm run dev:full
 ```
 
-`dev:full` の実行順序: `docker:up:dev` → `generate-code` → `migrate:dev` → `db:generate` → `db:seed-tenant` → `dev`
+`dev:full` の実行順序: `docker:up:dev` → `generate-code` → `migrate:dev` → `db:generate` → `db:seed-baseline` → `dev`
 
 本番ビルドの場合:
 
@@ -196,7 +203,7 @@ npm run dev:full
 npm run build:full
 ```
 
-`build:full` の実行順序: `docker:up:prod` → `generate-code` → `migrate:deploy` → `db:generate` → `db:seed-tenant` → `build`
+`build:full` の実行順序: `docker:up:prod` → `generate-code` → `migrate:deploy` → `db:generate` → `db:seed-baseline` → `build`
 
 > **重要**: `build:full` を初めて実行する前に、`dev:full` を少なくとも一度実行してください。`dev:full` は `migrate:dev` を使用して Prisma マイグレーションファイルを作成します。`build:full` が使用する `migrate:deploy` は既存のマイグレーションファイルを適用するだけです。
 
@@ -211,7 +218,7 @@ npm run docker:up:dev    # postgres-dev を起動（ポート 5433、DB: my_next
 ### コード生成・スキーマ反映・シーディング
 
 ```bash
-npm run setup            # generate-code → db:push → db:generate → db:seed-tenant
+npm run setup            # generate-code → db:push → db:generate → db:seed-baseline
 ```
 
 ### 開発サーバーの起動
@@ -246,7 +253,9 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 
 ポリモーフィックブリッジパターンにより、各エンティティのスキーマを変更することなく任意のエンティティにコメントスレッドを付与できます。コメントは詳細ページにインラインで表示され、各コメントにはリアクションボタンを付与できます（コメントごとのトグルエンドポイント・バッチ集計・親オーナー read 認可）。
 
-[docs/knowledge/appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) を参照してください。
+`x-mention: true` を付与したコメントフィールドには `@mention` 機能も付与されます: 所属組織で絞り込んだ候補検索（`MentionInput`）、GDPR安全なIDベースの保存形式（`@[user_id:<id>]`）、閲覧権限に応じたプロフィールリンク表示（`MentionText`）、新規メンション相手への通知（自己メンションは除外・編集時は新たに追加されたメンションのみ通知）。他の任意エンティティのフィールドに `x-mention: true` を付与した場合も、編集フォームに `MentionInput` ピッカーが付与されます。
+
+[docs/knowledge/appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) および [docs/knowledge/mention-system.md](docs/knowledge/mention-system.md) を参照してください。
 
 ### 添付ファイル管理
 
@@ -266,11 +275,15 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 
 **CSRF 保護**はすべての状態変更 API ルートに適用されます。
 
-**組織スコープフィルタリング**はクエリレイヤーで適用されます: すべてのリストクエリに自動的な `organization_id` フィルターが適用され、データを認証済みユーザーの組織にスコープします。組織スコープエンティティの更新系操作（update/delete/CSV インポートによる更新）も、ID指定での組織跨ぎアクセスを拒否します — 他組織のレコードを対象としたリクエストは、`creator_id`/`assignee_id` の権限だけでは成功せず拒否されます（API ルートは `404`、セッションアクションはサイレントに no-op）。テナントレベルの分離（クロステナントのデータ分離）はまだ実装されていません — ロードマップセクションを参照してください。
+**組織スコープフィルタリング**はクエリレイヤーで適用されます: すべてのリストクエリに自動的な `organization_id` フィルターが適用され、データを認証済みユーザーの組織にスコープします。組織スコープエンティティの更新系操作（update/delete/CSV インポートによる更新）も、ID指定での組織跨ぎアクセスを拒否します — 他組織のレコードを対象としたリクエストは、`creator_id`/`assignee_id` の権限だけでは成功せず拒否されます（API ルートは `404`、セッションアクションはサイレントに no-op）。組織スコープエンティティ自身の `organization` リレーションが任意（optional）として宣言されている場合、組織を持たない行は不可視ではなく未割当として扱われます — あらゆる読み取り/書き込みスコープフィルターにおいて、ユーザー自身の所属組織と並んで許可対象に含まれる（除外されない）ため、組織なしで作成された瞬間に孤立することなく、該当権限を持つ認証済みアクターなら誰でも到達可能なままです。テナントレベルの分離（クロステナントのデータ分離）はまだ実装されていません — ロードマップセクションを参照してください。
 
 **ロールベースアクセス制御**はスキーマでモデルごとに定義されます。`authz.ts` モジュールがすべてのリクエストに対してモデルごとの CRUD 権限を強制します。
 
-**デフォルト拒否**: 新規ユーザーは権限ゼロで開始します。Administrator が明示的にロールを割り当てることで初めてアクセスが許可されます。`seed-tenant.ts` によってシードされる `Administrator` ロールはすべてのエンティティに対して完全な CRUD 権限を付与します。詳細は [docs/knowledge/authorization-default-deny.md](docs/knowledge/authorization-default-deny.md) を参照してください。
+**デフォルト拒否**: 新規ユーザーは権限ゼロで開始します。Administrator が明示的にロールを割り当てることで初めてアクセスが許可されます。`seed-baseline.ts` によってシードされる `Administrator` ロールはすべてのエンティティに対して完全な CRUD 権限を付与します。詳細は [docs/knowledge/authorization-default-deny.md](docs/knowledge/authorization-default-deny.md) を参照してください。
+
+**未認証のページリクエスト**は、ページが描画される前に `proxy.ts` によって `/login` へリダイレクトされ、サインイン後は元のページへ戻ります(オープンリダイレクト対策済み — サイト外の `redirect` 値は拒否されます)。API ルートは影響を受けず、従来どおり JSON の `401`/`404` を返します。詳細は [docs/knowledge/unauthenticated-page-redirect.md](docs/knowledge/unauthenticated-page-redirect.md) を参照してください。
+
+**生成される権限 E2E テスト**には、エンティティごとの権限拒否テスト(GET/POST/PUT/DELETE/export/import、4xx)と、組織境界をまたぐ作成・更新・参照を拒否するクロス組織分離テストが `cypress/e2e/api/<entity>.cy.ts` に含まれます。詳細は [docs/knowledge/permission-e2e-test-design.md](docs/knowledge/permission-e2e-test-design.md) を参照してください。
 
 [docs/knowledge/multi-tenancy-and-permissions.md](docs/knowledge/multi-tenancy-and-permissions.md) を参照してください。
 
@@ -288,12 +301,31 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 
 ---
 
+## 決済（Stripe、オプトイン）
+
+既定スキーマの機能ではありません。`json_schema.yaml` の任意のエンティティに
+`x-payment: true` を宣言すると、`generate-code` の初回実行時に 3 本の
+write-once スタブファイルが書き込まれます(`lib/<parent>/invalidate_handler.ts`
+と同じ規約 — 編集内容は再生成後も保持されます): `lib/stripe.ts`(SDK 初期化、
+`STRIPE_SECRET_KEY` 未設定時は fail-closed)、`app/api/payment/checkout/route.ts`
+(Checkout Session 作成)、`app/api/webhooks/stripe/route.ts`(Webhook 受信、
+署名検証あり、`STRIPE_WEBHOOK_SECRET` 未設定時は fail-closed)。生成器は
+`Plan`/`Product`/`Purchase` 相当のエンティティ・認可/権限レイヤー・決済 UI は
+一切生成しません — それらは通常のスキーマエンティティとして自前でモデル化し、
+上記スタブへ接続してください。対応範囲は一回払いのみ(Checkout Session
+`mode: payment`)で、サブスクリプションは対象外(必要であれば自前で追加)です。
+詳細は
+[docs/knowledge/stripe-payment-integration.md](docs/knowledge/stripe-payment-integration.md)
+を参照してください。
+
+---
+
 ## パフォーマンス
 
 - **ストリーミング Suspense**: ページが即座にブラウザへ HTML をストリームし、TTFB を削減します。データは Suspense 境界内で非同期に読み込まれます。
 - **スケルトン画面**: 生成されたすべてのリスト・詳細ページは、データ読み込み中にスケルトンを表示してレイアウトシフトを防ぎます。
 - **並列フェッチ**: データと権限チェックを `Promise.all` で並列フェッチし、サーバーへのラウンドトリップを最小化します。
-- **クエリタイムアウト**（`lib/prisma.ts`）: 直結接続（PrismaPg）パスにはデフォルト30秒の `statement_timeout` が適用されます。`STATEMENT_TIMEOUT_MS` で設定変更可能（`0` で無効化）。Accelerate パス（Vercel）は `statement_timeout` を転送しないため対象外です。
+- **クエリタイムアウト**（`lib/prisma.ts`）: 直結接続（PrismaPg）パスにはデフォルト30秒の `statement_timeout` が適用されます。`STATEMENT_TIMEOUT_MS` で設定変更可能（`0` で無効化）。この直結パスが全環境のデフォルトです — Accelerate（`PRISMA_DATABASE_URL`）はオプトインでデフォルト無効、有効化した場合は `statement_timeout` を転送しないため対象外です。
 - **FK インデックス網羅**: `scripts/add_required_indexes.py` が `@relation` の FK カラムを自動検出し `@@index` を追加します（ジェネレーターのデモスキーマは18本から36本へ増加）。
 - **検索用 pg_trgm GIN インデックス**: `generate-code` が `scripts/create-gin-indexes.sql` を生成し、`psql` で手動適用します — `gin_trgm_ops` による `prisma migrate dev` のドリフトループを避けるため `prisma/schema.prisma` の外に置いています。
 - **検索の `COUNT(*)` オプトアウト**: `SearchOpts.count: false` でエンティティ横断検索の2本の `COUNT(*)` クエリをスキップできます（`total: -1` を返却）。
@@ -325,7 +357,7 @@ npm run lint
 ### E2E テスト — フルパイプライン
 
 ```bash
-npm run test:e2e:build   # docker:up:test は自動起動; generate-code + db:push + db:generate + db:seed-tenant + build
+npm run test:e2e:build   # docker:up:test は自動起動; generate-code + db:push + db:generate + db:seed-baseline + build
 npm run test:e2e:cy:api  # API のみの Cypress スペック
 npm run test:e2e         # Cypress フルスイート（build + start + run）
 npm run docker:down:test # テスト終了後にテスト用データベースを停止
@@ -385,6 +417,14 @@ Next.js は `NODE_ENV` に基づいて環境ファイルを自動的に読み込
 
 **Vercel** がデフォルトのデプロイ先です — 設定不要です。
 
+**検索エンジンへのインデックスはデフォルトでブロックされます。** 生成される
+アプリは主に社内向けツールであり、Vercel の *production* デプロイは
+preview デプロイと異なり自動的なクローラー保護を受けません。
+`lib/site-config.ts` の `seo.noindex` はデフォルトで `true` です。
+インデックスを許可するには `false` に設定してください。詳細は
+[docs/knowledge/noindex-default-and-branding-env-vars.md](docs/knowledge/noindex-default-and-branding-env-vars.md)
+を参照。
+
 **GCP Cloud Run** は `code_generator/json_schema.yaml` の `x-cloud` アノテーションによるオプトインです（デフォルトでコメントアウト）。`enabled: true` と `provider: gcp` の両方を明示指定した場合のみ有効化され、未指定であれば生成物に影響はありません。
 
 有効化すると、`generate-code` は追加で以下を生成します:
@@ -393,7 +433,9 @@ Next.js は `NODE_ENV` に基づいて環境ファイルを自動的に読み込
 - GCS Signed URL アップロードルート（デフォルトの Vercel Blob アップロードルートを上書き）と V4 Signed URL プロキシルート（`app/api/gcs/[...path]/route.ts`）
 - Cloud Run 内部ポート `:8080` がリダイレクトの `Location` ヘッダーに漏出しないようにする `proxy.ts` のヘッダー書き換え
 
-`scripts/` 配下の冪等な自動化スクリプトが GCP 側を駆動します:
+`scripts/` 配下の冪等な自動化スクリプトが GCP 側を駆動します。実行順は
+`x-cloud` 有効化 → `generate-code` → `gcp-setup.sh` → `gcp-deploy.sh` →
+（必要なら）`gcp-seed.sh` です:
 
 | スクリプト | 用途 |
 |---|---|
@@ -403,9 +445,14 @@ Next.js は `NODE_ENV` に基づいて環境ファイルを自動的に読み込
 | `gcp-seed.sh` | データベースのシード |
 | `gcp-teardown.sh` | GCP リソースの削除（2段階確認付き） |
 
-GCP はデータベースに直結します（`DATABASE_URL`、`PrismaPg`、pooler 無し、`STATEMENT_TIMEOUT_MS` 適用）。Vercel は `PRISMA_DATABASE_URL`（Accelerate）を使用し、Accelerate は `statement_timeout` を転送しないため `STATEMENT_TIMEOUT_MS` は無効です。
+`gcp-deploy.sh` は `generate-code` が生成する `Dockerfile` を要します —
+`x-cloud` を有効化した**後**に `generate-code` を実行し、`gcp-deploy.sh`
+より前に済ませてください。`gcp-setup.sh` にはこの依存はなく、
+`generate-code` の前後どちらでも実行できます。順序が重要な理由と実測結果
+は [docs/knowledge/gcp-automation-design.md](docs/knowledge/gcp-automation-design.md)
+のランブックを参照してください。
 
-詳細なランブックは [docs/knowledge/gcp-automation-design.md](docs/knowledge/gcp-automation-design.md) を参照してください。
+GCP はデータベースに直結します（`DATABASE_URL`、`PrismaPg`、pooler 無し、`STATEMENT_TIMEOUT_MS` 適用）。Accelerate（`PRISMA_DATABASE_URL`）は全環境（本番含む）でデフォルト無効です — 詳細は `docs/knowledge/architecture-overview.md` の「Environment configuration」節と `lib/prisma.ts` のコメントを参照してください。
 
 ---
 
@@ -444,8 +491,7 @@ app-generator/
 │   ├── schema.prisma         正式な DB スキーマ（手書き）
 │   └── migrations/           Prisma マイグレーション履歴
 ├── scripts/                  ユーティリティスクリプト
-│   ├── seed.ts               DB シーディング
-│   ├── seed-tenant.ts        テナント固有シーディング
+│   ├── seed-baseline.ts      ベースラインデータのシーディング
 │   └── run-next-dev.js       開発サーバー起動スクリプト
 ├── cypress/                  E2E テスト
 │   ├── e2e/                  エンティティごとに生成されたスペック + 手書きフローテスト
@@ -488,6 +534,7 @@ app-generator/
 | [cleanup.md](docs/knowledge/cleanup.md) | 生成ファイルの削除: デフォルトクリーンアップ、マニフェスト vs スキーマ駆動、`--prune-orphans`、孤児ファイル処理 |
 | [gcp-automation-design.md](docs/knowledge/gcp-automation-design.md) | GCP Cloud Run デプロイ: `x-cloud` オプトイン、Dockerfile、GCS アップロード、環境自動化スクリプト |
 | [claude-code-settings-consumer-side.md](docs/knowledge/claude-code-settings-consumer-side.md) | `.claude/settings.json` の読み込みルール、OS非依存な権限記法、複合コマンドのマッチングの罠、設定ファイルが実際に読み込まれたかの確認方法 — 本リポジトリまたは `app-template` の `.claude/settings.json` を編集する前に読むこと |
+| [legal-documents.md](docs/knowledge/legal-documents.md) | 利用規約・プライバシーポリシー画面: 文書の言語がサイトUIの言語一覧から独立している理由、Markdown採用（JSON/MDX不採用）の理由、文書の言語追加手順 |
 
 ---
 
@@ -514,7 +561,6 @@ app-generator/
 | ダッシュボードチャート（x-display.dashboard） | ✅ 実装済み |
 | インベントリ予約（x-reservation） | ✅ 実装済み |
 | インベントリ台帳（x-ledger-source） | ✅ 実装済み |
-| 入荷ワークフロー | ✅ 実装済み |
 | 分割アクション（x-splittable） | ✅ 実装済み |
 | 承認明細ヘルパー（x-approval-lines） | ✅ 実装済み |
 | 終端却下（x-readonly-fields）/ 却下イベント発火（on_rejected_dispatch） | ✅ 実装済み |
@@ -536,6 +582,7 @@ app-generator/
 | GDPR / データ保護（x-pii, anonymizeUser, x-gdpr-mode） | ✅ 実装済み |
 | 添付ファイル表示オプトアウト（showImages/showFiles） | ✅ 実装済み |
 | 性能ハードニング（statement_timeout, FK インデックス, GIN インデックス, COUNT オプトアウト） | ✅ 実装済み |
+| 宣言的な書き込みロック値（x-write-locked-values） | ✅ 実装済み |
 
 > **後方互換（v1.4 → v1.5）**: 非破壊的変更。既存のスキーマはそのまま動作します。エンティティ横断検索はエンティティごとのオプトイン（`x-generate.search: true`）です。承認後イベント発火はスキーマに `x-approval.on_approved` を設定した場合のみ有効になります。
 

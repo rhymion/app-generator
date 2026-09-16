@@ -1,9 +1,11 @@
 """
-validate.py — Pre-generation schema validation.
+validate.py — Schema and generated-output validation.
 
-Called by generate() before any files are written.  Collects all problems and
-reports them together so the user can fix everything in one pass rather than
-encountering errors one by one.
+Most checks here are called by generate() before any files are written, and
+collect all problems so they can be reported together rather than one at a
+time. One exception: validate_write_once_stub_asymmetry() must run at the
+END of generate(), once this run's write-once stubs are on disk and its
+manifest's stub history reflects them — see that function's docstring.
 
 Raises SchemaValidationError (a ValueError subclass) on failure so generate()
 can catch it and print a clean message without a traceback.
@@ -12,10 +14,15 @@ import re
 from pathlib import Path
 
 from helpers.label_field import resolve_label_paths
+from helpers.naming import to_pascal_case
 from helpers.schema_helpers import (
     get_parent_relationships, get_internal_bridge_fk_prop_names,
-    get_entity_properties, get_entity_required,
+    get_entity_properties, get_entity_required, get_self_only_flags,
+    get_direct_attachment_fk_props, schema_has_direct_attachment_fk,
+    is_write_only_prop,
 )
+from manifest import sha256_file
+from schema_deriver import parse_prisma_schema
 
 _SNAKE_CASE = re.compile(r'^(__)?[a-z][a-z0-9_]*$')
 _ID_SUFFIX  = re.compile(r'_id$')
@@ -155,6 +162,426 @@ def validate_prisma_indexes(schema_path: str | Path) -> None:
         )
 
 
+def _resolve_backing_model_name(def_key: str, defs: dict, _seen: frozenset = frozenset()) -> str:
+    """Resolve the Prisma model name that actually backs `def_key`.
+
+    Usually the entity name IS the model name (`role` -> `role`, `__role` ->
+    `role`). But a pass-through proxy view like `setting` has no Prisma model
+    of its own — its `allOf` $ref chain (`setting` -> `user` -> `__user`)
+    ultimately lands on a *different* model (`user`). Stripping the `__`
+    prefix from `def_key` alone (the old logic) would look for a
+    nonexistent `setting` model in schema.prisma and false-positive an
+    error. Walking the chain, same as generate_types.py's
+    `_resolve_raw_key`, finds the real backing model instead.
+    """
+    if def_key in _seen:
+        return def_key[2:] if def_key.startswith('__') else def_key
+    defn = defs.get(def_key) or {}
+    for item in defn.get('allOf', []):
+        ref = item.get('$ref')
+        if ref:
+            return _resolve_backing_model_name(ref.split('/')[-1], defs, _seen | {def_key})
+    return def_key[2:] if def_key.startswith('__') else def_key
+
+
+def validate_self_only_creator_id_columns(schema: dict, prisma_schema_path: str | Path) -> None:
+    """Verify every x-self-only entity's underlying Prisma model actually has
+    a creator_id column to filter on.
+
+    This can't be checked from the JSON schema alone (like the rest of
+    validate_schema() below): creator_id is boilerplate added directly to
+    schema.prisma for every generated model and is never listed under a
+    definition's 'properties' (see derive_raw_entity in schema_deriver.py) —
+    so, like validate_prisma_indexes() above, this reads the real Prisma
+    schema text rather than get_entity_properties().
+    """
+    path = Path(prisma_schema_path)
+    if not path.exists():
+        raise SchemaValidationError(
+            f"Prisma schema not found at {path} — required for x-self-only validation."
+        )
+    text = path.read_text()
+    model_bodies = dict(_iter_model_blocks(text))
+    defs = schema.get('definitions') or {}
+
+    errors: list[str] = []
+    for def_key, defn in defs.items():
+        if not isinstance(defn, dict) or not _SNAKE_CASE.match(def_key):
+            continue
+        is_self_only, _ = get_self_only_flags(defn)
+        if not is_self_only:
+            continue
+        model_name = _resolve_backing_model_name(def_key, defs)
+        body = model_bodies.get(model_name)
+        if body is None or not _model_has_column(body, 'creator_id'):
+            errors.append(
+                f"Definition '{def_key}': x-self-only requires the underlying "
+                f"Prisma model '{model_name}' to have a creator_id column to "
+                f"filter on, but none was found in schema.prisma."
+            )
+
+    if errors:
+        bullet_list = '\n'.join(f"  • {e}" for e in errors)
+        raise SchemaValidationError(
+            f"x-self-only validation failed — {len(errors)} entity(ies) missing "
+            f"a creator_id column:\n\n{bullet_list}\n"
+        )
+
+
+_ATTACHABLE_ID_NULLABLE = re.compile(r'^\s*attachable_id\s+String\?\s*$', re.MULTILINE)
+
+
+def validate_direct_attachment_prerequisite(schema: dict, prisma_schema_path: str | Path) -> None:
+    """Verify the Prisma-schema prerequisite for `x-relationship: {target:
+    attachment, type: direct}` is met before generate() writes any code that
+    depends on it.
+
+    `docs/knowledge/schema-yaml-configuration.md` ("Direct Attachment FK")
+    documents `attachment.attachable_id` as needing to be nullable
+    (`onDelete: SetNull`) once ANY entity adopts this feature — a hand-applied
+    prisma/schema.prisma edit, like every other x-relationship convention on
+    that page, not something the generator writes itself (subtask_788b:
+    lib/attachment/direct_actions.ts is now only emitted when this condition
+    is true, so this check and that gate agree on the same trigger). Only
+    checked when the schema actually uses the feature — a consumer that
+    doesn't is never asked to touch prisma/schema.prisma's built-in
+    `attachment` model. Without this, a consumer adopting the feature without
+    having applied the prerequisite found out only via a `tsc` TS2322 deep
+    inside the generated `lib/attachment/direct_actions.ts` (subtask_788b's
+    own root cause) — this catches it here, at generate time, with an
+    actionable message instead.
+    """
+    if not schema_has_direct_attachment_fk(schema):
+        return
+
+    path = Path(prisma_schema_path)
+    if not path.exists():
+        raise SchemaValidationError(
+            f"Prisma schema not found at {path} — required for direct-attachment "
+            f"FK validation."
+        )
+    model_bodies = dict(_iter_model_blocks(path.read_text()))
+    body = model_bodies.get('attachment')
+    if body is None or not _ATTACHABLE_ID_NULLABLE.search(body):
+        raise SchemaValidationError(
+            "Direct-attachment FK validation failed — an entity declares "
+            "`x-relationship: {target: attachment, type: direct}`, but "
+            "prisma/schema.prisma's `attachment` model does not have a "
+            "nullable `attachable_id`. A direct-attachment FK creates an "
+            "attachment row with no bridge owner, so attachable_id must be "
+            "nullable. Add to the `attachment` model:\n\n"
+            "  attachable_id String?\n"
+            "  attachable    attachable? @relation(fields: [attachable_id], "
+            "references: [id], onDelete: SetNull)\n\n"
+            "See docs/knowledge/schema-yaml-configuration.md \"Direct "
+            "Attachment FK\"."
+        )
+
+
+def validate_direct_attachment_reverse_fields(schema: dict, prisma_schema_path: str | Path) -> None:
+    """Verify that every `x-relationship: {target: attachment, type: direct}`
+    declaration has a matching hand-written back-reference field on
+    prisma/schema.prisma's `attachment` model (cmd_793③).
+
+    A direct-attachment FK is two-sided in Prisma, like any relation: the
+    owning entity gets its own `{field}_id` scalar + relation field (already
+    covered by ordinary Prisma-alignment expectations for any FK), but
+    `attachment` — a single shared internal model every direct-attachment
+    declaration across the whole schema points at — also needs a *named*
+    back-reference field, one per declaring entity+field, or `prisma
+    generate`/`prisma validate` reject the schema outright (a relation must
+    be declared on both sides). Nothing before this check ever verified that
+    second half exists; `validate_direct_attachment_prerequisite` above only
+    checks `attachable_id` nullability, a different (one-time, not
+    per-declaration) prerequisite.
+
+    This intentionally does NOT inject the field, following the pattern
+    `docs/knowledge/schema-yaml-configuration.md` "Direct Attachment FK"
+    already documents for the rest of this feature's Prisma-alignment
+    prerequisites: `generate.py` doesn't write to `prisma/schema.prisma`
+    except bridge injection (`inject_bridge_into_schema`) — a materially
+    different mechanism because a bridge's own model is entirely
+    generator-owned, whereas `attachment` is a hand-maintained shared model
+    a consumer may have customized in ways an automatic append could
+    conflict with. Fail-closed with an actionable message instead, matching
+    every other direct-attachment Prisma-alignment check on this page.
+
+    Naming convention (see docs/knowledge/schema-yaml-configuration.md):
+    field `{entity}_{relation_name}`, type `{entity}?`, `@relation("...")`
+    present (its exact contents are Prisma's own two-sided-match problem,
+    not re-validated here).
+    """
+    declarations = []
+    for name, defn in (schema.get('definitions') or {}).items():
+        if not name.startswith('__') or not isinstance(defn, dict):
+            continue
+        entity = name.removeprefix('__')
+        for dar in get_direct_attachment_fk_props(defn):
+            declarations.append((entity, dar['relation_name']))
+
+    if not declarations:
+        return
+
+    path = Path(prisma_schema_path)
+    if not path.exists():
+        raise SchemaValidationError(
+            f"Prisma schema not found at {path} — required for direct-attachment "
+            f"FK validation."
+        )
+    model_bodies = dict(_iter_model_blocks(path.read_text()))
+    body = model_bodies.get('attachment') or ''
+
+    missing = []
+    for entity, relation_name in declarations:
+        field_name = f"{entity}_{relation_name}"
+        pattern = re.compile(
+            rf'^\s*{re.escape(field_name)}\s+{re.escape(entity)}\?', re.MULTILINE
+        )
+        if not pattern.search(body):
+            missing.append((entity, relation_name, field_name))
+
+    if missing:
+        examples = "\n\n".join(
+            f"  # {entity}.{relation_name}\n"
+            f"  {field_name:<22} {entity}? @relation(\"{to_pascal_case(entity)}{to_pascal_case(relation_name)}\")"
+            for entity, relation_name, field_name in missing
+        )
+        raise SchemaValidationError(
+            "Direct-attachment FK reverse-field validation failed — the "
+            "following `x-relationship: {target: attachment, type: direct}` "
+            "declarations have no matching back-reference field on "
+            "prisma/schema.prisma's `attachment` model:\n\n"
+            + ", ".join(f"{e}.{r}" for e, r, _ in missing) + "\n\n"
+            "Add to the `attachment` model (one line per declaration):\n\n"
+            + examples + "\n\n"
+            "See docs/knowledge/schema-yaml-configuration.md \"Direct "
+            "Attachment FK\"."
+        )
+
+
+def validate_write_once_stub_asymmetry(entries: list[dict], manifest) -> None:
+    """cmd_941 gate 1: reject a lopsided write-once side-effect implementation.
+
+    Unlike every other validate_* in this file, this one runs at the END of
+    generate() — after all write-once stubs have been written for this run —
+    because the thing it inspects (whether a stub is still the pristine
+    generator render or was hand-edited) only exists once `_write_stub()` has
+    populated `manifest`'s stub history for this run. It is still "the
+    generation-time gate" (cmd_941 gate 1): it fails the run (nonzero exit)
+    before generate() reports success, which is what makes it a gate rather
+    than a passive observation.
+
+    Coarse and cheap on purpose (per ruling): this never reads what a stub's
+    body actually does. It only asks "was this file's content ever hand-
+    edited away from a known pristine render of its current stub template?"
+    (see `manifest.is_stale_stub`) — file-level, not field-level. A create
+    hook can reference any number of other models; the gate does not care
+    which. Its only signal is: create is implemented, but the update or
+    delete hook for the same entity is not — and edit/delete generation is
+    not turned off — meaning nothing runs to mirror whatever side effect the
+    create hook introduced.
+
+    `entries` is one dict per entity where these stubs are written (`model ==
+    parent` in generate()'s loop), each with keys `parent`, `create_path`,
+    `update_path`, `delete_path`, `can_edit`, `can_delete` (`can_edit`/
+    `can_delete` mirror the entity's own `x-generate.edit`/`.delete`).
+    """
+    def _implemented(path: Path) -> bool:
+        # _write_stub() always leaves the file on disk by the time this runs
+        # (creates it if missing), so existence itself is not the signal —
+        # whether its content still matches a known pristine render is.
+        return not manifest.is_stale_stub(path, sha256_file(path))
+
+    violations = []
+    for e in entries:
+        if not _implemented(e['create_path']):
+            continue
+        pairs = [('update', e['update_path'], e['can_edit']),
+                 ('delete', e['delete_path'], e['can_delete'])]
+        for kind, path, can_do in pairs:
+            if can_do and not _implemented(path):
+                violations.append((e['parent'], kind, path))
+
+    if violations:
+        lines = "\n".join(
+            f"  - {parent}: service_after_create.ts is implemented, but "
+            f"service_after_{kind}.ts is still the untouched stub ({path})"
+            for parent, kind, path in violations
+        )
+        raise SchemaValidationError(
+            "Write-once side-effect asymmetry — one or more entities "
+            "implement service_after_create.ts (writes/updates/deletes "
+            "another model) without a matching hook on the operations that "
+            "can undo or repeat that effect:\n\n"
+            + lines + "\n\n"
+            "This is a coarse, file-level check (cmd_941 gate 1) — it does not "
+            "read what the create hook does, only that its update/delete "
+            "counterpart for the same entity is still untouched. Pick one "
+            "per entity listed above:\n"
+            "  1. Implement the corresponding service_after_update.ts / "
+            "service_after_delete.ts stub (even a no-op with a comment "
+            "explaining why nothing needs to mirror the create hook), or\n"
+            "  2. Set x-generate.edit / x-generate.delete to false for that "
+            "entity so the operation this gate is protecting against cannot "
+            "happen at all."
+        )
+
+
+def _own_properties(defn: dict) -> dict:
+    """Properties declared directly on `defn`, including inline (non-$ref)
+    allOf branches, but NOT recursing into $ref'd definitions.
+
+    Used instead of get_entity_properties() (which merges the *whole* allOf
+    chain) so a paired entity's view (`inventory`, `allOf: [{$ref: __inventory},
+    {...}]`) does not re-report fields already owned by its raw counterpart
+    (`__inventory`) — each field is checked exactly once, from whichever
+    definition actually declares it.
+    """
+    props = dict(defn.get('properties') or {})
+    for item in defn.get('allOf', []):
+        if '$ref' not in item:
+            props.update(item.get('properties') or {})
+    return props
+
+
+def validate_defaults_cross_schema(schema: dict, prisma_schema_path: str | Path) -> None:
+    """Fail if any json_schema.yaml field declares `default:` but the
+    corresponding Prisma column has no `@default(...)`.
+
+    The two schemas independently carry `default` values (json `fields.X.default:`
+    vs Prisma `@default(...)`) with no automatic sync between them — a json
+    `default:` with no matching Prisma `@default()` silently produces a form
+    that appears to have a default in the UI but inserts NULL/nothing at the
+    DB layer on create. The reverse (Prisma has `@default()`, json doesn't) is
+    NOT an error: that's a valid Category C decision to not auto-fill the UI
+    field (e.g. attachment.type has `@default(0)` in Prisma with no matching
+    json `default:`, deliberately). (cmd_574, 2026-08-05)
+    """
+    path = Path(prisma_schema_path)
+    if not path.exists():
+        raise SchemaValidationError(
+            f"Prisma schema not found at {path} — required for default cross-schema validation."
+        )
+    prisma_models = parse_prisma_schema(path)
+    defs = schema.get('definitions') or {}
+
+    errors: list[str] = []
+    for def_key, defn in defs.items():
+        if not isinstance(defn, dict) or not _SNAKE_CASE.match(def_key):
+            continue
+        model_name = _resolve_backing_model_name(def_key, defs)
+        model = prisma_models.get(model_name)
+        if model is None:
+            continue
+        props = _own_properties(defn)
+        for field_name, field_def in props.items():
+            if not isinstance(field_def, dict) or 'default' not in field_def:
+                continue
+            pf = model.fields.get(field_name)
+            if pf is None or not pf.has_default:
+                errors.append(
+                    f"Definition '{def_key}', property '{field_name}': json schema declares "
+                    f"default={field_def['default']!r} but Prisma model '{model_name}' has no "
+                    f"@default() for this column."
+                )
+
+    if errors:
+        bullet_list = '\n'.join(f"  • {e}" for e in errors)
+        raise SchemaValidationError(
+            f"json_schema.yaml `default:` entries without a matching Prisma @default() — "
+            f"{len(errors)} field(s):\n\n{bullet_list}\n\n"
+            f"Fix by either adding @default(...) to the Prisma column in schema.prisma, "
+            f"or removing default: from the json schema field.\n"
+        )
+
+
+def validate_submit_on_default_matches_prisma(schema: dict, prisma_schema_path: str | Path) -> None:
+    """Fail if an `x-approval.submit_on` entity's own json_schema.yaml
+    `default:` for the submit_on field disagrees in *value* with the actual
+    Prisma `@default(...)` for that column.
+
+    Deliberately narrower than validate_defaults_cross_schema() above: that
+    check only catches a json `default:` with NO matching Prisma `@default()`
+    at all (presence), never a *value*-level disagreement when both sides
+    declare a default (e.g. json `default: draft` vs Prisma
+    `@default(pending)` -- both "have" a default, so the presence check
+    passes). Comparing default *values* on every field generally would be
+    too broad: Category A/C (schema_deriver.py) makes an intentional
+    both-sides-differ-in-kind case unremarkable outside x-approval (e.g. a
+    field where Prisma carries a storage-layer default that the json schema
+    deliberately does not mirror into the UI).
+
+    Within `x-approval.submit_on`, though, a value mismatch is never
+    intentional: `approval_lockdown_context()` (generators.py) locks every
+    row whose value equals submit_on's own value, and json_schema.yaml's
+    `default:` for that same field is the pre-submission value new rows are
+    declared to start at. If Prisma's real column default silently drifts
+    to equal submit_on's value instead, every freshly created row is born
+    already locked -- exactly the drift found in goods_receipt_line /
+    inventory_reservation (`status`, commit `900ce04`, undetected for 5
+    days -- cmd_1016/cmd_1017).
+
+    Only entities that declare `x-approval.submit_on` are in scope, and
+    only for the one field submit_on names. A field with no json `default:`
+    declared at all is skipped (nothing to cross-check -- Category A
+    auto-reflection is fine here too), as is a Prisma column with no
+    `@default()` at all (that half of the gap is already covered by
+    validate_defaults_cross_schema() above).
+    """
+    path = Path(prisma_schema_path)
+    if not path.exists():
+        raise SchemaValidationError(
+            f"Prisma schema not found at {path} — required for submit_on default validation."
+        )
+    prisma_models = parse_prisma_schema(path)
+    defs = schema.get('definitions') or {}
+
+    errors: list[str] = []
+    for def_key, defn in defs.items():
+        if not isinstance(defn, dict) or not _SNAKE_CASE.match(def_key):
+            continue
+        # x-approval lives on the raw ('__'-prefixed) entity (generators.py
+        # `_raw_def()`); a paired view's own `defn` simply won't have it, so
+        # no dedup logic is needed here -- each submit_on is only ever
+        # findable once, straight off whichever definition declares it.
+        submit_on_raw = (defn.get('x-approval') or {}).get('submit_on') or {}
+        if not submit_on_raw:
+            continue
+        if len(submit_on_raw) != 1:
+            # Malformed shape (generators.py's resolve_approval_submit_on()
+            # raises ValueError on this during generation) -- not this
+            # check's job to report, skip and let that raise downstream.
+            continue
+        field_name = next(iter(submit_on_raw))
+        field_def = _own_properties(defn).get(field_name)
+        if not isinstance(field_def, dict) or 'default' not in field_def:
+            continue
+        model_name = _resolve_backing_model_name(def_key, defs)
+        model = prisma_models.get(model_name)
+        if model is None:
+            continue
+        pf = model.fields.get(field_name)
+        if pf is None or not pf.has_default or pf.default_is_dynamic:
+            continue
+        json_default = field_def['default']
+        if json_default != pf.default_value:
+            errors.append(
+                f"Definition '{def_key}', x-approval.submit_on field '{field_name}': "
+                f"json schema declares default={json_default!r} but Prisma model "
+                f"'{model_name}' has @default({pf.default_value!r}) — newly created "
+                f"rows would start already at (or drift toward) a locked value."
+            )
+
+    if errors:
+        bullet_list = '\n'.join(f"  • {e}" for e in errors)
+        raise SchemaValidationError(
+            f"x-approval.submit_on default value mismatch between json_schema.yaml and "
+            f"Prisma schema.prisma — {len(errors)} field(s):\n\n{bullet_list}\n\n"
+            f"Fix by aligning schema.prisma's @default(...) to match json_schema.yaml's "
+            f"declared default: for the submit_on field (json_schema.yaml is canonical).\n"
+        )
+
+
 # ---------------------------------------------------------------------------
 # x-import-key visibility contract (cmd_394 §8, DP-1a)
 # ---------------------------------------------------------------------------
@@ -197,6 +624,7 @@ def _compute_export_visibility(def_key: str, defn: dict, defs: dict) -> tuple[se
         and f not in fk_prop_names
         and f in props
         and _is_export_scalar_type(props[f])
+        and not is_write_only_prop(props[f])  # cmd_801: credential material, never exported
     }
     # DP-1 UNION (build_context.py): non-dotted x-import-key fields already in
     # the view-visible allowlist are unioned in, mirrored here so this
@@ -218,11 +646,33 @@ def _compute_export_visibility(def_key: str, defn: dict, defs: dict) -> tuple[se
 def validate_schema(schema: dict) -> None:
     """Validate *schema* and raise SchemaValidationError listing all problems."""
     defs = schema.get('definitions', {})
-    if not defs:
+    if not defs and not schema.get('x-scheduled-tasks'):
         # Schema uses a format without 'definitions' (e.g. OpenAPI components) —
-        # nothing to validate at this level.
+        # nothing to validate at this level. x-scheduled-tasks (cmd_790) is the
+        # one top-level, entity-agnostic key that still needs validating even
+        # when 'definitions' is empty/absent, so it is excepted from this
+        # early return.
         return
     errors = []
+
+    # Entities referenced as the `items.$ref` of some *other* entity's array
+    # property — i.e. rendered as an inline embedded DataGrid child on that
+    # parent's form. Used by 2b2 below to distinguish a genuinely embedded
+    # child entity (no `x-generate` of its own, and actually consumed as a
+    # child list somewhere) from an entity that merely happens to omit
+    # `x-generate` in a minimal test fixture never embedded by anything —
+    # the latter is not the §15.9 hazard and must not be flagged.
+    # Uses get_entity_properties() (allOf-merge aware), not a plain
+    # `d.get('properties')`, so an array child declared on the *view* half
+    # of an already-migrated (allOf raw+view) parent entity is still seen —
+    # a plain top-level lookup finds nothing there (see the section 2 fix
+    # below for the same raw/view gap).
+    _embedded_child_targets = {
+        (prop_def.get('items') or {}).get('$ref', '').split('/')[-1]
+        for def_key in defs
+        for prop_def in get_entity_properties(def_key, schema).values()
+        if isinstance(prop_def, dict) and isinstance(prop_def.get('items'), dict)
+    } - {''}
 
     # -----------------------------------------------------------------------
     # 1. Entity / definition names must be lowercase snake_case
@@ -238,13 +688,80 @@ def validate_schema(schema: dict) -> None:
             )
 
     # -----------------------------------------------------------------------
+    # 1b. A '_detail'-suffixed key must be a genuine Stage-3-style base/view
+    #     pair: '{base}_detail' carrying x-generate + `allOf: [{$ref: '#/
+    #     definitions/{base}'}]`, with '{base}' itself present in the schema
+    #     (this shape is still actively exercised by this file's own test
+    #     suite — test_bridge_validation.py, test_validate_import_*.py — and
+    #     by convert_to_user_schema.py's legacy-schema converter, so it
+    #     remains accepted). What is NOT accepted: a self-contained entity
+    #     that merely happens to be named with a '_detail' suffix (no
+    #     matching base, no allOf $ref to one) — that shape silently
+    #     mis-scopes this file's own x-import-key eligibility check (section
+    #     12 below excludes any '_detail'-suffixed key from _base_model_keys,
+    #     assuming it is always the split's carrier) instead of erroring
+    #     (cmd_746, 2026-08-14 proj_h demo: build passed but generated code
+    #     was inconsistent for a self-contained 'endorsement_detail' entity
+    #     until it was renamed). See docs/knowledge/schema-restructuring-
+    #     build-order.md "Current entity-naming convention (cmd_409)" — new
+    #     entities should generally avoid this suffix entirely, but the
+    #     paired form is not itself an error.
+    # -----------------------------------------------------------------------
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue  # already reported above
+        if def_key.startswith('__') or not def_key.endswith('_detail'):
+            continue
+        if not isinstance(defn, dict):
+            continue
+        base_key = def_key[:-len('_detail')]
+        allof_refs = {
+            (item.get('$ref') or '').split('/')[-1]
+            for item in (defn.get('allOf') or [])
+            if isinstance(item, dict)
+        }
+        if base_key in defs and base_key in allof_refs:
+            continue  # genuine Stage-3 base/view pair — accepted
+        errors.append(
+            f"Definition '{def_key}': entity names ending in '_detail' are "
+            f"reserved for the base/view split naming convention (cmd_409) — "
+            f"a '{def_key}' definition must carry `allOf: [{{$ref: "
+            f"'#/definitions/{base_key}'}}]` with a matching '{base_key}' "
+            f"definition present.  This definition is self-contained (no such "
+            f"allOf/base pair), which silently mis-scopes this file's own "
+            f"x-import-key eligibility check (section 12) and "
+            f"convert_to_user_schema.py's legacy converter instead of "
+            f"erroring.  Rename to a name that does not end in '_detail' "
+            f"(e.g. '{base_key}' or a more specific business name), or add "
+            f"the matching '{base_key}' base definition and allOf $ref if a "
+            f"base/view split was genuinely intended."
+        )
+
+    # -----------------------------------------------------------------------
     # 2. Per-property relationship checks
     # -----------------------------------------------------------------------
     for def_key, defn in defs.items():
         if not _SNAKE_CASE.match(def_key):
             continue  # already reported; can't safely inspect properties
+        if def_key.startswith('__'):
+            # Raw base entity (build_user_schema.py's allOf[0] target for its
+            # view entity, e.g. `__role` for `role`) — its properties are
+            # already covered via the view entity below through
+            # get_entity_properties()'s allOf merge. Checking it again here
+            # under its own def_key would just duplicate every finding.
+            continue
 
-        props = defn.get('properties', {})
+        # get_entity_properties()/get_entity_required() resolve the allOf
+        # merge (raw base + view overlay) that build_user_schema.py produces
+        # for any entity already present in prisma/schema.prisma — a plain
+        # `defn.get('properties', {})` sees nothing for those (their fields
+        # live on the allOf[0]-referenced `__x` base, not on `x` itself) and
+        # silently skips every per-property check below for ~40% of a
+        # typical schema's entities (cmd_746/747 A1/B1 injection testing
+        # caught this: deviations added to an already-migrated entity went
+        # undetected until this fix).
+        props = get_entity_properties(def_key, schema)
+        req_set = get_entity_required(def_key, schema)
         for prop_name, prop_def in props.items():
             rel = prop_def.get('x-relationship', {})
             if not rel or rel.get('type') not in ('many-to-one', 'one-to-one', 'one-to-one_bridge'):
@@ -264,6 +781,25 @@ def validate_schema(schema: dict) -> None:
                     f"and React component props."
                 )
 
+            # 2a2. A field cannot simultaneously be a plain enum-valued column
+            # (`enum:` — a fixed set of literal values, rendered as a select)
+            # and a required FK reference (`x-relationship` — a pointer to
+            # another entity's row, rendered as an autocomplete). The two
+            # value shapes are incompatible: nativeEnum/int-enum derivation
+            # (schema_deriver.py) and FK relation derivation both claim the
+            # same column, and required: true forces the contradiction to be
+            # load-bearing rather than just dead config (cmd_746/747, A1).
+            if 'enum' in prop_def and prop_name in req_set:
+                errors.append(
+                    f"Definition '{def_key}', property '{prop_name}': "
+                    f"declares both `enum: {prop_def.get('enum')!r}` and "
+                    f"`x-relationship` (FK to '{target}'), and is required. "
+                    f"A column cannot be both a fixed-choice enum value and a "
+                    f"foreign-key reference. Remove `enum:` if this is a "
+                    f"genuine FK, or remove `x-relationship:` if this is a "
+                    f"genuine enum column."
+                )
+
             # 2b. Relationship target must exist in definitions
             if target and target not in defs:
                 errors.append(
@@ -275,6 +811,48 @@ def validate_schema(schema: dict) -> None:
 
             if not target:
                 continue
+
+            # 2b2. FK target must be an independent entity (its own
+            # x-generate block, per docs/knowledge/schema-yaml-configuration.md
+            # §15.9), not an embedded child (rendered only as an inline
+            # DataGrid on its parent's form, with no x-generate block of its
+            # own and therefore no Prisma model page/route the FK could link
+            # to). Generator gap confirmed as a build-breaking TypeScript
+            # error, not merely a style issue (cmd_746/747, B1). Gated on
+            # _embedded_child_targets (not just "x-generate absent") so an
+            # entity that merely omits x-generate in an unrelated minimal
+            # test fixture — never actually embedded as anyone's array child
+            # — is not false-flagged.
+            #
+            # Also skip when the FK's *own* entity carries entity-level
+            # `x-internal` (schema-yaml-configuration.md §4.5): such an
+            # entity (e.g. `reaction`, api: custom / page: false / embed:
+            # false) is never rendered through the standard DataGrid-
+            # column / autocomplete pipeline §15.9 is about — its FK fields
+            # are hand-coded, so a target lacking `x-generate` is not a
+            # hazard there. Confirmed against the real default schema:
+            # `reaction.comment_id` legitimately targets `comment` (a
+            # backing-only entity, no x-generate, also embedded elsewhere
+            # as a DataGrid child) — without this guard the unmodified
+            # default schema itself fails validate:schema.
+            target_def = defs.get(target, {})
+            if (
+                target in _embedded_child_targets
+                and isinstance(target_def, dict)
+                and 'x-generate' not in target_def
+                and not defn.get('x-internal')
+            ):
+                errors.append(
+                    f"Definition '{def_key}', property '{prop_name}': "
+                    f"x-relationship target '{target}' is an embedded child "
+                    f"entity (rendered as an inline DataGrid child elsewhere, "
+                    f"no `x-generate` block of its own — see "
+                    f"schema-yaml-configuration.md §15.9) and cannot be "
+                    f"referenced by FK. Either add an `x-generate` block to "
+                    f"'{target}' (making it independent, at least "
+                    f"`list: true`), or point '{prop_name}' at '{target}''s "
+                    f"parent entity instead."
+                )
 
             target_props = get_entity_properties(target, schema)
 
@@ -321,6 +899,58 @@ def validate_schema(schema: dict) -> None:
                                 f"formValues are pulled from this entity's own form state, "
                                 f"not from the relationship target '{target}'."
                             )
+
+    # -----------------------------------------------------------------------
+    # 2f. x-server-value shape checks (cmd_556/cmd_565)
+    # -----------------------------------------------------------------------
+    _SERVER_VALUE_OPERATIONS = {'create', 'read', 'update', 'delete', 'import'}
+    _SERVER_VALUE_DICT_KEYS = {'source', 'override_permission'}
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        props = defn.get('properties', {})
+        for prop_name, prop_def in props.items():
+            if not isinstance(prop_def, dict) or 'x-server-value' not in prop_def:
+                continue
+            sv = prop_def['x-server-value']
+            if isinstance(sv, str):
+                if sv != 'actor':
+                    errors.append(
+                        f"Definition '{def_key}', property '{prop_name}': "
+                        f"x-server-value string form only supports 'actor', got '{sv}'.  "
+                        f"Use the dict form {{source: {sv!r}, ...}} once other sources "
+                        f"are implemented, or correct the value to 'actor'."
+                    )
+                continue
+            if isinstance(sv, dict):
+                unknown_keys = set(sv.keys()) - _SERVER_VALUE_DICT_KEYS
+                if unknown_keys:
+                    errors.append(
+                        f"Definition '{def_key}', property '{prop_name}': "
+                        f"x-server-value has unknown key(s) {sorted(unknown_keys)}.  "
+                        f"Allowed keys are {sorted(_SERVER_VALUE_DICT_KEYS)}."
+                    )
+                if sv.get('source') != 'actor':
+                    errors.append(
+                        f"Definition '{def_key}', property '{prop_name}': "
+                        f"x-server-value.source must be 'actor' (the only implemented "
+                        f"source today), got {sv.get('source')!r}."
+                    )
+                _override = sv.get('override_permission')
+                if _override is not None and _override not in _SERVER_VALUE_OPERATIONS:
+                    errors.append(
+                        f"Definition '{def_key}', property '{prop_name}': "
+                        f"x-server-value.override_permission must be one of "
+                        f"{sorted(_SERVER_VALUE_OPERATIONS)} (lib/authz.ts Operation), "
+                        f"got {_override!r}."
+                    )
+                continue
+            errors.append(
+                f"Definition '{def_key}', property '{prop_name}': "
+                f"x-server-value must be the string 'actor' or a dict "
+                f"{{source: 'actor', override_permission?: <Operation>}}, "
+                f"got {type(sv).__name__}."
+            )
 
     # -----------------------------------------------------------------------
     # 3. Many-to-many x-relationships labelField checks
@@ -704,6 +1334,39 @@ def validate_schema(schema: dict) -> None:
                 )
 
     # -----------------------------------------------------------------------
+    # 6d. x-display.form field name validation (cmd_568): the declared
+    # create/edit-form + detail-view display order. Every entry must name an
+    # actual property on the model — fail-closed, since a typo would
+    # silently drop that field from the rendered form/view/CSV export
+    # (form_upsert_context/form_view_context/export_scalar_fields only
+    # render/emit fields they can find in this list).
+    # -----------------------------------------------------------------------
+    for entity in entities:
+        model     = entity['model']
+        model_def = defs.get(f'__{model}', defs.get(model, {}))
+        props     = get_entity_properties(model, schema)
+
+        xdisplay = model_def.get('x-display') or {}
+        if not isinstance(xdisplay, dict):
+            continue
+        form_order = xdisplay.get('form')
+        if form_order is None:
+            continue
+        if not isinstance(form_order, list) or not all(isinstance(f, str) for f in form_order):
+            errors.append(
+                f"Entity '{model}': x-display.form must be a list of field name "
+                f"strings, got {type(form_order).__name__}."
+            )
+            continue
+        for field_name in form_order:
+            if field_name not in props:
+                errors.append(
+                    f"Entity '{model}': x-display.form references field "
+                    f"'{field_name}' but that field does not exist on the model. "
+                    f"Fix the field name or remove it from x-display.form."
+                )
+
+    # -----------------------------------------------------------------------
     # 7. x-internal entity validation
     # -----------------------------------------------------------------------
     _REQUIRED_INTERNAL_KEYS = ('page', 'embed', 'api')
@@ -744,6 +1407,39 @@ def validate_schema(schema: dict) -> None:
                     f"integer enum labels count ({len(enum_vals)}) does not match "
                     f"minimum/maximum range ({minimum}..{maximum} = {expected_count} values). "
                     f"Adjust enum labels or minimum/maximum to match."
+                )
+
+    # -----------------------------------------------------------------------
+    # 7b. x-internal is an entity-level key only — reject field-level misuse
+    # -----------------------------------------------------------------------
+    # `x-internal` (schema-yaml-configuration.md §4.5) marks an ENTITY as
+    # excluded from pages/embedding. Every generator reference reads it off
+    # an entity definition (generate_types.py:123 "Skip x-internal
+    # entities", :322; the entity check above at :1218), never off a
+    # property. Declaring it under `fields: {<col>: {x-internal: true}}`
+    # (the entity-level key mistakenly written on a field, e.g. as a
+    # workaround for an unrelated template gap) is therefore silently
+    # accepted and silently does nothing — no exclusion happens for that
+    # field, and nothing else rejects it either (fail-open, cmd_903). This
+    # loop is deliberately NOT gated on the entity itself having a (correct)
+    # entity-level `x-internal` — the erroneous case by definition lacks one.
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        for prop_name, prop_def in defn.get('properties', {}).items():
+            if not isinstance(prop_def, dict):
+                continue
+            if 'x-internal' in prop_def:
+                errors.append(
+                    f"Definition '{def_key}', property '{prop_name}': "
+                    f"x-internal is an entity-level key (schema-yaml-"
+                    f"configuration.md §4.5), not a field-level one — the "
+                    f"generator never reads x-internal off a property, so "
+                    f"this is silently ignored at generation time. Remove "
+                    f"it from this field; if the intent is to exclude an "
+                    f"entire entity from pages/embedding, declare "
+                    f"x-internal (with page/embed/api keys) on that "
+                    f"entity's own definition instead."
                 )
 
     # -----------------------------------------------------------------------
@@ -1131,6 +1827,33 @@ def validate_schema(schema: dict) -> None:
         )
 
     # -----------------------------------------------------------------------
+    # 13. x-self-only schema rules
+    # -----------------------------------------------------------------------
+    # An entity declaring x-self-only ("only the record's creator can access
+    # it" is a fixed, permission-independent invariant) must never let CSV
+    # import set creator_id directly — the app layer always stamps it from
+    # the session, never from user-supplied input (see
+    # import_unimportable_columns in build_context.py). The companion check
+    # — the underlying Prisma model must actually HAVE a creator_id column —
+    # lives in validate_self_only_creator_id_columns() above: creator_id is
+    # never listed in a definition's 'properties' (it's schema.prisma
+    # boilerplate, not a JSON-schema property), so it can't be checked here.
+    for _so_key, _so_defn in defs.items():
+        if not isinstance(_so_defn, dict) or not _SNAKE_CASE.match(_so_key):
+            continue
+        _is_self_only, _ = get_self_only_flags(_so_defn)
+        if not _is_self_only:
+            continue
+        _so_import_key = _so_defn.get('x-import-key') or []
+        if 'creator_id' in _so_import_key:
+            errors.append(
+                f"Definition '{_so_key}': x-self-only entity cannot list "
+                f"'creator_id' in x-import-key — it must never be settable "
+                f"from user-supplied CSV input, only stamped from the "
+                f"session (see import_unimportable_columns)."
+            )
+
+    # -----------------------------------------------------------------------
     # 9. nativeEnum member naming convention (cmd_493)
     # -----------------------------------------------------------------------
     # Prisma `enum` block member names must be lowercase snake_case (e.g.
@@ -1155,6 +1878,411 @@ def validate_schema(schema: dict) -> None:
                         f"(pattern: {_ENUM_MEMBER_NAME.pattern}). "
                         f"See docs/knowledge/enum-member-naming.md."
                     )
+
+    # -----------------------------------------------------------------------
+    # 10. x-approval.{on_approved,on_rejected}.set_fields must be a mapping
+    # -----------------------------------------------------------------------
+    # _resolve_set_fields() (generate.py) iterates `raw.items()` -- a mapping
+    # is the only form it accepts. A list-of-{field, value} entries (the form
+    # once shown, in error, by docs/knowledge/appendix/approval-flow.md §16.9,
+    # cmd_544) raises an uninformative AttributeError deep inside generate()
+    # instead of failing here with the offending entity and key named.
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        x_approval = defn.get('x-approval')
+        if not x_approval:
+            continue
+        for stage in ('on_approved', 'on_rejected'):
+            stage_cfg = x_approval.get(stage)
+            if not isinstance(stage_cfg, dict):
+                continue
+            set_fields = stage_cfg.get('set_fields')
+            if set_fields is None or isinstance(set_fields, dict):
+                continue
+            # If it's the list-of-{field, value} form, name the specific
+            # field keys found so the user can see exactly what to fold into
+            # the mapping — not just "it's the wrong type".
+            found_fields = [
+                entry.get('field') for entry in set_fields
+                if isinstance(set_fields, list) and isinstance(entry, dict) and 'field' in entry
+            ] if isinstance(set_fields, list) else []
+            fields_note = (
+                f" Field key(s) found: {found_fields}." if found_fields else ""
+            )
+            errors.append(
+                f"Definition '{def_key}': x-approval.{stage}.set_fields must be a "
+                f"mapping of field_name: value (got {type(set_fields).__name__})."
+                f"{fields_note} Write it as:\n"
+                f"      set_fields:\n"
+                f"        <field_name>: <value>\n"
+                f"    not as a list of {{field, value}} entries."
+            )
+
+    # -----------------------------------------------------------------------
+    # 11. x-write-locked-values: field existence + enum membership
+    # -----------------------------------------------------------------------
+    # derive_write_locked_values() (helpers/schema_helpers.py) trusts every
+    # declared value at generate time -- a typo'd field name or a value not
+    # in that field's enum would otherwise silently produce dead template
+    # code (a locked value that can never be submitted anyway) instead of
+    # failing here with the offending entity and key named.
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        x_write_locked = defn.get('x-write-locked-values')
+        if not x_write_locked:
+            continue
+        if not isinstance(x_write_locked, dict):
+            errors.append(
+                f"Definition '{def_key}': x-write-locked-values must be a "
+                f"mapping of field_name: [value, ...] "
+                f"(got {type(x_write_locked).__name__})."
+            )
+            continue
+        # get_entity_properties() (allOf-merge aware), not a plain
+        # `defn.get('properties', {})` -- a proxy view declaring
+        # x-write-locked-values on itself (cmd_1032) has no top-level
+        # `properties` key of its own; the field it names lives on the raw
+        # entity its allOf $ref chain resolves to, same raw/view gap the
+        # embedded-child-array check above this function works around.
+        props = get_entity_properties(def_key, schema)
+        for field, values in x_write_locked.items():
+            if field not in props:
+                errors.append(
+                    f"Definition '{def_key}': x-write-locked-values references "
+                    f"field '{field}' which does not exist in properties."
+                )
+                continue
+            if not isinstance(values, list):
+                errors.append(
+                    f"Definition '{def_key}': x-write-locked-values.{field} "
+                    f"must be a list (got {type(values).__name__})."
+                )
+                continue
+            prop_def = props[field]
+            enum_vals = prop_def.get('enum')
+            if enum_vals is None:
+                errors.append(
+                    f"Definition '{def_key}': x-write-locked-values.{field} "
+                    f"declares locked values but field '{field}' has no enum. "
+                    f"Only enum fields are supported."
+                )
+                continue
+            actual_type = prop_def.get('type')
+            if isinstance(actual_type, list):
+                actual_type = next(
+                    (t for t in actual_type if t != 'null'), None
+                )
+            is_int_enum = (
+                actual_type in ('integer', 'number')
+                and all(isinstance(v, str) for v in enum_vals)
+            )
+            for v in values:
+                if is_int_enum:
+                    if not any(
+                        str(lbl).lower() == str(v).lower()
+                        for lbl in enum_vals
+                    ):
+                        errors.append(
+                            f"Definition '{def_key}': "
+                            f"x-write-locked-values.{field} value {v!r} "
+                            f"does not match any label in enum {enum_vals}."
+                        )
+                else:
+                    if v not in enum_vals:
+                        errors.append(
+                            f"Definition '{def_key}': "
+                            f"x-write-locked-values.{field} value {v!r} "
+                            f"is not in enum {enum_vals}."
+                        )
+
+    # -----------------------------------------------------------------------
+    # 11a. x-write-locked-values vs. submit_on/on_withdrawn/non-terminal
+    #      on_rejected collision (cmd_1022)
+    # -----------------------------------------------------------------------
+    # A value that x-write-locked-values marks as system-only, but that
+    # submit_on/on_withdrawn/a non-terminal on_rejected also names as a
+    # value a USER transition writes, is almost certainly a typo -- it
+    # would make submitting, withdrawing, or (non-terminally) rejecting
+    # impossible. A *terminal* on_rejected value is deliberately exempt:
+    # freezing a terminal rejection's own value is the intended use case
+    # (cmd_1022 acceptance criteria (2)), not a collision. Kept as an
+    # independent loop rather than folded into section 11 above -- section
+    # 11 is a structural check (field existence / enum membership), this is
+    # a semantic collision check between two different x-approval-adjacent
+    # declarations, and the two responsibilities are kept separate.
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        x_write_locked = defn.get('x-write-locked-values')
+        if not x_write_locked or not isinstance(x_write_locked, dict):
+            continue  # malformed shape already reported by section 11 above
+        # x-approval lives on the entity's own raw backing model, not
+        # necessarily on `defn` itself (cmd_1032): a proxy view may now
+        # declare x-write-locked-values on itself, and its own `defn`
+        # never carries x-approval (that key lives only on the raw
+        # '__'-prefixed entity -- same resolution
+        # validate_submit_on_default_matches_prisma() above already uses).
+        # Reading `defn.get('x-approval')` directly here would find an
+        # empty dict for such a view and silently let every collision
+        # through instead of catching it.
+        _model_name = _resolve_backing_model_name(def_key, defs)
+        _raw_entry = defs.get(f'__{_model_name}') or defs.get(_model_name) or {}
+        x_approval = _raw_entry.get('x-approval') or {}
+        submit_on_raw = x_approval.get('submit_on') or {}
+        on_withdrawn_sf = (x_approval.get('on_withdrawn') or {}).get('set_fields') or {}
+        on_rejected_block = x_approval.get('on_rejected') or {}
+        on_rejected_terminal = bool(on_rejected_block.get('terminal'))
+        on_rejected_sf = {} if on_rejected_terminal else (on_rejected_block.get('set_fields') or {})
+        for field, values in x_write_locked.items():
+            if not isinstance(values, list):
+                continue  # already reported by section 11 above
+            collision_sources = []
+            if submit_on_raw.get(field) in values:
+                collision_sources.append(f"submit_on={submit_on_raw.get(field)!r}")
+            if on_withdrawn_sf.get(field) in values:
+                collision_sources.append(f"on_withdrawn={on_withdrawn_sf.get(field)!r}")
+            if on_rejected_sf.get(field) in values:
+                collision_sources.append(
+                    f"on_rejected={on_rejected_sf.get(field)!r} (non-terminal)")
+            if collision_sources:
+                errors.append(
+                    f"Definition '{def_key}': x-write-locked-values.{field} "
+                    f"locks a value also reachable via "
+                    f"{', '.join(collision_sources)} -- a user could never "
+                    f"submit, withdraw, or non-terminally reject this "
+                    f"entity. This is almost certainly a typo; remove the "
+                    f"value from x-write-locked-values or correct the "
+                    f"submit_on/on_withdrawn/on_rejected declaration."
+                )
+
+    # -----------------------------------------------------------------------
+    # 14. x-relationship.searchField retired (cmd_552)
+    # -----------------------------------------------------------------------
+    # searchField used to opt an FK into cross-relation substring search
+    # independently of labelField, which let the two drift apart (a field
+    # shown on screen that differs from the field actually searched).
+    # derive_searchable_relation_fields() (schema_helpers.py) now derives
+    # search eligibility from labelField itself, so a schema that still
+    # declares searchField is stale config with no effect — silently
+    # ignoring it would leave the author believing search still works.
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        for prop_name, prop_def in defn.get('properties', {}).items():
+            if not isinstance(prop_def, dict):
+                continue
+            rel = prop_def.get('x-relationship')
+            if isinstance(rel, dict) and 'searchField' in rel:
+                errors.append(
+                    f"Definition '{def_key}', property '{prop_name}': "
+                    f"x-relationship.searchField is retired (cmd_552) and no "
+                    f"longer read by the generator. Delete it — cross-relation "
+                    f"substring search is now derived automatically from "
+                    f"x-relationship.labelField (the same field already shown "
+                    f"in the autocomplete label). If the field that used to be "
+                    f"named in searchField differs from labelField, move it "
+                    f"into labelField instead. See "
+                    f"docs/knowledge/label-field-search-semantics.md."
+                )
+
+    # -----------------------------------------------------------------------
+    # 15. x-scheduled-task entity-level validation (cmd_750 / subtask_741a)
+    # -----------------------------------------------------------------------
+    _scheduled_task_ids = {}
+    for def_key, defn in defs.items():
+        if not _SNAKE_CASE.match(def_key):
+            continue
+        xsched = defn.get('x-scheduled-task')
+        if not xsched:
+            continue
+        if not isinstance(xsched, dict):
+            errors.append(
+                f"Definition '{def_key}': x-scheduled-task must be a mapping, got "
+                f"{type(xsched).__name__}."
+            )
+            continue
+
+        task_id = xsched.get('task_id')
+        if not isinstance(task_id, str) or not task_id:
+            errors.append(
+                f"Definition '{def_key}': x-scheduled-task.task_id is required and must be "
+                f"a non-empty string (it doubles as the registry key and the "
+                f"/api/scheduled-tasks/[task] URL segment)."
+            )
+        else:
+            prior_owner = _scheduled_task_ids.get(task_id)
+            if prior_owner:
+                errors.append(
+                    f"Definition '{def_key}': x-scheduled-task.task_id {task_id!r} is also "
+                    f"declared by '{prior_owner}' — task_id must be unique across the schema."
+                )
+            else:
+                _scheduled_task_ids[task_id] = def_key
+
+        handler = xsched.get('handler')
+        if not isinstance(handler, str) or not re.match(r'^[A-Za-z_$][A-Za-z0-9_$]*$', handler):
+            errors.append(
+                f"Definition '{def_key}': x-scheduled-task.handler is required and must be "
+                f"a valid TypeScript identifier (the exported function name in "
+                f"service_scheduled_handler.ts), got {handler!r}."
+            )
+
+        interval = xsched.get('interval')
+        if not isinstance(interval, str) or not interval:
+            errors.append(
+                f"Definition '{def_key}': x-scheduled-task.interval is required and must be "
+                f"a non-empty cron expression string in the format Vercel's `crons[].schedule` "
+                f"accepts (cmd_781) — generate.py writes it verbatim into vercel.json's `crons` "
+                f"array for this task's /api/scheduled-tasks/{{task_id}} path."
+            )
+
+        xfilter = xsched.get('filter')
+        if not isinstance(xfilter, dict) or not xfilter:
+            errors.append(
+                f"Definition '{def_key}': x-scheduled-task.filter is required and must be a "
+                f"non-empty mapping — at least one of expires_at_before_now/status_in must "
+                f"be set (an empty filter would select every row on every run)."
+            )
+            continue
+
+        props = defn.get('properties', {})
+        expires_at_before_now = xfilter.get('expires_at_before_now')
+        if expires_at_before_now:
+            if not isinstance(expires_at_before_now, bool):
+                errors.append(
+                    f"Definition '{def_key}': x-scheduled-task.filter.expires_at_before_now "
+                    f"must be a boolean, got {type(expires_at_before_now).__name__}."
+                )
+            if 'expires_at' not in props:
+                errors.append(
+                    f"Definition '{def_key}': x-scheduled-task.filter.expires_at_before_now "
+                    f"is set but the entity has no 'expires_at' property."
+                )
+
+        status_in = xfilter.get('status_in')
+        if status_in is not None:
+            if not isinstance(status_in, list) or not status_in or not all(isinstance(s, str) for s in status_in):
+                errors.append(
+                    f"Definition '{def_key}': x-scheduled-task.filter.status_in must be a "
+                    f"non-empty list of strings, got {status_in!r}."
+                )
+            elif 'status' not in props:
+                errors.append(
+                    f"Definition '{def_key}': x-scheduled-task.filter.status_in is set but "
+                    f"the entity has no 'status' property."
+                )
+
+        if not expires_at_before_now and not status_in:
+            errors.append(
+                f"Definition '{def_key}': x-scheduled-task.filter must set at least one of "
+                f"expires_at_before_now/status_in (an empty filter would select every row "
+                f"on every run)."
+            )
+
+    # -----------------------------------------------------------------------
+    # 15.5. x-scheduled-tasks: top-level, entity-agnostic bulk validation
+    #       (cmd_790)
+    # -----------------------------------------------------------------------
+    #
+    # Entity-level x-scheduled-task (above) is a single-entity, filter-required
+    # row scan -- it has no shape for an operation that spans many entities or
+    # an entire table with no filter (e.g. a full demo-data reset). This
+    # top-level, plural sibling key registers a task that isn't bound to any
+    # entity's rows at all: generate.py calls its handler directly, once, per
+    # run, with no row selection. It shares one task_id/registry-key namespace
+    # with entity-level x-scheduled-task (`_scheduled_task_ids` below), since
+    # both dispatch through the same TASK_REGISTRY and
+    # /api/scheduled-tasks/[task] route.
+    _bulk_scheduled_tasks = schema.get('x-scheduled-tasks')
+    if _bulk_scheduled_tasks is not None:
+        if not isinstance(_bulk_scheduled_tasks, list):
+            errors.append(
+                f"x-scheduled-tasks must be a list, got "
+                f"{type(_bulk_scheduled_tasks).__name__}."
+            )
+            _bulk_scheduled_tasks = []
+
+        _ALLOWED_BULK_SCHEDULED_TASK_KEYS = {'task_id', 'handler', 'interval'}
+        for i, item in enumerate(_bulk_scheduled_tasks):
+            loc = f"x-scheduled-tasks[{i}]"
+            if not isinstance(item, dict):
+                errors.append(f"{loc}: must be a mapping, got {type(item).__name__}.")
+                continue
+
+            unknown_keys = set(item) - _ALLOWED_BULK_SCHEDULED_TASK_KEYS
+            if unknown_keys:
+                errors.append(
+                    f"{loc}: unknown key(s) {sorted(unknown_keys)!r} -- bulk tasks "
+                    f"(x-scheduled-tasks, top-level) take no `filter`; that concept "
+                    f"belongs to entity-level x-scheduled-task's single-row-scan "
+                    f"design. Bulk mode calls its handler directly, once, with no "
+                    f"row selection -- put any filtering the handler needs inside "
+                    f"the handler itself."
+                )
+
+            task_id = item.get('task_id')
+            if not isinstance(task_id, str) or not task_id:
+                errors.append(
+                    f"{loc}.task_id is required and must be a non-empty string (it "
+                    f"doubles as the registry key and the "
+                    f"/api/scheduled-tasks/[task] URL segment -- shared namespace "
+                    f"with entity-level x-scheduled-task)."
+                )
+            else:
+                prior_owner = _scheduled_task_ids.get(task_id)
+                if prior_owner:
+                    errors.append(
+                        f"{loc}.task_id {task_id!r} is also declared by "
+                        f"{prior_owner!r} -- task_id must be unique across the "
+                        f"schema (entity-level x-scheduled-task and top-level "
+                        f"x-scheduled-tasks share one namespace)."
+                    )
+                else:
+                    _scheduled_task_ids[task_id] = f'{loc} (bulk, no entity)'
+
+            handler = item.get('handler')
+            if not isinstance(handler, str) or not re.match(r'^[A-Za-z_$][A-Za-z0-9_$]*$', handler):
+                errors.append(
+                    f"{loc}.handler is required and must be a valid TypeScript "
+                    f"identifier (the exported function name in "
+                    f"lib/scheduled-tasks/<task_id>/service_scheduled_handler.ts), "
+                    f"got {handler!r}."
+                )
+
+            interval = item.get('interval')
+            if not isinstance(interval, str) or not interval:
+                errors.append(
+                    f"{loc}.interval is required and must be a non-empty cron "
+                    f"expression string in the format Vercel's `crons[].schedule` "
+                    f"accepts (cmd_781) -- generate.py writes it verbatim into "
+                    f"vercel.json's `crons` array for this task's "
+                    f"/api/scheduled-tasks/{{task_id}} path."
+                )
+
+    # Vercel's per-project cron-job limit is 100, unchanged across Hobby/Pro/
+    # Enterprise (last confirmed 2026-07-15 —
+    # https://vercel.com/docs/cron-jobs/usage-and-pricing). generate.py writes
+    # one `crons` entry per declared task_id (entity-level x-scheduled-task
+    # AND top-level x-scheduled-tasks both count -- one shared TASK_REGISTRY,
+    # one shared vercel.json `crons` array) into vercel.json, so a schema that
+    # declares more than that must fail here — loudly, at generate time —
+    # rather than silently emitting a vercel.json Vercel would reject at
+    # deploy (cmd_781 AC5: no silent drop). GCP deployments
+    # (x-cloud.provider: gcp) don't write vercel.json crons at all — see
+    # generate.py's `_write_vercel_json_crons` — so the limit doesn't apply
+    # there.
+    _x_cloud = schema.get('x-cloud') or {}
+    _cloud_provider = _x_cloud.get('provider', '') if _x_cloud.get('enabled') else ''
+    if _cloud_provider != 'gcp' and len(_scheduled_task_ids) > 100:
+        errors.append(
+            f"{len(_scheduled_task_ids)} scheduled task_id(s) declared (entity-level "
+            f"x-scheduled-task + top-level x-scheduled-tasks combined), exceeding "
+            f"Vercel's 100-cron-jobs-per-project limit (all plans, "
+            f"docs/knowledge/scheduled-task-operations.md). Reduce the number of "
+            f"distinct task_ids, or dispatch multiple filters from within one handler."
+        )
 
     # -----------------------------------------------------------------------
     # Report

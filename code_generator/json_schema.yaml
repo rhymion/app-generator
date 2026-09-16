@@ -68,6 +68,30 @@ x-import-key:
     Dotted FK path for Phase 2: [name, role.name] (role_id resolved via role.name)
     Entities without x-import-key: export-only in Phase 1; import blocked in Phase 2.
 
+x-payment:
+  type: boolean
+  default: false
+  description: |
+    Opt-in Stripe payment integration. When at least one entity in the
+    schema declares `x-payment: true`, the generator emits three write-once
+    stub files (same convention as lib/<parent>/invalidate_handler.ts --
+    written only if the file does not already exist, so hand-written
+    implementations survive regeneration):
+      - lib/stripe.ts                     -- Stripe SDK init, fail-closed on
+                                              a missing STRIPE_SECRET_KEY
+      - app/api/payment/checkout/route.ts -- Checkout Session creation stub
+      - app/api/webhooks/stripe/route.ts  -- Webhook receiver stub
+                                              (req.text() -> constructEvent)
+    The generator does NOT generate a Plan/Product/Purchase-style entity, an
+    authz/entitlement layer, or any payment UI -- consumers model their own
+    payment-related entities as ordinary schema entities and wire them into
+    the stub routes. Scope is one-time purchases (Checkout Session
+    mode: payment); subscription lifecycle handling is left to the consumer
+    to add. Requires STRIPE_SECRET_KEY / STRIPE_PUBLISHABLE_KEY /
+    STRIPE_WEBHOOK_SECRET env vars (see .env.example) -- the generated
+    lib/stripe.ts and webhook route both throw at import time if their
+    required key is unset (fail-closed; never a silent pass-through).
+
 definitions:
   user:
     x-generate:
@@ -85,7 +109,7 @@ definitions:
       search: false
       fields:
         - name
-        - image
+        - image_id
         - roles
     x-relationships:
       roles:
@@ -117,8 +141,10 @@ definitions:
         x-custom-component:
           target:
             - upsert
-      image:
-        format: uri
+      image_id:
+        x-relationship:
+          target: attachment
+          type: direct
         x-pii: indirect
       mfa_enabled:
         default: false
@@ -149,7 +175,7 @@ definitions:
       fields:
         - name
         - email
-        - image
+        - image_id
         - password
         - api_key
         - mfa_enabled
@@ -157,6 +183,20 @@ definitions:
       roles:
         type: many-to-many
         target: role
+    # x-self-only (cmd_536): `setting` is a proxy view of the acting
+    # user's OWN `user` row — id === creator_id always holds for every
+    # real account (see lib/auth/creator-id-self-reference-guard.test.ts),
+    # so creator_id is exactly the right unconditional ownership filter
+    # here, same as any other x-self-only entity. admin_bypass: true lets
+    # an Administrator read another user's settings for support purposes,
+    # but only with an audit row written for the access (see
+    # lib/self_only.ts) — this scope is entity-name-keyed (`setting`), so
+    # it applies ONLY to settings pages/routes/getters and never touches
+    # the `user` entity itself or any other entity's FK reference to
+    # `user` (mentions, comment creators, approvers, etc. all stay fully
+    # visible).
+    x-self-only:
+      admin_bypass: true
     allOf:
       - $ref: "#/definitions/user"
       - type: object
@@ -276,19 +316,17 @@ definitions:
       delete: true
       invalidate: false
       api: true
-      test: true
+      test: false
       search: false
     x-relationships:
       preceded_by:
         type: many-to-many
         target: approval_flow
-        labelField: entity_name
-        secondaryLabelField: approver_role.name
+        labelField: [entity_name, approver_role.name]
       followed_by:
         type: many-to-many
         target: approval_flow
-        labelField: entity_name
-        secondaryLabelField: approver_role.name
+        labelField: [entity_name, approver_role.name]
     x-import-key: [entity_name]
     x-display:
       table:
@@ -341,6 +379,14 @@ definitions:
           - approved
           - rejected
           - terminal_rejected
+          - withdrawn
+          # cmd_963: keep in sync with prisma/schema.prisma's
+          # ApprovalRequestStatus enum -- this json-schema enum drives the
+          # TS type emitted for approval_request's own `status` field
+          # (types.ts.jinja2/getters.ts.jinja2), independently of the
+          # Prisma enum itself.
+          - split_invalidated
+      round_id: {}
 
   comment:
     fields:
@@ -365,6 +411,7 @@ definitions:
       comment_id:
         x-relationship:
           labelField: id
+          constantParent: true
 
   attachment:
     fields:

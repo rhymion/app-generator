@@ -9,9 +9,9 @@ The app shell (header, sidebar, footer) is designed to work on both desktop and 
 ## File Structure
 
 ```
-lib/site-config.ts              ← single config file (title, nav links, theme)
-components/SidebarContext.tsx   ← React context: isOpen / open / close / toggle
-components/SessionSidebar.tsx   ← renders desktop panel OR mobile drawer
+lib/site-config.ts                        ← single config file (title, nav links, theme)
+components/_standard/SidebarContext.tsx   ← React context: isOpen / open / close / toggle
+components/_standard/SessionSidebar.tsx   ← renders desktop panel OR mobile drawer
 app/[locale]/providers.tsx      ← SessionProvider + SidebarProvider
 app/[locale]/layout.tsx         ← responsive shell (min-h-screen flex flex-col)
 app/[locale]/@header/page.tsx   ← sticky header with hamburger button
@@ -53,8 +53,11 @@ export const themeConfig = {
   },
   sidebar: {
     panel:    "bg-gray-100",
-    link:     "text-gray-700 hover:bg-gray-200 block px-4 py-2 no-underline transition",
+    link:     "text-gray-600 hover:bg-gray-200 block px-4 py-2 no-underline transition",
     backdrop: "bg-black/40",    // mobile overlay colour
+  },
+  content: {
+    background: "bg-orange-50 dark:bg-slate-800",   // main content area, added since this doc was written
   },
   footer: {
     bar: "bg-gray-900 text-white",

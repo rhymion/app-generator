@@ -19,9 +19,62 @@ export const MFA_TEST_CREDENTIALS = {
   name: 'MFA Test User',
 };
 
+/**
+ * Grants a seeded MFA test user read/update access to their own `setting`
+ * row (app-generator#563 regression coverage needs to reach
+ * /setting/view/[id] and /setting/edit/[id], not just the dedicated
+ * /setting/mfa page these fixtures originally supported).
+ *
+ * `setting` is x-self-only with no ordinary permission grant (see
+ * lib/authz.ts's rows.length === 0 fallback) -- the supported route to a
+ * non-admin user's own setting.read/update is the special-cased 'Creator'
+ * role (lib/authz.ts SPECIAL_ROLE_NAMES), resolved by ownership
+ * (creator_id === userId) rather than by role membership. scripts/seed-
+ * baseline.ts seeds exactly this Creator role + its setting permission row
+ * once per worktree, but cy.task('db:reset') (called at the top of every
+ * test in this spec) wipes it along with everything else, so it must be
+ * re-created per-test -- same pattern as cypress/support/db-helpers.ts's
+ * createSessionUserWithPermission for other entities.
+ */
+async function grantOwnSettingAccess(userId: string): Promise<void> {
+  const role = await prisma.role.create({
+    data: {
+      name: 'Creator',
+      creator_id: userId,
+      updater_id: userId,
+    },
+  });
+  await prisma.permission.create({
+    data: {
+      name: 'setting',
+      role_id: role.id,
+      create: false,
+      read: true,
+      update: true,
+      delete: false,
+      import: false,
+      creator_id: userId,
+      updater_id: userId,
+    },
+  });
+}
+
 export type MfaUserSeed = {
   email: string;
   password: string;
+  /** Plaintext TOTP secret — pass to cy.task('generateTotp', secret) to get a valid code. */
+  secret: string;
+  /** One plaintext recovery code — single-use. */
+  recoveryCode: string;
+};
+
+export const SSO_MFA_TEST_CREDENTIALS = {
+  email: 'sso-mfa-test@example.com',
+  name: 'SSO MFA Test User',
+};
+
+export type SsoMfaUserSeed = {
+  email: string;
   /** Plaintext TOTP secret — pass to cy.task('generateTotp', secret) to get a valid code. */
   secret: string;
   /** One plaintext recovery code — single-use. */
@@ -59,9 +112,59 @@ export async function seedMfaTestUser(): Promise<MfaUserSeed> {
     })),
   });
 
+  await grantOwnSettingAccess(userId);
+
   return {
     email: MFA_TEST_CREDENTIALS.email,
     password: MFA_TEST_CREDENTIALS.password,
+    secret,
+    recoveryCode: codes[0].plaintext,
+  };
+}
+
+/**
+ * Creates an SSO-provisioned test user (password = null, as any real Google
+ * sign-in produces — see auth.ts buildAdapter()/createTenantBoundUser) with
+ * MFA already enabled and 8 seeded recovery codes. This is the exact user
+ * class the cmd_527 bypass affected: `password === null` skips the
+ * credentials↔OAuth collision guard in auth.ts's signIn() callback, so
+ * only the OAuth-path MFA gate (jwt() callback) protects this account.
+ *
+ * Signs in via the test-only mock Google provider (auth.ts, gated on
+ * `MOCK_GOOGLE_OAUTH_TEST=true`) using `cy.task('db:seedSsoMfaUser')` +
+ * a POST to `/api/auth/callback/google` with `{ email }` — see
+ * cypress/e2e/auth/mfa.cy.ts Test A-E.
+ */
+export async function seedSsoMfaTestUser(): Promise<SsoMfaUserSeed> {
+  const secret = generateSecret();
+  const encryptedSecret = encryptSecret(secret);
+  const codes = await generateRecoveryCodes();
+  const userId = createId();
+
+  await prisma.user.create({
+    data: {
+      id: userId,
+      creator_id: userId,
+      updater_id: userId,
+      email: SSO_MFA_TEST_CREDENTIALS.email,
+      name: SSO_MFA_TEST_CREDENTIALS.name,
+      password: null,
+      mfa_secret: encryptedSecret,
+      mfa_enabled: true,
+    },
+  });
+
+  await prisma.mfa_recovery_code.createMany({
+    data: codes.map((c) => ({
+      user_id: userId,
+      code_hash: c.hash,
+    })),
+  });
+
+  await grantOwnSettingAccess(userId);
+
+  return {
+    email: SSO_MFA_TEST_CREDENTIALS.email,
     secret,
     recoveryCode: codes[0].plaintext,
   };

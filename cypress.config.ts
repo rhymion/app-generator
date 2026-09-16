@@ -20,7 +20,6 @@ export default defineConfig({
       // Falls back to empty object when no project-tasks.ts exists (base template).
       let projectTasks: Record<string, (...args: any[]) => any> = {};
       try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
         const mod = require('./cypress/support/project-tasks') as {
           getProjectTasks?: () => Record<string, (...args: any[]) => any>;
         };
@@ -71,20 +70,75 @@ export default defineConfig({
           const { createSessionUserWithPermission } = require('./cypress/support/db-helpers');
           return await createSessionUserWithPermission(params.entityName, params.flags, params.label);
         },
-        // cmd_452: X-API-Key-bearing actor with a custom permission set, NOT
-        // enrolled in any organization — the org-isolation IDOR fixture for
-        // API-route tests (detail GET/PUT/DELETE, list, export).
+        // cmd_695: mutate an already-granted session user's permission flags
+        // mid-test (e.g. read:true,delete:true at page-load, then delete:false
+        // before submit) — the error-message-delivery specs use this to
+        // simulate a permission revoked between page load and Server Action
+        // submit, which is the only reliable way to reach the
+        // requirePermission()-denied branch of a Server Action without the
+        // page's own assertPermission() gate blocking navigation first (both
+        // read the same DB row, so a static permission set can't disagree
+        // with itself). Assumes the user has exactly one role with exactly
+        // one permission row for entityName, which is how
+        // createSessionUserWithPermission above constructs it.
+        async 'db:setEntityPermission'(params: {
+          email: string;
+          entityName: string;
+          flags: { create?: boolean; read?: boolean; update?: boolean; delete?: boolean; import?: boolean };
+        }) {
+          const { prisma } = require('./cypress/support/db-helpers');
+          const user = await prisma.user.findUnique({ where: { email: params.email }, include: { roles: true } });
+          if (!user) throw new Error(`db:setEntityPermission: user not found: ${params.email}`);
+          const roleId = user.roles[0]?.id;
+          if (!roleId) throw new Error(`db:setEntityPermission: user ${params.email} has no role`);
+          await prisma.permission.updateMany({
+            where: { role_id: roleId, name: params.entityName },
+            data: params.flags,
+          });
+          return null;
+        },
+        // cmd_452: X-API-Key-bearing actor with a custom permission set for the
+        // org-isolation IDOR fixture (API-route tests: detail GET/PUT/DELETE,
+        // list, export). cmd_799: optional organizationId enrolls the actor in
+        // that one organization, when a test needs "belongs to the row's org
+        // but lacks organization-entity read permission" rather than "belongs
+        // to zero organizations".
         async 'db:createApiUserWithPermission'(params: {
           entityName: string;
           flags: { create?: boolean; read?: boolean; update?: boolean; delete?: boolean; import?: boolean };
           label?: string;
+          organizationId?: string;
         }) {
           const { createApiUserWithPermission } = require('./cypress/support/db-helpers');
-          return await createApiUserWithPermission(params.entityName, params.flags, params.label);
+          return await createApiUserWithPermission(params.entityName, params.flags, params.label, params.organizationId);
+        },
+        // G3: cross-org isolation fixture — orgA (test user is a
+        // member), orgB (test user is not), optionally reassigning an
+        // existing entity row into orgB.
+        async 'db:createCrossOrgScenario'(params: { entityName: string; entityId?: string }) {
+          const { createCrossOrgScenario } = require('./cypress/support/db-helpers');
+          return await createCrossOrgScenario(params.entityName, params.entityId);
         },
         async 'db:seedMfaUser'() {
           const { seedMfaTestUser } = require('./cypress/support/mfa-helpers');
           return await seedMfaTestUser();
+        },
+        async 'db:seedSsoMfaUser'() {
+          const { seedSsoMfaTestUser } = require('./cypress/support/mfa-helpers');
+          return await seedSsoMfaTestUser();
+        },
+        // app-generator#576 regression coverage (cypress/e2e/auth/settings_avatar_save.cy.ts)
+        async 'db:seedSettingsSaveUser'() {
+          const { seedSettingsSaveTestUser } = require('./cypress/support/settings-save-helpers');
+          return await seedSettingsSaveTestUser();
+        },
+        async 'db:seedSsoSettingsSaveUser'() {
+          const { seedSsoSettingsSaveTestUser } = require('./cypress/support/settings-save-helpers');
+          return await seedSsoSettingsSaveTestUser();
+        },
+        async 'db:getCredentialState'(email: string) {
+          const { getCredentialState } = require('./cypress/support/settings-save-helpers');
+          return await getCredentialState(email);
         },
         async 'generateTotp'(secret: string) {
           const otplib = require('otplib');
@@ -93,7 +147,6 @@ export default defineConfig({
         async 'db:createTestComment'() {
           const { prisma } = require('./cypress/support/db-helpers');
           const { TEST_CREDENTIALS } = require('./cypress/support/test-credentials');
-          const { createId } = require('@paralleldrive/cuid2');
           const testUser = await prisma.user.findUnique({
             where: { email: TEST_CREDENTIALS.email },
           });
@@ -108,7 +161,7 @@ export default defineConfig({
           });
           return JSON.parse(JSON.stringify({ commentId: comment.id, userId: testUser.id }));
         },
-        async 'db:createUserWithName'(params: { name: string; image?: string | null }) {
+        async 'db:createUserWithName'(params: { name: string }) {
           // Creates a user row with a caller-chosen (possibly duplicate) name,
           // owned by the session test user. Used by CSV import tests to set up
           // natural-key match scenarios (cmd_328).
@@ -125,13 +178,36 @@ export default defineConfig({
               updater_id: testUser.id,
               email: `${newUserId}@example.com`,
               name: params.name,
-              image: params.image ?? null,
               password: 'not_needed',
             },
           });
           return JSON.parse(JSON.stringify(record));
         },
-        // subtask_421f (cmd_421 Batch4): resource/product attachment
+        async 'db:createOrganizationWithName'(params: { name: string; description?: string | null }) {
+          // Creates an organization row with a caller-chosen name/description,
+          // owned by the session test user. `organization` is the CSV
+          // import/export test vehicle for a plain, freely-settable string
+          // column (cmd_793: `user.image` moved to a direct-attachment FK and
+          // is no longer such a column — see cypress/e2e/api/user_import.cy.ts
+          // and cypress/e2e/api/round_trip.cy.ts).
+          const { prisma } = require('./cypress/support/db-helpers');
+          const { TEST_CREDENTIALS } = require('./cypress/support/test-credentials');
+          const { createId } = require('@paralleldrive/cuid2');
+          const testUser = await prisma.user.findUnique({ where: { email: TEST_CREDENTIALS.email } });
+          if (!testUser) throw new Error('Test user not found. Run db:seed first.');
+          const newOrgId = createId();
+          const record = await prisma.organization.create({
+            data: {
+              id: newOrgId,
+              creator_id: testUser.id,
+              updater_id: testUser.id,
+              name: params.name,
+              description: params.description ?? null,
+            },
+          });
+          return JSON.parse(JSON.stringify(record));
+        },
+        // cmd_421 Batch4: resource/product attachment
         // view/edit-boundary + permission + org-scope regression spec.
         async 'db:addUserToOrganizationByEmail'(params: { email: string; organizationId: string }) {
           const { addUserToOrganizationByEmail } = require('./cypress/support/attachment/helper');
@@ -275,6 +351,10 @@ export default defineConfig({
           const { getPendingApprovalRequest } = require('./cypress/support/approval_test_helpers');
           return await getPendingApprovalRequest(params.approvable_id);
         },
+        async 'db:setupMultiStageApprovalFixture'() {
+          const { setupMultiStageApprovalFixture } = require('./cypress/support/approval_test_helpers');
+          return await setupMultiStageApprovalFixture();
+        },
         async 'db:populateAuditLog'(length: number) {
           const { populateAuditLogData } = require('./cypress/support/audit_log/helper');
           return await populateAuditLogData(length);
@@ -306,6 +386,12 @@ export default defineConfig({
           const { anonymizeUser } = require('./lib/compliance/anonymize_user');
           const result = await anonymizeUser(userId);
           return JSON.parse(JSON.stringify(result));
+        },
+        // cmd_941 gate 2: write-once side-effect round-trip probe. See
+        // docs/knowledge/write-once-side-effect-roundtrip-test.md.
+        async 'db:snapshotOtherModels'(excludeModel: string) {
+          const { snapshotOtherModels } = require('./cypress/support/db-helpers');
+          return await snapshotOtherModels(excludeModel);
         },
         ...projectTasks,
       });

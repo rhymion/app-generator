@@ -1,10 +1,20 @@
 {{ utility_code }}
 {% if can_create %}
-export async function add{{ parent_pascal }}(actorId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if bridge_child_params_str %}, {{ bridge_child_params_str }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}): Promise<{ id: string }> {
-  const result = await prisma.$transaction(async (tx) => {
+export async function add{{ parent_pascal }}(actorId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if bridge_child_params_str %}, {{ bridge_child_params_str }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}): Promise<{ id: string{% if has_assignee_id %}; assignee_id: string | null{% endif %}{% if server_value_override_fields %}; _server_value_overrides?: Record<string, string>{% endif %} }> {
+{% if org_id_client_writable %}
+  if (organizationId) {
+    const _createOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
+    if (!_createOrgIds.includes(organizationId)) {
+      throw new AppError('NOT_FOUND', 'Not found');
+    }
+  }
+{% endif %}
+  let result;
+  try {
+  result = await prisma.$transaction(async (tx) => {
     await validateOnAdd(tx, {
 {{ validation_data_obj }}
-    });
+    }, actorId);
 {% if bridge_child_pre_create_code %}
 {{ bridge_child_pre_create_code }}
 {% endif %}
@@ -14,6 +24,9 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% if approval_lines_pre_create_code %}
 {{ approval_lines_pre_create_code }}
 {% endif %}
+{% if server_value_pre_create_code %}
+{{ server_value_pre_create_code }}
+{% endif %}
     const created = await tx.{{ model }}.create({
       data: {
         creator_id: actorId,
@@ -22,6 +35,9 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {{ bridge_child_fk_data_line }}
 {% endif %}
 {{ parent_data_obj }}
+{% if server_value_data_lines %}
+{{ server_value_data_lines }}
+{% endif %}
 {% if child_nested_create %}
 {{ child_nested_create }}
 {% endif %}
@@ -33,16 +49,15 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% if reservation_allocation_code %}
 {{ reservation_allocation_code }}
 {% endif %}
+{% if item_reservation_create_code %}
+{{ item_reservation_create_code }}
+{% endif %}
 {% if approval_lines_post_create_code %}
 {{ approval_lines_post_create_code }}
 {% endif %}
-{% if one_to_one_spread %}
-    await afterCreate(tx, { ...created, {{ one_to_one_spread }} } as Record<string, unknown>, {
-{% else %}
-    await afterCreate(tx, created as Record<string, unknown>, {
+{% if approval_edge_trigger_create_code %}
+{{ approval_edge_trigger_create_code }}
 {% endif %}
-{{ validation_data_obj }}
-    });
 {% if is_audited %}
     await recordAuditEvent({
       action: '{{ parent }}:create',
@@ -52,13 +67,50 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
       tx,
     });
 {% endif %}
-    return { id: created.id };
+    // cmd_923a: post-create side effect hook, called in-tx -- a throw here
+    // rolls back the entire create (including the row just written above)
+    // rather than leaving the row committed with its side effect missing.
+    await afterCreate(tx, created.id);
+{% if server_value_overrides_build_code %}
+{{ server_value_overrides_build_code }}
+    return { id: created.id{% if has_assignee_id %}, assignee_id: created.assignee_id{% endif %}, ...(Object.keys(_serverValueOverrides).length ? { _server_value_overrides: _serverValueOverrides } : {}) };
+{% else %}
+    return { id: created.id{% if has_assignee_id %}, assignee_id: created.assignee_id{% endif %} };
+{% endif %}
+{% if item_reservation_create_code %}
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+{% else %}
   });
+{% endif %}
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+      throw new AppError('CONFLICT', 'Unique constraint violation', p2002Field(e.meta));
+    }
+    // Child-row (DataGrid nested create/update) fields carry no
+    // validateOnAdd/validateOnUpdate coverage of their own --
+    // an invalid or missing required value there (e.g. a cleared required
+    // date) reaches Prisma raw and throws PrismaClientValidationError
+    // (bad argument type/shape) rather than an AppError. Left unguarded,
+    // this is an uncaught exception, not a graceful "<field> is required"
+    // rejection. Same treatment for the parent-field edge this generator
+    // cannot fully prevent client-side either (a malformed value slipping
+    // past the browser). P2002 is handled above; every other
+    // PrismaClientKnownRequestError code below is likewise a bad-input
+    // shape (FK/type/constraint), not a server bug.
+    if (e instanceof Prisma.PrismaClientValidationError || e instanceof Prisma.PrismaClientKnownRequestError) {
+      throw new AppError('VALIDATION', 'One or more fields have an invalid value');
+    }
+    throw e;
+  }
 {% if has_assignee_id %}
   // Trigger #1 (notification design 2026-05-11): the new assignee learns
-  // they were assigned. Skipped when self-assigned.
-  if (assigneeId && assigneeId !== actorId) {
-    notify(assigneeId, 'assigned', {
+  // they were assigned. Skipped when self-assigned. Read off the persisted
+  // row (cmd_947), not an `assigneeId` parameter: assignee_id may be
+  // x-readonly-fields (no such parameter exists at all — cmd_945/#486) or
+  // server-set within this same create (approval set_fields etc.) — the row
+  // is the only value that is always both in scope and actually correct.
+  if (result.assignee_id && result.assignee_id !== actorId) {
+    notify(result.assignee_id, 'assigned', {
       title: 'You were assigned to {{ parent_pascal }}',
       href: `/{{ parent }}/view/${result.id}`,
       itemType: '{{ model }}',
@@ -77,17 +129,74 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 export async function update{{ parent_pascal }}(actorId: string, id: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if child_params_for_update %}, {{ child_params_for_update }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}, srcSnapshotRaw: string | null): Promise<void> {
 {% if has_assignee_id %}
   let _prevAssigneeId: string | null = null;
+  let _newAssigneeId: string | null = null;
 {% endif %}
+{% if org_id_client_writable %}
+  if (organizationId) {
+    const _updateOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
+    if (!_updateOrgIds.includes(organizationId)) {
+      throw new AppError('NOT_FOUND', 'Not found');
+    }
+  }
+{% endif %}
+{% if is_self_only %}
+  // x-self-only: verify ownership at the actual write, not just at the
+  // caller's item-permission check — a bypass of the getter/route layer
+  // (or a future caller that skips it) must not reach another user's row.
+  // No admin_bypass here: bypass (where declared) only widens reads.
+  const _selfOnlyExisting = await prisma.{{ model }}.findUnique({ where: { id }, select: { creator_id: true } });
+  if (!_selfOnlyExisting || _selfOnlyExisting.creator_id !== actorId) {
+    throw new AppError('NOT_FOUND', 'Not found');
+  }
+{% endif %}
+{% if filter_values %}
+  // x-filter-values: verify at the actual write — both the REST route and
+  // the Server Action call update{{ parent_pascal }}, so this is the single
+  // place both funnel through. Judged against the PRE-image row, not the
+  // incoming update data — a legitimate transition out of the filtered view
+  // must still succeed; only a row already outside the view is rejected
+  // (cmd_874/subtask_874f, ruling_C).
+  const _filterValuesExisting = await prisma.{{ model }}.findUnique({ where: { id }, select: {{ filter_values_select }} });
+  if (
+    !_filterValuesExisting
+{% for field, values in filter_values.items() %}
+    || !({{ values | tojson }} as unknown[]).includes((_filterValuesExisting as Record<string, unknown>).{{ field }})
+{% endfor %}
+  ) {
+    throw new AppError('NOT_FOUND', 'Not found');
+  }
+{% endif %}
+  try {
   await prisma.$transaction(async (tx) => {
 {% if reservation_mutation_guard_update %}
 {{ reservation_mutation_guard_update }}
 {% endif %}
+{% if fk_preservation_update_code %}
+    // A required FK the acting user can't read is omitted by the UI's
+    // AppFieldRelation permissionDenied branch (and may be omitted by a
+    // bare API PUT too) — preserve the existing value instead of failing
+    // required-field validation. See
+    // docs/knowledge/fk-read-permission-graceful-degradation.md.
+{{ fk_preservation_update_code }}
+{% endif %}
     if (srcSnapshotRaw) {
       await assertNotStale(srcSnapshotRaw, normalizeSnapshot, () => getCurrentSnapshot(tx, id));
     }
+    // cmd_834: fetched once, before validateOnUpdate, and reused both for
+    // the hand-written custom-validation hook and (below, on entities with
+    // an x-approval edge trigger) the approval transition check -- a
+    // second findUnique for the same row would otherwise run twice in the
+    // same transaction.
+    const _prevRow = (await tx.{{ model }}.findUnique({ where: { id } })) as Record<string, unknown> | null;
+{% if has_edit_guard %}
+    assertEditAllowed(_prevRow as { {{ lockdown_field }}?: unknown } | null);
+{% endif %}
     await validateOnUpdate(tx, id, {
 {{ validation_data_obj }}
-    });
+    }, _prevRow, actorId);
+{% if item_reservation_update_check_code %}
+{{ item_reservation_update_check_code }}
+{% endif %}
 {% if has_assignee_id %}
     // Capture the previous assignee so the post-transaction notify can
     // fire only on actual change (trigger #1, design 2026-05-11).
@@ -99,7 +208,8 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 {% if approval_lines_pre_update_code %}
 {{ approval_lines_pre_update_code }}
 {% endif %}
-    await tx.{{ model }}.update({
+{% if approval_edge_trigger_update_code %}
+    const updated = await tx.{{ model }}.update({
       where: { id },
       data: {
         updater_id: actorId,
@@ -109,6 +219,32 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 {% endif %}
       },
     });
+{{ approval_edge_trigger_update_code }}
+{% else %}
+{% if has_assignee_id %}
+    const updated = await tx.{{ model }}.update({
+{% else %}
+    await tx.{{ model }}.update({
+{% endif %}
+      where: { id },
+      data: {
+        updater_id: actorId,
+{{ parent_data_obj_update }}
+{% if child_nested_update %}
+{{ child_nested_update }}
+{% endif %}
+      },
+    });
+{% endif %}
+{% if has_assignee_id %}
+    // cmd_947: read the actual post-write value off the row, not an
+    // `assigneeId` parameter — that parameter doesn't exist at all when
+    // assignee_id is x-readonly-fields (#486), and even when it does exist
+    // it may not be what actually landed (a server-driven write, e.g. an
+    // approval set_fields, can still change assignee_id on this same
+    // update — the row is the only value that is always correct).
+    _newAssigneeId = updated.assignee_id;
+{% endif %}
 {% if approval_lines_post_update_code %}
 {{ approval_lines_post_update_code }}
 {% endif %}
@@ -124,10 +260,37 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
       tx,
     });
 {% endif %}
+    // cmd_923b: post-update side effect hook, called in-tx -- symmetric to
+    // afterCreate in add{{ parent_pascal }}() above (see cmd_923a).
+    await afterUpdate(tx, id);
+{% if item_reservation_update_check_code %}
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+{% else %}
   });
+{% endif %}
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+      throw new AppError('CONFLICT', 'Unique constraint violation', p2002Field(e.meta));
+    }
+    // Child-row (DataGrid nested create/update) fields carry no
+    // validateOnAdd/validateOnUpdate coverage of their own --
+    // an invalid or missing required value there (e.g. a cleared required
+    // date) reaches Prisma raw and throws PrismaClientValidationError
+    // (bad argument type/shape) rather than an AppError. Left unguarded,
+    // this is an uncaught exception, not a graceful "<field> is required"
+    // rejection. Same treatment for the parent-field edge this generator
+    // cannot fully prevent client-side either (a malformed value slipping
+    // past the browser). P2002 is handled above; every other
+    // PrismaClientKnownRequestError code below is likewise a bad-input
+    // shape (FK/type/constraint), not a server bug.
+    if (e instanceof Prisma.PrismaClientValidationError || e instanceof Prisma.PrismaClientKnownRequestError) {
+      throw new AppError('VALIDATION', 'One or more fields have an invalid value');
+    }
+    throw e;
+  }
 {% if has_assignee_id %}
-  if (assigneeId && assigneeId !== _prevAssigneeId && assigneeId !== actorId) {
-    notify(assigneeId, 'assigned', {
+  if (_newAssigneeId && _newAssigneeId !== _prevAssigneeId && _newAssigneeId !== actorId) {
+    notify(_newAssigneeId, 'assigned', {
       title: 'You were assigned to {{ parent_pascal }}',
       href: `/{{ parent }}/view/${id}`,
       itemType: '{{ model }}',
@@ -148,6 +311,21 @@ export async function delete{{ parent_pascal }}(actorId: string | null, ids: str
 {{ reservation_mutation_guard_delete }}
 {% endif %}
   await prisma.$transaction(async (tx) => {
+    // cmd_923b: fetched once, before any write -- reused for both the
+    // (optional) post-approval delete guard and the (always emitted)
+    // validateOnDelete hook below, so the same ids aren't queried twice.
+    const _deleteRows = await tx.{{ model }}.findMany({ where: { id: { in: ids } } });
+{% if has_delete_guard %}
+    for (const _row of _deleteRows) {
+      assertDeleteAllowed(_row);
+    }
+{% endif %}
+    // cmd_923b: pre-delete validation hook, in-tx -- same convergence-point
+    // convention as validateOnAdd/validateOnUpdate (runs before the write
+    // it guards, inside the same transaction, throws to reject).
+    for (const _row of _deleteRows) {
+      await validateOnDelete(tx, _row.id, _row as Record<string, unknown>);
+    }
 {% if bridge_cleanup_rels %}
     const _bridgeRows = await tx.{{ model }}.findMany({ where: { id: { in: ids } }, select: {{ bridge_pre_delete_select }} });
 {% endif %}
@@ -163,6 +341,9 @@ export async function delete{{ parent_pascal }}(actorId: string | null, ids: str
         target_id: id,
         tx,
       });
+      // cmd_923b: post-delete side effect hook, in-tx -- symmetric to
+      // afterCreate/afterUpdate above.
+      await afterDelete(tx, id);
     }
   });
 }
@@ -171,28 +352,51 @@ export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
 {% if reservation_mutation_guard_delete %}
 {{ reservation_mutation_guard_delete }}
 {% endif %}
-{% if bridge_cleanup_rels %}
-  const _bridgeRows = await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: {{ bridge_pre_delete_select }} });
-  await prisma.{{ model }}.deleteMany({ where: { id: { in: ids } } });
-{{ bridge_post_delete_cleanups }}
-{% else %}
-  await prisma.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+  // cmd_923b: wrapped in a transaction (previously several independent
+  // prisma.* calls with no rollback relationship between them) so
+  // validateOnDelete/afterDelete run in-tx like every other write path --
+  // a throw from either now rolls back the delete itself, not just fail to
+  // run its own effect while the row is already gone. See
+  // docs/knowledge/post-create-side-effect-hook.md.
+  await prisma.$transaction(async (tx) => {
+    const _deleteRows = await tx.{{ model }}.findMany({ where: { id: { in: ids } } });
+{% if has_delete_guard %}
+    for (const _row of _deleteRows) {
+      assertDeleteAllowed(_row);
+    }
 {% endif %}
+    for (const _row of _deleteRows) {
+      await validateOnDelete(tx, _row.id, _row as Record<string, unknown>);
+    }
+{% if bridge_cleanup_rels %}
+    const _bridgeRows = await tx.{{ model }}.findMany({ where: { id: { in: ids } }, select: {{ bridge_pre_delete_select }} });
+    await tx.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+{{ bridge_post_delete_cleanups | replace('await prisma.', '    await tx.') }}
+{% else %}
+    await tx.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+{% endif %}
+    for (const id of ids) {
+      await afterDelete(tx, id);
+    }
+  });
 }
 {% endif %}
 {% endif %}
 {% if reservation_config and reservation_config.mode == 'item' %}
 
 // Reservation: item mode — find an available {{ reservation_config.pool.entity }}, then link it to {{ model }}.
-// Isolation: serializable transaction (avoids raw SQL while preventing concurrent double-booking).
-export const reserve{{ parent_pascal }} = async (
+// Extracted as a *Core function (takes an existing tx) so add{{ parent_pascal }}/update{{ parent_pascal }}
+// can run it inside their own transaction instead of opening a second, unrelated one
+// (cmd_555: reserve{{ parent_pascal }} previously had no caller at all — the duplicate-reservation
+// check below never ran).
+async function reserve{{ parent_pascal }}Core(
+  tx: Prisma.TransactionClient,
   requestId: string,
 {% if reservation_config.dateRange %}
   dateRange: { {{ reservation_config.dateRange.startField }}: Date; {{ reservation_config.dateRange.endField }}: Date },
 {% endif %}
   criteria: Record<string, unknown> = {}
-): Promise<{ success: boolean; {{ reservation_config.allocatedField }}: string }> => {
-  return await prisma.$transaction(async (tx) => {
+): Promise<{ success: boolean; {{ reservation_config.allocatedField }}: string }> {
 {% if reservation_config.usesOverlapAvailability %}
     const _startMs = new Date(dateRange.{{ reservation_config.dateRange.startField }} as unknown as string).getTime();
     const _endMs = new Date(dateRange.{{ reservation_config.dateRange.endField }} as unknown as string).getTime();
@@ -225,7 +429,8 @@ export const reserve{{ parent_pascal }} = async (
         await assertNoDuplicateReservation(
           tx as unknown as Pick<typeof prisma, '{{ model }}'>,
           candidate.id,
-          dateRange
+          dateRange,
+          requestId
         );
       } catch {
         continue;
@@ -264,7 +469,8 @@ export const reserve{{ parent_pascal }} = async (
     await assertNoDuplicateReservation(
       tx as unknown as Pick<typeof prisma, '{{ model }}'>,
       candidate.id,
-      dateRange
+      dateRange,
+      requestId
     );
 {% endif %}
 {% if reservation_config.updatesPoolStatusOnReserve %}
@@ -279,8 +485,22 @@ export const reserve{{ parent_pascal }} = async (
     });
     return { success: true, {{ reservation_config.allocatedField }}: candidate.id };
 {% endif %}
-  }, {
-    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-  });
+}
+
+// Standalone entry point (own serializable transaction) — kept for callers that don't
+// already have an open tx. add{{ parent_pascal }}/update{{ parent_pascal }} call
+// reserve{{ parent_pascal }}Core directly instead, so allocation stays atomic with the
+// row write.
+export const reserve{{ parent_pascal }} = async (
+  requestId: string,
+{% if reservation_config.dateRange %}
+  dateRange: { {{ reservation_config.dateRange.startField }}: Date; {{ reservation_config.dateRange.endField }}: Date },
+{% endif %}
+  criteria: Record<string, unknown> = {}
+): Promise<{ success: boolean; {{ reservation_config.allocatedField }}: string }> => {
+  return await prisma.$transaction(
+    (tx) => reserve{{ parent_pascal }}Core(tx, requestId, {% if reservation_config.dateRange %}dateRange, {% endif %}criteria),
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+  );
 };
 {% endif %}

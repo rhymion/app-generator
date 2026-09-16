@@ -1,13 +1,36 @@
 // AUTO-GENERATED - DO NOT EDIT
-import { TEST_API_KEY, TEST_CREDENTIALS } from '../../support/test-credentials';
+import { TEST_API_KEY{% if can_list and can_export %}, TEST_CREDENTIALS{% endif %} } from '../../support/test-credentials';
 
 const API_BASE = '{{ api_path }}';
+{% if round_trip_unimportable_columns %}
+
+// {{ round_trip_unimportable_columns | join(', ') }}: present in export (read-only
+// diagnostic column(s)) but rejected by the import route if present in the CSV
+// header (UNIMPORTABLE_COLUMN). The N11-N13 round-trip tests below prove the
+// *importable* columns survive a re-import, not that literally every exported
+// column does — so they strip these columns from the exported CSV first.
+function _stripRoundTripUnimportableCsvColumns(csv: string): string {
+  const strip: string[] = {{ round_trip_unimportable_columns | tojson }};
+  const noBom = csv.charCodeAt(0) === 0xfeff ? csv.slice(1) : csv;
+  const lines = noBom.split('\r\n').filter((l) => l.length > 0);
+  const headers = lines[0].split(',');
+  const keepIdx = headers.reduce<number[]>((acc, h, i) => (strip.includes(h) ? acc : [...acc, i]), []);
+  const rebuild = (line: string) => keepIdx.map((i) => line.split(',')[i]).join(',');
+  return lines.map(rebuild).join('\r\n');
+}
+{% endif %}
+
+// FK Permission / Cross-org Test Coverage: 7.3(PUT denied)={{ 'yes' if can_edit else 'no(can_edit=false)' }}, 7.4(DELETE denied)={{ 'yes' if can_delete else 'no(can_delete=false)' }}, 7.5(export denied)={{ 'yes' if (can_list and can_export) else 'no(can_export=false)' }}, 7.6(import denied)={{ 'yes' if import_eligible else 'no(import_eligible=false)' }}, G3(cross-org isolation)={{ 'yes' if should_filter_by_org else 'no(should_filter_by_org=false)' }}
 
 describe('API: {{ title }}', () => {
   beforeEach(() => {
+{% if primary_fk_dep and not primary_fk_dep.is_user_account and primary_fk_dep.extra_required_fields %}
+    cy.task('db:reset{{ pascal }}CallSeq');
+{% endif %}
     cy.task('db:reset');
     cy.task('db:seed');
     cy.task('db:grantAllPermissions');
+    Cypress.session.clearAllSavedSessions();
   });
 {% if can_list %}
 
@@ -118,6 +141,31 @@ describe('API: {{ title }}', () => {
       });
 {% endif %}
     });
+{% if date_range_boundary %}
+
+    it('5.2 rejects reservation when {{ date_range_boundary.start_field }} equals {{ date_range_boundary.end_field }} (start must be before end)', () => {
+{% if has_deps %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+{{ I }}cy.request({
+{{ I }}  method: 'POST',
+{{ I }}  url: API_BASE,
+{{ I }}  headers: { 'X-API-Key': TEST_API_KEY },
+{{ I }}  body: {
+{% for ln in post_body_daterange_boundary %}
+{{ ln }}
+{% endfor %}
+{{ I }}  },
+{{ I }}  failOnStatusCode: false,
+{{ I }}}).then((res) => {
+{{ I }}  expect(res.status).to.be.gte(400);
+{{ I }}  expect(res.body.error).to.eq('Start date must be before end date');
+{{ I }}});
+{% if has_deps %}
+      });
+{% endif %}
+    });
+{% endif %}
   });
 {% endif %}
 {% if can_edit %}
@@ -457,6 +505,93 @@ describe('API: {{ title }}', () => {
   });
 {% endif %}
 
+{% if fk_preservation_relation %}
+
+  // cmd_516 Option B: search{{ fk_preservation_relation.target | pascal_case }}Options()/
+  // getAvailable...() now degrade gracefully (empty + permissionDenied flag)
+  // instead of throwing when the caller lacks read on {{ fk_preservation_relation.target }} —
+  // see docs/knowledge/fk-read-permission-graceful-degradation.md. This regression-
+  // tests the most dangerous failure mode: a PUT that omits the FK field entirely
+  // (exactly what the UI now sends when that field renders disabled) must leave
+  // the existing {{ fk_preservation_relation.prop_name }} value untouched, never null it out.
+  describe('FK read-permission graceful degradation (PUT {{ api_path }}/:id)', () => {
+    it('4.4 preserves {{ fk_preservation_relation.prop_name }} when the acting user cannot read {{ fk_preservation_relation.target }} and omits it from the PUT body', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        const original = records[0];
+        // Full CRUD on {{ parent }} itself, but no permission row at all on
+        // {{ fk_preservation_relation.target }} — defaults to deny (getModelPermissions:
+        // "no rows = deny all"), reproducing the exact actor the UI's
+        // AppFieldRelation permissionDenied branch is for.
+{% if should_filter_by_org %}
+        // cmd_799: also enrolled in the row's own organization — org
+        // isolation (getAssociatedOrganizations-scoped) must not 404 this
+        // actor before the FK-preservation scenario under test is reached;
+        // membership, not organization-entity read permission, is what
+        // reaching an org-scoped row requires.
+{% endif %}
+        cy.task<string>('db:createApiUserWithPermission', {
+          entityName: '{{ parent }}',
+          flags: { create: true, read: true, update: true, delete: true },
+          label: 'fk_read_denied',
+{% if should_filter_by_org %}
+          organizationId: original.organization_id,
+{% endif %}
+        }).then((restrictedKey) => {
+          cy.request({
+            method: 'PUT',
+            url: `${API_BASE}/${original.id}`,
+            headers: { 'X-API-Key': restrictedKey },
+            body: {
+{% for ln in put_body_fk_preservation_zero %}
+{{ ln }}
+{% endfor %}
+            },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            cy.request({ url: `${API_BASE}/${original.id}`, headers: { 'X-API-Key': restrictedKey } })
+              .then((getRes) => {
+                expect(getRes.status).to.eq(200);
+                expect(
+                  getRes.body.{{ fk_preservation_relation.relation_name }}?.id,
+                  '{{ fk_preservation_relation.prop_name }} must not be nulled out by a PUT that omits it',
+                ).to.eq(original.{{ fk_preservation_relation.prop_name }});
+              });
+          });
+        });
+      });
+    });
+
+    // cmd_648: pure-API counterpart of the UI regression spec
+    // (fk_read_permission_graceful_degradation.cy.ts, now under
+    // cypress/e2e/ui/ since it drives the browser rather than the API) —
+    // proves via X-API-Key alone that GET (list and detail) never crashes
+    // for an actor who can read {{ parent }} but not {{ fk_preservation_relation.target }};
+    // it simply returns 200 with whatever the FK relation resolves to.
+    it('4.5 returns 200 for GET (list and detail) when the acting user cannot read {{ fk_preservation_relation.target }}', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        const original = records[0];
+        cy.task<string>('db:createApiUserWithPermission', {
+          entityName: '{{ parent }}',
+          flags: { create: true, read: true, update: true, delete: true },
+          label: 'fk_read_denied_get',
+{% if should_filter_by_org %}
+          organizationId: original.organization_id,
+{% endif %}
+        }).then((restrictedKey) => {
+          cy.request({ url: API_BASE, headers: { 'X-API-Key': restrictedKey } })
+            .then((listRes) => {
+              expect(listRes.status).to.eq(200);
+            });
+          cy.request({ url: `${API_BASE}/${original.id}`, headers: { 'X-API-Key': restrictedKey } })
+            .then((getRes) => {
+              expect(getRes.status).to.eq(200);
+            });
+        });
+      });
+    });
+  });
+{% endif %}
+
   describe('Authentication errors', () => {
     it('6.1 returns 4xx without API key', () => {
       cy.request({ url: API_BASE, failOnStatusCode: false })
@@ -508,13 +643,241 @@ describe('API: {{ title }}', () => {
 {% endif %}
     });
 {% endif %}
+{% if can_edit %}
+
+    it('7.3 returns 4xx for PUT when permission denied', () => {
+      cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
+          cy.request({
+            method: 'PUT',
+            url: `${API_BASE}/${records[0].id}`,
+            headers: { 'X-API-Key': limitedKey },
+            body: {},
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.be.gte(400);
+          });
+        });
+      });
+    });
+{% endif %}
+{% if can_delete %}
+
+    it('7.4 returns 4xx for DELETE when permission denied', () => {
+      cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
+          cy.request({
+            method: 'DELETE',
+            url: `${API_BASE}/${records[0].id}`,
+            headers: { 'X-API-Key': limitedKey },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.be.gte(400);
+          });
+        });
+      });
+    });
+{% endif %}
+{% if can_list and can_export %}
+
+    // cmd_658: export now resolves the actor via resolveActorId() (cmd_648
+    // dual-auth), which reads X-API-Key the same as every other route below —
+    // this used to require a SESSION-loginable actor (cy.login) because the
+    // route read getSessionUserId() exclusively; that exclusivity is gone.
+    it('7.5 returns 4xx for GET export when permission denied', () => {
+      cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
+        cy.request({
+          url: `${API_BASE}/export`,
+          headers: { 'X-API-Key': limitedKey },
+          failOnStatusCode: false,
+        }).then((res) => {
+          expect(res.status).to.be.gte(400);
+        });
+      });
+    });
+{% endif %}
+{% if import_eligible %}
+
+    // cmd_658: see the 7.5 comment above — import resolves the actor the same
+    // dual-auth way (cmd_648) and no longer needs a session-loginable actor.
+    it('7.6 returns 4xx for POST import when permission denied', () => {
+      cy.task<string>('db:createLimitedApiUser', '{{ parent }}').then((limitedKey) => {
+        cy.request({
+          method: 'POST',
+          url: `${API_BASE}/import`,
+          headers: { 'X-API-Key': limitedKey },
+          body: { csv: '', dryRun: true },
+          failOnStatusCode: false,
+        }).then((res) => {
+          expect(res.status).to.be.gte(400);
+        });
+      });
+    });
+{% endif %}
   });
+{% if should_filter_by_org %}
+
+  // -------------------------------------------------------------------------
+  // Cross-organization isolation (G3) — verifies cmd_515's organization_id
+  // scope validation: an actor with full CRUD permission on {{ parent }}, who
+  // is a member of orgA only, cannot create or reach resources in orgB.
+  // -------------------------------------------------------------------------
+
+  describe('Cross-organization isolation (G3)', () => {
+{% if can_new %}
+    it('G3.1 POST with foreign organization_id returns 404 (existence hidden)', () => {
+{% if has_deps %}
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+{% endif %}
+{{ I7 }}cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}' }).then((scenario) => {
+{{ I7 }}  cy.request({
+{{ I7 }}    method: 'POST',
+{{ I7 }}    url: API_BASE,
+{{ I7 }}    headers: { 'X-API-Key': TEST_API_KEY },
+{{ I7 }}    body: {
+{% for ln in org_cross_post_body %}
+{{ ln }}
+{% endfor %}
+{{ I7 }}      organization_id: scenario.orgB.id,
+{{ I7 }}    },
+{{ I7 }}    failOnStatusCode: false,
+{{ I7 }}  }).then((res) => {
+{{ I7 }}    // Matches G3.2/G3.3: a foreign org_id is treated as not-found, not as a
+{{ I7 }}    // distinguishable "organization" error — the response must not reveal
+{{ I7 }}    // that the organization exists.
+{{ I7 }}    expect(res.status).to.eq(404);
+{{ I7 }}    expect(JSON.stringify(res.body)).to.not.match(/organization/i);
+{{ I7 }}  });
+{{ I7 }}});
+{% if has_deps %}
+      });
+{% endif %}
+    });
+{% endif %}
+{% if can_view %}
+
+    it('G3.2 GET on entity in foreign org returns 404 (existence hidden)', () => {
+      cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}', entityId: records[0].id }).then((scenario) => {
+          cy.request({
+            url: `${API_BASE}/${scenario.entityInOrgB.id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(404);
+          });
+        });
+      });
+    });
+{% endif %}
+{% if can_edit %}
+
+    it('G3.3 PUT on entity in foreign org returns 404 (existence hidden)', () => {
+      cy.task<any>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}', entityId: records[0].id }).then((scenario) => {
+          cy.request({
+            method: 'PUT',
+            url: `${API_BASE}/${scenario.entityInOrgB.id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: {},
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(404);
+          });
+        });
+      });
+    });
+
+    // cmd_640: G3.4 previously sent an actor with zero organization
+    // memberships an EMPTY PUT body, which fails required-field validation
+    // before the org-isolation check ever runs — the resulting 500 was a
+    // fixture artifact (missing required fields), not evidence of an org
+    // boundary being crossed or not crossed. Replaced with a scenario that
+    // sends a fully valid body and attempts to reassign the entity into a
+    // foreign organization (orgB) the actor does not belong to — the PUT
+    // analogue of G3.1's POST-with-foreign-organization_id check. Expected
+    // response is unified to 404 (existence hidden), matching G3.1-G3.3's
+    // policy: a foreign org_id must never be distinguishable
+    // from a not-found response.
+{% if primary_is_fk and not primary_fk_is_ua %}
+    it('G3.4 PUT setting organization_id to a foreign org returns 404 (existence hidden)', () => {
+      cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
+        cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+          cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}' }).then((scenario) => {
+            cy.request({
+              method: 'PUT',
+              url: `${API_BASE}/${records[0].id}`,
+              headers: { 'X-API-Key': TEST_API_KEY },
+              body: {
+{% for ln in org_cross_put_body_fk %}
+{{ ln }}
+{% endfor %}
+                organization_id: scenario.orgB.id,
+              },
+              failOnStatusCode: false,
+            }).then((res) => {
+              expect(res.status).to.eq(404);
+              expect(JSON.stringify(res.body)).to.not.match(/organization/i);
+            });
+          });
+        });
+      });
+    });
+{% else %}
+    it('G3.4 PUT setting organization_id to a foreign org returns 404 (existence hidden)', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<any>('db:createCrossOrgScenario', { entityName: '{{ parent }}' }).then((scenario) => {
+          cy.request({
+            method: 'PUT',
+            url: `${API_BASE}/${records[0].id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: {
+{% for ln in org_cross_put_body %}
+{{ ln }}
+{% endfor %}
+              organization_id: scenario.orgB.id,
+            },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(404);
+            expect(JSON.stringify(res.body)).to.not.match(/organization/i);
+          });
+        });
+      });
+    });
+{% endif %}
+{% endif %}
+  });
+{% endif %}
 {% if has_approvable %}
 
   // -------------------------------------------------------------------------
   // Approval operations
   // -------------------------------------------------------------------------
 
+  // app-generator#584: 11.1/11.2 exercise approval-request creation via a
+  // direct POST to this entity's own create route -- that route only
+  // exists when can_new is true (x-generate.new, gated in
+  // api_route.ts.jinja2). An entity can have x-approval declared while
+  // new:false (e.g. it is only ever created as another entity's side
+  // effect, then later submitted for approval through its own PUT/submit
+  // route) -- for those, 11.1/11.2 as written always fail: the POST hits
+  // a route with no POST handler and 405s before ever reaching the
+  // approval-flow logic under test. Falling through to no test at all
+  // would silently drop coverage instead of fixing the mismatch, so the
+  // can_new:false branch below asserts the create route is genuinely
+  // closed instead.
+{% if can_new %}
+  // cmd_846(c): 11.1/11.2's POST body now explicitly includes
+  // {{ resubmit_target_field or 'the submit_on field' }} at submit_on's
+  // own value when submit_on is declared -- relying on the schema
+  // default to coincide with it (tried first, reverted) breaks basic
+  // CRUD scenarios elsewhere in this same spec for any entity whose
+  // default is deliberately NOT the locked/submitted value (e.g. a
+  // 'draft' default kept so a freshly-created record stays editable for
+  // 3.x/5.x/9.x/10.x). Entities with no submit_on declared (the create-
+  // fires-unconditionally default behavior, §16.4) are unaffected --
+  // resubmit_target_field is None there, so nothing is added.
   describe('Approval request creation (POST {{ api_path }})', () => {
     it('11.1 creates approval requests for user in requestor role', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
@@ -529,6 +892,9 @@ describe('API: {{ title }}', () => {
 {% for ln in post_body_create %}
 {{ ln }}
 {% endfor %}
+{% if resubmit_target_field %}
+{{ I }}    {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+{% endif %}
 {{ I }}  },
 {{ I }}}).then((res) => {
 {{ I }}  expect(res.status).to.eq(201);
@@ -556,6 +922,9 @@ describe('API: {{ title }}', () => {
 {% for ln in post_body_create %}
 {{ ln }}
 {% endfor %}
+{% if resubmit_target_field %}
+{{ I }}    {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+{% endif %}
 {{ I }}  },
 {{ I }}}).then((res) => {
 {{ I }}  expect(res.status).to.eq(201);
@@ -570,6 +939,21 @@ describe('API: {{ title }}', () => {
       });
     });
   });
+{% else %}
+  describe('Approval request creation (POST {{ api_path }})', () => {
+    it('11.1 POST is not available -- the entity has no create route (x-generate.new: false)', () => {
+      cy.request({
+        method: 'POST',
+        url: API_BASE,
+        headers: { 'X-API-Key': TEST_API_KEY },
+        body: {},
+        failOnStatusCode: false,
+      }).then((res) => {
+        expect(res.status).to.eq(405);
+      });
+    });
+  });
+{% endif %}
 
   describe('Approve (POST /api/approval_request/:id/approve)', () => {
     it('12.1 approver can approve a pending request', () => {
@@ -579,12 +963,10 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.approverUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/approve`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
           }).then((res) => {
             expect(res.status).to.eq(200);
             expect(res.body.status).to.eq('approved');
@@ -600,12 +982,10 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.requestorUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/approve`,
+            headers: { 'X-API-Key': setup.requestorUser.api_key },
             failOnStatusCode: false,
           }).then((res) => {
             expect(res.status).to.eq(403);
@@ -624,12 +1004,10 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.approverUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/reject`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
           }).then((res) => {
             expect(res.status).to.eq(200);
             expect(res.body.status).to.eq('rejected');
@@ -646,12 +1024,10 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.requestorUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/reject`,
+            headers: { 'X-API-Key': setup.requestorUser.api_key },
             failOnStatusCode: false,
           }).then((res) => {
             expect(res.status).to.eq(403);
@@ -667,12 +1043,10 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.approverUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/reject`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
             body: { message: 'Needs more info' },
           }).then((res) => {
             expect(res.status).to.eq(200);
@@ -695,12 +1069,10 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.approverUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/reject`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
           }).then((res) => {
             expect(res.status).to.eq(200);
             cy.request({
@@ -722,12 +1094,10 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.approverUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/reject`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
           }).then((res) => {
             expect(res.status).to.eq(200);
             expect(res.body.status).to.eq('terminal_rejected');
@@ -743,12 +1113,10 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
           const arId = data.approvalRequests[0].id;
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.approverUser.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${arId}/reject`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
           }).then(() => {
             cy.request({
               url: `{{ api_path }}/${data.record.id}`,
@@ -770,12 +1138,10 @@ describe('API: {{ title }}', () => {
           approvalFlowIds: [setup.flow1.id, setup.flow2.id],
         }).then((data) => {
           const ar2 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow2.id);
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.approverUser2.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${ar2.id}/approve`,
+            headers: { 'X-API-Key': setup.approverUser2.api_key },
             failOnStatusCode: false,
           }).then((res) => {
             expect(res.status).to.eq(400);
@@ -792,20 +1158,16 @@ describe('API: {{ title }}', () => {
         }).then((data) => {
           const ar1 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow1.id);
           const ar2 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow2.id);
-          Cypress.session.clearAllSavedSessions();
-          cy.clearCookies();
-          cy.login(setup.approverUser1.email, 'test-password');
           cy.request({
             method: 'POST',
             url: `/api/approval_request/${ar1.id}/approve`,
+            headers: { 'X-API-Key': setup.approverUser1.api_key },
           }).then((res) => {
             expect(res.status).to.eq(200);
-            Cypress.session.clearAllSavedSessions();
-            cy.clearCookies();
-            cy.login(setup.approverUser2.email, 'test-password');
             cy.request({
               method: 'POST',
               url: `/api/approval_request/${ar2.id}/approve`,
+              headers: { 'X-API-Key': setup.approverUser2.api_key },
             }).then((res2) => {
               expect(res2.status).to.eq(200);
               expect(res2.body.status).to.eq('approved');
@@ -816,101 +1178,714 @@ describe('API: {{ title }}', () => {
     });
   });
 
-  describe('Resubmit (POST /api/approval_request/:id/resubmit)', () => {
-    it('14.1 requestor can resubmit a rejected request', () => {
+  // cmd_818 (D1): the dedicated resubmit route/action is retired -- re-
+  // submission is now an ordinary update through the entity's own service
+  // layer (edit the status field back to x-approval.submit_on's target
+  // value), which fires the same update-time edge trigger a first-time
+  // submission fires at create time. See
+  // code_generator/tests/test_approval_edge_trigger.py for that mechanism's
+  // generated-code coverage.
+{% if (can_edit and put_body_resubmit) or entity_on_rejected_terminal %}
+
+  describe('Resubmit via ordinary update (cmd_824)', () => {
+{% if not entity_on_rejected_terminal and can_edit and put_body_resubmit %}
+    it('14.1 editing {{ resubmit_target_field }} back to its open value after a non-terminal rejection creates a new pending approval_request', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithRejectedApproval', {
           creatorId: setup.requestorUser.id,
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
-          const arId = data.approvalRequests[0].id;
           cy.request({
-            method: 'POST',
-            url: `/api/approval_request/${arId}/resubmit`,
-            headers: { 'X-API-Key': setup.requestorUser.api_key },
+            method: 'PUT',
+            url: `{{ api_path }}/${data.record.id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: {
+{% for ln in put_body_resubmit %}
+{{ ln }}
+{% endfor %}
+              {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+            },
           }).then((res) => {
             expect(res.status).to.eq(200);
-            expect(res.body.status).to.eq('pending');
-          });
-        });
-      });
-    });
-
-    it('14.2 non-requestor cannot resubmit (403)', () => {
-      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
-        cy.task<any>('db:populate{{ pascal }}WithRejectedApproval', {
-          creatorId: setup.requestorUser.id,
-          approvalFlowIds: [setup.flowWithRole.id],
-        }).then((data) => {
-          const arId = data.approvalRequests[0].id;
-          cy.request({
-            method: 'POST',
-            url: `/api/approval_request/${arId}/resubmit`,
-            headers: { 'X-API-Key': setup.approverUser.api_key },
-            failOnStatusCode: false,
-          }).then((res) => {
-            expect(res.status).to.eq(403);
-          });
-        });
-      });
-    });
-
-    it('14.3 resubmit with message creates history entry', () => {
-      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
-        cy.task<any>('db:populate{{ pascal }}WithRejectedApproval', {
-          creatorId: setup.requestorUser.id,
-          approvalFlowIds: [setup.flowWithRole.id],
-        }).then((data) => {
-          const arId = data.approvalRequests[0].id;
-          cy.request({
-            method: 'POST',
-            url: `/api/approval_request/${arId}/resubmit`,
-            headers: { 'X-API-Key': setup.requestorUser.api_key },
-            body: { message: 'Updated and resubmitting' },
-          }).then((res) => {
-            expect(res.status).to.eq(200);
-            cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': setup.requestorUser.api_key } })
+            cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
               .then((getRes) => {
-                const histories = getRes.body.approvable.approval_requests[0].approval_histories;
-                expect(histories).to.have.length(1);
-                expect(histories[0].message).to.eq('Updated and resubmitting');
+                const requests = getRes.body.approvable.approval_requests;
+                expect(requests.length).to.eq(2);
+                expect(requests.some((r: any) => r.status === 'pending')).to.eq(true);
               });
           });
         });
       });
     });
-  });
+{% endif %}
 {% if entity_on_rejected_terminal %}
-    it('14.4 terminal_rejected request cannot be re-submitted (400)', () => {
+{% if can_edit and put_body_resubmit %}
+    // cmd_1022: before this cmd, editing back to the open value after a
+    // terminal rejection succeeded (200) but silently created no new
+    // approval_request -- the record could be resubmitted-looking without
+    // an actual live approval flow behind it. derive_post_decision_freeze_
+    // values() now freezes a terminal on_rejected's own value, so
+    // assertEditAllowed (called against the PRE-update row, service.ts)
+    // now rejects this edit outright, before the payload is even applied.
+    it('14.2 editing {{ resubmit_target_field }} back to its open value after a terminal rejection is forbidden by post-approval edit lockdown', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithTerminalRejectedApproval', {
           creatorId: setup.requestorUser.id,
           approvalFlowIds: [setup.flowWithRole.id],
         }).then((data) => {
-          const arId = data.approvalRequests[0].id;
           cy.request({
-            method: 'POST',
-            url: `/api/approval_request/${arId}/resubmit`,
-            headers: { 'X-API-Key': setup.requestorUser.api_key },
+            method: 'PUT',
+            url: `{{ api_path }}/${data.record.id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: {
+{% for ln in put_body_resubmit %}
+{{ ln }}
+{% endfor %}
+              {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+            },
             failOnStatusCode: false,
           }).then((res) => {
-            expect(res.status).to.eq(400);
+            expect(res.status).to.eq(403);
+            expect(res.body.error).to.eq('edit_forbidden:approval_locked');
+            cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+              .then((getRes) => {
+                const requests = getRes.body.approvable.approval_requests;
+                expect(requests.length).to.eq(1);
+                expect(requests[0].status).to.eq('terminal_rejected');
+              });
+          });
+        });
+      });
+    });
+{% else %}
+    it('14.2 the entity has no PUT route at all -- there is no ordinary-update path a terminal rejection could be resubmitted through', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithTerminalRejectedApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          cy.request({
+            method: 'PUT',
+            url: `{{ api_path }}/${data.record.id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: {},
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(405);
           });
         });
       });
     });
 {% endif %}
 {% endif %}
+{% if can_edit and put_body_resubmit %}
+    // cmd_846: editing {{ resubmit_target_field }} back to its open value
+    // used to be THE resubmission mechanism (cmd_824) -- it is now exactly
+    // what post-approval edit lockdown (assertEditAllowed, wired into
+    // service.ts's update{{ pascal }} -- the choke point both this REST
+    // route and the Server Action funnel through) forbids while the
+    // record sits at an approved/submitted status. The old "PUT succeeds,
+    // no new approval_request" assertion this scenario originally checked
+    // is retired along with that mechanism -- resubmission after approval
+    // is no longer reachable via ordinary edit at all (14.4/14.5 cover the
+    // actual reachable path: withdraw/reject first, THEN edit, once the
+    // record has left the locked state).
+    it('14.3 editing {{ resubmit_target_field }} back to its open value while approved is forbidden by post-approval edit lockdown', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/approve`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
+          }).then(() => {
+            cy.request({
+              method: 'PUT',
+              url: `{{ api_path }}/${data.record.id}`,
+              headers: { 'X-API-Key': TEST_API_KEY },
+              body: {
+{% for ln in put_body_resubmit %}
+{{ ln }}
+{% endfor %}
+                {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+              },
+              failOnStatusCode: false,
+            }).then((res) => {
+              expect(res.status).to.eq(403);
+              expect(res.body.error).to.eq('edit_forbidden:approval_locked');
+              cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+                .then((getRes) => {
+                  const requests = getRes.body.approvable.approval_requests;
+                  expect(requests.length).to.eq(1);
+                  expect(requests[0].status).to.eq('approved');
+                });
+            });
+          });
+        });
+      });
+    });
+{% if can_edit and lockdown_write_locked_sample_value_literal %}
+
+    // cmd_1022: a row can become frozen through a route OTHER than the
+    // approval flow itself -- x-write-locked-values declares
+    // {{ resubmit_target_field }}: {{ lockdown_write_locked_sample_value_literal }}
+    // as a system-only value (e.g. written by a scheduled task or any
+    // other out-of-band writer this declaration guards against), and
+    // derive_post_decision_freeze_values() merges that declaration into
+    // the same frozen set post-approval editing itself locks against --
+    // no live approval_request is needed for the guard to fire.
+    it('14.3W a record whose {{ resubmit_target_field }} sits at an x-write-locked-values value is forbidden from being edited', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [],
+          overrides: { {{ resubmit_target_field }}: {{ lockdown_write_locked_sample_value_literal }} },
+        }).then((data) => {
+          cy.request({
+            method: 'PUT',
+            url: `{{ api_path }}/${data.record.id}`,
+            headers: { 'X-API-Key': TEST_API_KEY },
+            body: {},
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(403);
+            expect(res.body.error).to.eq('edit_forbidden:approval_locked');
+          });
+        });
+      });
+    });
+{% endif %}
+{% if can_delete and put_body_resubmit %}
+
+    // cmd_846: the same lockdown as 14.3, for DELETE (assertDeleteAllowed,
+    // wired into service.ts's delete{{ pascal }} -- the same choke point
+    // both the REST DELETE route and the remove{{ pascal }} Server Action
+    // funnel through).
+    it('14.3D deleting the record while approved is forbidden by post-approval delete lockdown', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/approve`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
+          }).then(() => {
+            cy.request({
+              method: 'DELETE',
+              url: `{{ api_path }}/${data.record.id}`,
+              headers: { 'X-API-Key': TEST_API_KEY },
+              failOnStatusCode: false,
+            }).then((res) => {
+              expect(res.status).to.eq(403);
+              expect(res.body.error).to.eq('delete_forbidden:approval_locked');
+              cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+                .then((getRes) => {
+                  expect(getRes.status).to.eq(200);
+                });
+            });
+          });
+        });
+      });
+    });
+{% endif %}
+{% if can_invalidate and put_body_resubmit %}
+
+    // cmd_846: the same lockdown as 14.3, for invalidate
+    // (assertInvalidateAllowed, wired into BOTH the REST invalidate route
+    // and the invalidate{{ pascal }} Server Action -- there is no single
+    // service.ts choke point for invalidate the way edit/delete have, so
+    // both entry points call the guard independently).
+    it('14.3N invalidating the record while approved is forbidden by post-approval invalidate lockdown', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/approve`,
+            headers: { 'X-API-Key': setup.approverUser.api_key },
+          }).then(() => {
+            cy.request({
+              method: 'POST',
+              url: `{{ api_path }}/${data.record.id}/actions/invalidate`,
+              headers: { 'X-API-Key': TEST_API_KEY },
+              failOnStatusCode: false,
+            }).then((res) => {
+              expect(res.status).to.eq(403);
+              expect(res.body.error).to.eq('invalidate_forbidden:approval_locked');
+            });
+          });
+        });
+      });
+    });
+{% if on_withdrawn_value_literal %}
+
+    it('14.4N withdrawing a pending request then invalidating the record succeeds once it is no longer locked', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/withdraw`,
+            headers: { 'X-API-Key': setup.requestorUser.api_key },
+          }).then((withdrawRes) => {
+            expect(withdrawRes.status).to.eq(200);
+            cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+              .then((getRes) => {
+                expect(getRes.body.{{ resubmit_target_field }}).to.eq({{ on_withdrawn_value_literal }});
+                cy.request({
+                  method: 'POST',
+                  url: `{{ api_path }}/${data.record.id}/actions/invalidate`,
+                  headers: { 'X-API-Key': TEST_API_KEY },
+                }).then((res) => {
+                  expect(res.status).to.eq(200);
+                });
+              });
+          });
+        });
+      });
+    });
+{% endif %}
+{% endif %}
+
+{% if on_withdrawn_value_literal %}
+    it('14.4 withdrawing a pending request automatically sets {{ resubmit_target_field }} to its on_withdrawn value, then editing back to its open value creates a new pending approval_request', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/withdraw`,
+            headers: { 'X-API-Key': setup.requestorUser.api_key },
+          }).then((withdrawRes) => {
+            expect(withdrawRes.status).to.eq(200);
+            expect(withdrawRes.body.status).to.eq('withdrawn');
+            // cmd_841: withdrawal itself dispatches on_withdrawn.set_fields,
+            // so {{ resubmit_target_field }} has already left its open
+            // value by the time the request settles -- no separate "away"
+            // edit is needed before editing back to it (contrast the
+            // away-then-back form below, generated for entities with no
+            // on_withdrawn declared).
+            cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+              .then((getRes) => {
+                expect(getRes.body.{{ resubmit_target_field }}).to.eq({{ on_withdrawn_value_literal }});
+                cy.request({
+                  method: 'PUT',
+                  url: `{{ api_path }}/${data.record.id}`,
+                  headers: { 'X-API-Key': TEST_API_KEY },
+                  body: {
+{% for ln in put_body_resubmit %}
+{{ ln }}
+{% endfor %}
+                    {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+                  },
+                }).then((res) => {
+                  expect(res.status).to.eq(200);
+                  cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+                    .then((getRes2) => {
+                      const requests = getRes2.body.approvable.approval_requests;
+                      expect(requests.length).to.eq(2);
+                      expect(requests.some((r: any) => r.status === 'pending')).to.eq(true);
+                    });
+                });
+              });
+          });
+        });
+      });
+    });
+{% elif resubmit_unsubmitted_value_literal %}
+    it('14.4 withdrawing a pending request then editing {{ resubmit_target_field }} away and back to its open value creates a new pending approval_request', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/withdraw`,
+            headers: { 'X-API-Key': setup.requestorUser.api_key },
+          }).then((withdrawRes) => {
+            expect(withdrawRes.status).to.eq(200);
+            expect(withdrawRes.body.status).to.eq('withdrawn');
+            // Withdrawal only moves the approval_request itself -- it has
+            // no on_approved/on_rejected-style set_fields side effect, so
+            // {{ resubmit_target_field }} is still at its open value from
+            // creation. The edge trigger only fires on an actual
+            // transition (previous !== target -> new === target), so a
+            // real resubmission first requires the record to leave that
+            // value (an ordinary edit, same as a requestor updating other
+            // details while their request is withdrawn) before coming
+            // back to it.
+            cy.request({
+              method: 'PUT',
+              url: `{{ api_path }}/${data.record.id}`,
+              headers: { 'X-API-Key': TEST_API_KEY },
+              body: {
+{% for ln in put_body_resubmit %}
+{{ ln }}
+{% endfor %}
+                {{ resubmit_target_field }}: {{ resubmit_unsubmitted_value_literal }},
+              },
+            }).then((awayRes) => {
+              expect(awayRes.status).to.eq(200);
+              cy.request({
+                method: 'PUT',
+                url: `{{ api_path }}/${data.record.id}`,
+                headers: { 'X-API-Key': TEST_API_KEY },
+                body: {
+{% for ln in put_body_resubmit %}
+{{ ln }}
+{% endfor %}
+                  {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+                },
+              }).then((res) => {
+                expect(res.status).to.eq(200);
+                cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+                  .then((getRes) => {
+                    const requests = getRes.body.approvable.approval_requests;
+                    expect(requests.length).to.eq(2);
+                    expect(requests.some((r: any) => r.status === 'pending')).to.eq(true);
+                  });
+              });
+            });
+          });
+        });
+      });
+    });
+{% endif %}
+{% if resubmit_unsubmitted_value_literal and not has_deps %}
+
+    it('14.5 a newly-created record with {{ resubmit_target_field }} not yet at its open value has no approval_request until explicitly edited there', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.request({
+          method: 'POST',
+          url: '{{ api_path }}',
+          headers: { 'X-API-Key': setup.requestorUser.api_key },
+          body: {
+{% for ln in post_body_create %}
+{{ ln }}
+{% endfor %}
+            {{ resubmit_target_field }}: {{ resubmit_unsubmitted_value_literal }},
+          },
+        }).then((createRes) => {
+          expect(createRes.status).to.eq(201);
+          cy.request({ url: `{{ api_path }}/${createRes.body.id}`, headers: { 'X-API-Key': setup.requestorUser.api_key } })
+            .then((getRes1) => {
+              expect(getRes1.body.approvable.approval_requests).to.have.length(0);
+              cy.request({
+                method: 'PUT',
+                url: `{{ api_path }}/${createRes.body.id}`,
+                headers: { 'X-API-Key': TEST_API_KEY },
+                body: {
+{% for ln in put_body_resubmit_created %}
+{{ ln }}
+{% endfor %}
+                  {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+                },
+              }).then((putRes) => {
+                expect(putRes.status).to.eq(200);
+                cy.request({ url: `{{ api_path }}/${createRes.body.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+                  .then((getRes2) => {
+                    const requests = getRes2.body.approvable.approval_requests;
+                    expect(requests.length).to.eq(1);
+                    expect(requests[0].status).to.eq('pending');
+                  });
+              });
+            });
+        });
+      });
+    });
+{% endif %}
+{% endif %}
+  });
+{% endif %}
+
+  // cmd_844: round-based multistage approval -- every scenario below reuses
+  // the same 2-stage ordered chain (flow1 -> flow2, preceded_by) the
+  // "Approval order enforcement" describe block above already sets up via
+  // db:setup{{ pascal }}OrderedApprovalFlow, so no schema-level "is this
+  // entity multistage" declaration is needed -- approval_flow chaining is
+  // admin/test-fixture data, not a schema-time concept.
+  describe('Multistage approval rounds (cmd_844)', () => {
+{% if has_on_withdrawn %}
+    it('14.2M withdrawing an all-pending round withdraws every stage', () => {
+      cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.approverUser1.id,
+          approvalFlowIds: [setup.flow1.id, setup.flow2.id],
+        }).then((data) => {
+          const ar1 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow1.id);
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${ar1.id}/withdraw`,
+            headers: { 'X-API-Key': setup.approverUser1.api_key },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+            expect(res.body.status).to.eq('withdrawn');
+            cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+              .then((getRes) => {
+                const requests = getRes.body.approvable.approval_requests;
+                expect(requests).to.have.length(2);
+                expect(requests.every((r: any) => r.status === 'withdrawn')).to.eq(true);
+              });
+          });
+        });
+      });
+    });
+
+    // PD-1 final ruling: round_id scoping alone -- an already-approved
+    // stage is never rewritten by a withdrawal of the same round.
+    it('14.3M withdrawing a partially-approved round leaves the approved stage untouched and closes only the pending one', () => {
+      cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.approverUser1.id,
+          approvalFlowIds: [setup.flow1.id, setup.flow2.id],
+        }).then((data) => {
+          const ar1 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow1.id);
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${ar1.id}/approve`,
+            headers: { 'X-API-Key': setup.approverUser1.api_key },
+          }).then(() => {
+            cy.request({
+              method: 'POST',
+              url: `/api/approval_request/${ar1.id}/withdraw`,
+              headers: { 'X-API-Key': setup.approverUser1.api_key },
+            }).then((res) => {
+              expect(res.status).to.eq(200);
+              cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+                .then((getRes) => {
+                  const requests = getRes.body.approvable.approval_requests;
+                  const stage1 = requests.find((r: any) => r.approval_flow_id === setup.flow1.id);
+                  const stage2 = requests.find((r: any) => r.approval_flow_id === setup.flow2.id);
+                  expect(stage1.status).to.eq('approved');
+                  expect(stage2.status).to.eq('withdrawn');
+                });
+            });
+          });
+        });
+      });
+    });
+{% else %}
+    // cmd_876: this entity does not declare x-approval.on_withdrawn, so the
+    // server-side withdraw lockout (on_withdrawn_dispatch.ts's
+    // ENTITIES_WITH_ON_WITHDRAWN, cmd_865/PR#450) 400s every POST
+    // .../withdraw regardless of round/stage state -- these replace the
+    // withdraw-succeeds variants above with withdraw-is-rejected ones,
+    // asserting the round is left untouched by the failed call.
+    it('14.2M withdrawing an all-pending round is rejected because on_withdrawn is not declared', () => {
+      cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.approverUser1.id,
+          approvalFlowIds: [setup.flow1.id, setup.flow2.id],
+        }).then((data) => {
+          const ar1 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow1.id);
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${ar1.id}/withdraw`,
+            headers: { 'X-API-Key': setup.approverUser1.api_key },
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(res.status).to.eq(400);
+            cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+              .then((getRes) => {
+                const requests = getRes.body.approvable.approval_requests;
+                expect(requests).to.have.length(2);
+                expect(requests.every((r: any) => r.status === 'pending')).to.eq(true);
+              });
+          });
+        });
+      });
+    });
+
+    it('14.3M withdrawing a partially-approved round is rejected because on_withdrawn is not declared', () => {
+      cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.approverUser1.id,
+          approvalFlowIds: [setup.flow1.id, setup.flow2.id],
+        }).then((data) => {
+          const ar1 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow1.id);
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${ar1.id}/approve`,
+            headers: { 'X-API-Key': setup.approverUser1.api_key },
+          }).then(() => {
+            cy.request({
+              method: 'POST',
+              url: `/api/approval_request/${ar1.id}/withdraw`,
+              headers: { 'X-API-Key': setup.approverUser1.api_key },
+              failOnStatusCode: false,
+            }).then((res) => {
+              expect(res.status).to.eq(400);
+              cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+                .then((getRes) => {
+                  const requests = getRes.body.approvable.approval_requests;
+                  const stage1 = requests.find((r: any) => r.approval_flow_id === setup.flow1.id);
+                  const stage2 = requests.find((r: any) => r.approval_flow_id === setup.flow2.id);
+                  expect(stage1.status).to.eq('approved');
+                  expect(stage2.status).to.eq('pending');
+                });
+            });
+          });
+        });
+      });
+    });
+{% endif %}
+
+    // PD-2: a non-terminal rejection at stage 1 auto-cancels stage 2's
+    // still-pending row (reuses 'withdrawn', not a new 'cancelled' value).
+    it('14.3M(b) a non-terminal rejection auto-cancels the other still-pending stage', () => {
+      cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.approverUser1.id,
+          approvalFlowIds: [setup.flow1.id, setup.flow2.id],
+        }).then((data) => {
+          const ar1 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow1.id);
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${ar1.id}/reject`,
+            headers: { 'X-API-Key': setup.approverUser1.api_key },
+          }).then((res) => {
+            expect(res.status).to.eq(200);
+{% if entity_on_rejected_terminal %}
+            expect(res.body.status).to.eq('terminal_rejected');
+{% else %}
+            expect(res.body.status).to.eq('rejected');
+{% endif %}
+            cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+              .then((getRes) => {
+                const requests = getRes.body.approvable.approval_requests;
+                const stage2 = requests.find((r: any) => r.approval_flow_id === setup.flow2.id);
+                expect(stage2.status).to.eq('withdrawn');
+              });
+          });
+        });
+      });
+    });
+
+{# cmd_897/subtask_886a: `can_edit` added to this guard -- unlike the
+   single-stage 14.4/14.5 pair above (line ~1194, `can_edit and
+   put_body_resubmit`), this multistage-rounds version resubmits via a
+   direct PUT to the main entity with no can_edit check at all, so an
+   edit:false entity (no PUT route generated -- see 14.2's own no-PUT-route
+   branch above, "no ordinary-update path ... could be resubmitted
+   through") got a PUT-based test generated anyway, hitting a 405 the
+   entity's own 14.2 test already asserts is correct. No extra test is
+   added here for the edit:false case: 14.2's no-PUT-route branch already
+   covers "this entity has no PUT route at all" once per spec; repeating
+   it per-round-shape would be redundant, not missing coverage. #}
+{% if can_edit and has_on_withdrawn and resubmit_unsubmitted_value_literal %}
+    it('14.4M resubmitting after a round-level withdrawal starts a brand new round with every stage pending again', () => {
+      cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.approverUser1.id,
+          approvalFlowIds: [setup.flow1.id, setup.flow2.id],
+        }).then((data) => {
+          const ar1 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow1.id);
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${ar1.id}/withdraw`,
+            headers: { 'X-API-Key': setup.approverUser1.api_key },
+          }).then(() => {
+            cy.request({
+              method: 'PUT',
+              url: `{{ api_path }}/${data.record.id}`,
+              headers: { 'X-API-Key': TEST_API_KEY },
+              body: {
+{% for ln in put_body_resubmit %}
+{{ ln }}
+{% endfor %}
+                {{ resubmit_target_field }}: {{ resubmit_unsubmitted_value_literal }},
+              },
+            }).then((awayRes) => {
+              expect(awayRes.status).to.eq(200);
+              cy.request({
+                method: 'PUT',
+                url: `{{ api_path }}/${data.record.id}`,
+                headers: { 'X-API-Key': TEST_API_KEY },
+                body: {
+{% for ln in put_body_resubmit %}
+{{ ln }}
+{% endfor %}
+                  {{ resubmit_target_field }}: {{ resubmit_target_value_literal }},
+                },
+              }).then((backRes) => {
+                expect(backRes.status).to.eq(200);
+                cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+                  .then((getRes) => {
+                    const requests = getRes.body.approvable.approval_requests;
+                    expect(requests).to.have.length(4); // 2 withdrawn (old round) + 2 pending (new round)
+                    const newRound = requests.filter((r: any) => r.status === 'pending');
+                    expect(newRound).to.have.length(2);
+                    // Every new-round row shares one round_id, distinct from the old (withdrawn) round's.
+                    const newRoundIds = new Set(newRound.map((r: any) => r.round_id));
+                    expect(newRoundIds.size).to.eq(1);
+                    const oldRoundIds = new Set(
+                      requests.filter((r: any) => r.status === 'withdrawn').map((r: any) => r.round_id),
+                    );
+                    expect(oldRoundIds.has([...newRoundIds][0])).to.eq(false);
+                  });
+              });
+            });
+          });
+        });
+      });
+    });
+{% endif %}
+
+    it('14.5M a fully-approved round cannot be withdrawn', () => {
+      cy.task<any>('db:setup{{ pascal }}OrderedApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.approverUser1.id,
+          approvalFlowIds: [setup.flow1.id, setup.flow2.id],
+        }).then((data) => {
+          const ar1 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow1.id);
+          const ar2 = data.approvalRequests.find((r: any) => r.approval_flow_id === setup.flow2.id);
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${ar1.id}/approve`,
+            headers: { 'X-API-Key': setup.approverUser1.api_key },
+          }).then(() => {
+            cy.request({
+              method: 'POST',
+              url: `/api/approval_request/${ar2.id}/approve`,
+              headers: { 'X-API-Key': setup.approverUser2.api_key },
+            }).then(() => {
+              cy.request({
+                method: 'POST',
+                url: `/api/approval_request/${ar1.id}/withdraw`,
+                headers: { 'X-API-Key': setup.approverUser1.api_key },
+                failOnStatusCode: false,
+              }).then((res) => {
+                expect(res.status).to.eq(400);
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+{% endif %}
 {% if can_list and can_export %}
 
   describe('GET {{ api_path }}/export', () => {
-    beforeEach(() => {
-      Cypress.session.clearAllSavedSessions();
-      cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
-    });
-
     it('N1 returns 200 CSV with attachment disposition', () => {
-      cy.request({ url: `{{ api_path }}/export` })
+      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           expect(res.status).to.eq(200);
           expect(res.headers['content-type']).to.include('text/csv');
@@ -920,7 +1895,7 @@ describe('API: {{ title }}', () => {
 
     it('N2 CSV header row does not include an id column', () => {
       cy.task('db:populate{{ pascal }}', 1);
-      cy.request({ url: `{{ api_path }}/export` })
+      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
           const headers = headerLine.split(',');
@@ -933,7 +1908,7 @@ describe('API: {{ title }}', () => {
       cy.task('db:populateOrganizationWithUser', 1).then(() => {
         cy.task<{ id: string; name: string }[]>('db:populateOrganization', 1).then((otherOrgs) => {
           cy.task('db:populate{{ pascal }}', 1);
-          cy.request({ url: `{{ api_path }}/export` })
+          cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
             .then((res) => {
               expect(res.status).to.eq(200);
               const lines = (res.body as string).replace(/^\uFEFF/, '').split('\r\n').filter(Boolean);
@@ -948,7 +1923,7 @@ describe('API: {{ title }}', () => {
 
     it('N4 CSV header includes the x-import-key natural-key column(s) present in the export allowlist', () => {
       cy.task('db:populate{{ pascal }}', 1);
-      cy.request({ url: `{{ api_path }}/export` })
+      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
           const headers = headerLine.split(',');
@@ -961,14 +1936,21 @@ describe('API: {{ title }}', () => {
 
     it('N5 CSV header does not include system fields (timestamps/audit/tenant refs)', () => {
       cy.task('db:populate{{ pascal }}', 1);
-      cy.request({ url: `{{ api_path }}/export` })
+      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
           const headers = headerLine.split(',');
           expect(headers).to.not.include('id');
           expect(headers).to.not.include('created_at');
           expect(headers).to.not.include('updated_at');
+{% if is_self_only %}
+          // x-self-only: creator_id IS exported here \u2014 a deliberate exception
+          // (read-only diagnostic column, never accepted back on import; see
+          // docs/knowledge/self-only-entity.md), not a system-column leak.
+          expect(headers).to.include('creator_id');
+{% else %}
           expect(headers).to.not.include('creator_id');
+{% endif %}
           expect(headers).to.not.include('updater_id');
           expect(headers).to.not.include('organization_id');
         });
@@ -976,7 +1958,7 @@ describe('API: {{ title }}', () => {
 
     it('N6 CSV export headers match the view-field allowlist exactly', () => {
       cy.task('db:populate{{ pascal }}', 1);
-      cy.request({ url: `{{ api_path }}/export` })
+      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
           const headers = headerLine.split(',');
@@ -987,9 +1969,15 @@ describe('API: {{ title }}', () => {
 {% for rel in x_relationships_list %}
           expect(headers).to.include('{{ rel.display_col }}');
 {% endfor %}
+{% if is_self_only %}
+          // x-self-only: creator_id IS exported here \u2014 see the N5 comment above.
+          expect(headers).to.include('creator_id');
+{% endif %}
           // Negative: system columns must not appear
           expect(headers).to.not.include('id');
+{% if not is_self_only %}
           expect(headers).to.not.include('creator_id');
+{% endif %}
           expect(headers).to.not.include('updater_id');
           expect(headers).to.not.include('organization_id');
           expect(headers).to.not.include('tenant_id');
@@ -999,7 +1987,7 @@ describe('API: {{ title }}', () => {
 
     it('N7 CSV export does not expose sensitive columns (allowlist enforcement)', () => {
       cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
-        cy.request({ url: `{{ api_path }}/export` })
+        cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
           .then((res) => {
             const body = res.body as string;
             const headerLine = body.replace(/^\uFEFF/, '').split('\r\n')[0];
@@ -1031,7 +2019,7 @@ describe('API: {{ title }}', () => {
             roles: [],
           },
         }).then(() => {
-          cy.request({ url: `{{ api_path }}/export` })
+          cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
             .then((res) => {
               const body = res.body as string;
               // The formula-trigger value must be neutralized with a leading tab...
@@ -1048,7 +2036,7 @@ describe('API: {{ title }}', () => {
 
     it('N9 CSV export excludes internal bridge FK columns', () => {
       cy.task('db:populate{{ pascal }}', 1);
-      cy.request({ url: `{{ api_path }}/export` })
+      cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } })
         .then((res) => {
           expect(res.status).to.eq(200);
           const headerLine = (res.body as string).replace(/^\uFEFF/, '').split('\r\n')[0];
@@ -1063,12 +2051,17 @@ describe('API: {{ title }}', () => {
 
     it('N11 CSV import round-trip: re-importing an exported row matches it via the natural key with zero errors (dry run)', () => {
       cy.task('db:populate{{ pascal }}', 1).then(() => {
-        cy.request({ url: `{{ api_path }}/export` }).then((exportRes) => {
+        cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } }).then((exportRes) => {
           expect(exportRes.status).to.eq(200);
+{% if round_trip_unimportable_columns %}
+          const csv = _stripRoundTripUnimportableCsvColumns(exportRes.body as string);
+{% else %}
           const csv = exportRes.body as string;
+{% endif %}
           cy.request({
             method: 'POST',
             url: `{{ api_path }}/import`,
+            headers: { 'X-API-Key': TEST_API_KEY },
             body: { csv, dryRun: true },
           }).then((res) => {
             expect(res.status).to.eq(200);
@@ -1084,17 +2077,23 @@ describe('API: {{ title }}', () => {
 
     it('N12 CSV import round-trip: confirming the dry run (dryRun=false) commits with zero write failures', () => {
       cy.task('db:populate{{ pascal }}', 1).then(() => {
-        cy.request({ url: `{{ api_path }}/export` }).then((exportRes) => {
+        cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } }).then((exportRes) => {
+{% if round_trip_unimportable_columns %}
+          const csv = _stripRoundTripUnimportableCsvColumns(exportRes.body as string);
+{% else %}
           const csv = exportRes.body as string;
+{% endif %}
           cy.request({
             method: 'POST',
             url: `{{ api_path }}/import`,
+            headers: { 'X-API-Key': TEST_API_KEY },
             body: { csv, dryRun: true },
           }).then((dryRunRes) => {
             const confirmToken = dryRunRes.body.confirmToken as string;
             cy.request({
               method: 'POST',
               url: `{{ api_path }}/import`,
+              headers: { 'X-API-Key': TEST_API_KEY },
               body: { csv, dryRun: false, confirmToken },
             }).then((commitRes) => {
               expect(commitRes.status).to.eq(200);
@@ -1109,11 +2108,16 @@ describe('API: {{ title }}', () => {
 
     it('N13 CSV import rejects an unconfirmed commit (dryRun=false without a valid confirmToken)', () => {
       cy.task('db:populate{{ pascal }}', 1).then(() => {
-        cy.request({ url: `{{ api_path }}/export` }).then((exportRes) => {
+        cy.request({ url: `{{ api_path }}/export`, headers: { 'X-API-Key': TEST_API_KEY } }).then((exportRes) => {
+{% if round_trip_unimportable_columns %}
+          const csv = _stripRoundTripUnimportableCsvColumns(exportRes.body as string);
+{% else %}
           const csv = exportRes.body as string;
+{% endif %}
           cy.request({
             method: 'POST',
             url: `{{ api_path }}/import`,
+            headers: { 'X-API-Key': TEST_API_KEY },
             body: { csv, dryRun: false },
             failOnStatusCode: false,
           }).then((res) => {
@@ -1124,20 +2128,34 @@ describe('API: {{ title }}', () => {
       });
     });
 {% endif %}
+
+    // cmd_658: N1-N13 above prove the X-API-Key path (cmd_648 dual-auth).
+    // This is the one deliberate session-cookie test for this route family —
+    // resolveActorId()/requireDualAuth() (lib/api-auth.ts) is shared by every
+    // dual-auth route, so proving the session branch here once is sufficient;
+    // it is not re-proven per route. Do not delete this without also removing
+    // the last session-cookie coverage for dual-auth routes (see docs/knowledge
+    // on the API-test/UI-test boundary, cmd_658).
+    // dual-auth-session-canary: the cy.login() below is the machine-checked
+    // exemption (code_generator/check_generated.py rule test:unexplained-login)
+    // — do not copy this pattern elsewhere without the same justification.
+    it('N14 also authenticates via a NextAuth session cookie (dual-auth)', () => {
+      Cypress.session.clearAllSavedSessions();
+      cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
+      cy.request({ url: `{{ api_path }}/export` }).then((res) => {
+        expect(res.status).to.eq(200);
+      });
+    });
   });
 {% endif %}
 {% if is_searchable %}
 
   describe('Search coverage (GET /api/search)', () => {
-    beforeEach(() => {
-      Cypress.session.clearAllSavedSessions();
-      cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
-    });
 
     it('N10 per-entity data surfaces in global search results', () => {
       cy.task<any[]>('db:populate{{ pascal }}{% if not search_sample_field_required %}Full{% endif %}', 1).then((records) => {
         const q = records[0].{{ search_sample_field }} as string;
-        cy.request({ url: `/api/search?q=${encodeURIComponent(q)}` })
+        cy.request({ url: `/api/search?q=${encodeURIComponent(q)}`, headers: { 'X-API-Key': TEST_API_KEY } })
           .then((res) => {
             expect(res.status).to.eq(200);
             expect(
@@ -1160,6 +2178,14 @@ describe('API: {{ title }}', () => {
               .map((c) => c.{{ mention_field_name }});
             expect(messages.some((m) => m.includes(result.mentionedUser.name))).to.eq(true);
           });
+      });
+    });
+
+    it('M2 creates a mention notification when a comment with @mention is added', () => {
+      cy.task<{ parentId: string; mentionedUserId: string }>('db:populate{{ pascal }}WithMentionUser').then(({ mentionedUserId }) => {
+        cy.task<Array<{ type: string }>>('db:getNotificationsForUser', mentionedUserId).then((notifications) => {
+          expect(notifications.some((n) => n.type === 'mentioned_in_comment')).to.eq(true);
+        });
       });
     });
   });

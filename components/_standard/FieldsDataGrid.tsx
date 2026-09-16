@@ -27,7 +27,6 @@ import Button from '@mui/material/Button';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
-import SaveIcon from '@mui/icons-material/Save';
 import DateTimeWrapper from './DateTimeWrapper';
 import dayjs from 'dayjs';
 
@@ -148,22 +147,10 @@ const FieldsDataGrid = forwardRef<FieldsDataGridHandle, FieldsDataGridProps>(
       getFields: () => fields,
     }), [fields]);
 
-    function processRowUpdate(newRow: GridValidRowModel, oldRow: GridValidRowModel) {
+    function processRowUpdate(newRow: GridValidRowModel, _oldRow: GridValidRowModel) {
       const updatedFields = fields.map(row => row.id === newRow.id ? newRow : row);
       setFields(updatedFields);
       return newRow;
-    }
-
-    function moveRowUp(index: number) {
-      const newFields = [...fields];
-      [newFields[index - 1], newFields[index]] = [newFields[index], newFields[index - 1]];
-      setFields(newFields);
-    }
-
-    function moveRowDown(index: number) {
-      const newFields = [...fields];
-      [newFields[index], newFields[index + 1]] = [newFields[index + 1], newFields[index]];
-      setFields(newFields);
     }
 
     const addField = () => {
@@ -227,7 +214,9 @@ const FieldsDataGrid = forwardRef<FieldsDataGridHandle, FieldsDataGridProps>(
           </Tooltip>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             {fields.length === 0 ? (
-              <Typography color="text.secondary">No items.</Typography>
+              <Typography sx={{
+                color: "text.secondary"
+              }}>No items.</Typography>
             ) : (
               fields.map((row, index) => (
                 <Card key={row.id ?? index} variant="outlined">
@@ -237,7 +226,9 @@ const FieldsDataGrid = forwardRef<FieldsDataGridHandle, FieldsDataGridProps>(
                       if (!displayValue) return null;
                       return (
                         <Box key={col.field} sx={{ mt: 0.5 }}>
-                          <Typography variant="caption" color="text.secondary" component="span">
+                          <Typography variant="caption" component="span" sx={{
+                            color: "text.secondary"
+                          }}>
                             {col.headerName}:{' '}
                           </Typography>
                           <Typography variant="body2" component="span">

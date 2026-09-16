@@ -7,17 +7,20 @@ type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction'
 /**
  * Called after {{ snake_name }} is rejected.
  * Customize this function to implement post-rejection side effects.
+ * The `_`-prefixed parameter names below follow this repo's convention for
+ * intentionally-unused bindings (see eslint.config.mjs); drop the leading
+ * `_` from whichever ones your implementation actually reads.
  *
- * @param tx - Prisma transaction client
- * @param entityId - ID of the rejected {{ snake_name }}
- * @param approvableId - ID of the approvable record
- * @param rejectedByUserId - ID of the user who rejected
+ * @param _tx - Prisma transaction client
+ * @param _entityId - ID of the rejected {{ snake_name }}
+ * @param _approvableId - ID of the approvable record
+ * @param _rejectedByUserId - ID of the user who rejected
  */
 export async function afterReject(
-  tx: Tx,
-  entityId: string,
-  approvableId: string,
-  rejectedByUserId: string,
+  _tx: Tx,
+  _entityId: string,
+  _approvableId: string,
+  _rejectedByUserId: string,
 ): Promise<void> {
   // TODO: implement post-rejection effects here
 }

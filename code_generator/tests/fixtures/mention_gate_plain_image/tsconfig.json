@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/lib/mention_gate_plain_image_item/*": ["./lib/mention_gate_plain_image_item/*"],
+      "@/lib/mention/*": ["./lib/mention/*"],
+      "@/lib/comment/*": ["./lib/comment/*"],
+      "@/lib/reaction/*": ["./lib/reaction/*"],
+      "@/lib/reaction_constants": ["./lib/reaction_constants.ts"],
+      "@/components/mention_gate_plain_image_item/*": ["./components/mention_gate_plain_image_item/*"],
+      "@/lib/prisma": ["./lib/prisma.ts"],
+      "@/lib/authz": ["./lib/authz.ts"],
+      "@/lib/api-auth": ["./lib/api-auth.ts"],
+      "@/lib/_notifier": ["./lib/_notifier.ts"],
+      "@/lib/organization/getters_associated": ["./lib/organization/getters_associated.ts"],
+      "@/app/generated/prisma/client": ["./prisma/.generated-client/client"],
+      "@/*": ["../*"]
+    }
+  },
+  "include": [
+    "lib/mention_gate_plain_image_item/getters.ts",
+    "app/api/mention_gate_plain_image_item/[id]/route.ts",
+    "components/mention_gate_plain_image_item/FormUpsert.tsx",
+    "app/[locale]/mention_gate_plain_image_item/edit/[id]/page.tsx"
+  ],
+  "exclude": ["node_modules"]
+}

@@ -168,3 +168,118 @@ def test_derive_property_without_prisma_enums_raises_on_native_enum_type(tmp_pat
 
     with pytest.raises(SchemaDivergenceError):
         derive_property(models["inventory_movement"], "status", {})
+
+
+# ---------------------------------------------------------------------------
+# cmd_574: static Prisma @default() auto-reflected into the derived json
+# schema property (Category A), unless the user schema already declares its
+# own default: (Category C, which always wins).
+# ---------------------------------------------------------------------------
+
+def test_b1_static_default_is_derived_into_json_property(prisma_models):
+    """B-1: `permission.active` has `@default(true)` in Prisma and no
+    `default:` override in the user schema -- the derived prop must pick up
+    Prisma's static default."""
+    prop = derive_property(prisma_models["permission"], "active", {})
+    assert prop["default"] is True
+
+
+def test_b2_dynamic_default_is_not_derived(prisma_models):
+    """B-2: `role.id` has `@default(cuid())` in Prisma (dynamic, server-
+    generated) -- it must NOT appear as a `default:` in the derived
+    property; a dynamic default has no meaning as a UI form default."""
+    prop = derive_property(prisma_models["role"], "id", {})
+    assert "default" not in prop
+
+
+def test_b3_user_field_overrides_default_wins_over_prisma_default(prisma_models):
+    """B-3: user schema explicitly declares `default: False` for
+    `permission.active`, even though Prisma's `@default(true)` differs --
+    the user-authored value must win, not Prisma's."""
+    prop = derive_property(
+        prisma_models["permission"], "active", {"default": False}
+    )
+    assert prop["default"] is False
+
+
+# ---------------------------------------------------------------------------
+# cmd_705: Prisma `Decimal` maps to JSON type "string" (precision-preserving
+# -- a `number`/JS-float mapping was explicitly rejected).
+# ---------------------------------------------------------------------------
+
+DECIMAL_PRISMA_FIXTURE = dedent(
+    """
+    model widget {
+      id     String   @id @default(cuid())
+      price  Decimal  @db.Decimal(10, 2)
+      weight Decimal? @db.Decimal(8, 3)
+    }
+    """
+)
+
+
+@pytest.fixture()
+def decimal_models(tmp_path):
+    path = tmp_path / "schema.prisma"
+    path.write_text(DECIMAL_PRISMA_FIXTURE, encoding="utf-8")
+    return parse_prisma_schema(path)
+
+
+def test_decimal_maps_to_json_string_type_not_number(decimal_models):
+    """The core cmd_705 ruling: Decimal -> "string", never "number" -- a
+    `number` mapping would round-trip through JS float and risk exact
+    rounding error, which the string representation exists to avoid."""
+    prop = derive_property(decimal_models["widget"], "price", {})
+    assert prop["type"] == "string"
+
+
+def test_decimal_nullable_maps_to_string_null_union(decimal_models):
+    prop = derive_property(decimal_models["widget"], "weight", {})
+    assert prop["type"] == ["string", "null"]
+
+
+def test_decimal_field_carries_internal_marker(decimal_models):
+    """Downstream codegen (form input rendering, CSV coercion, display
+    formatting, DataGrid-child test-value seeding) distinguishes a
+    Decimal-backed string field from an ordinary string field via this
+    marker -- it must never leak into a real JSON schema keyword name."""
+    prop = derive_property(decimal_models["widget"], "price", {})
+    assert prop["_prisma_decimal_type"] is True
+
+
+def test_decimal_scale_auto_reflected_from_db_attribute(decimal_models):
+    """`@db.Decimal(10, 2)` -- scale (2) is auto-reflected as `x-decimal-scale`
+    (auto-derived from Prisma, like the existing `default:` auto-reflection),
+    not a user-schema override."""
+    price_prop = derive_property(decimal_models["widget"], "price", {})
+    assert price_prop["x-decimal-scale"] == 2
+    weight_prop = derive_property(decimal_models["widget"], "weight", {})
+    assert weight_prop["x-decimal-scale"] == 3
+
+
+def test_decimal_without_db_scale_has_no_x_decimal_scale_key():
+    """A `Decimal` column with no `@db.Decimal(p, s)` attribute must not
+    fabricate a scale value."""
+    path_text = dedent(
+        """
+        model widget {
+          id    String  @id @default(cuid())
+          price Decimal
+        }
+        """
+    )
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "schema.prisma"
+        path.write_text(path_text, encoding="utf-8")
+        models = parse_prisma_schema(path)
+        prop = derive_property(models["widget"], "price", {})
+        assert "x-decimal-scale" not in prop
+        assert prop["_prisma_decimal_type"] is True
+
+
+def test_decimal_raw_entity_required_when_non_nullable_no_default(decimal_models):
+    raw = derive_raw_entity(decimal_models["widget"], {"price": {}, "weight": {}})
+    assert "price" in raw["required"]
+    assert "weight" not in raw["required"]

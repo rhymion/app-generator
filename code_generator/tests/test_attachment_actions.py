@@ -6,15 +6,17 @@ Three surfaces are covered:
   1. `build_attachable_owners` — discovery of base entities that declare
      an `attachable_id` field with x-relationship.target: attachable.
 
-  2. The rendered `lib/attachment/actions.ts` — one select / revalidate
+  2. The rendered `lib/attachment/bridge_actions.ts` — one select / revalidate
      branch per owner. Drives the template through Jinja2 so format
      regressions (missing imports, malformed `creatorId` chain) fail here
      rather than at `demo:generate` time.
 
-  3. cleanup deletes the file via the AUTO-GENERATED marker guard. Generate
-     emits it only when at least one owner exists; cleanup must collect the
-     orphan when the schema later drops the last owner, while preserving a
-     user-forked copy that has had the marker stripped.
+  3. cleanup deletes the file via the AUTO-GENERATED marker guard, for a
+     hand-forked copy that predates the subtask_769d path rename (or any
+     other stale leftover) — not because generate.py ever stops emitting
+     it: the file is always written, at 0 owners too, because
+     components/_standard/AttachmentSection.tsx imports from it
+     unconditionally.
 """
 from pathlib import Path
 
@@ -171,21 +173,25 @@ def test_template_with_no_owners_still_renders():
 
 
 # ---------------------------------------------------------------------------
-# cleanup — deletes lib/attachment/actions.ts and lib/dashboard/catalog.ts
+# cleanup — deletes lib/attachment/bridge_actions.ts and lib/dashboard/catalog.ts
 # ---------------------------------------------------------------------------
 
 def test_cleanup_deletes_generated_catalogs(tmp_path: Path):
-    """The two schema-wide catalogs are emitted by generate.py only when
-    at least one contributing entity exists. With no manifest present cleanup
-    falls back to the schema-driven sweep, which collects them via the
-    AUTO-GENERATED marker guard — so a schema drop doesn't leave stale code on
-    disk, while a user-forked copy (marker stripped) would be preserved."""
+    """The dashboard catalog is emitted by generate.py only when at least
+    one contributing entity exists; the attachment bridge_actions.ts is
+    always emitted (see module docstring). This test only exercises
+    cleanup's marker-guarded deletion of a stale/leftover copy of either
+    file — it does not assert anything about generate.py's write
+    condition. With no manifest present cleanup falls back to the
+    schema-driven sweep, which collects them via the AUTO-GENERATED marker
+    guard, while a user-forked copy (marker stripped) would be
+    preserved."""
     out = tmp_path
     (out / 'lib' / 'attachment').mkdir(parents=True)
     (out / 'lib' / 'dashboard').mkdir(parents=True)
     # Real generated catalogs carry this marker; the guard keys off it.
     marker = '// AUTO-GENERATED - DO NOT EDIT\n'
-    (out / 'lib' / 'attachment' / 'actions.ts').write_text(marker + '// stale\n')
+    (out / 'lib' / 'attachment' / 'bridge_actions.ts').write_text(marker + '// stale\n')
     (out / 'lib' / 'dashboard' / 'catalog.ts').write_text(marker + '// stale\n')
 
     # Minimal schema — one entity so cleanup() has something to iterate.
@@ -205,7 +211,7 @@ def test_cleanup_deletes_generated_catalogs(tmp_path: Path):
 
     cleanup(str(schema_path), str(out))
 
-    assert not (out / 'lib' / 'attachment' / 'actions.ts').exists()
+    assert not (out / 'lib' / 'attachment' / 'bridge_actions.ts').exists()
     assert not (out / 'lib' / 'dashboard' / 'catalog.ts').exists()
     # And the now-empty parent dirs are pruned (rmdir attempts the parent;
     # leaves siblings alone — but here both dirs are empty after cleanup).

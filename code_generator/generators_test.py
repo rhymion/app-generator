@@ -8,6 +8,7 @@ Builds Jinja2 template contexts for:
   - cypress/e2e/api/{entity}.cy.ts      (API test spec)
 """
 import re
+from datetime import datetime
 
 # Messages Fields namespace for enum label translation.
 # Populated by set_messages_fields() before generating test specs.
@@ -29,6 +30,20 @@ def set_messages_namespaces(messages: dict) -> None:
     """Register all message namespaces from messages/en.json for enum label lookup."""
     global _messages_ns
     _messages_ns = messages or {}
+
+
+# Prisma uniqueness facts, `{model: {'single': [col], 'composite': [[col, ...]]}}`,
+# as produced by schema_deriver.collect_unique_columns(). Populated by
+# set_prisma_uniques() before any helper context is built. Used to pick the
+# find-or-create lookup key for dep records whose entity has no `name` column
+# (e.g. purchase_order, keyed on its @unique po_number).
+_prisma_uniques: dict = {}
+
+
+def set_prisma_uniques(uniques: dict) -> None:
+    """Register the Prisma @unique / @@unique column map for dep lookups."""
+    global _prisma_uniques
+    _prisma_uniques = uniques or {}
 
 
 def _enum_ns_key(value) -> str:
@@ -112,6 +127,7 @@ from helpers.naming import (
 from helpers.schema_helpers import (
     filter_fields,
     get_parent_relationships,
+    get_direct_attachment_fk_props,
     is_optional_fk_to_parent,
     get_flatten_rels,
     get_splittable_bridge_field,
@@ -120,23 +136,42 @@ from helpers.schema_helpers import (
     derive_text_fields,
     get_entity_properties,
     get_entity_required,
+    get_self_only_flags,
+    derive_write_locked_values,
+    derive_write_locked_values_for_view,
+    is_canonical_model_view,
+    derive_post_decision_freeze_values,
+    is_write_only_prop,
+    resolve_set_fields,
 )
 from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import (
     build_label_expression, render_prisma_include, resolve_label_paths, relation_chain_targets,
     build_string_only_label_expression,
 )
-from build_context import _get_entity_options, _raw_def, is_forced_required_field
+from build_context import _get_entity_options, _raw_def, is_forced_required_field, get_uri_kind
 from generate_types import extract_entities
+from generators import resolve_approval_submit_on
 
 
-def _readonly_field_names(model_def: dict) -> set[str]:
+def _readonly_field_names(model_def: dict, view_def: dict | None = None) -> set[str]:
     """Fields marked read-only via x-readonly-fields (entity) or x-readonly (per field).
 
     Such fields render as non-editable text in the form, so UI tests must not try
     to fill or clear them (the helper would fail typing into a read-only input).
+
+    x-readonly-fields is entity-level but view-scoped (cmd_874 subtask_874d):
+    it lives on the view entity itself, not the shared raw entity `model_def`
+    resolves to — pass `view_def` (schema['definitions'][definition_key])
+    whenever the caller has it, or a proxy view's declaration is silently
+    invisible here (fail-open: the test helper would try to fill a field the
+    real form renders read-only). Falls back to `model_def` when `view_def`
+    is omitted so a caller mid-migration can't crash outright, but that
+    fallback reads the wrong (pre-fix) scope — always pass `view_def`.
+    Per-property x-readonly is unaffected: properties live on the raw entity
+    by design, not something this scoping fix changes.
     """
-    ro = set(model_def.get('x-readonly-fields') or [])
+    ro = set((view_def if view_def is not None else model_def).get('x-readonly-fields') or [])
     ro |= {k for k, v in (model_def.get('properties') or {}).items()
            if isinstance(v, dict) and v.get('x-readonly')}
     return ro
@@ -254,7 +289,12 @@ def _seed_relation_label_value(
         day = unique_index if unique_index is not None else 1
         return f'2025-01-{day:02d}'
     title = to_title_case(label_field) if isinstance(label_field, str) else 'Item'
-    return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title}'
+    if target == 'user' and unique_index is not None:
+        # is_user_account targets are excluded from the callIndex-prefixed
+        # `0_{i}` format (test_helper.ts.jinja2 §4.2/cmd614) — see the
+        # matching branch in `_seed_path_part` below.
+        return f'Test {title} {unique_index}'
+    return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
 
 
 def _seed_path_part(
@@ -316,16 +356,107 @@ def _seed_path_part(
 
     if final_field == 'name':
         title = to_title_case(cursor_entity)
-        return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title}'
+        if cursor_entity == 'user':
+            # is_user_account targets are excluded from Phase2's per-call
+            # callIndex namespace (test_helper.ts.jinja2 §4.2/cmd614) — the
+            # primary_fk_dep.is_user_account branch creates `Test User ${i}`
+            # (plain loop index), never `${callIndex}_${i}`. Mirroring the
+            # `0_{unique_index}` callIndex format here made every populated
+            # is_user_account row's label assertion unfindable (cmd_625b/625g).
+            return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title} A'
+        return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
+    if prop_type == 'string' and isinstance(label_prop.get('enum'), list) and label_prop['enum']:
+        # A bare string-enum labelField segment (e.g.
+        # claim_event.event_type in claim_line's [claim.claim_no,
+        # event_type]) is never explicitly set by the populate helper that
+        # creates this row when it's optional (schema_deriver only omits a
+        # non-nullable field from `required:` when a Prisma @default(...)
+        # backs it — mirrors _build_form_data_gets' has_db_default
+        # reasoning in build_context.py) -- the row reads back whichever
+        # value the DB default assigned, NOT a fabricated 'Test <Field> A'
+        # placeholder this branch previously always returned regardless of
+        # type. When required (no default), the populate helper must set
+        # some explicit value; every enum-value generator in this file
+        # (prisma_value's 'string_enum' branch et al.) uses the first
+        # declared member as that value by convention. Prefer the schema
+        # default when declared, else the first enum member, so this
+        # matches whichever of those two the row actually holds.
+        return label_prop.get('default') or label_prop['enum'][0]
     if prop_type == 'string':
         title = to_title_case(final_field)
-        return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title}'
+        return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
     if prop_type in ('integer', 'number'):
         return str(unique_index * 100) if unique_index is not None else str(label_prop.get('minimum', 0))
     if prop_type == 'boolean':
         return 'false'
     title = to_title_case(final_field)
-    return f'Test {title} {unique_index}' if unique_index is not None else f'Test {title}'
+    return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
+
+
+# ---------------------------------------------------------------------------
+# Decimal test-value derivation (cmd_754)
+# ---------------------------------------------------------------------------
+#
+# Every Decimal test-value call site below used to plant a fixed literal
+# ('10.00', '150.00', '250.00' ...) regardless of the column's declared
+# `@db.Decimal(precision, scale)`. A narrow column such as Decimal(5, 4)
+# (one integer digit, four fractional digits) rejects '10.00' outright with
+# a numeric field overflow, and took every test in the same spec file down
+# with it. These helpers derive a value from the column's own precision/
+# scale instead, so the value is always safe regardless of how tight the
+# declared bounds are.
+
+def _decimal_scale_and_force_zero(prop: dict) -> tuple[int, bool]:
+    """(scale, force_zero_integer_part) for a `_prisma_decimal_type` prop.
+
+    scale comes from x-decimal-scale (schema_deriver, auto-reflected from
+    `@db.Decimal(p, s)`), defaulting to 2 when unknown (matches the decimal
+    places every pre-fix literal used). force_zero_integer_part is True only
+    when precision is known and leaves no room for a nonzero leading digit
+    (precision - scale <= 0, e.g. Decimal(4, 4) -- the value must be < 1). A
+    single leading digit (0-9) is otherwise always safe: precision > scale is
+    the normal case, and an unknown precision keeps the same generous
+    assumption every Decimal branch already made before this fix.
+    """
+    scale = prop.get('x-decimal-scale')
+    scale = scale if scale is not None else 2
+    precision = prop.get('x-decimal-precision')
+    force_zero = precision is not None and (precision - scale) <= 0
+    return scale, force_zero
+
+
+def _decimal_literal(n: int, scale: int, force_zero_int: bool) -> str:
+    """Render a Decimal(precision, scale)-safe bare numeric string for a
+    small distinguishing digit `n` (0-9), without quotes."""
+    if force_zero_int:
+        int_part, frac_n = '0', n
+    else:
+        int_part, frac_n = str(n), 0
+    if scale <= 0:
+        return int_part
+    frac = str(frac_n).zfill(scale)[-scale:]
+    return f'{int_part}.{frac}'
+
+
+def _decimal_ts_expr(index_expr: str, scale: int, force_zero_int: bool) -> str:
+    """TS expression for a Decimal-safe value that varies with `index_expr`.
+
+    `index_expr` is a raw TS expression (e.g. `i`) or a literal base-10
+    integer string, in which case the value is computed at generation time
+    instead of emitting a runtime expression. The runtime form cycles the
+    distinguishing digit through 1-9 (`(index_expr % 9) + 1`) so it stays
+    safe no matter how large the loop index grows.
+    """
+    if index_expr.lstrip('-').isdigit():
+        return f"'{_decimal_literal(int(index_expr), scale, force_zero_int)}'"
+    digit_expr = f'(({index_expr} % 9) + 1)'
+    if force_zero_int:
+        if scale <= 0:
+            return "'0'"
+        return '`0.${String(' + digit_expr + ").padStart(" + str(scale) + ", '0')}`"
+    if scale <= 0:
+        return f'`${{{digit_expr}}}`'
+    return f'`${{{digit_expr}}}.{"0" * scale}`'
 
 
 def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dict, is_self_ref: bool = False) -> list[dict]:
@@ -340,15 +471,22 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
     under test — but the entity being generated is what the test's own "creates
     with minimal/full data" flow also creates, using the first x-entity-select
     option (see cypress_create_value). If a self-ref dep also picked that same
-    first option for an x-entity-select field, and that field participates in a
-    @@unique constraint alongside another dep FK the test also reuses directly
-    (e.g. approval_flow's @@unique([entity_name, approver_role_id])), the self-ref
-    dep's create() and the test's own create() collide with P2002. Self-ref deps
-    pick the second entity option instead so the two never share a unique key.
+    first option for an x-entity-select field, AND that field actually
+    participates in a Prisma `@@unique([...])` group alongside another dep FK
+    the test also reuses directly, the self-ref dep's create() and the test's
+    own create() would collide with P2002 — so in that case (checked via
+    `_prisma_uniques`, a structural Prisma-schema fact, cmd_652: not a
+    business-rule flag) the self-ref dep picks the second entity option
+    instead, so the two never share a unique key. When no such constraint
+    exists (the common case — and currently true for every self-ref entity in
+    this schema), the self-ref dep matches the primary's first option instead:
+    matching is strictly safer whenever there is no P2002 risk, since it can
+    never collide with a hand-written save-time guard that expects same-value
+    self-ref links (e.g. lib/approval_flow/service_validation_custom.ts).
     """
     if target == 'user':
         return [
-            {'prop_name': 'name', 'prisma_val': f"'Test {title}'", 'prisma_val_unique': f'`Test {title} ${{i}}`', 'prisma_val_second': f"'Test {title} 2'"},
+            {'prop_name': 'name', 'prisma_val': f"'Test {title} A'", 'prisma_val_unique': f'`Test {title} ${{callIndex}}_${{i}}`', 'prisma_val_second': f"'Test {title} B'"},
             {'prop_name': 'email', 'prisma_val': f'`test-{var_name}-${{Date.now()}}@example.com`', 'prisma_val_unique': f'`test-{var_name}-${{Date.now()}}-${{i}}@example.com`', 'prisma_val_second': f'`test-{var_name}-${{Date.now()}}-2@example.com`'},
             {'prop_name': 'password', 'prisma_val': "'test-password'", 'prisma_val_unique': "'test-password'", 'prisma_val_second': "'test-password'"},
         ]
@@ -377,11 +515,23 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
     exclude = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | rel_props | oto_props | _inferred_internal
     _entity_opts = _get_entity_options(schema)
     _first_entity_val = f"'{_entity_opts[0]['value']}'" if _entity_opts else "''"
-    # Self-ref deps use the second entity option (see docstring) so they never
-    # share an x-entity-select value with the primary create test, which always
-    # uses the first option (see cypress_create_value's 'entity_select' branch).
+    # Self-ref deps only diverge to the second entity option (see docstring)
+    # when the x-entity-select field genuinely participates in a Prisma
+    # @@unique group — a structural fact read from _prisma_uniques, not a
+    # business-rule declaration. Otherwise they match the primary's first
+    # option, which is always safe when there is no such constraint.
+    _entity_select_field = next((pn for pn, p in props.items() if p.get('x-entity-select')), None)
+    _entity_select_in_composite_unique = bool(
+        _entity_select_field
+        and any(
+            _entity_select_field in group
+            for group in (_prisma_uniques.get(target, {}) or {}).get('composite', [])
+        )
+    )
     _self_ref_entity_val = (
-        f"'{_entity_opts[1]['value']}'" if is_self_ref and len(_entity_opts) > 1 else _first_entity_val
+        f"'{_entity_opts[1]['value']}'"
+        if is_self_ref and _entity_select_in_composite_unique and len(_entity_opts) > 1
+        else _first_entity_val
     )
     result = []
     for prop_name, prop in props.items():
@@ -391,9 +541,9 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
         actual = next((t for t in prop_type_raw if t != 'null'), None) if isinstance(prop_type_raw, list) else prop_type_raw
         fmt = prop.get('format')
         if prop_name == 'name':
-            val = f"'Test {title}'"
-            val_unique = f'`Test {title} ${{i}}`'
-            val_second = f"'Test {title} 2'"
+            val = f"'Test {title} A'"
+            val_unique = f'`Test {title} ${{callIndex}}_${{i}}`'
+            val_second = f"'Test {title} B'"
         elif actual == 'string' and prop.get('x-entity-select'):
             val = val_unique = val_second = _self_ref_entity_val
         elif actual == 'string' and fmt == 'date':
@@ -404,17 +554,34 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             val = 'new Date(2025, 0, 1).toISOString()'
             val_unique = 'new Date(2025, 0, i).toISOString()'
             val_second = 'new Date(2025, 0, 2).toISOString()'
+        elif actual == 'string' and prop.get('_prisma_decimal_type'):
+            # Decimal columns are exposed as JSON type "string" (cmd_705) —
+            # without this branch they fell into the generic 'string' case
+            # below and got a non-numeric placeholder, which Prisma's
+            # Decimal column rejects outright ("invalid digit found in
+            # string. Expected decimal String."). Discovered via proj_g's
+            # Int-cents→Decimal migration (cmd_711f). The value itself is
+            # derived from the column's declared precision/scale (cmd_754) —
+            # a fixed '10.00' overflows a narrow column like Decimal(5, 4).
+            _scale, _force_zero = _decimal_scale_and_force_zero(prop)
+            val = f"'{_decimal_literal(1, _scale, _force_zero)}'"
+            val_unique = _decimal_ts_expr('i', _scale, _force_zero)
+            val_second = f"'{_decimal_literal(2, _scale, _force_zero)}'"
         elif actual == 'string':
             field_title = to_title_case(prop_name)
             # Deterministic, human-readable values. Dep-helper-call collisions
             # on @unique fields (e.g. product.code) are avoided at a different
             # layer: populateXxxDependencies is rendered idempotently by the
             # test_helper template (see `dep_lookup_field` / find-or-create).
-            # Within a populate(N) loop, ${i} provides intra-loop uniqueness;
-            # tests assert on the exact "Test X 1" / "Test X 2" form.
-            val = f"'Test {field_title}'"
-            val_unique = f'`Test {field_title} ${{i}}`'
-            val_second = f"'Test {field_title} 2'"
+            # Within a populate(N) loop, ${callIndex}_${i} provides both
+            # intra-loop AND cross-call uniqueness (cmd_620 Option β — each
+            # populateXxxData/FullData call gets its own callIndex slice so two
+            # calls never reuse the same primary-FK-dep row); tests assert on
+            # the exact "Test X 0_1" / "Test X 0_2" form (callIndex is always 0
+            # for a generated spec's single call within one it()).
+            val = f"'Test {field_title} A'"
+            val_unique = f'`Test {field_title} ${{callIndex}}_${{i}}`'
+            val_second = f"'Test {field_title} B'"
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
             val = val_unique = str(mn)
@@ -431,6 +598,80 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             val_second = f'`TEST-{prop_name.upper()}-${{Date.now()}}-2`'
         result.append({'prop_name': prop_name, 'prisma_val': val, 'prisma_val_unique': val_unique, 'prisma_val_second': val_second})
     return result
+
+
+def _dep_lookup_columns(target: str, extra_required_fields: list[dict], fk_deps: list[dict]) -> list[dict]:
+    """Pick the columns a dep record's find-or-create should be keyed on.
+
+    Returns a list of column dicts, in `where`-clause order, or `[]` when the
+    dep has no usable key (plain `create()`, the pre-existing behavior for
+    bridges such as commentable/approvable that have no unique constraint at
+    all). Two column shapes come back:
+
+      - a scalar column: the `extra_required_fields` entry itself, so the
+        caller can pick `prisma_val` / `prisma_val_second` / `prisma_val_unique`
+        to match the create() variant it is emitting;
+      - an FK column: `{'prop_name', 'dep_var_name'}` straight from `fk_deps`,
+        rendered as `<dep_var>.id`.
+
+    Priority:
+      1. `name`, when the entity has one — every required-`name` entity emits a
+         deterministic `Test <Title>`, and keying on it is the long-standing
+         behavior that existing generated helpers (and their assertions)
+         depend on.
+      2. a field-level `@unique` column that the dep create() actually writes
+         (e.g. purchase_order.po_number once `name` was dropped from the
+         entity) — without this the second call to a populate helper in the
+         same test trips P2002 on that column.
+      3. a `@@unique([...])` group whose every column the create() can supply,
+         counting FK columns fed by another dep (e.g. bin's
+         `@@unique([location_id, code])`).
+
+    A column the create() does not write (nullable / DB-defaulted, hence absent
+    from `extra_required_fields`) can never be matched by the lookup, so any
+    constraint mentioning one is skipped rather than half-applied.
+    """
+    ef_by_prop = {f['prop_name']: f for f in extra_required_fields}
+    if 'name' in ef_by_prop:
+        return [ef_by_prop['name']]
+
+    uniques = _prisma_uniques.get(target) or {}
+    for col in uniques.get('single') or []:
+        if col in ef_by_prop:
+            return [ef_by_prop[col]]
+
+    fk_by_prop = {fk['prop_name']: fk for fk in (fk_deps or [])}
+    for cols in uniques.get('composite') or []:
+        resolved = []
+        for col in cols:
+            if col in ef_by_prop:
+                resolved.append(ef_by_prop[col])
+            elif col in fk_by_prop:
+                resolved.append(fk_by_prop[col])
+            else:
+                resolved = []
+                break
+        if resolved:
+            return resolved
+    return []
+
+
+def _render_lookup_where(columns: list[dict], value_key: str, fk_prefix: str = '') -> str:
+    """Render `columns` as a Prisma `where` object literal for the template.
+
+    `value_key` selects which of the scalar column's pre-rendered TS
+    expressions to use (`prisma_val` / `prisma_val_second` /
+    `prisma_val_unique`); `fk_prefix` is the accessor the emitting helper uses
+    for its dep records (`''` inside populateXxxDependencies, `'deps.'` inside
+    the populateXxxData / populateXxxFullData loops).
+    """
+    parts = []
+    for col in columns:
+        if 'dep_var_name' in col:
+            parts.append(f"{col['prop_name']}: {fk_prefix}{col['dep_var_name']}.id")
+        else:
+            parts.append(f"{col['prop_name']}: {col[value_key]}")
+    return '{ ' + ', '.join(parts) + ' }'
 
 
 def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
@@ -461,9 +702,9 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
         actual = next((t for t in prop_type if t != 'null'), None) if isinstance(prop_type, list) else prop_type
         fmt = prop.get('format')
         if prop_name == 'name':
-            val = f"'Test {to_title_case(dep_target)}'"
-            val_unique = f'`Test {to_title_case(dep_target)} ${{i}}`'
-            val_second = f"'Test {to_title_case(dep_target)} 2'"
+            val = f"'Test {to_title_case(dep_target)} A'"
+            val_unique = f'`Test {to_title_case(dep_target)} ${{callIndex}}_${{i}}`'
+            val_second = f"'Test {to_title_case(dep_target)} B'"
         elif actual == 'string' and prop.get('x-entity-select'):
             val = val_unique = val_second = _first_entity_val
         elif actual == 'string' and fmt == 'date':
@@ -474,11 +715,20 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
             val = 'new Date(2025, 0, 1).toISOString()'
             val_unique = 'new Date(2025, 0, i).toISOString()'
             val_second = 'new Date(2025, 0, 2).toISOString()'
+        elif actual == 'string' and prop.get('_prisma_decimal_type'):
+            # See the matching branch in _get_dep_populate_fields (cmd_711f,
+            # cmd_754) for why: decimal columns are exposed as JSON type
+            # "string" (cmd_705) and reject a non-numeric placeholder, and
+            # the value must fit the column's declared precision/scale.
+            _scale, _force_zero = _decimal_scale_and_force_zero(prop)
+            val = f"'{_decimal_literal(1, _scale, _force_zero)}'"
+            val_unique = _decimal_ts_expr('i', _scale, _force_zero)
+            val_second = f"'{_decimal_literal(2, _scale, _force_zero)}'"
         elif actual == 'string':
             field_title = to_title_case(prop_name)
-            val = f"'Test {field_title}'"
-            val_unique = f'`Test {field_title} ${{i}}`'
-            val_second = f"'Test {field_title} 2'"
+            val = f"'Test {field_title} A'"
+            val_unique = f'`Test {field_title} ${{callIndex}}_${{i}}`'
+            val_second = f"'Test {field_title} B'"
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
             val = str(mn)
@@ -575,6 +825,90 @@ def get_entity_fk_deps(model_name: str, schema: dict, deps: list[dict]) -> list[
         and r['prop_name'] != 'assignee_id'
         and any(d['target'] == r['target'] for d in deps)
     ]
+
+
+def split_same_target_fk_deps(
+    model_name: str,
+    relationships: list[dict],
+    deps: list[dict],
+    entity_fk_deps: list[dict],
+) -> tuple[list[dict], list[dict], dict[str, list], dict[str, list]]:
+    """Split same-target deps into prop-stem deps when multiple FK fields point
+    to the same target (e.g. insured_party_id + insurer_party_id both -> party).
+
+    Without this, every FK field pointing at the same target collapses onto a
+    single dep var (e.g. `deps.party`), so generated test code renders the SAME
+    record for every such field instead of one distinct record per FK — a
+    crash (ReferenceError from a duplicate `let party = ...` declaration) in
+    contexts that declare deps as local variables, or a silent
+    every-FK-points-to-the-same-row data bug in contexts (like api_spec_context)
+    that read deps off an object instead.
+
+    Returns (deps, entity_fk_deps, target_to_fk_rels, multi_fk_targets) — the
+    two dict return values let callers that need them (e.g. helper_context's
+    single-FK non-standard prop name aliasing) reuse the same relationship
+    grouping instead of recomputing it.
+
+    A dep unrelated to model_name can itself carry a `fk_deps` entry that
+    points at the same target (e.g. `policy` is a dep of `claim` and has its
+    own `party_id` FK, so `policy`'s dep object has
+    `fk_deps: [{'prop_name': 'party_id', 'dep_var_name': 'party'}]`,
+    built by resolve_dependencies() before this function ever runs). Once the
+    bare `party` dep is removed above, that reference is left dangling — no
+    dep with var_name 'party' exists any more, so a lookup-column renderer
+    like helper_context's `_dep_lookup_columns` emits a bare, undeclared
+    `party.id`. Repoint any such stale reference at the first split dep for
+    that target; any one of them is a real, already-created record, so it
+    satisfies the FK regardless of which of model_name's own fields the
+    split was keyed on. The split deps are also inserted at the position the
+    removed bare dep occupied (not appended) so a dep like `policy`, whose
+    own creation must come after its FK targets, still renders in a valid
+    declaration order.
+    """
+    target_to_fk_rels: dict[str, list] = {}
+    for r in relationships:
+        if (r['target'] not in ('user', model_name)
+                and r['prop_name'] not in ('updater_id', 'assignee_id')):
+            target_to_fk_rels.setdefault(r['target'], []).append(r)
+    multi_fk_targets = {t: rels for t, rels in target_to_fk_rels.items() if len(rels) > 1}
+    for target, fk_rels in multi_fk_targets.items():
+        # Capture original dep's fk_deps and position before removing it —
+        # split prop-stem deps must inherit the fk_deps so create() calls
+        # include required FK columns, and the position so they're inserted
+        # back where the bare dep was (not appended after later deps that
+        # may depend on them).
+        orig_index = next((i for i, d in enumerate(deps) if d['target'] == target), len(deps))
+        _orig_dep = deps[orig_index] if orig_index < len(deps) else None
+        _orig_fk_deps = _orig_dep.get('fk_deps', []) if _orig_dep else []
+        old_var = to_camel_case(target)
+        # Remove the single target-based dep and its entity_fk_deps entries
+        deps = [d for d in deps if d['target'] != target]
+        entity_fk_deps = [d for d in entity_fk_deps if d['dep_var_name'] != old_var]
+        # Build per-prop-stem deps and entity_fk_deps entries
+        new_deps: list[dict] = []
+        new_var_names: list[str] = []
+        for r in fk_rels:
+            prop_stem = re.sub(r'_id$', '', r['prop_name'])
+            var_name = to_camel_case(prop_stem)
+            dep_title = to_title_case(prop_stem)
+            if not any(d['var_name'] == var_name for d in deps) and not any(d['var_name'] == var_name for d in new_deps):
+                new_deps.append({'target': target, 'var_name': var_name, 'title': dep_title, 'fk_deps': _orig_fk_deps})
+            entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
+            new_var_names.append(var_name)
+        insert_at = min(orig_index, len(deps))
+        deps[insert_at:insert_at] = new_deps
+        # Rewrite any OTHER dep's stale reference to the now-removed bare
+        # target var. new_deps themselves are excluded (their fk_deps is the
+        # inherited _orig_fk_deps, which can't reference their own target).
+        fallback_var = new_var_names[0] if new_var_names else old_var
+        new_dep_ids = {id(d) for d in new_deps}
+        for dep in deps:
+            if id(dep) in new_dep_ids:
+                continue
+            for nested_fk in dep.get('fk_deps') or []:
+                if nested_fk.get('dep_var_name') == old_var:
+                    nested_fk['dep_var_name'] = fallback_var
+    return deps, entity_fk_deps, target_to_fk_rels, multi_fk_targets
 
 
 def _entity_has_updater_id(entity_name: str, schema: dict) -> bool:
@@ -695,6 +1029,30 @@ def get_all_internal_fk_deps(model_name: str, schema: dict) -> list[dict]:
     return deps
 
 
+def _date_range_fields(model_def: dict) -> dict | None:
+    """Extract {'start': field_name, 'end': field_name} from an entity's
+    x-reservation item-mode dateRange declaration (mirrors build_context.py's
+    reservation_config['dateRange'] parsing — dateRange may sit at request
+    level (legacy) or inside request.criteria).
+
+    This is the generator's one schema-driven signal that two date/datetime
+    fields on the same entity form an ordered pair (start must be before
+    end). Test-value generation uses it instead of guessing pairing from
+    field names (e.g. 'check_in'/'check_out' — a name pattern specific to
+    one consumer that no keyword heuristic could reasonably cover; cmd_577).
+    Returns None when the model has no such declaration.
+    """
+    xres = model_def.get('x-reservation')
+    if not isinstance(xres, dict) or xres.get('mode') != 'item':
+        return None
+    request = xres.get('request') or {}
+    criteria = request.get('criteria') or {}
+    date_range = request.get('dateRange') or criteria.get('dateRange')
+    if not isinstance(date_range, dict):
+        return None
+    return {'start': date_range.get('start', 'start'), 'end': date_range.get('end', 'end')}
+
+
 # ---------------------------------------------------------------------------
 # Field analysis
 # ---------------------------------------------------------------------------
@@ -705,12 +1063,18 @@ def get_field_metas(
     relationships: list,
     fields_filter: list | None = None,
     entity_options: list | None = None,
+    range_end_field: str | None = None,
 ) -> list[dict]:
     """Port of getFieldMetas().
 
     Returns list of FieldMeta dicts with keys:
       prop_name, label, category, required,
-      enum_values, format, dep_target, min, max, entity_options
+      enum_values, format, dep_target, min, max, entity_options, is_range_end
+
+    range_end_field: prop_name of the entity's x-reservation dateRange end
+    field (see _date_range_fields), if any. Tagged onto that field's meta as
+    is_range_end=True so value generators can produce a value guaranteed
+    later than its paired start field, instead of guessing from the name.
     """
     filtered = filter_fields(properties, fields_filter)
     # Exclude *able_id FKs with no x-relationship (system-managed internal bridge FKs,
@@ -720,7 +1084,28 @@ def get_field_metas(
         pn for pn in filtered
         if pn.endswith('able_id') and pn not in _rel_prop_names
     }
-    exclude_keys = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'} | _bridge_fk_keys
+    # Exclude direct-attachment FKs (x-relationship.type: direct, cmd_788):
+    # rendered as SingleAttachmentUpload, not a plain labeled text/select
+    # input, so the generic label-driven fill/clear commands this function
+    # feeds (getFormLabel + cy.fillField) can never find a matching element
+    # for one, and the generic string/number placeholder value generators
+    # this same meta would otherwise drive (populate{Parent}FullData etc.)
+    # produce a fake string that violates the column's real FK constraint.
+    # Deliberately separate from get_parent_relationships()-backed
+    # `relationships` above for the same reason get_direct_attachment_fk_props()
+    # itself stays out of that list -- see its docstring. Uncovered by any
+    # test today (cmd_793): the field simply never appears in fill/clear/
+    # full-data commands, the same way an m2m self-ref child or an internal
+    # bridge FK is already handled by this function.
+    _direct_attachment_fk_keys = {
+        pn for pn, prop in filtered.items()
+        if isinstance(prop, dict)
+        and (prop.get('x-relationship') or {}).get('type') == 'direct'
+    }
+    exclude_keys = (
+        {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'}
+        | _bridge_fk_keys | _direct_attachment_fk_keys
+    )
     metas = []
 
     for prop_name, prop in filtered.items():
@@ -737,6 +1122,9 @@ def get_field_metas(
             'min': None,
             'max': None,
             'entity_options': None,
+            'decimal_scale': None,
+            'decimal_force_zero_int': False,
+            'max_length': prop.get('maxLength'),
         }
 
         rel = next((r for r in relationships if r['prop_name'] == prop_name), None)
@@ -762,7 +1150,36 @@ def get_field_metas(
         fmt = prop.get('format')
 
         if prop_type == 'string' and fmt == 'uri':
-            continue  # image/file field — skip
+            # image/file field: an optional (nullable) one is legitimately
+            # skippable — no attachment is a valid state. A non-nullable one
+            # is a required column with no other value source; omitting it
+            # from every test-data generator (populate helpers especially)
+            # leaves the column unset and Prisma rejects the whole create()
+            # with a NOT NULL violation before the test under it ever runs
+            # (e.g. claim_document.file_uri — a required child of claim).
+            # Give it a 'text' meta carrying format:'uri' so the
+            # existing api_value() uri branch (already written for this,
+            # previously dead code since this field never reached it) and
+            # the prisma_value()/cypress_*_value() uri branches added below
+            # generate a URL-shaped placeholder instead of skipping it.
+            prop_is_nullable = isinstance(prop_type_raw, list) and 'null' in prop_type_raw
+            if prop_is_nullable:
+                continue
+            metas.append({
+                **base,
+                'label': to_title_case(prop_name),
+                'category': 'text',
+                'required': prop_name in required_fields,
+                'format': fmt,
+                # 'image' kind (the default) renders via ImageUpload (create/edit,
+                # a labeled TextField -- cy.fillField works) but ImageDisplay on
+                # the view page (a bare <img>, no <label>/<input> at all) -- a
+                # view-page cy.checkField() can never find a matching element for
+                # it. 'link' kind is a distinct, currently-unrendered category
+                # (tracked separately) and isn't reachable here in practice.
+                'view_display_uncheckable': get_uri_kind(prop) != 'link',
+            })
+            continue
         elif prop_type == 'string' and fmt in ('date', 'date-time', 'time'):
             metas.append({
                 **base,
@@ -770,6 +1187,7 @@ def get_field_metas(
                 'category': 'datetime',
                 'required': prop_name in required_fields,
                 'format': fmt,
+                'is_range_end': range_end_field is not None and prop_name == range_end_field,
             })
         elif prop_type in ('integer', 'number'):
             if prop.get('enum'):
@@ -820,6 +1238,26 @@ def get_field_metas(
                 # generated test's expected label matches what's actually rendered.
                 'enum_namespace': prop.get('x-enum-namespace') or prop.get('_prisma_native_enum_type'),
             })
+        elif prop_type == 'string' and prop.get('_prisma_decimal_type'):
+            # Decimal columns are exposed as JSON type "string" (cmd_705:
+            # precision-preserving, no JS float rounding) — without this
+            # branch they fell into the generic 'text' category below and
+            # got a non-numeric placeholder ('Test Unit Price 1'), which
+            # Prisma's Decimal column rejects outright
+            # ("invalid digit found in string. Expected decimal String.").
+            # Discovered via proj_g's Int-cents→Decimal migration
+            # (cmd_711f). decimal_scale/decimal_force_zero_int (cmd_754) let
+            # the value generators below derive a value that fits the
+            # column's declared precision/scale instead of a fixed literal.
+            _scale, _force_zero = _decimal_scale_and_force_zero(prop)
+            metas.append({
+                **base,
+                'label': to_title_case(prop_name),
+                'category': 'decimal',
+                'required': prop_name in required_fields,
+                'decimal_scale': _scale,
+                'decimal_force_zero_int': _force_zero,
+            })
         else:
             metas.append({
                 **base,
@@ -848,6 +1286,25 @@ def get_child_render_type(child: dict, schema: dict = None, parent_model_name: s
         return 'editable-list-text'
     if child.get('output_type') == 'comments':
         return 'comments'
+    # issue #538 (a follow-up to the read-only embed decision, issue
+    # #520/PR#528/PR#530): an independent
+    # child (own x-generate — own list/view/new/edit/delete pages) that is
+    # NOT self-referencing renders read-only from the parent — generators.py's
+    # form_upsert_context() narrows it out of the editable-grid machinery
+    # (readonly_indep_grid_ch) and build_context.py's write_ch excludes it
+    # from nested create/update, same as build_context.py's own
+    # `is_independent` flag (mirrored here: `not is_many_to_many and
+    # bool(x-generate)` on the child's raw schema entry). A self-referencing
+    # independent child (child['name'] == parent_model_name) is excluded from
+    # this narrowing on the generator side too (build_context.py's
+    # `use_connect` gates on `child_name == model`), so it keeps the normal
+    # writable 'datagrid' render type here.
+    if (
+        schema is not None
+        and child['name'] != parent_model_name
+        and bool((schema.get('definitions') or {}).get(child['name'], {}).get('x-generate'))
+    ):
+        return 'readonly-datagrid'
     return 'datagrid'
 
 
@@ -875,7 +1332,9 @@ def _child_system_managed_fk_excludes(child_def: dict) -> set[str]:
     props = child_def.get('properties') or {}
     excludes = {
         prop_name for prop_name, prop in props.items()
-        if isinstance(prop, dict) and (prop.get('x-relationship') or {}).get('type') == 'one-to-one_bridge'
+        if isinstance(prop, dict) and (
+            (prop.get('x-relationship') or {}).get('type') == 'one-to-one_bridge'
+        )
     }
     _bridge_field = get_splittable_bridge_field(child_def)
     if _bridge_field in props:
@@ -905,7 +1364,22 @@ def analyze_children(children: list, schema: dict, parent_model_name: str) -> li
         exclude_keys = {'id', parent_fk_prop, 'order'} | _child_system_managed_fk_excludes(child_def)
         child_properties = {k: v for k, v in child_def['properties'].items() if k not in exclude_keys}
 
-        fields = get_field_metas(child_properties, child_required, child_rels)
+        _child_date_range = _date_range_fields(child_def)
+        fields = get_field_metas(
+            child_properties, child_required, child_rels,
+            range_end_field=_child_date_range['end'] if _child_date_range else None,
+        )
+
+        # cmd_881: a field the child's own view uses as an x-filter-values
+        # discriminator must not be picked as a generic "optional field"
+        # edit/clear target — changing it can move the row out of the
+        # filtered view, so the generic scaffold's "still visible after
+        # edit" assertion would be self-contradicting. Read from the VIEW
+        # entity (child['name']), not child_def (the raw entity) — mirrors
+        # helper_context()'s _filter_values_for_populate read above.
+        _child_filter_values: dict = (
+            schema['definitions'].get(child['name'], {}) or {}
+        ).get('x-filter-values') or {}
 
         result.append({
             'child': child,
@@ -913,7 +1387,10 @@ def analyze_children(children: list, schema: dict, parent_model_name: str) -> li
             'render_type': render_type,
             'fields': fields,
             'required_fields': [f for f in fields if f['required']],
-            'optional_fields': [f for f in fields if not f['required']],
+            'optional_fields': [
+                f for f in fields
+                if not f['required'] and f['prop_name'] not in _child_filter_values
+            ],
             'parent_fk_prop': parent_fk_prop,
         })
     return result
@@ -923,12 +1400,46 @@ def analyze_children(children: list, schema: dict, parent_model_name: str) -> li
 # Test data value generators
 # ---------------------------------------------------------------------------
 
+def _clip_to_max_length(value: str, max_len: int | None, tail: str) -> str:
+    """Fit a Cypress-typed text value inside a JSON-schema `maxLength`.
+
+    The rendered <AppFieldText> carries the same maxLength as an HTML
+    input attribute, so cy.type() silently truncates anything longer —
+    an unclipped value makes the fill differ from the checkField
+    assertion. Keep `maxLength - 1` chars of the intended value and use
+    the last slot for a distinguishing tail char (create vs. edit).
+    """
+    if max_len is None or len(value) <= max_len:
+        return value
+    return value[:max(0, max_len - 1)] + tail
+
+
+def _ts_literal_for_python_value(value) -> str:
+    """Render a plain Python value (as it appears in an x-filter-values
+    allowed-values list) as a TypeScript literal, for a generated
+    populate/seed helper's `prisma.<model>.create()` call. cmd_874/subtask_874f."""
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    if value is None:
+        return 'null'
+    if isinstance(value, (int, float)):
+        return str(value)
+    return "'" + str(value).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
 def prisma_value(field: dict, index: str, entity_title: str) -> str:
     """Generate a TypeScript expression for Prisma test data."""
     cat = field['category']
     prop_name = field['prop_name']
 
     if cat == 'text':
+        if field.get('format') == 'uri':
+            # A URL-shaped placeholder, not the generic
+            # 'Test <label>' text — a required uri column (e.g.
+            # claim_document.file_uri) is otherwise inserted via the DB
+            # populate helper, which has no browser/AppFieldText in the
+            # loop to justify a human-readable placeholder.
+            return f'`https://example.com/test-{prop_name}-${{{index}}}`'
         if prop_name == 'name':
             return f'`{entity_title} ${{{index}}}`'
         if prop_name == 'email':
@@ -939,6 +1450,15 @@ def prisma_value(field: dict, index: str, entity_title: str) -> str:
         if field.get('enum_values'):
             return f"'{field['enum_values'][0]}'"
         return f'`Test {field["label"]} ${{{index}}}`'
+
+    elif cat == 'decimal':
+        # Decimal columns need a valid decimal-format string (cmd_705:
+        # exposed as JSON type "string"), not the 'text' category's
+        # human-readable placeholder — Prisma's Decimal column rejects
+        # anything that doesn't parse as a number (cmd_711f). The value is
+        # derived from the column's declared precision/scale (cmd_754) so it
+        # never overflows a narrow column like Decimal(5, 4).
+        return _decimal_ts_expr(index, field.get('decimal_scale', 2), field.get('decimal_force_zero_int', False))
 
     elif cat == 'entity_select':
         options = field.get('entity_options') or []
@@ -967,10 +1487,16 @@ def prisma_value(field: dict, index: str, entity_title: str) -> str:
 
     elif cat == 'datetime':
         fmt = field.get('format')
+        # is_range_end (x-reservation dateRange.end, see _date_range_fields) is a
+        # schema-driven pairing signal and takes priority over the name-keyword
+        # heuristic below — the keyword list can't cover every consumer's naming
+        # (e.g. 'check_out' matches neither 'end'/'logout'/'finish'; cmd_577).
+        is_end = field.get('is_range_end', False)
         if fmt == 'date':
             # Use UTC to avoid timezone shift: local midnight in e.g. JST would be stored as prev day
-            return f'new Date(Date.UTC(2025, 0, {index})).toISOString()'
-        if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
+            day = f'{index} + 1' if is_end else index
+            return f'new Date(Date.UTC(2025, 0, {day})).toISOString()'
+        if is_end or any(kw in prop_name for kw in ('end', 'logout', 'finish')):
             return f'new Date(2025, 0, {index}, 17, 0).toISOString()'
         return f'new Date(2025, 0, {index}, 9, 0).toISOString()'
 
@@ -983,11 +1509,21 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
     prop_name = field['prop_name']
 
     if cat == 'text':
+        if field.get('format') == 'uri':
+            return f'https://example.com/test-{prop_name}-1'
         if prop_name == 'name':
-            return f'Test {entity_title}'
-        if field.get('enum_values'):
-            return field['enum_values'][0]
-        return f'Test {field["label"]}'
+            val = f'Test {entity_title}'
+        elif field.get('enum_values'):
+            val = field['enum_values'][0]
+        else:
+            val = f'Test {field["label"]}'
+        return _clip_to_max_length(val, field.get('max_length'), '1')
+
+    elif cat == 'decimal':
+        # Plain numeric-format string typed into the AppFieldText decimal
+        # input — same reasoning as prisma_value's 'decimal' branch (cmd_711f,
+        # cmd_754).
+        return _decimal_literal(1, field.get('decimal_scale', 2), field.get('decimal_force_zero_int', False))
 
     elif cat == 'entity_select':
         options = field.get('entity_options') or []
@@ -1015,33 +1551,52 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
 
     elif cat == 'datetime':
         fmt = field.get('format')
+        is_end = field.get('is_range_end', False)
         if fmt == 'date':
-            if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
+            if is_end or any(kw in prop_name for kw in ('end', 'logout', 'finish')):
                 return '01/16/2025'
             return '01/15/2025'
         if fmt == 'time':
-            if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
+            if is_end or any(kw in prop_name for kw in ('end', 'logout', 'finish')):
                 return '05:00 PM'
             return '09:00 AM'
-        if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
+        if is_end or any(kw in prop_name for kw in ('end', 'logout', 'finish')):
             return '01/15/2025 05:00 PM'
         return '01/15/2025 09:00 AM'
 
     return ''  # autocomplete
 
 
-def cypress_edit_value(field: dict, entity_title: str) -> str:
-    """Generate a Cypress edit (updated) value."""
+def cypress_edit_value(field: dict, entity_title: str, write_locked_values: dict | None = None) -> str:
+    """Generate a Cypress edit (updated) value.
+
+    write_locked_values (field -> locked values, from
+    derive_write_locked_values): an enum/string_enum field's edit value
+    must never be picked from this set. Those values are system-only
+    (x-approval and/or x-write-locked-values); a generated spec that wrote
+    one directly would fabricate a state the workflow never produced.
+    """
     cat = field['category']
     prop_name = field['prop_name']
+    _locked = set((write_locked_values or {}).get(prop_name) or [])
 
     if cat == 'text':
+        if field.get('format') == 'uri':
+            return f'https://example.com/test-{prop_name}-2'
         if prop_name == 'name':
-            return f'Updated {entity_title}'
-        enum_values = field.get('enum_values')
-        if enum_values:
-            return enum_values[1] if len(enum_values) > 1 else enum_values[0]
-        return f'Updated {field["label"]}'
+            val = f'Updated {entity_title}'
+        else:
+            enum_values = [v for v in (field.get('enum_values') or []) if v not in _locked]
+            if enum_values:
+                val = enum_values[1] if len(enum_values) > 1 else enum_values[0]
+            else:
+                val = f'Updated {field["label"]}'
+        return _clip_to_max_length(val, field.get('max_length'), '2')
+
+    elif cat == 'decimal':
+        # Distinct from cypress_create_value's 'decimal' value (cmd_711f,
+        # cmd_754).
+        return _decimal_literal(2, field.get('decimal_scale', 2), field.get('decimal_force_zero_int', False))
 
     elif cat == 'entity_select':
         options = field.get('entity_options') or []
@@ -1050,7 +1605,7 @@ def cypress_edit_value(field: dict, entity_title: str) -> str:
         return options[0]['label'] if options else ''
 
     elif cat in ('enum', 'string_enum'):
-        values = [v for v in (field.get('enum_values') or []) if v is not None]
+        values = [v for v in (field.get('enum_values') or []) if v is not None and v not in _locked]
         raw = values[1] if len(values) > 1 else (values[0] if values else None)
         if raw is None:
             return ''
@@ -1071,15 +1626,19 @@ def cypress_edit_value(field: dict, entity_title: str) -> str:
 
     elif cat == 'datetime':
         fmt = field.get('format')
+        is_end = field.get('is_range_end', False)
         if fmt == 'date':
-            return '06/15/2025'
+            # Range-end fields (x-reservation dateRange.end) get a distinct later
+            # day — editing both fields in a pair to the same date would trip the
+            # same start<end validation the create-value fix guards against (cmd_577).
+            return '06/16/2025' if is_end else '06/15/2025'
         if fmt == 'time':
             # `cy.fillTime` requires "HH:MM AM/PM" only — datetime format
             # would crash the helper. Mirror the create_value time branch.
-            if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
+            if is_end or any(kw in prop_name for kw in ('end', 'logout', 'finish')):
                 return '06:00 PM'
             return '02:00 PM'
-        if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
+        if is_end or any(kw in prop_name for kw in ('end', 'logout', 'finish')):
             return '06/15/2025 06:00 PM'
         return '06/15/2025 02:00 PM'
 
@@ -1099,6 +1658,13 @@ def api_value(field: dict, entity_title: str) -> str:
         if field.get('enum_values'):
             return f"'{field['enum_values'][0]}'"
         return f"'Test {field['label']}'"
+
+    elif cat == 'decimal':
+        # Quoted decimal string literal — the API JSON contract for a
+        # Decimal field is a string too (cmd_705), same reasoning as
+        # prisma_value/cypress_create_value's 'decimal' branches (cmd_711f,
+        # cmd_754).
+        return f"'{_decimal_literal(1, field.get('decimal_scale', 2), field.get('decimal_force_zero_int', False))}'"
 
     elif cat == 'entity_select':
         options = field.get('entity_options') or []
@@ -1125,7 +1691,7 @@ def api_value(field: dict, entity_title: str) -> str:
         return 'true'
 
     elif cat == 'datetime':
-        if any(kw in prop_name for kw in ('end', 'logout', 'finish')):
+        if field.get('is_range_end', False) or any(kw in prop_name for kw in ('end', 'logout', 'finish')):
             return "'2025-01-15T17:00:00.000Z'"
         return "'2025-01-15T09:00:00.000Z'"
 
@@ -1139,7 +1705,7 @@ def api_value(field: dict, entity_title: str) -> str:
 def gen_fill_command(field: dict, value: str, indent: str) -> str:
     cat = field['category']
     label = field['label']
-    if cat in ('text', 'number'):
+    if cat in ('text', 'number', 'decimal'):
         return f"{indent}cy.fillField('{label}', '{value}');"
     elif cat == 'datetime':
         fmt = field.get('format')
@@ -1159,7 +1725,7 @@ def gen_fill_command(field: dict, value: str, indent: str) -> str:
 def gen_clear_command(field: dict, indent: str) -> str:
     cat = field['category']
     label = field['label']
-    if cat in ('text', 'number'):
+    if cat in ('text', 'number', 'decimal'):
         return f"{indent}cy.clearField('{label}');"
     elif cat == 'datetime':
         return f"{indent}cy.clearDateTime('{label}');"
@@ -1246,6 +1812,8 @@ def gen_assert_commands(
     for field in fields:
         if field.get('readonly'):
             continue  # read-only fields aren't filled, so don't assert the edited value
+        if field.get('view_display_uncheckable'):
+            continue  # rendered read-only via a bare, unlabeled display widget -- no checkField target exists
         if field['category'] == 'autocomplete':
             dep_target = field.get('dep_target')
             if dep_target:
@@ -1265,9 +1833,9 @@ def gen_assert_commands(
                     )
                 elif dep_var:
                     prop_stem = re.sub(r'_id$', '', field['prop_name'])
-                    dep_title = f'Test {to_title_case(prop_stem)}'
+                    dep_title = f'Test {to_title_case(prop_stem)} A'
                 else:
-                    dep_title = f'Test {to_title_case(dep_target)}'
+                    dep_title = f'Test {to_title_case(dep_target)} A'
                 if field['prop_name'] in flatten_m2o_props:
                     inner_label_field = field.get('dep_label_field') or 'name'
                     # Inner label inside a flattened accordion is the literal field
@@ -1289,6 +1857,37 @@ def gen_assert_commands(
 # Child DataGrid object helpers
 # ---------------------------------------------------------------------------
 
+def _child_datetime_iso_value(value: str, fmt: str | None) -> str:
+    """Convert a cypress_create_value/cypress_edit_value 'datetime' result
+    into the cy.type() string the field's actual native input expects.
+
+    DataGrid-child date/date-time/time columns (generators.py's column_def
+    codegen, issue #540) render two different native input types depending
+    on `fmt`: a `date`-format column gets MUI's dedicated `type: 'date'`
+    GridColDef (native `<input type="date">`, `YYYY-MM-DD`); `date-time`
+    and `time` columns have no dedicated MUI type and keep `type:
+    'dateTime'` (native `<input type="datetime-local">`,
+    `YYYY-MM-DDThh:mm`) — unlike the top-level form, whose DateTimeWrapper
+    accepts keyboard-sectioned typing (MM/DD/YYYY, "05:00 PM", ...) via
+    cy.fillDate/cy.fillTime. value_fn's human-readable format matches the
+    top-level convention; this reformats it for the DataGrid-child case
+    only, so the top-level format (and its is_range_end / keyword day-pick
+    logic) stays the single source of truth.
+    """
+    if fmt == 'time':
+        # No date component (e.g. '05:00 PM') — the grid's datetime-local
+        # input still requires one even though the field itself is
+        # time-only, so pair it with a fixed placeholder date.
+        dt = datetime.strptime(value, '%I:%M %p').replace(year=2025, month=1, day=15)
+        return dt.strftime('%Y-%m-%dT%H:%M')
+    elif fmt == 'date':
+        dt = datetime.strptime(value, '%m/%d/%Y')
+        return dt.strftime('%Y-%m-%d')
+    else:
+        dt = datetime.strptime(value, '%m/%d/%Y %I:%M %p')
+        return dt.strftime('%Y-%m-%dT%H:%M')
+
+
 def _child_scalar_entries(fields: list, title: str, value_fn) -> list[str]:
     """Return JS object entries for scalar (non-autocomplete) datagrid child fields."""
     entries = []
@@ -1298,6 +1897,9 @@ def _child_scalar_entries(fields: list, title: str, value_fn) -> list[str]:
         value = value_fn(field, title)
         if field['category'] in ('boolean', 'number'):
             entries.append(f"{field['prop_name']}: {value}")
+        elif field['category'] == 'datetime':
+            iso_value = _child_datetime_iso_value(value, field.get('format'))
+            entries.append(f"{field['prop_name']}: '{iso_value}'")
         else:
             entries.append(f"{field['prop_name']}: '{value}'")
     return entries
@@ -1311,6 +1913,11 @@ def _child_native_enum_singleselect_calls(fields: list, title: str, value_fn) ->
     each section only ever adds a single child row. selectDataGridSingleSelect
     is imported directly in the template (no `cy.` prefix), matching the
     existing fk.field / fk.label_code call sites.
+
+    The trailing `title` argument (cmd_632) scopes the call to this child's
+    own embedded DataGrid — a parent with 2+ datagrid children renders all
+    of them at once, so an unscoped call ambiguously matches every grid on
+    the page (see datagrid-helpers.ts's scopedGet doc for the full story).
     """
     calls = []
     for field in fields:
@@ -1323,7 +1930,7 @@ def _child_native_enum_singleselect_calls(fields: list, title: str, value_fn) ->
         label = value_fn(field, title)
         raw = _reverse_enum_label(field, label)
         calls.append(
-            f"selectDataGridSingleSelect(0, '{field['prop_name']}', '{label}', '{raw}');"
+            f"selectDataGridSingleSelect(0, '{field['prop_name']}', '{label}', '{raw}', '{title}');"
         )
     return calls
 
@@ -1369,8 +1976,27 @@ def gen_child_datagrid_fk_fields(fields: list, schema: dict | None = None) -> li
         elif isinstance(dep_label_field, list) and schema is not None:
             raw = _seed_relation_label_value(dep_target, dep_label_field, False, schema)
             label_code = f"'{raw}'"
+        elif dep_label_field and dep_label_field != 'name' and schema is not None:
+            # A non-'name'/non-'id' scalar labelField (e.g.
+            # agent_appointment.product_version_id → labelField
+            # 'regulatory_filing_no') fell through to the generic
+            # entity-name literal below ('Test Product Version A'), which
+            # never matches the dropdown option text the UI actually
+            # renders (the target's real labelField value, 'Test
+            # Regulatory Filing No A') — selectDataGridSingleSelect then
+            # times out with no match. The dependency helper's own name
+            # mapping (deps.<x>.name aliasing) already gets this right for
+            # the *parent* form's autocomplete; only this child-datagrid
+            # singleSelect value generator was still hardcoded to the
+            # entity-name shape. _seed_relation_label_value is the same
+            # resolver the list-labelField branch above (and the parent
+            # form's own expected-label computation) already trusts.
+            raw = _seed_relation_label_value(
+                dep_target, dep_label_field, f.get('dep_label_field_is_date', False), schema,
+            )
+            label_code = f"'{raw}'"
         else:
-            label_code = f"'Test {to_title_case(stem)}'"
+            label_code = f"'Test {to_title_case(stem)} A'"
         result.append({'field': f['prop_name'], 'label_code': label_code})
     return result
 
@@ -1519,6 +2145,51 @@ def _compute_flatten_test_rels(parent: str, pascal: str, definition_key: str, sc
 # Context builders (Jinja2 template contexts)
 # ---------------------------------------------------------------------------
 
+def _resolve_pool_extra_deps(
+    pool_entity: str, schema: dict, enriched_deps: list[dict], exclude_field: str | None,
+) -> tuple[list[dict], list[dict]]:
+    """cmd_602: resolve an x-reservation pool entity's required FKs other than
+    `exclude_field` (the request criteria field already handled by the caller;
+    None when there is no criteria field at all — reservation_nolines_pool_seed).
+
+    Without this, helper_context()'s reservation_lines_pool_seed/
+    reservation_nolines_pool_seed blocks only ever wired the criteria-field FK
+    into the pool entity's create() call (e.g. inventory.product_id), silently
+    omitting any OTHER required FK on the pool entity (e.g. inventory.location_id,
+    added 2026-08-06 alongside product_id) — the generated helper's Prisma call
+    then throws a missing-required-column error at seed time.
+
+    Returns (pool_extra_fk_props, pool_extra_deps):
+      - pool_extra_fk_props: [{prop_name, dep_var_name}] to wire directly into the
+        pool entity's create() data block.
+      - pool_extra_deps: [{target, var_name, pascal, fk_deps, extra_required_fields,
+        bridge_otos}] for FK targets NOT already present in enriched_deps (e.g. not
+        already pulled in by a datagrid child's own autocomplete FK resolution —
+        see purchase_per_item.inventory_id above) — these need dedicated creation
+        code emitted before the pool entity's create(). Targets already present in
+        enriched_deps are referenced directly via their existing var_name instead
+        of being created a second time.
+    """
+    pool_deps_raw = resolve_dependencies(pool_entity, schema) if pool_entity else []
+    pool_entity_fk_deps = get_entity_fk_deps(pool_entity, schema, pool_deps_raw) if pool_entity else []
+    pool_extra_fk_props = [fk for fk in pool_entity_fk_deps if fk['prop_name'] != exclude_field]
+    pool_extra_deps = []
+    for fk in pool_extra_fk_props:
+        if any(d['var_name'] == fk['dep_var_name'] for d in enriched_deps):
+            continue
+        dep_raw = next((d for d in pool_deps_raw if d['var_name'] == fk['dep_var_name']), None)
+        if dep_raw:
+            pool_extra_deps.append({
+                'target': dep_raw['target'],
+                'var_name': dep_raw['var_name'],
+                'pascal': to_pascal_case(dep_raw['target']),
+                'fk_deps': dep_raw.get('fk_deps', []),
+                'extra_required_fields': _get_dep_extra_required_fields(dep_raw['target'], schema),
+                'bridge_otos': get_all_internal_fk_deps(dep_raw['target'], schema),
+            })
+    return pool_extra_fk_props, pool_extra_deps
+
+
 def helper_context(
     parent: str,
     children: list,
@@ -1537,7 +2208,11 @@ def helper_context(
     required_fields = parent_def.get('required') or []
     relationships = get_parent_relationships(parent_def, schema)
     entity_options = _get_entity_options(schema)
-    fields = get_field_metas(properties, required_fields, relationships, generate_config.get('fields'), entity_options)
+    _date_range = _date_range_fields(parent_def)
+    fields = get_field_metas(
+        properties, required_fields, relationships, generate_config.get('fields'), entity_options,
+        range_end_field=_date_range['end'] if _date_range else None,
+    )
     # Detect outbound one-to-one FK fields (e.g. approvable_id on leave_request).
     # These are internal bridge records the service creates automatically — not user-facing.
     # Exclude from fill/assert commands and from prisma data field lists; handle separately.
@@ -1545,7 +2220,19 @@ def helper_context(
     internal_fk_prop_names = {d['prop_name'] for d in internal_fk_deps}
     fields = [f for f in fields if f['prop_name'] not in internal_fk_prop_names]
 
-    # cmd_421 Domain 4 (M1, subtask_421i): mention field name resolution. Only
+    # Exclude direct-attachment FK fields (x-relationship type:direct, e.g.
+    # product.warranty_card_id) from the generated CRUD helper the same way:
+    # they render as a file-upload widget (SingleAttachmentUpload), not a
+    # plain scalar column, so treating them as a normal optional field made
+    # populate{{Pascal}}FullData() write a literal test string into an FK
+    # column ("Test Warranty Card Id 1"), violating the FK constraint since
+    # no such attachment row exists. Dedicated file-upload coverage lives in
+    # the hand-written direct_attachment_and_uri_kind_file.cy.ts spec, which
+    # does not go through this generated helper.
+    direct_attachment_prop_names = {d['prop_name'] for d in get_direct_attachment_fk_props(parent_def)}
+    fields = [f for f in fields if f['prop_name'] not in direct_attachment_prop_names]
+
+    # cmd_421 Domain 4 (M1): mention field name resolution. Only
     # the commentable-bridge shape is supported here (comment_children direct-FK
     # shape has no populate helper of its own yet — see build_context.py's
     # _build_comment_actions/_build_comment_actions_bridge split for the two
@@ -1564,7 +2251,9 @@ def helper_context(
     # Mark read-only fields: they stay in `fields` (so seed/prisma data still sets
     # required values) but UI fill/clear/assert commands skip them — the form renders
     # them non-editable, so typing into them would fail.
-    _readonly_props = _readonly_field_names(parent_def)
+    _readonly_props = _readonly_field_names(
+        parent_def, schema.get('definitions', {}).get(definition_key, {})
+    )
     for _f in fields:
         _f['readonly'] = _f['prop_name'] in _readonly_props
     deps = resolve_dependencies(model_name, schema)
@@ -1643,28 +2332,9 @@ def helper_context(
     # Mirrors user_account handling: each FK field gets its own dep with a prop-stem var name.
     # e.g. approver_role_id + requestor_role_id → both point to 'role'
     # → creates 'approverRole' dep and 'requestorRole' dep instead of a single 'role' dep.
-    target_to_fk_rels: dict[str, list] = {}
-    for r in relationships:
-        if (r['target'] not in ('user', model_name)
-                and r['prop_name'] not in ('updater_id', 'assignee_id')):
-            target_to_fk_rels.setdefault(r['target'], []).append(r)
-    multi_fk_targets = {t: rels for t, rels in target_to_fk_rels.items() if len(rels) > 1}
-    for target, fk_rels in multi_fk_targets.items():
-        # Capture original dep's fk_deps before removing it — split prop-stem
-        # deps must inherit them so create() calls include required FK columns.
-        _orig_dep = next((d for d in deps if d['target'] == target), None)
-        _orig_fk_deps = _orig_dep.get('fk_deps', []) if _orig_dep else []
-        # Remove the single target-based dep and its entity_fk_deps entries
-        deps = [d for d in deps if d['target'] != target]
-        entity_fk_deps = [d for d in entity_fk_deps if d['dep_var_name'] != to_camel_case(target)]
-        # Add per-prop-stem deps and entity_fk_deps entries
-        for r in fk_rels:
-            prop_stem = re.sub(r'_id$', '', r['prop_name'])
-            var_name = to_camel_case(prop_stem)
-            title = to_title_case(prop_stem)
-            if not any(d['var_name'] == var_name for d in deps):
-                deps.append({'target': target, 'var_name': var_name, 'title': title, 'fk_deps': _orig_fk_deps})
-            entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
+    deps, entity_fk_deps, target_to_fk_rels, multi_fk_targets = split_same_target_fk_deps(
+        model_name, relationships, deps, entity_fk_deps,
+    )
 
     # Handle single-FK non-standard prop names (e.g. work_creator_id → creator).
     # When prop_stem != target name, rename the dep's var_name/title to prop_stem-based
@@ -1695,10 +2365,34 @@ def helper_context(
                 if nested_fk.get('dep_var_name') == old_var:
                     nested_fk['dep_var_name'] = new_var
 
+    # cmd_874/subtask_874f: x-filter-values-constrained fields must have
+    # their generated populate/seed value forced to an allowed value — the
+    # generic prisma_value() default (e.g. 'Test <label> <index>') has no
+    # awareness of the view's filter, so an unconstrained populate call
+    # would silently create test rows outside the view it exists to test,
+    # 404ing the generic CRUD tests (1.2/2.1/4.1/4.2/9.x/10.x/N6/N10) built
+    # on top of it — the same class of problem the lockdown-field override
+    # below fixes for x-approval submit_on. Read from the VIEW entity
+    # (definition_key), not parent_def (the raw entity) — filter_values
+    # lives in _VIEW_LEVEL_CONFIG_KEYS and is never copied to the raw entity
+    # (see build_user_schema.py). A constrained field that is NOT itself
+    # schema-required (e.g. x-filter-values on an optional column) must
+    # still be treated as required-for-populate-purposes below — otherwise
+    # populate{Pascal}Data() (built from required_field_metas only) omits
+    # it entirely, leaving the column unset/null, which almost never
+    # satisfies the filter either.
+    _filter_values_for_populate: dict = (
+        schema['definitions'].get(definition_key, {}) or {}
+    ).get('x-filter-values') or {}
+
     # Note: read-only fields stay in these lists so seed/prisma create data includes
     # their required values; the fill/clear/assert command builders skip them.
-    required_field_metas = [f for f in fields if f['required']]
-    optional_field_metas = [f for f in fields if not f['required']]
+    required_field_metas = [
+        f for f in fields if f['required'] or f['prop_name'] in _filter_values_for_populate
+    ]
+    optional_field_metas = [
+        f for f in fields if not f['required'] and f['prop_name'] not in _filter_values_for_populate
+    ]
 
     child_metas = analyze_children(children, schema, model_name)
     datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
@@ -1720,6 +2414,28 @@ def helper_context(
         for field in child_meta['fields']:
             target = field.get('dep_target')
             if field['category'] == 'autocomplete' and target and target != 'user':
+                # A self-referencing FK on the datagrid child's
+                # OWN entity type (e.g. goods_receipt_line.
+                # parent_goods_receipt_line_id -> goods_receipt_line, an
+                # x-splittable parentField) is a decoy: the referenced row
+                # is a sibling of the same collection being populated,
+                # never a separate fixture. Walking
+                # resolve_dependencies(target, schema) for it recurses
+                # into the child's OWN transitive deps (e.g.
+                # goods_receipt_line's own goods_receipt_id ->
+                # goods_receipt), registering the datagrid's own
+                # parent/ancestor entity as an independent, org-blind
+                # dependency and inflating populateXxxDependencies()'s
+                # created-row count outside any org scope.
+                #
+                # This is a DIFFERENT shape from the child referencing the
+                # OUTER model itself (e.g. field.reference_id -> db_table,
+                # where db_table IS the entity whose own helper_context
+                # this loop runs inside): that case is target ==
+                # model_name, not target == the child's own type, and is
+                # intentionally left untouched below.
+                if target == child_meta['child']['name']:
+                    continue
                 prop_stem = re.sub(r'_id$', '', field['prop_name'])
                 var_name = to_camel_case(prop_stem)
                 if not any(d['var_name'] == var_name for d in deps):
@@ -1730,10 +2446,24 @@ def helper_context(
                         if not any(d['target'] == td['target'] for d in deps):
                             deps.append(td)
                     target_def = _raw_def(target, schema)
+                    # Look up each relation's ALREADY-RESOLVED dep var_name instead of
+                    # re-deriving it as to_camel_case(r['target']) -- a sibling datagrid-
+                    # child FK field processed earlier in this same loop (e.g.
+                    # destination_bin_id -> bin) may have registered its dep under a
+                    # prop-stem var_name (destinationBin) rather than the target's own
+                    # name (bin). Re-deriving the naive name here produced a generated
+                    # test helper that assigns `const destinationBin = ...` but then
+                    # reads an undefined `bin` variable (ReferenceError) whenever a
+                    # self-referencing/nested dep (e.g. a self-ref child) shares that
+                    # target through its own relations (cmd_1047i, pre-existing defect
+                    # exposed by proj_g's real schema; empirically confirmed unrelated
+                    # to subtask_1047g/PR#530 -- identical generated output reproduces
+                    # with generators_test.py from before that PR).
+                    _dep_var_by_target = {d['target']: d['var_name'] for d in deps}
                     target_fk_deps = [
-                        {'prop_name': r['prop_name'], 'dep_var_name': to_camel_case(r['target'])}
+                        {'prop_name': r['prop_name'], 'dep_var_name': _dep_var_by_target[r['target']]}
                         for r in get_parent_relationships(target_def, schema)
-                        if any(d['target'] == r['target'] for d in deps)
+                        if r['target'] in _dep_var_by_target
                     ]
                     deps.append({'target': target, 'var_name': var_name, 'title': to_title_case(prop_stem), 'fk_deps': target_fk_deps})
 
@@ -1746,7 +2476,21 @@ def helper_context(
                 and r['prop_name'] not in ('creator_id', 'updater_id')):
             prop_stem = re.sub(r'_id$', '', r['prop_name'])
             var_name = to_camel_case(prop_stem)
-            deps.append({'target': 'user', 'var_name': var_name, 'title': to_title_case(prop_stem), 'fk_deps': []})
+            # x-server-value (source: actor — the only implemented source,
+            # enforced by validate.py) always overwrites this FK with the
+            # acting test user's id on create, no matter what a populate
+            # helper supplies. A dep record built the normal way (a fresh,
+            # unrelated user row) would never match what actually lands in
+            # the DB or what the UI displays — the assertion side (e.g.
+            # deps.user.name) would drift from the real row's owner. Resolve
+            # this dep to the actor itself instead of creating a decoy row,
+            # so every caller's deps.<var> reflects the value the server will
+            # actually write (leave_request.user_id; cmd_630).
+            is_actor_delegated = isinstance(properties.get(r['prop_name']), dict) and properties[r['prop_name']].get('x-server-value') is not None
+            deps.append({
+                'target': 'user', 'var_name': var_name, 'title': to_title_case(prop_stem), 'fk_deps': [],
+                'is_actor_delegated': is_actor_delegated,
+            })
             entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
             ua_dep_fields_full.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
             if r['prop_name'] in required_fields:
@@ -1771,6 +2515,7 @@ def helper_context(
                     'var_name': var_name,
                     'title': to_title_case(prop_stem),
                     'fk_deps': self_ref_fk_deps,
+                    'is_self_ref_dep': True,
                 })
             entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
 
@@ -1808,6 +2553,7 @@ def helper_context(
                 'title': title_str,
                 'fk_deps': self_ref_fk_deps,
                 'label_field': label_field,
+                'is_self_ref_dep': True,
             })
 
     # Enrich deps with extra_required_fields, has_user_accounts, needs_second.
@@ -1830,26 +2576,25 @@ def helper_context(
         extra_required_fields = _get_dep_populate_fields(
             dep['target'], dep['var_name'], title_str, schema, is_self_ref=(dep['target'] == model_name),
         )
-        # Idempotency hook for `populateXxxDependencies`: if the dep target has
-        # a deterministic `name` value (the common case — every required-`name`
-        # entity emits `name: 'Test <Title>'`), the template uses
-        # findFirst({where: {name}}) ?? create(...) so calling the helper twice
-        # in the same test (parent populator + child populator) does not
-        # duplicate the row and trip @unique constraints (e.g. product.code).
-        # Bridges without a `name` field (commentable, approvable) skip this
-        # path — they have no unique constraints, so plain create is safe.
-        name_ef = next((f for f in extra_required_fields if f['prop_name'] == 'name'), None)
-        lookup_field = 'name' if name_ef else None
-        lookup_value = name_ef['prisma_val'] if name_ef else None
-        lookup_value_second = name_ef['prisma_val_second'] if name_ef else None
-        # Per-iteration lookup value (`Test X ${i}`) used by populateXxxData's
-        # find-or-create on the primary FK. Closes the cross-helper
-        # collision where deps create `Test X 2` and populate(2) would then
-        # try to create another `Test X 2` and trip @unique (e.g.
-        # product.code). When the row already exists, the iteration re-uses
-        # it; otherwise it creates a fresh one. Same lookup field as deps
-        # (`name`) so the two helpers see the same row.
-        lookup_value_unique = name_ef['prisma_val_unique'] if name_ef else None
+        # Idempotency hook for `populateXxxDependencies`: when the dep record
+        # can be found again by a deterministic key, the template uses
+        # findFirst({where: ...}) ?? create(...) so calling the helper twice in
+        # the same test (parent populator + child populator) does not duplicate
+        # the row and trip @unique constraints (e.g. product.code).
+        # `_dep_lookup_columns` picks that key: `name` when the entity has one
+        # (the common case — every required-`name` entity emits
+        # `name: 'Test <Title>'`), otherwise the entity's own @unique /
+        # @@unique columns (e.g. purchase_order.po_number, or bin's
+        # [location_id, code]). Bridges with neither (commentable, approvable)
+        # skip this path — nothing can collide, so plain create is safe.
+        lookup_columns = _dep_lookup_columns(
+            dep['target'], extra_required_fields, dep.get('fk_deps'),
+        )
+        lookup_field = lookup_columns[0]['prop_name'] if lookup_columns else None
+        lookup_where = _render_lookup_where(lookup_columns, 'prisma_val') if lookup_columns else None
+        lookup_where_second = (
+            _render_lookup_where(lookup_columns, 'prisma_val_second') if lookup_columns else None
+        )
         label_field = dep_label_info.get('label_field', 'name') if dep_label_info else dep.get('label_field', 'name')
         label_field_is_date = dep_label_info.get('label_field_is_date', False) if dep_label_info else dep.get('label_field_is_date', False)
         # Pre-compute the TS expression and Prisma include so the template
@@ -1906,21 +2651,59 @@ def helper_context(
             'search_differs': search_differs,
             'prisma_include_str': prisma_include_str,
             'label_has_format': label_has_format,
-            # needs_second only for transitive (non-direct) deps matching primary FK target
-            'needs_second': not is_direct and dep['target'] == primary_fk_dep_target,
+            # needs_second only for transitive (non-direct) deps matching primary FK target.
+            # Compare on var_name (reference-name axis, e.g. 'product'), not dep['target']
+            # (entity-name axis, e.g. 'item') — primary_fk_dep_target is always a reference
+            # name (the x-display.table key, snake_case). The single_fk_target_aliases pass
+            # above already renames var_name to the camelCase reference-name stem whenever it
+            # differs from the target entity name, so var_name (camelCase) is on the same axis
+            # as to_camel_case(primary_fk_dep_target) in every case, including when the
+            # relation's reference name differs from its target entity name (e.g. reference
+            # `product` -> entity `item`) or is multi-word (e.g. reference `patient_rel`,
+            # var_name `patientRel` — comparing the raw snake_case value here would always
+            # miss for multi-word reference names).
+            'needs_second': (
+                not is_direct
+                and primary_fk_dep_target is not None
+                and dep['var_name'] == to_camel_case(primary_fk_dep_target)
+            ),
             # one-to-one FK pre-creates needed when creating this dep record (e.g. commentable_id)
             'internal_fk_deps': get_all_internal_fk_deps(dep['target'], schema),
             'lookup_field': lookup_field,
-            'lookup_value': lookup_value,
-            'lookup_value_second': lookup_value_second,
-            'lookup_value_unique': lookup_value_unique,
+            'lookup_where': lookup_where,
+            'lookup_where_second': lookup_where_second,
             # True if dep entity has updater_id (user-visible entities do; leaf/bridge entities may not)
             'has_updater_id': _entity_has_updater_id(dep['target'], schema),
         })
 
-    # Separate self-ref deps (target == model) from non-self deps for _createBaseDeps() split.
-    non_self_deps = [d for d in enriched_deps if d['target'] != model_name]
-    self_ref_deps = [d for d in enriched_deps if d['target'] == model_name]
+    # Separate self-ref deps from non-self deps for _createBaseDeps() split.
+    # Classify strictly on the explicit is_self_ref_dep tag set by the two
+    # deliberate self-ref-injection blocks above (direct self-ref FK fields,
+    # editable-list-autocomplete self-ref children) -- NOT on `target ==
+    # model_name` alone. A dep can legitimately end up with target ==
+    # model_name without being a genuine self-ref of THIS entity: the
+    # datagrid-children FK-dep extension loop above calls
+    # resolve_dependencies(target, schema) for a CHILD's own self-ref target
+    # (e.g. goods_receipt_line's parent_goods_receipt_line_id), and that
+    # nested resolution has no notion of the outer model_name -- if the child
+    # entity's own required FK chain leads back to the outer model (e.g.
+    # goods_receipt_line.goods_receipt_id -> goods_receipt), it gets pulled
+    # in as an ordinary transitive dep whose target just happens to equal
+    # model_name. Classifying that as a "self-ref dep" deferred it to
+    # populate{{pascal}}Dependencies() (rendered AFTER _create{{pascal}}
+    # BaseDeps() returns), while the child dep needing it as an fk_dep
+    # (e.g. parentGoodsReceiptLine) is rendered non-self, INSIDE
+    # _create{{pascal}}BaseDeps() -- a forward reference to a not-yet-declared
+    # variable, throwing `ReferenceError: goodsReceipt is not defined` at
+    # runtime (cmd_1047k; goods_receipt.cy.ts, all 26 tests). Treating it as
+    # an ordinary non-self dep instead renders it in the same function, in
+    # the same list-order position it was appended at (before the child dep
+    # that needs it), fixing the ordering with no change to the values or
+    # lookup keys _get_dep_populate_fields/_dep_lookup_columns already
+    # compute for it (both keep keying off `dep['target'] == model_name`
+    # directly, unaffected by this tag).
+    non_self_deps = [d for d in enriched_deps if not d.get('is_self_ref_dep')]
+    self_ref_deps = [d for d in enriched_deps if d.get('is_self_ref_dep')]
     has_self_ref_deps = bool(self_ref_deps)
 
     # When a self-ref record's uniqueness is keyed partly on a required fk_dep
@@ -1933,6 +2716,20 @@ def helper_context(
     # split for setup{{pascal}}ApprovalFlow).
     non_self_deps_by_var = {d['var_name']: d for d in non_self_deps}
     seen_self_ref_fk_vars = set()
+    # Pre-seed with the primary-display FK's dep var (e.g. goods_receipt_line's
+    # `item`): a self-ref dep that binds the SAME instance (e.g. the
+    # parent_goods_receipt_line_id decoy record also referencing baseDeps.item)
+    # renders an identical list row to whatever a Create/Approval test creates
+    # via that same instance — cy.contains(deps.<var>.name) then matches
+    # whichever row the DataGrid puts first, which is often the decoy, not the
+    # record the test just created (cmd_590; e.g. goods_receipt_line
+    # 2.1/7.1/7.2 clicking the decoy's row and asserting against its stale
+    # quantity_received / missing approval_requests). Treating it as
+    # already-seen here routes the self-ref dep onto the existing '2' instance
+    # in the loop below — the same mechanism that already separates 2+
+    # self-ref deps sharing an fk (see docstring above).
+    if primary_fk_dep_target is not None:
+        seen_self_ref_fk_vars.add(to_camel_case(primary_fk_dep_target))
     for s_dep in self_ref_deps:
         for fk in s_dep['fk_deps']:
             dep_var = fk['dep_var_name']
@@ -1943,6 +2740,27 @@ def helper_context(
                     nd['needs_second'] = True
             else:
                 seen_self_ref_fk_vars.add(dep_var)
+
+    # Self-ref decoy records (e.g. goods_receipt_line's parent_goods_receipt_line_id)
+    # are rendered in populateXxxDependencies(), not inside _createXxxBaseDeps() —
+    # their fk_deps resolve through `baseDeps.<var>.id` rather than a bare local
+    # var, so their find-or-create lookup needs its own fk_prefix='baseDeps.'
+    # rendering (the enriched_deps pass above computed lookup_where with
+    # fk_prefix='' for the non-self-dep / local-var case only). Recomputed here,
+    # after the fk-rename loop above has settled fk_deps' final dep_var_name
+    # (e.g. item -> item2), so the lookup key matches what the create() below it
+    # actually writes. Without a lookup key, a self-ref dep with no distinguishing
+    # required field (the common case: it exists only to satisfy a self-ref FK)
+    # issues an unconditional create() every time the populate helper runs,
+    # tripping any @@unique its own required fields participate in once a spec
+    # calls the helper more than once (cmd_592; e.g. goods_receipt_line's
+    # @@unique([goods_receipt_id, item_id])).
+    for s_dep in self_ref_deps:
+        _sr_lookup_cols = _dep_lookup_columns(s_dep['target'], s_dep['extra_required_fields'], s_dep['fk_deps'])
+        s_dep['lookup_field'] = _sr_lookup_cols[0]['prop_name'] if _sr_lookup_cols else None
+        s_dep['lookup_where'] = (
+            _render_lookup_where(_sr_lookup_cols, 'prisma_val', fk_prefix='baseDeps.') if _sr_lookup_cols else None
+        )
 
     # A multi-FK-target alias (e.g. `role: approverRole`, built below purely so
     # API/UI test bodies can write `deps.role.id`) must never resolve to a dep
@@ -1958,14 +2776,26 @@ def helper_context(
             _src_dep = non_self_deps_by_var[_alias_var]
             _fresh_var = f'{_alias_var}Alias'
             _fresh_title = f"{_src_dep['title']} Alias"
+            _fresh_efs = _get_dep_populate_fields(_target, _fresh_var, _fresh_title, schema)
+            # Re-key the alias's find-or-create off its OWN field values. For a
+            # `name`-carrying target that is the distinct `Test <Title> Alias`
+            # row this branch exists to create. A `name`-less target keys on a
+            # unique column whose value is field- rather than title-derived
+            # (`_get_dep_populate_fields`), so the alias resolves to the source
+            # dep's row instead of a fresh one — sharing, where the pre-fix
+            # behavior was a P2002 on the duplicate create().
+            _fresh_cols = _dep_lookup_columns(_target, _fresh_efs, _src_dep.get('fk_deps'))
             _fresh_dep = {
                 **_src_dep,
                 'var_name': _fresh_var,
                 'title': _fresh_title,
                 'needs_second': False,
-                'extra_required_fields': _get_dep_populate_fields(_target, _fresh_var, _fresh_title, schema),
-                'lookup_value': f"'Test {_fresh_title}'",
-                'lookup_value_second': f"'Test {_fresh_title} 2'",
+                'extra_required_fields': _fresh_efs,
+                'lookup_field': _fresh_cols[0]['prop_name'] if _fresh_cols else None,
+                'lookup_where': _render_lookup_where(_fresh_cols, 'prisma_val') if _fresh_cols else None,
+                'lookup_where_second': (
+                    _render_lookup_where(_fresh_cols, 'prisma_val_second') if _fresh_cols else None
+                ),
             }
             non_self_deps.append(_fresh_dep)
             enriched_deps.append(_fresh_dep)
@@ -2011,6 +2841,77 @@ def helper_context(
     deps_return = ', '.join(deps_return_parts)
     non_self_deps_return = ', '.join(non_self_deps_return_parts)
 
+    # cmd_858c (系統①): prisma_value()'s 'string_enum' branch always picks
+    # enum_values[0] as the populate/seed value, regardless of the field's
+    # actual schema default. For every x-approval.submit_on entity in this
+    # schema, submit_on's own locked value happens to be enum_values[0]
+    # (the status default intentionally matches submit_on, so real
+    # create()-time approval-request firing stays unconditional -- see the
+    # json_schema.yaml comment above approval_edit_terminal_test), so this
+    # generic populate helper was creating every test record already
+    # sitting AT the one value post-approval edit/delete lockdown
+    # (approval_lockdown_context(), cmd_846c/#439) locks -- 403ing the
+    # generic CRUD tests (4.1/4.2/9.1/9.2/10.1/10.2) built on top of it
+    # unconditionally, regardless of what those tests are actually
+    # exercising.
+    #
+    # cmd_1022: the lockdown field's frozen-value set is no longer just
+    # submit_on + on_approved -- derive_post_decision_freeze_values() (the
+    # same helper approval_lockdown_context() itself now calls) also
+    # freezes a *terminal* on_rejected value. The old escape hatch
+    # (unconditionally override to on_rejected.set_fields' value) is no
+    # longer always safe: on an entity where on_rejected.terminal: true,
+    # that value is itself frozen. Fall back through:
+    #   1. on_rejected.set_fields' value, when it is not itself frozen
+    #      (the non-terminal case -- unchanged from before this cmd).
+    #   2. on_withdrawn.set_fields' value -- 846b never adds on_withdrawn
+    #      to the freeze set, so a declared on_withdrawn value is always
+    #      safe.
+    #   3. the schema's own declared default: for the field -- assumed
+    #      unfrozen (a default equal to a frozen value would itself be an
+    #      unrelated schema design problem, out of this helper's scope to
+    #      detect; see the design note this cmd's task carried).
+    # No schema change needed either way -- this only changes what this
+    # test-only DB helper writes via prisma.model.create(), bypassing the
+    # service layer / real create route entirely, so it can never itself
+    # fire or skip approval-request creation.
+    _lockdown_field, _lockdown_submit_value = (
+        resolve_approval_submit_on(parent_def) if parent_def.get('x-approval') else (None, None)
+    )
+    _lockdown_override_literal = None
+    if _lockdown_field is not None:
+        _lockdown_x_approval = parent_def['x-approval']
+        _lockdown_props = parent_def.get('properties') or {}
+        _lockdown_freeze_values = derive_post_decision_freeze_values(parent_def).get(_lockdown_field, [])
+        _lockdown_candidate = None
+
+        _lockdown_on_rejected_sf = (_lockdown_x_approval.get('on_rejected') or {}).get('set_fields') or {}
+        if _lockdown_field in _lockdown_on_rejected_sf:
+            _lockdown_rejected_value = resolve_set_fields(
+                _lockdown_props,
+                {_lockdown_field: _lockdown_on_rejected_sf[_lockdown_field]},
+            )[_lockdown_field]
+            if _lockdown_rejected_value not in _lockdown_freeze_values:
+                _lockdown_candidate = _lockdown_rejected_value
+
+        if _lockdown_candidate is None:
+            _lockdown_on_withdrawn_sf = (_lockdown_x_approval.get('on_withdrawn') or {}).get('set_fields') or {}
+            if _lockdown_field in _lockdown_on_withdrawn_sf:
+                _lockdown_candidate = resolve_set_fields(
+                    _lockdown_props,
+                    {_lockdown_field: _lockdown_on_withdrawn_sf[_lockdown_field]},
+                )[_lockdown_field]
+
+        if _lockdown_candidate is None:
+            _lockdown_default_value = (_lockdown_props.get(_lockdown_field) or {}).get('default')
+            if _lockdown_default_value is not None and _lockdown_default_value not in _lockdown_freeze_values:
+                _lockdown_candidate = _lockdown_default_value
+
+        if _lockdown_candidate is not None:
+            _lockdown_override_literal = (
+                "'" + str(_lockdown_candidate).replace("\\", "\\\\").replace("'", "\\'") + "'"
+            )
+
     def _enrich_field_prisma(field: dict, entity_title: str) -> dict:
         f = dict(field)
         if f['category'] == 'autocomplete':
@@ -2018,6 +2919,15 @@ def helper_context(
             f['dep_var_name'] = dep['dep_var_name'] if dep else None
             f['prisma_val'] = None
             f['prisma_val_fixed'] = None
+        elif f['prop_name'] == _lockdown_field and _lockdown_override_literal is not None:
+            f['prisma_val'] = _lockdown_override_literal
+            f['prisma_val_fixed'] = _lockdown_override_literal
+            f['dep_var_name'] = None
+        elif f['prop_name'] in _filter_values_for_populate and _filter_values_for_populate[f['prop_name']]:
+            _filter_literal = _ts_literal_for_python_value(_filter_values_for_populate[f['prop_name']][0])
+            f['prisma_val'] = _filter_literal
+            f['prisma_val_fixed'] = _filter_literal
+            f['dep_var_name'] = None
         else:
             f['prisma_val'] = prisma_value(f, 'i', entity_title)
             f['prisma_val_fixed'] = prisma_value(f, '1', entity_title)
@@ -2026,6 +2936,69 @@ def helper_context(
 
     required_fields_prisma = [_enrich_field_prisma(f, title) for f in required_field_metas]
     all_fields_prisma = [_enrich_field_prisma(f, title) for f in fields]
+
+    # cmd_863c: the lockdown escape-hatch override built above only ever
+    # reaches a *generated* record through all_fields_prisma -- the lockdown
+    # field itself (submit_on's own target field, e.g. status) is virtually
+    # always required_fields_prisma-omitted by design (its schema default
+    # intentionally equals submit_on's value, cmd_858c), so
+    # populate{Pascal}Data (built from required_fields_prisma alone, and the
+    # one 4.1/4.2/9.1/9.2/10.1/10.2/4.4 actually call via db:populate{Pascal})
+    # never wrote the override at all -- the field was simply omitted from
+    # its create() call, leaving the DB default (the locked value) in place.
+    # Only populate{Pascal}FullData (built from all_fields_prisma) ever saw
+    # it, and nothing generated calls that function.
+    #
+    # A dedicated list (NOT a mutation of required_fields_prisma itself) is
+    # used for this: required_fields_prisma is also read unfiltered by
+    # populate{Pascal}WithApproval, which deliberately needs the lockdown
+    # field left at submit_on's own value (the flow is still in-flight,
+    # nothing has been rejected yet) -- injecting the override there would
+    # make a "pending approval" fixture claim the entity is already
+    # 'rejected'. populate{Pascal}WithRejectedApproval/
+    # WithTerminalRejectedApproval already filter required_fields_prisma by
+    # rejected_set_fields_prisma's own prop names, so they would have been
+    # safe either way, but keeping the change additive avoids relying on
+    # that filter for correctness here too.
+    required_fields_prisma_for_populate_data = list(required_fields_prisma)
+    if _lockdown_field is not None and _lockdown_override_literal is not None:
+        if not any(f['prop_name'] == _lockdown_field for f in required_fields_prisma):
+            _lockdown_enriched_field = next(
+                (f for f in all_fields_prisma if f['prop_name'] == _lockdown_field),
+                None,
+            )
+            if _lockdown_enriched_field is not None:
+                required_fields_prisma_for_populate_data.append(_lockdown_enriched_field)
+
+    # cmd_825: populate{{Pascal}}WithRejectedApproval/WithTerminalRejectedApproval
+    # create the approval_request directly (status: 'rejected'/'terminal_rejected'),
+    # bypassing the real reject route entirely -- so unlike a genuine rejection,
+    # they never apply on_rejected.set_fields to the ENTITY's own row. For a
+    # submit_on entity whose set_fields target field happens to already be
+    # required_fields_prisma-omitted (i.e. its schema default already equals
+    # submit_on's own value, the common case), the fixture's created record
+    # is left sitting AT submit_on's target value from creation -- an
+    # unrealistic state a genuine rejection never produces (dispatchOnRejected
+    # always runs set_fields on reject, terminal or not), and one that
+    # silently defeats any resubmit-via-edit test built on top of these two
+    # fixtures: PUTting the field back to a value it never left triggers no
+    # edge (prev !== target -> new === target), so no new approval_request is
+    # created regardless of whether the guard is correct. Bake the same
+    # set_fields the real route would have applied directly into these two
+    # fixtures' own create() calls.
+    _helper_x_approval = parent_def.get('x-approval')
+    _helper_on_rejected_sf = (_helper_x_approval.get('on_rejected') or {}).get('set_fields') if _helper_x_approval else None
+    rejected_set_fields_prisma = []
+    if _helper_on_rejected_sf:
+        _resolved_sf = resolve_set_fields(parent_def.get('properties') or {}, _helper_on_rejected_sf)
+        for _sf_field, _sf_value in _resolved_sf.items():
+            if isinstance(_sf_value, bool):
+                _sf_lit = 'true' if _sf_value else 'false'
+            elif isinstance(_sf_value, (int, float)):
+                _sf_lit = str(_sf_value)
+            else:
+                _sf_lit = "'" + str(_sf_value).replace("\\", "\\\\").replace("'", "\\'") + "'"
+            rejected_set_fields_prisma.append({'prop_name': _sf_field, 'prisma_val_fixed': _sf_lit})
 
     enriched_datagrid_children = []
     for child_meta in datagrid_children:
@@ -2038,6 +3011,19 @@ def helper_context(
         for f in child_meta['fields']:
             target = f.get('dep_target')
             if f['category'] == 'autocomplete' and target and target != 'user':
+                # A self-referencing FK on the datagrid child's OWN
+                # entity type (e.g. goods_receipt_line.parent_goods_receipt_line_id
+                # -> goods_receipt_line) is never populated here, mirroring the
+                # skip added to helper_context()'s dependency-registration loop
+                # above -- there is no "deps.<var>" for it any more (no dependency
+                # was ever registered for it) since the referenced row would be a
+                # sibling of the same collection being populated, not a separate
+                # fixture. Such a field is always nullable (a splittable
+                # `parentField` FK cannot be required -- the first, unsplit row
+                # would have nothing to point at), so simply omitting it from the
+                # create() call (leaving it at its natural null) is correct.
+                if target == child_name:
+                    continue
                 # Use prop-stem var name so self-ref FKs (e.g. reference_id → db_table)
                 # get their own dep (e.g. deps.reference) distinct from the parent itself.
                 prop_stem = re.sub(r'_id$', '', f['prop_name'])
@@ -2082,6 +3068,62 @@ def helper_context(
         )
     if primary_fk_dep is not None:
         primary_fk_dep = {**primary_fk_dep, 'is_user_account': primary_fk_dep['target'] == 'user'}
+        # cmd_958: when the primary display FK's OWN label is a composite built
+        # from ITS OWN FK fields (a dotted labelField, e.g.
+        # goods_receipt_line_amendment's primary FK goods_receipt_line has
+        # labelField ['goods_receipt.receipt_number', 'item.sku'] — no bare
+        # scalar of goods_receipt_line's own carries the label), the shared
+        # `deps.<var>` row those FK fields point at (fixed for the whole test
+        # file) can never disambiguate one loop iteration's label from
+        # another's — every row renders the same "Test Receipt Number A ..."
+        # label instead of the `${callIndex}_${i}`-suffixed one the generated
+        # spec asserts on. (Gating on primary_fk_dep.extra_required_fields
+        # being empty is NOT the right signal here — goods_receipt_line still
+        # has its own unrelated required scalar quantity_received, which
+        # renders non-unique per iteration anyway since ints don't get
+        # callIndex_i disambiguation; the label composition itself is what
+        # decides whether a nested fresh row is needed.)
+        #
+        # For each dotted labelField segment (`<stem>.<leaf>`), find the
+        # matching fk_dep by prop-name stem and, only when that FK's target
+        # itself has an extra_required_fields entry for that exact leaf field
+        # (a real per-iteration-unique-able scalar), give the loop a fresh
+        # instance of THAT target instead of the shared one. Only one level
+        # deep — the current schema has no case needing more — and this only
+        # ever fires for a dotted labelField, so the common case (a bare
+        # labelField on the primary FK's own scalar, e.g. purchase_order_line's
+        # `item`/sku) renders byte-identical output to before this change.
+        _nested_fk_deps = []
+        if not primary_fk_dep['is_user_account']:
+            _label_field = primary_fk_dep.get('label_field')
+            _label_paths = _label_field if isinstance(_label_field, list) else ([_label_field] if _label_field else [])
+            _label_leaves_by_stem: dict[str, set[str]] = {}
+            for _p in _label_paths:
+                if isinstance(_p, str) and '.' in _p:
+                    _stem, _leaf = _p.split('.', 1)
+                    _label_leaves_by_stem.setdefault(_stem, set()).add(_leaf)
+            for _fk in primary_fk_dep.get('fk_deps') or []:
+                _fk_stem = re.sub(r'_id$', '', _fk['prop_name'])
+                _leaves = _label_leaves_by_stem.get(_fk_stem)
+                if not _leaves:
+                    continue
+                _nested_dep = next(
+                    (d for d in enriched_deps if d['var_name'] == _fk['dep_var_name']),
+                    None,
+                )
+                if not _nested_dep:
+                    continue
+                _nested_efs = _nested_dep.get('extra_required_fields') or []
+                if not any(_ef['prop_name'] in _leaves for _ef in _nested_efs):
+                    continue
+                _nested_fk_deps.append({
+                    'prop_name': _fk['prop_name'],
+                    'dep_var_name': _fk['dep_var_name'],
+                    'target': _nested_dep['target'],
+                    'extra_required_fields': _nested_efs,
+                    'fk_deps': _nested_dep.get('fk_deps') or [],
+                })
+        primary_fk_dep['nested_fk_deps'] = _nested_fk_deps
 
     # When the primary display FK is optional (nullable), it won't appear in
     # required_fields_prisma, so populateData creates records without it and
@@ -2103,6 +3145,38 @@ def helper_context(
                 )
                 if _pfk_field:
                     required_fields_prisma.append(_pfk_field)
+
+    # Required one-to-one FKs other than the primary display FK (cmd_760): a
+    # one-to-one relationship allows at most one row per target, so every test
+    # row the populate loop creates needs its OWN fresh target record — reusing
+    # the single shared `deps.<var>` row across loop iterations trips the
+    # target's own uniqueness on the 2nd create() (e.g. underwriting_case's
+    # `application_id`: each application accepts only one case). Mirrors
+    # primary_fk_dep's per-iteration create, kept as a separate list so entities
+    # without a secondary one-to-one FK (the overwhelming majority) render
+    # byte-identical output to before this change.
+    _oto_required_props = {
+        prop_name for prop_name, prop in (parent_def.get('properties') or {}).items()
+        if prop_name in required_fields
+        and (prop.get('x-relationship') or {}).get('type') == 'one-to-one'
+    }
+    extra_oto_fk_deps = []
+    _seen_oto_vars = set()
+    for _prop_name in _oto_required_props:
+        _fk = next((f for f in entity_fk_deps if f['prop_name'] == _prop_name), None)
+        if not _fk:
+            continue
+        _var = _fk['dep_var_name']
+        if primary_fk_dep is not None and _var == primary_fk_dep['var_name']:
+            continue  # already handled by the primary-FK per-iteration block
+        if _var in _seen_oto_vars:
+            continue
+        _dep = next((d for d in enriched_deps if d['var_name'] == _var), None)
+        if _dep is None or _dep['target'] == 'user':
+            continue
+        _seen_oto_vars.add(_var)
+        extra_oto_fk_deps.append(_dep)
+    extra_oto_fk_dep_vars = {d['var_name'] for d in extra_oto_fk_deps}
 
     # x-ledger-source pool FK(s) (poolIdField / fromPoolIdField / toPoolIdField)
     # are usually schema-optional — the real pool target is often resolved after
@@ -2127,15 +3201,19 @@ def helper_context(
     primary_fk_is_ua = primary_fk_dep is not None and primary_fk_dep.get('is_user_account', False)
     primary_fk_ua_dep_var = primary_fk_dep_var if primary_fk_is_ua else None
     non_primary_ua_dep_fields = [f for f in ua_dep_fields if f['dep_var_name'] != primary_fk_ua_dep_var]
+    _per_iteration_dep_vars = {primary_fk_dep_var} | extra_oto_fk_dep_vars
     needs_deps_in_populate = (
         bool(non_primary_ua_dep_fields)
         or any(
-            f['category'] == 'autocomplete' and f['dep_var_name'] and f['dep_var_name'] != primary_fk_dep_var
+            f['category'] == 'autocomplete' and f['dep_var_name'] and f['dep_var_name'] not in _per_iteration_dep_vars
             for f in required_fields_prisma
         )
-        # Also needed when the primary FK dep itself has FK deps (e.g. patient_rel needs patient + clinic).
-        # Without this, the template generates deps.X.id references without defining deps.
+        # Also needed when the primary FK dep, or an extra one-to-one FK dep,
+        # itself has FK deps (e.g. patient_rel needs patient + clinic; application
+        # needs product_version + applicant_party). Without this, the template
+        # generates deps.X.id references without defining deps.
         or bool(primary_fk_dep and primary_fk_dep.get('fk_deps'))
+        or any(bool(d.get('fk_deps')) for d in extra_oto_fk_deps)
     )
     # populateFullData also needs deps when there are any UA FK fields or optional FK fields
     needs_deps_in_populate_full = bool(ua_dep_fields_full) or any(
@@ -2211,11 +3289,16 @@ def helper_context(
                 None
             )
             if _pool_fk_dep_var_h:
+                _pool_extra_fk_props_h, _pool_extra_deps_h = _resolve_pool_extra_deps(
+                    _pool_entity_h, schema, enriched_deps, _crit_pool_field_h
+                )
                 reservation_lines_pool_seed = {
                     'pool_entity': _pool_entity_h,
                     'pool_qty_field': _pool_qty_h,
                     'criteria_pool_field': _crit_pool_field_h,
                     'pool_fk_dep_var': _pool_fk_dep_var_h,
+                    'pool_extra_fk_props': _pool_extra_fk_props_h,
+                    'pool_extra_deps': _pool_extra_deps_h,
                 }
 
     # Detect count-mode reservation WITHOUT lines: populateDependencies must seed the pool entity
@@ -2226,18 +3309,64 @@ def helper_context(
             and not _xres_h.get('lines')):
         _pool_cfg_nolines = _xres_h.get('pool', {})
         _pool_entity_nolines = _pool_cfg_nolines.get('entity')
+        # OD-1 (cmd_734): strategy: ledger_transaction resolves pool.entity
+        # via transaction.ledgerDomain instead of declaring it directly —
+        # mirrors the WITH-lines branch above. Without this, a self-case
+        # (no lines) ledger_transaction entity's pool never gets seeded with
+        # quantity here, so every generated Create test's default
+        # quantity_reserved trips InsufficientPoolCapacityError against a
+        # quantity: 0 pool row (found via cmd_734 e2e run).
+        if not _pool_entity_nolines:
+            _domain_key_nolines = (_xres_h.get('transaction') or {}).get('ledgerDomain')
+            if _domain_key_nolines:
+                _pool_entity_nolines = resolve_ledger_domain(schema, _domain_key_nolines)['pool']
         _pool_qty_nolines = _pool_cfg_nolines.get('quantityField', 'quantity')
-        if _pool_entity_nolines:
-            _pool_def_nolines = _raw_def(_pool_entity_nolines, schema)
-            _pool_has_name_nolines = 'name' in (_pool_def_nolines.get('properties') or {})
+        # cmd_734 single-lot pattern: request.criteria: {id: <field>} matches
+        # the pool by exact row id (not by a shared FK value like the
+        # WITH-lines branch's {product_id: product_id}). <field>'s own
+        # x-relationship target is very likely already one of this entity's
+        # regular FK deps (e.g. inventory_id → the same `inventory` dep
+        # created above for the create-form's own FK) — seeding a *second*,
+        # freestanding pool row (the WITH-lines branch's pattern) would be
+        # inert, since every generated test passes the existing dep's id as
+        # the request's own criteria field value, never the freestanding
+        # row's. Detect that case and UPDATE the existing dep in place
+        # instead of creating an unrelated one.
+        _existing_dep_var_nolines = None
+        _crit_nolines = (_xres_h.get('request') or {}).get('criteria') or {}
+        if list(_crit_nolines.keys()) == ['id']:
+            _crit_field_nolines = _crit_nolines['id']
+            _crit_prop_nolines = _raw_def(parent, schema).get('properties', {}).get(_crit_field_nolines, {})
+            _crit_fk_target_nolines = (_crit_prop_nolines.get('x-relationship') or {}).get('target', '')
+            if _crit_fk_target_nolines == _pool_entity_nolines:
+                _existing_dep_var_nolines = next(
+                    (d['var_name'] for d in enriched_deps if d['target'] == _pool_entity_nolines),
+                    None,
+                )
+        if _pool_entity_nolines and _existing_dep_var_nolines:
             reservation_nolines_pool_seed = {
                 'pool_entity': _pool_entity_nolines,
                 'pool_qty_field': _pool_qty_nolines,
+                'existing_dep_var': _existing_dep_var_nolines,
+            }
+        elif _pool_entity_nolines:
+            _pool_def_nolines = _raw_def(_pool_entity_nolines, schema)
+            _pool_has_name_nolines = 'name' in (_pool_def_nolines.get('properties') or {})
+            _pool_extra_fk_props_nolines, _pool_extra_deps_nolines = _resolve_pool_extra_deps(
+                _pool_entity_nolines, schema, enriched_deps, None
+            )
+            reservation_nolines_pool_seed = {
+                'pool_entity': _pool_entity_nolines,
+                'pool_qty_field': _pool_qty_nolines,
+                'existing_dep_var': None,
                 'has_name': _pool_has_name_nolines,
                 'pool_title': to_title_case(_pool_entity_nolines),
+                'pool_extra_fk_props': _pool_extra_fk_props_nolines,
+                'pool_extra_deps': _pool_extra_deps_nolines,
             }
 
     return {
+        'parent': parent,
         'pascal': pascal,
         'title': title,
         'model_name': model_name,
@@ -2253,12 +3382,16 @@ def helper_context(
         'ua_dep_fields': ua_dep_fields,
         'ua_dep_fields_full': ua_dep_fields_full,
         'required_fields_prisma': required_fields_prisma,
+        'required_fields_prisma_for_populate_data': required_fields_prisma_for_populate_data,
+        'rejected_set_fields_prisma': rejected_set_fields_prisma,
         'all_fields_prisma': all_fields_prisma,
         'extra_prisma_fields': extra_prisma_fields,
         'has_optional': bool(optional_field_metas),
         'datagrid_children': enriched_datagrid_children,
         'comment_children': enriched_comment_children,
         'primary_fk_dep': primary_fk_dep,
+        'extra_oto_fk_deps': extra_oto_fk_deps,
+        'extra_oto_fk_dep_vars': sorted(extra_oto_fk_dep_vars),
         'internal_fk_deps': internal_fk_deps,
         'has_approvable': has_approvable,
         'flatten_test_rels': flatten_test_rels,
@@ -2287,28 +3420,86 @@ def spec_context(
     if not parent_def or not parent_def.get('properties'):
         return {}
 
+    # View-scoped (cmd_1032): the exclusion set a generated "edit this
+    # field" Cypress step must avoid must match what the generated
+    # application actually enforces for THIS view — see
+    # derive_write_locked_values_for_view's docstring.
+    _spec_view_entry = schema['definitions'].get(definition_key, {}) or {}
+    _write_locked_values = derive_write_locked_values_for_view(
+        model_name, parent_def, _spec_view_entry, schema,
+    )
+
     title = to_title_case(parent)
     pascal = to_pascal_case(parent)
     properties = filter_fields(parent_def['properties'], generate_config.get('fields'))
     required_fields = parent_def.get('required') or []
     relationships = get_parent_relationships(parent_def, schema)
     entity_options = _get_entity_options(schema)
-    fields = get_field_metas(properties, required_fields, relationships, generate_config.get('fields'), entity_options)
+    _date_range = _date_range_fields(parent_def)
+    fields = get_field_metas(
+        properties, required_fields, relationships, generate_config.get('fields'), entity_options,
+        range_end_field=_date_range['end'] if _date_range else None,
+    )
     # Exclude outbound one-to-one FK fields (internal bridge records, not user-facing).
     _internal_fk_prop_names = {d['prop_name'] for d in get_internal_one_to_one_fks(model_name, schema)}
     fields = [f for f in fields if f['prop_name'] not in _internal_fk_prop_names]
+    # Exclude direct-attachment FK fields (x-relationship type:direct) the same
+    # way: they render as a file-upload widget, so cy.fillField()/getFormLabel()
+    # can never find a matching <label> for them ("Expected to find element:
+    # `filter`, but never found it" — the same failure mode already noted above
+    # for x-server-value fields). Dedicated coverage lives in the hand-written
+    # direct_attachment_and_uri_kind_file.cy.ts spec.
+    _direct_attachment_prop_names = {d['prop_name'] for d in get_direct_attachment_fk_props(parent_def)}
+    fields = [f for f in fields if f['prop_name'] not in _direct_attachment_prop_names]
+    # Exclude fields left off x-display.form the same way (cmd_897/subtask_886a
+    # scope-expansion). generators.py's FormUpsert/FormView builders treat a
+    # declared x-display.form as a strict allowlist -- a field with a real jsx
+    # renderer but missing from that list is never emitted onto the page
+    # (generators.py:4121/5244, `[f for f in _x_display_form if f in
+    # jsx_by_field]`) -- a documented, sanctioned pattern for a field that
+    # isn't knowable/writable at create time (e.g. customer_return.responsibility/
+    # resolution, inventory_reservation.modification_reason, supplier_return.
+    # shipped_at). Without this same filter here, `fields` still carries such a
+    # field, so all_fill_cmds/all_assert_cmds below emit a
+    # cy.selectAutocomplete()/cy.fillDateTime() for a label the form never
+    # renders -- the same "Expected to find element: `filter`, but never found
+    # it" failure already noted above for x-server-value and direct-attachment
+    # fields. Only applies when x-display.form is actually declared (mirrors
+    # generators.py's own `if _x_display_form:` branch) -- an entity with no
+    # x-display.form (e.g. shipment_line) renders every field, so nothing is
+    # excluded here either.
+    _x_display_form_props = (parent_def.get('x-display') or {}).get('form')
+    if _x_display_form_props:
+        _x_display_form_set = set(_x_display_form_props)
+        fields = [f for f in fields if f['prop_name'] in _x_display_form_set]
     # Mark read-only fields: kept in `fields` for seed/prisma data, skipped by UI
     # fill/clear/assert commands (the form renders them non-editable).
-    _readonly_props = _readonly_field_names(parent_def)
+    _readonly_props = _readonly_field_names(
+        parent_def, schema.get('definitions', {}).get(definition_key, {})
+    )
     for _f in fields:
         _f['readonly'] = _f['prop_name'] in _readonly_props
     deps = resolve_dependencies(model_name, schema)
 
     # Collect ALL user_account FK fields (required and optional) for fill/assert commands.
     # req_ua_spec: required only (for section 2.1, 5.x); all_ua_spec: all (for section 2.2)
+    # x-server-value fields are excluded here (cmd_611/612): the field is
+    # always readonly and excluded from every form input (create and edit) —
+    # see docs/knowledge/x-server-value-actor-delegation.md — so a UI test
+    # trying to cy.selectAutocomplete() it fails outright (`Expected to find
+    # element: 'filter', but never found it`), since the form never renders
+    # that autocomplete input in the first place. The API-level test scaffold
+    # is unaffected: it supplies the value directly as a request body field,
+    # not through this UI form-fill path.
+    _server_value_prop_names = {
+        p for p, pdef in properties.items()
+        if isinstance(pdef, dict) and pdef.get('x-server-value') is not None
+    }
     req_ua_spec = []
     all_ua_spec = []
     for r in relationships:
+        if r['prop_name'] in _server_value_prop_names:
+            continue
         if r['target'] == 'user' and r['prop_name'] not in ('creator_id', 'updater_id'):
             var_name = to_camel_case(re.sub(r'_id$', '', r['prop_name']))
             field_label = to_title_case(re.sub(r'_id$', '', r['prop_name']))
@@ -2316,7 +3507,7 @@ def spec_context(
                 'prop_name': r['prop_name'],
                 'dep_var_name': var_name,
                 'label': field_label,
-                'dep_name': f'Test {field_label}',
+                'dep_name': f'Test {field_label} A',
             }
             all_ua_spec.append(entry)
             if r['prop_name'] in required_fields:
@@ -2371,10 +3562,35 @@ def spec_context(
     if has_m2m_self_ref and not any(d['target'] == model_name for d in deps):
         deps.append({'target': model_name, 'var_name': to_camel_case(model_name)})
 
+    # True when this entity has a dependency on itself (self-ref FK or m2m
+    # self-ref child, appended above) — gates the exact-match cy.contains()
+    # regex in test_spec.cy.ts.jinja2 (cmd_592): a self-ref dependency record
+    # created by populate{{pascal}}Dependencies() can substring-collide with
+    # the record the spec creates via the UI (e.g. goods_receipt_line's
+    # split-lineage decoy sharing "Test Sku" as a substring of its own
+    # display name), so row lookups keyed on a dep's display name need an
+    # anchor. Kept narrow: entities without a self-ref dep keep the
+    # pre-existing substring-based cy.contains().
+    has_self_ref_deps = any(d['target'] == model_name for d in deps)
+
     datagrid_children = [c for c in child_metas if c['render_type'] == 'datagrid']
-    # Datagrid children may have FK deps not on the parent (e.g. field.reference_id → db_table)
+    # Independent grid-style children (own x-generate) render read-only from
+    # the parent (issue #520/PR#528/PR#530) -- no
+    # 'Add {{ title }}' control exists for them at all. Generate a negative
+    # assertion guarding exactly that fact (test 3.1, test_spec.cy.ts.jinja2)
+    # instead of the removed write-flow assertions (issue #538) --
+    # rewritten to match the read-only grid, not deleted outright.
+    readonly_datagrid_children = [c for c in child_metas if c['render_type'] == 'readonly-datagrid']
+    # Datagrid children may have FK deps not on the parent (e.g. field.reference_id → db_table).
+    # A self-referencing FK on the datagrid child's own entity type
+    # (dep_target == c['child']['name']) never resolves to a real dependency (see
+    # the same skip in helper_context()'s deps-registration loop and in
+    # enriched_datagrid_children's fields_prisma loop above) -- excluded here too
+    # so an entity whose ONLY datagrid-child autocomplete FK is such a self-ref
+    # doesn't incorrectly report has_child_fk_deps (and therefore has_deps) as True.
     has_child_fk_deps = any(
         f['category'] == 'autocomplete' and f.get('dep_target') and f.get('dep_target') != 'user'
+        and f.get('dep_target') != c['child']['name']
         for c in datagrid_children
         for f in c['fields']
     )
@@ -2392,10 +3608,24 @@ def spec_context(
     )
     needs_pool_for_create = _has_nolines_reservation and not has_deps
 
+    # cmd_881: a field this view uses as an x-filter-values discriminator
+    # must not be picked as a generic "optional field" edit/clear target —
+    # changing it can move the row out of the filtered view, so the generic
+    # scaffold's "still visible after edit" assertion would be
+    # self-contradicting. Read from the VIEW entity (definition_key), not
+    # parent_def (the raw entity) — mirrors helper_context()'s
+    # _filter_values_for_populate read.
+    _filter_values_for_spec: dict = (
+        schema['definitions'].get(definition_key, {}) or {}
+    ).get('x-filter-values') or {}
+
     # Note: read-only fields stay in these lists so seed/prisma create data includes
     # their required values; the fill/clear/assert command builders skip them.
     required_field_metas = [f for f in fields if f['required']]
-    optional_field_metas = [f for f in fields if not f['required']]
+    optional_field_metas = [
+        f for f in fields
+        if not f['required'] and f['prop_name'] not in _filter_values_for_spec
+    ]
     # Fail-edit/clear target must be a user-editable required field (not read-only).
     non_autocomplete_required = [
         f for f in required_field_metas
@@ -2429,6 +3659,25 @@ def spec_context(
     }
     required_fill_cmds = gen_fill_commands(required_field_metas, title, I, fk_dep_vars, dep_search_info)
     all_fill_cmds = gen_fill_commands(fields, title, I, fk_dep_vars, dep_search_info)
+    # cmd_846(c): 7.1/7.2 create a record via the UI form and expect the
+    # create-time edge trigger to have fired (approval_request rows to
+    # exist) -- true only if the record actually reaches submit_on's
+    # value. required_fill_cmds alone does not guarantee that (the status
+    # field may have a default distinct from submit_on's value, same gap
+    # 11.1/11.2 had on the API-spec side -- see test_api_spec.cy.ts.jinja2).
+    # Only emitted (non-empty) when the submit_on field is itself editable
+    # in the form and not already covered by required_fill_cmds.
+    approval_submit_fill_cmd = ''
+    if any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model_name, schema)):
+        _spec_submit_on_field, _spec_submit_on_value = resolve_approval_submit_on(parent_def)
+        if _spec_submit_on_field and _spec_submit_on_field not in required_fields:
+            _submit_on_field_meta = next(
+                (f for f in fields if f['prop_name'] == _spec_submit_on_field and not f.get('readonly')), None,
+            )
+            if _submit_on_field_meta is not None:
+                approval_submit_fill_cmd = gen_fill_command(
+                    _submit_on_field_meta, _enum_label(_submit_on_field_meta, _spec_submit_on_value), I,
+                )
     required_assert_cmds_no_bool = gen_assert_commands(
         [f for f in required_field_metas if f['category'] != 'boolean'], title, I, fk_dep_vars,
         flatten_m2o_props=flatten_m2o_props_view, schema=schema)
@@ -2448,6 +3697,14 @@ def spec_context(
     # Priority: FK primary → explicit non-name primary → name → fallback.
     prim = _get_primary_display_field_name(parent_def)
     prim_is_fk = bool(prim and f'{prim}_id' in (parent_def.get('properties') or {}))
+    # cmd_611/612: a primary FK that is also x-server-value is never rendered
+    # as a form autocomplete, so 3.3's "mixed changes" edit never touches it
+    # (see edit_primary_cmd's prim_is_server_value gate below) — the row/field
+    # label after that edit must therefore stay at its as-created value, not
+    # the "as-if-edited" letter-suffixed value list_id_updated/check_field_updated
+    # would otherwise compute (cmd_625b: leave_request 3.3 asserted 'Test User A'
+    # after an edit that never changed the User field, which stayed 'Test User 0_1').
+    prim_is_server_value = bool(prim_is_fk and f'{prim}_id' in _server_value_prop_names)
     has_name = any(f['prop_name'] == 'name' for f in fields)
     prim_meta = next((f for f in fields if f['prop_name'] == prim), None) if prim else None
     # Default values; overridden in branches where the primary FK is rendered
@@ -2470,14 +3727,33 @@ def spec_context(
         after_create_id = None
         after_create_id_is_expr = True
         primary_dep_var_for_list = to_camel_case(prim)
-        list_id_updated = _seed_relation_label_value(
+        # cmd_594: target the dependency helper's base (un-suffixed) instance of
+        # the primary FK's target — e.g. `deps.item` (label 'Test Sku'), not the
+        # "second instance" (`deps.item2`, label 'Test Sku 2', unique_index=2).
+        # populate{{Pascal}}Data(populate_count_3_3)'s own loop always attaches
+        # its rows to deps.<primaryVar> or deps.<primaryVar>2 depending on which
+        # deterministic name ('Test X 1'..'Test X N') a given iteration produces
+        # — and for entities whose primary FK also participates in a composite
+        # @@unique together with another field the loop holds constant across
+        # iterations (e.g. asn_line's [asn_id, item_id], purchase_order_line's
+        # [purchase_order_id, item_id]), iteration 2 always collides with and
+        # therefore reuses deps.<primaryVar>2's row (idempotent find-or-create,
+        # cmd_592) — so selecting deps.<primaryVar>2's label as the edit target
+        # just re-points row[0] at row[1]'s own (parent_fk, primary_fk) tuple and
+        # trips the same @@unique on update (P2002; cmd_593/594, asn_line 3.3 /
+        # purchase_order_line 3.3). The base instance is never produced by that
+        # loop (which only ever emits suffixed 'Test X {i}' names, i>=1) and is
+        # therefore guaranteed free of every populated row's composite key,
+        # whether or not the entity actually carries this composite unique —
+        # making it a safe, deterministic edit target unconditionally, not just
+        # for the entities currently known to collide.
+        list_id_updated = (_seed_relation_label_value(
             primary_rel['target'],
             primary_rel.get('label_field', 'name'),
             primary_rel.get('label_field_is_date', False),
             schema,
-            unique_index=2,
-        ) if primary_rel else list_id_1
-        has_edit_primary = True
+        ) if primary_rel else list_id_1) if not prim_is_server_value else list_id_1
+        has_edit_primary = not prim_is_server_value
         edit_field_label = dep_title
         edit_update_value = list_id_updated
         check_field_label = dep_title
@@ -2526,12 +3802,25 @@ def spec_context(
             check_field_updated = second_label
         elif prim_meta.get('category') == 'enum':
             # Integer enum primary (e.g. plan.tier = [free, premium, vip])
-            raw_vals = [str(v) for v in (prim_meta.get('enum_values') or [])]
+            _raw_enum_values = prim_meta.get('enum_values') or []
+            raw_vals = [str(v) for v in _raw_enum_values]
             prim_prop = prim_meta.get('prop_name', prim or '')
             if _messages_fields:
                 enum_labels = [_messages_fields.get(f'{prim_prop}_{v}', v) for v in raw_vals]
             else:
                 enum_labels = raw_vals
+            # Approval-locked values (workflow-only) are never picked as a
+            # generated test's create/edit value -- neither by direct value
+            # match nor by ordinal position (unlabeled int-enum resolves a
+            # set_fields label to its index; see derive_write_locked_values).
+            _prim_locked = set(_write_locked_values.get(prim_prop) or [])
+            _prim_unlocked_idx = [
+                i for i, v in enumerate(_raw_enum_values)
+                if i not in _prim_locked and v not in _prim_locked
+            ]
+            if _prim_unlocked_idx:
+                raw_vals = [raw_vals[i] for i in _prim_unlocked_idx]
+                enum_labels = [enum_labels[i] for i in _prim_unlocked_idx]
             list_id_1 = enum_labels[0] if enum_labels else f'Test {lbl} 1'
             list_id_is_unique = False
             after_create_id = enum_labels[0] if enum_labels else f'Test {lbl}'
@@ -2544,7 +3833,34 @@ def spec_context(
             check_field_label = lbl
             check_field_value_1 = list_id_1
             check_field_updated = list_id_updated
-        elif prim_meta.get('category') == 'number':
+        elif prim_meta.get('category') == 'string_enum':
+            # String/native enum primary (e.g. agent_hierarchy.hierarchy_type).
+            # The list/card shows the translated label (generators.py's
+            # page_list_context builds a `{var}Labels` map for this exact
+            # field) — not the raw enum DB value, and not the generic
+            # 'Test {Label} 1' placeholder the fallback branch below would
+            # otherwise produce (that placeholder can never appear on screen:
+            # an enum column only ever holds one of its declared values).
+            # Reuse cypress_create_value/cypress_edit_value — the same
+            # functions the generic per-field fill/assert commands already
+            # use for this category — so the primary-field list/card
+            # assertions match exactly what the form writes and the list
+            # actually renders.
+            list_id_1 = cypress_create_value(prim_meta, title)
+            list_id_is_unique = False
+            after_create_id = list_id_1
+            after_create_id_is_expr = False
+            primary_dep_var_for_list = None
+            list_id_updated = cypress_edit_value(prim_meta, title, _write_locked_values) or list_id_1
+            has_edit_primary = True
+            edit_field_label = lbl
+            edit_update_value = list_id_updated
+            check_field_label = lbl
+            check_field_value_1 = list_id_1
+            check_field_updated = list_id_updated
+        elif prim_meta.get('category') in ('number', 'decimal'):
+            # 'decimal' (cmd_711f): same shape as 'number' — cypress_create_value/
+            # cypress_edit_value already return valid numeric-format strings for it.
             _first_val = cypress_create_value(prim_meta, title)   # '100'
             _edit_val  = cypress_edit_value(prim_meta, title)     # '200'
             list_id_1 = _first_val
@@ -2676,6 +3992,13 @@ def spec_context(
             'native_enum_full_calls': native_enum_full_calls,
         })
 
+    # Read-only independent grid children data (issue #538): only
+    # a title is needed -- the generated assertion is a single negative
+    # check (no 'Add {title}' control exists), not a fill/edit flow.
+    readonly_datagrid_children_data = [
+        {'title': c['names']['title']} for c in readonly_datagrid_children
+    ]
+
     # List children data
     list_children_data = []
     for child_meta in list_children:
@@ -2689,9 +4012,15 @@ def spec_context(
         # Compute expected autocomplete label for seed index 1
         # name fields: seed uses `${entity_title} ${i}` → 'Character 1' for character
         # other string fields: seed uses `Test ${field_title} ${i}` → 'Test Title 1' for music.title
+        # list-form (composite) labelField: mirrors the UI's build_label_expression
+        # concatenation via the shared _seed_relation_label_value helper.
         _ac_lf = rel.get('label_field', 'name') or 'name'
         if not rel_target:
             _ac_label_1 = ''
+        elif isinstance(_ac_lf, list):
+            _ac_label_1 = _seed_relation_label_value(
+                rel_target, _ac_lf, rel.get('label_field_is_date', False), schema, unique_index=1,
+            )
         elif _ac_lf == 'name':
             _ac_label_1 = f'{to_title_case(rel_target)} 1'
         else:
@@ -2717,6 +4046,32 @@ def spec_context(
             'title': child_meta['names']['title'],
             'pascal': to_pascal_case(child_name),
         })
+
+    # comment_has_mention (cmd_522c): the shared `comment` model has ≥1
+    # x-mention: true field AND this entity actually has a comment thread —
+    # mirrors build_context.py's/context.py's identical computation. Drives
+    # the @mention picker/link UI scenario appended to the "Add comment"
+    # step below.
+    #
+    # cmd_538: `comment_children_data` alone only covers the direct-child
+    # shape (a property with x-outputType: comments declared straight on
+    # this entity). It misses the commentable-bridge shape (one-to-one_bridge
+    # FK to `commentable`, per docs/knowledge/appendix/comment-bridge.md
+    # §17.2 — the recommended pattern and the one this fixture/probe uses).
+    # Before this fix, ANY entity using that shape got zero "Add comment"/
+    # mention UI test coverage from the standard generated spec, silently —
+    # comment_has_mention was always False for it. tasks_registry_context's
+    # has_mention_comments (M1/M2 API tests) already ORs in this same
+    # OTO-bridge signal via get_internal_one_to_one_fks; this brings the UI
+    # spec's detection in line with it.
+    _has_commentable_oto_for_mention = any(
+        d['target'] == 'commentable' for d in get_internal_one_to_one_fks(model_name, schema)
+    )
+    _comment_def_for_mention = _raw_def('comment', schema)
+    comment_has_mention = (bool(comment_children_data) or _has_commentable_oto_for_mention) and any(
+        isinstance(fp, dict) and fp.get('x-mention') is True
+        for fp in (_comment_def_for_mention.get('properties') or {}).values()
+    )
 
     # Section 3.1: optional fill commands (8-space indent)
     # When deps are available, include optional autocomplete fields too; otherwise omit them.
@@ -2755,16 +4110,24 @@ def spec_context(
 
     # Section 3.3: primary field edit command
     use_deps_in_3_3 = False
+    # cmd_611/612: a primary FK that is also x-server-value never renders as
+    # a form autocomplete (it's excluded from every form input by design —
+    # see the req_ua_spec/all_ua_spec exclusion above), so the mixed-changes
+    # edit test must not try to touch it at all, and the 2-row FK-switch
+    # populate count is meaningless for a field the UI can never edit.
+    prim_is_server_value = bool(prim_is_fk and f'{prim}_id' in _server_value_prop_names)
     # If the primary field is a FK the form renders an autocomplete picker, and the
     # populate() helper creates a fresh target row per index — so we need at least
     # two rows in the DB for the test to switch from "Test X 1" to "Test X 2".
-    populate_count_3_3 = 2 if prim_is_fk else 1
-    if has_edit_primary and edit_field_label and edit_update_value:
+    populate_count_3_3 = 2 if (prim_is_fk and not prim_is_server_value) else 1
+    if prim_is_server_value:
+        edit_primary_cmd = None
+    elif has_edit_primary and edit_field_label and edit_update_value:
         prim_edit_meta = next(
             (f for f in fields if f.get('label') == edit_field_label), None
         )
-        if prim_edit_meta and prim_edit_meta.get('category') in ('entity_select', 'autocomplete', 'enum'):
-            if prim_edit_meta.get('category') == 'enum':
+        if prim_edit_meta and prim_edit_meta.get('category') in ('entity_select', 'autocomplete', 'enum', 'string_enum'):
+            if prim_edit_meta.get('category') in ('enum', 'string_enum'):
                 # In edit mode the enum Autocomplete already has a value selected;
                 # clear it first so selectAutocomplete can open the dropdown cleanly.
                 edit_primary_cmd = (
@@ -2781,6 +4144,17 @@ def spec_context(
             # selectAutocomplete and rely on populate_count_3_3==2 to ensure
             # the "Test X 2" target row exists.
             edit_primary_cmd = f"        cy.selectAutocomplete('{edit_field_label}', '{edit_update_value}');"
+            # cmd_633: is_user_account is the one primary_is_fk case where the
+            # "Test X 2" row above doesn't exist — populate{Pascal}Data's
+            # is_user_account loop (test_helper.ts.jinja2) only ever creates
+            # `Test User ${i}`, never a letter-suffixed row. edit_update_value
+            # here is the letter-suffixed dep instance ('Test User A', from
+            # _seed_relation_label_value's unique_index=None fallback), which
+            # only exists once populate{Pascal}Dependencies() has actually run
+            # — so route this edit test through it like the autocomplete
+            # branch above does, instead of relying on populate_count_3_3.
+            if primary_rel and primary_rel.get('target') == 'user':
+                use_deps_in_3_3 = has_deps
         else:
             edit_primary_cmd = f"        cy.clearAndFillField('{edit_field_label}', '{edit_update_value}');"
     else:
@@ -2795,7 +4169,9 @@ def spec_context(
             None,
         )
         if first_opt is not None:
-            edit_fill_cmd_3_3 = gen_fill_command(first_opt, cypress_edit_value(first_opt, title), '        ')
+            edit_fill_cmd_3_3 = gen_fill_command(
+                first_opt, cypress_edit_value(first_opt, title, _write_locked_values), '        ',
+            )
 
     # Section 5.1: fill all required fields except one
     fail_create_5_1 = None
@@ -2809,7 +4185,7 @@ def spec_context(
             primary_required_fk or (non_autocomplete_required[0] if non_autocomplete_required else required_field_metas[0]),
         )
         fields_to_fill_5_1 = [f for f in required_field_metas if f['prop_name'] != field_to_skip['prop_name']]
-        fail_create_5_1 = {'fill_cmds': gen_fill_commands(fields_to_fill_5_1, title, I, dep_search_info=dep_search_info)}
+        fail_create_5_1 = {'fill_cmds': gen_fill_commands(fields_to_fill_5_1, title, I, fk_dep_vars, dep_search_info=dep_search_info)}
 
     # Section 5.2: missing scalar required child field; 5.3: missing FK required child field
     fail_create_5_2_scalar = None
@@ -2831,7 +4207,7 @@ def spec_context(
                 'title': child_title,
                 'partial_obj': ('{ ' + ', '.join(entries) + ' }') if entries else None,
                 'fk_fields': gen_child_datagrid_fk_fields(fk_required, schema),
-                'fill_cmds': gen_fill_commands(required_field_metas, title, I, dep_search_info=dep_search_info),
+                'fill_cmds': gen_fill_commands(required_field_metas, title, I, fk_dep_vars, dep_search_info=dep_search_info),
             }
 
         # 5.3: add child with all scalar fields filled but no FK selection
@@ -2840,7 +4216,7 @@ def spec_context(
             fail_create_5_2_fk = {
                 'title': child_title,
                 'partial_obj': ('{ ' + ', '.join(entries) + ' }') if entries else None,
-                'fill_cmds': gen_fill_commands(required_field_metas, title, I, dep_search_info=dep_search_info),
+                'fill_cmds': gen_fill_commands(required_field_metas, title, I, fk_dep_vars, dep_search_info=dep_search_info),
             }
 
     # Section 6.1: clear a required field
@@ -2872,6 +4248,22 @@ def spec_context(
             fail_edit_6_2 = {
                 'child_pascal': to_pascal_case(test_child['child']['name']),
                 'field_prop_name': child_field_to_clear['prop_name'],
+                # A DataGrid child date/date-time/time column
+                # (generators.py's column_def codegen) has no renderEditCell
+                # override -- editing goes through the browser's native
+                # datetime-local/date/time input (unlike the top-level
+                # form's DateTimeWrapper, which accepts keyboard-sectioned
+                # typing and clearDateTime()'s "Clear" button -- neither
+                # exists here). Cypress's own .type() validates its argument
+                # against these native input types and rejects a key-action
+                # sequence like '{selectall}{backspace}' outright
+                # (CypressError: "requires a valid datetime... You passed:
+                # {selectAll}{Backspace}"), which is a different failure
+                # from the original crash coverage_master 6.2 was measured
+                # against but blocks it just the same. .clear() is
+                # Cypress's own supported way to empty a native date/time
+                # input.
+                'field_is_datetime': child_field_to_clear['category'] == 'datetime',
             }
 
     # Count records pre-created by db:seed + db:grantAllPermissions.
@@ -2896,6 +4288,7 @@ def spec_context(
         'can_delete': can_delete,
         'can_view': can_view,
         'has_deps': has_deps,
+        'has_self_ref_deps': has_self_ref_deps,
         'needs_pool_for_create': needs_pool_for_create,
         'has_optional': bool(optional_field_metas),
         'has_children': bool(child_metas),
@@ -2909,12 +4302,15 @@ def spec_context(
         ),
         'I': I,
         'required_fill_cmds': required_fill_cmds,
+        'approval_submit_fill_cmd': approval_submit_fill_cmd,
         'all_fill_cmds': all_fill_cmds,
         'required_assert_cmds_no_bool': required_assert_cmds_no_bool,
         'all_assert_cmds_no_bool': all_assert_cmds_no_bool,
         'datagrid_children_data': datagrid_children_data,
+        'readonly_datagrid_children_data': readonly_datagrid_children_data,
         'list_children_data': list_children_data,
         'comment_children_data': comment_children_data,
+        'comment_has_mention': comment_has_mention,
         'use_deps_in_3_1': use_deps_in_3_1,
         'opt_fill_cmds_3_1': opt_fill_cmds_3_1,
         'opt_clear_cmds_3_2': opt_clear_cmds_3_2,
@@ -2947,13 +4343,24 @@ def spec_context(
         'flatten_test_rels': _compute_flatten_test_rels(parent, pascal, definition_key, schema),
         'seed_count': seed_count,
         'bridge_child_ir': get_new_form_bridge(_raw_def(model_name, schema)),
+        # The 7.1/7.2 Approval tests log in as setup.requestorUser/setup.noRoleUser
+        # (not the default actor) before creating the record — when the primary
+        # display FK is itself x-server-value:actor, the server overwrites it with
+        # WHICHEVER actor is logged in at create time, so the post-create list
+        # lookup must match that same switched-in actor's identity, not
+        # deps.<var>.name (which only reflects the default actor; see
+        # populateXxxDependencies' is_actor_delegated handling in helper_context above).
+        'prim_is_server_value': prim_is_server_value,
     }
 
 
 def tasks_registry_context(entities: list, schema: dict) -> dict:
     """Build context for the generated-tasks.ts registry template.
 
-    `entities` is a list of dicts: {parent, model_name, children}.
+    `entities` is a list of dicts: {parent, model_name, children,
+    primary_fk_dep} — primary_fk_dep is threaded through from the same
+    entity's helper_context() result (cmd_625) so the reset-task guard here
+    matches the one that decided whether _reset{{ pascal }}CallSeq() exists.
     """
     enriched_entities = []
     # The fallback `db:populateUser` task at the bottom of the registry only
@@ -2999,6 +4406,7 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
             'pascal': pascal,
             'helper_path': f'./{parent}/helper',
             'reservation_helper_path': f'./{parent}/reservation_gen_helper',
+            'primary_fk_dep': entity.get('primary_fk_dep'),
             'datagrid_children': [
                 {'pascal': to_pascal_case(c['child']['name'])}
                 for c in datagrid_children
@@ -3014,7 +4422,24 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
         })
     if user_in_entities:
         has_user_account_populate = False
-    return {'entities': enriched_entities, 'has_user_account_populate': has_user_account_populate}
+    # cmd_522 (M2): schema-global signal — mirrors generate.py's _has_any_mention
+    # gate for lib/mention/parser.ts and search.ts. Broader than
+    # _reg_comment_has_mention_field (which only checks the shared `comment`
+    # model): any x-mention: true field anywhere means db:getNotificationsForUser
+    # should be registered, since MentionInput usage isn't limited to comments.
+    has_any_mention = any(
+        any(
+            isinstance(prop, dict) and prop.get('x-mention') is True
+            for prop in defn.get('properties', {}).values()
+        )
+        for defn in schema.get('definitions', {}).values()
+        if isinstance(defn, dict)
+    )
+    return {
+        'entities': enriched_entities,
+        'has_user_account_populate': has_user_account_populate,
+        'has_any_mention': has_any_mention,
+    }
 
 
 def api_spec_context(
@@ -3178,7 +4603,27 @@ def api_spec_context(
     exportable_bridge_fk_names = sorted(_api_internal_bridge_fk_names)
     has_exportable_bridge_fks = bool(exportable_bridge_fk_names)
 
-    # cmd_421 Domain 4 (M1, subtask_421i): x-mention name resolution after
+    # x-self-only: creator_id is exported (read-only diagnostic column, see
+    # build_context.py) but rejected by the import route if present in the
+    # CSV header (import_unimportable_columns). The N11-N13 round-trip tests
+    # below re-submit the exported CSV verbatim to prove the natural key
+    # round-trips — they must strip this column first, or every self-only
+    # entity's round-trip fails on UNIMPORTABLE_COLUMN by construction, not
+    # from a real regression.
+    #
+    # Checked at the def_key level first, same reasoning as build_context.py:
+    # a pass-through proxy view (e.g. `setting`) declares x-self-only on its
+    # own view-level dict, not on the shared raw entity model_def resolves
+    # to — falling back to model_def only covers entities with an exclusive
+    # raw twin (or no raw/view split at all).
+    _api_is_self_only, _ = get_self_only_flags(
+        schema.get('definitions', {}).get(definition_key or parent, {})
+    )
+    if not _api_is_self_only:
+        _api_is_self_only, _ = get_self_only_flags(model_def)
+    round_trip_unimportable_columns = ['creator_id'] if _api_is_self_only else []
+
+    # cmd_421 Domain 4 (M1): x-mention name resolution after
     # save. Mirrors build_context.py's comment_has_mention detection exactly
     # (the shared 'comment' model has an x-mention: true field AND this
     # entity has a one-to-one_bridge FK to 'commentable') — this test context
@@ -3211,13 +4656,18 @@ def api_spec_context(
         and f not in _api_fk_prop_names
         and f in model_def.get('properties', {})
         and _is_export_scalar(model_def['properties'][f])
+        and not is_write_only_prop(model_def['properties'][f])  # cmd_801: credential material, never exported
     ]
     # NOTE: x-import-key UNION intentionally not applied — see cmd_324 SA-1.
     export_import_key_fields = [f for f in import_key_fields if f in export_scalar_fields]
 
     required_fields_list = model_def.get('required') or []
     _api_entity_options = _get_entity_options(schema)
-    all_field_metas = get_field_metas(filtered_props, required_fields_list, relationships, gen_cfg.get('fields'), _api_entity_options)
+    _api_date_range = _date_range_fields(model_def)
+    all_field_metas = get_field_metas(
+        filtered_props, required_fields_list, relationships, gen_cfg.get('fields'), _api_entity_options,
+        range_end_field=_api_date_range['end'] if _api_date_range else None,
+    )
     # Exclude outbound one-to-one FK fields (internal bridge records — service creates them automatically).
     _api_internal_fk_prop_names = {d['prop_name'] for d in get_internal_one_to_one_fks(model, schema)}
     all_field_metas = [f for f in all_field_metas if f['prop_name'] not in _api_internal_fk_prop_names]
@@ -3238,6 +4688,11 @@ def api_spec_context(
 
     deps = resolve_dependencies(model, schema)
     entity_fk_deps = get_entity_fk_deps(model, schema, deps)
+    # Same fix as helper_context: without this, multiple FK fields pointing at
+    # the same target (e.g. insured_party_id + insurer_party_id -> party) all
+    # resolve to the same dep var, so the generated POST/PUT bodies below wire
+    # every such field to the SAME created record instead of distinct ones.
+    deps, entity_fk_deps, _, _ = split_same_target_fk_deps(model, relationships, deps, entity_fk_deps)
 
     child_metas = analyze_children(children, schema, model)
     api_child_metas = [c for c in child_metas if c['render_type'] != 'file']
@@ -3249,7 +4704,12 @@ def api_spec_context(
     ]
 
     # Collect readonly fields (x-readonly-fields entity-level OR x-readonly per-field).
-    _ro_from_entity: set[str] = set(model_def.get('x-readonly-fields') or [])
+    # x-readonly-fields is read from _api_detail_def (the view entity itself),
+    # not model_def (cmd_874 subtask_874d) — mirrors build_context.py's
+    # _ro_from_entity: model_def is the raw entity shared by every view of
+    # this Prisma model, so reading it there would let one proxy view's
+    # declaration leak into every other view's generated test helper.
+    _ro_from_entity: set[str] = set(_api_detail_def.get('x-readonly-fields') or [])
     _ro_from_props: set[str] = {
         fn for fn, fp in (model_def.get('properties') or {}).items()
         if isinstance(fp, dict) and fp.get('x-readonly')
@@ -3396,14 +4856,17 @@ def api_spec_context(
     elif ua_fk_fields_for_api:
         field_to_skip_5_1 = ua_fk_fields_for_api[0]['prop_name']
 
-    def _post_body_impl(skip_field: str | None, indent: str) -> list[str]:
+    def _post_body_impl(skip_field: str | None, indent: str, override: dict | None = None) -> list[str]:
+        override = override or {}
         out = []
         for field in all_field_metas:
             if not field['required']:
                 continue
             if field['prop_name'] == skip_field:
                 continue
-            if field['category'] == 'autocomplete':
+            if field['prop_name'] in override:
+                out.append(f"{indent}{field['prop_name']}: {override[field['prop_name']]},")
+            elif field['category'] == 'autocomplete':
                 dep = next((d for d in entity_fk_deps if d['prop_name'] == field['prop_name']), None)
                 if dep:
                     out.append(f"{indent}{field['prop_name']}: deps.{dep['dep_var_name']}.id,")
@@ -3429,11 +4892,16 @@ def api_spec_context(
             out.append(f"{indent}{c['child']['property_name']}: [],")
         return out
 
-    def _put_body_impl(indent: str) -> list[str]:
+    def _put_body_impl(indent: str, skip_field: str | None = None, record_var: str = 'records[0]') -> list[str]:
         out = []
         for prop in put_body_props:
+            if prop == skip_field:
+                continue
             if primary_is_fk and not primary_fk_is_ua and prop == f'{primary_field_name}_id':
-                out.append(f"{indent}{prop}: deps.{primary_dep_var}2.id,")
+                if record_var == 'records[0]':
+                    out.append(f"{indent}{prop}: deps.{primary_dep_var}2.id,")
+                else:
+                    out.append(f"{indent}{prop}: {record_var}.{prop},")
             elif primary_fk_is_ua and ua_update_field and prop == ua_update_field['prop_name']:
                 out.append(f"{indent}{prop}: {ua_update_expr},")
             elif not primary_is_fk and primary_field_name and prop == primary_field_name:
@@ -3463,7 +4931,7 @@ def api_spec_context(
                 else:
                     out.append(f"{indent}name: 'Updated {title}',")
             else:
-                out.append(f"{indent}{prop}: records[0].{prop},")
+                out.append(f"{indent}{prop}: {record_var}.{prop},")
         for c in api_child_metas:
             out.append(f"{indent}{c['child']['property_name']}: [],")
         return out
@@ -3482,10 +4950,253 @@ def api_spec_context(
             out.append(f"{indent}{c['child']['property_name']}: [],")
         return out
 
+    # cmd_516 Option B: pick a required many-to-one relation (guaranteed
+    # non-null after db:populate<Entity>, which only sets required fields) to
+    # regression-test that a PUT omitting the FK entirely — exactly what the
+    # UI now sends when the acting user can't read the FK's target, see
+    # AppFieldRelation's permissionDenied branch and
+    # docs/knowledge/fk-read-permission-graceful-degradation.md — leaves the
+    # existing FK value untouched instead of silently nulling it out. Limited
+    # to required relations so scope stays simple: an entity with only
+    # optional FK relations doesn't get this generated test.
+    # Excludes self-referential relations (target == model): granting the test
+    # actor full CRUD on this entity would also grant read on the "denied"
+    # target in that case, defeating the scenario.
+    # Excludes relations targeting 'organization' (cmd_576, reconfirmed cmd_799):
+    # the fixture this test relies on (db:createApiUserWithPermission) builds an
+    # actor with RBAC permission on the parent entity but no read permission on
+    # the FK's target model — that mismatch (permission row present for the
+    # parent, absent for the target) is what the graceful-degradation feature
+    # (docs/knowledge/fk-read-permission-graceful-degradation.md) actually
+    # reacts to. `organization_id`'s existence check is a different mechanism
+    # entirely: cmd_515's should_filter_by_org lookup (getAssociatedOrganizations,
+    # scoped by actual membership, not by any RBAC permission row). As of
+    # cmd_799 the fixture also enrolls the actor in the target row's own
+    # organization (should_filter_by_org entities only) so that mismatch alone
+    # doesn't 404 the request before reaching the scenario a *non*-organization
+    # fk_preservation_relation is meant to test — but that does not make
+    # 'organization' itself a valid choice for this relation: omitting
+    # organization_id from the PUT body and asserting it's "preserved" would
+    # still be exercising the membership-scoped existence filter, not the
+    # RBAC-read-permission graceful-degradation path this test is named for.
+    # See the org-isolation-boundary rejection test (G3) below for that
+    # mechanism's own coverage instead.
+    _fk_preservation_relation = next(
+        (r for r in relationships if r['required'] and r['target'] not in (model, 'organization')), None,
+    )
+
+    def _put_body_fk_zero_impl(indent: str) -> list[str]:
+        if not _fk_preservation_relation:
+            return []
+        out = []
+        for prop in put_body_props:
+            if prop != _fk_preservation_relation['prop_name']:
+                out.append(f"{indent}{prop}: original.{prop},")
+        for c in api_child_metas:
+            out.append(f"{indent}{c['child']['property_name']}: [],")
+        return out
+
     has_approvable = any(d['target'] == 'approvable' for d in get_internal_one_to_one_fks(model, schema))
     _x_approval = model_def.get('x-approval')
     entity_on_rejected = _x_approval.get('on_rejected') if _x_approval else None
     entity_on_rejected_terminal = bool((_x_approval or {}).get('on_rejected', {}).get('terminal', False))
+
+    # cmd_824: resubmission is now an ordinary edit of the entity's own
+    # field back toward its "open" value (the dedicated resubmit route was
+    # retired in favor of the update-time edge trigger service.ts.jinja2
+    # emits from x-approval.submit_on). To generate a live PUT-based test
+    # proving (a) a non-terminal rejection can be resubmitted this way and
+    # (b) a terminal rejection cannot, resolve the exact field+value such an
+    # edit targets:
+    #   - when submit_on is declared, use it directly -- the field the
+    #     update-time edge trigger itself watches.
+    #   - otherwise (the "no submit_on" default behavior -- an update never
+    #     re-fires approval creation at all, regardless of value, because
+    #     no update-time trigger code is emitted for this entity), fall
+    #     back to on_rejected.set_fields' own target field and its schema
+    #     default -- the value editing the rejected record back toward
+    #     "open" would naturally use. Either way we get a real field+value
+    #     that can be sent over the API and observed for whether a new
+    #     approval_request appears.
+    _resubmit_target_field, _resubmit_target_value = (
+        resolve_approval_submit_on(model_def) if has_approvable and _x_approval else (None, None)
+    )
+    if _resubmit_target_field is None and entity_on_rejected and entity_on_rejected.get('set_fields'):
+        _rt_field = next(iter(entity_on_rejected['set_fields']), None)
+        _rt_default = (model_def.get('properties') or {}).get(_rt_field, {}).get('default') if _rt_field else None
+        if _rt_field is not None and _rt_default is not None:
+            _resubmit_target_field = _rt_field
+            _resubmit_target_value = resolve_set_fields(
+                model_def.get('properties') or {}, {_rt_field: _rt_default},
+            )[_rt_field]
+    def _resubmit_literal(value) -> str:
+        if isinstance(value, bool):
+            return 'true' if value else 'false'
+        if isinstance(value, (int, float)):
+            return str(value)
+        return "'" + str(value).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+    resubmit_target_field = None
+    resubmit_target_value_literal = None
+    # cmd_825: a value the field could hold that is NEITHER submit_on's
+    # target nor any value on_approved/on_rejected's set_fields writes to
+    # this same field -- i.e. a genuine "not yet submitted" state distinct
+    # from every state the mechanism itself transitions the field to.
+    # Powers the "created but not yet submitted, then explicitly submitted"
+    # test (submit_on's whole reason for existing): only generated when
+    # such a spare enum value actually exists on the field, so a schema
+    # with no room for one (e.g. only submit_on's own value declared)
+    # silently gets no test rather than a broken one.
+    resubmit_unsubmitted_value_literal = None
+    if _resubmit_target_field and _resubmit_target_field in put_body_props:
+        resubmit_target_field = _resubmit_target_field
+        resubmit_target_value_literal = _resubmit_literal(_resubmit_target_value)
+        _rt_field_meta = next((f for f in all_field_metas if f['prop_name'] == resubmit_target_field), None)
+        _rt_evals = [v for v in ((_rt_field_meta or {}).get('enum_values') or []) if v is not None]
+        if _rt_evals:
+            _excluded_values = {_resubmit_target_value}
+            _on_approved_sf = (_x_approval.get('on_approved') or {}).get('set_fields') or {} if _x_approval else {}
+            if resubmit_target_field in _on_approved_sf:
+                _excluded_values.add(_on_approved_sf[resubmit_target_field])
+            _on_rejected_sf = (entity_on_rejected or {}).get('set_fields') or {}
+            if resubmit_target_field in _on_rejected_sf:
+                _excluded_values.add(_on_rejected_sf[resubmit_target_field])
+            _spare_value = next((v for v in _rt_evals if v not in _excluded_values), None)
+            if _spare_value is not None:
+                resubmit_unsubmitted_value_literal = _resubmit_literal(_spare_value)
+
+    # cmd_1022, test (c): a value the lockdown field is frozen at via
+    # x-write-locked-values specifically (Source 2 of
+    # derive_post_decision_freeze_values), scoped to resubmit_target_field
+    # since that is the same field approval_lockdown_context() guards.
+    # Demonstrates a row can become frozen through a route OTHER than the
+    # approval flow itself (e.g. a scheduled task, or whatever system
+    # writer the x-write-locked-values declaration is meant to guard
+    # against) -- only generated when such a declaration actually exists,
+    # same "no room for the test -> no test" discipline as
+    # resubmit_unsubmitted_value_literal above.
+    lockdown_write_locked_sample_value_literal = None
+    if resubmit_target_field:
+        # View-scoped (cmd_1032): a proxy view's own x-write-locked-values
+        # declaration lives on the view entity itself, not the canonical
+        # screen's (raw) declaration -- see
+        # derive_write_locked_values_for_view's docstring. This test wants
+        # the raw Source-2 declaration dict specifically (not the merged
+        # x-approval union), so the canonical-view check is inlined rather
+        # than going through that helper.
+        _lockdown_source_def = model_def if is_canonical_model_view(model, _api_detail_def, schema) else _api_detail_def
+        _lockdown_x_write_locked = (_lockdown_source_def.get('x-write-locked-values') or {}).get(resubmit_target_field) or []
+        if _lockdown_x_write_locked:
+            lockdown_write_locked_sample_value_literal = _resubmit_literal(_lockdown_x_write_locked[0])
+
+    # cmd_841 ruling_5: x-approval.on_withdrawn.set_fields' value for
+    # resubmit_target_field, when declared -- powers the new-form 14.4 test
+    # (withdrawal itself sets the field, so no separate "away" edit is
+    # needed before editing back to submit_on's value). Independent of the
+    # spare_value / _rt_evals enum-scan above: on_withdrawn's value is never
+    # added to _excluded_values (it is not a state submit_on's own edge
+    # trigger writes -- it is a state the withdrawal dispatch writes, and
+    # the whole point is that a user CAN select it, see cmd_841's
+    # locked_values_interpretation ruling).
+    _on_withdrawn = (_x_approval.get('on_withdrawn') or {}) if _x_approval else {}
+    # cmd_876: whether this entity declares x-approval.on_withdrawn at all --
+    # the server-side withdraw lockout (on_withdrawn_dispatch.ts's
+    # ENTITIES_WITH_ON_WITHDRAWN, cmd_865/PR#450) 400s every POST
+    # .../withdraw call for an entity that lacks this declaration,
+    # regardless of round/stage state. The round-based multistage tests
+    # below (14.2M/14.3M/14.4M) call withdraw expecting 200, so they must
+    # only be generated when this is true -- 14.3M(b) (uses /reject, not
+    # /withdraw) and 14.5M (already asserts 400 via failOnStatusCode: false)
+    # are unaffected and stay unconditional.
+    has_on_withdrawn = bool(_on_withdrawn)
+    _on_withdrawn_sf = _on_withdrawn.get('set_fields') or {}
+    _on_withdrawn_value = (
+        _on_withdrawn_sf.get(resubmit_target_field) if _on_withdrawn_sf else None
+    )
+    on_withdrawn_value_literal = (
+        _resubmit_literal(_on_withdrawn_value) if _on_withdrawn_value else None
+    )
+
+    # cmd_843 PD-1 (fail-closed resubmission-reachability gate, round_id-era
+    # rewrite of the cmd_825 comment above): an entity that declares
+    # x-approval.submit_on together with a non-terminal on_rejected promises
+    # a real path back to submit_on's target value -- either the new-form
+    # withdraw-then-edit-back 14.4 test (on_withdrawn_value_literal) or the
+    # old-form away-then-back 14.4 test (resubmit_unsubmitted_value_literal).
+    # cmd_498: a condition the machine cannot see is a hole -- raise instead
+    # of the silent "gets no test" fallback the cmd_825 comment above
+    # describes when NEITHER path exists. Also raise when a DECLARED
+    # on_withdrawn/on_rejected writes a value that collides with submit_on's
+    # own target or on_approved's set_fields value for the same field: the
+    # withdrawn/rejected record would then be indistinguishable from a
+    # submitted/approved one even though no live approval_request backs
+    # that state, and the update-time edge trigger
+    # (_build_approval_edge_trigger_update_code, which fires only on the
+    # EDGE previous!=target -> new===target) could never observe a real
+    # transition on the follow-up resubmit PUT either.
+    if resubmit_target_field and entity_on_rejected and not entity_on_rejected_terminal:
+        _gate_blocked_values = {_resubmit_target_value}
+        _on_approved_sf_raw = (
+            (_x_approval.get('on_approved') or {}).get('set_fields') or {} if _x_approval else {}
+        )
+        if resubmit_target_field in _on_approved_sf_raw:
+            _gate_blocked_values.add(resolve_set_fields(
+                model_def.get('properties') or {},
+                {resubmit_target_field: _on_approved_sf_raw[resubmit_target_field]},
+            )[resubmit_target_field])
+
+        if _on_withdrawn_value is not None:
+            _gate_on_withdrawn_resolved = resolve_set_fields(
+                model_def.get('properties') or {},
+                {resubmit_target_field: _on_withdrawn_value},
+            )[resubmit_target_field]
+            if _gate_on_withdrawn_resolved in _gate_blocked_values:
+                raise ValueError(
+                    f"{model}: x-approval.on_withdrawn.set_fields."
+                    f"{resubmit_target_field} = {_gate_on_withdrawn_resolved!r} "
+                    "is unreachable for resubmission -- it matches "
+                    "submit_on's or on_approved's own value for this field, "
+                    "so a withdrawn record could never be told apart from a "
+                    "submitted/approved one, and the resubmit edge trigger "
+                    "(which fires only on a real previous!=target "
+                    "transition) would never see one. Give "
+                    "on_withdrawn.set_fields a value distinct from "
+                    f"submit_on and on_approved.set_fields for "
+                    f"'{resubmit_target_field}' (e.g. 'draft')."
+                )
+
+        _on_rejected_sf_raw = (entity_on_rejected or {}).get('set_fields') or {}
+        if resubmit_target_field in _on_rejected_sf_raw:
+            _gate_on_rejected_resolved = resolve_set_fields(
+                model_def.get('properties') or {},
+                {resubmit_target_field: _on_rejected_sf_raw[resubmit_target_field]},
+            )[resubmit_target_field]
+            if _gate_on_rejected_resolved in _gate_blocked_values:
+                raise ValueError(
+                    f"{model}: x-approval.on_rejected.set_fields."
+                    f"{resubmit_target_field} = {_gate_on_rejected_resolved!r} "
+                    "(non-terminal) is unreachable for resubmission -- it "
+                    "matches submit_on's or on_approved's own value for "
+                    "this field, so a rejected-but-resubmittable record "
+                    "could never be told apart from a submitted/approved "
+                    "one. Give on_rejected.set_fields a value distinct "
+                    f"from submit_on and on_approved.set_fields for "
+                    f"'{resubmit_target_field}'."
+                )
+
+        if on_withdrawn_value_literal is None and resubmit_unsubmitted_value_literal is None:
+            raise ValueError(
+                f"{model}: x-approval.submit_on is declared with a "
+                "non-terminal on_rejected, but no value is reachable for "
+                f"'{resubmit_target_field}' that is distinct from "
+                "submit_on/on_approved/on_rejected's own values -- "
+                "resubmission after withdrawal or non-terminal rejection "
+                "is unreachable, so 14.4/14.5 cannot be generated. Declare "
+                "x-approval.on_withdrawn.set_fields for "
+                f"'{resubmit_target_field}' with a spare value (e.g. "
+                "'draft'), or add a spare value to the enum that no "
+                "on_approved/on_rejected set_fields entry writes."
+            )
 
     # Detect count-mode reservation without lines: POST tests must seed the pool entity first.
     _xres_def = model_def.get('x-reservation')
@@ -3511,6 +5222,31 @@ def api_spec_context(
     else:
         seed_count = 0
 
+    # cmd_577: boundary test for x-reservation item-mode dateRange entities
+    # (e.g. room_reservation's check_in/check_out) — "start equals end" must
+    # be rejected by the same start<end check the create-value fix above
+    # keeps out of everyday test data (see reserve{Entity}Core in
+    # service.ts.jinja2). Only emitted when the schema actually declares a
+    # dateRange pair and both fields survived into all_field_metas.
+    date_range_boundary = None
+    post_body_daterange_boundary = _post_body_impl(None, f'{I}    ')
+    if _api_date_range:
+        _drb_start_meta = next(
+            (f for f in all_field_metas if f['prop_name'] == _api_date_range['start']), None,
+        )
+        _drb_end_meta = next(
+            (f for f in all_field_metas if f['prop_name'] == _api_date_range['end']), None,
+        )
+        if _drb_start_meta and _drb_end_meta:
+            date_range_boundary = {
+                'start_field': _api_date_range['start'],
+                'end_field': _api_date_range['end'],
+            }
+            post_body_daterange_boundary = _post_body_impl(
+                None, f'{I}    ',
+                override={_api_date_range['end']: api_value(_drb_start_meta, title)},
+            )
+
     return {
         'parent': parent,
         'pascal': parent_pascal,
@@ -3525,6 +5261,17 @@ def api_spec_context(
         'can_new': gen_cfg.get('new', True) is not False,
         'can_edit': gen_cfg.get('edit', True) is not False,
         'can_delete': gen_cfg.get('delete', True) is not False,
+        # cmd_846(c): added for the 14.3N/14.4N invalidate-lockdown
+        # scenarios -- this context builder never needed can_invalidate
+        # before (no invalidate API test scenario existed in this
+        # template until those two were added). Same bool-or-dict
+        # resolution build_context.py uses for the same x-generate.invalidate
+        # value.
+        'can_invalidate': bool(
+            (gen_cfg.get('invalidate') or {}).get('enabled', False)
+            if isinstance(gen_cfg.get('invalidate'), dict)
+            else gen_cfg.get('invalidate', False)
+        ),
         'can_export': gen_cfg.get('export', True) is not False,   # cmd_330
         'seed_count': seed_count,
         'I': I,
@@ -3533,9 +5280,22 @@ def api_spec_context(
         'assert_update': assert_update,
         'post_body_create': _post_body_impl(None, f'{I}    '),
         'post_body_missing_field': _post_body_impl(field_to_skip_5_1, f'{I}    '),
+        'date_range_boundary': date_range_boundary,
+        'post_body_daterange_boundary': post_body_daterange_boundary,
         'put_body_update': _put_body_impl('            '),
         'put_body_update_fk': _put_body_impl('              '),
         'i7_post_body': _post_body_impl(None, f'{I}      '),
+        # G3.1: same shape as i7_post_body, minus organization_id — the
+        # G3.1 test injects its own (foreign) organization_id value after this.
+        'org_cross_post_body': _post_body_impl('organization_id', f'{I}      '),
+        # cmd_640 G3.4: same shape as put_body_update/put_body_update_fk, minus
+        # organization_id — the G3.4 test injects its own (foreign)
+        # organization_id value after this. Indents are put_body_update's and
+        # put_body_update_fk's own indent plus one extra nesting level (the
+        # db:createCrossOrgScenario .then() wrapper G3.4 adds around the same
+        # populate steps 4.1 uses).
+        'org_cross_put_body': _put_body_impl('              ', skip_field='organization_id'),
+        'org_cross_put_body_fk': _put_body_impl('                ', skip_field='organization_id'),
         # Bulk test bodies — two extra spaces of indent (inside array item `{`)
         'bulk_post_body_valid':   _post_body_impl(None,               f'{I}      '),
         'bulk_post_body_invalid': _post_body_impl(field_to_skip_5_1, f'{I}      '),
@@ -3545,6 +5305,38 @@ def api_spec_context(
         'has_approvable': has_approvable,
         'entity_on_rejected': entity_on_rejected,
         'entity_on_rejected_terminal': entity_on_rejected_terminal,
+        # cmd_824: PUT body for the resubmit-via-edit tests (14.x below) --
+        # same shape as put_body_update but with resubmit_target_field
+        # skipped from the loop so the template can append it explicitly
+        # with resubmit_target_value_literal, and sourced from the
+        # single-record populate helpers' `data.record` (not `records[0]`,
+        # which only the array-returning db:populate<Entity> task uses).
+        'resubmit_target_field': resubmit_target_field,
+        'resubmit_target_value_literal': resubmit_target_value_literal,
+        'resubmit_unsubmitted_value_literal': resubmit_unsubmitted_value_literal,
+        'on_withdrawn_value_literal': on_withdrawn_value_literal,
+        'has_on_withdrawn': has_on_withdrawn,
+        'lockdown_write_locked_sample_value_literal': lockdown_write_locked_sample_value_literal,
+        'put_body_resubmit': (
+            _put_body_impl('              ', skip_field=resubmit_target_field, record_var='data.record')
+            if resubmit_target_field else None
+        ),
+        # cmd_867: 14.5 alone has no `data` in scope -- it POSTs the record
+        # itself rather than sourcing it from a db:populate<Entity> task, so
+        # the row it PUTs back must come from the detail GET response
+        # (`getRes1.body`, from the .then((getRes1) => {...}) wrapper the
+        # 14.5 template block opens around its PUT) instead of `data.record`.
+        # createRes.body is not usable here: the generated add<Parent>()
+        # service function (service.ts.jinja2) returns only `{ id }`, so
+        # createRes.body.<field> would silently resolve to undefined for
+        # every field but id.
+        # Indent is 18 spaces (one level deeper than put_body_resubmit's 14 --
+        # 14.5 nests its PUT inside two .then() blocks, the other resubmit
+        # tests inside one).
+        'put_body_resubmit_created': (
+            _put_body_impl('                  ', skip_field=resubmit_target_field, record_var='getRes1.body')
+            if resubmit_target_field else None
+        ),
         'reservation_count_pool_pascal': _reservation_count_pool_pascal,
         # CSV Export (Phase 1) test context
         'should_filter_by_org': should_filter_by_org,
@@ -3559,9 +5351,22 @@ def api_spec_context(
         'x_relationships_list': x_relationships_list,
         'readonly_fields': readonly_fields,
         'put_body_readonly_zero': _put_body_ro_zero_impl('            '),
+        # cmd_516 Option B: FK read-permission graceful-degradation regression test
+        'fk_preservation_relation': (
+            {
+                'prop_name': _fk_preservation_relation['prop_name'],
+                'relation_name': _fk_preservation_relation['prop_name'].removesuffix('_id'),
+                'target': _fk_preservation_relation['target'],
+            }
+            if _fk_preservation_relation and (gen_cfg.get('edit', True) is not False)
+            else None
+        ),
+        'put_body_fk_preservation_zero': _put_body_fk_zero_impl('            '),
         # CSV Export (cmd_421 N9): internal bridge FK exclusion
         'has_exportable_bridge_fks': has_exportable_bridge_fks,
         'exportable_bridge_fk_names': exportable_bridge_fk_names,
+        'round_trip_unimportable_columns': round_trip_unimportable_columns,
+        'is_self_only': _api_is_self_only,
         # Search coverage (cmd_421 Domain 5)
         'is_searchable': is_searchable,
         'search_sample_field': search_sample_field,
@@ -3772,6 +5577,32 @@ def _reservation_base(entity: str, schema: dict, children: list) -> dict | None:
     pool_criteria_prop = pool_props.get(criteria_pool_field, {})
     pool_fk_entity = (pool_criteria_prop.get('x-relationship') or {}).get('target', '')
 
+    # cmd_602: pool_entity may carry required FKs beyond the criteria field
+    # (e.g. inventory.location_id, alongside the criteria's product_id) —
+    # without these, prisma.<pool_entity>.create() in createPool() below omits
+    # a required column and the generated helper throws at seed time. Reuse
+    # resolve_dependencies()/_get_dep_extra_required_fields() (the same
+    # machinery helper_context() uses for populateXxxDependencies) rather than
+    # hand-rolling a second resolver — this also covers transitive chains
+    # (a pool_extra_dep target that itself has a required FK) for free, since
+    # resolve_dependencies() already recurses and returns creation-order deps.
+    pool_deps_raw = resolve_dependencies(pool_entity, schema) if pool_entity else []
+    pool_entity_fk_deps = get_entity_fk_deps(pool_entity, schema, pool_deps_raw) if pool_entity else []
+    pool_extra_fk_props = [fk for fk in pool_entity_fk_deps if fk['prop_name'] != criteria_pool_field]
+    pool_extra_deps = [
+        {
+            'target': d['target'],
+            'var_name': d['var_name'],
+            'pascal': to_pascal_case(d['target']),
+            'title': to_title_case(d['target']),
+            'fk_deps': d.get('fk_deps', []),
+            'extra_required_fields': _get_dep_extra_required_fields(d['target'], schema),
+            'bridge_otos': get_all_internal_fk_deps(d['target'], schema),
+        }
+        for d in pool_deps_raw
+        if d['target'] != pool_fk_entity
+    ]
+
     # orderBy fields
     orderby_raw = policy_cfg.get('orderBy', [])
     orderby_fields = []
@@ -3839,6 +5670,16 @@ def _reservation_base(entity: str, schema: dict, children: list) -> dict | None:
     lines_prop   = x_res.get('lines', '')
     lines_entity = next((c['name'] for c in children if c.get('property_name') == lines_prop), None)
 
+    # cmd_869: whether the lines entity declares x-approval.submit_on — if so,
+    # POST no longer creates a reservation (moved to submit time, cmd_856),
+    # and IT-(2) in the generated spec must assert 201/no-reservation instead
+    # of 409.
+    _lines_submit_on_field, _ = (
+        resolve_approval_submit_on(_raw_def(lines_entity, schema))
+        if lines_entity else (None, None)
+    )
+    reservation_lines_has_submit_on = _lines_submit_on_field is not None
+
     # orderBy description for spec comment
     orderby_desc = ' → '.join(
         f"{f['field']} {f['direction']}" for f in orderby_fields
@@ -3855,6 +5696,10 @@ def _reservation_base(entity: str, schema: dict, children: list) -> dict | None:
         # (attachable) AND injected bridge-parent FKs (noteable). The helper must
         # create each bridge row and set its <bridge>_id, or the create rejects.
         'pool_fk_bridge_otos': get_all_internal_fk_deps(pool_fk_entity, schema) if pool_fk_entity else [],
+        # cmd_602: pool_entity's required FKs other than the criteria field
+        # (e.g. inventory.location_id) — creation-ordered, transitive-safe.
+        'pool_extra_deps':    pool_extra_deps,
+        'pool_extra_fk_props': pool_extra_fk_props,
         'pool_qty_field':     pool_cfg.get('quantityField', 'quantity'),
         'pool_res_field':     pool_cfg.get('reservedField', 'reserved_quantity'),
         'alloc_entity':       result_cfg.get('allocationEntity', ''),
@@ -3874,6 +5719,7 @@ def _reservation_base(entity: str, schema: dict, children: list) -> dict | None:
         'orderby_fields':     orderby_fields,
         'orderby_sortable':   orderby_sortable,
         'orderby_desc':       orderby_desc,
+        'reservation_lines_has_submit_on': reservation_lines_has_submit_on,
     }
 
 

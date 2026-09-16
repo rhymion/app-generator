@@ -23,9 +23,9 @@ A user's effective permissions are computed by:
 Special roles `Creator` and `Assignee` are resolved at item level: they only grant
 `read`/`update`/`delete` on items the user owns or is assigned to, never `create`.
 
-## seed-tenant.ts Role
+## seed-baseline.ts Role
 
-`scripts/seed-tenant.ts` seeds an `Administrator` role with full CRUD on 8 entities:
+`scripts/seed-baseline.ts` seeds an `Administrator` role with full CRUD on 8 entities:
 
 ```
 user, role, organization, permission, setting,
@@ -33,6 +33,18 @@ approval_request, approval_flow, dashboard
 ```
 
 Plus a 9th, read-only permission row on `audit_log` (create/update/delete: false).
+
+This is a **fixed enumeration, not schema-derived**: consumer-added entities
+(see "Adding Tests for a New Entity" below) are never in this list, so the
+seeded `Administrator` role starts with zero permissions on them until an
+admin explicitly grants them via the Permissions UI — a deliberate
+least-privilege-by-default boundary, not a bug. See
+`docs/knowledge/seed-baseline-credential-hardening.md` §"Fixed permission
+enumeration" for the full rationale, plus that doc's credential-hardening
+change (production provisioning now requires `SEED_ADMIN_EMAIL`/
+`SEED_ADMIN_PASSWORD` and mints a random `api_key`, instead of the fixed
+`admin@example.com`/`password123`/literal-`api_key` defaults below staying
+usable in production).
 
 Only the admin account (`admin@example.com`) receives this role by default. New users start
 with zero permissions until an Administrator explicitly assigns roles.
@@ -64,11 +76,11 @@ When adding a new **default** entity to `code_generator/json_schema.yaml` (app-g
 generator's own baseline schema):
 
 1. Add the entity name to `ALL_ENTITIES` in `cypress/support/db-helpers.ts`.
-2. Also add it to `scripts/seed-tenant.ts` entities array.
+2. Also add it to `scripts/seed-baseline.ts` entities array.
 3. For new Cypress normal-flow tests: use `cy.task('db:grantAllPermissions')` in `beforeEach`.
 
 Consumer/project-specific entities (defined in a consuming project's own `prj/code_generator/
-json_schema.yaml`, e.g. `leave_request`) must **not** be added to `scripts/seed-tenant.ts` —
+json_schema.yaml`, e.g. `leave_request`) must **not** be added to `scripts/seed-baseline.ts` —
 that file is generator-owned and shared by every consumer. Project-specific fixture data
 belongs in the consuming project's own test helpers/tasks (see `prj/cypress/support/
 project-tasks.ts`), not the shared seed script.
@@ -101,8 +113,19 @@ specific entities.
 | `user`      | `seedTestDatabase`    | 1 (test user)                      |
 | all others  | neither               | 0                                  |
 
-N = number of base entities in `code_generator/json_schema.yaml` (entities without `_detail`
-or `_input` suffix that have `type: object` and an `id` property).
+N is **not** simply "every base entity in the schema" — it's the size of `ALL_ENTITIES`
+(`cypress/support/db-helpers.ts`), which `code_generator/generate.py`'s `db_helpers_context()`
+derives as the union of (a) entities with `x-generate.test: true` (the ones that get a generated
+Cypress spec at all) and (b) any entity referenced as a labelField target elsewhere in the schema —
+sorted and deduplicated. On the current default schema (12 total entities in
+`code_generator/json_schema.yaml`'s `definitions`), that union currently has **6** members
+(`approval_flow, dashboard, organization, permission, role, user`) — several default entities
+(`setting`, `approval_request`, `comment`, `reaction`, `attachment`, `dashboard_widget`) have no
+generated spec and aren't a labelField target, so they're outside `ALL_ENTITIES` and never get a
+`permission` row from `grantAllEntityPermissions()`. Treat the exact count and membership as
+something to re-check (`cypress/support/db-helpers.ts`'s `ALL_ENTITIES` is the live source of
+truth) rather than assume from this description — it changes whenever an entity's `test` flag or
+labelField references change.
 
 ### Solution: parameterized `seed_count` in the generator
 
@@ -119,7 +142,7 @@ entity:
 
 ### user entity: hidden Prisma-required fields
 
-`user_detail.x-generate.fields = [name, image, roles]` omits `email`, but Prisma requires it
+`user_detail.x-generate.fields = [name, image_id, roles]` omits `email`, but Prisma requires it
 (NOT NULL + UNIQUE). The generator's `helper_context()` now computes `extra_prisma_fields` —
 required schema fields not in the UI fields list — and includes them in `prisma.create()` data
 for populate helpers. For `user`, this adds:
@@ -141,15 +164,21 @@ email: `test-${i}-${Date.now()}@example.com`,
 
 ### Problem: desktop DataGrid virtual-scroll limitation
 
-The desktop Cypress specs use `getDataGridRowCount()` which counts rendered DOM rows
+`getDataGridRowCount()` (`cypress/support/datagrid-helpers.ts:207`) counts rendered DOM rows
 (`div[role="row"][data-rowindex]`). With a fixed-height 500px DataGrid container and MUI's
-default row height (~52px), only ~11 rows are rendered in the DOM at once. For `permission`
-(seed_count=9), test 1.3 expects 12 rows (9 + 3 populated) but the DOM shows only 11.
+default row height (~52px), only ~11 rows are rendered in the DOM at once — so this helper
+undercounts whenever an entity's actual row total exceeds that window (e.g. it would have
+undercounted `permission`'s test 1.3 back when `ALL_ENTITIES` — and so `permission`'s
+`seed_count` — was large enough to push `seed_count + 3` over ~11; see "N is not simply..."
+above for why that count now varies with schema/test-flag changes).
 
-**Solution**: Test 1.3 uses `getDataGridTotalRowCount()` (new helper in `datagrid-helpers.ts`)
-which reads MUI DataGrid's `aria-rowcount` attribute. MUI DataGrid sets
-`aria-rowcount = 1 (header) + total_data_rows` regardless of virtual-scroll state, so
-`getDataGridTotalRowCount()` correctly returns the full dataset size.
+**Solution, and current status**: `getDataGridTotalRowCount()` (`datagrid-helpers.ts:216`) reads
+MUI DataGrid's `aria-rowcount` attribute instead, which is `1 (header) + total_data_rows`
+regardless of virtual-scroll state. The generator template (`test_spec.cy.ts.jinja2`) now uses
+`getDataGridTotalRowCount()` unconditionally for every generated entity's tests 1.1/1.2/1.3 (lines
+~51/60/69, plus the split-related count assertions further down) — not only for entities that
+happen to exceed the ~11-row window today. The virtual-scroll undercount this fixed is real, but
+the fix is no longer entity-conditional; it's the standard row-count assertion generator-wide.
 
 ### Problem: mobile test 4.2 FK constraint violation for user entity
 

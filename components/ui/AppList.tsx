@@ -32,7 +32,7 @@ export function AppListItem({
       <ListItemText
         primary={primary}
         secondary={secondary}
-        primaryTypographyProps={primaryTextTransform ? { textTransform: primaryTextTransform } : undefined}
+        slotProps={{ primary: primaryTextTransform ? { sx: { textTransform: primaryTextTransform } } : undefined }}
       />
     </ListItem>
   );

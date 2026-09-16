@@ -4,6 +4,28 @@ const REQUIRED_FIELDS = [
 {% endfor %}
 ] as const;
 
+// Explicit element type (not `as const`, unlike REQUIRED_FIELDS above): most
+// entities have zero Decimal fields, so this array is empty far more often
+// than not -- `[] as const` infers as the empty tuple type `readonly []`,
+// which makes `for (const field of DECIMAL_FIELDS)` narrow `field` to
+// `never` and fail to compile on `field.key`/`field.label`. An explicit
+// array type keeps element access valid regardless of length.
+const DECIMAL_FIELDS: { key: string; label: string }[] = [
+{% for field in decimal_fields %}
+  { key: '{{ field.key }}', label: '{{ field.label }}' },
+{% endfor %}
+];
+
+// Optional sign, digits, optional fractional part -- matches what a Prisma
+// Decimal column accepts. Missing/empty values are not this check's concern
+// (REQUIRED_FIELDS above already covers that).
+const DECIMAL_PATTERN = /^-?\d+(\.\d+)?$/;
+
+function isInvalidDecimal(value: unknown): boolean {
+  if (typeof value !== 'string' || value.trim() === '') return false;
+  return !DECIMAL_PATTERN.test(value.trim());
+}
+
 function isMissingValue(value: unknown): boolean {
   if (value === null || value === undefined) return true;
   if (typeof value === 'string') return value.trim() === '';
@@ -23,6 +45,11 @@ export function validateForm(values: Record<string, unknown>): string | null {
   for (const field of REQUIRED_FIELDS) {
     if (isMissingValue(values[field.key])) {
       return `${field.label} is required`;
+    }
+  }
+  for (const field of DECIMAL_FIELDS) {
+    if (isInvalidDecimal(values[field.key])) {
+      return `${field.label} must be a valid decimal number`;
     }
   }
   return null;

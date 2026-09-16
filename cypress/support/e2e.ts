@@ -34,5 +34,14 @@ Cypress.on('uncaught:exception', (err) => {
   if (err.message.includes('"isTrusted":true') || err.message === '{"isTrusted":true}') {
     return false;
   }
+  // Next.js dev mode's own internal `performance.measure(...)` navigation-timing
+  // telemetry occasionally races a fast client-side transition (e.g. the MFA
+  // challenge page's `unstable_update()` immediately followed by `router.push()`,
+  // cmd_527) and computes a negative duration, which the Performance API rejects.
+  // The navigation itself completes correctly — this is Next's own instrumentation
+  // throwing, not application code (never reproduces against a production build).
+  if (err.message.includes("cannot have a negative timestamp")) {
+    return false;
+  }
   return true;
 });

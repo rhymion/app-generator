@@ -229,7 +229,6 @@ export default function GanttChart({ items, periodStart, span, basePath }: Props
             value={dayjs(periodStart)}
             onChange={handleDateChange}
             views={pickerViews}
-            enableAccessibleFieldDOMStructure={false}
             slotProps={{ textField: { size: 'small' } }}
           />
         </LocalizationProvider>
@@ -240,7 +239,7 @@ export default function GanttChart({ items, periodStart, span, basePath }: Props
 
       {span === 'week' ? (
         // ── Week view: one section per day with 24-hour timeline ───────────────
-        <>
+        (<>
           {days.map((dayInfo) => {
             const dayItems = itemsByDay.get(dayInfo.key) ?? [];
             const rowIds: string[] = [];
@@ -323,10 +322,10 @@ export default function GanttChart({ items, periodStart, span, basePath }: Props
               </Box>
             );
           })}
-        </>
+        </>)
       ) : (
         // ── Month / Year view: flat Gantt timeline ─────────────────────────────
-        <Box>
+        (<Box>
           <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
             {flatData.label}
           </Typography>
@@ -392,7 +391,7 @@ export default function GanttChart({ items, periodStart, span, basePath }: Props
               })
             )}
           </Box>
-        </Box>
+        </Box>)
       )}
     </Box>
   );

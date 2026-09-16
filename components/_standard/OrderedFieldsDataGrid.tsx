@@ -27,7 +27,6 @@ import Button from '@mui/material/Button';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
-import SaveIcon from '@mui/icons-material/Save';
 
 interface OrderedFieldsDataGridProps {
   initialFields?: GridRowsProp;
@@ -268,7 +267,9 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
           </Tooltip>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             {fields.length === 0 ? (
-              <Typography color="text.secondary">No items.</Typography>
+              <Typography sx={{
+                color: "text.secondary"
+              }}>No items.</Typography>
             ) : (
               fields.map((row, index) => (
                 <Card key={row.id ?? index} variant="outlined">
@@ -278,7 +279,9 @@ const OrderedFieldsDataGrid = forwardRef<OrderedFieldsDataGridHandle, OrderedFie
                       if (!displayValue) return null;
                       return (
                         <Box key={col.field} sx={{ mt: 0.5 }}>
-                          <Typography variant="caption" color="text.secondary" component="span">
+                          <Typography variant="caption" component="span" sx={{
+                            color: "text.secondary"
+                          }}>
                             {col.headerName}:{' '}
                           </Typography>
                           <Typography variant="body2" component="span">

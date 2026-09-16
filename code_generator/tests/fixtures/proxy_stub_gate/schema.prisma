@@ -1,0 +1,39 @@
+// Self-contained fixture Prisma schema for the allOf-proxy dead-stub check.
+// NOT the project's real prisma/schema.prisma -- this file exists only to
+// run a minimal `widget` (a real Prisma model) and `widget_proxy` (an
+// allOf proxy view of `widget` with no Prisma model of its own, mirroring
+// the real schema's `setting` -> `user` shape) pair through the real
+// build_user_schema.py -> generate.py pipeline in isolation.
+//
+// Modeled on code_generator/tests/fixtures/invalidate_gate/schema.prisma's
+// self-contained-fixture pattern.
+
+generator client {
+  provider = "prisma-client"
+  output   = "./.generated-client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model user {
+  id              String   @id @default(cuid())
+  name            String
+  email           String   @unique
+  created_widgets widget[] @relation("WidgetCreator")
+  updated_widgets widget[] @relation("WidgetUpdater")
+}
+
+model widget {
+  id         String   @id @default(cuid())
+  name       String
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("WidgetCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("WidgetUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}

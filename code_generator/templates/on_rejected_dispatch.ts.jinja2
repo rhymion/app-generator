@@ -30,10 +30,10 @@ export function isTerminalReject(entityType: string): boolean {
  * For terminal entities, called only when approved_at guard passes (idempotent).
  */
 export async function dispatchOnRejected(
-  tx: Tx,
-  entityType: string,
-  approvableId: string,
-  rejectedByUserId: string,
+  {% if rejected_body_needed %}tx{% else %}_tx{% endif %}: Tx,
+  {% if rejectable_entities %}entityType{% else %}_entityType{% endif %}: string,
+  {% if rejected_body_needed %}approvableId{% else %}_approvableId{% endif %}: string,
+  {% if rejected_hook_needed %}rejectedByUserId{% else %}_rejectedByUserId{% endif %}: string,
 ): Promise<void> {
 {% for entity in rejectable_entities %}
   if (entityType === '{{ entity.snake_name }}') {

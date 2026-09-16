@@ -1,5 +1,5 @@
 """
-Tests for the three generator defects fixed in subtask_154a.
+Tests for the three generator defects described below.
 
 Defect 1 (labelField ignored): embedded non-independent list children must
   use the labelField from x-relationships, not hardcode `f.name`.

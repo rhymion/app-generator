@@ -136,12 +136,12 @@ test:e2e:cy:api)` only covers that exact standalone invocation. The moment
 you (or an agent) chain it with something else in one Bash call —
 
 ```bash
-cd /path/to/worktree && docker compose --env-file .env.test -f docker-compose.test.yml up -d --wait && npm run db:push && npm run db:generate && npm run db:seed-tenant && npm run test:e2e:cy:api
+cd /path/to/worktree && docker compose --env-file .env.test -f docker-compose.test.yml up -d --wait && npm run db:push && npm run db:generate && npm run db:seed-baseline && npm run test:e2e:cy:api
 ```
 
 — every one of `cd /path/to/worktree`, `docker compose --env-file
 .env.test -f docker-compose.test.yml up -d --wait`, `npm run db:push`,
-`npm run db:generate`, `npm run db:seed-tenant`, and `npm run
+`npm run db:generate`, `npm run db:seed-baseline`, and `npm run
 test:e2e:cy:api` must have its own match, or the whole line prompts. This
 is why both `.claude/settings.json` files in this project pair carry
 explicit `Bash(cd *)` and `Bash(docker compose --env-file .env.test -f
@@ -160,7 +160,7 @@ which rule(s) each subcommand needs:
 | `cd <any path>` | `Bash(cd *)` |
 | `docker compose --env-file .env.test -f docker-compose.test.yml up -d --wait` | `Bash(docker compose --env-file .env.test -f docker-compose.test.yml *)` |
 | `docker compose --env-file .env.test -f docker-compose.test.yml down -v` | same rule (wildcard covers `up`/`down`/any subcommand) |
-| `npm run db:push` / `db:generate` / `db:seed-tenant` / `generate-code` / `check:generated` / `test:pytest` / `test:vitest` / `test:e2e:build` / `test:e2e:cy:api` / `test:e2e:cy:ui` / `lint` | exact `Bash(npm run <script>)` entry per script |
+| `npm run db:push` / `db:generate` / `db:seed-baseline` / `generate-code` / `check:generated` / `test:pytest` / `test:vitest` / `test:e2e:build` / `test:e2e:cy:api` / `test:e2e:cy:ui` / `lint` | exact `Bash(npm run <script>)` entry per script |
 | `npm audit --omit=dev --audit-level=high` | `Bash(npm audit --omit=dev --audit-level=high)` |
 | `pip-audit -r requirements.txt` | `Bash(pip-audit -r requirements.txt)` |
 | `git worktree add <path> <ref>` / `git worktree remove <path>` | `Bash(git worktree add *)` / `Bash(git worktree remove *)` |

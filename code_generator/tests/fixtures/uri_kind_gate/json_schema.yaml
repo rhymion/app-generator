@@ -1,0 +1,98 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+format-version: 3.0
+
+x-generator:
+  search:
+    default_scope: all
+
+x-pii:
+  type: string
+  enum: [direct, indirect, sensitive, none]
+
+x-retention:
+  type: string
+
+x-gdpr-mode:
+  type: string
+  enum: [internal, consumer, both]
+  default: both
+
+x-import-key:
+  type: array
+  items:
+    type: string
+
+definitions:
+  user:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name: {}
+      email: {}
+
+  # The child entity this fixture exists to exercise: a link-kind uri field
+  # and a default (image-kind) uri field, embedded into
+  # uri_kind_gate_wrapper's editable DataGrid -- cmd_792 path (iii). No
+  # x-generate: a fully embedded-only child (no own pages) is what makes
+  # generate.py treat it as non-independent and route it through
+  # column_def_context's editable in-place grid, rather than the read-only
+  # "own pages, shown embedded" path decimal_gate_item/decimal_gate_wrapper
+  # use for the relation-embed getters.ts coverage.
+  uri_kind_gate_item:
+    fields:
+      name: {}
+      link_field:
+        format: uri
+        x-uri-kind: link
+      image_field:
+        format: uri
+
+  # cmd_792: embeds uri_kind_gate_item as a to-many child list (lines,
+  # rendered by the editable column_def.tsx DataGrid), and carries its own
+  # link_field listed in x-display.table (rendered by the list-page
+  # ResponsiveListClient/DataGridClient -- cmd_792 path (ii)).
+  uri_kind_gate_wrapper:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: false
+      invalidate: false
+      api: false
+      export: false
+      test: false
+    x-relationships:
+      lines:
+        type: one-to-many
+        target: uri_kind_gate_item
+        labelField: name
+    x-import-key:
+      - name
+    x-display:
+      table:
+        - name:
+            primary: true
+            width: 150
+        - link_field:
+            width: 200
+    fields:
+      name: {}
+      link_field:
+        format: uri
+        x-uri-kind: link
+    required:
+      - lines
+    properties:
+      lines:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/uri_kind_gate_item"

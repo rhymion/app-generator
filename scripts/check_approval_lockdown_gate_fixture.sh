@@ -1,0 +1,155 @@
+#!/bin/bash
+# Approval-lockdown-gate fixture check (cmd_732).
+#
+# Runs a small, self-contained fixture entity (a nativeEnum status field
+# with x-approval.on_approved/on_rejected.set_fields declared on it)
+# through the real build_user_schema.py -> generate.py -> tsc pipeline and
+# type-checks the generated files that carry the value-lockdown-specific
+# branches: form_upsert_context's disabled-option rendering (FormUpsert.tsx),
+# service_validation.ts (WRITE_LOCKED_FIELDS create/update check -- the
+# shared mechanism cmd_857 generalized beyond x-approval, still exercised
+# here via this fixture's x-approval declaration -- shared by the REST API
+# route, the Server Action write path, AND (cmd_996, Issue #93) CSV import,
+# which now commits through add/update{{parent_pascal}} -- the same
+# service.ts convergence point -- instead of a raw tx.model.create/update,
+# so the import route's own former WRITE_LOCKED_FIELDS/findLockedViolation
+# duplicate is gone (folded away, not merely dead).
+#
+# Why this exists: this repo's own json_schema.yaml declares no x-approval
+# entity, so test:e2e:build's own tsc pass never compiles any of the above
+# branches -- a regression in any of them would only ever surface in a
+# downstream consumer schema, late. Mirrors scripts/check_decimal_gate_fixture.sh's
+# structure and rationale.
+#
+# Usage: bash scripts/check_approval_lockdown_gate_fixture.sh
+# Exit code: 0 = pass, non-zero = fail (schema/generation error or a real
+# tsc type error).
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+FIXTURE_DIR="code_generator/tests/fixtures/approval_lockdown_gate"
+OUT_DIR="$REPO_ROOT/.generated-approval-lockdown-gate"
+
+if [ ! -f "$FIXTURE_DIR/json_schema.yaml" ] || [ ! -f "$FIXTURE_DIR/schema.prisma" ]; then
+  echo "approval-lockdown-gate fixture check: fixture files not found under $FIXTURE_DIR" >&2
+  exit 1
+fi
+
+echo "== approval-lockdown-gate fixture check =="
+t0=$(date +%s.%N)
+
+rm -rf "$OUT_DIR"
+mkdir -p "$OUT_DIR/prisma" "$OUT_DIR/lib" "$OUT_DIR/app/api"
+cp "$FIXTURE_DIR/schema.prisma" "$OUT_DIR/prisma/schema.prisma"
+
+echo "-- build_user_schema.py (Stage 4 -> intermediate) --"
+python3 code_generator/build_user_schema.py \
+  "$FIXTURE_DIR/json_schema.yaml" \
+  "$OUT_DIR/prisma/schema.prisma" \
+  --out "$OUT_DIR/generated_json_schema.yaml"
+
+echo "-- generate.py (intermediate -> TS) --"
+python3 code_generator/generate.py "$OUT_DIR/generated_json_schema.yaml" "$OUT_DIR"
+
+echo "-- prisma generate (fixture-only client, isolated output) --"
+npx prisma generate --schema="$OUT_DIR/prisma/schema.prisma" >/tmp/approval_lockdown_gate_prisma_generate.log 2>&1 \
+  || { cat /tmp/approval_lockdown_gate_prisma_generate.log >&2; exit 1; }
+
+# Fixture-only shims for stable, entity-independent shared libs that the
+# generated files import -- see fixtures/approval_lockdown_gate/shims/ for
+# the source of truth and why these exist rather than the real files.
+cp "$FIXTURE_DIR/shims/prisma.ts" "$OUT_DIR/lib/prisma.ts"
+cp "$FIXTURE_DIR/shims/authz.ts" "$OUT_DIR/lib/authz.ts"
+cp "$FIXTURE_DIR/shims/api-auth.ts" "$OUT_DIR/lib/api-auth.ts"
+cp "$FIXTURE_DIR/tsconfig.json" "$OUT_DIR/tsconfig.json"
+
+echo "-- tsc --noEmit (FormUpsert.tsx + service_validation.ts + import route) --"
+set +e
+npx tsc -p "$OUT_DIR/tsconfig.json"
+tsc_status=$?
+set -e
+
+# Content assertions -- tsc only proves the emitted code TYPE-CHECKS, not
+# that the value-lockdown branches actually rendered (an entity with no
+# locked values would type-check too, silently proving nothing). Assert the
+# expected markers are present in the generated output.
+echo "-- content checks (locked-value markers actually rendered) --"
+content_status=0
+_SV="$OUT_DIR/lib/approval_lockdown_gate_item/service_validation.ts"
+_IMPORT_ROUTE="$OUT_DIR/app/api/approval_lockdown_gate_item/import/route.ts"
+_FORM="$OUT_DIR/components/approval_lockdown_gate_item/FormUpsert.tsx"
+
+# cmd_857: write_lockdown_gate_item has NO x-approval block -- only
+# x-write-locked-values -- so these markers being present proves the
+# lockdown mechanism works independently of x-approval, not merely that
+# the shared code path still handles the x-approval case correctly.
+_WL_SV="$OUT_DIR/lib/write_lockdown_gate_item/service_validation.ts"
+_WL_IMPORT_ROUTE="$OUT_DIR/app/api/write_lockdown_gate_item/import/route.ts"
+_WL_FORM="$OUT_DIR/components/write_lockdown_gate_item/FormUpsert.tsx"
+
+# cmd_1032: write_lockdown_gate_item_view is a genuine proxy view of
+# write_lockdown_gate_item (allOf references the canonical view, not the
+# raw entity directly) with its OWN x-write-locked-values declaration
+# (locks 'submitted', a value the raw entity leaves writable). Proves both
+# directions of view-scoping in one generated file: the raw's own locked
+# values (in_underwriting/issued) must NOT be inherited by default, and
+# the view's own declaration must still take effect.
+_WLV_SV="$OUT_DIR/lib/write_lockdown_gate_item_view/service_validation.ts"
+
+for f in "$_SV" "$_IMPORT_ROUTE" "$_FORM" "$_WL_SV" "$_WL_IMPORT_ROUTE" "$_WL_FORM" "$_WLV_SV"; do
+  if [ ! -f "$f" ]; then
+    echo "approval-lockdown-gate fixture check FAILED: expected generated file missing: $f" >&2
+    content_status=1
+  fi
+done
+
+if [ "$content_status" -eq 0 ]; then
+  grep -q "WRITE_LOCKED_FIELDS" "$_SV" || { echo "FAILED: $_SV missing WRITE_LOCKED_FIELDS" >&2; content_status=1; }
+  grep -q '"active"' "$_SV" || { echo "FAILED: $_SV missing locked value 'active'" >&2; content_status=1; }
+  # cmd_996: the import route now commits through addApprovalLockdownGateItem/
+  # updateApprovalLockdownGateItem instead of a raw tx.*.create/update --
+  # validateOnAdd/validateOnUpdate (which call into the WRITE_LOCKED_FIELDS
+  # check just asserted against $_SV above) enforce this for CSV import too,
+  # so the import route's own former duplicate check must be ABSENT, not
+  # present -- its presence would mean the fold-away regressed back to a
+  # second, driftable copy of the same rule.
+  grep -q "findLockedViolation" "$_IMPORT_ROUTE" && { echo "FAILED: $_IMPORT_ROUTE still has its own findLockedViolation duplicate (should delegate to add/updateApprovalLockdownGateItem instead, cmd_996)" >&2; content_status=1; }
+  grep -q "await addApprovalLockdownGateItem(actorId," "$_IMPORT_ROUTE" || { echo "FAILED: $_IMPORT_ROUTE does not call addApprovalLockdownGateItem (service.ts convergence, cmd_996)" >&2; content_status=1; }
+  grep -q "await updateApprovalLockdownGateItem(actorId, action.id," "$_IMPORT_ROUTE" || { echo "FAILED: $_IMPORT_ROUTE does not call updateApprovalLockdownGateItem (service.ts convergence, cmd_996)" >&2; content_status=1; }
+  grep -q "disabled: true" "$_FORM" || { echo "FAILED: $_FORM missing disabled: true option" >&2; content_status=1; }
+
+  grep -q "WRITE_LOCKED_FIELDS" "$_WL_SV" || { echo "FAILED: $_WL_SV missing WRITE_LOCKED_FIELDS (x-write-locked-values without x-approval)" >&2; content_status=1; }
+  grep -q '"in_underwriting"' "$_WL_SV" || { echo "FAILED: $_WL_SV missing locked value 'in_underwriting'" >&2; content_status=1; }
+  grep -q "findLockedViolation" "$_WL_IMPORT_ROUTE" && { echo "FAILED: $_WL_IMPORT_ROUTE still has its own findLockedViolation duplicate (should delegate to add/updateWriteLockdownGateItem instead, cmd_996)" >&2; content_status=1; }
+  grep -q "await addWriteLockdownGateItem(actorId," "$_WL_IMPORT_ROUTE" || { echo "FAILED: $_WL_IMPORT_ROUTE does not call addWriteLockdownGateItem (service.ts convergence, cmd_996)" >&2; content_status=1; }
+  grep -q "disabled: true" "$_WL_FORM" || { echo "FAILED: $_WL_FORM missing disabled: true option" >&2; content_status=1; }
+
+  # cmd_1032: view-scoping, both directions in one file.
+  grep -q "WRITE_LOCKED_FIELDS" "$_WLV_SV" || { echo "FAILED: $_WLV_SV missing WRITE_LOCKED_FIELDS (proxy view's own x-write-locked-values)" >&2; content_status=1; }
+  # (a) opt-in: the view's own declared value must be locked.
+  grep -q '"submitted"' "$_WLV_SV" || { echo "FAILED: $_WLV_SV missing its own locked value 'submitted' -- proxy view's own x-write-locked-values declaration was not applied" >&2; content_status=1; }
+  # (b) default-unlock: the raw entity's declared values must NOT leak
+  # into a proxy view that never declared them itself.
+  grep -q "in_underwriting" "$_WLV_SV" && { echo "FAILED: $_WLV_SV contains 'in_underwriting' -- raw entity's own x-write-locked-values leaked into a proxy view that never declared it" >&2; content_status=1; }
+  grep -q '"issued"' "$_WLV_SV" && { echo "FAILED: $_WLV_SV contains 'issued' -- raw entity's own x-write-locked-values leaked into a proxy view that never declared it" >&2; content_status=1; }
+fi
+
+t1=$(date +%s.%N)
+elapsed=$(echo "$t1 - $t0" | bc)
+echo "== approval-lockdown-gate fixture check: $(printf '%.1f' "$elapsed")s, tsc exit=$tsc_status, content exit=$content_status =="
+
+if [ "$tsc_status" -ne 0 ]; then
+  echo "approval-lockdown-gate fixture check FAILED -- a value-lockdown branch (see" >&2
+  echo "scripts/check_approval_lockdown_gate_fixture.sh header for the list) no" >&2
+  echo "longer type-checks." >&2
+  exit "$tsc_status"
+fi
+
+if [ "$content_status" -ne 0 ]; then
+  exit "$content_status"
+fi
+
+exit 0

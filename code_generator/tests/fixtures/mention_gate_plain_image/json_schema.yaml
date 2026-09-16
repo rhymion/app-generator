@@ -1,0 +1,125 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+format-version: 3.0
+
+# Sibling of ../mention_gate/ (cmd_803): identical fixture except `user.image`
+# stays a plain `format: uri` string column instead of a direct-attachment FK
+# (`image_id`). `type: direct` is opt-in per consumer schema, not a repo-wide
+# migration -- a schema can legally declare `x-mention: true` while never
+# having adopted the FK shape for `user.image`. The original mention_gate
+# fixture's `user.image_id` is FK-shaped, so it only ever type-checked one of
+# the two select shapes build_context.py's comment/mention creator avatar
+# select can produce; this fixture exercises the other one (plain `image:
+# true` scalar select instead of `image: { select: { path: true } } }`).
+# Keep in sync with ../mention_gate/json_schema.yaml by hand aside from the
+# `user.image`/`user.image_id` field itself.
+
+x-generator:
+  search:
+    default_scope: all
+
+x-pii:
+  type: string
+  enum: [direct, indirect, sensitive, none]
+
+x-retention:
+  type: string
+
+x-mention:
+  type: boolean
+  default: false
+
+x-gdpr-mode:
+  type: string
+  enum: [internal, consumer, both]
+  default: both
+
+x-import-key:
+  type: array
+  items:
+    type: string
+
+definitions:
+  # See ../mention_gate/json_schema.yaml's header for why comment/reaction/
+  # commentable are hand-copied here rather than pulled in automatically.
+  user:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name: {}
+      email: {}
+      image:
+        format: uri
+  commentable:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    required:
+      - comments
+    properties:
+      comments:
+        type: array
+        x-outputType: comments
+        items:
+          $ref: "#/definitions/comment"
+  comment:
+    fields:
+      message:
+        x-mention: true
+      commentable_id: {}
+  reaction:
+    x-internal:
+      page: false
+      embed: false
+      api: custom
+    fields:
+      type:
+        enum:
+          - like
+          - love
+          - laugh
+          - surprised
+          - sad
+      user_id:
+        x-relationship: {}
+      comment_id:
+        x-relationship:
+          labelField: id
+          constantParent: true
+
+  # The one entity this fixture exists to exercise -- same shape as
+  # ../mention_gate/'s mention_gate_item, renamed to avoid any risk of Prisma
+  # model collision if both fixtures were ever generated into the same
+  # output directory.
+  mention_gate_plain_image_item:
+    x-generate:
+      list: false
+      view: true
+      new: false
+      edit: true
+      delete: false
+      invalidate: false
+      api: true
+      test: false
+    fields:
+      name: {}
+      commentable_id:
+        x-relationship:
+          type: one-to-one_bridge
+          target: commentable
+          labelField: id
+    properties:
+      commentable:
+        $ref: "#/definitions/commentable"

@@ -1,0 +1,20 @@
+// AUTO-GENERATED - DO NOT EDIT
+//
+// Post-approval edit lockdown (cmd_846). Editing a {{ parent }} row is
+// forbidden while it sits at one of the locked statuses below -- the
+// submit_on value (submitted / under review) and on_approved.set_fields'
+// value for the same field (approved). A non-terminal rejection or
+// withdrawal moves the field to a different value, which unlocks editing
+// again. Called from lib/{{ parent }}/service.ts's update{{ parent_pascal }}
+// -- the one choke point both the REST PUT route and the upsert{{ parent_pascal }}
+// Server Action already funnel through.
+import { AppError } from '@/lib/_errors';
+
+const LOCKED_{{ lockdown_field | upper }}_VALUES: unknown[] = {{ lockdown_locked_values_ts }};
+
+export function assertEditAllowed(entity: { {{ lockdown_field }}?: unknown } | null | undefined): void {
+  if (!entity) return;
+  if (LOCKED_{{ lockdown_field | upper }}_VALUES.includes(entity.{{ lockdown_field }})) {
+    throw new AppError('PERMISSION_DENIED', 'edit_forbidden:approval_locked');
+  }
+}

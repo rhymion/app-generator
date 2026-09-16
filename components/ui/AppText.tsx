@@ -52,16 +52,16 @@ export default function AppText({
     <Typography
       variant={variant}
       color={color}
-      fontWeight={fontWeight}
-      fontFamily={fontFamily}
-      textAlign={textAlign}
-      mb={mb}
-      mt={mt}
-      ml={ml}
       className={className}
       component={component as React.ElementType}
-      sx={Object.keys(sxInternal).length > 0 ? sxInternal : undefined}
-    >
+      sx={[{
+        fontWeight: fontWeight,
+        fontFamily: fontFamily,
+        textAlign: textAlign,
+        mb: mb,
+        mt: mt,
+        ml: ml
+      }, Object.keys(sxInternal).length > 0 ? sxInternal : false]}>
       {children}
     </Typography>
   );

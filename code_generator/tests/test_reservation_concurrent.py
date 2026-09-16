@@ -337,12 +337,31 @@ def _get_ledger_service_context() -> dict:
         "type": ["string", "null"],
         "pattern": "^c[a-z0-9]{24,}$",
     }
+    # cmd_562: inventory's own location_id FK — identity is copied by id,
+    # not rendered as a denormalized display string, so resolve_ledger_domain
+    # no longer inspects this x-relationship. Declared here for realism only.
+    schema["definitions"]["inventory"]["properties"]["location_id"] = {
+        "type": "string",
+        "x-relationship": {"type": "many-to-one", "target": "location", "labelField": "name"},
+    }
+    schema["definitions"]["location"] = {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+            "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+            "name": {"type": "string"},
+        },
+    }
     # OD-1: top-level domain declaration resolved via transaction.ledgerDomain
     schema["x-ledger-entities"] = {
         "inventory_domain": {
             "pool": "inventory",
             "ledger": "inventory_transaction",
             "transactionable": "inventory_transactionable",
+            "itemField": "product_id",
+            "locationField": "location_id",
+            "lotField": "lot_number",
+            "expirationField": "expiration_date",
         }
     }
     entity = {

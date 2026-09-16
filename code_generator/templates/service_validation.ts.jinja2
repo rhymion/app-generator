@@ -1,4 +1,6 @@
 import prisma from '@/lib/prisma';
+import { validateCustomRules } from '@/lib/{{ model }}/service_validation_custom';
+import { AppError } from '@/lib/_errors';
 
 type TransactionClient = Pick<typeof prisma, '{{ model }}'{% for check in one_to_one_checks %} | '{{ check.target }}'{% endfor %}>;
 type RequiredField = { key: string; label: string };
@@ -10,11 +12,45 @@ const REQUIRED_FIELDS: RequiredField[] = [
 {% endfor %}
 ] ;
 
+const DECIMAL_FIELDS: RequiredField[] = [
+{% for field in decimal_fields %}
+  { key: '{{ field.key }}', label: '{{ field.label }}' },
+{% endfor %}
+] ;
+
+// Optional sign, digits, optional fractional part -- matches what a Prisma
+// Decimal column accepts. This is the authoritative guard for the REST
+// API / server-action write path (CSV import bypasses validateOnAdd/
+// validateOnUpdate entirely -- see api_import_route.ts.jinja2's own
+// DECIMAL_CELL_RE check).
+const DECIMAL_PATTERN = /^-?\d+(\.\d+)?$/;
+
+function isInvalidDecimal(value: unknown): boolean {
+  if (typeof value !== 'string' || value.trim() === '') return false;
+  return !DECIMAL_PATTERN.test(value.trim());
+}
+
 const ONE_TO_ONE_RELATIONS: OneToOneRelation[] = [
 {% for check in one_to_one_checks %}
   { key: '{{ check.key }}', label: '{{ check.label }}', target: '{{ check.target }}', required: {{ 'true' if check.required else 'false' }} },
 {% endfor %}
 ] ;
+{% if write_locked_fields %}
+
+// Write-locked values: values a field may only receive through the system
+// (derived from that entity's x-approval on_approved/on_rejected
+// set_fields and/or its x-write-locked-values declarations). A plain
+// create/update attempting to write one of these values is rejected here
+// -- system writers reach this data via a direct transaction call, not
+// this service layer.
+type WriteLockedField = { key: string; values: unknown[] };
+
+const WRITE_LOCKED_FIELDS: WriteLockedField[] = [
+{% for field in write_locked_fields %}
+  { key: '{{ field }}', values: {{ write_locked_values[field] | tojson }} },
+{% endfor %}
+] ;
+{% endif %}
 
 function isMissingValue(value: unknown): boolean {
   if (value === null || value === undefined) return true;
@@ -31,10 +67,46 @@ function isMissingValue(value: unknown): boolean {
   return false;
 }
 
-async function validateSchemaRules(tx: TransactionClient, data: Record<string, unknown>, currentId: string | null): Promise<void> {
+// cmd_834: validateCustomRules's declared arity varies by entity -- newly
+// generated stubs accept the pre-edit row as a 4th parameter, but every
+// already-generated (GENERATED-ONCE, never rewritten in place)
+// service_validation_custom.ts across every existing consumer entity still
+// declares the pre-cmd_834 3-parameter signature. A function type with
+// fewer parameters is always structurally assignable to one with more (the
+// same rule that lets `(x) => x` satisfy an Array.prototype.map callback
+// typed to take (item, index, array)), so casting the import through
+// CustomRulesFn below compiles against BOTH shapes with no back-compat
+// branch: an old 3-param implementation simply never binds the extra
+// argument (JavaScript silently discards a call's trailing arguments a
+// function doesn't declare); a new 4-param one receives it.
+//
+// cmd_891: actorId is added the same way, as a 5th parameter -- unlike
+// prevRow it is never null at either call site (add{{ parent_pascal }}/
+// update{{ parent_pascal }} both declare `actorId: string`, resolved from
+// the session cookie on the Server Action path and from the API key on the
+// REST path -- see resolveActorId()/authenticateApiKey() in
+// lib/api-auth.ts), so it is typed as a plain `string`, not
+// `string | null`. Existing 3- and 4-parameter hand-written implementations
+// widen the same structural way prevRow's did: a 5th argument they don't
+// declare is silently discarded at the call site.
+type CustomRulesFn = (
+  tx: TransactionClient,
+  data: Record<string, unknown>,
+  currentId: string | null,
+  prevRow: Record<string, unknown> | null,
+  actorId: string,
+) => Promise<void>;
+
+async function validateSchemaRules(tx: TransactionClient, data: Record<string, unknown>, currentId: string | null, prevRow: Record<string, unknown> | null, actorId: string): Promise<void> {
   for (const field of REQUIRED_FIELDS) {
     if (isMissingValue(data[field.key])) {
-      throw new Error(`${field.label} is required`);
+      throw new AppError('VALIDATION', `${field.label} is required`, field.key, 'missing');
+    }
+  }
+
+  for (const field of DECIMAL_FIELDS) {
+    if (isInvalidDecimal(data[field.key])) {
+      throw new AppError('VALIDATION', `${field.label} must be a valid decimal number`, field.key, 'invalid');
     }
   }
 
@@ -42,7 +114,7 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
     const value = data[relation.key];
     if (isMissingValue(value)) {
       if (relation.required) {
-        throw new Error(`${relation.label} is required`);
+        throw new AppError('VALIDATION', `${relation.label} is required`, relation.key, 'missing');
       }
       continue;
     }
@@ -54,7 +126,7 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
       select: { id: true },
     });
     if (!targetExists) {
-      throw new Error(`${relation.label} does not exist`);
+      throw new AppError('VALIDATION', `${relation.label} does not exist`, relation.key, 'invalid');
     }
 
     const conflict = await tx.{{ model }}.findFirst({
@@ -64,17 +136,68 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
       select: { id: true },
     });
     if (conflict) {
-      throw new Error(`${relation.label} is already linked`);
+      throw new AppError('CONFLICT', `${relation.label} is already linked`, relation.key);
     }
+  }
+{% if write_locked_fields %}
+
+  {
+    let currentRow: Record<string, unknown> | null = null;
+    for (const field of WRITE_LOCKED_FIELDS) {
+      if (!(field.key in data)) continue;
+      const submitted = data[field.key];
+      if (!field.values.includes(submitted)) continue;
+      if (currentId !== null) {
+        if (currentRow === null) {
+          currentRow = (await tx.{{ model }}.findUnique({
+            where: { id: currentId },
+            select: {{ write_locked_values_select }},
+          })) as Record<string, unknown> | null;
+        }
+        // No-op resubmission of the value the row already holds is not a
+        // lockdown violation -- it was already written by a prior operation.
+        if (currentRow && currentRow[field.key] === submitted) continue;
+      }
+      throw new AppError(
+        'VALIDATION',
+        `${field.key} cannot be set to this value directly -- it is managed by the system`,
+        field.key,
+        'invalid',
+      );
+    }
+  }
+{% endif %}
+
+  // cmd_652: hand-written entity-specific business rules (e.g. a
+  // self-referential relation that must only link same-"chain" rows) live
+  // entirely in lib/{{ model }}/service_validation_custom.ts, a
+  // GENERATED-ONCE stub — see that file for the socket contract. This call
+  // is unconditional and identical for every entity; the generator carries
+  // no knowledge of what (if anything) the hook checks.
+  //
+  // cmd_830: a hand-written rule rejects a value that IS present (e.g. "X
+  // is not a party on the claimed policy") -- never a missing one, since
+  // the REQUIRED_FIELDS loop above already owns that case for any field it
+  // covers. service_validation_custom.ts predates the 'reason' discriminator
+  // and always constructs AppError('VALIDATION', ...) with no 4th argument,
+  // so re-tag it here rather than requiring every hand-written file across
+  // every consumer project to be edited.
+  try {
+    await (validateCustomRules as CustomRulesFn)(tx, data, currentId, prevRow, actorId);
+  } catch (e) {
+    if (e instanceof AppError && e.code === 'VALIDATION' && !e.reason) {
+      throw new AppError('VALIDATION', e.message, e.field, 'invalid');
+    }
+    throw e;
   }
 }
 
-export async function validateOnAdd(tx: TransactionClient, data: Record<string, unknown>): Promise<void> {
-  await validateSchemaRules(tx, data, null);
+export async function validateOnAdd(tx: TransactionClient, data: Record<string, unknown>, actorId: string): Promise<void> {
+  await validateSchemaRules(tx, data, null, null, actorId);
 }
 
-export async function validateOnUpdate(tx: TransactionClient, id: string, data: Record<string, unknown>): Promise<void> {
-  await validateSchemaRules(tx, data, id);
+export async function validateOnUpdate(tx: TransactionClient, id: string, data: Record<string, unknown>, prevRow: Record<string, unknown> | null, actorId: string): Promise<void> {
+  await validateSchemaRules(tx, data, id, prevRow, actorId);
 }
 {% if reservation_config and reservation_config.mode == 'item' and reservation_config.dateRange %}
 

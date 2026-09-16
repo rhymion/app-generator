@@ -25,6 +25,7 @@ from generators_test import (
     prisma_value,
     cypress_create_value,
     cypress_edit_value,
+    _child_scalar_entries,
     _get_dep_populate_fields,
     _get_dep_extra_required_fields,
     helper_context as _test_helper_context,
@@ -212,6 +213,63 @@ class TestCypressEditValueTimeFormat:
 
 
 # ---------------------------------------------------------------------------
+# 2c-2. DataGrid-child date/date-time/time fields need the ISO string their
+# actual native input expects for cy.type() — not value_fn's human-readable
+# top-level form format.
+#
+# generators.py's column_def codegen (issue #540) renders a `format: date`
+# DataGrid-child column with MUI's dedicated `type: 'date'` GridColDef —
+# native `<input type="date">`, 10-character `YYYY-MM-DD`. `format:
+# date-time` and `format: time` columns have no dedicated MUI type and keep
+# `type: 'dateTime'` — native `<input type="datetime-local">`, 16-character
+# `YYYY-MM-DDThh:mm` — see test_embedded_datagrid_column_date_format.py and
+# MUI's own GridEditDateCell, which branches the rendered <input> on
+# `colDef.type` (`type: isDateTime ? 'datetime-local' : 'date'`,
+# node_modules/@mui/x-data-grid/components/cell/GridEditDateCell.js). Cypress's
+# cy.type() enforces the ISO format matching whichever native input is
+# actually rendered — typing '01/16/2025' (the top-level DateTimeWrapper's
+# keyboard-sectioned format) throws "Typing into a datetime input with
+# `cy.type()` requires a valid datetime with the format
+# `YYYY-MM-DDThh:mm`..." (parent1.cy.ts 2.1/2.2/3.1
+# failures — end_date is a DataGrid-child `format: date` field), while
+# typing a 16-character value into the now-`type: 'date'` input throws the
+# native-input equivalent (issue #542, found once #540 switched `format:
+# date` DataGrid-child columns to `type: 'date'` without updating this
+# reformatting helper to match).
+# ---------------------------------------------------------------------------
+class TestChildDatetimeIsoValue:
+    def test_date_format_create_value_converted_to_iso(self):
+        field = {'category': 'datetime', 'prop_name': 'end_date', 'format': 'date'}
+        entries = _child_scalar_entries([field], 'Parent1 Child2', cypress_create_value)
+        assert entries == ["end_date: '2025-01-16'"]
+
+    def test_date_format_edit_value_converted_to_iso(self):
+        field = {'category': 'datetime', 'prop_name': 'start_date', 'format': 'date'}
+        entries = _child_scalar_entries([field], 'Parent1 Child2', cypress_edit_value)
+        assert entries == ["start_date: '2025-06-15'"]
+
+    def test_datetime_format_create_value_converted_to_iso(self):
+        field = {'category': 'datetime', 'prop_name': 'created_at'}
+        entries = _child_scalar_entries([field], 'Thing', cypress_create_value)
+        assert entries == ["created_at: '2025-01-15T09:00'"]
+
+    def test_time_format_create_value_converted_to_iso(self):
+        """Time-only fields have no date component in value_fn's output — the
+        grid's datetime-local input still requires one, so a fixed
+        placeholder date is paired with the parsed time."""
+        field = {'category': 'datetime', 'prop_name': 'blood_sampling_time', 'format': 'time'}
+        entries = _child_scalar_entries([field], 'Checkup', cypress_create_value)
+        assert entries == ["blood_sampling_time: '2025-01-15T09:00'"]
+
+    def test_non_datetime_scalar_fields_unaffected(self):
+        """text/number/boolean fields keep going through the unmodified else/
+        boolean-number branches — only `category == 'datetime'` reformats."""
+        text_field = {'category': 'text', 'prop_name': 'name'}
+        entries = _child_scalar_entries([text_field], 'Parent1 Child2', cypress_create_value)
+        assert entries == ["name: 'Test Parent1 Child2'"]
+
+
+# ---------------------------------------------------------------------------
 # 2d. dep helpers must be idempotent — re-callable in a single test without
 # tripping @unique constraints (e.g. product.code)
 # ---------------------------------------------------------------------------
@@ -220,7 +278,7 @@ class TestDepHelperIdempotency:
     """`populateXxxDependencies` is called multiple times in a single test
     (parent populator + child populators each call it). The helper must be
     idempotent — find an existing row, fall back to create. The helper
-    context exposes `lookup_field` / `lookup_value` per dep so the template
+    context exposes `lookup_field` / `lookup_where*` per dep so the template
     can emit the find-or-create pattern."""
 
     def _schema(self) -> dict:
@@ -262,7 +320,7 @@ class TestDepHelperIdempotency:
         )
         product_dep = next(d for d in ctx["deps"] if d["target"] == "product")
         assert product_dep["lookup_field"] == "name"
-        assert product_dep["lookup_value"] == "'Test Product'"
+        assert product_dep["lookup_where"] == "{ name: 'Test Product A' }"
 
     def test_dep_lookup_value_second_for_needs_second(self):
         """needs_second deps also need a deterministic name for the 2nd row's
@@ -273,7 +331,7 @@ class TestDepHelperIdempotency:
             {"list": True, "view": True, "new": True, "edit": True, "delete": True, "api": True, "test": True, "fields": None},
         )
         product_dep = next(d for d in ctx["deps"] if d["target"] == "product")
-        assert product_dep["lookup_value_second"] == "'Test Product 2'"
+        assert product_dep["lookup_where_second"] == "{ name: 'Test Product B' }"
 
 
 # ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ Focuses on:
 """
 import pytest
 from build_context import build_context
-from generators import form_upsert_context
+from generators import form_upsert_context, form_view_context
 
 
 # ---------------------------------------------------------------------------
@@ -545,6 +545,22 @@ class TestSelectorOTOMandatory:
         ctx = self._build_ctx()
         assert "checkup" not in ctx["one_to_one_pre_creates"]
 
+    def test_required_relation_fields_init_var_uses_available_prefix(self):
+        """Regression (cmd_704 [2-a]): a required selector-OTO FK's
+        required_relation_fields entry must carry init_var
+        'initialAvailable{Target}s' — the name page_new.tsx.jinja2's Promise.all
+        actually destructures selector_oto_rels entries into (see
+        TestSelectorOTOMandatory.test_selector_oto_in_form_upsert_params above).
+        Before the fix, page_new.tsx.jinja2 re-derived this name from `target`
+        alone as plain 'initial{Target}s' — the same name used for a *different*
+        variable (see test_form_upsert.py's un-prefixed rel_opt_setups check) —
+        producing a reference to an identifier that Promise.all never declares.
+        """
+        ctx = self._build_ctx()
+        entry = next((f for f in ctx["required_relation_fields"] if f["target"] == "checkup"), None)
+        assert entry is not None, "checkup_id (required selector-OTO) must appear in required_relation_fields"
+        assert entry["init_var"] == "initialAvailableCheckups"
+
 
 # ---------------------------------------------------------------------------
 # Selector OTO — optional FK (nullable)
@@ -626,6 +642,107 @@ class TestSelectorOTOOptional:
         ctx = self._ctx()
         assert "initialUserAccounts" in ctx["rel_opt_setups"]
         assert "searchUserAccountOptions" in ctx["rel_opt_setups"]
+
+
+# ---------------------------------------------------------------------------
+# required_relation_fields init_var (cmd_704 [2-a])
+# ---------------------------------------------------------------------------
+
+class TestRequiredRelationFieldsInitVarPlainFK:
+    """
+    A required plain many-to-one FK (parent_rels_raw, NOT a selector-OTO) must
+    get an init_var of 'initial{Target}s' — the un-prefixed form. Guards the
+    other half of the cmd_704 fix: only selector-OTO entries should carry the
+    'Available' infix; a regression that always prefixes (or never prefixes)
+    would silently break one of the two branches.
+    """
+
+    def _schema(self) -> dict:
+        return {
+            "definitions": {
+                "category": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "properties": _base_props(),
+                },
+                "__product": {
+                    "type": "object",
+                    "required": ["id", "name", "category_id"],
+                    "properties": {
+                        **_base_props(),
+                        "category_id": _fk_field("category", nullable=False),
+                    },
+                },
+                "product": {
+                    "x-generate": {"list": True, "view": True, "new": True, "edit": True,
+                                   "delete": True, "api": False, "test": False},
+                    "allOf": [{"$ref": "#/definitions/__product"}],
+                },
+            }
+        }
+
+    def test_required_many_to_one_init_var_has_no_available_infix(self):
+        ctx = build_context(_entity("product"), self._schema())
+        entry = next((f for f in ctx["required_relation_fields"] if f["target"] == "category"), None)
+        assert entry is not None, "category_id (required many-to-one) must appear in required_relation_fields"
+        assert entry["init_var"] == "initialCategorys", (
+            f"Expected the plain 'initial{{Target}}s' form (no 'Available' infix), got {entry['init_var']!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# has_datetime_props via inline child-grid dayjs() calls (cmd_704 [2-c])
+# ---------------------------------------------------------------------------
+
+class TestChildGridDatetimePropsGate:
+    """
+    A parent with NO date/date-time/time field of its own, but with an inline
+    (non-independent) datagrid child that DOES have one, must still report
+    has_datetime_props=True — _new_prop_val() embeds a bare `dayjs()` call into
+    that child's createNew{Child}() (part of child_grid_setup), and
+    form_upsert.tsx.jinja2 only imports dayjs when has_datetime_props is True.
+    Before the fix, has_datetime_props only looked at the parent's own fields
+    plus a 'DateTimeWrapper' substring check over _rendered_body_text — neither
+    of which sees this child_grid_setup call site — so the import was silently
+    dropped and the generated FormUpsert.tsx failed to build.
+    """
+
+    def _schema(self) -> dict:
+        return {
+            "definitions": {
+                "log_entry": {
+                    "type": "object",
+                    "required": ["id", "logged_at"],
+                    "properties": {
+                        "id": {"type": "string"},
+                        "logged_at": {"type": "string", "format": "date"},
+                    },
+                },
+            }
+        }
+
+    def _ctx(self) -> dict:
+        entity = _entity("session", children=[
+            _child_entry("log_entry", "log_entries"),  # no output_type → inline DataGrid
+        ])
+        return _build_upsert_ctx(entity, self._schema())
+
+    def test_has_datetime_props_true_from_child_date_field_alone(self):
+        ctx = self._ctx()
+        assert ctx["has_datetime_props"] is True
+
+    def test_child_grid_setup_contains_bare_dayjs_call(self):
+        """Sanity check the fixture actually reproduces the emitting code path."""
+        ctx = self._ctx()
+        assert "dayjs(" in ctx["child_grid_setup"]
+
+    def test_parent_alone_has_no_datetime_props(self):
+        """Control: a parent with neither its own date field nor a datagrid
+        child with one must NOT report has_datetime_props."""
+        entity = _entity("session")
+        schema = {"definitions": {}}
+        ctx = _build_upsert_ctx(entity, schema)
+        assert ctx["has_datetime_props"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -722,7 +839,14 @@ class TestChildGridCreateNewIntegerDefault:
                                    "delete": True, "api": False, "test": False},
                     "allOf": [{"$ref": "#/definitions/__dashboard"}],
                 },
-                "__widget": {
+                # widget deliberately has NO x-generate (no own page): this test
+                # exercises the DataGrid-child createNew() default-value seed,
+                # which only runs for a child still embedded EDITABLE via the
+                # parent. A child with its own x-generate is independent and
+                # (cmd_1047 "Otsu" ruling) read-only from the parent regardless
+                # of output_type -- it would never reach child_grid_setup's
+                # createNew()/_new_prop_val() call at all.
+                "widget": {
                     "type": "object",
                     "required": ["id", "chart_type", "dashboard_id"],
                     "properties": {
@@ -751,11 +875,6 @@ class TestChildGridCreateNewIntegerDefault:
                         },
                     },
                 },
-                "widget": {
-                    "x-generate": {"list": True, "view": True, "new": True, "edit": True,
-                                   "delete": True, "api": False, "test": False},
-                    "allOf": [{"$ref": "#/definitions/__widget"}],
-                },
             }
         }
 
@@ -780,3 +899,184 @@ class TestChildGridCreateNewIntegerDefault:
         assert "nullable_score: null," in setup, (
             f"Expected 'nullable_score: null,' in child_grid_setup but got:\n{setup}"
         )
+
+
+# ---------------------------------------------------------------------------
+# format:uri, x-uri-kind:link field: FormUpsert input wiring
+# ---------------------------------------------------------------------------
+
+class TestUriKindLinkField:
+    """
+    A format:uri field with x-uri-kind: link is categorized into
+    cats['link_uri'] by build_context.py (already covered in
+    test_build_context.py), but form_upsert_context() must actually render
+    an input for it — regression guard for the field being silently absent
+    from FormUpsert.tsx (present only in getters/actions/service/types and
+    the read-only FormView), which on every edit save let a null FormData
+    read for the field silently overwrite (erase) any existing value.
+    """
+
+    def _schema(self) -> dict:
+        return {
+            "definitions": {
+                "__resource": {
+                    "type": "object",
+                    "required": ["id", "name", "reference_url"],
+                    "properties": {
+                        "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                        "name": {"type": "string"},
+                        "reference_url": {
+                            "type": "string",
+                            "format": "uri",
+                            "x-uri-kind": "link",
+                        },
+                    },
+                },
+                "resource": {
+                    "x-generate": {"list": True, "view": True, "new": True, "edit": True,
+                                   "delete": True, "api": False, "test": False},
+                    "allOf": [{"$ref": "#/definitions/__resource"}],
+                },
+            }
+        }
+
+    def _ctx(self) -> dict:
+        entity = _entity("resource")
+        return _build_upsert_ctx(entity, self._schema())
+
+    def test_link_field_renders_an_input(self):
+        """The field must actually appear in the rendered FormUpsert JSX."""
+        ctx = self._ctx()
+        assert "reference_url" in ctx["all_parent_fields_jsx"] or "referenceUrl" in ctx["all_parent_fields_jsx"], (
+            f"Expected reference_url/referenceUrl in all_parent_fields_jsx but got:\n{ctx['all_parent_fields_jsx']}"
+        )
+
+    def test_link_field_uses_url_typed_input(self):
+        """Rendered as a plain URL-typed text input, mirroring the image_props ref-based pattern."""
+        ctx = self._ctx()
+        jsx = ctx["all_parent_fields_jsx"]
+        assert "reference_urlRef" in jsx
+        assert "type: 'url'" in jsx or 'type: "url"' in jsx
+
+    def test_link_field_included_in_form_data_sets(self):
+        """The value must actually be sent on save — otherwise it is silently wiped (data loss)."""
+        ctx = self._ctx()
+        assert "reference_url" in ctx["parent_form_data_sets"], (
+            f"Expected 'reference_url' formData.set call but got:\n{ctx['parent_form_data_sets']}"
+        )
+
+    def test_link_field_included_in_validation_call(self):
+        ctx = self._ctx()
+        assert "reference_url" in ctx["validation_call"]
+
+    def test_link_field_uses_app_field_text(self):
+        ctx = self._ctx()
+        assert ctx["uses_app_field_text"] is True
+
+
+# ---------------------------------------------------------------------------
+# format:uri, x-uri-kind:link field: FormView (read-only) rendering
+# ---------------------------------------------------------------------------
+
+class TestUriKindLinkFieldFormView:
+    """
+    form_view.tsx.jinja2 already carries a `needs_link_display`-gated
+    AppFieldExternalLink import (dead plumbing until form_view_context()
+    actually sets it) — form_view_context() was unconditionally routing
+    every format:uri field (any x-uri-kind) into ImageDisplay, so a link
+    field's read-only view rendered an <img> tag pointed at an arbitrary
+    URL instead of a clickable external link.
+    """
+
+    def _schema(self) -> dict:
+        return {
+            "definitions": {
+                "__resource": {
+                    "type": "object",
+                    "required": ["id", "name", "reference_url"],
+                    "properties": {
+                        "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                        "name": {"type": "string"},
+                        "reference_url": {
+                            "type": "string",
+                            "format": "uri",
+                            "x-uri-kind": "link",
+                        },
+                    },
+                },
+                "resource": {
+                    "x-generate": {"list": True, "view": True, "new": True, "edit": True,
+                                   "delete": True, "api": False, "test": False},
+                    "allOf": [{"$ref": "#/definitions/__resource"}],
+                },
+            }
+        }
+
+    def _ctx(self) -> dict:
+        entity = _entity("resource")
+        ctx = build_context(entity, self._schema())
+        return form_view_context(ctx, self._schema())
+
+    def test_link_field_renders_external_link_not_image(self):
+        ctx = self._ctx()
+        assert "AppFieldExternalLink" in ctx["all_parent_fields"]
+        assert "ImageDisplay" not in ctx["all_parent_fields"]
+
+    def test_link_field_sets_needs_link_display(self):
+        ctx = self._ctx()
+        assert ctx["needs_link_display"] is True
+
+    def test_link_field_does_not_set_needs_image_display(self):
+        ctx = self._ctx()
+        assert ctx["needs_image_display"] is False
+
+
+# ---------------------------------------------------------------------------
+# format:uri, x-uri-kind:link field: x-readonly display in FormUpsert (edit mode)
+# ---------------------------------------------------------------------------
+
+class TestUriKindLinkFieldReadonlyInFormUpsert:
+    """
+    _readonly_display_field() (shared by form_view_context and
+    form_upsert_context's x-readonly-fields loop, cmd_642) unconditionally
+    rendered ImageDisplay for any format:uri field — an x-readonly link
+    field's read-only display inside the edit form inherited the same
+    ImageDisplay-instead-of-AppFieldExternalLink defect as form_view_context.
+    """
+
+    def _schema(self) -> dict:
+        return {
+            "definitions": {
+                "__resource": {
+                    "type": "object",
+                    "required": ["id", "name", "reference_url"],
+                    "properties": {
+                        "id": {"type": "string", "pattern": "^c[a-z0-9]{24,}$"},
+                        "name": {"type": "string"},
+                        "reference_url": {
+                            "type": "string",
+                            "format": "uri",
+                            "x-uri-kind": "link",
+                        },
+                    },
+                },
+                "resource": {
+                    "x-generate": {"list": True, "view": True, "new": True, "edit": True,
+                                   "delete": True, "api": False, "test": False},
+                    # x-readonly-fields is view-scoped (cmd_874 subtask_874d):
+                    # it lives on the view entity itself, not the shared raw
+                    # entity — see build_context.py's _ro_from_entity.
+                    "x-readonly-fields": ["reference_url"],
+                    "allOf": [{"$ref": "#/definitions/__resource"}],
+                },
+            }
+        }
+
+    def _ctx(self) -> dict:
+        entity = _entity("resource")
+        return _build_upsert_ctx(entity, self._schema())
+
+    def test_readonly_link_field_renders_external_link_not_image(self):
+        ctx = self._ctx()
+        assert "AppFieldExternalLink" in ctx["all_parent_fields_jsx"]
+        assert "ImageDisplay" not in ctx["all_parent_fields_jsx"]

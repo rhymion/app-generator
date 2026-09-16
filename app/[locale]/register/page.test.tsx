@@ -15,23 +15,39 @@ vi.mock("@/i18n/navigation", () => ({
 }));
 
 // Mock next-intl — return English strings matching messages/en.json
-vi.mock("next-intl", () => ({
-  useTranslations: (_namespace: string) => (key: string) => {
-    const messages: Record<string, string> = {
-      registerTitle: "Create your account",
-      namePlaceholder: "Full name",
-      emailPlaceholder: "Email address",
-      passwordPlaceholder: "Password",
-      confirmPasswordPlaceholder: "Confirm password",
-      passwordMismatch: "Passwords do not match",
-      registerButton: "Register",
-      haveAccount: "Already have an account? Sign in",
-      emailInUse: "Email address is already in use",
-      registrationFailed: "Registration failed",
-    };
-    return messages[key] ?? key;
-  },
-}));
+vi.mock("next-intl", () => {
+  const messages: Record<string, string> = {
+    registerTitle: "Create your account",
+    namePlaceholder: "Full name",
+    emailPlaceholder: "Email address",
+    passwordPlaceholder: "Password",
+    confirmPasswordPlaceholder: "Confirm password",
+    passwordMismatch: "Passwords do not match",
+    registerButton: "Register",
+    haveAccount: "Already have an account? Sign in",
+    emailInUse: "Email address is already in use",
+    registrationFailed: "Registration failed",
+    legalAgreementNotice: "By creating an account, you agree to our <terms>Terms of Service</terms> and <privacy>Privacy Policy</privacy>.",
+  };
+  const t = (key: string) => messages[key] ?? key;
+  t.rich = (
+    key: string,
+    tags: Record<string, (chunks: React.ReactNode) => React.ReactNode>,
+  ) => {
+    const raw = messages[key] ?? key;
+    const parts = raw.split(/(<\w+>.*?<\/\w+>)/g);
+    return parts.map((part, i) => {
+      const match = /^<(\w+)>(.*)<\/\w+>$/.exec(part);
+      if (match && tags[match[1]]) {
+        return <span key={i}>{tags[match[1]](match[2])}</span>;
+      }
+      return part;
+    });
+  };
+  return {
+    useTranslations: (_namespace: string) => t,
+  };
+});
 
 // Mock next-auth/react
 vi.mock("next-auth/react", () => ({
@@ -57,6 +73,16 @@ describe("RegisterPage", () => {
     expect(screen.getByTestId("password")).toBeInTheDocument();
     expect(screen.getByTestId("confirm-password")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /register/i })).toBeInTheDocument();
+  });
+
+  it("should link to the Terms of Service and Privacy Policy", () => {
+    render(<RegisterPage />);
+
+    const termsLink = screen.getByRole("link", { name: /terms of service/i });
+    expect(termsLink).toHaveAttribute("href", "/legal/terms");
+
+    const privacyLink = screen.getByRole("link", { name: /privacy policy/i });
+    expect(privacyLink).toHaveAttribute("href", "/legal/privacy");
   });
 
   it("should fail to register with no name", async () => {

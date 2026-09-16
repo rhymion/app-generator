@@ -3,7 +3,7 @@
 import { useTranslations } from 'next-intl';
 import type { FormViewProps } from '@/lib/audit_log/types';
 import Box from '@mui/material/Box';
-import { AppDetailShell, AppDetailHeader, AppFieldText, AppFieldBoolean, AppFieldRelation, AppSection } from '@/components/ui';
+import { AppDetailShell, AppDetailHeader, AppFieldText, AppFieldRelation, AppSection } from '@/components/ui';
 
 export default function FormView({ src, permissions }: FormViewProps) {
   const tf = useTranslations('Fields');

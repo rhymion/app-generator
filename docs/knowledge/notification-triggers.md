@@ -21,10 +21,13 @@ This behavior is generic and template-driven
 entity with `has_assignee_id`, and the `notify` import is added
 conditionally for those entities only.
 
-Currently, the `procedure` and `leave_request` entities declare
-`assignee_id` in the schema, so this trigger fires for both. Adding
-`assignee_id` (with the matching `x-relationship`) to another entity's
-schema definition enables the same behavior for that entity.
+This repo's own default `json_schema.yaml` currently declares no entity
+with an `assignee_id` field — `procedure`/`leave_request` were consuming-
+schema entities that exercised this trigger before they were removed from
+the default schema (they no longer appear under `definitions:` at all).
+The mechanism itself is unaffected by that removal: adding `assignee_id`
+(with the matching `x-relationship`) to any entity's schema definition
+enables the same behavior for that entity.
 
 ## Approval request creation notification
 
@@ -33,16 +36,33 @@ built to notify every user holding the approving role for a newly
 created `approval_request`, excluding the requester and optionally
 scoped to an organization.
 
-It is called from `lib/leave_request/service_after_create.ts:53` and
-`lib/receiving_receipt/service.ts:91,196` (both inside the entity's
+For a top-level entity, it is wired into the edge-trigger block
+`generators.py` emits directly into `service.ts.jinja2`'s
+`add{Parent}`/`update{Parent}` (called once inside the entity's
 `$transaction()`, using `tx` for the role/user lookup reads only —
-`notify()` itself is fire-and-forget and not part of that transaction).
-Wiring a new entity's approval flow up to this trigger is a matter of
-calling `notifyApprovalRequestCreated(tx, approvalRequestId, options)`
-from that entity's own `service_after_create.ts` once its
-`approval_request` row is created.
+`notify()` itself is fire-and-forget and not part of that transaction) —
+`leave_request`/`receiving_receipt` below are illustrative example entity
+names for a consuming schema (this repo's own default `json_schema.yaml`
+declares no entity with a `one-to-one_bridge` to `approvable`, so neither
+actually exists in this repo's own generated `lib/`; see
+`docs/knowledge/appendix/approval-flow.md` §16.2/§16.4). Wiring a new
+entity's approval flow up to this trigger needs nothing hand-written — any
+entity with the `approvable` bridge gets the edge-trigger block
+automatically; the same underlying call also appears in the split-action
+route (`code_generator/templates/split_action_route.ts.jinja2`) for
+`x-approval-lines` children (§16.10).
 
-### Link target convention (cmd_479)
+**Note**: this trigger also fires on **re-submission** — after a
+non-terminal rejection, editing the entity's own status field back to
+`x-approval.submit_on`'s value fires the same update-time edge trigger a
+first-time submission fires at create time, creating a fresh
+`approval_request` row (not reusing the rejected one) and notifying the
+approver-role holders normally. There is no separate resubmit code path
+to keep in sync with this trigger. See
+`docs/knowledge/appendix/approval-flow.md` §16.4/§16.6 for the full
+mechanism.
+
+### Link target convention
 
 An approval notification must link to the **approvable's own detail
 page** (`/{entityName}/view/{id}`) — the item an approver actually needs
@@ -56,19 +76,26 @@ which entity it belongs to, only the reverse (the target entity holds
 the target entity/row is already known at the call site:
 
 - **Known at call time** (Trigger #2, from any entity's own generated
-  code — the top-level `service_after_create_stub.ts.jinja2`, the
-  x-approval-lines post-create block, and the split-action route):
+  code — the top-level edge-trigger block, the x-approval-lines
+  post-create block, and the split-action route):
   the caller passes `targetEntityName`/`targetId` straight into
   `notifyApprovalRequestCreated()`'s options — no DB lookup needed, the
   entity name is a template-time literal and the row was just created.
 - **Only known at runtime** (Trigger #3, `lib/approval_request/actions.ts`
   approve/reject — a single shared handler for every entity's approval
-  requests): `lib/approval_request/resolve_target.ts` (generated,
-  mirrors `on_approved_dispatch.ts`'s per-entity branch pattern) maps
-  `entity_name + approvable_id -> { id }` via one
-  `tx.{entity}.findFirst({ where: { approvable_id } })` branch per
-  entity declaring an `approvable` bridge. Always emitted, even with
-  zero such entities, since `actions.ts` imports it unconditionally.
+  requests): `lib/approval_request/resolve_target.ts` (generated) maps
+  `entity_name` (a view key) `+ approvable_id -> { id }` via one
+  `tx.{model}.findFirst({ where: { approvable_id } })` branch per view
+  declaring an `approvable` bridge — keyed by view since a proxy view can
+  carry its own approval flows independent of other views sharing its
+  model (`docs/knowledge/appendix/approval-flow.md` §16.5), but querying
+  the row under the real Prisma model. The same module also exports
+  `resolveApprovableModel(entityType)`, which `actions_core.ts` uses to
+  translate the view key to a model name before calling
+  `on_approved_dispatch.ts`/`on_rejected_dispatch.ts` — those stay keyed
+  by model, since `x-approval` is a raw-entity-level declaration shared by
+  every view over that model. Both are always emitted, even with zero
+  such entities, since `actions.ts` imports them unconditionally.
 
 If neither can resolve a target, `href` is omitted (not defaulted to a
 guessed or broken link) — the bell shows a non-clickable notice instead.
@@ -78,7 +105,7 @@ config for this — the target link follows automatically from the
 entity's own `x-relationship: {type: one-to-one_bridge, target:
 approvable}` declaration.
 
-### Two independent approve/reject implementations (cmd_479)
+### Two independent approve/reject implementations
 
 `lib/approval_request/actions.ts`'s `approveApprovalRequest()` /
 `rejectApprovalRequest()` (server actions, called from the UI's
@@ -89,11 +116,41 @@ approvable}` declaration.
 the requester of the outcome) must be duplicated in both places; while
 investigating the link-target fix, the REST routes were found to have
 *no* Trigger #3 notify call at all (not a link bug — a fully missing
-notification, pre-existing before cmd_479). Fixed by copying the same
+notification, pre-existing before that link-target fix). Fixed by copying the same
 post-transaction `getApprovalRequestRecipient()` + `notify()` block from
 `actions.ts` into both route handlers. If either implementation changes
 its post-approval/rejection side effects, check whether the other needs
 the same change — there's no shared code path enforcing parity.
+
+## Approval order-reached notification
+
+A `preceded_by` chain (§16.5 of `docs/knowledge/appendix/approval-flow.md`) creates every flow's
+`approval_request` up front, when the approvable entity is created — so the "approval request
+creation notification" above already fires once for every flow's approver role at that point,
+including flows that aren't actionable yet because a preceding flow hasn't been approved. That
+earlier notification told them a request exists; it did not tell them when they could actually
+act on it. Approving a preceding flow used to be silent for the next flow's approvers — nothing
+told them their turn had arrived.
+
+`findNewlyActionableFollowFlowIds()` (`lib/approval_request/order-check.ts`) is called from inside
+`approveApprovalRequest()`'s transaction, after the status update, in **both** independent
+implementations (`lib/approval_request/actions_core.ts`'s server action and
+`app/api/approval_request/[id]/approve/route.ts`'s REST route — see the "Two independent
+approve/reject implementations" note above; this trigger needed the same duplication). It walks
+the just-approved flow's `followed_by` set and, for each follow-on flow, checks whether *all* of
+its `preceded_by` flows now have an approved `approval_request` on the same approvable — the same
+check `assertApprovalOrder()` runs in the opposite direction (backward from the flow being acted
+on, instead of forward from the flow that just completed).
+
+Any follow-on flow whose ordering constraint just became satisfied gets its approver role notified
+via `notifyApprovalOrderReached()` (`lib/_notifyApprovalRequest.ts`, type
+`approval_order_reached`) — fired after the transaction commits, using the plain `prisma` client
+(not `tx`), the same pattern Trigger #3 above uses. This is a distinct notification type from the
+creation-time `approval_requested` one those same approvers already hold, not a duplicate of it —
+the two are asserted separately (by type) in
+`cypress/e2e/api/multi_stage_approval_order_reached.cy.ts`. A `before.status !== 'approved'` check,
+read inside the same transaction as the status update, guards against re-sending this notification
+if the same request is ever approved more than once.
 
 ## Delivery mechanism
 
@@ -101,13 +158,13 @@ Both triggers share the same notification plumbing:
 
 - `lib/_notifier.ts` — each `notify()` call fire-and-forget writes a row
   to the `notification` Prisma model, the single source of truth read by
-  `app/api/notifications/*`. It also updates an in-process
-  `Map<userId, Notification[]>` (capped at 50 entries per user, 7-day
-  TTL swept on read), kept only for `listNotifications()` /
-  `unreadCount()` / `markAllRead()` backward compatibility — nothing in
-  `app/api/notifications/*` reads it. A DB write failure (e.g. an FK
-  violation because `user_id` no longer exists) is logged and swallowed,
-  never surfaced to the caller.
+  `app/api/notifications/*`. A DB write failure (e.g. an FK violation
+  because `user_id` no longer exists) is logged and swallowed, never
+  surfaced to the caller. (An in-process `Map<userId, Notification[]>`
+  used to back a second, in-memory read path here — `listNotifications()`
+  / `unreadCount()` / `markAllRead()` / `clearInbox()` — but it was
+  removed (in a later cleanup): nothing outside this module's own tests ever called
+  those four functions.)
 - `app/api/notifications/*` — REST endpoints backed by the
   `notification` table directly: `GET` (7-day filter, 50-row cap, newest
   first, plus unread count) and `POST mark-read` (bulk `updateMany`).

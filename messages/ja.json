@@ -23,6 +23,25 @@
     "previousPage": "前へ",
     "save": "保存"
   },
+  "Errors": {
+    "capacityExhausted": "利用可能な容量がありません。別の選択肢をお試しください。",
+    "fieldAlreadyLinked": "{field}は既に他のレコードにリンクされています。",
+    "fieldInvalid": "{field}の値が無効か、許可されていません。",
+    "fieldRequired": "{field}は必須です。",
+    "fkPermissionDenied": "{entity}の選択肢を閲覧する権限がありません。",
+    "fkPermissionDeniedHint": "管理者に{entity}の閲覧権限付与を依頼してください。",
+    "invalidSnapshot": "フォームのデータが古くなっています。ページを再読み込みしてください。",
+    "notFound": "レコードが見つかりませんでした。削除された可能性があります。",
+    "pageError": "問題が発生しました。",
+    "permissionDenied": "この操作を行う権限がありません。",
+    "relatedRecordInvalid": "関連するレコードが必要な条件を満たしていないため、この操作を完了できません。",
+    "reservationConflict": "この操作は既存の予約と競合しています。",
+    "reservationLocked": "この行の予約は既に確保済みのため、数量や条件を変更することはできません。",
+    "sessionExpired": "セッションの有効期限が切れました。再度サインインしてください。",
+    "staleMutation": "このレコードは、あなたが開いた後に更新されました。再読み込みして最新の変更内容をご確認ください。",
+    "tryAgain": "再試行",
+    "unknown": "予期しないエラーが発生しました。もう一度お試しください。"
+  },
   "EntityLabel": {
     "approvalFlow": "承認フロー",
     "auditLog": "監査ログ",
@@ -43,8 +62,10 @@
     "approve": "承認",
     "approverRole": "承認者ロール",
     "attachments": "添付ファイル",
+    "body": "Body",
     "chartType": "チャート種別",
     "comments": "コメント",
+    "content": "Content",
     "create": "作成",
     "created_at": "作成日時",
     "dashboard": "ダッシュボード",
@@ -66,6 +87,7 @@
     "name": "名前",
     "order": "No.",
     "password": "パスワード",
+    "pastSubmissions": "過去の申請",
     "precededBy": "先行",
     "read": "読取",
     "reject": "却下",
@@ -76,12 +98,14 @@
     "seriesField": "系列項目",
     "stackMode": "積み上げモード",
     "status": "ステータス",
+    "submit": "申請",
     "targetId": "Target Id",
     "targetTable": "Target Table",
     "title": "タイトル",
     "update": "更新",
     "users": "ユーザ",
-    "widgets": "ウィジェット"
+    "widgets": "ウィジェット",
+    "withdraw": "取り下げ"
   },
   "Chart": {
     "month": "月",
@@ -144,7 +168,17 @@
     "mfaCodeLabel": "6 桁の認証コード",
     "mfaHelper": "認証アプリを開いて現在のコードを入力してください。リカバリーコードも使用できます。",
     "mfaRequired": "サインインを完了するため、認証アプリの 6 桁コードを入力してください。",
-    "mfaInvalid": "コードが一致しません。新しい 6 桁コードを入力するか、リカバリーコードを使用してください。"
+    "mfaChallengeTitle": "本人確認",
+    "mfaInvalid": "コードが一致しません。新しい 6 桁コードを入力するか、リカバリーコードを使用してください。",
+    "mfaRateLimited": "試行回数が上限に達しました。数分待ってから再度お試しください。",
+    "legalAgreementNotice": "アカウントを作成すると、<terms>利用規約</terms>および<privacy>プライバシーポリシー</privacy>に同意したものとみなされます。"
+  },
+  "Legal": {
+    "termsTitle": "利用規約",
+    "privacyTitle": "プライバシーポリシー",
+    "templateDisclaimer": "本書はApp Generatorが生成した雛形です。法的助言ではありません——実際の運用に先立ち、必ず有資格の法務専門家によるレビューを受けてください。",
+    "languageSwitcherLabel": "他の言語",
+    "documentUnavailable": "この文書はまだ用意されていません。"
   },
   "Mfa": {
     "title": "2要素認証",
@@ -203,7 +237,9 @@
     "approved": "承認済み",
     "pending": "承認待ち",
     "rejected": "否決",
-    "terminal_rejected": "最終否決"
+    "split_invalidated": "分割済み(無効)",
+    "terminal_rejected": "最終否決",
+    "withdrawn": "取り下げ済み"
   },
   "ReactionType": {
     "laugh": "笑える",

@@ -1,8 +1,8 @@
 // AUTO-GENERATED - DO NOT EDIT
 import { Prisma } from '@/app/generated/prisma/client';
 import prisma from '@/lib/prisma';
-import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
-import { getModelPermissions } from '@/lib/authz';
+{% if has_org_filtered_search_entity %}import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+{% endif %}import { getModelPermissions } from '@/lib/authz';
 
 export interface SearchResult {
   entity_type: string;
@@ -41,8 +41,9 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
   const { q, entityTypes, userId, page, pageSize } = opts;
   const shouldCount = opts.count !== false;
 
-  const associatedOrgs = await getAssociatedOrganizations(userId);
+{% if has_org_filtered_search_entity %}  const associatedOrgs = await getAssociatedOrganizations(userId);
   const associatedOrgIds = associatedOrgs.map((o) => o.id);
+{% endif %}
 
 {% for entity in search_entities %}
   const {{ entity.perms_ts_var }} = await getModelPermissions('{{ entity.entity_type }}', userId);
@@ -56,12 +57,45 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
     // Build access WHERE mirroring build{{ entity.entity_type | replace("_", "") | title }}AccessWhere
     const {{ entity.access_clauses_ts_var }}: Prisma.Sql[] = [];
 {% if entity.should_filter_by_org %}
+{% if entity.org_relationship_optional %}
+    // org_relationship_optional: organization_id is nullable here, and
+    // `IN (...)` never matches NULL in SQL — an org-less row must stay
+    // visible to every caller (it belongs to no organization, so no
+    // organization boundary excludes it), not just callers who happen to
+    // share an org. Unconditional OR-null, no associatedOrgIds.length guard
+    // on admission — the length check below exists only because Prisma.join
+    // over an empty array cannot form a valid `IN (...)` list.
+    if (associatedOrgIds.length > 0) {
+      {{ entity.access_clauses_ts_var }}.push(Prisma.sql`({{ entity.org_id_field }} IN (${ Prisma.join(associatedOrgIds.map((id) => Prisma.sql`${ id }`)) }) OR {{ entity.org_id_field }} IS NULL)`);
+    } else {
+      {{ entity.access_clauses_ts_var }}.push(Prisma.sql`{{ entity.org_id_field }} IS NULL`);
+    }
+{% else %}
     if (associatedOrgIds.length > 0) {
       {{ entity.access_clauses_ts_var }}.push(Prisma.sql`{{ entity.org_id_field }} IN (${ Prisma.join(associatedOrgIds.map((id) => Prisma.sql`${ id }`)) })`);
     } else {
       {{ entity.access_clauses_ts_var }}.push(Prisma.sql`1=0`);
     }
 {% endif %}
+{% endif %}
+{% if entity.is_self_only %}
+    // x-self-only: any explicit read grant (general or Creator/Assignee)
+    // only ever exposes the caller's OWN rows here — general.read must
+    // never widen this to every user's rows, unlike the ordinary branch
+    // below. No admin_bypass path in cross-entity search (see build_context/
+    // generate.py comment) — only the dedicated per-entity getters offer it.
+    if (
+      {{ entity.general_read_ts_var }}
+      || {{ entity.perms_ts_var }}.permissions.creator?.read
+{% if entity.has_assignee_id %}
+      || {{ entity.perms_ts_var }}.permissions.assignee?.read
+{% endif %}
+    ) {
+      {{ entity.access_clauses_ts_var }}.push(userId ? Prisma.sql`creator_id = ${ userId }` : Prisma.sql`1=0`);
+    } else {
+      {{ entity.access_clauses_ts_var }}.push(Prisma.sql`1=0`);
+    }
+{% else %}
     if (!{{ entity.general_read_ts_var }}) {
       const {{ entity.or_clauses_ts_var }}: Prisma.Sql[] = [];
       if ({{ entity.perms_ts_var }}.permissions.creator?.read && userId) {{ entity.or_clauses_ts_var }}.push(Prisma.sql`creator_id = ${ userId }`);
@@ -70,6 +104,13 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
 {% endif %}
       {{ entity.access_clauses_ts_var }}.push({{ entity.or_clauses_ts_var }}.length > 0 ? Prisma.sql`(${ Prisma.join({{ entity.or_clauses_ts_var }}, ' OR ') })` : Prisma.sql`1=0`);
     }
+{% endif %}
+{% if entity.filter_values %}
+    // x-filter-values: ANDed alongside org/self-only above (cmd_874/subtask_874f).
+{% for field, values in entity.filter_values.items() %}
+    {{ entity.access_clauses_ts_var }}.push(Prisma.sql`{{ field }} IN (${ Prisma.join({{ values | tojson }}.map((v: unknown) => Prisma.sql`${ v }`)) })`);
+{% endfor %}
+{% endif %}
     const {{ entity.access_where_ts_var }}: Prisma.Sql = {{ entity.access_clauses_ts_var }}.length > 0
       ? Prisma.sql`(${ Prisma.join({{ entity.access_clauses_ts_var }}, ' AND ') })`
       : Prisma.sql`1=1`;
@@ -77,12 +118,37 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
     // Parent-qualified ACL for child subqueries (D-8: parent. prefix avoids creator_id ambiguity)
     const {{ entity.parent_access_clauses_ts_var }}: Prisma.Sql[] = [];
 {% if entity.should_filter_by_org %}
+{% if entity.org_relationship_optional %}
+    // See the non-parent-qualified branch above for rationale — same
+    // unconditional OR-null, qualified to the parent row.
+    if (associatedOrgIds.length > 0) {
+      {{ entity.parent_access_clauses_ts_var }}.push(Prisma.sql`(parent.{{ entity.org_id_field }} IN (${ Prisma.join(associatedOrgIds.map((id) => Prisma.sql`${ id }`)) }) OR parent.{{ entity.org_id_field }} IS NULL)`);
+    } else {
+      {{ entity.parent_access_clauses_ts_var }}.push(Prisma.sql`parent.{{ entity.org_id_field }} IS NULL`);
+    }
+{% else %}
     if (associatedOrgIds.length > 0) {
       {{ entity.parent_access_clauses_ts_var }}.push(Prisma.sql`parent.{{ entity.org_id_field }} IN (${ Prisma.join(associatedOrgIds.map((id) => Prisma.sql`${ id }`)) })`);
     } else {
       {{ entity.parent_access_clauses_ts_var }}.push(Prisma.sql`1=0`);
     }
 {% endif %}
+{% endif %}
+{% if entity.is_self_only %}
+    // x-self-only: same unconditional-restriction rule as above, qualified
+    // to the parent row (the child has no creator_id of its own).
+    if (
+      {{ entity.general_read_ts_var }}
+      || {{ entity.perms_ts_var }}.permissions.creator?.read
+{% if entity.has_assignee_id %}
+      || {{ entity.perms_ts_var }}.permissions.assignee?.read
+{% endif %}
+    ) {
+      {{ entity.parent_access_clauses_ts_var }}.push(userId ? Prisma.sql`parent.creator_id = ${ userId }` : Prisma.sql`1=0`);
+    } else {
+      {{ entity.parent_access_clauses_ts_var }}.push(Prisma.sql`1=0`);
+    }
+{% else %}
     if (!{{ entity.general_read_ts_var }}) {
       const {{ entity.parent_or_clauses_ts_var }}: Prisma.Sql[] = [];
       if ({{ entity.perms_ts_var }}.permissions.creator?.read && userId) {{ entity.parent_or_clauses_ts_var }}.push(Prisma.sql`parent.creator_id = ${ userId }`);
@@ -91,6 +157,13 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
 {% endif %}
       {{ entity.parent_access_clauses_ts_var }}.push({{ entity.parent_or_clauses_ts_var }}.length > 0 ? Prisma.sql`(${ Prisma.join({{ entity.parent_or_clauses_ts_var }}, ' OR ') })` : Prisma.sql`1=0`);
     }
+{% endif %}
+{% if entity.filter_values %}
+    // x-filter-values: ANDed alongside org/self-only above (cmd_874/subtask_874f).
+{% for field, values in entity.filter_values.items() %}
+    {{ entity.parent_access_clauses_ts_var }}.push(Prisma.sql`parent.{{ field }} IN (${ Prisma.join({{ values | tojson }}.map((v: unknown) => Prisma.sql`${ v }`)) })`);
+{% endfor %}
+{% endif %}
     const {{ entity.parent_access_where_ts_var }}: Prisma.Sql = {{ entity.parent_access_clauses_ts_var }}.length > 0
       ? Prisma.sql`(${ Prisma.join({{ entity.parent_access_clauses_ts_var }}, ' AND ') })`
       : Prisma.sql`1=1`;

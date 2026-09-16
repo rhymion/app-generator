@@ -32,7 +32,6 @@ export type CreateUserPrismaClient = {
         email: string;
         name: string;
         emailVerified: Date | null;
-        image: string | null;
         creator_id: string;
         updater_id: string;
         tenant_id: string;
@@ -42,7 +41,6 @@ export type CreateUserPrismaClient = {
       email: string;
       name: string;
       emailVerified: Date | null;
-      image: string | null;
       tenant_id: string;
     }>;
   };
@@ -59,7 +57,10 @@ export async function createTenantBoundUser(
       email: data.email!,
       name: data.name ?? data.email!,
       emailVerified: data.emailVerified ?? null,
-      image: data.image ?? null,
+      // cmd_793(c): OAuth-provider profile-image intake is intentionally
+      // dropped — `user.image` moved to a direct-attachment FK
+      // (`image_id` -> attachment), which only the user's own upload can
+      // populate. `data.image` (the provider's avatar URL) is discarded.
       creator_id: id,
       updater_id: id,
       tenant_id: DEFAULT_TENANT_ID,
@@ -86,6 +87,5 @@ export async function createTenantBoundUser(
     name: created.name,
     email: created.email,
     emailVerified: created.emailVerified,
-    image: created.image,
   } as AdapterUser;
 }

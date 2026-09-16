@@ -1,0 +1,29 @@
+// GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
+// x-scheduled-task handler for {{ snake_name }} (task_id: {{ task_id }})
+
+import type { PrismaClient } from '@/app/generated/prisma/client';
+
+type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+
+/**
+ * Called once per {{ snake_name }} row matched by the `{{ task_id }}` scheduled
+ * task filter (see service_scheduled.ts). Implement the side effect here.
+ *
+ * If equivalent logic already exists elsewhere for this entity (e.g. an
+ * approval/rejection hook), factor the shared part into a helper and call it
+ * from both places — do not re-implement it here (cmd_750/subtask_741a AC2).
+ *
+ * @param tx - Prisma transaction client
+ * @param entityId - ID of the matched {{ snake_name }} row
+ * @param systemActorId - the scheduled-task service account's user id
+ */
+export async function {{ handler }}(
+  tx: Tx,
+  entityId: string,
+  systemActorId: string,
+): Promise<void> {
+  // TODO: implement scheduled-task side effects here
+  void tx;
+  void entityId;
+  void systemActorId;
+}

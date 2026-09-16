@@ -1,19 +1,28 @@
 // AUTO-GENERATED - DO NOT EDIT
 import { TEST_CREDENTIALS } from '../support/test-credentials';
-{% if has_datagrid_children and has_datagrid_fk_children %}
-import { fillDataGridRow, selectDataGridSingleSelect, {% if seed_count == 0 %}assertDataGridEmpty, {% endif %}getDataGridRowCount, getDataGridTotalRowCount, assertDataGridRowData } from '../support/datagrid-helpers';
-{% elif has_datagrid_children %}
-import { fillDataGridRow, {% if seed_count == 0 %}assertDataGridEmpty, {% endif %}getDataGridRowCount, getDataGridTotalRowCount, assertDataGridRowData } from '../support/datagrid-helpers';
-{% else %}
-{% if seed_count == 0 %}
-import { assertDataGridEmpty, getDataGridRowCount, getDataGridTotalRowCount } from '../support/datagrid-helpers';
-{% else %}
-import { getDataGridRowCount, getDataGridTotalRowCount } from '../support/datagrid-helpers';
+{% set needs_fill = (can_new or can_edit) and has_datagrid_children %}
+{% set needs_select = (can_new or can_edit) and has_datagrid_children and has_datagrid_fk_children %}
+{% set needs_empty = can_list and seed_count == 0 %}
+{% set needs_count = can_list %}
+{% if needs_fill or needs_select or needs_empty or needs_count %}
+import { {% if needs_fill %}fillDataGridRow{% if needs_select or needs_empty or needs_count %}, {% endif %}{% endif %}{% if needs_select %}selectDataGridSingleSelect{% if needs_empty or needs_count %}, {% endif %}{% endif %}{% if needs_empty %}assertDataGridEmpty{% if needs_count %}, {% endif %}{% endif %}{% if needs_count %}getDataGridTotalRowCount{% endif %} } from '../support/datagrid-helpers';
 {% endif %}
-{% endif %}
+
+// A dependency record's display name can share a substring with another
+// record (e.g. a split-lineage decoy created by populate{{ pascal }}Dependencies(),
+// cmd_592) — cy.contains() is substring-based, so row lookups keyed on a
+// dep's display name need an exact-match anchor instead (cmd_614: widened
+// from self-ref-only to all entities — partial-match collisions aren't
+// specific to self-referential deps).
+function exactRe(text: string): RegExp {
+  return new RegExp('^' + text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$');
+}
 
 describe('Testing {{ title }} pages and their behavior', () => {
   beforeEach(() => {
+{% if primary_fk_dep and not primary_fk_dep.is_user_account and primary_fk_dep.extra_required_fields %}
+    cy.task('db:reset{{ pascal }}CallSeq');
+{% endif %}
     cy.task('db:reset');
     cy.task('db:seed');
     cy.task('db:grantAllPermissions');
@@ -47,7 +56,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.task('db:populate{{ pascal }}', 1);
       cy.visit('/en/{{ parent }}');
       cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-      cy.contains('{{ list_id_1 }}').scrollIntoView().should('be.visible');
+      cy.contains(exactRe('{{ list_id_1 }}')).scrollIntoView().should('be.visible');
       getDataGridTotalRowCount().should('eq', {{ seed_count + 1 }});
     });
 
@@ -55,7 +64,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.task('db:populate{{ pascal }}', 3);
       cy.visit('/en/{{ parent }}');
       cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-      cy.contains('{{ list_id_1 }}').scrollIntoView().should('be.visible');
+      cy.contains(exactRe('{{ list_id_1 }}')).scrollIntoView().should('be.visible');
       // Use aria-rowcount for the total (getDataGridRowCount counts only virtualised DOM rows)
       getDataGridTotalRowCount().should('eq', {{ seed_count + 3 }});
     });
@@ -83,13 +92,13 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}// Add required child: {{ child.title }}
 {{ I }}cy.clickButton('Add {{ child.title }}');
 {% for fk in child.fk_create_fields %}
-{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }});
+{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }}, undefined, '{{ child.title }}');
 {% endfor %}
 {% for line in child.native_enum_create_calls %}
 {{ I }}{{ line }}
 {% endfor %}
 {% if child.create_obj != '{}' %}
-{{ I }}fillDataGridRow(0, {{ child.create_obj }});
+{{ I }}fillDataGridRow(0, {{ child.create_obj }}, true, '{{ child.title }}');
 {% endif %}
 {% endif %}
 {% endfor %}
@@ -99,22 +108,29 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_list %}
 {{ I }}cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if after_create_id_is_expr %}
-{{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).scrollIntoView().should('be.visible');
+{{ I }}cy.contains('.MuiDataGrid-cell', exactRe(deps.{{ primary_dep_var_for_list }}.name)).scrollIntoView().should('be.visible');
 {% else %}
-{{ I }}cy.contains('{{ after_create_id }}').scrollIntoView().should('be.visible');
+{{ I }}cy.contains(exactRe('{{ after_create_id }}')).scrollIntoView().should('be.visible');
 {% endif %}
 {% endif %}
 {% if can_view and can_list %}
 {{ I }}// Verify on view page
 {% if after_create_id_is_expr %}
 {{ I }}cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-{{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).scrollIntoView().should('be.visible');
-{{ I }}cy.contains('.MuiDataGrid-row', deps.{{ primary_dep_var_for_list }}.name).find('a').first().click();
+{{ I }}cy.contains('.MuiDataGrid-cell', exactRe(deps.{{ primary_dep_var_for_list }}.name)).scrollIntoView().should('be.visible');
+{{ I }}cy.contains('.MuiDataGrid-cell', exactRe(deps.{{ primary_dep_var_for_list }}.name)).find('a').first().click();
 {% elif not list_id_is_unique %}
+{{ I }}// list_id_1/after_create_id may not uniquely identify this row (e.g.
+{{ I }}// an entity_select primary whose value repeats across seed rows --
+{{ I }}// permission's 'Name' is the resource type, not a unique per-record
+{{ I }}// label) -- the record was just created via this UI form
+{{ I }}// (no populate-helper id available), so position is the only signal:
+{{ I }}// it sorts to the bottom of the (ascending, freshly-scrolled) grid,
+{{ I }}// same assumption 2.2's identical branch below already relies on.
 {{ I }}cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-{{ I }}cy.contains('.MuiDataGrid-row', '{{ after_create_id }}').find('a').first().click();
+{{ I }}cy.get('.MuiDataGrid-row').last().find('a').first().click();
 {% else %}
-{{ I }}cy.contains('{{ after_create_id }}').click();
+{{ I }}cy.contains(exactRe('{{ after_create_id }}')).click();
 {% endif %}
 {{ I }}cy.url().should('include', '/{{ parent }}/view');
 {% for cmd in required_assert_cmds_no_bool %}
@@ -149,13 +165,13 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}// Add child: {{ child.title }}
 {{ I }}cy.clickButton('Add {{ child.title }}');
 {% for fk in child.fk_full_fields %}
-{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }});
+{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }}, undefined, '{{ child.title }}');
 {% endfor %}
 {% for line in child.native_enum_full_calls %}
 {{ I }}{{ line }}
 {% endfor %}
 {% if child.full_create_obj != '{}' %}
-{{ I }}fillDataGridRow(0, {{ child.full_create_obj }});
+{{ I }}fillDataGridRow(0, {{ child.full_create_obj }}, true, '{{ child.title }}');
 {% endif %}
 {% endfor %}
 {% for child in list_children_data %}
@@ -169,7 +185,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}cy.clickButton('Add {{ child.title }}');
 {% if child.dep_var_name %}
 {{ I }}cy.get('div[role="dialog"]').find('input').type(deps.{{ child.dep_var_name }}.name);
-{{ I }}cy.get('.MuiAutocomplete-popper li').first().click();
+{{ I }}cy.contains('.MuiAutocomplete-popper li', exactRe(deps.{{ child.dep_var_name }}.name)).click();
 {% else %}
 {{ I }}cy.get('div[role="dialog"]').find('input').type('{{ child.autocomplete_seed_label_1 }}');
 {{ I }}cy.get('.MuiAutocomplete-popper li').contains('{{ child.autocomplete_seed_label_1 }}').click();
@@ -183,9 +199,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if can_list %}
 {{ I }}cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if after_create_id_is_expr %}
-{{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).scrollIntoView().should('be.visible');
+{{ I }}cy.contains('.MuiDataGrid-cell', exactRe(deps.{{ primary_dep_var_for_list }}.name)).scrollIntoView().should('be.visible');
 {% else %}
-{{ I }}cy.contains('{{ after_create_id }}').scrollIntoView().should('be.visible');
+{{ I }}cy.contains(exactRe('{{ after_create_id }}')).scrollIntoView().should('be.visible');
 {% endif %}
 {% endif %}
 {% if can_view and can_list %}
@@ -198,7 +214,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {{ I }}cy.get('.MuiDataGrid-row').last().find('a').first().click();
 {% else %}
-{{ I }}cy.contains('{{ after_create_id }}').click();
+{{ I }}cy.contains(exactRe('{{ after_create_id }}')).click();
 {% endif %}
 {{ I }}cy.url().should('include', '/{{ parent }}/view');
 {% for cmd in all_assert_cmds_no_bool %}
@@ -218,7 +234,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
     it('3.1 adds optional data and child items', () => {
 {% if use_deps_in_3_1 %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
-        cy.task('db:populate{{ pascal }}', 1);
+        cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
 {% for child in list_children_data %}
 {% if child.render_type == 'editable-list-autocomplete' and child.is_external_target and not child.dep_var_name %}
         cy.task('db:populate{{ child.target_pascal }}', 1);
@@ -233,12 +249,17 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
 {% endif %}
 {% if can_list and can_view %}
+{% if list_id_is_unique %}
         cy.visit('/en/{{ parent }}');
         cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-{% if list_id_is_unique %}
-        cy.contains('{{ list_id_1 }}').click();
+        cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
-        cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+        {# list_id_1 ('{{ list_id_1 }}') is not guaranteed unique in the DB —
+           a self-ref m2m dep (cmd_646) or another row can share the same
+           display text, making '.find(\'a\').first()' pick an arbitrary
+           matching row instead of the one just created. Navigate straight to
+           the known record's own id instead of searching the list by text. #}
+        cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
 {% endif %}
         cy.get('a[aria-label="Edit"]').click();
 {% elif can_list %}
@@ -252,6 +273,13 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
 {% endif %}
         cy.url().should('include', '/{{ parent }}/edit');
+{% for child in readonly_datagrid_children_data %}
+        // {{ child.title }} is an independent child (own list/view/new/edit
+        // pages) -- rendered read-only here (FieldsViewGrid, issue #520/PR#528/PR#530
+        // ruling); only its own CRUD route may write it, so no 'Add' control
+        // exists on this page at all.
+        cy.get(`button[aria-label="Add {{ child.title }}"]`).should('not.exist');
+{% endfor %}
 {% for cmd in opt_fill_cmds_3_1 %}
 {{ cmd }}
 {% endfor %}
@@ -259,13 +287,13 @@ describe('Testing {{ title }} pages and their behavior', () => {
         // Add child: {{ child.title }}
         cy.clickButton('Add {{ child.title }}');
 {% for fk in child.fk_create_fields %}
-        selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }});
+        selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }}, undefined, '{{ child.title }}');
 {% endfor %}
 {% for line in child.native_enum_create_calls %}
         {{ line }}
 {% endfor %}
 {% if child.create_obj != '{}' %}
-        fillDataGridRow(0, {{ child.create_obj }});
+        fillDataGridRow(0, {{ child.create_obj }}, true, '{{ child.title }}');
 {% endif %}
 {% endfor %}
 {% for child in list_children_data %}
@@ -277,7 +305,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.clickButton('Add {{ child.title }}');
 {% if use_deps_in_3_1 and child.dep_var_name %}
         cy.get('div[role="dialog"]').find('input').type(deps.{{ child.dep_var_name }}.name);
-        cy.get('.MuiAutocomplete-popper li').first().click();
+        cy.contains('.MuiAutocomplete-popper li', exactRe(deps.{{ child.dep_var_name }}.name)).click();
 {% else %}
         cy.get('div[role="dialog"]').find('input').type('{{ child.autocomplete_seed_label_1 }}');
         cy.get('.MuiAutocomplete-popper li').contains('{{ child.autocomplete_seed_label_1 }}').click();
@@ -290,25 +318,51 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.get('textarea[placeholder="Write a comment..."]').type('Test {{ child.title }} Comment');
         cy.get('button[aria-label="Submit"]').click();
 {% endfor %}
+{% if comment_has_mention %}
+        // @mention (cmd_522c): type "@" + a few letters of the logged-in test
+        // user's own name — self-mention is allowed by design (candidates
+        // include the actor; only outbound notifications exclude self).
+        // Candidate search is org-scoped, so the actor needs ≥1 organization
+        // membership or it always returns zero results (org-isolation policy).
+        cy.task('db:populateOrganizationWithUser', 1);
+        cy.get('textarea[placeholder="Write a comment..."]').type('Hi @Test');
+        cy.get('[role="menuitem"]').contains(TEST_CREDENTIALS.name).click();
+        cy.get('button[aria-label="Submit"]').click();
+        // cmd_538: the marker must resolve to a colored profile link on the
+        // EDIT page itself, immediately after the comment is posted — not
+        // only after a later round-trip through the view page (form_upsert.tsx
+        // previously never received canViewUserProfile/mentionUserContext/
+        // renderMessage, so this rendered as raw @[user_id:<id>] marker text
+        // here until cmd_538 wired it).
+        cy.get('.mention-link').should('contain.text', TEST_CREDENTIALS.name);
+{% endif %}
         cy.clickButton('Save');
         cy.url().should('include', '/{{ parent }}');
         cy.url().should('not.include', '/{{ parent }}/');
 {% if can_list %}
         cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-        cy.contains('{{ list_id_1 }}').scrollIntoView().should('be.visible');
+        cy.contains(exactRe('{{ list_id_1 }}')).scrollIntoView().should('be.visible');
 {% endif %}
 {% if can_view %}
         // Verify on view page
 {% if can_list %}
 {% if list_id_is_unique %}
-        cy.contains('{{ list_id_1 }}').click();
+        cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
-        cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+        {# See the entry-navigation comment above — list_id_1 may not be
+           unique, so navigate straight to the known id instead. #}
+        cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
 {% endif %}
 {% else %}
         cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
 {% endif %}
         cy.url().should('include', '/{{ parent }}/view');
+{% if comment_has_mention %}
+        // The inserted @[user_id:<id>] marker must render as a colored profile
+        // link (own read permission on `user` → canViewUserProfile=true), not
+        // raw marker text or a plain-text name (design doc decision (e)).
+        cy.get('.mention-link').should('contain.text', TEST_CREDENTIALS.name);
+{% endif %}
 {% if not check_field_skip %}
 {% if check_field_use_accordion %}
         cy.openAccordion('{{ check_field_label }}');
@@ -318,8 +372,36 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endif %}
 {% endif %}
 {% endif %}
+{% if use_deps_in_3_1 %}
+      });
+{% endif %}
       });
     });
+{% endif %}
+{% if comment_has_mention %}
+
+    // cmd_538: 3.1 above only proves the self-mention path (candidates include
+    // the actor). Self-mentions never notify, so that alone can't prove
+    // notification delivery. This drives the full chain — candidate suggest ->
+    // select -> marker -> link -> notification — for a genuinely different
+    // user, and confirms the notification actually reaches its recipient
+    // (not just that the notify() call fires in isolation).
+    it('3.1b mentioning a different user in a comment notifies that user', () => {
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<{ id: string; name: string }>('db:createMentionCandidateInSameOrg', 'Mention Target Person').then((otherUser) => {
+          cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
+          cy.get('textarea[placeholder="Write a comment..."]').type('Hi @Mention');
+          cy.get('[role="menuitem"]').contains(otherUser.name).click();
+          cy.get('button[aria-label="Submit"]').click();
+          cy.get('.mention-link').should('contain.text', otherUser.name);
+          cy.task<Array<{ type: string }>>('db:getNotificationsForUser', otherUser.id).then((notifications) => {
+            expect(notifications.some((n) => n.type === 'mentioned_in_comment')).to.eq(true);
+          });
+        });
+      });
+    });
+{% endif %}
+{% if has_optional or has_children %}
 
     it('3.2 removes optional data and child items', () => {
 {% if has_optional %}
@@ -337,9 +419,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.visit('/en/{{ parent }}');
         cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if list_id_is_unique %}
-        cy.contains('{{ list_id_1 }}').click();
+        cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
-        cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+        cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
 {% endif %}
         cy.get('a[aria-label="Edit"]').click();
 {% elif can_list %}
@@ -358,7 +440,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
 {% for child in datagrid_children_data %}
         // Delete child: {{ child.title }}
-        cy.selectDataGridRows([0]);
+        cy.selectDataGridRows([0], '{{ child.title }}');
         cy.contains('h2', '{{ child.title }}').parent().find('button[aria-label="Delete Selected"]').click();
         cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
 {% endfor %}
@@ -371,7 +453,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.url().should('not.include', '/{{ parent }}/');
 {% if can_list %}
         cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-        cy.contains('{{ list_id_1 }}').scrollIntoView().should('be.visible');
+        cy.contains(exactRe('{{ list_id_1 }}')).scrollIntoView().should('be.visible');
 {% endif %}
       });
     });
@@ -390,7 +472,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% elif can_list and can_view %}
         cy.visit('/en/{{ parent }}');
         cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-        cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+        cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
         cy.get('a[aria-label="Edit"]').click();
 {% elif can_list %}
         cy.visit('/en/{{ parent }}');
@@ -412,7 +494,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.url().should('include', '/{{ parent }}');
         cy.url().should('not.include', '/{{ parent }}/');
 {% if can_list and list_id_is_unique %}
-        cy.contains('{{ list_id_updated }}').scrollIntoView().should('be.visible');
+        cy.contains(exactRe('{{ list_id_updated }}')).scrollIntoView().should('be.visible');
 {% endif %}
 {% if can_view and can_list %}
         // Verify on view page
@@ -421,7 +503,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
         // range issues (the renamed value may be beyond the initial viewport).
         cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
 {% else %}
-        cy.contains('{{ list_id_updated }}').click();
+        cy.contains(exactRe('{{ list_id_updated }}')).click();
 {% endif %}
         cy.url().should('include', '/{{ parent }}/view');
 {% if not check_field_skip %}
@@ -464,7 +546,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.get('div').find('button[aria-label="Delete Selected"]').first().click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
 {% if list_id_is_unique %}
-      cy.contains('{{ list_id_1 }}').should('not.exist');
+      cy.contains(exactRe('{{ list_id_1 }}')).should('not.exist');
 {% endif %}
       getDataGridTotalRowCount().should('eq', 1);
 {% else %}
@@ -490,7 +572,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.get('div').find('button[aria-label="Delete Selected"]').first().click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
 {% if list_id_is_unique %}
-      cy.contains('{{ list_id_1 }}').should('not.exist');
+      cy.contains(exactRe('{{ list_id_1 }}')).should('not.exist');
 {% endif %}
       getDataGridTotalRowCount().should('eq', 1);
 {% else %}
@@ -522,9 +604,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.visit('/en/{{ parent }}');
       cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if list_id_is_unique %}
-      cy.contains('{{ list_id_1 }}').click();
+      cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
-      cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+      cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
 {% endif %}
       cy.get('a[aria-label="Edit"]').click();
 {% else %}
@@ -539,7 +621,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.url().should('include', '/{{ parent }}');
       cy.url().should('not.include', '/{{ parent }}/');
 {% if list_id_is_unique %}
-      cy.contains('{{ list_id_1 }}').should('not.exist');
+      cy.contains(exactRe('{{ list_id_1 }}')).should('not.exist');
 {% endif %}
 {% else %}
       cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
@@ -593,10 +675,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
 {{ I }}cy.clickButton('Add {{ fail_create_5_2_scalar.title }}');
 {% for fk in fail_create_5_2_scalar.fk_fields %}
-{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }});
+{{ I }}selectDataGridSingleSelect(0, '{{ fk.field }}', {{ fk.label_code }}, undefined, '{{ fail_create_5_2_scalar.title }}');
 {% endfor %}
 {% if fail_create_5_2_scalar.partial_obj %}
-{{ I }}fillDataGridRow(0, {{ fail_create_5_2_scalar.partial_obj }});
+{{ I }}fillDataGridRow(0, {{ fail_create_5_2_scalar.partial_obj }}, true, '{{ fail_create_5_2_scalar.title }}');
 {% endif %}
 {{ I }}cy.clickButton('Save');
 {{ I }}cy.url().should('include', '/{{ parent }}/new');
@@ -617,7 +699,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endfor %}
 {{ I }}cy.clickButton('Add {{ fail_create_5_2_fk.title }}');
 {% if fail_create_5_2_fk.partial_obj %}
-{{ I }}fillDataGridRow(0, {{ fail_create_5_2_fk.partial_obj }});
+{{ I }}fillDataGridRow(0, {{ fail_create_5_2_fk.partial_obj }}, true, '{{ fail_create_5_2_fk.title }}');
 {% endif %}
 {{ I }}cy.clickButton('Save');
 {{ I }}cy.url().should('include', '/{{ parent }}/new');
@@ -639,9 +721,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
       cy.visit('/en/{{ parent }}');
       cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if list_id_is_unique %}
-      cy.contains('{{ list_id_1 }}').click();
+      cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
-      cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+      cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
 {% endif %}
       cy.get('a[aria-label="Edit"]').click();
 {% else %}
@@ -676,9 +758,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.visit('/en/{{ parent }}');
         cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if list_id_is_unique %}
-        cy.contains('{{ list_id_1 }}').click();
+        cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
-        cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+        cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
 {% endif %}
         cy.get('a[aria-label="Edit"]').click();
 {% elif can_list %}
@@ -695,7 +777,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
         cy.get('form').should('be.visible');
         cy.get('div[role="row"][data-rowindex="0"]').should('be.visible');
         cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="{{ fail_edit_6_2.field_prop_name }}"]').dblclick();
+{% if fail_edit_6_2.field_is_datetime %}
+        cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="{{ fail_edit_6_2.field_prop_name }}"] input').should('be.visible').clear();
+{% else %}
         cy.get('div[role="row"][data-rowindex="0"]').find('div[data-field="{{ fail_edit_6_2.field_prop_name }}"] input').should('be.visible').type('{selectall}{backspace}');
+{% endif %}
         cy.get('p').first().click(); // Click outside to commit the edit, as some cells may have async validation that prevents Enter key from working.
         cy.clickButton('Save');
         cy.url().should('include', '/{{ parent }}/edit');
@@ -734,7 +820,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}cy.url().should('include', '/{{ parent }}');
 {{ I }}cy.url().should('not.include', '/{{ parent }}/');
 {% if can_list and can_view %}
-{{ I }}cy.contains(deps.{{ primary_dep_var_for_list }}.name).click();
+{{ I }}cy.contains('.MuiDataGrid-cell', exactRe(deps.{{ primary_dep_var_for_list }}.name)).find('a').first().click();
 {{ I }}cy.url().should('include', '/{{ parent }}/view');
 {{ I }}cy.get('a[aria-label="Edit"]').click();
 {{ I }}cy.url().should('include', '/{{ parent }}/edit');
@@ -779,9 +865,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.visit('/en/{{ parent }}');
           cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if list_id_is_unique %}
-          cy.contains('{{ list_id_1 }}').click();
+          cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
-          cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+          cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
 {% endif %}
           cy.get('a[aria-label="Edit"]').click();
 {% elif can_view %}
@@ -818,9 +904,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.visit('/en/{{ parent }}');
           cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if list_id_is_unique %}
-          cy.contains('{{ list_id_1 }}').click();
+          cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
-          cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+          cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
 {% endif %}
           cy.get('a[aria-label="Edit"]').click();
 {% elif can_view %}
@@ -855,9 +941,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.visit('/en/{{ parent }}');
           cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if list_id_is_unique %}
-          cy.contains('{{ list_id_1 }}').click();
+          cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
-          cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+          cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
 {% endif %}
           cy.get('a[aria-label="Edit"]').click();
 {% elif can_view %}
@@ -931,9 +1017,9 @@ describe('Testing {{ title }} pages and their behavior', () => {
           cy.visit('/en/{{ parent }}');
           cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
 {% if list_id_is_unique %}
-          cy.contains('{{ list_id_1 }}').click();
+          cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
-          cy.contains('.MuiDataGrid-row', '{{ list_id_1 }}').find('a').first().click();
+          cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
 {% endif %}
           cy.get('a[aria-label="Edit"]').click();
 {% elif can_view %}
@@ -973,12 +1059,20 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% for cmd in required_fill_cmds %}
           {{ cmd | trim }}
 {% endfor %}
+{% if approval_submit_fill_cmd %}
+          {{ approval_submit_fill_cmd | trim }}
+{% endif %}
           cy.clickButton('Save');
           cy.url().should('include', '/{{ parent }}');
+          cy.url().should('not.include', '/new');
 {% if after_create_id_is_expr %}
-          cy.contains(deps.{{ primary_dep_var_for_list }}.name).click();
+{% if prim_is_server_value %}
+          cy.contains('.MuiDataGrid-cell', exactRe(setup.requestorUser.name)).find('a').first().click();
 {% else %}
-          cy.contains('{{ after_create_id }}').click();
+          cy.contains('.MuiDataGrid-cell', exactRe(deps.{{ primary_dep_var_for_list }}.name)).find('a').first().click();
+{% endif %}
+{% else %}
+          cy.contains(exactRe('{{ after_create_id }}')).click();
 {% endif %}
           cy.url().should('include', '/{{ parent }}/view');
           // Requestor is in requestorRole → both flows apply → 2 approval_requests
@@ -997,12 +1091,20 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% for cmd in required_fill_cmds %}
           {{ cmd | trim }}
 {% endfor %}
+{% if approval_submit_fill_cmd %}
+          {{ approval_submit_fill_cmd | trim }}
+{% endif %}
           cy.clickButton('Save');
           cy.url().should('include', '/{{ parent }}');
+          cy.url().should('not.include', '/new');
 {% if after_create_id_is_expr %}
-          cy.contains(deps.{{ primary_dep_var_for_list }}.name).click();
+{% if prim_is_server_value %}
+          cy.contains('.MuiDataGrid-cell', exactRe(setup.noRoleUser.name)).find('a').first().click();
 {% else %}
-          cy.contains('{{ after_create_id }}').click();
+          cy.contains('.MuiDataGrid-cell', exactRe(deps.{{ primary_dep_var_for_list }}.name)).find('a').first().click();
+{% endif %}
+{% else %}
+          cy.contains(exactRe('{{ after_create_id }}')).click();
 {% endif %}
           cy.url().should('include', '/{{ parent }}/view');
           // noRoleUser not in requestorRole → only flowWithoutRole applies → 1 approval_request
@@ -1099,23 +1201,39 @@ describe('Testing {{ title }} pages and their behavior', () => {
       });
     });
 
-    it('7.8 requestor can re-submit a rejected request', () => {
-      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
-        cy.task<any>('db:populate{{ pascal }}WithRejectedApproval', {
-          creatorId: setup.requestorUser.id,
-          approvalFlowIds: [setup.flowWithRole.id],
-        }).then((data) => {
+    // cmd_818 (D1): the dedicated resubmit UI action is retired --
+    // ApprovalSection.tsx no longer renders a Re-submit button
+    // (see components/_standard/ApprovalSection.tsx). Re-submission is now
+    // an ordinary update through the entity's own edit form (edit the
+    // status field back to x-approval.submit_on's target value), which
+    // fires the same update-time edge trigger a first-time submission
+    // fires at create time. See
+    // code_generator/tests/test_approval_edge_trigger.py for that
+    // mechanism's generated-code coverage, and the matching removal in
+    // test_api_spec.cy.ts.jinja2's "Resubmit" describe block.
+  });
+{% endif %}
+{% if comment_has_mention and can_edit %}
+
+  describe('Mention permission-denied graceful degradation', () => {
+    it('8.1 shows a non-crashing message instead of candidates when the actor lacks read on user', () => {
+      // cmd_516 Option B: an actor without read permission on the `user`
+      // model gets permissionDenied:true from searchMentionUserOptions —
+      // the picker must show a message, not crash the comment box. Comment
+      // threads only render in edit mode (an unsaved /new entity has no id
+      // to attach comments to), so this needs an existing record + a
+      // session user with edit access to it but no `user` read permission.
+      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
+        cy.task<string>('db:createSessionUserWithPermission', {
+          entityName: '{{ parent }}',
+          flags: { create: true, read: true, update: true },
+        }).then((email) => {
           Cypress.session.clearAllSavedSessions();
           cy.clearCookies();
-          cy.login(setup.requestorUser.email, 'test-password');
-          cy.visit(`/en/{{ parent }}/view/${data.record.id}`);
-          cy.get('[aria-label="Re-submit"]').should('be.visible');
-          cy.get('[aria-label="Re-submit"]').click();
-          cy.get('[role="dialog"]').find('button').contains('Re-submit').click();
-          cy.contains('Pending').should('be.visible');
-          cy.get('[aria-label="Re-submit"]').should('not.exist');
-          // History expand button should appear after re-submission
-          cy.get('[aria-label="Expand history"]').should('be.visible');
+          cy.login(email, TEST_CREDENTIALS.password);
+          cy.visit(`/en/{{ parent }}/edit/${records[0].id}`);
+          cy.get('textarea[placeholder="Write a comment..."]').type('Hi @Test');
+          cy.contains('Mention suggestions unavailable.').should('be.visible');
         });
       });
     });

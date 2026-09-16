@@ -1,0 +1,234 @@
+# Readonly field rendering in FormUpsert
+
+## Symptom
+
+An entity with an editable relation and a readonly FK (`x-readonly` on the FK
+property, or the property named in an entity-level `x-readonly-fields` list)
+rendered the FK's readonly display in `FormUpsert.tsx` as a raw value with a
+broken translation key:
+
+```tsx
+<AppFieldText
+  label={tf('parentGoodsReceiptLineId')}   // no such i18n key — untranslated key shown verbatim
+  value={String(src.parent_goods_receipt_line_id)}  // raw id, not the relation's labelField value
+  readOnly
+/>
+```
+
+`FormView.tsx` (always fully read-only) rendered the same FK correctly —
+`<AppFieldRelation>` resolving the relation's `labelField`, with a working
+`tf('parentGoodsReceiptLine')` key and a link to the target row.
+
+## Root cause
+
+`generators.py`'s `form_upsert_context()` had its own, independent readonly-field
+render loop that dispatched on **nothing but `String(src.<prop>)`** — no type
+check at all. Every readonly field, regardless of type, was rendered the same
+way. For a relation this produces the bug above (wrong key, wrong value); the
+same blind loop also affected date/datetime/time (unformatted ISO string),
+boolean (`"true"`/`"false"` literal), image (`uri` format shown as raw text
+instead of `<ImageDisplay>`), and both enum flavors (int-enum and nativeEnum
+string — raw stored code shown, untranslated).
+
+## Fix
+
+Extracted the type-dispatch logic that `form_view_context()` already had
+(relation → `<AppFieldRelation>` with `labelField` resolution; date/datetime/
+time → `<DateTimeWrapper readOnly>`; image (`format: uri`) → `<ImageDisplay>`;
+boolean → `<AppFieldBoolean readOnly>`; int-enum / nativeEnum → `<AppFieldText
+readOnly>` with the field's own options array for label lookup; fallback →
+`<AppFieldText readOnly>`) into a single shared function,
+`_readonly_display_field()` (`generators.py`). Both `form_view_context()` and
+`form_upsert_context()`'s readonly-field loop now call it — the two paths
+can no longer drift apart.
+
+Enum options built for the readonly display (`const <field>Options = [...]`,
+needed for label lookup) do land in `enum_opt_setups` even when the field is
+readonly-only; this is intentional (the label needs the array), not a
+regression — a readonly enum never gets an editable `AppFieldSelect`/state
+variable for it (see `test_readonly_field_not_in_normal_enum_jsx` in
+`code_generator/tests/test_readonly_fields.py`).
+
+`form_upsert.tsx.jinja2` needed one addition: a conditional `ImageDisplay`
+import gated on a new `uses_image_display` flag (same text-search pattern as
+`uses_app_field_text`/`uses_app_field_relation`) — a readonly-only
+image field has no other path that would pull the import in.
+
+**Later fix:** `_readonly_display_field()`'s `format: uri` branch was
+unconditional — it rendered `ImageDisplay` for any uri field regardless of
+`x-uri-kind`, so an `x-uri-kind: link` field marked readonly (either via
+`x-readonly-fields` here, or as a plain non-editable field on `FormView`)
+rendered an `<img>` tag pointed at an arbitrary URL instead of a clickable
+link. Fixed by branching on `get_uri_kind(prop)`: `link` renders
+`AppFieldExternalLink`, everything else keeps `ImageDisplay`. See
+`code_generator/tests/test_form_upsert.py`'s
+`TestUriKindLinkFieldReadonlyInFormUpsert`.
+
+## Fail-closed validation: `x-readonly-fields` must resolve to a real property
+
+`build_context.py` collects `x-readonly-fields` (entity-level) and unions it
+with field-level `x-readonly` into `readonly_fields`. Before this fix, every
+downstream consumer — the API-route `readonly_fields_api` filter and
+FormUpsert's render loop — silently dropped any entry that didn't match an
+actual property name. A misspelled entry (most commonly: the relation name,
+e.g. `parent_goods_receipt_line`, instead of the actual FK column,
+`parent_goods_receipt_line_id`) had **no effect at all** — the field stayed
+fully editable, with no warning anywhere.
+
+`build_context.py` now raises `ValueError` at generation time if any
+`x-readonly-fields` entry doesn't resolve to a property in `filtered_props`.
+See `test_unresolved_entity_level_readonly_field_fails_closed` and
+`test_relation_name_instead_of_fk_column_fails_closed` in
+`test_readonly_fields.py`.
+
+**Naming convention**: `x-readonly-fields` entries must be the exact property
+name (the FK column, e.g. `parent_goods_receipt_line_id`, not the relation
+name `parent_goods_receipt_line`) — consistent with every other entry in the
+list (plain scalar properties) and with `readonly_fields_api`/
+`readonly_fields_create_reject`, which are used directly as API column names.
+No alias/dual-form acceptance was added (kept the check simple, one valid
+spelling). This point (accept `_id`-suffixed only, vs. also accepting the bare
+relation name) is flagged in the task report as a decision the schema author
+should confirm — the fail-closed check itself does not depend on which
+spelling is chosen, only on it resolving unambiguously.
+
+## Type-scope note
+
+Only relation and enum readonly fields had a *user-visible correctness* bug
+(wrong value / untranslated key). Date/boolean/image readonly fields were
+previously legible but unstyled (raw ISO string, raw `"true"`/`"false"`, raw
+URL text) — now rendered with the same components `FormView` uses.
+
+## `x-readonly` vs `x-readonly-fields`: two different scopes
+
+These two annotations both feed into `readonly_fields` and render the same
+way, but they are **not** interchangeable — they differ in scope, and that
+difference is load-bearing for anyone using a proxy/secondary view.
+
+- **`x-readonly` (per-property, under `fields:`)** is **model/raw-wide**.
+  Properties themselves always live on the raw entity (`build_user_schema.py`
+  derives them from Prisma; they are never duplicated per view), so a
+  per-property flag necessarily applies to every view built on that model.
+  There is no way to scope it to a single view, by design.
+- **`x-readonly-fields` (entity-level list)** is **view-scoped**. It lives
+  on whichever view entity declares it and applies only to that view.
+
+The two annotations entered the codebase for different features at
+different times, which is why their scopes were never unified until the
+fix below made the distinction explicit and intentional rather than
+incidental.
+
+### Fixed: `x-readonly-fields` used to leak across views of the same model
+
+`build_user_schema.py`'s `_ENTITY_LEVEL_DATA_KEYS` allowlist used to copy a
+view's `x-readonly-fields` declaration onto the shared **raw** entity
+(alongside genuinely raw-scoped keys like `x-import-key`/`x-display`), and
+`build_context.py` read it back from that same raw entity (`model_def`).
+Since every view of a Prisma model resolves to the same raw entity, one
+view's declaration silently applied to every other view sharing that
+model — a proxy view (e.g. a `setting` page that is really just another
+view of `user`, per `docs/knowledge/schema-restructuring-build-order.md`'s
+pass-through description) could not declare a readonly field without also
+locking it down on the model's other view(s).
+
+Fix: `x-readonly-fields` moved to `_VIEW_LEVEL_CONFIG_KEYS`
+(`build_user_schema.py`) so it stays on the view entity, and
+`build_context.py`'s `_ro_from_entity` now reads
+`schema['definitions'][definition_key]` (the view entity itself) instead
+of `model_def` (the shared raw entity). Verified against the real schema:
+declaring `x-readonly-fields: [name]` on `setting` (a proxy view of
+`user`) rendered `name` readonly in `setting`'s generated `FormUpsert.tsx`
+while `user`'s own `FormUpsert.tsx` kept `name` fully editable — and the
+reconstructed raw entity (`__user`) never carried the key at all. Test
+coverage: `code_generator/tests/test_scheduled_task_templates.py`'s
+`TestXReadonlyFieldsScope` (builder side) and
+`code_generator/tests/test_readonly_fields.py`'s
+`TestReadonlyFieldsCrossViewIsolation` (read side).
+
+`x-readonly` (per-property) was deliberately left unchanged — see the
+scope list above.
+
+## `x-generate.fields` filters, `x-display.form` only orders
+
+Three keys look related — all three are declared on a view entity and all
+three affect its generated edit form — but only one of them actually
+restricts which fields render. Mixing them up produces exactly the wrong
+conclusion about which key to reach for.
+
+- **`x-generate.fields`** (entity-level list) is the **filter**. It is
+  view-scoped: `schema_helpers.py`'s `filter_fields()` keeps only the
+  listed properties (plus `id`/timestamps) for that view's own definition,
+  so two views sharing the same raw model can each declare a different
+  subset — one view's list has no effect on any other view's rendered
+  fields.
+- **`x-display.form`** is **not** a filter — it only reorders the fields a
+  view already renders. It is also **not view-scoped**: the form/view-order
+  helpers in `build_context.py`/`generators.py` resolve it from the shared
+  raw model backing the view, not from the view's own definition, so it
+  cannot vary per view the way `x-generate.fields` can.
+- **`x-readonly-fields`** (entity-level list, view-scoped) does neither of
+  the above — it makes already-rendered fields non-editable. The field
+  still renders, just as read-only display; it is not a way to remove a
+  field from the form.
+
+**Verified against a real, live example** — `user` and its Proxy View
+`setting` (both resolve to the same raw model, `__user`): `user` declares
+`x-generate.fields: [name, image_id, roles]` and `setting` declares
+`x-generate.fields: [name, email, image_id, password, api_key,
+mfa_enabled]`. Their generated `FormUpsert.tsx` files render exactly their
+own list and nothing else — `user`'s form has no email/password/api_key/
+mfa_enabled inputs at all, and `setting`'s form has all of them plus
+`email`, neither leaking into the other — confirming `x-generate.fields`
+filters per-view, independent of the shared raw model. `x-display` itself,
+by contrast, lives only on the raw entity (`__user`) in the built schema —
+neither `user` nor `setting`'s own view definition carries it — confirming
+it is raw-model-tied, not view-scoped, which is why it cannot be used to
+vary which fields render across views of the same model the way
+`x-generate.fields` can.
+
+_Provenance: originally recorded as a schema comment in a consumer
+project's Proxy View entity, documenting a gap found while building that
+entity. Moved here when that entity was later retired, so the generator's
+behavior is documented independent of any particular consumer entity. An
+earlier version of this section incorrectly concluded that no key can
+restrict which fields a Proxy View's form renders except `x-readonly-fields`
+— `x-generate.fields` does exactly that, and was overlooked._
+
+## DataGrid child support
+
+Both `x-readonly` and `x-readonly-fields` also reach a DataGrid child (an
+editable one-to-many child grid embedded in the parent's form) when
+declared on the child entity itself — not just the parent's own
+form/list rendering (verified above). A readonly-declared child field
+renders with `editable: false` in the generated grid, and the write path
+protects it too: an existing row's value can't be overwritten through the
+child's `update` path, even by a direct API request that bypasses the UI.
+
+- **Resolution**: `build_context.py`'s per-child loop resolves the
+  readonly field set for each child — the union of the child entity's own
+  `x-readonly-fields` (read from its own definitions entry, mirroring the
+  parent's view-scoped read above) and any per-property `x-readonly` on
+  the child's own properties. Fails closed on an `x-readonly-fields` entry
+  that doesn't match a real child property, the same as the parent-level
+  check above.
+- **UI side**: `generators.py`'s child-grid column builder forces
+  `editable: false` for a readonly column, the same pattern the `order`
+  column already used.
+- **API/service side — create vs. update asymmetry**: a child row's
+  create-time field mapping (used for both a standalone create and a new
+  row added during an update) substitutes a schema-derived default
+  literal for a readonly field instead of the client-submitted value,
+  because a brand-new row has no prior value to preserve. A separate
+  update-time field mapping (used only for an *existing* row's `update`
+  branch) omits the field from the write payload entirely, so Prisma
+  leaves the persisted value untouched — an omitted key is a no-op for
+  that column, so no "re-read and resend the current value" plumbing is
+  needed.
+- **Verification**: confirmed against the live generated output of the
+  one true-editable DataGrid child in the base schema (`dashboard_widget`,
+  under `dashboard`) — declaring `x-readonly-fields: [name]` on it
+  produced `editable: false` for the `name` column in the generated
+  `column_def.tsx`, `name: ''` (no schema default, so the empty-string
+  fallback) in the generated create bodies, and no `name:` key at all in
+  the generated update branch's write payload. Reverting the declaration
+  and regenerating round-tripped the output back to a clean `git status`.

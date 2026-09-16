@@ -1,0 +1,52 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+format-version: 3.0
+
+definitions:
+  user:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name: {}
+      email: {}
+
+  # Base Prisma-backed entity -- non-proxy control. model == parent for
+  # this entity, so its service_validation_custom.ts stub IS imported (by
+  # its own service_validation.ts) and must still be written.
+  widget:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    fields:
+      name: {}
+
+  # allOf proxy view of `widget` with no Prisma model of its own -- mirrors
+  # the real schema's `setting` -> `user` shape. service_validation.ts
+  # generated for THIS entity imports validateCustomRules from
+  # '@/lib/widget/service_validation_custom' (the base model's dir, since
+  # model != parent), never from its own lib dir -- no stub should ever be
+  # written under lib/widget_proxy/.
+  widget_proxy:
+    x-generate:
+      list: false
+      view: true
+      new: false
+      edit: true
+      delete: false
+      invalidate: false
+      api: true
+      test: false
+    allOf:
+      - $ref: "#/definitions/widget"

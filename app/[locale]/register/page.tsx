@@ -101,6 +101,12 @@ export default function RegisterPage() {
             fullWidth
           />
           {error && <AppAlert severity="error">{error}</AppAlert>}
+          <AppText variant="body2" textAlign="center" color="text.secondary">
+            {t.rich("legalAgreementNotice", {
+              terms: (chunks) => <Link href="/legal/terms">{chunks}</Link>,
+              privacy: (chunks) => <Link href="/legal/privacy">{chunks}</Link>,
+            })}
+          </AppText>
           <AppButton type="submit" variant="contained" fullWidth>
             {t("registerButton")}
           </AppButton>

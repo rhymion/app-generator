@@ -17,7 +17,8 @@ it the new key convention:
   - For every user schema entity whose name IS a Prisma model AND that
     carries at least one Category D / view-level annotation
     (`_VIEW_LEVEL_CONFIG_KEYS` -- `x-generate`, `x-audit`,
-    `x-relationships`, `x-search`, `x-custom-components`) -- a "paired"
+    `x-relationships`, `x-search`, `x-custom-components`,
+    `x-readonly-fields`, `x-filter-values`) -- a "paired"
     entity, e.g. `role` (was `role_detail`): the raw entity `__role` is
     synthesized from Prisma (`schema_deriver.derive_raw_entity`),
     Category C entity-level annotations (`x-import-key`, `x-display`,
@@ -84,6 +85,121 @@ from schema_deriver import (
 # Reserved prefix for machine-generated raw entities (Stage 4).
 _RESERVED_RAW_PREFIX = "__"
 
+# cmd_1076: dogfood-default-schema-read-as-real-schema guard. Fired twice
+# in one day (2026-09-16, subtask_1071e/proj_g and subtask_1076a/proj_h):
+# a consumer submodule's own code_generator/json_schema.yaml (this
+# generator's dogfood default) got fed into generate-code instead of the
+# consumer's real schema, because the npm script chain that runs `prj:sync`
+# before generate-code was bypassed (e.g. `npm --prefix app-generator run
+# generate-code` invoked directly, skipping the *consumer's* top-level
+# wrapper script that prefixes `prj:sync &&`). A check placed inside
+# prj_sync.py itself cannot catch this, because prj_sync.py is exactly the
+# script that got skipped. This module is the one thing every real
+# generate-code/cleanup/check-generated/validate-schema invocation already
+# runs first (see each submodule npm script), so the guard lives here.
+
+
+class DogfoodSchemaGuardError(Exception):
+    """Raised when a consumer submodule appears to be building against its
+    own dogfood-default schema instead of the consumer's synced one."""
+
+
+def _is_git_submodule(project_root: Path) -> bool:
+    """True iff project_root is checked out as a git submodule (of any
+    superproject, including a worktree of that superproject) rather than
+    a standalone repo. A worktree's own `.git` is also a file, but its
+    gitdir target contains `.git/worktrees/<name>` with no `modules/`
+    segment for *this* repo; a submodule's gitdir target always resolves
+    through `.../modules/<name>` regardless of how many worktree layers
+    sit above it (verified empirically against a range of live worktrees
+    covering both standalone and submodule checkouts of this generator)."""
+    git_path = project_root / ".git"
+    if not git_path.is_file():
+        return False
+    try:
+        content = git_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return "modules/" in content
+
+
+def check_dogfood_schema_guard(user_schema_path: Path) -> None:
+    """Fail closed if user_schema_path is this generator's own top-level
+    code_generator/json_schema.yaml, this checkout is a consumer submodule,
+    and the file has not actually been synced from the consumer's ../prj.
+
+    Deliberately scoped to the literal top-level schema path only: this
+    generator's own pytest fixtures (code_generator/tests/fixtures/*/
+    json_schema.yaml) build against different, explicit paths and are
+    never routed through this guard -- no env var needed to exempt them.
+    Standalone dogfood checkouts (this generator's own top-level repo) are
+    likewise exempt unconditionally, since `_is_git_submodule` is false
+    for them.
+
+    An explicit escape hatch (APP_GENERATOR_SKIP_DOGFOOD_SCHEMA_GUARD=1)
+    exists for a genuine edge case this investigation did not anticipate;
+    it is not needed for any of the legitimate flows verified so far.
+    """
+    import os
+
+    project_root = Path(__file__).resolve().parent.parent
+    canonical_schema = project_root / "code_generator" / "json_schema.yaml"
+    try:
+        if user_schema_path.resolve() != canonical_schema.resolve():
+            return  # a fixture or other explicit path -- not in scope
+    except OSError:
+        return
+
+    if os.environ.get("APP_GENERATOR_SKIP_DOGFOOD_SCHEMA_GUARD") == "1":
+        return
+
+    if not _is_git_submodule(project_root):
+        return  # standalone dogfood checkout -- never blocked
+
+    prj_dir = project_root.parent / "prj"
+    if not prj_dir.is_dir():
+        raise DogfoodSchemaGuardError(
+            f"error: dogfood-schema guard (cmd_1076): {project_root} is a "
+            "git submodule but no ../prj sibling directory was found at "
+            f"{prj_dir}. Generating code now would silently use this "
+            "generator's own dogfood-default schema instead of the "
+            "consumer's real schema -- this exact bug produced a "
+            "false-green gate twice on 2026-09-16 (subtask_1071e/proj_g, "
+            "subtask_1076a/proj_h). Refusing to proceed (fail-closed). "
+            "Run the consumer's own `generate-code` npm script from the "
+            "consumer root (not `npm --prefix app-generator run "
+            "generate-code` directly) so `prj:sync` runs first, or set "
+            "APP_GENERATOR_SKIP_DOGFOOD_SCHEMA_GUARD=1 if this is "
+            "deliberate."
+        )
+
+    prj_schema = prj_dir / "code_generator" / "json_schema.yaml"
+    if not prj_schema.is_file():
+        raise DogfoodSchemaGuardError(
+            f"error: dogfood-schema guard (cmd_1076): {project_root} is a "
+            f"git submodule with a ../prj sibling ({prj_dir}) but it has "
+            f"no code_generator/json_schema.yaml at {prj_schema}. "
+            "generate-code would use this generator's own dogfood-default "
+            "schema instead of the consumer's real one. Refusing to "
+            "proceed (fail-closed). Add the consumer's real schema at "
+            "that path, or set APP_GENERATOR_SKIP_DOGFOOD_SCHEMA_GUARD=1 "
+            "if this is deliberate."
+        )
+
+    if user_schema_path.read_bytes() != prj_schema.read_bytes():
+        raise DogfoodSchemaGuardError(
+            f"error: dogfood-schema guard (cmd_1076): {project_root} is a "
+            f"git submodule, and {canonical_schema} does not match "
+            f"{prj_schema} -- prj:sync has not run (or did not run "
+            "against this ../prj) since the last change to either file. "
+            "Generating code now would use a stale or dogfood-default "
+            "schema. Run the consumer's own `generate-code` npm script "
+            "from the consumer root (not `npm --prefix app-generator run "
+            "generate-code` directly) so `prj:sync` runs first, or set "
+            "APP_GENERATOR_SKIP_DOGFOOD_SCHEMA_GUARD=1 if this is "
+            "deliberate."
+        )
+
 
 class UserSchemaError(Exception):
     """Raised when the user-authored schema itself is invalid: a reserved
@@ -105,26 +221,48 @@ _YAML_INDENT = {"mapping": 2, "sequence": 4, "offset": 2}
 # raw entity so the intermediate schema is unchanged.
 _ENTITY_LEVEL_DATA_KEYS = (
     "x-import-key",
+    "x-bridge",
     "x-display",
-    "x-readonly-fields",
     "x-internal",
     "x-approval",
     "x-approval-lines",
+    "x-write-locked-values",
     "x-ledger-source",
     "x-splittable",
     "x-reservation",
     "x-gdpr-mode",
+    "x-self-only",
+    "x-payment",
+    "x-nav",
+    "x-scheduled-task",
 )
 
 # Category D: unchanged location, stay on the view entity as before. Also
 # the content-based signal (`_has_view_level_config`) for whether an entity
 # needs a raw/view split at all.
+#
+# `x-readonly-fields` moved here from `_ENTITY_LEVEL_DATA_KEYS` (cmd_874
+# subtask_874d): copying it onto the shared raw entity meant one view's
+# declaration leaked to every other view of the same raw model (e.g. a
+# proxy view's readonly declaration would have applied to the raw model's
+# other views too), since `build_context.py` reads the raw entity for it.
+# It now stays on the view entity, and `build_context.py` reads the view's
+# own definition — see that module for the read-side half of this fix.
+# Contrast with per-property `x-readonly` (unchanged, still model/raw-wide
+# by design — see `docs/knowledge/readonly-field-form-rendering.md`).
+#
+# `x-filter-values` (cmd_874/subtask_874f) is view-scoped for the same
+# reason: a proxy view's row-restriction declaration must not leak onto
+# other views sharing the same raw model. See build_context.py's
+# `filter_values` read for the enforcement side.
 _VIEW_LEVEL_CONFIG_KEYS = (
     "x-generate",
     "x-audit",
     "x-relationships",
     "x-search",
     "x-custom-components",
+    "x-readonly-fields",
+    "x-filter-values",
 )
 
 
@@ -244,6 +382,19 @@ def _build_standalone_raw(
     for key, value in entry.items():
         if key == "fields":
             continue
+        if key == "properties":
+            # Merge, don't replace (cmd_883/subtask_883h): a standalone
+            # entity (no _VIEW_LEVEL_CONFIG_KEYS) can declare its own
+            # `properties:` for relation embeds (e.g. attachment's
+            # `organization: {$ref: ...}`) alongside `fields:`. A bare
+            # `raw[key] = value` here clobbered derive_raw_entity's
+            # scalar properties (id/type/name/... -- attachment.type's
+            # enum included) with just the entry's relation-embed dict,
+            # so any scalar lookup on the raw entity (e.g. generators.py's
+            # attachment_type_ts()) silently lost the field and fell back
+            # to its `number` default.
+            raw.setdefault("properties", {}).update(value)
+            continue
         raw[key] = value
     return raw
 
@@ -361,6 +512,12 @@ def main(argv: list[str] | None = None) -> int:
         "--out", type=Path, required=True, help="Output path for the intermediate schema"
     )
     args = parser.parse_args(argv)
+
+    try:
+        check_dogfood_schema_guard(args.user_schema)
+    except DogfoodSchemaGuardError as exc:
+        print(str(exc), file=sys.stderr)
+        return 4
 
     try:
         build_user_schema(args.user_schema, args.prisma_schema, args.out)

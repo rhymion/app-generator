@@ -26,12 +26,18 @@ from helpers.bridge_prisma import emit_bridge_model, emit_parent_bridge_fk, emit
 from helpers.schema_helpers import get_flatten_rels
 from generate_types import extract_entities, extract_named_constants
 from context import build_entity_context
-from build_context import build_context, build_anonymize_user_context, _get_actual_type
+from build_context import build_context, build_anonymize_user_context, _get_actual_type, set_prisma_models
 from helpers.label_field import build_label_expression
 from helpers.schema_helpers import derive_text_fields as _derive_text_fields
 from helpers.schema_helpers import get_splittable_bridge_field
 from helpers.schema_helpers import resolve_ledger_domain
 from helpers.schema_helpers import get_entity_properties
+from helpers.schema_helpers import get_self_only_flags
+from helpers.schema_helpers import get_parent_relationships
+from helpers.schema_helpers import resolve_set_fields as _resolve_set_fields
+from helpers.schema_helpers import schema_has_direct_attachment_fk
+from helpers.schema_helpers import get_parent_fk_props
+from helpers.schema_helpers import is_optional_fk_to_parent
 from generators import (
     chart_context,
     page_list_context,
@@ -46,6 +52,10 @@ from generators import (
     reaction_type_ts,
     _build_approval_create_block_for_entity,
     _build_split_approval_inherit_block,
+    _raw_def,
+    resolve_approval_submit_on,
+    seed_entities_context,
+    approval_lockdown_context,
 )
 from generators_i18n import (
     update_i18n_and_config,
@@ -54,7 +64,15 @@ from generators_i18n import (
     _collect_custom_component_sections,
     _merge_file_wins_messages,
 )
-from validate import validate_schema, validate_prisma_indexes, SchemaValidationError
+from validate import (
+    validate_schema, validate_prisma_indexes,
+    validate_self_only_creator_id_columns, validate_defaults_cross_schema,
+    validate_submit_on_default_matches_prisma,
+    validate_direct_attachment_prerequisite,
+    validate_direct_attachment_reverse_fields,
+    validate_write_once_stub_asymmetry,
+    SchemaValidationError,
+)
 from generators_doc import build_doc_entity_context, build_doc_index_context, convert_md_to_mdx
 from generators_test import (
     helper_context,
@@ -66,7 +84,9 @@ from generators_test import (
     reservation_spec_context,
     set_messages_fields,
     set_messages_namespaces,
+    set_prisma_uniques,
 )
+from schema_deriver import collect_unique_columns, parse_prisma_schema
 from validation_context import build_validation_context
 from manifest import ManifestRecorder, sha256_file, sha256_text
 
@@ -233,6 +253,209 @@ def _render(env: Environment, template_name: str, ctx: dict) -> str:
     return tmpl.render(**ctx)
 
 
+# cmd_592's exactRe() helper (test_spec.cy.ts.jinja2) is defined whenever an
+# entity has self-ref deps, but it's only *called* under several independent
+# per-relation conditions (after_create_id_is_expr, flatten_test_rels, etc.)
+# that don't all coincide for every entity with self-ref deps (e.g.
+# approval_flow: has_self_ref_deps=True but none of the call-site conditions
+# fire) — a bare `has_self_ref_deps` guard on the definition alone leaves it
+# unused (cmd_607, TS6133/no-unused-vars). Rather than duplicate every
+# call-site guard in Python to gate the definition precisely, strip the
+# helper post-render if the file ends up with no actual call — self-healing
+# as call-site conditions evolve, instead of drifting out of sync with them.
+#
+# Anchored on the function signature, not the preceding comment (cmd_618):
+# cmd_614 widened exactRe from self-ref-only to all entities and rewrote the
+# comment prose to match ("A self-referential dependency record" ->
+# "A dependency record's display name can share a substring with another"),
+# which would have silently desynced a comment-anchored regex — the strip
+# would stop matching, `remainder == content` would trip the safety
+# fallback, and the pre-cmd_607 lint debt (83 warnings) would silently
+# return with no error, no test failure, just a quietly-passing gate that
+# had stopped doing its job. The function signature is the part of this
+# block least likely to change independently of the mechanism itself.
+_EXACT_RE_HELPER_RE = re.compile(
+    r'\n\n(?://[^\n]*\n)*'
+    r"function exactRe\(text: string\): RegExp \{\n"
+    r"  return new RegExp\('\^' \+ text\.replace\(/\[\.\*\+\?\^\$\{\}\(\)\|\[\\\]\\\\\]/g, '\\\\\$&'\) \+ '\$'\);\n"
+    r'\}\n'
+)
+
+
+def _strip_unused_exact_re_helper(content: str) -> str:
+    if 'function exactRe(text: string): RegExp {' not in content:
+        return content
+    remainder = _EXACT_RE_HELPER_RE.sub('', content, count=1)
+    if remainder == content:
+        # The signature literal is present but the surrounding shape (return
+        # statement formatting, comment block) diverged from what
+        # _EXACT_RE_HELPER_RE expects (cmd_618: this used to `return
+        # content` here silently — exactly how cmd_614's comment rewrite
+        # went undetected). A shape mismatch means this function has
+        # stopped doing its job; fail loudly at generate-code time instead
+        # of shipping quietly-broken output.
+        raise RuntimeError(
+            "_strip_unused_exact_re_helper: found 'function exactRe(...)' but "
+            '_EXACT_RE_HELPER_RE did not match the surrounding block — the '
+            'comment/return-statement shape has diverged from what the regex '
+            'expects. Update _EXACT_RE_HELPER_RE to match the current '
+            'test_spec.cy.ts.jinja2 output.'
+        )
+    if 'exactRe(' in remainder:
+        return content  # still called elsewhere in the file — keep the definition
+    return remainder
+
+
+# cmd_607: cypress spec templates seed dependency/record fixtures via
+# `cy.task(...).then((records) => { ... })` / `.then((deps) => { ... })`
+# hundreds of times; whether the body actually reads the callback param
+# (vs. just sequencing the task, e.g. asserting against a hardcoded seed
+# label) depends on which of many independent per-scenario Jinja branches
+# rendered — replicating every branch's condition in Python to gate the
+# param name precisely would be as much surface area as the template itself,
+# and would silently drift out of sync as scenarios are added. Instead,
+# brace-match each callback body post-render and prefix the param with `_`
+# (the repo's established `no-unused-vars` opt-out, see eslint.config.mjs)
+# when it's genuinely never referenced inside — self-healing, and immune to
+# future call-site changes in the templates.
+#
+# The param clause tolerates the real formatting variance already present
+# in these templates (cmd_618): optional `async`, arbitrary whitespace, and
+# an optional TS type annotation (`.then((res: any) => {`, used throughout
+# test_reservation_spec.cy.ts.jinja2) — the original bare `\((\w+)\) => \{`
+# matched none of those, so every typed callback silently passed through
+# unprocessed. Two shapes are deliberately NOT matched here and are left
+# untouched by design, not by accident: no-param `.then(() => {` (nothing
+# to prefix) and destructured `.then(({ a, b }) => {` (per-key unused-vars
+# handling, a different mechanism entirely). _check_then_callback_coverage()
+# below is what tells the difference between "deliberately skipped" and
+# "silently missed" — every `.then(` in the file must fall into one of
+# these three recognized shapes, or generation fails loudly instead of
+# shipping quietly-unprocessed output.
+_THEN_CALLBACK_RE = re.compile(
+    r'\.then\(\s*(?:async\s+)?'
+    r'\(\s*(?P<name>\w+)(?:\s*:\s*[^),]+)?\s*\)'
+    r'\s*=>\s*\{'
+)
+
+_THEN_CALL_RE = re.compile(r'\.then\(')
+_THEN_KNOWN_SHAPE_RE = re.compile(
+    r'\.then\(\s*(?:async\s+)?'
+    r'(?:'
+    r'\(\s*\)|'                                    # no-param
+    r'\(\s*\{[^{}]*\}\s*(?::\s*[^),]+)?\s*\)|'      # destructured, optional type
+    r'\(\s*\w+(?:\s*:\s*[^),]+)?\s*\)'              # named, optional type
+    r')'
+    r'\s*=>'
+)
+
+
+def _check_then_callback_coverage(content: str) -> None:
+    for m in _THEN_CALL_RE.finditer(content):
+        if _THEN_KNOWN_SHAPE_RE.match(content, m.start()):
+            continue
+        snippet = content[m.start():m.start() + 80].replace('\n', '\\n')
+        raise RuntimeError(
+            '_prefix_unused_then_callback_params: found a .then( call whose '
+            'parameter clause matches none of the recognized shapes '
+            '(no-param, destructured, or named with an optional TS type) — '
+            f'near: {snippet!r}. Extend _THEN_CALLBACK_RE / '
+            '_THEN_KNOWN_SHAPE_RE to cover this shape, or confirm it is a '
+            'genuinely new case that needs its own handling.'
+        )
+
+
+def _strip_same_name_then_decls(body: str, name: str) -> str:
+    # A nested `.then((records) => {...})` reusing the same param name would
+    # shadow the outer one — its own declaration text contains `name` too,
+    # which isn't a *use* of the outer binding. Strip every nested
+    # declaration matching this name (any async/whitespace/type variant)
+    # before checking, so a same-named nested callback can't mask the outer
+    # param being genuinely dead.
+    def repl(m: re.Match) -> str:
+        return '' if m.group('name') == name else m.group(0)
+
+    return _THEN_CALLBACK_RE.sub(repl, body)
+
+
+def _prefix_unused_then_callback_params(content: str) -> str:
+    _check_then_callback_coverage(content)
+    out = []
+    i = 0
+    n = len(content)
+    while i < n:
+        m = _THEN_CALLBACK_RE.match(content, i)
+        if not m:
+            out.append(content[i])
+            i += 1
+            continue
+        name = m.group('name')
+        body_start = m.end()
+        depth = 1
+        j = body_start
+        quote = None
+        line_comment = False
+        block_comment = False
+        while j < n and depth > 0:
+            c = content[j]
+            if line_comment:
+                if c == '\n':
+                    line_comment = False
+                j += 1
+                continue
+            if block_comment:
+                if content[j:j + 2] == '*/':
+                    block_comment = False
+                    j += 2
+                    continue
+                j += 1
+                continue
+            if quote:
+                if c == '\\':
+                    j += 2
+                    continue
+                if c == quote:
+                    quote = None
+                j += 1
+                continue
+            if c == '/' and content[j + 1:j + 2] == '/':
+                line_comment = True
+                j += 2
+                continue
+            if c == '/' and content[j + 1:j + 2] == '*':
+                block_comment = True
+                j += 2
+                continue
+            if c in ('"', "'", '`'):
+                quote = c
+                j += 1
+                continue
+            if c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+            j += 1
+        if depth != 0:
+            # Unbalanced — bail out and leave the rest of the file untouched
+            # rather than risk mangling it.
+            out.append(content[i:])
+            return ''.join(out)
+        body_end = j - 1  # index of the matching '}'
+        body = content[body_start:body_end]
+        usage_check_body = _strip_same_name_then_decls(body, name)
+        used = bool(re.search(rf'\b{re.escape(name)}\b', usage_check_body))
+        # Recurse so nested `.then((records) => {...})` blocks inside this
+        # body are checked independently of whether the outer param is used.
+        body = _prefix_unused_then_callback_params(body)
+        prefix = name if used else f'_{name}'
+        # Preserve everything matched verbatim (async/whitespace/type
+        # annotation) — only the identifier itself changes.
+        header = content[i:m.start('name')] + prefix + content[m.end('name'):m.end()]
+        out.append(header + body + '}')
+        i = j
+    return ''.join(out)
+
+
 # Records every generated file for this run; reset at the top of generate().
 _manifest = ManifestRecorder()
 
@@ -242,6 +465,69 @@ def _write(path: Path, content: str) -> None:
     path.write_text(content, encoding='utf-8')
     _manifest.record(path, content, 'overwrite')
     print(f'  Wrote {path}')
+
+
+_VERCEL_JSON_DEFAULTS = {
+    '$schema': 'https://openapi.vercel.sh/vercel.json',
+    'framework': 'nextjs',
+    'buildCommand': 'npm run vercel-build',
+    'regions': ['sin1'],
+}
+
+
+def _write_vercel_json_crons(path: Path, scheduled_task_entities: list) -> None:
+    """Write vercel.json's `crons` array from x-scheduled-task declarations
+    (cmd_781) — the only generator-owned key in this otherwise hand-authored
+    file. Every other key (framework/buildCommand/...) is read back
+    verbatim and left untouched. `crons` is fully replaced, not merged, each
+    run, so a task_id removed from the schema also disappears from
+    vercel.json — same "no orphaned entries" contract as
+    lib/scheduled-tasks/registry.ts. Not routed through `_write`/`_manifest`:
+    unlike registry.ts, this file's other keys are meant to be hand-edited —
+    the file has no "GENERATED — do not edit" contract as a whole, only this
+    one key does.
+
+    `regions` is a second, narrower self-heal (cmd_1080): if an existing
+    vercel.json is missing `regions` entirely, it is backfilled with the
+    single-region default below. An existing `regions` value — whatever it
+    is — is never touched. This is not a path toward multi-region fan-out:
+    per cmd_1080, if the single sin1 region hits the Vercel WAF request
+    cap, the fix is to raise the cap, not spread load across regions. The
+    default here exists only to self-heal a file that was written before
+    `regions` existed, or otherwise lost the key.
+    """
+    if path.exists():
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+    else:
+        data = dict(_VERCEL_JSON_DEFAULTS)
+
+    regions_added = 'regions' not in data
+    if regions_added:
+        data['regions'] = list(_VERCEL_JSON_DEFAULTS['regions'])
+
+    crons = [
+        {'path': f"/api/scheduled-tasks/{ent['task_id']}", 'schedule': ent['interval']}
+        for ent in scheduled_task_entities
+        if ent.get('interval')
+    ]
+
+    if crons:
+        crons_changed = data.get('crons') != crons
+        data['crons'] = crons
+    else:
+        crons_changed = 'crons' in data
+        data.pop('crons', None)
+
+    changed = crons_changed or regions_added
+
+    if changed or not path.exists():
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write('\n')
+        print(f'  Wrote {path} (crons: {len(crons)})')
+    else:
+        print(f'  Skipped (up to date) {path} (crons: {len(crons)})')
 
 
 def _write_stub(path: Path, content: str) -> None:
@@ -282,25 +568,6 @@ _handwritten_notices: list[str] = []
 
 def _note_stub_created(path: Path, why: str, action: str) -> None:
     _handwritten_notices.append(f'  - {path}\n      {why}\n      -> {action}')
-
-
-def _resolve_set_fields(entity_props: dict, raw: dict) -> dict:
-    resolved = {}
-    for field, value in raw.items():
-        prop_def = entity_props.get(field, {})
-        actual = _get_actual_type(prop_def)
-        enum_vals = prop_def.get('enum')
-        if actual in ('integer', 'number') and isinstance(enum_vals, list) and isinstance(value, str):
-            lower_labels = [str(v).lower() for v in enum_vals]
-            if value.lower() not in lower_labels:
-                raise ValueError(
-                    f"set_fields: label '{value}' not found in enum {enum_vals} "
-                    f"for field '{field}'"
-                )
-            resolved[field] = lower_labels.index(value.lower())
-        else:
-            resolved[field] = value
-    return resolved
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +670,218 @@ def _append_no_page_child(
     })
 
 
+def pool_relation_target(pool_entity: str, field_name: str, schema: dict) -> str | None:
+    """The entity targeted by `field_name` (a many-to-one FK) on `pool_entity`.
+
+    cmd_546: used to resolve the item-master entity a ledger domain's
+    `item_field` targets (e.g. inventory.product_id -> 'item'), and the
+    location entity its `location_field` targets — both schema-derived
+    instead of a literal `'product'` / `'location'` entity-name comparison,
+    which is what makes `detect_product_id_field` below (and the
+    `tx.<entity>.findFirst` lookups in the ledger_* stub / split_action_route
+    templates) entity-name-independent.
+    """
+    pool_props = get_entity_properties(pool_entity, schema) or {}
+    rel = (pool_props.get(field_name) or {}).get('x-relationship') or {}
+    return rel.get('target')
+
+
+def detect_product_id_field(props: dict, pool_item_target: str | None) -> str | None:
+    """Many-to-one FK on the split entity pointing at the same item-master
+    entity the ledger domain's `item_field` (on the pool entity) references,
+    for split auto-allocate queries and lot/product-mismatch validation.
+
+    Resolves the target entity via `pool_item_target` (schema-derived, see
+    `pool_relation_target`) instead of a literal `target == 'product'`
+    comparison — the previous literal comparison silently returned None
+    (disabling these checks with no error, no warning) for any consumer
+    naming the item-master entity something other than `product` (e.g.
+    `item` — see proj_g's goods_receipt_line).
+    """
+    if not pool_item_target:
+        return None
+    for prop_name, prop_def in props.items():
+        rel = (prop_def or {}).get('x-relationship') or {}
+        if rel.get('type') == 'many-to-one' and rel.get('target') == pool_item_target:
+            return prop_name
+    return None
+
+
+def _ledger_stub_field_vars(domain: dict, schema: dict) -> dict:
+    """Template context for the pool entity's item/location/lot/expiration
+    columns, shared by the ledger_write/move/adjust once-stub templates and
+    the split_action_route template (see the `pool_*` context vars built
+    alongside `_ledger_domain_vars` in the x-splittable loop below).
+
+    cmd_562: location_field is an id-FK on both the pool and ledger entities
+    (same shape as item_field), so the ledger row write is a plain id copy —
+    no display-string rendering, no reverse lookup, no relation include.
+    This removes the `pool_location_label_exprs`/`pool_location_label_field`/
+    `pool_location_relation`/`pool_location_target_entity` machinery cmd_550
+    (PR #269) built to fix the previous denormalized-string design; that
+    whole design (and its fix) is obsolete once the column is an id itself.
+
+    cmd_991: pool_bin_field is OPT-IN (None when the domain doesn't
+    declare binField) — every template site that reads it is guarded by
+    `{% if pool_bin_field %}`, so a consumer that never declares binField
+    renders byte-identical output to before this key existed.
+    """
+    return {
+        'pool_item_field': domain['item_field'],
+        'pool_location_field': domain['location_field'],
+        'pool_lot_field': domain['lot_field'],
+        'pool_expiration_field': domain['expiration_field'],
+        'pool_bin_field': domain.get('bin_field'),
+    }
+
+
+def _entity_is_write_reachable(entity_name: str, defs: dict) -> bool:
+    """True if entity_name's own field values can be written by some
+    ancestor entity's nested create/update, i.e. it is a one-to-many list
+    child that is neither independent (own x-generate, shown read-only on
+    the parent form and excluded from the parent's nested write body -- see
+    build_context.py's `embedded_ch` filter, `not c['is_independent']`) nor
+    use_connect (a many-to-many or nullable-FK list child, which only
+    connects/sets existing ids -- no field-value write at all).
+
+    Mirrors build_context.py's `_build_child_data`/`embedded_ch` computation
+    without needing the full ctx-building pipeline -- this runs earlier, in
+    generate()'s definitions-scan pass, before any ctx exists. Does not
+    special-case many-to-many list children (no schema in current use
+    combines x-approval with an m2m list-child relationship); treated the
+    same as any other list child here, since a m2m child is always
+    use_connect and so is already excluded via is_optional_fk_to_parent's
+    fallback returning False only for a genuinely non-nullable FK -- an m2m
+    child has no such column at all (bridge table), which would
+    misclassify it as a required FK if one ever appeared. Flagged as a
+    known gap rather than silently assumed safe.
+    """
+    own_key = f'__{entity_name}'
+    own_def = defs.get(own_key) or {}
+    # x-generate lives on the BARE definitions key after
+    # build_user_schema.py's transform, not on the '__'-prefixed raw def
+    # (confirmed empirically: __inventory_movement.get('x-generate') is
+    # None in the real generated_json_schema.yaml; generate.py's own
+    # search_entities() reads it the same way, defs['definitions'].get(bare)
+    # falling back to the '__'-prefixed form only when the bare key is
+    # missing -- generate.py:~2170).
+    if (defs.get(entity_name) or {}).get('x-generate') or own_def.get('x-generate'):
+        return False
+    own_props = own_def.get('properties') or {}
+    for other_key, other_def in defs.items():
+        if not other_key.startswith('__') or other_key == own_key:
+            continue
+        other_name = other_key[2:]
+        is_list_child = any(
+            isinstance(p, dict) and p.get('type') == 'array'
+            and (p.get('items') or {}).get('$ref', '').rsplit('/', 1)[-1] == entity_name
+            for p in (other_def.get('properties') or {}).values()
+        )
+        if not is_list_child:
+            continue
+        fk_props = get_parent_fk_props(own_def, other_name) & set(own_props)
+        if not fk_props:
+            continue
+        if is_optional_fk_to_parent(own_def, other_name):
+            continue
+        return True
+    return False
+
+
+def _validate_x_approval_combinations(
+    entity_name: str, x_approval: dict, entity_props: dict, is_editable: bool,
+) -> None:
+    """Fail-closed structural checks on an entity's x-approval clause
+    combination (cmd_865). Runs once per x-approval-declaring entity, before
+    any approval-related file is generated from it.
+
+    Combination truth table (subtask_865b task YAML, 2026-08-29 14:37
+    amendment -- this single table supersedes the three earlier separate
+    checks it replaced, which are no longer implemented on their own):
+
+    Axes: S=submit_on declared, W=on_withdrawn declared, T=on_rejected
+    terminal (on_rejected absent counts as T=False -- matches
+    isTerminalReject()'s runtime behavior, which only ever returns true for
+    a model that declared on_rejected.terminal: true), E=is_editable
+    (editable via ANY generated write path -- see _entity_is_write_reachable
+    for what counts as a write path beyond the entity's own x-generate.edit).
+
+    Rule: S=True is valid unconditionally (all 8 W/T/E combinations). S=False
+    is valid ONLY for exactly W=False, T=True, E=False; every other S=False
+    combination is rejected -- see subtask_865a's report (harm_cases and the
+    truth table's own reasoning column) for why each forbidden combination
+    is unsafe (a resubmission dead end, or unguarded post-submission edits).
+
+    Duplicate-value check (kept independent of the table above; see
+    subtask_865a's report for the full design): the same (field, resolved
+    value) pair used by 2+ distinct declarations among submit_on/
+    on_approved.set_fields/on_rejected.set_fields/on_withdrawn.set_fields --
+    e.g. a rejection or withdrawal writing a field back to submit_on's own
+    value re-triggers the update-side edge trigger, creating an approval
+    round in an infinite loop.
+    """
+    submit_on_raw = x_approval.get('submit_on') or {}
+    on_rejected = x_approval.get('on_rejected') or {}
+    on_approved = x_approval.get('on_approved') or {}
+    on_withdrawn = x_approval.get('on_withdrawn') or {}
+
+    submit_on_present = bool(submit_on_raw)
+    on_withdrawn_present = bool(on_withdrawn)
+    on_rejected_terminal = bool(on_rejected.get('terminal', False))
+
+    if not submit_on_present and not (
+        not on_withdrawn_present and on_rejected_terminal and not is_editable
+    ):
+        reasons = []
+        if on_withdrawn_present:
+            reasons.append(
+                "on_withdrawn is declared -- a withdrawn row can never resubmit "
+                "without submit_on"
+            )
+        if not on_rejected_terminal:
+            reasons.append(
+                "on_rejected.terminal is not true (or on_rejected is absent) -- "
+                "a rejected row can never resubmit and is not terminal either"
+            )
+        if is_editable:
+            reasons.append(
+                "the entity is editable via a generated write path (its own "
+                "edit endpoint, or nested writes from an ancestor entity's "
+                "create/update) -- with no submit_on there is no approval "
+                "lockdown to stop the request's content being rewritten "
+                "after submission"
+            )
+        raise ValueError(
+            f"{entity_name}: x-approval.submit_on is absent. This is only allowed when "
+            f"x-approval.on_withdrawn is NOT declared, x-approval.on_rejected.terminal is "
+            f"true, and the entity is not editable via any generated write path. "
+            f"Violated: " + "; ".join(reasons)
+        )
+
+    # Duplicate-value check: same (field, resolved value) pair across 2+ distinct clauses.
+    value_registry: dict[tuple[str, str], set[str]] = {}
+    if submit_on_raw:
+        resolved_so = _resolve_set_fields(entity_props, submit_on_raw)
+        for f, v in resolved_so.items():
+            value_registry.setdefault((f, str(v)), set()).add('submit_on')
+    for f, v in _resolve_set_fields(entity_props, on_approved.get('set_fields') or {}).items():
+        value_registry.setdefault((f, str(v)), set()).add('on_approved')
+    for f, v in _resolve_set_fields(entity_props, on_rejected.get('set_fields') or {}).items():
+        value_registry.setdefault((f, str(v)), set()).add('on_rejected')
+    for f, v in _resolve_set_fields(entity_props, on_withdrawn.get('set_fields') or {}).items():
+        value_registry.setdefault((f, str(v)), set()).add('on_withdrawn')
+
+    for (field, value), clauses in value_registry.items():
+        if len(clauses) > 1:
+            raise ValueError(
+                f"{entity_name}: x-approval field '{field}' maps to value "
+                f"'{value}' in multiple declarations: {sorted(clauses)}. Each approval "
+                f"state transition must target a distinct value to avoid ambiguous or "
+                f"self-retriggering state machine behavior. Conflicting declarations: "
+                f"{{{field!r}: {value!r}}} appears in {sorted(clauses)}."
+            )
+
+
 # ---------------------------------------------------------------------------
 # Main orchestrator
 # ---------------------------------------------------------------------------
@@ -423,6 +902,11 @@ def generate(schema_path: str, output_dir: str) -> None:
     try:
         validate_schema(schema)
         validate_prisma_indexes(Path(output_dir) / 'prisma' / 'schema.prisma')
+        validate_self_only_creator_id_columns(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
+        validate_defaults_cross_schema(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
+        validate_submit_on_default_matches_prisma(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
+        validate_direct_attachment_prerequisite(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
+        validate_direct_attachment_reverse_fields(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
     except SchemaValidationError as exc:
         print(f'\n{exc}', file=sys.stderr)
         sys.exit(1)
@@ -436,6 +920,11 @@ def generate(schema_path: str, output_dir: str) -> None:
     global _manifest
     _manifest = ManifestRecorder(out=out)
     _handwritten_notices.clear()
+    # cmd_941 gate (1): populated per-entity below (model == parent only,
+    # where service_after_create/update/delete.ts are actually written),
+    # checked as a gate at the end of this function once all stubs are on
+    # disk — see validate_write_once_stub_asymmetry()'s docstring.
+    _stub_asymmetry_entries: list[dict] = []
 
     env = _make_env()
 
@@ -470,6 +959,18 @@ def generate(schema_path: str, output_dir: str) -> None:
         _write(out / 'prisma' / 'bridge_additions.prisma', bridge_additions)
         print(f'  Bridge Prisma additions (reference) → prisma/bridge_additions.prisma')
 
+    # Prisma uniqueness facts (@unique / @@unique) for the Cypress populate
+    # helpers' find-or-create idempotency. Read after the bridge injection
+    # above so freshly injected bridge models are included. Uniqueness is not
+    # part of the derived JSON schema (see schema_deriver.collect_unique_columns),
+    # so it is threaded in here rather than through `schema`.
+    _prisma_models = parse_prisma_schema(out / 'prisma' / 'schema.prisma')
+    set_prisma_uniques(collect_unique_columns(_prisma_models))
+    # subtask_892d GAP1: registers the same parsed Prisma models for
+    # build_context.py's child audit-field (creator_id/updater_id) presence
+    # lookups -- see build_context.py's set_prisma_models() docstring.
+    set_prisma_models(_prisma_models)
+
     print(f'Found {len(entities)} entities in {schema_path}')
 
     # Pre-compute named_constants so entity templates (getters.ts) can use it
@@ -477,6 +978,7 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     doc_dir = out / 'docs' / 'generated'
     entity_doc_summaries: list[dict] = []
+    self_only_admin_bypass_entities: list[str] = []
 
     for entity in entities:
         parent     = entity['parent']
@@ -515,6 +1017,13 @@ def generate(schema_path: str, output_dir: str) -> None:
 
         # Base context for all other generators
         ctx = build_context(entity, schema, has_reactions=bool(named_constants))
+        # cmd_846(c): post-approval edit/delete/invalidate lockdown --
+        # merged into ctx (not just svc_ctx) so it's available regardless
+        # of which downstream block (service.ts vs. the invalidate-only
+        # write below) needs it.
+        ctx = {**ctx, **approval_lockdown_context(ctx, schema)}
+        if ctx.get('is_self_only') and ctx.get('self_only_admin_bypass'):
+            self_only_admin_bypass_entities.append(parent)
 
         # --- docs/{parent}.md + app/[locale]/docs/{parent}/page.mdx ---
         doc_ctx = build_doc_entity_context(ctx)
@@ -557,6 +1066,95 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'parent_pascal': parent_pascal,
             }),
         )
+        # An allOf proxy entity (model != parent, e.g. 'setting' -> 'user')
+        # has no Prisma model of its own -- service_validation.ts.jinja2
+        # imports validateCustomRules from '@/lib/{{ model }}/...', never
+        # from the proxy's own lib dir, so a stub written here would never
+        # be imported by anything.
+        if model == parent:
+            _write_stub(
+                lib_dir / 'service_validation_custom.ts',
+                _render(env, 'service_validation_custom_stub.ts.jinja2', {
+                    'parent': parent,
+                    'parent_pascal': parent_pascal,
+                }),
+            )
+
+        # --- post-create side-effect hook write-once stub (cmd_923a) ---
+        #
+        # Same model == parent guard as service_validation_custom.ts above,
+        # for the same reason: an allOf proxy view (model != parent) has no
+        # Prisma model of its own, and service.ts.jinja2 imports afterCreate
+        # from '@/lib/{{ model }}/...', never from the proxy's own lib dir --
+        # a stub written at the proxy's lib_dir would never be imported.
+        #
+        # Unconditional on can_new here (unlike the call site in
+        # service.ts.jinja2, which IS gated on can_create) -- deliberately
+        # mirrors service_validation_custom.ts's own unconditional write
+        # just above. A proxy view sharing this model can independently
+        # declare x-generate.new: true even when the canonical (model ==
+        # parent) entity itself has create disabled; that proxy's
+        # add{{ parent_pascal }}() imports this same file via the absolute
+        # '@/lib/{{ model }}/...' path (see generators.py utility_code), so
+        # the stub must exist regardless of the canonical entity's own
+        # can_new value.
+        if model == parent:
+            _write_stub(
+                lib_dir / 'service_after_create.ts',
+                _render(env, 'service_after_create_stub.ts.jinja2', {
+                    'parent': parent,
+                    'parent_pascal': parent_pascal,
+                }),
+            )
+
+        # --- post-update/post-delete/pre-delete/post-submit write-once
+        # stubs (cmd_923b) ---
+        #
+        # Same model == parent guard, and the same "unconditional on this
+        # view's own can_edit/can_delete" reasoning, as service_after_create.ts
+        # above -- a proxy view sharing this model can independently enable
+        # edit/delete/submit even when the canonical entity itself has that
+        # operation disabled, and its generated service.ts imports these
+        # stubs via the absolute '@/lib/{{ model }}/...' path regardless.
+        if model == parent:
+            _write_stub(
+                lib_dir / 'service_after_update.ts',
+                _render(env, 'service_after_update_stub.ts.jinja2', {
+                    'parent': parent,
+                    'parent_pascal': parent_pascal,
+                }),
+            )
+            _write_stub(
+                lib_dir / 'service_after_delete.ts',
+                _render(env, 'service_after_delete_stub.ts.jinja2', {
+                    'parent': parent,
+                    'parent_pascal': parent_pascal,
+                }),
+            )
+            _write_stub(
+                lib_dir / 'service_validation_delete.ts',
+                _render(env, 'service_validation_delete_stub.ts.jinja2', {
+                    'parent': parent,
+                    'parent_pascal': parent_pascal,
+                }),
+            )
+            # cmd_941 gate (1): record this entity's create/update/delete
+            # stub paths so the end-of-run asymmetry check can compare them.
+            _stub_asymmetry_entries.append({
+                'parent': parent,
+                'create_path': lib_dir / 'service_after_create.ts',
+                'update_path': lib_dir / 'service_after_update.ts',
+                'delete_path': lib_dir / 'service_after_delete.ts',
+                'can_edit': can_edit,
+                'can_delete': can_delete,
+            })
+            _write_stub(
+                lib_dir / 'service_after_submit.ts',
+                _render(env, 'service_after_submit_stub.ts.jinja2', {
+                    'parent': parent,
+                    'parent_pascal': parent_pascal,
+                }),
+            )
 
         # --- virtual column resolver stub (per-entity, async/bulk) ---
         if ctx.get('virtual_columns'):
@@ -580,23 +1178,113 @@ def generate(schema_path: str, output_dir: str) -> None:
                 )
 
         # --- service.ts + service_validation stub ---
-        if can_new or can_edit or can_delete:
+        #
+        # cmd_856 [変更4 corollary]: a reservation lines-child (new/edit/
+        # delete all false -- e.g. purchase_per_item, whose only value-
+        # mutation path is the PARENT's own nested create/update) can still
+        # declare its own x-approval.submit_on + approvable bridge and need
+        # a standalone submit_for_approval action -- see
+        # service_context()'s has_approvable_bridge-and-not-can_create
+        # branch. needs_submit_action mirrors that same predicate here so
+        # svc_ctx gets computed (and submit_actions.ts written) even though
+        # service.ts itself (gated on can_new/edit/delete, unchanged below)
+        # would otherwise never be reached at all for such an entity.
+        needs_submit_action = (
+            any(r.get('target') == 'approvable' for r in ctx.get('one_to_one_rels', []))
+            and resolve_approval_submit_on(_raw_def(model, schema))[0] is not None
+        )
+        if can_new or can_edit or can_delete or needs_submit_action:
             svc_ctx = {**ctx, **service_context(ctx, schema)}
-            _write(lib_dir / 'service.ts', _render(env, 'service.ts.jinja2', svc_ctx))
-            if can_new or can_edit:
-                val_ctx = {**ctx, **build_validation_context(ctx)}
-                _write(lib_dir / 'service_validation.ts', _render(env, 'service_validation.ts.jinja2', val_ctx))
-            if can_new or ctx.get('bridge_child_ir'):
-                # Bridge children create via parent context (cmd_167 §4), so their
-                # service imports afterCreate — emit the write-once stub for them too.
-                _write_stub(
-                    lib_dir / 'service_after_create.ts',
-                    _render(env, 'service_after_create_stub.ts.jinja2', ctx),
-                )
+            if can_new or can_edit or can_delete:
+                _write(lib_dir / 'service.ts', _render(env, 'service.ts.jinja2', svc_ctx))
+                if can_new or can_edit:
+                    val_ctx = {**ctx, **build_validation_context(ctx)}
+                    _write(lib_dir / 'service_validation.ts', _render(env, 'service_validation.ts.jinja2', val_ctx))
+            # --- submit_actions.ts (cmd_841 ruling_4) ---
+            #
+            # Emitted for entities that declare x-approval.submit_on with an
+            # approvable bridge and either can_create (the ordinary case) or
+            # needs_submit_action (a reservation lines-child with neither
+            # add{Parent} nor update{Parent} of its own, cmd_856 change 4)
+            # -- see service_context()'s submit_for_approval_action_code.
+            if svc_ctx.get('submit_for_approval_action_code'):
+                _write(lib_dir / 'submit_actions.ts', _render(env, 'submit_for_approval.ts.jinja2', svc_ctx))
+                print(f'  Submit-for-approval action → lib/{parent}/submit_actions.ts')
+
+            # --- edit_guard.ts / delete_guard.ts (cmd_846(c)) ---
+            #
+            # assertEditAllowed/assertDeleteAllowed, called from inside
+            # update{Parent}/delete{Parent} in service.ts.jinja2 itself --
+            # the one choke point both the REST PUT/DELETE route
+            # (api_detail_route.ts.jinja2) and the upsert{Parent}/
+            # remove{Parent} Server Action (actions.ts.jinja2) already
+            # funnel through. Always regenerated (pure derivation from
+            # schema, not a hand-customization point) -- never a
+            # _write_stub(). Gated on has_edit_guard/has_delete_guard
+            # (approval_lockdown_context(), view-scoped per has_approvable_
+            # bridge) so a proxy view sharing the model never gets one.
+            if svc_ctx.get('has_edit_guard'):
+                _write(lib_dir / 'edit_guard.ts', _render(env, 'edit_guard.ts.jinja2', svc_ctx))
+            if svc_ctx.get('has_delete_guard'):
+                _write(lib_dir / 'delete_guard.ts', _render(env, 'delete_guard.ts.jinja2', svc_ctx))
+
+        # --- invalidate handler write-once stub (cmd_583) ---
+        # x-generate.invalidate enabled without a configured handler/module:
+        # both actions.ts.jinja2 and invalidate_action_route.ts.jinja2 import
+        # invalidate{{ parent_pascal }} from lib/{{ parent }}/invalidate_handler
+        # in that case — write it so the import target actually exists.
+        if can_invalidate and not invalidate_module:
+            inv_stub_path = lib_dir / 'invalidate_handler.ts'
+            # cmd_587: only the default `{ invalidated_at: new Date() }` update is
+            # safe to emit when the Prisma model actually has that column -- read
+            # the real column set (not an assumption) so entities without it fall
+            # back to the #290-style throw instead of a build-breaking prisma call.
+            _model_fields = _prisma_models[model].fields if model in _prisma_models else {}
+            inv_stub_ctx = {**ctx, 'has_invalidated_at_column': 'invalidated_at' in _model_fields}
+            _write_stub(inv_stub_path, _render(env, 'invalidate_handler_stub.ts.jinja2', inv_stub_ctx))
+            _note_stub_created(
+                inv_stub_path,
+                f'Entity "{parent}" has x-generate.invalidate enabled with no handler/module.',
+                ('Review the default `invalidated_at` update written here, or '
+                 if inv_stub_ctx['has_invalidated_at_column'] else
+                 'Implement domain-specific invalidate logic here (the stub throws) -- '
+                 'this model has no `invalidated_at` column, so no default was written -- or ')
+                + 'configure x-generate.invalidate.module/handler to point elsewhere.',
+            )
+
+        # --- invalidate_guard.ts (cmd_846(c)) ---
+        #
+        # assertInvalidateAllowed, called from BOTH
+        # invalidate_action_route.ts.jinja2 (REST) and actions.ts.jinja2's
+        # invalidate{Parent} (Server Action) -- unlike edit/delete there is
+        # no single service.ts choke point here (both call the same
+        # generated lib/{parent}/invalidate_handler.ts directly, not
+        # through service.ts), so the call is wired into both entry
+        # points. Mirrors the existing assertApprovalOrder precedent
+        # (both entry points call the same function -- see
+        # docs/knowledge/appendix/approval-flow.md §16.6.1). Written
+        # regardless of whether a custom handler/module is configured --
+        # the lockdown applies independent of what the invalidate handler
+        # itself does.
+        if can_invalidate and ctx.get('has_invalidate_guard'):
+            _write(lib_dir / 'invalidate_guard.ts', _render(env, 'invalidate_guard.ts.jinja2', ctx))
 
         # --- actions.ts ---
         if can_new or can_edit or can_delete or can_invalidate:
             act_ctx = {**ctx, **actions_context(ctx)}
+            # uses_prisma: whether anything in this entity's rendered body
+            # (not just the static template branches) calls `prisma.` — the
+            # can_delete/has_commentable blocks in actions.ts.jinja2 are the
+            # common case, but per-entity injected content like upsert_body
+            # can also embed a raw prisma call (e.g. setting/user's
+            # ownership lookup), which a static condition can't see ahead of
+            # time. Render once with the import forced on to inspect the
+            # actual body, then render for real with the measured flag —
+            # avoids a dangling unused `import prisma` (lint finding)
+            # without having to enumerate every body-content code path.
+            _probe = _render(env, 'actions.ts.jinja2', {**act_ctx, 'uses_prisma': True})
+            _probe_sans_import = _probe.replace("import prisma from '@/lib/prisma';\n", '', 1)
+            act_ctx['uses_prisma'] = 'prisma.' in _probe_sans_import
             _write(lib_dir / 'actions.ts', _render(env, 'actions.ts.jinja2', act_ctx))
 
         # --- API routes ---
@@ -634,7 +1322,12 @@ def generate(schema_path: str, output_dir: str) -> None:
             print(f'  Invalidate route → app/api/{parent}/[id]/actions/invalidate/')
 
         # --- column_def.tsx ---
-        has_children = bool(entity.get('children'))
+        # Use the filtered non_comment_ch (embedded_ch), not the raw entity
+        # children list — an entity whose only children are comment-type or
+        # otherwise filtered out has nothing for column_def_context() to loop
+        # over, leaving the unconditional GridColDef/useTranslations imports
+        # unused in the written file (lint finding).
+        has_children = bool(ctx['non_comment_ch'])
         if has_children and (can_view or can_edit):
             col_ctx = {**ctx, **column_def_context(ctx, schema)}
             _write(components_dir / 'column_def.tsx', _render(env, 'column_def.tsx.jinja2', col_ctx))
@@ -654,10 +1347,10 @@ def generate(schema_path: str, output_dir: str) -> None:
         # --- <Child>BridgeGrid.tsx (parent-embedded DataGrid, cmd_167 §4) ---
         # Emitted for bridge children (entities with new-form x-bridge); the
         # component is embedded on each parent's FormView (see form_view_context).
-        _self_bridge = get_new_form_bridge(schema['definitions'].get(model, {}))
+        _self_bridge = get_new_form_bridge(_raw_def(model, schema))
         if _self_bridge:
-            _bg_cols = (schema['definitions'].get(model, {}).get('x-display') or {}).get('table') or []
-            _model_props = schema['definitions'].get(model, {}).get('properties', {}) or {}
+            _bg_cols = (_raw_def(model, schema).get('x-display') or {}).get('table') or []
+            _model_props = _raw_def(model, schema).get('properties', {}) or {}
             _df_entries = []
             for _col in _bg_cols:
                 for _fname, _fcfg in _col.items():
@@ -755,14 +1448,6 @@ def generate(schema_path: str, output_dir: str) -> None:
                 return prop_name
         return None
 
-    def _detect_product_id_field(props: dict) -> str | None:
-        """Many-to-one FK pointing at product, for split auto-allocate queries."""
-        for prop_name, prop_def in props.items():
-            rel = (prop_def or {}).get('x-relationship') or {}
-            if rel.get('type') == 'many-to-one' and rel.get('target') == 'product':
-                return prop_name
-        return None
-
     _splittable_defs = schema.get('definitions', {})
     for _def_key, _def_val in _splittable_defs.items():
         if not _def_key.startswith('__'):
@@ -799,7 +1484,6 @@ def generate(schema_path: str, output_dir: str) -> None:
             _bridge_field in _split_entity_props
             and (_def_val.get('x-approval', {}) or {}).get('on_approved', {}).get('emit_hook')
         )
-        _product_id_f = _detect_product_id_field(_split_entity_props)
 
         # cmd_307 FIX-β: entities whose x-ledger-source has event_type 'receive'
         # (e.g. receiving_receipt_line) add inventory on approval — they never
@@ -831,7 +1515,41 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'pool_entity': _domain['pool'],
                 'bridge_fk_field': _bridge_field,
                 'pool_fk_field': _pool_fk_field,
+                # cmd_546: pool entity's own item/location/lot/expiration column
+                # names (OD-1 domain config), replacing what were literal
+                # 'product_id'/'location'/'lot_number'/'expiration_date'
+                # hardcodes throughout split_action_route.ts.jinja2.
+                **_ledger_stub_field_vars(_domain, schema),
             }
+
+        # Detect the split entity's own FK to the item-master entity (used for
+        # split auto-allocate queries and lot/product-mismatch validation).
+        # Only meaningful when there's a pool entity to resolve the item
+        # target from — no bridge means no split_item_field consumer in the
+        # template either (every use is nested inside `{% if has_inventory_bridge %}`).
+        _split_item_f = (
+            detect_product_id_field(
+                _split_entity_props,
+                pool_relation_target(_domain['pool'], _domain['item_field'], schema),
+            )
+            if _has_inventory_bridge else None
+        )
+        # cmd_546/545b: fail loud instead of silently rendering `.None` in the
+        # auto-allocate WHERE clause (split_action_route.ts.jinja2) — a
+        # reserve-type splittable entity with an inventory bridge always
+        # needs an item FK to filter candidate pool rows by; unlike the
+        # receive-type lot-mismatch check (gated by `{% if split_item_field %}`,
+        # safe to skip), the reserve-type auto-allocate query has no such
+        # guard and silently returning inventory across all items would be a
+        # correctness bug, not a degraded-but-safe feature.
+        if _has_inventory_bridge and _split_reserves_inventory and not _split_item_f:
+            raise ValueError(
+                f"x-splittable for {_def_key!r}: no many-to-one FK on {_def_key!r} targets "
+                f"{pool_relation_target(_domain['pool'], _domain['item_field'], schema)!r} "
+                f"(the entity x-ledger-entities.{_domain_key!r}.itemField targets on the pool "
+                f"entity {_domain['pool']!r}) — required to filter split auto-allocate "
+                f"candidates by item (OD-1)"
+            )
 
         # perPartRequired mandatory validation:
         #   receive-type entities (not split_reserves_inventory): ALL perPartRequired fields
@@ -856,6 +1574,21 @@ def generate(schema_path: str, output_dir: str) -> None:
         }
 
         _split_has_approvable = 'approvable_id' in _split_entity_props
+        # cmd_847 [③]: the pre-submission split guard only makes sense for
+        # entities with their own draft -> submit_on lifecycle -- an
+        # x-approval-lines child (e.g. purchase_per_item) gets its
+        # approval_request(s) unconditionally at the PARENT's create time
+        # (get_approval_lines_props/_build_approval_lines_post_create_code),
+        # with no separate "submitted" transition of its own; an empty
+        # approval_requests array there means no approval_flow matched its
+        # entity_name, not "still draft" -- guarding split on that would
+        # reject a legitimate split with zero approval configured, not an
+        # unsubmitted draft (see subtask_847f's purchase_per_item_split.cy.ts
+        # regression finding).
+        _split_submit_on_field, _ = (
+            resolve_approval_submit_on(_def_val) if _split_has_approvable else (None, None)
+        )
+        _split_has_submit_on = _split_submit_on_field is not None
         # cmd_296 Phase2: one approvable per part, created directly in the
         # per-part loop (no pre-create array — unlike cmd_295's x-approval-lines
         # batch).
@@ -884,6 +1617,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'status_split_value': next((v for v in _split_status_enum if str(v).lower() == 'split'), 'split'),
             'status_rejected_value': next((v for v in _split_status_enum if str(v).lower() == 'rejected'), 'rejected'),
             'has_approvable': _split_has_approvable,
+            'has_submit_on': _split_has_submit_on,
             'approval_create_block': _split_approval_create_block,
             'has_quantity_check': bool(_qty_field),
             'quantity_field': _qty_field,
@@ -893,7 +1627,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'inherited_fields': [f for f in _split_entity_props if f not in _always_exclude],
             'has_inventory_bridge': _has_inventory_bridge,
             'split_reserves_inventory': _split_reserves_inventory,
-            'product_id_field': _product_id_f,
+            'split_item_field': _split_item_f,
             'per_part_required_mandatory': _per_part_req_mandatory,
             **_ledger_domain_vars,
         }
@@ -979,24 +1713,54 @@ def generate(schema_path: str, output_dir: str) -> None:
         )
         print('  Dashboard aggregate route → app/api/dashboard/aggregate/route.ts')
 
-    # --- Attachment bridge actions (lib/attachment/actions.ts) ---
+    # --- Attachment bridge actions (lib/attachment/bridge_actions.ts) ---
     #
-    # Emitted whenever at least one base entity owns the `attachable` bridge
-    # (has `attachable_id` with x-relationship.target: attachable). Each
-    # owner contributes a select branch + a revalidate-paths block, mirroring
-    # the polymorphic bridge pattern used by `commentable` and `approvable`.
-    # When no owner exists the file is left out and cleanup.py removes any
-    # stale copy from a previous schema.
+    # Always emitted (subtask_769d): components/_standard/AttachmentSection.tsx
+    # unconditionally imports `setAttachmentsForBridge` from this module
+    # regardless of schema, so the file must exist even with zero owners.
+    # Lives at a path distinct from `lib/attachment/actions.ts` (the
+    # standard per-entity CRUD actions file) so the two never collide when
+    # `attachment` is *also* independently generated (x-generate on the
+    # `attachment` entity itself, needed for the OTO-selector "otsu" FK
+    # pattern) -- prior to this rename both writers targeted
+    # `lib/attachment/actions.ts`, and whichever ran later silently clobbered
+    # the other's exports (see subtask_769d report for the reproduction).
     attachable_owners = build_attachable_owners(schema)
-    if True:
+    _write(
+        out / 'lib' / 'attachment' / 'bridge_actions.ts',
+        _render(env, 'attachment_actions.ts.jinja2', {
+            'owners': attachable_owners,
+            'type_ts': attachment_type_ts(schema),
+        }),
+    )
+    print(f'  Attachment bridge actions → lib/attachment/bridge_actions.ts ({len(attachable_owners)} owners)')
+
+    # --- Direct-attachment FK server action (lib/attachment/direct_actions.ts) ---
+    #
+    # Only emitted when at least one entity declares an
+    # `x-relationship: {target: attachment, type: direct}` FK (subtask_788b, fixing
+    # a cmd_788 regression). Unlike lib/attachment/bridge_actions.ts above -- which
+    # components/_standard/AttachmentSection.tsx really does unconditionally import,
+    # so it must always exist -- nothing in this repo's hand-written components
+    # statically imports createDirectAttachment; SingleAttachmentUpload.tsx takes it
+    # as an injected `createAttachment` prop specifically so it stays import-free
+    # (see its own docstring), and the only static importer is the GENERATED
+    # per-entity FormUpsert.tsx for an entity that actually has a direct-attachment
+    # field. Emitting this file unconditionally made every consumer's `tsc` build
+    # depend on `attachment.attachable_id` being nullable in their prisma/
+    # schema.prisma -- the documented Prisma-alignment prerequisite for this feature
+    # (docs/knowledge/schema-yaml-configuration.md "Direct Attachment FK") -- even
+    # for a consumer that declares zero `type: direct` fields and so was never told
+    # to apply it: proj_c/proj_g/proj_h all failed `tsc` with TS2322 on this exact
+    # file despite none of them using the feature.
+    if schema_has_direct_attachment_fk(schema):
         _write(
-            out / 'lib' / 'attachment' / 'actions.ts',
-            _render(env, 'attachment_actions.ts.jinja2', {
-                'owners': attachable_owners,
+            out / 'lib' / 'attachment' / 'direct_actions.ts',
+            _render(env, 'direct_attachment_actions.ts.jinja2', {
                 'type_ts': attachment_type_ts(schema),
             }),
         )
-        print(f'  Attachment bridge actions → lib/attachment/actions.ts ({len(attachable_owners)} owners)')
+        print('  Direct-attachment FK action → lib/attachment/direct_actions.ts')
 
     # --- Named constants (lib/reaction_constants.ts) ---
     # named_constants was pre-computed before the entity loop
@@ -1006,6 +1770,25 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'reaction_constants.ts.jinja2', {'named_constants': named_constants}),
         )
         print(f'  Named constants → lib/reaction_constants.ts ({len(named_constants)} constant(s))')
+
+    # --- Self-only admin-bypass entity list (lib/self_only_admin_bypass_entities.ts) ---
+    # x-self-only entities with admin_bypass:true (cmd_536) — the privileged
+    # role's item-level bypass is granted by trySelfOnlyAdminBypass() inside
+    # each entity's own getters, but the separate, coarser
+    # requireApiPermission()/getModelPermissions() gate has no permission
+    # row to check (these entities are deliberately excluded from
+    # cypress/support/db-helpers.ts's ALL_ENTITIES-driven grants, and in
+    # production nobody grants a permission row for a self-service entity
+    # either) — without this list, that coarse gate 403s before the
+    # item-level bypass ever gets a chance to run. Always written (even
+    # empty) so `lib/authz.ts`'s import never dangles.
+    _write(
+        out / 'lib' / 'self_only_admin_bypass_entities.ts',
+        _render(env, 'self_only_admin_bypass_entities.ts.jinja2', {
+            'entities': self_only_admin_bypass_entities,
+        }),
+    )
+    print(f'  Self-only admin-bypass entities → lib/self_only_admin_bypass_entities.ts ({len(self_only_admin_bypass_entities)} entities)')
 
     # --- anonymize_user.ts (lib/compliance/anonymize_user.ts) ---
     # Emitted when the user entity has at least one x-pii annotated field.
@@ -1034,6 +1817,83 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'mention_parser.ts.jinja2', {}),
         )
         print('  Mention parser → lib/mention/parser.ts')
+        _write(
+            out / 'lib' / 'mention' / 'search.ts',
+            _render(env, 'mention_search.ts.jinja2', {}),
+        )
+        print('  Mention candidate search → lib/mention/search.ts')
+
+    # --- Stripe payment integration write-once stubs (cmd_706) ---
+    # Emitted when at least one entity in any schema definition declares
+    # x-payment: true. Same write-once convention as
+    # lib/<parent>/invalidate_handler.ts (cmd_583) -- these three files are
+    # only written if they don't already exist, so a consumer's hand-written
+    # implementation is never clobbered by regeneration.
+    _has_any_payment = any(
+        isinstance(defn, dict) and defn.get('x-payment') is True
+        for defn in schema.get('definitions', {}).values()
+    )
+    if _has_any_payment:
+        stripe_lib_path = out / 'lib' / 'stripe.ts'
+        _write_stub(stripe_lib_path, _render(env, 'stripe_lib_stub.ts.jinja2', {}))
+        print('  Stripe SDK stub → lib/stripe.ts')
+        _note_stub_created(
+            stripe_lib_path,
+            'x-payment: true is declared on at least one entity.',
+            'Set STRIPE_SECRET_KEY in your env (this stub fails closed if unset).',
+        )
+
+        checkout_route_path = out / 'app' / 'api' / 'payment' / 'checkout' / 'route.ts'
+        _write_stub(checkout_route_path, _render(env, 'stripe_checkout_route_stub.ts.jinja2', {}))
+        print('  Checkout Session stub → app/api/payment/checkout/route.ts')
+        _note_stub_created(
+            checkout_route_path,
+            'x-payment: true is declared on at least one entity.',
+            'Fill in the price_id / line_items for what you are selling.',
+        )
+
+        webhook_route_path = out / 'app' / 'api' / 'webhooks' / 'stripe' / 'route.ts'
+        _write_stub(webhook_route_path, _render(env, 'stripe_webhook_route_stub.ts.jinja2', {}))
+        print('  Webhook receiver stub → app/api/webhooks/stripe/route.ts')
+        _note_stub_created(
+            webhook_route_path,
+            'x-payment: true is declared on at least one entity.',
+            'Set STRIPE_WEBHOOK_SECRET and implement checkout.session.completed handling.',
+        )
+
+    # --- Comment/reaction service layer (lib/comment/service.ts, lib/reaction/service.ts) ---
+    # Emitted whenever x-internal enum entities exist (i.e., reactions are
+    # enabled) -- same gate as the reactions API route below, since both
+    # features share the same comment/reaction models. comment/reaction have
+    # no x-generate (no standalone pages/API — see docs/knowledge/
+    # schema-yaml-configuration.md §"x-internal at the entity level"), so
+    # they are not run through extract_entities()/the per-entity pipeline:
+    # that pipeline's service.ts assumes a standard creator_id+updater_id
+    # CRUD shape (see service.ts.jinja2/service_context()), but `comment`
+    # has no updater_id and `reaction` has neither creator_id nor updater_id
+    # plus toggle (delete-if-exists-else-create) write semantics — forcing
+    # them through the generic machinery would require widening it for a
+    # shape no other entity has. Written directly here instead, following
+    # the same "bespoke schema-wide artifact" pattern already used below for
+    # the reactions API route and above for the mention parser/search
+    # modules. _build_comment_actions_bridge() (build_context.py) and
+    # comment_reactions_api_route.ts.jinja2 both call these functions
+    # instead of writing `prisma.comment.*`/`prisma.reaction.*` directly, so
+    # check_generated.py's write:direct rule treats them the same as any
+    # other entity's service.ts.
+    if named_constants:
+        _write(
+            out / 'lib' / 'comment' / 'service.ts',
+            _render(env, 'comment_service.ts.jinja2', {}),
+        )
+        print('  Comment service layer → lib/comment/service.ts')
+        _write(
+            out / 'lib' / 'reaction' / 'service.ts',
+            _render(env, 'reaction_service.ts.jinja2', {
+                'reaction_value_type': reaction_type_ts(schema),
+            }),
+        )
+        print('  Reaction service layer → lib/reaction/service.ts')
 
     # --- Comment reactions API route (app/api/comment/[commentId]/reactions/toggle/route.ts) ---
     # Emitted whenever x-internal enum entities exist (i.e., reactions are enabled).
@@ -1055,6 +1915,28 @@ def generate(schema_path: str, output_dir: str) -> None:
     # Builds an `approvable_entities` list and generates the dispatch module plus
     # per-entity service_after_approve once-stubs (emit_hook: true only).
     defs = schema.get('definitions', {})
+    # cmd_865: fail-closed structural validation of every entity's
+    # x-approval clause combination, before any approval-related file
+    # (dispatch modules, service.ts's edit guard, etc.) is generated from
+    # it. One pass over every x-approval-declaring definition.
+    for _val_def_key, _val_def_val in defs.items():
+        if not _val_def_key.startswith('__'):
+            continue
+        _val_x_approval = _val_def_val.get('x-approval')
+        if not _val_x_approval:
+            continue
+        _val_entity_name = _val_def_key[2:]
+        # x-generate lives on the BARE definitions key after
+        # build_user_schema.py's transform (see _entity_is_write_reachable's
+        # docstring) -- fall back to the '__'-prefixed def for entities with
+        # no bare counterpart.
+        _val_x_generate = defs.get(_val_entity_name, {}).get('x-generate') or _val_def_val.get('x-generate') or {}
+        _val_can_update = _val_x_generate.get('edit', True) is not False
+        _val_is_editable = _val_can_update or _entity_is_write_reachable(_val_entity_name, defs)
+        _validate_x_approval_combinations(
+            _val_entity_name, _val_x_approval, _val_def_val.get('properties', {}), _val_is_editable,
+        )
+
     approvable_entities = []
     for def_key, def_val in defs.items():
         if not def_key.startswith('__'):
@@ -1090,6 +1972,7 @@ def generate(schema_path: str, output_dir: str) -> None:
                 # split-route bridge field (get_splittable_bridge_field), since
                 # a ledger-source entity's bridge FK is declared identically.
                 'bridge_fk_field': get_splittable_bridge_field(def_val),
+                **_ledger_stub_field_vars(_ent_domain, schema),
             }
         elif x_splittable.get('ledgerDomain'):
             # Phase 3 / OD-3 (Option B): a splittable, approval-driven entity with
@@ -1106,6 +1989,7 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'pool_entity': _ent_domain['pool'],
                 'bridge_fk_field': get_splittable_bridge_field(def_val),
                 'is_ship_skeleton': True,
+                **_ledger_stub_field_vars(_ent_domain, schema),
             }
         approvable_entities.append({
             'snake_name': def_key,
@@ -1132,10 +2016,17 @@ def generate(schema_path: str, output_dir: str) -> None:
     # with an approvable bridge needs to be resolvable here regardless of
     # whether it declares on_approved, since Trigger #2/#3 notifications
     # fire independently of that config.
+    # cmd_818 GROUP C: one entry per VIEW (not per raw model) — a proxy
+    # view's entity_name is now the view key ('parent'), so resolution
+    # here must be keyed the same way, while the actual Prisma call still
+    # needs the real model. `entities` (extract_entities(), already in
+    # scope) already carries one {parent, model} pair per generated view;
+    # reuse it instead of iterating raw defs directly (which collapses
+    # every view sharing one raw model into a single entry keyed by model
+    # name — exactly the bug this fixes).
     approvable_bridge_entities = []
-    for def_key, def_val in defs.items():
-        if not def_key.startswith('__'):
-            continue
+    for entity in entities:
+        def_val = defs.get(f"__{entity['model']}", {})
         props = def_val.get('properties', {})
         has_approvable_bridge = any(
             isinstance(p, dict)
@@ -1145,7 +2036,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         )
         if not has_approvable_bridge:
             continue
-        approvable_bridge_entities.append(def_key[2:])
+        approvable_bridge_entities.append({'parent': entity['parent'], 'model': entity['model']})
     # Always emitted (mirrors on_approved_dispatch.ts below) — actions.ts
     # imports this unconditionally, so it must exist even with zero entities.
     _write(
@@ -1197,9 +2088,21 @@ def generate(schema_path: str, output_dir: str) -> None:
             'emit_hook': bool(on_rejected.get('emit_hook', False)),
             'terminal': bool(on_rejected.get('terminal', False)),
         })
+    # tx / approvableId are only read inside the per-entity `if (set_fields or
+    # emit_hook)` body (see the template); rejectedByUserId only inside the
+    # emit_hook arm. An empty or fields-less rejectable_entities list leaves
+    # them dead — same interface-conformance case as on_approved_dispatch.ts,
+    # since dispatchOnRejected's 4-arg signature is a stable call-site
+    # contract (cmd_529).
+    _rejected_body_needed = any(e['set_fields'] or e['emit_hook'] for e in rejectable_entities)
+    _rejected_hook_needed = any(e['emit_hook'] for e in rejectable_entities)
     _write(
         out / 'lib' / 'approval_request' / 'on_rejected_dispatch.ts',
-        _render(env, 'on_rejected_dispatch.ts.jinja2', {'rejectable_entities': rejectable_entities}),
+        _render(env, 'on_rejected_dispatch.ts.jinja2', {
+            'rejectable_entities': rejectable_entities,
+            'rejected_body_needed': _rejected_body_needed,
+            'rejected_hook_needed': _rejected_hook_needed,
+        }),
     )
     print(f'  Rejection dispatch → lib/approval_request/on_rejected_dispatch.ts ({len(rejectable_entities)} entities)')
     for ent in rejectable_entities:
@@ -1209,6 +2112,230 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _render(env, 'service_after_reject_stub.ts.jinja2', ent),
             )
             print(f"  Rejection stub → lib/{ent['snake_name']}/service_after_reject.ts")
+
+    # --- Withdrawal event dispatch (lib/approval_request/on_withdrawn_dispatch.ts) ---
+    #
+    # cmd_841 ruling_1: symmetric to on_rejected above, minus the terminal
+    # concept (a withdrawal always leaves the door open to resubmission --
+    # see docs/knowledge and lib/approval_request/actions_core.ts's
+    # withdrawApprovalRequest). Emitted when at least one entity declares
+    # `x-approval.on_withdrawn`.
+    withdrawable_entities = []
+    for def_key, def_val in defs.items():
+        if not def_key.startswith('__'):
+            continue
+        x_approval = def_val.get('x-approval')
+        if not x_approval:
+            continue
+        on_withdrawn = x_approval.get('on_withdrawn', {})
+        if not on_withdrawn:
+            continue
+        def_key = def_key[2:]
+        entity_props = def_val.get('properties', {})
+        resolved_sf = _resolve_set_fields(entity_props, on_withdrawn.get('set_fields') or {})
+        withdrawable_entities.append({
+            'snake_name': def_key,
+            'pascal_name': to_pascal_case(def_key),
+            'set_fields': resolved_sf,
+            'emit_hook': bool(on_withdrawn.get('emit_hook', False)),
+        })
+    # Always emitted (mirrors on_rejected_dispatch.ts above) — actions.ts
+    # imports this unconditionally, so it must exist even with zero entities.
+    _withdrawn_body_needed = any(e['set_fields'] or e['emit_hook'] for e in withdrawable_entities)
+    _write(
+        out / 'lib' / 'approval_request' / 'on_withdrawn_dispatch.ts',
+        _render(env, 'on_withdrawn_dispatch.ts.jinja2', {
+            'withdrawable_entities': withdrawable_entities,
+            'withdrawn_body_needed': _withdrawn_body_needed,
+        }),
+    )
+    print(f'  Withdrawal dispatch → lib/approval_request/on_withdrawn_dispatch.ts ({len(withdrawable_entities)} entities)')
+    for ent in withdrawable_entities:
+        if ent['emit_hook']:
+            _write_stub(
+                out / 'lib' / ent['snake_name'] / 'service_after_withdraw.ts',
+                _render(env, 'service_after_withdraw_stub.ts.jinja2', ent),
+            )
+            print(f"  Withdrawal stub → lib/{ent['snake_name']}/service_after_withdraw.ts")
+
+    # --- Pre-approve/pre-reject/pre-withdraw dispatch (cmd_923b) ---
+    #
+    # Symmetric to the on_approved/on_rejected/on_withdrawn dispatch modules
+    # above, but unconditional -- no emit_hook opt-in -- since these are
+    # validation sockets (like validateCustomRules), not opt-in side-effect
+    # hooks. beforeApprove/beforeReject apply to every entity declaring
+    # x-approval at all (approve/reject are always reachable regardless of
+    # what an entity's x-approval block actually configures); beforeWithdraw
+    # is scoped to withdrawable_entities (x-approval.on_withdrawn declared)
+    # only, since withdrawal itself is blocked upstream (hasOnWithdrawn) for
+    # any entity that doesn't declare it -- a stub without that scoping
+    # would be dead code (see service_before_withdraw_stub.ts.jinja2).
+    approval_entities = []
+    for def_key, def_val in defs.items():
+        if not def_key.startswith('__'):
+            continue
+        x_approval = def_val.get('x-approval')
+        if not x_approval:
+            continue
+        def_key = def_key[2:]
+        approval_entities.append({
+            'snake_name': def_key,
+            'pascal_name': to_pascal_case(def_key),
+        })
+    _write(
+        out / 'lib' / 'approval_request' / 'on_before_approve_dispatch.ts',
+        _render(env, 'on_before_approve_dispatch.ts.jinja2', {'approval_entities': approval_entities}),
+    )
+    print(f'  Pre-approval dispatch → lib/approval_request/on_before_approve_dispatch.ts ({len(approval_entities)} entities)')
+    for ent in approval_entities:
+        _write_stub(
+            out / 'lib' / ent['snake_name'] / 'service_before_approve.ts',
+            _render(env, 'service_before_approve_stub.ts.jinja2', ent),
+        )
+        print(f"  Pre-approval stub → lib/{ent['snake_name']}/service_before_approve.ts")
+
+    _write(
+        out / 'lib' / 'approval_request' / 'on_before_reject_dispatch.ts',
+        _render(env, 'on_before_reject_dispatch.ts.jinja2', {'approval_entities': approval_entities}),
+    )
+    print(f'  Pre-rejection dispatch → lib/approval_request/on_before_reject_dispatch.ts ({len(approval_entities)} entities)')
+    for ent in approval_entities:
+        _write_stub(
+            out / 'lib' / ent['snake_name'] / 'service_before_reject.ts',
+            _render(env, 'service_before_reject_stub.ts.jinja2', ent),
+        )
+        print(f"  Pre-rejection stub → lib/{ent['snake_name']}/service_before_reject.ts")
+
+    _write(
+        out / 'lib' / 'approval_request' / 'on_before_withdraw_dispatch.ts',
+        _render(env, 'on_before_withdraw_dispatch.ts.jinja2', {'withdrawable_entities': withdrawable_entities}),
+    )
+    print(f'  Pre-withdrawal dispatch → lib/approval_request/on_before_withdraw_dispatch.ts ({len(withdrawable_entities)} entities)')
+    for ent in withdrawable_entities:
+        _write_stub(
+            out / 'lib' / ent['snake_name'] / 'service_before_withdraw.ts',
+            _render(env, 'service_before_withdraw_stub.ts.jinja2', ent),
+        )
+        print(f"  Pre-withdrawal stub → lib/{ent['snake_name']}/service_before_withdraw.ts")
+
+    # --- Scheduled tasks (lib/{entity}/service_scheduled.ts + lib/scheduled-tasks/
+    #     registry.ts + app/api/scheduled-tasks/[task]/route.ts) ---
+    #
+    # cmd_750 / subtask_741a design: a generic recurring-execution mechanism, not an
+    # expires_at-specific one. Any entity may declare `x-scheduled-task` to register a
+    # filtered row-scan + per-row handler call under a task_id; expires_at-based release
+    # is its first user, not a special case baked into the generator. Unlike the approval
+    # dispatch above, there is no parent feature gate — the key stands on its own.
+    #
+    # cmd_790 extends this with a second, entity-agnostic mode: top-level
+    # `x-scheduled-tasks` (plural) registers a task with no row selection at
+    # all -- generate.py calls its handler directly, once, per run. This is
+    # for operations that span many entities/tables or an entire table with
+    # no filter (a full demo-data reset was the motivating case), where the
+    # single-entity, filter-required row scan above does not fit. Both modes
+    # share one task_id/registry-key namespace (`_scheduled_task_ids_seen`)
+    # and feed the same TASK_REGISTRY + vercel.json `crons` array below --
+    # the dispatcher route and registry are unaware which mode produced any
+    # given entry.
+    scheduled_task_entities = []
+    _scheduled_task_ids_seen = {}
+    for def_key, def_val in defs.items():
+        if not def_key.startswith('__'):
+            continue
+        x_scheduled = def_val.get('x-scheduled-task')
+        if not x_scheduled:
+            continue
+        def_key = def_key[2:]
+        task_id = x_scheduled['task_id']
+        if task_id in _scheduled_task_ids_seen:
+            raise ValueError(
+                f"x-scheduled-task: task_id {task_id!r} is declared by both "
+                f"{_scheduled_task_ids_seen[task_id]!r} and {def_key!r} — task_id "
+                f"must be unique across the schema (it doubles as the registry key "
+                f"and the /api/scheduled-tasks/[task] URL segment)."
+            )
+        _scheduled_task_ids_seen[task_id] = def_key
+        xfilter = x_scheduled.get('filter') or {}
+        scheduled_task_entities.append({
+            'snake_name': def_key,
+            'pascal_name': to_pascal_case(def_key),
+            'task_id': task_id,
+            'handler': x_scheduled['handler'],
+            'interval': x_scheduled.get('interval', ''),
+            'expires_at_before_now': bool(xfilter.get('expires_at_before_now', False)),
+            'status_in': xfilter.get('status_in') or [],
+            'module_path': def_key,
+            'run_name': to_camel_case(def_key) + 'Run',
+        })
+
+    for ent in scheduled_task_entities:
+        _write(
+            out / 'lib' / ent['snake_name'] / 'service_scheduled.ts',
+            _render(env, 'service_scheduled.ts.jinja2', ent),
+        )
+        print(f"  Scheduled task → lib/{ent['snake_name']}/service_scheduled.ts (task_id={ent['task_id']})")
+        _write_stub(
+            out / 'lib' / ent['snake_name'] / 'service_scheduled_handler.ts',
+            _render(env, 'service_scheduled_handler_stub.ts.jinja2', ent),
+        )
+        print(f"  Scheduled task handler stub → lib/{ent['snake_name']}/service_scheduled_handler.ts")
+
+    # Bulk (entity-agnostic) scheduled tasks — cmd_790.
+    scheduled_task_bulk_entities = []
+    for x_scheduled_bulk in (schema.get('x-scheduled-tasks') or []):
+        task_id = x_scheduled_bulk['task_id']
+        if task_id in _scheduled_task_ids_seen:
+            raise ValueError(
+                f"x-scheduled-tasks: task_id {task_id!r} is also declared by "
+                f"{_scheduled_task_ids_seen[task_id]!r} — task_id must be unique "
+                f"across the schema (entity-level x-scheduled-task and top-level "
+                f"x-scheduled-tasks share one namespace)."
+            )
+        _scheduled_task_ids_seen[task_id] = 'x-scheduled-tasks (bulk, no entity)'
+        module_path = f'scheduled-tasks/{task_id}'
+        scheduled_task_bulk_entities.append({
+            'task_id': task_id,
+            'handler': x_scheduled_bulk['handler'],
+            'interval': x_scheduled_bulk.get('interval', ''),
+            'module_path': module_path,
+            'run_name': to_camel_case(task_id) + 'Run',
+        })
+
+    for ent in scheduled_task_bulk_entities:
+        _write(
+            out / 'lib' / ent['module_path'] / 'service_scheduled.ts',
+            _render(env, 'service_scheduled_bulk.ts.jinja2', ent),
+        )
+        print(f"  Scheduled task (bulk) → lib/{ent['module_path']}/service_scheduled.ts (task_id={ent['task_id']})")
+        _write_stub(
+            out / 'lib' / ent['module_path'] / 'service_scheduled_handler.ts',
+            _render(env, 'service_scheduled_bulk_handler_stub.ts.jinja2', ent),
+        )
+        print(f"  Scheduled task (bulk) handler stub → lib/{ent['module_path']}/service_scheduled_handler.ts")
+
+    all_scheduled_tasks = scheduled_task_entities + scheduled_task_bulk_entities
+
+    # Always emitted (mirrors resolve_target.ts / on_approved_dispatch.ts above) —
+    # a fixed, entity-count-independent pair. New tasks register into
+    # TASK_REGISTRY; this route itself never changes.
+    _write(
+        out / 'lib' / 'scheduled-tasks' / 'registry.ts',
+        _render(env, 'scheduled_task_registry.ts.jinja2', {'scheduled_task_entities': all_scheduled_tasks}),
+    )
+    print(f'  Scheduled task registry → lib/scheduled-tasks/registry.ts ({len(all_scheduled_tasks)} task(s))')
+    _write(
+        out / 'app' / 'api' / 'scheduled-tasks' / '[task]' / 'route.ts',
+        _render(env, 'scheduled_task_route.ts.jinja2', {}),
+    )
+    print('  Scheduled task dispatcher route → app/api/scheduled-tasks/[task]/route.ts')
+
+    # vercel.json `crons` (cmd_781) — Vercel-only; GCP (x-cloud:gcp) uses
+    # Cloud Scheduler instead and never reads vercel.json for this.
+    if cloud_enabled and cloud_provider == 'gcp':
+        print('  Skipped vercel.json crons (x-cloud:gcp — see docs/knowledge/scheduled-task-operations.md)')
+    else:
+        _write_vercel_json_crons(out / 'vercel.json', all_scheduled_tasks)
+
     # --- Search templates (lib/search/helpers.ts + app/api/search/route.ts) ---
     # DP-3: default_scope from x-generator.search.default_scope.
     #   'opt_in' (default) — only entities with x-generate.search: true are searchable
@@ -1309,9 +2436,38 @@ def generate(schema_path: str, output_dir: str) -> None:
         has_organization_id = 'organization_id' in all_props
         should_filter_by_org = has_organization_id or (org_id_field_override is not None)
         effective_org_id_field = org_id_field_override if org_id_field_override else 'organization_id'
+        # Mirrors build_context.py's org_relationship_optional (already used by
+        # actions.ts.jinja2/getters.ts.jinja2/api_detail_route.ts.jinja2/
+        # api_import_route.ts.jinja2): an org-scoped entity whose `organization`
+        # FK is itself optional (organization_id nullable) needs its read-scope
+        # filter to admit NULL rows too, or an org-less row becomes invisible to
+        # every org-scoped actor, including its own creator. Guarded on
+        # org_id_field_override is None: the override case (e.g.
+        # x-search.org_id_field: 'id' for the organization entity itself)
+        # points at a column that is never null (a primary key), so there is no
+        # optional relationship to speak of there.
+        org_relationship_optional = should_filter_by_org and org_id_field_override is None and not next(
+            (r['required'] for r in get_parent_relationships(base_def, schema) if r['target'] == 'organization'),
+            True,
+        )
         # creator_id is always auto-injected by the code generator (present in every Prisma model)
         # assignee_id is entity-specific; check schema properties
         has_assignee_id = 'assignee_id' in all_props
+        # x-self-only: same invariant as build<Entity>AccessWhere — the global
+        # cross-entity search union must not surface another user's rows
+        # through a side channel just because the per-entity page filters
+        # them. Global search intentionally has no admin_bypass path (only
+        # the dedicated get<Entity>Page/Detail/search<Entity>Options getters
+        # do) — cross-entity full-text search is not the audited
+        # investigation surface the bypass exists for.
+        is_self_only, _ = get_self_only_flags(base_def if isinstance(base_def, dict) else {})
+
+        # x-filter-values: mirrors build_context.py's filter_values read —
+        # the VIEW entity's own declaration only (never the raw entity; see
+        # build_user_schema.py's _VIEW_LEVEL_CONFIG_KEYS). Field-name
+        # validity is already fail-closed-checked by build_context() earlier
+        # in generate() for every entity, so no re-validation needed here.
+        filter_values = detail_def.get('x-filter-values') or {}
 
         # Phase1+2: non-independent child entities searchable via the parent's page
         # (inline grid / embedded list children, and non-m2o flattened OTO relations).
@@ -1380,7 +2536,10 @@ def generate(schema_path: str, output_dir: str) -> None:
             # DP-a: authorization variables aligned with build<Entity>AccessWhere
             'should_filter_by_org':  should_filter_by_org,
             'org_id_field':          effective_org_id_field,
+            'org_relationship_optional': org_relationship_optional,
             'has_assignee_id':       has_assignee_id,
+            'is_self_only':          is_self_only,
+            'filter_values':         filter_values,  # cmd_874/subtask_874f
             # Pre-computed TypeScript identifiers (avoids Jinja2/TypeScript ${{{...}}} delimiter conflict)
             'perms_ts_var':          f'{parent}Perms',
             'general_read_ts_var':   f'{parent}GeneralRead',
@@ -1398,7 +2557,18 @@ def generate(schema_path: str, output_dir: str) -> None:
         })
 
     if search_entities:
-        search_ctx = {'search_entities': search_entities}
+        # getAssociatedOrganizations/associatedOrgIds are only referenced
+        # inside {% if entity.should_filter_by_org %} branches of
+        # search_helpers.ts.jinja2 (top-level entities and no_page_children
+        # alike) -- computing them unconditionally left them unused whenever
+        # no search entity is org-scoped (lint finding).
+        has_org_filtered_search_entity = any(
+            e['should_filter_by_org'] for e in search_entities
+        )
+        search_ctx = {
+            'search_entities': search_entities,
+            'has_org_filtered_search_entity': has_org_filtered_search_entity,
+        }
         _write(
             out / 'lib' / 'search' / 'helpers.ts',
             _render(env, 'search_helpers.ts.jinja2', search_ctx),
@@ -1486,8 +2656,14 @@ def generate(schema_path: str, output_dir: str) -> None:
 
             # e2e spec (desktop)
             spec_ctx = spec_context(parent, children, schema, model, def_key, gen_cfg, _test_entity_count)
+            # cmd_625 (Phase 3): reuse helper_ctx's already-resolved primary_fk_dep
+            # so both spec templates' beforeEach can guard the per-test-case
+            # callIndex reset task on the same condition test_helper.ts.jinja2
+            # used to decide whether _reset{{ pascal }}CallSeq() exists at all.
+            spec_ctx['primary_fk_dep'] = helper_ctx.get('primary_fk_dep')
             _write(cypress_e2e / f'{parent}.cy.ts',
-                   _render(env, 'test_spec.cy.ts.jinja2', spec_ctx))
+                   _prefix_unused_then_callback_params(_strip_unused_exact_re_helper(
+                       _render(env, 'test_spec.cy.ts.jinja2', spec_ctx))))
 
             # e2e spec (mobile) — separate file under cypress/e2e/mobile/.
             # The mobile list view renders CardListClient instead of the
@@ -1496,13 +2672,20 @@ def generate(schema_path: str, output_dir: str) -> None:
             # of the desktop one. Forms are responsive but currently share
             # the same FormUpsert at every viewport.
             _write(cypress_e2e / 'mobile' / f'{parent}.cy.ts',
-                   _render(env, 'test_spec_mobile.cy.ts.jinja2', spec_ctx))
+                   _prefix_unused_then_callback_params(
+                       _render(env, 'test_spec_mobile.cy.ts.jinja2', spec_ctx)))
 
             # api spec (only if api: true)
             if gen_cfg.get('api'):
                 api_ctx = api_spec_context(parent, children, schema, model, def_key, gen_cfg, _test_entity_count)
+                # cmd_628 (Phase 3 follow-up): same primary_fk_dep threading as
+                # spec_ctx above — api_spec_context() never computes it either,
+                # so without this the reset guard in test_api_spec.cy.ts.jinja2
+                # would be permanently undefined/falsy.
+                api_ctx['primary_fk_dep'] = helper_ctx.get('primary_fk_dep')
                 _write(cypress_e2e / 'api' / f'{parent}.cy.ts',
-                       _render(env, 'test_api_spec.cy.ts.jinja2', api_ctx))
+                       _prefix_unused_then_callback_params(
+                           _render(env, 'test_api_spec.cy.ts.jinja2', api_ctx)))
 
             # reservation spec + helper (only for entities with x-reservation count mode)
             res_ctx = reservation_spec_context(parent, schema, children)
@@ -1518,6 +2701,7 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'model_name': model,
                 'children': children,
                 'definition_key': def_key,
+                'primary_fk_dep': helper_ctx.get('primary_fk_dep'),
             })
 
     # Task registry (always generated — empty registry when test_entities is
@@ -1531,6 +2715,14 @@ def generate(schema_path: str, output_dir: str) -> None:
     print('\nGenerating db-helpers.ts...')
     _write(out / 'cypress' / 'support' / 'db-helpers.ts',
            _render(env, 'test_db_helpers.ts.jinja2', db_ctx))
+
+    # --- scripts/generated/seed-entities.ts ---
+    # Consumed by scripts/grant-all-permissions.ts (dev/verification tool),
+    # not by scripts/seed-baseline.ts — see seed_entities_context() docstring.
+    print('\nGenerating seed-entities.ts...')
+    seed_ctx = seed_entities_context(schema)
+    _write(out / 'scripts' / 'generated' / 'seed-entities.ts',
+           _render(env, 'seed_entities.ts.jinja2', seed_ctx))
 
     # --- i18n / config updates ---
     print('\nUpdating i18n and navigation config...')
@@ -1589,6 +2781,18 @@ def generate(schema_path: str, output_dir: str) -> None:
                 print('  Cloud: output:standalone already present in next.config.ts')
         else:
             print('  Cloud: next.config.ts not found — skipping standalone injection')
+
+    # --- cmd_941 gate (1): write-once side-effect asymmetry ---
+    # Must run after every service_after_*.ts stub for this run has been
+    # written (so the manifest's stub history reflects them) and before the
+    # run is allowed to report success — see validate_write_once_stub_
+    # asymmetry()'s docstring for why this is a generation-time gate despite
+    # running at the end rather than the start.
+    try:
+        validate_write_once_stub_asymmetry(_stub_asymmetry_entries, _manifest)
+    except SchemaValidationError as exc:
+        print(f'\n{exc}', file=sys.stderr)
+        sys.exit(1)
 
     # --- generation manifest (drives cleanup.py) ---
     # Written last so it reflects exactly what this run produced. Appended files

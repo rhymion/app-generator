@@ -303,3 +303,120 @@ def test_hand_written_files_outside_generated_set_are_ignored(tmp_path: Path) ->
         "await prisma.$queryRaw`SELECT 1`;\n"
     )
     assert check(schema, tmp_path, _empty_allowlist(tmp_path)) == []
+
+
+# ---------------------------------------------------------------------------
+# Unexplained-login rule (cmd_658)
+# ---------------------------------------------------------------------------
+
+def _api_test_dir(tmp_path: Path) -> Path:
+    d = tmp_path / 'cypress' / 'e2e' / 'api'
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def test_unmarked_login_in_generated_api_spec_is_flagged(tmp_path: Path) -> None:
+    schema = _make_tree(tmp_path)
+    (_api_test_dir(tmp_path) / 'widget.cy.ts').write_text(
+        "describe('API: Widget', () => {\n"
+        "  it('does something', () => {\n"
+        "    cy.login('a@example.com', 'pw');\n"
+        "  });\n"
+        "});\n"
+    )
+    vs = check(schema, tmp_path, _empty_allowlist(tmp_path))
+    assert len(vs) == 1
+    assert vs[0].rule == 'test:unexplained-login'
+    assert vs[0].path == 'cypress/e2e/api/widget.cy.ts'
+    assert vs[0].line == 3
+
+
+def test_login_with_nearby_marker_is_allowed(tmp_path: Path) -> None:
+    schema = _make_tree(tmp_path)
+    (_api_test_dir(tmp_path) / 'widget.cy.ts').write_text(
+        "describe('API: Widget', () => {\n"
+        "  // dual-auth-session-canary: proves the session-cookie path too\n"
+        "  it('also authenticates via session cookie', () => {\n"
+        "    cy.login('a@example.com', 'pw');\n"
+        "  });\n"
+        "});\n"
+    )
+    assert check(schema, tmp_path, _empty_allowlist(tmp_path)) == []
+
+
+def test_marker_more_than_lookback_away_does_not_exempt(tmp_path: Path) -> None:
+    schema = _make_tree(tmp_path)
+    filler = ''.join(f'  // filler line {i}\n' for i in range(10))
+    (_api_test_dir(tmp_path) / 'widget.cy.ts').write_text(
+        "describe('API: Widget', () => {\n"
+        "  // dual-auth-session-canary: too far above to count\n"
+        f"{filler}"
+        "  it('does something', () => {\n"
+        "    cy.login('a@example.com', 'pw');\n"
+        "  });\n"
+        "});\n"
+    )
+    vs = check(schema, tmp_path, _empty_allowlist(tmp_path))
+    assert len(vs) == 1
+    assert vs[0].rule == 'test:unexplained-login'
+
+
+def test_login_mentioned_only_in_a_comment_is_not_a_call(tmp_path: Path) -> None:
+    schema = _make_tree(tmp_path)
+    (_api_test_dir(tmp_path) / 'widget.cy.ts').write_text(
+        "describe('API: Widget', () => {\n"
+        "  // this route used to require cy.login(), not anymore\n"
+        "  it('does something', () => {\n"
+        "    cy.request({ url: '/api/widget' });\n"
+        "  });\n"
+        "});\n"
+    )
+    assert check(schema, tmp_path, _empty_allowlist(tmp_path)) == []
+
+
+def test_login_rule_is_not_allowlist_exemptable(tmp_path: Path) -> None:
+    schema = _make_tree(tmp_path)
+    (_api_test_dir(tmp_path) / 'widget.cy.ts').write_text(
+        "describe('API: Widget', () => {\n"
+        "  it('does something', () => {\n"
+        "    cy.login('a@example.com', 'pw');\n"
+        "  });\n"
+        "});\n"
+    )
+    allow = tmp_path / 'allowlist.yaml'
+    allow.write_text(
+        "exemptions:\n"
+        "  - path: cypress/e2e/api/widget.cy.ts\n"
+        "    pattern: test:unexplained-login\n"
+        "    substring: \"cy.login\"\n"
+        "    reason: 'trying to exempt via YAML instead of the in-file marker'\n"
+    )
+    vs = check(schema, tmp_path, allow)
+    assert len(vs) == 1
+    assert vs[0].rule == 'test:unexplained-login'
+
+
+def test_login_in_non_api_test_dir_is_out_of_scope(tmp_path: Path) -> None:
+    schema = _make_tree(tmp_path)
+    # UI specs (cypress/e2e/widget.cy.ts, not .../api/widget.cy.ts) are a
+    # different file entirely — this rule only walks generated API specs.
+    (tmp_path / 'cypress' / 'e2e').mkdir(parents=True, exist_ok=True)
+    (tmp_path / 'cypress' / 'e2e' / 'widget.cy.ts').write_text(
+        "describe('Widget UI', () => {\n"
+        "  it('logs in through the screen', () => {\n"
+        "    cy.login('a@example.com', 'pw');\n"
+        "  });\n"
+        "});\n"
+    )
+    assert check(schema, tmp_path, _empty_allowlist(tmp_path)) == []
+
+
+def test_api_disabled_entity_has_no_login_spec_to_scan(tmp_path: Path) -> None:
+    # api: false entities never get a cypress/e2e/api/<parent>.cy.ts file —
+    # confirm the enumeration doesn't invent one to scan.
+    schema_path = tmp_path / 'json_schema.yaml'
+    schema_path.write_text(_MIN_SCHEMA.replace('api: true', 'api: false'))
+    for sub in ('lib/widget', 'components/widget', 'app/[locale]/widget'):
+        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
+    _api_test_dir(tmp_path)  # dir exists, but no widget.cy.ts written into it
+    assert check(schema_path, tmp_path, _empty_allowlist(tmp_path)) == []

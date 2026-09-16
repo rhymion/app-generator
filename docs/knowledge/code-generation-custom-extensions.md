@@ -1,6 +1,15 @@
 # Code Generation: Custom Extension Points
 
-The code generator (under ./code_generator) overwrites most files on every run. To minimize manual re-work while still supporting entity-specific logic, four extension points have been established. Each follows the same principle: the generator produces a boilerplate file that delegates to a separate, user-maintained file that is **never overwritten**.
+The code generator (under ./code_generator) overwrites most files on every run. To minimize manual re-work while still supporting entity-specific logic, extension points have been established. Each follows the same principle: the generator produces a boilerplate file that delegates to a separate, user-maintained file that is **never overwritten**.
+
+A fifth extension point, the post-create hook (`lib/{entity}/service_after_create.ts`, an
+`afterCreate(tx, entityId)` call inside `service.ts`'s create transaction), was retired once --
+approval-request creation, its original consumer, moved to inline edge-trigger code in
+`service.ts.jinja2` (see `docs/knowledge/appendix/approval-flow.md` §16.4) -- and later reinstated
+as a general-purpose, no-op-by-default hook for arbitrary post-create side effects, unrelated to
+approval-request creation (which still lives entirely in the edge-trigger code). See
+`docs/knowledge/post-create-side-effect-hook.md` for the current contract: called in-tx, a throw
+rolls back the whole create.
 
 ---
 
@@ -11,8 +20,7 @@ The code generator (under ./code_generator) overwrites most files on every run. 
 | Property-level custom field | `components/{entity}/{prop}.tsx` | Replace a form field with a custom UI component |
 | Entity-level custom component | `components/{entity}/{ComponentName}.tsx` | Add a custom widget to the list, view, or edit page |
 | Client-side form validation | `components/{entity}/form_validation.ts` | Real-time validation in FormUpsert |
-| Server-side service validation | `lib/{entity}/service_validation.ts` | Pre-write validation inside DB transactions |
-| Post-create hook | `lib/{entity}/service_after_create.ts` | Run logic inside the create transaction after the record is saved |
+| Server-side service validation | `lib/{entity}/service_validation_custom.ts` | Pre-write validation inside DB transactions |
 
 ---
 
@@ -50,6 +58,31 @@ interface Props { value: string; }
 ### Example
 
 `components/setting/api_key.tsx` — renders the API key with a "Generate" button. The generator references it but never touches it.
+
+### Upsert-only fields are treated as write-only
+
+A string property whose `x-custom-component.target` includes `upsert` but
+omits `view` (e.g. `password`, `api_key`) is a write-only field:
+`is_write_only_prop()`/`get_write_only_field_names()`
+(`code_generator/helpers/schema_helpers.py`) is the single predicate that
+drives every read path an entity has — `get{Parent}Detail()`
+(`getters.ts.jinja2`) destructures the field out of the raw Prisma row
+before the REST API JSON response or the view page's server data can ever
+see it, and the same field name is excluded from `FormView`, the CSV export
+allowlist, and the sort/filter allowlists.
+
+This predicate must be evaluated against the entity's **full** property set
+(`model_def.get('properties', {})` in `build_context.py`/`generators.py`),
+not `filtered_props` (the subset narrowed by `x-generate.fields`). The
+`get{Parent}Detail()` Prisma query has no `select` clause — it fetches
+every column on the row regardless of `x-generate.fields` — so an entity
+whose `fields` allowlist happens to omit a write-only column (this repo's
+own `user` entity: `fields: [name, image_id, roles]`, password/api_key
+excluded) would otherwise compute an empty write-only set and let the
+unconditional `...{{ parent_camel }}` spread return the raw password hash
+and api_key straight through `GET /api/user/{id}`. Confirmed by curl
+(subtask_810e, 2026-08-25) and fixed by switching both call sites from
+`filtered_props` to `model_def.get('properties', {})`.
 
 ---
 
@@ -145,7 +178,7 @@ user_detail:
 
 `props.src` is typed as `{ id: string; mfa_enabled?: boolean }` (minimal interface). At runtime Prisma includes `mfa_enabled` via the `...user` spread. Component renders an MUI `Chip` (green "MFA Enabled" / neutral "MFA Disabled") — **no edit/toggle widget**. Self-service Enable/Disable lives in the `/setting/mfa` flow accessed from the handwritten `/setting` page.
 
-> **Note:** `components/setting/SettingsHub.tsx` was abolished in cmd_075 (Option B). The `/setting` page is now a committed handwritten `app/[locale]/setting/page.tsx` (not generated). The `setting` entity uses `list: false` in `json_schema.yaml` to prevent overwriting.
+> **Note:** `components/setting/SettingsHub.tsx` was abolished (Option B). The `/setting` page is now a committed handwritten `app/[locale]/setting/page.tsx` (not generated). The `setting` entity uses `list: false` in `json_schema.yaml` to prevent overwriting.
 
 ---
 
@@ -218,70 +251,59 @@ export function useFormValidation(values: Record<string, unknown>): string | nul
 
 ---
 
-## 4. Server-Side Service Validation (`service_validation.ts`)
+## 4. Server-Side Service Validation (`service_validation_custom.ts`)
 
-Every entity with `new` or `edit` enabled gets `validateOnAdd`/`validateOnUpdate` calls inside the Prisma transaction in `service.ts`. This is the authoritative validation — it runs even for API calls, not just UI submissions.
+**This section describes an earlier design; the actual extension point moved
+to a separate file.** `lib/{entity}/service_validation.ts` is itself
+generator output, **fully overwritten on every `generate-code` run**
+(`generate.py` writes it via `_write()`, not the write-once `_write_stub()`
+path) — it holds the schema-driven checks (`REQUIRED_FIELDS`/
+`DECIMAL_FIELDS`/one-to-one-relation checks, all derived straight from
+`json_schema.yaml`) and exports `validateOnAdd(tx, data, actorId)` /
+`validateOnUpdate(tx, id, data, prevRow, actorId)`, both called from the
+Prisma transaction in `service.ts`. Editing this file directly is lost on
+the next regeneration.
 
-### Generated boilerplate (service.ts)
-
-```ts
-import { validateOnAdd, validateOnUpdate } from './service_validation';
-
-export async function addBooking(creatorId: string, name: string, resourceId: string, startTime: Date, endTime: Date) {
-  return await prisma.$transaction(async (tx) => {
-    await validateOnAdd(tx, {
-      name: name,
-      resource_id: resourceId,
-      start_time: startTime,
-      end_time: endTime,
-    });
-    return await tx.booking.create({ data: { ... } });
-  });
-}
-```
-
-Data is passed as `Record<string, unknown>` keyed by **schema property names** (snake_case). Values use the service function's parameter types (`Date` for datetime fields, not `Dayjs`).
-
-### Generator behavior
-
-- On first generation: writes a **no-op stub** at `lib/{entity}/service_validation.ts`.
-- On subsequent runs: stub is **never overwritten** if the file already exists.
-
-### Stub (default)
+The actual **never-overwritten** extension point is
+`lib/{entity}/service_validation_custom.ts`
+(`service_validation_custom_stub.ts.jinja2`, written once via `_write_stub()`
+— same skip-if-exists convention as `autocomplete_filter.ts`). Both
+`validateOnAdd`/`validateOnUpdate` call its single export,
+`validateCustomRules`, unconditionally, after the generated schema-driven
+checks:
 
 ```ts
-export async function validateOnAdd(_tx: unknown, _data: Record<string, unknown>): Promise<void> {}
-
-export async function validateOnUpdate(_tx: unknown, _id: string, _data: Record<string, unknown>): Promise<void> {}
+export async function validateCustomRules(
+  _tx: unknown,
+  _data: Record<string, unknown>,
+  _currentId: string | null,
+  _prevRow: Record<string, unknown> | null,
+  _actorId: string,
+): Promise<void> {}
 ```
 
-### Custom implementation
+- `data` — the raw create/update payload, keyed by schema property names.
+- `currentId` — `null` on create, the row id on update.
+- `prevRow` — the full row as it stood *before* this write (`null` on
+  create) — see `docs/knowledge/pre-edit-row-handoff-to-custom-validation.md`.
+- `actorId` — the id of the user performing the write, never `null` — see
+  `docs/knowledge/actor-id-handoff-to-custom-validation.md`.
+- Throwing rejects the save; the message surfaces to the caller (UI form or
+  direct API request) alike, since this hook runs for both entry points.
 
-```ts
-// lib/booking/service_validation.ts
-export async function validateOnAdd(_tx: unknown, data: Record<string, unknown>): Promise<void> {
-  const { resource_id, start_time, end_time } = data as {
-    resource_id: string; start_time: Date; end_time: Date;
-  };
-  if (!resource_id || !start_time || !end_time) return;
-  if (start_time >= end_time) throw new Error('Start time must be before end time');
-  await assertNoBookingOverlap(prisma, resource_id, start_time, end_time);
-}
-
-export async function validateOnUpdate(_tx: unknown, id: string, data: Record<string, unknown>): Promise<void> {
-  // Same but passes id as excludeId for the overlap check
-}
-```
-
-The `tx` parameter is typed as `unknown` to avoid coupling the validation file to the generated `TransactionClient` type. Cast it internally if transaction-scoped queries are needed.
+Full design rationale (why this is a hand-written socket rather than a
+schema-declared mechanism, and the self-referential-m2m case that motivated
+it) is in `docs/knowledge/same-entity-validation-socket.md` — that is the
+canonical doc for this extension point; treat the summary above as a pointer
+to it, not a duplicate source of truth.
 
 ---
 
 ## Relationship Between Client and Server Validation
 
-For the booking entity, both `form_validation.ts` and `service_validation.ts` check overlap, but serve different roles:
+For the booking entity, both `form_validation.ts` and `service_validation_custom.ts` check overlap, but serve different roles:
 
-| | `form_validation.ts` | `service_validation.ts` |
+| | `form_validation.ts` | `service_validation_custom.ts` |
 |---|---|---|
 | **When** | On every state change (real-time) | Inside the DB transaction (on submit) |
 | **Input** | Dayjs values from `useState` | Date values from service function params |
@@ -289,82 +311,6 @@ For the booking entity, both `form_validation.ts` and `service_validation.ts` ch
 | **Covers API calls** | No | Yes |
 
 The client-side check is UX; the server-side check is the enforcement layer.
-
----
-
-## 5. Post-Create Hook (`service_after_create.ts`)
-
-Every entity with `new: true` gets an `afterCreate` call inside the Prisma `$transaction` in `service.ts`, executed after the record is created.
-
-### Generated boilerplate (service.ts)
-
-```ts
-import { afterCreate } from './service_after_create';
-
-export async function addLeaveRequest(...): Promise<{ id: string }> {
-  return await prisma.$transaction(async (tx) => {
-    await validateOnAdd(tx, { ... });
-    const created = await tx.leave_request.create({
-      data: { ..., approvable: { create: {} } },
-      include: { approvable: true },   // present when one-to-one rels exist
-    });
-    await afterCreate(tx, created as Record<string, unknown>, { ...formData });
-    return { id: created.id };
-  });
-}
-```
-
-### Generator behavior
-
-- On first generation: writes a **no-op stub** at `lib/{entity}/service_after_create.ts`.
-- On subsequent runs: stub is **never overwritten** if the file already exists.
-
-### Stub (default)
-
-```ts
-export async function afterCreate(
-  _tx: unknown,
-  _created: Record<string, unknown>,
-  _data: Record<string, unknown>,
-): Promise<void> {}
-```
-
-### Parameters
-
-| Parameter | Type | Description |
-|---|---|---|
-| `tx` | `unknown` | Prisma transaction client (cast internally as needed) |
-| `created` | `Record<string, unknown>` | The created record, including nested one-to-one relations when present (e.g. `created.approvable`) |
-| `data` | `Record<string, unknown>` | The form data passed to the service function (keyed by schema property names) |
-
-### Custom implementation
-
-```ts
-// lib/leave_request/service_after_create.ts
-import type { PrismaClient } from '@/app/generated/prisma';
-
-type Tx = Omit<PrismaClient, '$connect' | ...>;
-
-export async function afterCreate(
-  tx: unknown,
-  created: Record<string, unknown>,
-  _data: Record<string, unknown>,
-): Promise<void> {
-  const approvable = created.approvable as { id: string } | null | undefined;
-  if (!approvable?.id) return;
-
-  const flows = await (tx as Tx).approval_flow.findMany({
-    where: { entity_name: 'leave_request' },
-  });
-  for (const flow of flows) {
-    await (tx as Tx).approval_request.create({
-      data: { approvable_id: approvable.id, approval_flow_id: flow.id, status: 0 },
-    });
-  }
-}
-```
-
-**Note**: `afterCreate` runs inside the same `$transaction` as the parent `create`. Any error thrown will roll back the entire transaction including the parent record.
 
 ---
 
@@ -380,6 +326,7 @@ components/{entity}/
 
 lib/{entity}/
   service.ts                  ← overwritten by generator
-  service_validation.ts       ← stub created once, never overwritten
-  service_after_create.ts     ← stub created once, never overwritten (when new: true)
+  service_validation.ts       ← overwritten by generator (schema-driven checks; calls into service_validation_custom.ts)
+  service_validation_custom.ts ← stub created once, never overwritten
+  service_after_create.ts     ← stub created once, never overwritten (written whenever this lib dir is the model's own, regardless of can_new/can_create)
 ```

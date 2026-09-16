@@ -17,7 +17,11 @@ from helpers.schema_helpers import (
     get_detail_ref_rels,
     get_flatten_rels,
     get_entity_properties,
+    get_direct_attachment_fk_props,
+    is_write_only_prop,
+    get_write_only_field_names,
 )
+from helpers.bridge_direction import collect_parent_bridge_fk_props
 
 
 def _raw_def(entity_name: str, schema: dict) -> dict:
@@ -28,6 +32,17 @@ def _raw_def(entity_name: str, schema: dict) -> dict:
     proxies the 'user' view instead of having its own raw twin)."""
     defs = schema.get('definitions', {})
     return defs.get(f'__{entity_name}', {}) or defs.get(entity_name, {})
+
+
+def _target_has_write_only_fields(target: str, schema: dict) -> bool:
+    """True when `target` declares at least one write-only field (password,
+    api_key, ...) -- mirrors build_context.py's
+    _write_only_narrowed_include() gate so the generated TS type for a
+    relation to `target` matches the narrowed `{ id, label }` shape that
+    function emits for the Prisma fetch (subtask_854b)."""
+    if not target:
+        return False
+    return bool(get_write_only_field_names(_raw_def(target, schema).get('properties', {}) or {}))
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +61,14 @@ class RelInfo:
     relation_name: str   # resolved from detail def (e.g. "organization", not "organization_id")
     target: str          # entity name (e.g. "organization")
     label_field: str     # for XxxOption types (usually "name")
+    # True when `target` carries write-only fields (password/api_key-shaped
+    # columns) and build_context.py's _write_only_narrowed_include()
+    # therefore narrows this relation's Prisma fetch to `{ id, label_field }`
+    # (see subtask_854b). The TS type must mirror that narrowing -- the
+    # full `{{ target | pascal_case }}` type declares those write-only
+    # columns as required fields the actual (select-narrowed) value never
+    # has, which fails to type-check otherwise.
+    write_only_narrowed: bool = False
 
 
 @dataclass
@@ -56,6 +79,10 @@ class ChildContext:
     fields: list[FieldInfo]
     relationships: list[RelInfo]   # many-to-one rels within this child
     declare_type: bool   # False when this child type was already declared earlier
+    # Same rationale as RelInfo.write_only_narrowed, for a to-many child
+    # relation (e.g. role.users / organization.users) whose child_include_entries
+    # (build_context.py) narrows to `{ id, name }` rows.
+    write_only_narrowed: bool = False
 
 
 @dataclass
@@ -91,6 +118,16 @@ class FlattenRelInfo:
 
 
 @dataclass
+class DirectAttachmentRelInfo:
+    """A field declaring `x-relationship: { target: attachment, type: direct }`
+    (cmd_788). `attachment` has no generated pascal-case type (it is never
+    independently generated), so FormViewProps.src inlines the attachment
+    row's shape here rather than referencing `{{ target | pascal_case }}`
+    like parent_rels does."""
+    relation_name: str       # Prisma relation name, e.g. "profile_picture"
+
+
+@dataclass
 class EntityContext:
     parent: str
     model: str
@@ -110,6 +147,9 @@ class EntityContext:
     entity_edit_components: list[dict] = ()    # custom components rendered in FormUpsert; [{name, path?}]
     is_bridge_child: bool = False              # entity declares new-form x-bridge (parent-context create)
     reaction_value_type: str = 'number'        # runtime type of the reaction 'type' constant (see generate_types.extract_named_constants)
+    comment_has_mention: bool = False          # this entity's comment thread supports @mention (cmd_522) — gates FormViewProps.canViewUserProfile/mentionUserContext
+    direct_attachment_rels: list[DirectAttachmentRelInfo] = ()  # x-relationship type:direct FK -> attachment (cmd_788)
+    attachment_type_ts: str = 'number'         # TS type of attachment.type, shared by every direct_attachment_rels entry
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +177,21 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     generate_config = entity.get('generate_config', {})
     children_raw = entity.get('children', [])
 
-    model_def = _raw_def(model, schema)
+    # canonicalize_bridges()/collect_parent_bridge_fk_props(): normalize both
+    # x-bridge forms (old array form → synthetic x-relationship on the `via`
+    # field; new object form → synthesized parent-side FK prop) into
+    # model_def BEFORE any one-to-one-rel detection below — mirrors
+    # build_context.py's identical two-step normalization (its sole other
+    # caller). Without this, get_one_to_one_rels() below never sees the
+    # bridge relation for entities using either x-bridge form, so
+    # comment_has_mention (cmd_522c, computed further down from
+    # one_to_one_rels) silently stays False for a bridge-based comment
+    # thread that build_context.py correctly detects as True.
+    from build_context import canonicalize_bridges
+    model_def = canonicalize_bridges(_raw_def(model, schema), schema.get('definitions', {}))
+    _parent_bridge_fks = collect_parent_bridge_fk_props(model, schema)
+    if _parent_bridge_fks:
+        model_def = {**model_def, 'properties': {**model_def.get('properties', {}), **_parent_bridge_fks}}
     filtered_props = filter_fields(
         model_def.get('properties', {}),
         generate_config.get('fields'),
@@ -147,8 +201,18 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     # Int-with-magic-numbers x-internal fields, or the nativeEnum literal union
     # once reaction.type has been migrated to a Prisma enum — cmd_446 Class A).
     # Needed by types.ts.jinja2's CommentReactionSummary/reactionCounts/myReactionTypes.
-    from generators import reaction_type_ts
+    from generators import reaction_type_ts, attachment_type_ts
     _reaction_value_type = reaction_type_ts(schema)
+
+    # Direct-attachment FK rels (cmd_788): x-relationship type:direct fields.
+    # merged_def isn't built yet at this point, so use model_def directly --
+    # get_direct_attachment_fk_props only reads properties/required, both
+    # already present on model_def before the filtered_props merge below.
+    _direct_attachment_rels = [
+        DirectAttachmentRelInfo(relation_name=r['relation_name'])
+        for r in get_direct_attachment_fk_props(model_def)
+    ]
+    _attachment_type_ts = attachment_type_ts(schema) if _direct_attachment_rels else 'number'
 
     # Many-to-one relationships on parent (using filtered props)
     merged_def = {**model_def, 'properties': filtered_props}
@@ -157,6 +221,12 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
     required_set = set(model_def.get('required') or [])
     parent_fields = []
     for k, v in filtered_props.items():
+        # write-only fields (password, api_key, ... — see is_write_only_prop())
+        # never reach the client: get{{Parent}}Detail() (getters.ts.jinja2)
+        # strips them from its returned object (cmd_801), so the TS type
+        # this object is assigned to must not declare them either.
+        if is_write_only_prop(v):
+            continue
         ts_type = get_ts_type(v)
         # Fields not in required and without a JSON schema default are nullable in Prisma
         # (generated as optional columns with no DB default). Reflect this in TypeScript
@@ -212,14 +282,24 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             relation_name=r['prop_name'].removesuffix('_id'),
             target=r['target'],
             label_field=r.get('label_field', 'name'),
+            write_only_narrowed=_target_has_write_only_fields(r['target'], schema),
         )
         for r in rels_raw
     ]
 
     # All OTO FK props are excluded from form_view_fields — the selector OTO rels will be
     # displayed through parent_rels (like many-to-one), and auto-create OTO via nested includes
+    # write-only fields (password, api_key, ... — see is_write_only_prop())
+    # are declared optional here rather than excluded: get{{Parent}}Detail()
+    # (getters.ts.jinja2, cmd_801) never populates them on the read path, so
+    # FormView.tsx (which no longer renders them at all — see
+    # form_view_context()'s write_only_props skip) never sees a value. But
+    # FormUpsertProps intersects this same `src` type below, and
+    # FormUpsert.tsx legitimately reads `src.password ?? ''` as the initial
+    # (always-blank) value for its password-change input -- the field must
+    # stay in the type, just as optional/possibly-undefined.
     form_view_fields = [
-        FieldInfo(k, get_ts_type(v, for_view_props=True))
+        FieldInfo(k, get_ts_type(v, for_view_props=True), optional=is_write_only_prop(v))
         for k, v in filtered_props.items()
         if k not in _TIMESTAMP_FIELDS and k not in _all_oto_prop_names
     ]
@@ -268,6 +348,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             relation_name=r['relation_name'],
             target=r['target'],
             label_field=r['label_field'],
+            write_only_narrowed=_target_has_write_only_fields(r['target'], schema),
         ))
 
     # Reverse OTO rels (FK lives in target, not in this model) — display-only in detail view
@@ -334,6 +415,28 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             _fields.append(FieldInfo('creator_id', 'string | null'))
         _inline_flatten_types.append({'name': _t, 'fields': _fields})
 
+    # Names of children whose type will be declared LOCALLY in this file (mirrors
+    # the is_independent check the children loop below applies per child_raw).
+    # A self-referencing child (x-splittable FK back to itself) has its own
+    # target name equal to its own child_name, and that target can leak into
+    # child_rels_early/import_targets below once the child is non-list — computed
+    # here, ahead of import_targets, so both the initial build and the loop's
+    # own import_targets.append() can exclude it and avoid `import type {X}` +
+    # `export type X = {...}` coexisting in the same file (TS2440).
+    _locally_declared_child_names: set[str] = set()
+    for _cr in children_raw:
+        _cn = _cr['name']
+        _cdef = _raw_def(_cn, schema)
+        if not _cdef.get('properties'):
+            continue
+        _is_indep = (
+            _cr.get('output_type') == 'list'
+            and (_cr.get('relationship') or {}).get('type') != 'many-to-many'
+            and bool(schema['definitions'].get(_cn, {}).get('x-generate'))
+        )
+        if not _is_indep:
+            _locally_declared_child_names.add(_cn)
+
     # Import targets = union of parent + child + auto-create OTO nested rel targets + selector OTO + reverse OTO + flatten
     all_import_targets = _dedupe_ordered([
         *[r['target'] for r in relationship_targets],
@@ -343,7 +446,10 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         *[r['target'] for r in _reverse_oto_early],
         *_flatten_non_detail_targets,
     ])
-    import_targets = [t for t in all_import_targets if t != model]
+    import_targets = [
+        t for t in all_import_targets
+        if t != model and t not in _locally_declared_child_names
+    ]
 
     # XxxOption types — parent rels (including selector OTO) whose target is not the model (deduplicated)
     _seen_option_targets: set[str] = set()
@@ -396,8 +502,16 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             declared_child_types.add(child_name)
             # When this child's type is declared inline, its FK targets are
             # referenced as types inside this file — they must be imported.
+            # Exclude targets that are themselves locally-declared children
+            # (including a self-referencing FK back to child_name) — those
+            # get `declare_type=True` below, not an import (see
+            # _locally_declared_child_names above; TS2440 otherwise).
             for rel in child_rels:
-                if rel.target != model and rel.target not in import_targets:
+                if (
+                    rel.target != model
+                    and rel.target not in _locally_declared_child_names
+                    and rel.target not in import_targets
+                ):
                     import_targets.append(rel.target)
 
         children.append(ChildContext(
@@ -407,6 +521,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             fields=child_fields,
             relationships=child_rels,
             declare_type=not already_declared,
+            write_only_narrowed=_target_has_write_only_fields(child_name, schema),
         ))
 
     # all_option_targets for FormUpsertProps: m2m + optional-FK-list + parent rels + embedded child rels
@@ -421,7 +536,19 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
             and (c.get('relationship') or {}).get('type') != 'many-to-many'
             and is_optional_fk_to_parent(schema['definitions'].get(c['name'], {}), model))
     ]
-    child_rel_targets = _dedupe_ordered(r['target'] for r in child_rels_early)
+    # Exclude _locally_declared_child_names for the same reason import_targets
+    # does above: a self-referencing child's own relation target (e.g.
+    # goods_receipt_line's parent_line_id -> goods_receipt_line) is that
+    # child's own name, not a genuine pickable "option target" -- without
+    # this, FormUpsertProps grew a dead initial{Child}s/search{Child}Options
+    # prop pair that nothing in the generated component ever uses (found via
+    # subtask_1047g's own empirical fixture verification, a sibling of Bug B
+    # sharing the same child_rels_early root cause but surfacing in
+    # all_option_targets/FormUpsertProps instead of import_targets/types.ts).
+    child_rel_targets = _dedupe_ordered(
+        r['target'] for r in child_rels_early
+        if r['target'] not in _locally_declared_child_names
+    )
     # For bridge-child entities (new-form x-bridge), include bridge parent targets in FormUpsertProps
     x_bridge = model_def.get('x-bridge')
     bridge_parent_targets = (
@@ -493,6 +620,20 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         for r in _flatten_rels_raw
     ]
 
+    # comment_has_mention (cmd_522): this entity has a bridge-based
+    # (commentable one-to-one) or child comment thread AND the shared
+    # `comment` model has ≥1 x-mention: true field. Mirrors build_context.py's
+    # identical computation for getters.ts.jinja2/actions.ts.jinja2 — kept as
+    # a separate calculation here since context.py is a fully independent
+    # context builder (types.ts.jinja2 only) with no shared state.
+    _has_commentable_oto = any(r.target == 'commentable' for r in one_to_one_rels)
+    _has_comment_children = any(c.get('output_type') == 'comments' for c in children_raw)
+    _comment_def = _raw_def('comment', schema)
+    comment_has_mention = (_has_commentable_oto or _has_comment_children) and any(
+        isinstance(fp, dict) and fp.get('x-mention') is True
+        for fp in (_comment_def.get('properties') or {}).values()
+    )
+
     # Custom view/edit components from x-custom-components config (entity-level, list).
     _xcc_list_raw = schema['definitions'].get(def_key, {}).get('x-custom-components') or []
     if not isinstance(_xcc_list_raw, list):
@@ -531,4 +672,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         entity_edit_components=entity_edit_components,
         is_bridge_child=isinstance(_x_bridge, dict),
         reaction_value_type=_reaction_value_type,
+        comment_has_mention=comment_has_mention,
+        direct_attachment_rels=_direct_attachment_rels,
+        attachment_type_ts=_attachment_type_ts,
     )

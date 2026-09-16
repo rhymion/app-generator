@@ -16,8 +16,14 @@ from helpers.schema_helpers import (
     is_optional_fk_to_parent, get_parent_fk_props, get_one_to_one_rels,
     get_detail_ref_rels, get_flatten_rels, get_approval_lines_props,
     derive_text_fields, derive_searchable_relation_fields,
+    derive_cross_entity_searchable_fields,
     get_internal_bridge_fk_prop_names,
-    get_entity_properties,
+    get_entity_properties, get_self_only_flags,
+    derive_write_locked_values,
+    derive_write_locked_values_for_view,
+    get_direct_attachment_fk_props,
+    get_write_only_field_names,
+    is_write_only_prop,
 )
 from helpers.label_field import build_label_expression, render_prisma_include
 from helpers.bridge_direction import (
@@ -34,15 +40,92 @@ _EXCLUDE_FIELDS = {'created_at', 'updated_at'}
 _EXCLUDE_ID_TS  = {'id', 'created_at', 'updated_at', 'creator_id'}
 _SCALAR_TYPES   = {'string', 'integer', 'number', 'boolean'}
 
+# Parsed Prisma models (schema_deriver.parse_prisma_schema() output), for
+# Prisma-only facts that can never be answered from the JSON schema alone.
+# creator_id/updater_id are a case in point (subtask_892d GAP1): every
+# *top-level* x-generate entity is assumed to carry them unconditionally
+# (service.ts.jinja2 hardcodes `creator_id: actorId, updater_id: actorId,`
+# on its own add/update), but a §7.1 raw-inline-child is NOT guaranteed to
+# (the dashboard_widget precedent has neither) -- audit columns are
+# deliberately never a JSON-schema `fields:` entry (they're always
+# server-set), so child_props_dict (build_user_schema.py-derived) can never
+# answer "does this child model actually have them" on its own. Mirrors the
+# existing generators_test.py set_prisma_uniques() pattern -- populated by
+# set_prisma_models() before build_context() runs for any entity.
+_prisma_models: dict = {}
+
+
+def set_prisma_models(models: dict) -> None:
+    """Register the parsed Prisma models (schema_deriver.parse_prisma_schema()
+    output) for Prisma-only-fact lookups (e.g. child audit-field presence)."""
+    global _prisma_models
+    _prisma_models = models or {}
+
+
+def _model_has_audit_fields(model_name: str) -> bool:
+    """True when `model_name`'s Prisma model declares both creator_id and
+    updater_id columns."""
+    pm = _prisma_models.get(model_name)
+    return bool(pm and 'creator_id' in pm.fields and 'updater_id' in pm.fields)
+
 
 def _raw_def(entity_name: str, schema: dict) -> dict:
     """Resolve a bare/view model name to its raw entity dict — scalar/FK
-    properties, x-readonly-fields, x-gdpr-mode, x-display etc. all live on
-    the raw ('__'-prefixed) entity, not the view. Falls back to the bare
-    view for entities with no raw counterpart (e.g. 'setting', which
-    proxies the 'user' view instead of having its own raw twin)."""
+    properties, x-gdpr-mode, x-display etc. all live on the raw
+    ('__'-prefixed) entity, not the view. Falls back to the bare view for
+    entities with no raw counterpart (e.g. 'setting', which proxies the
+    'user' view instead of having its own raw twin).
+
+    NOTE: `x-readonly-fields` and `x-filter-values` are entity-level
+    annotations that do NOT live here (cmd_874 subtask_874d/874f) — they
+    stay on the view entity itself so one view's declaration can't leak to
+    every other view of the same raw model. Read them from
+    `schema['definitions'][definition_key]` instead; see `build_context()`'s
+    `_ro_from_entity` / `_filter_values_raw`.
+    """
     defs = schema.get('definitions', {})
     return defs.get(f'__{entity_name}', {}) or defs.get(entity_name, {})
+
+
+def _entity_decimal_deep(entity_name: str, schema: dict, _visited: frozenset = frozenset()) -> bool:
+    """True if `entity_name` itself has a Decimal-backed scalar column, or
+    any many-to-one/one-to-one/one-to-many relation it embeds carries one,
+    at any nesting depth (cmd_711f).
+
+    getters.ts's decimal_display_columns only stringifies an entity's OWN
+    scalar Decimal columns before they cross the Server-to-Client Component
+    boundary. A Decimal column reached through an *embedded relation*
+    (e.g. asn_line.purchase_order_line.unit_price, or a to-many child list
+    such as purchase_order.purchase_order_lines[].unit_price) is untouched
+    by that check and reaches the client as a raw decimal.js instance,
+    which React cannot serialize — TS2322 at build time. This walks the
+    relation graph recursively (m2o/o2o via get_parent_relationships, o2m
+    via the entity-level x-relationships children) so a relation embed at
+    any depth is caught, not just the immediate target's own fields.
+
+    _visited guards against a cycle (e.g. a self-referential parent FK)
+    recursing forever; it is never meant to be passed by callers.
+    """
+    if entity_name in _visited:
+        return False
+    _visited = _visited | {entity_name}
+
+    raw = _raw_def(entity_name, schema)
+    for v in raw.get('properties', {}).values():
+        if isinstance(v, dict) and v.get('_prisma_decimal_type'):
+            return True
+
+    for r in get_parent_relationships(raw, schema):
+        if _entity_decimal_deep(r['target'], schema, _visited):
+            return True
+
+    view = schema.get('definitions', {}).get(entity_name, {})
+    for rel_info in (view.get('x-relationships') or {}).values():
+        target = rel_info.get('target')
+        if target and _entity_decimal_deep(target, schema, _visited):
+            return True
+
+    return False
 
 
 def _is_scalar_prop(prop: dict) -> bool:
@@ -61,18 +144,94 @@ def _get_actual_type(defn: dict) -> str | None:
 
 
 def get_uri_kind(prop: dict) -> str | None:
-    """Return the uri kind for a format:uri property. Default is 'image'."""
+    """Return the uri kind for a format:uri property. Default is 'image'.
+
+    'file' (cmd_776(3)/subtask_780a) is a URL-string field like 'image' —
+    still uploaded via /api/upload and stored as a plain string, not an
+    attachment FK — but for a non-image file (e.g. proj_h's file_uri): the
+    upload widget must not render it as an <img>. Rendered via the same
+    SingleAttachmentUpload component (mode='url', kind='file') that the
+    x-relationship: {target: attachment, type: direct} FK path (mode='fk')
+    also uses, per the殿-approved common-component design in subtask_780a.
+    """
     if prop.get('format') != 'uri':
         return None
     kind = prop.get('x-uri-kind', 'image')
-    if kind not in ('image', 'link'):
-        raise ValueError(f"x-uri-kind must be 'image' or 'link', got: {kind!r}")
+    if kind not in ('image', 'link', 'file'):
+        raise ValueError(f"x-uri-kind must be 'image', 'link', or 'file', got: {kind!r}")
     return kind
 
 
 def _is_nullable(defn: dict) -> bool:
     t = defn.get('type')
     return isinstance(t, list) and 'null' in t
+
+
+# A nullable plain-text field written as '' (an empty-but-not-cleared
+# client value -- a blank text input, an omitted-then-defaulted FormData
+# read, a JSON body that sends "" instead of null) must persist as NULL,
+# the same as if the field had never been set at all. Two writes of "no
+# value" that land as two different DB values (NULL vs '') silently break
+# any later equality-match against the column (e.g. a find-or-create
+# unique-compound-key lookup keyed in part on this field never matches a
+# row saved the other way -- confirmed root cause of a duplicate-row
+# incident on goods_receipt_line.lot_number, traced to inventory's
+# @@unique([..., lot_number, ...]) never matching an existing NULL row
+# against a freshly-'' one).
+#
+# Scoped narrowly to a PLAIN nullable string column -- not date/time
+# (format set), not Decimal (_prisma_decimal_type), not a Prisma
+# nativeEnum (_prisma_native_enum_type, where '' isn't a valid member to
+# begin with and this cast would be a no-op at best). A non-nullable
+# string field is deliberately untouched -- '' is a legitimate, distinct
+# value there (an entity requiring the field to be present, just possibly
+# blank), never a stand-in for "absent".
+def _is_nullable_plain_string(defn: dict) -> bool:
+    if not _is_nullable(defn):
+        return False
+    t = defn.get('type')
+    types = t if isinstance(t, list) else [t]
+    if 'string' not in types:
+        return False
+    if defn.get('format'):
+        return False
+    if defn.get('_prisma_decimal_type') or defn.get('_prisma_native_enum_type'):
+        return False
+    return True
+
+
+def _normalized_value_expr(prop: str, var_name: str, defn: dict) -> str:
+    """The write-side expression for one field's `data: {...}` entry --
+    `var_name` untouched, or (for a nullable plain-text field only)
+    `var_name === '' ? null : var_name` so an empty string never reaches
+    the DB as a value distinct from NULL. See _is_nullable_plain_string.
+
+    A write-only field (is_write_only_prop -- password, api_key, ...) takes
+    a different empty-string rule: `undefined`, not `null`, and Prisma
+    omits an `undefined` data entry entirely rather than writing SQL NULL
+    (app-generator#576). The upsert-only form component for a write-only
+    field never receives the persisted value on any read path (that is the
+    point of write-only), so its client-side state -- and therefore this
+    var_name -- starts at '' on every load and stays '' unless the user
+    takes an explicit action to supply a new value (verify+set a new
+    password, generate a new api_key). '' here is never the client
+    reporting a real observed blank, the way it can be for an ordinary
+    nullable string field -- it is indistinguishable from "field never
+    touched". Treating it as "clear to NULL" (the _is_nullable_plain_string
+    rule) means every update that does not touch the field wipes it,
+    independent of what the user actually changed -- confirmed empirically
+    (subtask_1068a): a plain Save with zero field changes reset an admin's
+    password to NULL, breaking that account's credentials login outright.
+    Skipping the write (Prisma's `undefined`-omits-the-key behavior)
+    preserves the existing column value instead, which is the only
+    reading consistent with there being no explicit "clear this" action
+    exposed by either the password or api_key form component.
+    """
+    if is_write_only_prop(defn):
+        return f"{var_name} === '' ? undefined : {var_name}"
+    if _is_nullable_plain_string(defn):
+        return f"{var_name} === '' ? null : {var_name}"
+    return var_name
 
 
 def is_select_like_field(defn: dict) -> bool:
@@ -143,7 +302,8 @@ def _dedupe_ordered(items):
 # Form data extraction  (actions.ts / api routes)
 # ---------------------------------------------------------------------------
 
-def _build_form_data_gets(prop_infos: list[dict]) -> str:
+def _build_form_data_gets(prop_infos: list[dict], required_props: set | None = None) -> str:
+    required_props = required_props or set()
     lines = []
     for p in prop_infos:
         prop     = p['prop']
@@ -160,10 +320,43 @@ def _build_form_data_gets(prop_infos: list[dict]) -> str:
                     f"  const {var_name}Str = data.get('{prop}') as string | null;\n"
                     f"  const {var_name} = {var_name}Str ? new Date({var_name}Str) : null;"
                 )
-            else:
+            elif prop in required_props:
+                # Non-nullable + required: '' (an untouched-then-cleared
+                # field -- form_data_sets emits `?.toISOString() || ''`)
+                # turns into `new Date('')` == Invalid Date -- but
+                # isMissingValue() (service_validation.ts) already treats
+                # any Date failing isNaN(.getTime()) as missing, so
+                # REQUIRED_FIELDS cleanly rejects this with an AppError
+                # before it ever reaches Prisma. Left as the original
+                # unconditional construction: the service function's
+                # parameter type is plain `Date` (get_ts_type for a
+                # non-nullable date), so this must never become a
+                # `Date | null` expression.
                 lines.append(
                     f"  const {var_name}Str = data.get('{prop}') as string;\n"
                     f"  const {var_name} = new Date({var_name}Str);"
+                )
+            else:
+                # Non-nullable + NOT required: schema_deriver only omits a
+                # non-nullable field from `required:` when it carries a
+                # Prisma @default(...) (static or dynamic now()) --
+                # _default_value's has_db_default reasoning. Unlike the
+                # required case above, there is no REQUIRED_FIELDS check to
+                # rely on, so an Invalid Date here would reach Prisma raw
+                # and crash it (the required-*child*-row equivalent of this
+                # bug reaches this same failure a different way -- see
+                # `service.ts.jinja2`'s catch-all below; this parent-field
+                # branch was latent but unconfirmed by any failing spec --
+                # fixed here defensively, mirroring the Decimal case above).
+                # Falls back to the schema default (or "now") so the
+                # column stays legally NOT NULL, keeping the const's type
+                # plain `Date` throughout, matching the non-nullable
+                # parameter type.
+                date_fallback = f"new Date('{defn['default']}')" if 'default' in defn else 'new Date()'
+                lines.append(
+                    f"  const {var_name}Str = data.get('{prop}') as string;\n"
+                    f"  const {var_name}Raw = {var_name}Str ? new Date({var_name}Str) : null;\n"
+                    f"  const {var_name} = {var_name}Raw && !isNaN({var_name}Raw.getTime()) ? {var_name}Raw : {date_fallback};"
                 )
         elif actual == 'boolean':
             lines.append(f"  const {var_name} = data.get('{prop}') === 'true';")
@@ -185,6 +378,39 @@ def _build_form_data_gets(prop_infos: list[dict]) -> str:
             # narrower type the service layer now expects (cmd_446 pilot).
             suffix = ' | null' if nullable else ''
             lines.append(f"  const {var_name} = data.get('{prop}') as {get_ts_type(defn)}{suffix};")
+        elif actual == 'string' and defn.get('_prisma_decimal_type'):
+            # Decimal fields are exposed as JSON type "string", but
+            # an untouched/cleared field submits '' via FormData -- passed
+            # straight through, that reaches Prisma as the literal string ''
+            # and fails with "Failed to parse empty string. Expected decimal
+            # String." This is a product-code defect, not a test defect --
+            # clearing an optional numeric field is a normal user action.
+            if nullable:
+                # A nullable Decimal column legally accepts null for "cleared".
+                lines.append(f"  const {var_name} = (data.get('{prop}') as string | null) || null;")
+            elif prop in required_props:
+                # Non-nullable + required: '' already fails REQUIRED_FIELDS/
+                # isMissingValue (service_validation.ts) cleanly -- no
+                # fallback needed, and none is safe here: the service
+                # function's parameter type is plain `string`
+                # (get_ts_type for a non-nullable Decimal), so this must
+                # never become a `string | null` expression (a regression
+                # caught by test:decimal-gate's required-column branch:
+                # TS2345 assigning `string | null` to `string`).
+                lines.append(f"  const {var_name} = data.get('{prop}') as string;")
+            else:
+                # Non-nullable + NOT required: schema_deriver only omits a
+                # non-nullable field from `required:` when it carries a
+                # Prisma @default(...) (_default_value's has_db_default
+                # reasoning) -- client-clearable, with no REQUIRED_FIELDS
+                # check to catch it, so '' must fall back to a legal
+                # Decimal string here instead of reaching Prisma raw. Uses
+                # the schema default when declared, else '0' (always a
+                # valid Decimal literal) -- never `null`, for the same
+                # non-nullable-parameter-type reason as the required branch.
+                default_val = defn.get('default')
+                fallback = f"'{default_val}'" if default_val is not None else "'0'"
+                lines.append(f"  const {var_name} = (data.get('{prop}') as string) || {fallback};")
         else:
             suffix = ' | null' if nullable else ''
             lines.append(f"  const {var_name} = data.get('{prop}') as string{suffix};")
@@ -209,6 +435,79 @@ def _get_child_parent_id_props(child_name: str, model: str, parent_rels_raw: lis
     return get_parent_fk_props(child_def, model)
 
 
+def _child_readonly_field_names(child_name: str, child_props_dict: dict, schema: dict, model: str) -> set[str]:
+    """Resolve x-readonly-fields (entity-level) + x-readonly (per-field) for a
+    DataGrid child entity — the child-grid counterpart of build_context()'s own
+    `_ro_from_entity`/`_ro_from_props` (cmd_874 subtask_874i). x-readonly-fields
+    is read from the child's own definitions entry directly (not via _raw_def),
+    mirroring the parent's view-scoped read (see _raw_def's docstring note) —
+    child grid entities referenced by `children:` have no raw/view split today,
+    so `schema['definitions'][child_name]` already is the view-equivalent entry.
+    Fails closed (cmd_642 precedent) on an x-readonly-fields entry that names an
+    unknown property, rather than silently leaving it editable.
+    """
+    _child_entry = schema['definitions'].get(child_name, {}) or {}
+    _ro_from_entity: set[str] = set(_child_entry.get('x-readonly-fields') or [])
+    _unresolved = sorted(_ro_from_entity - set(child_props_dict))
+    if _unresolved:
+        raise ValueError(
+            f"x-readonly-fields on child entity '{child_name}' (under '{model}') references "
+            f"unknown propert{'y' if len(_unresolved) == 1 else 'ies'}: {_unresolved}. "
+            "Each entry must be an exact property name."
+        )
+    _ro_from_props: set[str] = {
+        fn for fn, fp in child_props_dict.items()
+        if isinstance(fp, dict) and fp.get('x-readonly')
+    }
+    return _ro_from_entity | _ro_from_props
+
+
+def _child_readonly_default_value(prop_name: str, defn: dict, child_def: dict) -> str:
+    """Server-side create-time default literal for a readonly child-grid
+    column. A row is still `create`d with all its columns even when one of
+    them is readonly (the row itself is new — there is no prior value to
+    keep), so the client-submitted value is replaced with a schema-derived
+    default instead of being dropped outright (contrast
+    _build_child_nested_update's `update` branch, which omits the key
+    entirely — see field_map_update below).
+
+    A third near-duplicate of this same schema-default-literal logic
+    (generators.py's `_new_prop_val` seeds the client-side new-row grid
+    state; build_context.py's own `_default_value` seeds the parent's
+    page_new defaults) — kept separate rather than shared because neither
+    runs in this function's scope: `_new_prop_val` emits for the browser,
+    and `_default_value` is a closure over build_context()'s parent-model
+    locals (model_def, is required, etc.) not available here for a child.
+    """
+    actual = _get_actual_type(defn)
+    fmt = defn.get('format')
+    is_req = prop_name in (child_def.get('required') or [])
+    is_null = _is_nullable(defn)
+    has_db_default = 'default' in defn or (not is_req and not is_null)
+    if actual == 'string' and fmt in ('date', 'date-time', 'time'):
+        return 'new Date()' if has_db_default else 'null'
+    if actual in ('integer', 'number'):
+        if has_db_default and defn.get('default') is not None:
+            schema_default = defn['default']
+            return str(int(schema_default)) if actual == 'integer' else str(schema_default)
+        return 'null'
+    if actual == 'string':
+        if defn.get('_prisma_native_enum_type') and 'default' in defn:
+            return f"'{defn['default']}'"
+        if defn.get('_prisma_native_enum_type') and isinstance(defn.get('enum'), list) and defn['enum']:
+            return f"'{defn['enum'][0]}'"
+        if isinstance(defn.get('enum'), list) and defn['enum']:
+            if 'default' in defn:
+                return f"'{defn['default']}'"
+            return f"'{defn['enum'][0]}'"
+        if 'default' in defn:
+            return f"'{defn['default']}'"
+        return "''"
+    if actual == 'boolean':
+        return str(defn.get('default', False)).lower()
+    return 'null'
+
+
 def _build_child_data(children_raw: list[dict], model: str, schema: dict,
                       parent_rels_raw: list[dict]) -> list[dict]:
     result = []
@@ -229,10 +528,24 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             and is_optional_fk_to_parent(child_def, model)
         )
         use_connect = is_many_to_many or child_name == model or is_optional_fk_list
-        # Independent list child: has its own view definition with x-generate.
-        # These are managed on their own pages; the parent form shows them read-only.
+        # Independent child: has its own view definition with x-generate --
+        # managed on its own page(s); the parent form shows it read-only.
+        #
+        # Not gated on output_type == 'list': before issue #520/PR#528, an
+        # independent (own x-generate) child could only ever be output_type
+        # 'list' (generate_types.py's extract_entities() rejected any other
+        # combination), so gating this on output_type == 'list' was an
+        # equivalent, harmless simplification. PR#528 lifted that
+        # restriction to allow a non-'list' output_type (grid-style embed)
+        # for an independent child too, but this gate was never updated to
+        # match -- every independent, non-'list' child (e.g. goods_receipt_line,
+        # x-approval + self-referencing FK, once x-outputType: list is
+        # removed) silently fell through to is_independent=False, which
+        # embedded_ch's own child_nested_create/child_nested_update
+        # generation (below) then treated as writable via the parent's own
+        # service, producing a TS2322 (cmd_1047 "Otsu" ruling, subtask_1047g).
         is_independent = (
-            output_type == 'list' and not is_many_to_many
+            not is_many_to_many
             and bool(schema['definitions'].get(child_name, {}).get('x-generate'))
         )
         child_props_dict = child_def.get('properties', {})
@@ -289,11 +602,37 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             return (isinstance(t, list) and 'null' in t
                     and defn.get('pattern') == '^c[a-z0-9]{24,}$')
 
+        # x-readonly-fields / x-readonly on the child entity (cmd_874
+        # subtask_874i): the UI's editable flag (generators.py
+        # column_def_context, via readonly_field_names below) and this
+        # write path both need to honor it. Asymmetric by design (874g
+        # report): a create still needs *some* value for a readonly column
+        # (the row is new — there is no prior value to preserve), so
+        # field_map_create substitutes a schema-derived default; an update
+        # instead omits the key entirely from `data:` so Prisma leaves the
+        # existing value untouched. field_map_update is used only for the
+        # `update:` (existing-row) branch in _build_child_nested_update —
+        # the `create:` branch there (new rows added during an update) is a
+        # create, so it keeps using field_map_create like
+        # _build_child_nested_create does.
+        readonly_field_names = _child_readonly_field_names(child_name, child_props_dict, schema, model)
+
         field_map_create = '\n'.join(
+            f'          {p}: {_child_readonly_default_value(p, child_props_dict.get(p, {}), child_def)},'
+            if p in readonly_field_names
+            else (
+                f'          {p}: f.{p} || null,'
+                if _is_nullable_cuid(child_props_dict.get(p, {}))
+                else f'          {p}: f.{p},'
+            )
+            for p in props_no_id
+        )
+        field_map_update = '\n'.join(
             f'          {p}: f.{p} || null,'
             if _is_nullable_cuid(child_props_dict.get(p, {}))
             else f'          {p}: f.{p},'
             for p in props_no_id
+            if p not in readonly_field_names
         )
 
         child_var    = safe_var_name(prop_name)
@@ -319,6 +658,12 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
         # _build_child_assignee_notify_create_code/_update_code below.
         child_has_assignee_id = 'assignee_id' in child_props_dict
 
+        # subtask_892d GAP1: does this child's own Prisma model declare
+        # creator_id/updater_id? Never derivable from child_props_dict (see
+        # _model_has_audit_fields docstring) -- checked directly against the
+        # parsed Prisma schema instead.
+        child_has_audit_fields = _model_has_audit_fields(child_name)
+
         result.append({
             **child_raw,
             'child_var':        child_var,
@@ -333,9 +678,12 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             'field_type':       field_type,
             'field_type_with_id': field_type_with_id,
             'field_map_create': field_map_create,
+            'field_map_update': field_map_update,
+            'readonly_field_names': readonly_field_names,
             'approval_indexed':   approval_indexed,
             'approval_array_var': approval_array_var,
             'has_assignee_id':    child_has_assignee_id,
+            'has_audit_fields':   child_has_audit_fields,
         })
     return result
 
@@ -366,12 +714,26 @@ def _build_child_form_data_extractions(children_data: list[dict]) -> str:
     return '\n'.join(lines)
 
 
+def _child_audit_create_lines(c: dict) -> str:
+    """`creator_id`/`updater_id` lines for a child-row `create:` object, when
+    the child's own Prisma model carries them (subtask_892d GAP1) — mirrors
+    the parent row's own unconditional `creator_id: actorId, updater_id:
+    actorId,` in service.ts.jinja2's add{{ parent_pascal }}/
+    update{{ parent_pascal }}, both of which pass `actorId` as their first
+    parameter (the name is hardcoded here, not templated, because it is a
+    TypeScript-source-level constant, not a Python value)."""
+    if not c.get('has_audit_fields'):
+        return ''
+    return "          creator_id: actorId,\n          updater_id: actorId,\n"
+
+
 def _build_child_nested_create(children_data: list[dict]) -> str:
     lines = []
     for c in children_data:
         pn  = c['property_name']
         cv  = c['child_var']
         fmc = c['field_map_create']
+        audit = _child_audit_create_lines(c)
         if c['use_connect']:
             lines.append(f"      {pn}: {{\n        connect: {cv}Ids.map((id) => ({{ id }})),\n      }},")
         elif c.get('approval_indexed'):
@@ -383,12 +745,13 @@ def _build_child_nested_create(children_data: list[dict]) -> str:
                 f"      {pn}: {{\n"
                 f"        create: {cv}Items.map((f, _i) => ({{\n"
                 f"{fmc}\n"
+                f"{audit}"
                 f"          approvable_id: {arr}[_i],\n"
                 f"        }})),\n"
                 f"      }},"
             )
         else:
-            lines.append(f"      {pn}: {{\n        create: {cv}Items.map(f => ({{\n{fmc}\n        }})),\n      }},")
+            lines.append(f"      {pn}: {{\n        create: {cv}Items.map(f => ({{\n{fmc}\n{audit}        }})),\n      }},")
     return '\n'.join(lines)
 
 
@@ -398,6 +761,8 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
         pn  = c['property_name']
         cv  = c['child_var']
         fmc = c['field_map_create']
+        fmu = c['field_map_update']
+        audit = _child_audit_create_lines(c)
         if c['use_connect']:
             lines.append(f"      {pn}: {{\n        set: {cv}Ids.map((id) => ({{ id }})),\n      }},")
         elif c.get('approval_indexed'):
@@ -411,10 +776,11 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
                 f"        deleteMany: {{ id: {{ notIn: {cv}Items.map(f => f.id).filter((id): id is string => Boolean(id)) }} }},\n"
                 f"        update: {cv}Items.filter(f => f.id).map(f => ({{\n"
                 f"          where: {{ id: f.id! }},\n"
-                f"          data: {{\n{fmc}\n          }},\n"
+                f"          data: {{\n{fmu}\n          }},\n"
                 f"        }})),\n"
                 f"        create: {cv}Items.filter(f => !f.id).map((f, _i) => ({{\n"
                 f"{fmc}\n"
+                f"{audit}"
                 f"          approvable_id: {arr}[_i],\n"
                 f"        }})),\n"
                 f"      }},"
@@ -425,15 +791,21 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
             # with an id are kept (and updated in place); ids no longer
             # present are deleted; items without an id are created. This
             # turns N statements per update into roughly K_new + K_changed
-            # + 1 (vs the old K_existing + K_new).
+            # + 1 (vs the old K_existing + K_new). New rows (the `create:`
+            # branch) get creator_id/updater_id like any other create
+            # (subtask_892d GAP1); existing rows (the `update:` branch above)
+            # deliberately do not — creator_id is immutable post-creation and
+            # Prisma's update input type makes updater_id optional there, so
+            # leaving it untouched on an edit is not a compile error and is
+            # out of this fix's scope (only the two reported `create:` paths).
             lines.append(
                 f"      {pn}: {{\n"
                 f"        deleteMany: {{ id: {{ notIn: {cv}Items.map(f => f.id).filter((id): id is string => Boolean(id)) }} }},\n"
                 f"        update: {cv}Items.filter(f => f.id).map(f => ({{\n"
                 f"          where: {{ id: f.id! }},\n"
-                f"          data: {{\n{fmc}\n          }},\n"
+                f"          data: {{\n{fmu}\n          }},\n"
                 f"        }})),\n"
-                f"        create: {cv}Items.filter(f => !f.id).map(f => ({{\n{fmc}\n        }})),\n"
+                f"        create: {cv}Items.filter(f => !f.id).map(f => ({{\n{fmc}\n{audit}        }})),\n"
                 f"      }},"
             )
     return '\n'.join(lines)
@@ -513,23 +885,46 @@ def _build_comment_actions(comment_children: list[dict], parent: str, model: str
         "[parentRow.creator_id, parentRow.assignee_id]"
         if has_assignee_id else "[parentRow.creator_id]"
     )
-    encode_block = (
-        "\n  const allUsers = await prisma.user.findMany({ select: { id: true, name: true } });"
-        "\n  const userLookup: UserLookup = Object.fromEntries("
-        "\n    allUsers.map(u => [u.name, { id: u.id, name: u.name }])"
-        "\n  );"
-        "\n  const storedMessage = encodeMentions(message, userLookup);"
-    ) if comment_has_mention else ""
-    stored_var = "storedMessage" if comment_has_mention else "message"
     lines = []
     for c in comment_children:
         child_model   = c['name']
         parent_id_prop = f'{model}_id'
+        # Mention notifications (cmd_522): encodeMentions() retired from the save
+        # path — the client-side picker inserts @[user_id:<id>] markers directly,
+        # so the stored message is always the raw client text. Self-mentions are
+        # excluded; on update, only newly-added mentions (vs. the prior message)
+        # are notified.
+        mention_notify_add = (
+            f"\n    const mentionedIds = extractMentionedUserIds(message).filter((mid) => mid !== userId);"
+            f"\n    for (const mentionedId of new Set(mentionedIds)) {{"
+            f"\n      notify(mentionedId, 'mentioned_in_comment', {{"
+            f"\n        title: 'You were mentioned in a {parent_pascal} comment',"
+            f"\n        href: `/{parent}/view/${{parentRow.id}}`,"
+            f"\n        commentSnippet: message.slice(0, 80),"
+            f"\n      }});"
+            f"\n    }}"
+        ) if comment_has_mention else ""
+        update_select = (
+            "{ creator_id: true, message: true, " + parent_id_prop + ": true }"
+            if comment_has_mention else "{ creator_id: true }"
+        )
+        mention_notify_update = (
+            f"\n  const oldIds = new Set(extractMentionedUserIds(comment.message));"
+            f"\n  const newIds = extractMentionedUserIds(message);"
+            f"\n  const freshMentions = newIds.filter((mid) => !oldIds.has(mid) && mid !== userId);"
+            f"\n  for (const mentionedId of freshMentions) {{"
+            f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
+            f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
+            f"\n      href: `/{parent}/view/${{comment.{parent_id_prop}}}`,"
+            f"\n      commentSnippet: message.slice(0, 80),"
+            f"\n    }});"
+            f"\n  }}"
+        ) if comment_has_mention else ""
         lines.append(f"""
 export async function add{parent_pascal}Comment({parent_id_prop}: string, message: string): Promise<void> {{
-  const userId = await getSessionUserIdOrThrow();{encode_block}
+  const userId = await getSessionUserIdOrThrow();
   await prisma.{child_model}.create({{
-    data: {{ message: {stored_var}, {parent_id_prop}, creator_id: userId }},
+    data: {{ message, {parent_id_prop}, creator_id: userId }},
   }});
   // Trigger #4 (notification design 2026-05-11): notify the entity creator
   // and (if present) assignee; never the commenter themselves.
@@ -547,18 +942,18 @@ export async function add{parent_pascal}Comment({parent_id_prop}: string, messag
         href: `/{parent}/view/${{parentRow.id}}`,
         commentSnippet: message.slice(0, 80),
       }});
-    }}
+    }}{mention_notify_add}
   }}
   revalidatePath('/{parent}');
 }}
 
 export async function update{parent_pascal}Comment(commentId: string, message: string): Promise<void> {{
-  const userId = await getSessionUserIdOrThrow();{encode_block}
-  const comment = await prisma.{child_model}.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true }} }});
+  const userId = await getSessionUserIdOrThrow();
+  const comment = await prisma.{child_model}.findUnique({{ where: {{ id: commentId }}, select: {update_select} }});
   if (!comment || comment.creator_id !== userId) {{
     throw new Error('Not authorized to edit this comment');
   }}
-  await prisma.{child_model}.update({{ where: {{ id: commentId }}, data: {{ message: {stored_var} }} }});
+  await prisma.{child_model}.update({{ where: {{ id: commentId }}, data: {{ message }} }});{mention_notify_update}
   revalidatePath('/{parent}');
 }}
 
@@ -583,20 +978,49 @@ def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool
         "[parentRow.creator_id, parentRow.assignee_id]"
         if has_assignee_id else "[parentRow.creator_id]"
     )
-    encode_block = (
-        "\n  const allUsers = await prisma.user.findMany({ select: { id: true, name: true } });"
-        "\n  const userLookup: UserLookup = Object.fromEntries("
-        "\n    allUsers.map(u => [u.name, { id: u.id, name: u.name }])"
-        "\n  );"
-        "\n  const storedMessage = encodeMentions(message, userLookup);"
+    # Mention notifications (cmd_522): encodeMentions() retired from the save
+    # path — see _build_comment_actions for the rationale. The bridge variant
+    # has no direct parent FK on the comment row (only commentable_id), so the
+    # update path re-resolves the parent row for the href, and only pays for
+    # that extra query when there are fresh mentions to notify.
+    mention_notify_add = (
+        f"\n    const mentionedIds = extractMentionedUserIds(message).filter((mid) => mid !== userId);"
+        f"\n    for (const mentionedId of new Set(mentionedIds)) {{"
+        f"\n      notify(mentionedId, 'mentioned_in_comment', {{"
+        f"\n        title: 'You were mentioned in a {parent_pascal} comment',"
+        f"\n        href: `/{parent}/view/${{parentRow.id}}`,"
+        f"\n        commentSnippet: message.slice(0, 80),"
+        f"\n      }});"
+        f"\n    }}"
     ) if comment_has_mention else ""
-    stored_var = "storedMessage" if comment_has_mention else "message"
+    update_select = (
+        "{ creator_id: true, message: true, commentable_id: true }"
+        if comment_has_mention else "{ creator_id: true }"
+    )
+    mention_notify_update = (
+        f"\n  const oldIds = new Set(extractMentionedUserIds(comment.message));"
+        f"\n  const newIds = extractMentionedUserIds(message);"
+        f"\n  const freshMentions = newIds.filter((mid) => !oldIds.has(mid) && mid !== userId);"
+        f"\n  if (freshMentions.length > 0) {{"
+        f"\n    const mentionParentRow = await prisma.{model}.findFirst({{"
+        f"\n      where: {{ commentable_id: comment.commentable_id }},"
+        f"\n      select: {{ id: true }},"
+        f"\n    }});"
+        f"\n    if (mentionParentRow) {{"
+        f"\n      for (const mentionedId of freshMentions) {{"
+        f"\n        notify(mentionedId, 'mentioned_in_comment', {{"
+        f"\n          title: 'You were mentioned in a {parent_pascal} comment',"
+        f"\n          href: `/{parent}/view/${{mentionParentRow.id}}`,"
+        f"\n          commentSnippet: message.slice(0, 80),"
+        f"\n        }});"
+        f"\n      }}"
+        f"\n    }}"
+        f"\n  }}"
+    ) if comment_has_mention else ""
     return f"""
 export async function add{parent_pascal}Comment(commentable_id: string, message: string): Promise<void> {{
-  const userId = await getSessionUserIdOrThrow();{encode_block}
-  await prisma.comment.create({{
-    data: {{ message: {stored_var}, commentable_id, creator_id: userId }},
-  }});
+  const userId = await getSessionUserIdOrThrow();
+  await createComment({{ message, commentable_id, creator_id: userId }});
   // Trigger #4 (notification design 2026-05-11): notify the entity creator
   // and (if present) assignee; never the commenter themselves.
   const parentRow = await prisma.{model}.findFirst({{
@@ -613,18 +1037,18 @@ export async function add{parent_pascal}Comment(commentable_id: string, message:
         href: `/{parent}/view/${{parentRow.id}}`,
         commentSnippet: message.slice(0, 80),
       }});
-    }}
+    }}{mention_notify_add}
   }}
   revalidatePath('/{parent}');
 }}
 
 export async function update{parent_pascal}Comment(commentId: string, message: string): Promise<void> {{
-  const userId = await getSessionUserIdOrThrow();{encode_block}
-  const comment = await prisma.comment.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true }} }});
+  const userId = await getSessionUserIdOrThrow();
+  const comment = await prisma.comment.findUnique({{ where: {{ id: commentId }}, select: {update_select} }});
   if (!comment || comment.creator_id !== userId) {{
     throw new Error('Not authorized to edit this comment');
   }}
-  await prisma.comment.update({{ where: {{ id: commentId }}, data: {{ message: {stored_var} }} }});
+  await updateComment(commentId, {{ message }});{mention_notify_update}
   revalidatePath('/{parent}');
 }}
 
@@ -635,7 +1059,7 @@ export async function delete{parent_pascal}Comment(commentId: string): Promise<v
   if (comment.creator_id !== userId) {{
     await requirePermission('{parent}', 'delete');
   }}
-  await prisma.comment.delete({{ where: {{ id: commentId }} }});
+  await deleteComment(commentId);
   revalidatePath('/{parent}');
 }}"""
 
@@ -664,6 +1088,15 @@ def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict]
         if (model_props.get(r['prop_name'], {}).get('x-relationship') or {}).get('type') == 'many-to-one'
     ]
 
+    # `r['target'] != child_raw['name']`: a self-referencing child (e.g.
+    # goods_receipt_line's parent_line_id -> goods_receipt_line) must not
+    # add its own name as a "selection target" -- that produced a dead
+    # initial{Child}s/search{Child}Options FormUpsertProps param pair
+    # nothing in the generated FormUpsert component ever used (found via
+    # subtask_1047g's empirical fixture verification; same child_rels-style
+    # root cause as context.py's own child_rels_early -> import_targets/
+    # all_option_targets fix, a separate downstream consumer of the same
+    # "collect each non-list child's own m2o relations" pattern).
     child_entity_rel_targets = []
     for child_raw in children_raw:
         output_type  = child_raw.get('output_type')
@@ -676,6 +1109,7 @@ def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict]
             child_entity_rel_targets.extend(
                 r['target'] for r in get_parent_relationships(child_def)
                 if r['prop_name'] not in parent_fk_props
+                and r['target'] != child_raw['name']
                 and ((child_def.get('properties', {}).get(r['prop_name'], {}).get('x-relationship') or {}).get('type') == 'many-to-one')
             )
 
@@ -707,9 +1141,11 @@ def _int_enum_option(v, i: int) -> str:
 
 def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
                             generate_config: dict,
-                            one_to_one_fk_props: set | None = None) -> dict:
+                            one_to_one_fk_props: set | None = None,
+                            direct_attachment_fk_props: set | None = None) -> dict:
     rel_prop_names = {r['prop_name'] for r in parent_rels_raw}
     _oto_fk = one_to_one_fk_props or set()
+    _direct_attachment_fk = direct_attachment_fk_props or set()
     # Exclude *able_id FKs with no x-relationship (system-managed internal bridge FKs,
     # e.g. inventory_transactionable_id). Mirrors form_view_context's bridge_fk_no_rel_props.
     _bridge_fk_no_rel = {
@@ -721,15 +1157,18 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
         k for k in filtered_props
         if k not in _EXCLUDE_ID_TS and k != 'id'
         and k not in rel_prop_names and k not in _oto_fk and k not in _bridge_fk_no_rel
+        and k not in _direct_attachment_fk
     ]
 
     custom_upsert = []
     date_time     = []
     number        = []
+    decimal       = []
     enum_integer  = []
     enum_string   = []
     image         = []
     link_uri      = []
+    file_uri      = []
     boolean       = []
     entity_select = []
     text          = []
@@ -751,14 +1190,22 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
         elif actual == 'boolean':
             boolean.append(p)
         elif actual == 'string' and fmt == 'uri':
-            if get_uri_kind(defn) == 'link':
+            _kind = get_uri_kind(defn)
+            if _kind == 'link':
                 link_uri.append(p)
+            elif _kind == 'file':
+                file_uri.append(p)
             else:
                 image.append(p)
         elif actual == 'string' and defn.get('x-entity-select'):
             entity_select.append(p)
         elif actual == 'string' and isinstance(defn.get('enum'), list):
             enum_string.append(p)
+        elif actual == 'string' and defn.get('_prisma_decimal_type'):
+            # Decimal fields are exposed as JSON type "string" (precision
+            # preservation -- no JS float rounding), but still render as a
+            # numeric-styled input rather than falling through to plain text.
+            decimal.append(p)
         else:
             text.append(p)
 
@@ -766,10 +1213,12 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
         'custom_upsert': custom_upsert,
         'date_time': date_time,
         'number': number,
+        'decimal': decimal,
         'enum_integer': enum_integer,
         'enum_string': enum_string,
         'image': image,
         'link_uri': link_uri,
+        'file_uri': file_uri,
         'boolean': boolean,
         'entity_select': entity_select,
         'text': text,
@@ -848,7 +1297,7 @@ def build_anonymize_user_context(schema: dict) -> dict:
     the pii_data_block string (pre-formatted TypeScript lines for the data: {} block).
 
     Fields not in json_schema but present in schema.prisma (emailVerified, mfa_secret)
-    are hardcoded after 'image' to match the canonical scrub order.
+    are hardcoded after 'image_id' to match the canonical scrub order.
 
     Returns:
         has_pii_user: bool — True when the user entity has at least one x-pii field.
@@ -893,14 +1342,18 @@ def build_anonymize_user_context(schema: dict) -> dict:
         return {'has_pii_user': False, 'pii_data_block': '', 'pii_fields': []}
 
     # Build the data block lines (10-space indent matches `data: {` nesting in template).
-    # Prisma-only fields (emailVerified, mfa_secret) are inserted after 'image' to
-    # match the canonical hand-written order.
+    # Prisma-only fields (emailVerified, mfa_secret) are inserted after
+    # 'image_id' to match the canonical hand-written order (cmd_793: this
+    # anchor used to be 'image', back when it was a plain string column --
+    # renamed alongside the field itself when it became a direct-attachment
+    # FK, or this insertion point silently falls through to the
+    # end-of-loop fallback below instead).
     INDENT = '          '
     lines = []
     prisma_only_inserted = False
     for f in pii_fields:
         lines.append(f"{INDENT}{f['name']}: {f['scrub_value']},")
-        if f['name'] == 'image' and not prisma_only_inserted:
+        if f['name'] == 'image_id' and not prisma_only_inserted:
             lines.append(f"{INDENT}emailVerified: null,")
             lines.append(f"{INDENT}mfa_secret: null,")
             prisma_only_inserted = True
@@ -910,6 +1363,7 @@ def build_anonymize_user_context(schema: dict) -> dict:
         lines.append(f"{INDENT}mfa_secret: null,")
 
     lines.append(f"{INDENT}anonymized_at: anonymizedAt,")
+    lines.append(f"{INDENT}invalidated_at: anonymizedAt,")
 
     return {
         'has_pii_user': True,
@@ -929,9 +1383,11 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     parent_camel  = to_camel_case(parent)
 
     # model_def is the raw entity backing `model` — scalar/FK properties,
-    # x-readonly-fields, x-gdpr-mode etc. all live there. Prefer the
-    # '__'-prefixed raw form; fall back to the bare view for entities with
-    # no raw counterpart (e.g. 'setting', which proxies the 'user' view).
+    # x-gdpr-mode etc. all live there. Prefer the '__'-prefixed raw form;
+    # fall back to the bare view for entities with no raw counterpart (e.g.
+    # 'setting', which proxies the 'user' view). x-readonly-fields is the
+    # exception — it lives on the view entity itself (`def_key`), not here;
+    # see `_ro_from_entity` below.
     model_def      = canonicalize_bridges(
         schema['definitions'].get(f'__{model}', {}) or schema['definitions'].get(model, {}),
         schema.get('definitions', {}),
@@ -946,6 +1402,74 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             'properties': {**model_def.get('properties', {}), **_parent_bridge_fks},
         }
     filtered_props = filter_fields(model_def.get('properties', {}), gen_cfg.get('fields'))
+
+    # write_only_field_names (cmd_801, widened in subtask_810e): credential-
+    # material fields (e.g. password, api_key) that must never leave the
+    # server on a read path. get{{Parent}}Detail() (getters.ts.jinja2)
+    # strips these from its returned object before it reaches either the
+    # REST API JSON response or the view page's server data — see
+    # is_write_only_prop()'s docstring for why this is scoped to string
+    # fields with no 'view' target.
+    #
+    # Computed from model_def's full properties, NOT filtered_props: the
+    # Prisma query in get{{Parent}}Detail() (getters.ts.jinja2) has no
+    # `select` clause, so it fetches every column on the row regardless of
+    # x-generate.fields — an entity whose fields allowlist omits a
+    # write-only column (e.g. this repo's own `user` entity: fields:
+    # [name, image_id, roles], password/api_key excluded) made
+    # write_only_field_names compute empty from filtered_props, so the
+    # `{% if write_only_field_names %}` destructure never fired and the
+    # unconditional `...{{ parent_camel }}` spread returned the raw
+    # password hash and api_key straight through GET /api/user/{id}
+    # (subtask_810e, confirmed by curl — verbatim the same root cause
+    # subtask_810d found and fixed for proj_a). filter_fields only trims
+    # what later stages *render*; it was never a safe basis for what a
+    # select-less query has already fetched.
+    write_only_field_names = get_write_only_field_names(model_def.get('properties', {}))
+
+    # decimal_field_names: fields backed by a Prisma `Decimal` column
+    # (schema_deriver._prisma_decimal_type marker). Prisma Client returns
+    # these as decimal.js `Decimal` instances, not plain JS values -- passed
+    # unconverted across the Server-to-Client Component boundary (a
+    # getters.ts return value consumed by a 'use client' component such as
+    # FormUpsert/DataGrid), React's serialization rejects the class instance.
+    # Every getters.ts read path that can reach a client prop must convert to
+    # string first; see decimal_display_columns / parent_mapping below.
+    decimal_field_names: list[str] = [
+        k for k, v in filtered_props.items()
+        if isinstance(v, dict) and v.get('_prisma_decimal_type')
+    ]
+
+    # x-server-value: server-computed field values the client can never set directly
+    # (cmd_556/cmd_565). Accepts the legacy string form `"actor"` (client value
+    # always discarded, actorId written unconditionally) or the dict form
+    # `{source: actor, override_permission: <Operation>}` (cmd_565 revision):
+    # an actor holding `override_permission` may supply an explicit value that is
+    # accepted as-is; anyone else's supplied value is silently replaced with
+    # actorId (not rejected — the request still succeeds as *their own* action).
+    # Only source 'actor' is implemented today; other sources (e.g. a future
+    # 'org'/'now') are simply skipped here as an unrecognized declaration would
+    # otherwise silently disable the field's protection.
+    _server_value_fields_raw: dict[str, dict] = {}
+    for _svfn, _svfp in filtered_props.items():
+        if not isinstance(_svfp, dict):
+            continue
+        _sv_raw = _svfp.get('x-server-value')
+        if _sv_raw is None:
+            continue
+        if isinstance(_sv_raw, str):
+            _sv_source, _sv_override = _sv_raw, None
+        elif isinstance(_sv_raw, dict):
+            _sv_source, _sv_override = _sv_raw.get('source'), _sv_raw.get('override_permission')
+        else:
+            continue
+        if _sv_source != 'actor':
+            continue
+        _server_value_fields_raw[_svfn] = {'override_permission': _sv_override}
+    _server_value_prop_names: set[str] = set(_server_value_fields_raw)
+    _server_value_no_override_props: set[str] = {
+        fn for fn, meta in _server_value_fields_raw.items() if not meta['override_permission']
+    }
 
     # Mention fields: fields annotated with x-mention: true (Phase 2 template generation).
     mention_fields: list[str] = [
@@ -963,18 +1487,85 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     }
 
     # Collect explicit readonly fields: x-readonly per-field OR x-readonly-fields entity-level.
-    _ro_from_entity: set[str] = set(model_def.get('x-readonly-fields') or [])
+    # x-server-value fields are always readonly too (server-computed, never
+    # client-editable through the normal form path).
+    #
+    # x-readonly-fields is read from the VIEW entity itself
+    # (schema['definitions'][def_key]), not model_def (cmd_874
+    # subtask_874d) — model_def is the shared raw entity backing every
+    # view of this Prisma model, and build_user_schema.py used to copy a
+    # view's x-readonly-fields declaration onto it, so one proxy view's
+    # declaration silently applied to every other view sharing the same
+    # raw model. Per-property x-readonly (below, _ro_from_props) is
+    # deliberately unchanged: properties themselves live on the raw
+    # entity, so a per-property flag is inherently model/raw-wide by
+    # design, not something this fix rescopes.
+    _view_entry = schema['definitions'].get(def_key, {}) or {}
+    _ro_from_entity: set[str] = set(_view_entry.get('x-readonly-fields') or [])
+    # Fail closed (cmd_642): every x-readonly-fields entry must name an actual
+    # property. Downstream consumers (this function's readonly_fields_api
+    # filter, and generators.py's FormUpsert readonly-field loop) both silently
+    # skip entries that don't match filtered_props — an unresolved name used to
+    # leave the field fully editable with no error (fail open), defeating the
+    # readonly declaration. A common miswrite is the relation name instead of
+    # the FK property (e.g. 'parent_goods_receipt_line' instead of
+    # 'parent_goods_receipt_line_id').
+    _unresolved_ro = sorted(_ro_from_entity - set(filtered_props))
+    if _unresolved_ro:
+        raise ValueError(
+            f"x-readonly-fields on '{model}' references unknown propert"
+            f"{'y' if len(_unresolved_ro) == 1 else 'ies'}: {_unresolved_ro}. "
+            "Each entry must be an exact property name (e.g. the FK column "
+            "'parent_goods_receipt_line_id', not the relation name "
+            "'parent_goods_receipt_line')."
+        )
     _ro_from_props: set[str] = {
         fn for fn, fp in filtered_props.items()
         if isinstance(fp, dict) and fp.get('x-readonly')
     }
-    readonly_fields: list[str] = sorted(_ro_from_entity | _ro_from_props)
+    readonly_fields: list[str] = sorted(_ro_from_entity | _ro_from_props | _server_value_prop_names)
     # API route: select clause string and field list for AP-3=B readonly reject check.
     _api_ro_in_props = [f for f in readonly_fields if f in filtered_props]
     readonly_fields_api: list[str] = _api_ro_in_props
     readonly_fields_api_select: str | None = (
         '{ ' + ', '.join(f'{f}: true' for f in _api_ro_in_props) + ' }'
         if _api_ro_in_props else None
+    )
+    # CREATE-time reject list (cmd_565): unlike PUT's AP-3=B (compare against
+    # the persisted row), POST has no existing row to compare against — any
+    # client-submitted value for a plain readonly field is rejected outright.
+    # x-server-value fields are excluded here: they have their own dedicated
+    # resolution (silently discarded for the plain-actor form, permission-gated
+    # override for the dict form) rather than a hard reject.
+    readonly_fields_create_reject: list[str] = [
+        f for f in readonly_fields_api if f not in _server_value_prop_names
+    ]
+
+    # Value-level lockdown: per field, the values only the system may
+    # write — union of x-approval.on_approved/on_rejected set_fields and
+    # explicit x-write-locked-values declarations. Field-scoped (locks a
+    # value, not the whole field — CREATE still needs values like pending)
+    # and per-entity (a value locked here may be ordinary elsewhere) — see
+    # derive_write_locked_values for the full reasoning.
+    #
+    # x-write-locked-values itself is VIEW-scoped, not raw-wide (cmd_1032):
+    # a proxy view does not inherit the canonical screen's own declaration
+    # by default, but may declare its own. See
+    # derive_write_locked_values_for_view's docstring for the full
+    # canonical-vs-proxy reasoning (identical raw/view resolution problem
+    # as x-readonly-fields above, applied to this different key).
+    write_locked_values: dict[str, list] = derive_write_locked_values_for_view(
+        model, model_def, _view_entry, schema,
+    )
+    write_locked_fields: list[str] = sorted(write_locked_values)
+    # Select clause to fetch an existing row's current values for the
+    # write-locked fields, so UPDATE / CSV-import UPDATE can allow a
+    # no-op resubmission of the value a record already holds without
+    # treating it as a lockdown violation (mirrors the readonly_fields_api
+    # / readonly_fields_api_select current-value-comparison pattern above).
+    write_locked_values_select: str | None = (
+        '{ ' + ', '.join(f'{f}: true' for f in write_locked_fields) + ' }'
+        if write_locked_fields else None
     )
 
     # Config flags
@@ -1010,6 +1601,14 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     auto_create_oto_rels = [r for r in one_to_one_rels if not r['is_selector']]
     selector_oto_rels    = [r for r in one_to_one_rels if r['is_selector']]
     oto_prop_names = {r['prop_name'] for r in one_to_one_rels}
+
+    # Direct-attachment FK rels (cmd_788/subtask_780a): `x-relationship:
+    # { target: attachment, type: direct }` fields. Deliberately NOT folded
+    # into parent_rels_raw/one_to_one_rels — see
+    # get_direct_attachment_fk_props()'s docstring for why keeping it a
+    # separate list is what excludes it from every autocomplete-specific
+    # code path for free.
+    direct_attachment_rels = get_direct_attachment_fk_props(merged_def)
 
     # Bridge child IR: new-form x-bridge on this entity (as child), with parent targets.
     # Used by child forms to render parent-entity autocomplete and by service to
@@ -1081,6 +1680,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             })
 
     # Stage 2: auto-add bridge FK prop to readonly_fields for bridge child entities.
+    # (referenced later by _base_data_lines' create-time skip below; stays None
+    # for every entity that isn't a new-form-bridge child)
+    _bridge_fk_prop: str | None = None
     if bridge_child_ir:
         _bridge_fk_prop = f'{bridge_child_ir["name"]}_id'
         if _bridge_fk_prop not in readonly_fields and _bridge_fk_prop in filtered_props:
@@ -1089,6 +1691,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 readonly_fields_api = sorted(set(readonly_fields_api) | {_bridge_fk_prop})
                 readonly_fields_api_select = (
                     '{ ' + ', '.join(f'{f}: true' for f in readonly_fields_api) + ' }'
+                )
+                readonly_fields_create_reject = sorted(
+                    set(readonly_fields_create_reject) | {_bridge_fk_prop}
                 )
 
     # Collect bridge targets from new-form x-bridge declarations in the schema.
@@ -1149,6 +1754,73 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
 
     has_org_rel          = any(r['target'] == 'organization' for r in parent_rels)
     should_filter_by_org = has_org_rel and model not in ('organization', 'user')
+    # cmd_611/612: an org-scoped model whose organization relation is itself
+    # OPTIONAL (organization_id nullable) needs its read-scope filter to admit
+    # NULL rows too — `organization_id: { in: [...] }` never matches NULL in
+    # SQL, so without this an org-less row is invisible to every org-scoped
+    # actor, including its own creator, the moment organization stops being
+    # required. Harmless no-op for a required-org model: organization_id is
+    # never null there, so the extra OR branch never actually fires.
+    org_relationship_optional = should_filter_by_org and not next(
+        (r['required'] for r in parent_rels if r['target'] == 'organization'), True
+    )
+
+    # is_self_only / self_only_admin_bypass: entity-level access invariant
+    # ("only the record's creator can access it") that no permission setting
+    # can widen. Declared on the base entity (`x-self-only`) — see
+    # get_self_only_flags() for the shorthand-vs-dict resolution rule.
+    # Combines with should_filter_by_org via AND (both an org and a creator
+    # scope may apply to the same entity) — never OR.
+    #
+    # Checked at TWO levels, not just model_def: for most entities def_key's
+    # own definition IS model_def (or model_def is that entity's exclusive
+    # raw '__'-prefixed twin), so either lookup finds the same declaration.
+    # But a pass-through proxy view (`setting`, whose allOf resolves to the
+    # *shared* `__user` raw entity also backing the real `user` entity) is
+    # never merged into model_def — it keeps its own x-self-only declaration
+    # on its own view-level dict (schema['definitions']['setting']).
+    # Reading model_def alone would either miss it entirely, or — far worse
+    # — if ever declared on the shared raw entity instead, leak the
+    # restriction onto `user` too. Checking the def_key-level dict first
+    # keeps `x-self-only: true` on `setting` scoped to `setting` alone.
+    is_self_only, self_only_admin_bypass = get_self_only_flags(schema['definitions'].get(def_key, {}))
+    if not is_self_only:
+        is_self_only, self_only_admin_bypass = get_self_only_flags(model_def)
+
+    # x-filter-values: entity-level access invariant restricting which rows
+    # a view may see to those matching { field: [allowed values, ...] },
+    # AND across fields, IN across each field's values (cmd_874/subtask_874f,
+    # ruling_B Option A). Composes with should_filter_by_org / is_self_only
+    # via AND (never OR) — see build{Entity}AccessWhere() in
+    # getters.ts.jinja2, which ANDs this into the same `and` array as the
+    # org-isolation and self-only clauses.
+    #
+    # Read from the VIEW entity itself (schema['definitions'][def_key]),
+    # single-level like x-readonly-fields — x-filter-values lives in
+    # _VIEW_LEVEL_CONFIG_KEYS (build_user_schema.py) and is never copied
+    # onto the shared raw entity, so there is no raw-entity fallback to
+    # check (unlike is_self_only's two-level read above, which exists only
+    # because x-self-only IS copied to the raw entity for non-proxy models).
+    _filter_values_raw: dict = _view_entry.get('x-filter-values') or {}
+    _unresolved_filter_fields = sorted(set(_filter_values_raw) - set(filtered_props))
+    if _unresolved_filter_fields:
+        raise ValueError(
+            f"x-filter-values on '{model}' references unknown propert"
+            f"{'y' if len(_unresolved_filter_fields) == 1 else 'ies'}: "
+            f"{_unresolved_filter_fields}. Each key must be an exact "
+            "property name."
+        )
+    filter_values: dict[str, list] = {
+        field: list(values) for field, values in _filter_values_raw.items()
+    }
+    # Select clause to re-fetch a pre-image row's filter_values fields at the
+    # actual write (service.ts update<Entity>), mirroring is_self_only's own
+    # _selfOnlyExisting pre-check — see that block for why this must be a
+    # PRE-image read (before the transaction), not the post-write value.
+    filter_values_select: str | None = (
+        '{ ' + ', '.join(f'{f}: true' for f in filter_values) + ' }'
+        if filter_values else None
+    )
 
     # x-import-key: natural key fields (CSV export column guarantee, Phase 1;
     # natural-key import matching, Phase 2). Dotted FK paths (e.g. role.name)
@@ -1183,29 +1855,41 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # to the "_name" suffix — those are not expected to serve as dotted
     # x-import-key sources.
     from helpers.label_field import build_label_expression as _xrl_build_label_expression
-    x_relationships_list = []
-    export_uses_format_label_value = False
-    for r in parent_rels:
-        _xrl_simple_label = (
-            r['label_field'] if isinstance(r['label_field'], str) and '.' not in r['label_field'] else None
-        )
+
+    def _xrl_build(_item_var: str, _label_field, _target: str) -> dict:
         try:
-            _xrl_built = _xrl_build_label_expression(
-                f"row.{r['relation_name']}", r['label_field'], r['target'], schema,
-            )
+            return _xrl_build_label_expression(_item_var, _label_field, _target, schema)
         except ValueError:
             # Malformed/unresolvable labelField path — never silently drop the
             # column (that's the exact failure mode this fix exists for). Fall
             # back to the target's own display-fallback chain (mirrors
             # bridge_parent_options' AP-1-B fallback above); 'id' always
             # exists, so this second attempt cannot itself raise.
-            _xrl_tprops = _raw_def(r['target'], schema).get('properties') or {}
+            _xrl_tprops = _raw_def(_target, schema).get('properties') or {}
             _xrl_fallback = next((f for f in ('name', 'title', 'label', 'id') if f in _xrl_tprops), 'id')
-            _xrl_built = _xrl_build_label_expression(
-                f"row.{r['relation_name']}", _xrl_fallback, r['target'], schema,
-            )
+            return _xrl_build_label_expression(_item_var, _xrl_fallback, _target, schema)
+
+    x_relationships_list = []
+    export_uses_format_label_value = False
+    for r in parent_rels:
+        _xrl_simple_label = (
+            r['label_field'] if isinstance(r['label_field'], str) and '.' not in r['label_field'] else None
+        )
+        _xrl_built = _xrl_build(f"row.{r['relation_name']}", r['label_field'], r['target'])
         if _xrl_built['has_format']:
             export_uses_format_label_value = True
+        # cmd_548: composite/dotted labelFields also need a candidate-rooted
+        # ('c') variant of the SAME expression for import-side label
+        # matching — the import map is built from `prisma.<target>.findMany()`
+        # results directly, not nested under a parent row, so the root
+        # variable must differ. This is the SAME helper call with the SAME
+        # label_field/target/schema/join_separator inputs as the export
+        # expression above (only item_var differs) — export and import can
+        # never render the label text differently for the same values, since
+        # both are one call away from identical inputs.
+        _xrl_import_built = (
+            _xrl_build('c', r['label_field'], r['target']) if _xrl_simple_label is None else None
+        )
         x_relationships_list.append({
             'field': r['relation_name'],
             'display_col': (
@@ -1213,6 +1897,26 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 else f"{r['relation_name']}_name"
             ),
             'label_expr': _xrl_built['expression'],
+            # cmd_530: needed to build import_fk_specs below — a relation is
+            # only import-resolvable-by-scalar-field when its labelField is a
+            # single field (simple_label is None for composite/dotted
+            # labelFields). cmd_548: composite/dotted labelFields are still
+            # import-resolvable via full-label-text matching — see
+            # import_label_expr/prisma_include below.
+            'prop_name': r['prop_name'],
+            'target': r['target'],
+            'simple_label': _xrl_simple_label,
+            'import_label_expr': _xrl_import_built['expression'] if _xrl_import_built else None,
+            # cmd_621: import_label_expr can itself invoke formatLabelValue
+            # (same helper/inputs as the export label_expr — see cmd_548 note
+            # above) — the import route must import it iff this is true for
+            # at least one composite/dotted labelField relation. Tracked
+            # separately from export_uses_format_label_value because the
+            # export and import code paths render in different template
+            # files (page_list/form_view/etc. vs. api_import_route) and each
+            # must only import what it actually calls.
+            'import_has_format': _xrl_import_built['has_format'] if _xrl_import_built else False,
+            'prisma_include': _xrl_import_built['prisma_include'] if _xrl_import_built else None,
         })
 
     # export_scalar_fields: explicit allowlist of CSV export columns (cmd_324 V1).
@@ -1229,7 +1933,22 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # (approvable_id, inventory_transactionable_id, ...) — see
     # get_internal_bridge_fk_prop_names() docstring for why.
     _fk_prop_names = {r['prop_name'] for r in parent_rels_raw} | get_internal_bridge_fk_prop_names(model_def, schema)
-    _export_candidates = gen_cfg.get('fields') or list(model_def.get('properties', {}).keys())
+    # Order source: x-display.form (if declared) takes the declared order,
+    # followed by any remaining scalar properties in schema order (x-display.form
+    # may deliberately omit rarely-edited fields from the form without meaning
+    # to drop them from CSV export too). Without x-display.form, plain schema
+    # declaration order applies. x-generate.fields no longer doubles as an
+    # order source here — cmd_568: it is filter-only, so a declared fields
+    # allowlist can no longer silently reorder CSV export columns relative
+    # to the form/view display order.
+    _form_order = (model_def.get('x-display') or {}).get('form')
+    if _form_order:
+        _export_order_source = list(_form_order) + [
+            k for k in model_def.get('properties', {}) if k not in _form_order
+        ]
+    else:
+        _export_order_source = list(model_def.get('properties', {}).keys())
+    _export_allowlist = set(gen_cfg['fields']) if gen_cfg.get('fields') else None
 
     def _is_export_scalar(_prop: dict) -> bool:
         _ptype = _prop.get('type')
@@ -1238,11 +1957,13 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         return _ptype in ('string', 'integer', 'number', 'boolean')
 
     export_scalar_fields = [
-        f for f in _export_candidates
+        f for f in _export_order_source
         if f not in _SYSTEM_FIELDS
         and f not in _fk_prop_names
+        and f not in write_only_field_names  # cmd_801: credential material, never exported
         and f in model_def.get('properties', {})
         and _is_export_scalar(model_def['properties'][f])
+        and (_export_allowlist is None or f in _export_allowlist)
     ]
 
     # DP-1 (cmd_394 §3, Option B — conservative UNION): non-dotted x-import-key
@@ -1302,6 +2023,37 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             # Falls back to the prefix when x-relationship/target is absent
             # (keeps prior behavior for any not-yet-annotated schema).
             _lookup_entity = _fk_prop.get('x-relationship', {}).get('target', _fk_entity)
+            # cmd_521: same discriminant as should_filter_by_org (cmd_515) —
+            # applied to the dotted FK's LOOKUP entity rather than the parent
+            # model. A lookup entity without organization_id is system-global
+            # (e.g. 'role'); filtering it would break every dotted lookup
+            # against it (all rows are legitimately visible org-wide).
+            _lookup_entity_def = (
+                schema['definitions'].get(f'__{_lookup_entity}', {})
+                or schema['definitions'].get(_lookup_entity, {})
+            )
+            _lookup_has_org = 'organization_id' in _lookup_entity_def.get('properties', {})
+            _lookup_entity_filter_by_org = _lookup_has_org and _lookup_entity not in ('organization', 'user')
+            # cmd_611/612: the org/user exclusion above is correct (neither
+            # model has its own organization_id to filter on), but when the
+            # lookup target IS 'organization' itself, that leaves the
+            # candidate search entirely unfiltered — a CSV row naming ANY
+            # organization in the system (not just one the actor belongs
+            # to) resolves and gets attached. Filter organization candidates
+            # by their OWN id being in the actor's associated-org list
+            # instead of by an organization_id column that doesn't exist
+            # on this model.
+            _lookup_entity_filter_by_self_id = _lookup_entity == 'organization'
+            # cmd_964 (Issue #88): same reasoning as `org_relationship_optional`
+            # above, but for the LOOKUP entity's own organization_id, not the
+            # importing entity's. `organization_id: { in: _importOrgIds } }`
+            # never matches NULL in SQL, so a lookup entity whose own org
+            # relation is optional (e.g. a supplier/item shared org-wide)
+            # silently fails to resolve any org-less row — the import can
+            # never re-find a record the export itself just emitted.
+            _lookup_org_relationship_optional = _lookup_entity_filter_by_org and _is_nullable(
+                _lookup_entity_def.get('properties', {}).get('organization_id', {})
+            )
             import_key_specs.append({
                 'raw':                  _raw,
                 'is_dotted':            True,
@@ -1312,8 +2064,22 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 'lookup_field':         _fk_field,                      # e.g. 'name'
                 'result_col':           _fk_col,                        # e.g. 'role_id'
                 'fk_nullable':          _fk_nullable,
+                'lookup_entity_filter_by_org': _lookup_entity_filter_by_org,
+                'lookup_entity_filter_by_self_id': _lookup_entity_filter_by_self_id,
+                'lookup_entity_org_relationship_optional': _lookup_org_relationship_optional,
             })
         else:
+            # Issue #525: a non-dotted (plain scalar) key column must
+            # resolve nullable the same way import_field_specs already
+            # does for this same column (below, `_nullable = 'null' in
+            # _types`) — this was previously hardcoded False, so an
+            # optional key column's empty CSV cell never matched an
+            # existing NULL (or legacy '') row, producing spurious
+            # duplicate rows on re-import. Reuses the 'fk_nullable' key
+            # name for symmetry with the dotted branch above, even though
+            # this column isn't an FK — the template already branches on
+            # `spec.fk_nullable` regardless of is_dotted.
+            _key_nullable = _is_nullable(model_def.get('properties', {}).get(_raw, {}))
             import_key_specs.append({
                 'raw':           _raw,
                 'is_dotted':     False,
@@ -1321,8 +2087,153 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 'lookup_entity': None,
                 'lookup_field':  _raw,
                 'result_col':    _raw,
-                'fk_nullable':   False,
+                'fk_nullable':   _key_nullable,
+                'lookup_entity_filter_by_org': False,
+                'lookup_entity_filter_by_self_id': False,
+                'lookup_entity_org_relationship_optional': False,
             })
+
+    # import_fk_specs (cmd_530): generalizes the dotted-FK lookup-by-label
+    # mechanism above from "x-import-key FKs only" to "every screen-editable
+    # FK relation" — closing the gap where a FK that's editable on the
+    # screen (present in x_relationships_list, i.e. in filtered_props) but
+    # NOT declared in x-import-key had zero CSV-import write path (silently
+    # dropped on both CREATE and UPDATE — the reported bug, root cause 筋2).
+    # Also fixes 筋1 (a *declared* dotted key FK was never written on UPDATE,
+    # only merged into CREATE data via keyWhere) by routing every entry here
+    # — key or not — into updateData in the template.
+    #
+    # cmd_548: composite/dotted labelFields (x_relationships_list['simple_label']
+    # is None) used to be excluded here entirely — there's no single lookup
+    # field to resolve a CSV cell back to. They're now import-resolvable via
+    # full-label-text matching (is_composite=True; see
+    # option_ko_label_match design): the pre-built
+    # label→id map (import_label_expr/prisma_include, computed above with
+    # the same helper/inputs as the export label_expr) is matched against
+    # the whole CSV cell instead of a single scalar field. Non-editable
+    # (x-readonly) FKs are still excluded — they have no business being
+    # writable via import just because they're visible in export. Both
+    # exclusion classes remain exported but become import_unimportable_columns
+    # below (fail loud instead of silent drop).
+    def _fk_nullable_and_org_filter(_prop_name: str, _lookup_entity: str) -> tuple[bool, bool, bool, bool]:
+        _fk_prop  = model_def.get('properties', {}).get(_prop_name, {})
+        _fk_types = _fk_prop.get('type', [])
+        if isinstance(_fk_types, str):
+            _fk_types = [_fk_types]
+        _fk_nullable = 'null' in _fk_types
+        _lookup_entity_def = (
+            schema['definitions'].get(f'__{_lookup_entity}', {})
+            or schema['definitions'].get(_lookup_entity, {})
+        )
+        _lookup_has_org = 'organization_id' in _lookup_entity_def.get('properties', {})
+        _lookup_entity_filter_by_org = _lookup_has_org and _lookup_entity not in ('organization', 'user')
+        # cmd_611/612: see the matching comment in the dotted x-import-key
+        # block above — 'organization' as a lookup target needs a self-id
+        # filter, not an organization_id filter (it has no such column).
+        _lookup_entity_filter_by_self_id = _lookup_entity == 'organization'
+        # cmd_964 (Issue #88): see the matching comment in the dotted
+        # x-import-key block above — a lookup entity whose own organization_id
+        # is optional needs the OR-null form, or an org-less row is never
+        # re-found on import.
+        _lookup_org_relationship_optional = _lookup_entity_filter_by_org and _is_nullable(
+            _lookup_entity_def.get('properties', {}).get('organization_id', {})
+        )
+        return _fk_nullable, _lookup_entity_filter_by_org, _lookup_entity_filter_by_self_id, _lookup_org_relationship_optional
+
+    _key_relation_names = {s['var_prefix'] for s in import_key_specs if s['is_dotted']}
+    import_fk_specs = [
+        {**s, 'is_key': True, 'is_composite': False} for s in import_key_specs if s['is_dotted']
+    ]
+    for r in x_relationships_list:
+        if r['field'] in _key_relation_names:
+            continue
+        if r['prop_name'] in readonly_fields:
+            continue
+        _lookup_entity = r['target']
+        _fk_nullable, _lookup_entity_filter_by_org, _lookup_entity_filter_by_self_id, _lookup_org_relationship_optional = (
+            _fk_nullable_and_org_filter(r['prop_name'], _lookup_entity)
+        )
+        if r['simple_label'] is None:
+            import_fk_specs.append({
+                'raw':                  r['field'],
+                'is_dotted':            False,
+                'is_composite':         True,
+                'csv_col':              r['display_col'],
+                'var_prefix':           r['field'],
+                'lookup_entity':        _lookup_entity,
+                'lookup_entity_pascal': to_pascal_case(_lookup_entity),
+                'result_col':           r['prop_name'],
+                'fk_nullable':          _fk_nullable,
+                'lookup_entity_filter_by_org': _lookup_entity_filter_by_org,
+                'lookup_entity_filter_by_self_id': _lookup_entity_filter_by_self_id,
+                'lookup_entity_org_relationship_optional': _lookup_org_relationship_optional,
+                'is_key':               False,
+                'import_label_expr':    r['import_label_expr'],
+                'has_format':           r['import_has_format'],
+                'prisma_include':       r['prisma_include'],
+            })
+            continue
+        import_fk_specs.append({
+            'raw':                  f"{r['field']}.{r['simple_label']}",
+            'is_dotted':            True,
+            'is_composite':         False,
+            'csv_col':              r['display_col'],
+            'var_prefix':           r['field'],
+            'lookup_entity':        _lookup_entity,
+            'lookup_entity_pascal': to_pascal_case(_lookup_entity),
+            'lookup_field':         r['simple_label'],
+            'result_col':           r['prop_name'],
+            'fk_nullable':          _fk_nullable,
+            'lookup_entity_filter_by_org': _lookup_entity_filter_by_org,
+            'lookup_entity_filter_by_self_id': _lookup_entity_filter_by_self_id,
+            'lookup_entity_org_relationship_optional': _lookup_org_relationship_optional,
+            'is_key':               False,
+        })
+
+    # cmd_521 + cmd_530: whether ANY dotted-FK lookup in this route needs the
+    # actor's org id list — drives the import/computation gates in
+    # api_import_route.ts.jinja2 (they must fire even when the parent
+    # model itself is not should_filter_by_org, e.g. a system-global
+    # parent with a dotted FK into an org-scoped lookup entity). Computed
+    # from import_fk_specs (superset of import_key_specs' dotted entries)
+    # so newly-importable non-key FKs pull the org-scoped lookup gate in too.
+    # cmd_611/612: also fires for lookup_entity_filter_by_self_id (the
+    # 'organization' lookup-target case) — that filter needs the same
+    # _importOrgIds list, just applied to the candidate's own id instead of
+    # an organization_id column.
+    any_dotted_fk_needs_org_filter = any(
+        s['lookup_entity_filter_by_org'] or s['lookup_entity_filter_by_self_id']
+        for s in import_fk_specs
+    )
+
+    # cmd_621: whether ANY composite-labelField import_label_expr in this
+    # route calls formatLabelValue — drives the conditional import in
+    # api_import_route.ts.jinja2. cmd_607 removed the unconditional import as
+    # dead-binding lint debt; that was correct for THAT template snapshot,
+    # but import_label_expr renders {{ }}-injected calls the jinja2 source
+    # text never spells out, so a static read of the template can't see this
+    # dependency — only s.get('has_format') (only composite-branch specs
+    # carry it) can.
+    import_uses_format_label_value = any(s.get('has_format') for s in import_fk_specs)
+
+    # import_unimportable_columns (cmd_530): exported FK display columns with
+    # no CSV-import write path (composite/dotted labelField, or read-only on
+    # screen) — a CSV column the generated route would otherwise silently
+    # accept and discard. Checked against the CSV header at request time so
+    # the route refuses (fail loud) rather than answering "success" while
+    # dropping the column — see the fail-loud requirement 筋2 fix companion.
+    _import_fk_csv_cols = {s['csv_col'] for s in import_fk_specs}
+    import_unimportable_columns = [
+        rel['display_col'] for rel in x_relationships_list
+        if rel['display_col'] not in _import_fk_csv_cols
+    ]
+    # x-self-only: creator_id is exported (read-only, for diagnostics — see
+    # export_scalar_fields below) but must never be settable from a CSV. A
+    # CSV header naming it is a hard reject, not a silently-ignored column,
+    # matching the "import cannot do more than the screen" invariant —
+    # creator_id is never screen-editable either.
+    if is_self_only:
+        import_unimportable_columns = import_unimportable_columns + ['creator_id']
 
     # _create_feasible: True if all required non-system fields can be provided via CSV.
     # Required fields that are NOT in export_scalar_fields and NOT resolvable via
@@ -1341,19 +2252,36 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     #            column (invisible source). validate.py's E_IMPORT_KEY_INVISIBLE
     #            gate (DP-1a) rejects such schemas outright; this guards
     #            defense-in-depth for contexts that bypass that gate (e.g. tests).
+    #
+    # cmd_609: a required FK to an internal bridge model (e.g. approvable_id,
+    # x-relationship.type == 'one-to-one_bridge') is server-managed plumbing —
+    # the service layer creates and wires it at CREATE time, it is never a
+    # column a client is expected to fill via CSV. Before this fix, such a
+    # field fell through as an unfillable required gap (it is excluded from
+    # export_scalar_fields precisely because it's internal, but nothing then
+    # removed it from the gap set), so _create_feasible was False even though
+    # CREATE is genuinely fine. That false negative combines with edit:false
+    # (import_can_update also False) to collapse the entire import route to
+    # the ENTITY_IMPORT_NOT_SUPPORTED 400 stub (api_import_route.ts.jinja2:24)
+    # for any x-approval entity that also disallows edit. Reuse the same
+    # get_internal_bridge_fk_prop_names() helper validate.py:326 and
+    # generators_test.py:3551 already call — do not hand-maintain a parallel
+    # name list here, or this exact class of gap recurs a third time.
     _SYSTEM_AND_AUTO_IDS = {
         'id', 'created_at', 'updated_at', 'creator_id', 'updater_id',
         'organization_id', 'tenant_id',
     }
+    _internal_bridge_fk_names = get_internal_bridge_fk_prop_names(model_def, schema)
     _fk_display_col_names = {rel['display_col'] for rel in x_relationships_list}
     _import_resolvable_cols = {
-        spec['result_col'] for spec in import_key_specs
-        if spec['is_dotted'] and spec['csv_col'] in _fk_display_col_names
+        spec['result_col'] for spec in import_fk_specs
+        if spec['csv_col'] in _fk_display_col_names
     }
     _required_by_schema     = set(model_def.get('required', []))
     _create_required_gaps   = (
         _required_by_schema
         - _SYSTEM_AND_AUTO_IDS
+        - _internal_bridge_fk_names
         - set(export_scalar_fields)
         - _import_resolvable_cols
     )
@@ -1377,7 +2305,17 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             _types = [_types]
         _nullable  = 'null' in _types
         _base      = [t for t in _types if t != 'null']
-        _ts_type   = _TSTYPE_MAP.get(_base[0] if _base else 'string', 'string')
+        if _prop.get('_prisma_decimal_type'):
+            # Decimal is exposed as JSON type "string" (precision-preserving),
+            # but must not go through the generic 'string' passthrough
+            # without at least a numeric-format check -- a CSV cell like
+            # "abc" would otherwise reach `tx.model.create()` unvalidated and
+            # surface as an opaque Prisma write error instead of an
+            # INVALID_VALUE row error. 'decimal' still returns the raw string
+            # (never Number()) so precision is never at risk either way.
+            _ts_type = 'decimal'
+        else:
+            _ts_type = _TSTYPE_MAP.get(_base[0] if _base else 'string', 'string')
         import_field_specs.append({
             'name':      _f,
             'ts_type':   _ts_type,
@@ -1387,8 +2325,15 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         })
 
     has_assignee_id   = 'assignee_id' in filtered_props
+    # cmd_874/subtask_874f: filter_values fields are appended so the write
+    # paths that already fetch a pre-image row via item_context_select
+    # (api_detail_route.ts, api_bulk_route.ts) can pre-image-check
+    # x-filter-values without an extra query.
+    _filter_value_select_fields = ''.join(f', {f}: true' for f in sorted(filter_values))
     item_context_select = (
-        f'{{ id: true, creator_id: true{", assignee_id: true" if has_assignee_id else ""} }}'
+        f'{{ id: true, creator_id: true'
+        f'{", assignee_id: true" if has_assignee_id else ""}'
+        f'{_filter_value_select_fields} }}'
     )
 
     # is_audited: when true, generated service.ts wraps create/update/delete
@@ -1407,7 +2352,10 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # Scalar columns the paginated API/page-list will accept for sort/filter.
     # Always include audit columns. Anything not in this set is silently ignored
     # at request time so external input cannot pick arbitrary Prisma columns.
-    _scalar_props = [k for k, v in filtered_props.items() if _is_scalar_prop(v)]
+    _scalar_props = [
+        k for k, v in filtered_props.items()
+        if _is_scalar_prop(v) and k not in write_only_field_names  # cmd_801: no sort/filter oracle on credential material
+    ]
     for _extra in ('id', 'created_at', 'updated_at', 'creator_id'):
         if _extra not in _scalar_props:
             _scalar_props.append(_extra)
@@ -1421,10 +2369,21 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # rule in generate.py:_derive_text_fields) so callers don't accidentally
     # search across freeform fields, FKs, enums, or write-only properties.
     searchable_text_fields = derive_text_fields(filtered_props)
-    # Relation fields opted into cross-relation search via
-    # x-relationship.searchField (e.g. inventory matching by product name) —
-    # rendered as a one-hop nested Prisma `where` alongside the plain fields.
-    searchable_relation_fields = derive_searchable_relation_fields(filtered_props)
+    # Relation fields auto-derived from x-relationship.labelField (e.g.
+    # inventory matching by product name) — rendered as a one-hop nested
+    # Prisma `where` alongside the plain fields. Same source as the label
+    # shown on screen and as cmd_548's CSV-import full-match, so the search
+    # target can never drift from the display (cmd_552).
+    searchable_relation_fields = derive_searchable_relation_fields(filtered_props, schema)
+    # cmd_627: widen with fields other entities reference THROUGH one of
+    # this entity's own relations via a composite/dotted labelField (e.g.
+    # goods_receipt_line's inventory_id labelField includes `location.code`
+    # — a plain one-hop field from inventory's own perspective, even though
+    # it's a second hop relative to goods_receipt_line). See
+    # derive_cross_entity_searchable_fields()'s docstring.
+    for _rf in derive_cross_entity_searchable_fields(model, schema):
+        if _rf not in searchable_relation_fields:
+            searchable_relation_fields.append(_rf)
     searchable_fields_display = searchable_text_fields + [
         f"{rf['relation']}.{rf['field']}" for rf in searchable_relation_fields
     ]
@@ -1486,18 +2445,138 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # all OTO FK props are excluded from field categorisation (never treated as plain text fields)
     all_oto_fk_props = {r['prop_name'] for r in one_to_one_rels}
 
-    # Parent prop infos: exclude id, timestamps, and auto-create OTO FK props
+    # Parent prop infos: exclude id, timestamps, auto-create OTO FK props, and
+    # x-server-value fields with no override_permission (client can never supply
+    # them at all — see server_value_fields below). Fields WITH override_permission
+    # stay in parent_prop_infos so the raw client value still flows through as a
+    # service parameter (the service decides whether to honor or discard it).
     # Selector OTO FK props ARE included — they flow through the form as autocomplete values
-    parent_props = [k for k in filtered_props if k not in _EXCLUDE_ID_TS and k not in auto_create_oto_fk_props]
+    parent_props = [
+        k for k in filtered_props
+        if k not in _EXCLUDE_ID_TS and k not in auto_create_oto_fk_props
+        and k not in _server_value_no_override_props
+    ]
     parent_prop_infos = [
         {'prop': p, 'var_name': safe_var_name(p), 'def': filtered_props[p]}
         for p in parent_props
     ]
-    parent_params = ', '.join(p['var_name'] for p in parent_prop_infos)
+    # Plain readonly fields (x-readonly-fields / x-readonly) must never be read
+    # from client input at all (cmd_945) — not FormData, not a POST/PUT body,
+    # not even as a service-function parameter. readonly_fields_create_reject
+    # already excludes x-server-value fields (those have their own dedicated,
+    # server-resolved value — see server_value_data_lines below); the
+    # dynamically-added bridge FK prop (_bridge_fk_prop, Stage 2 above) is
+    # exempted too, since bridge_child_fk_data_line writes it with the real
+    # resolved parent id via its own dedicated template line and still needs
+    # it threaded through as a parameter.
+    #
+    # parent_prop_infos itself stays the FULL set (readonly fields included):
+    # normalizeSnapshot()/getCurrentSnapshot() (snapshot_field_mappings below)
+    # need every persisted column a client could actually have seen, readonly
+    # ones included, for assertNotStale's staleness comparison — that is a
+    # read of the *persisted* value, not of client input, so it is unaffected
+    # by this exclusion. The one deliberate narrowing of that "every column"
+    # rule is write-only fields (see snapshot_field_mappings below,
+    # app-generator#576): the client never sees those at all, on any read
+    # path, so there is no "value the client saw" to compare against.
+    # client_prop_infos is
+    # the narrower set for every consumer that reads a value the client supplied:
+    # the service function's own parameter list, the object passed to
+    # validate()/validateCustomRules, and the FormData/JSON-body extraction
+    # (_build_form_data_gets, REST route body destructuring, service call args).
+    _ro_client_exclude = set(readonly_fields_create_reject) - {_bridge_fk_prop}
+    client_prop_infos = [p for p in parent_prop_infos if p['prop'] not in _ro_client_exclude]
+    parent_params = ', '.join(p['var_name'] for p in client_prop_infos)
     parent_params_with_types = ', '.join(
-        f"{p['var_name']}: {get_ts_type(p['def'])}" for p in parent_prop_infos
+        f"{p['var_name']}: {get_ts_type(p['def'])}" for p in client_prop_infos
     )
-    _base_data_lines = [f"        {p['prop']}: {p['var_name']}," for p in parent_prop_infos]
+    # org_id_client_writable (cmd_946d, #486 regression fix): service.ts's
+    # should_filter_by_org guard (`if (organizationId) { ... }`) validates a
+    # CLIENT-SUPPLIED organization_id value before it gets written — it is
+    # not the entity's primary org-scope enforcement (that lives in the
+    # org-filtered findFirst pre-fetch added by cmd_452's GAP-2 fix, present
+    # in every should_filter_by_org REST route/Server Action update path
+    # regardless of this flag). The guard therefore only makes sense, and
+    # only compiles, when organization_id is actually one of the function's
+    # parameters — i.e. still present in client_prop_infos. #486 (cmd_945)
+    # started excluding readonly fields (x-readonly-fields) from
+    # client_prop_infos/parent_params_with_types entirely, so an org-scoped
+    # entity with organization_id declared readonly (e.g. a Proxy View like
+    # asn_status) generates a guard referencing an `organizationId` that no
+    # longer exists as a parameter — TS2304. When organization_id isn't
+    # client-writable there is no client-supplied value to validate, so the
+    # guard is correctly omitted rather than patched to reference a
+    # parameter that would have no legitimate value to receive.
+    _org_fk_prop = next((r['prop_name'] for r in parent_rels if r['target'] == 'organization'), None)
+    org_id_client_writable = bool(
+        should_filter_by_org and _org_fk_prop and _org_fk_prop not in _ro_client_exclude
+    )
+    # x-server-value fields never go through the generic "just write the client
+    # value" line below — server_value_data_lines (built further down) supplies
+    # a dedicated, server-resolved line for each of them instead.
+    #
+    # Plain readonly fields are skipped too, reusing _ro_client_exclude above:
+    # omitting the key lets the column's own Prisma @default apply
+    # (shipment_line.status's motivating case: a required, non-nullable enum
+    # with @default(picked) — passing an explicit `status: null` made the
+    # query engine reject the whole create with a confusing "Argument
+    # `shipment` is missing" error, not a status error).
+    _base_data_lines = [
+        f"        {p['prop']}: {_normalized_value_expr(p['prop'], p['var_name'], p['def'])},"
+        for p in parent_prop_infos
+        if p['prop'] not in _server_value_prop_names and p['prop'] not in _ro_client_exclude
+    ]
+
+    # server_value_fields: template-facing list for service.ts.jinja2's per-field
+    # actorId resolution (cmd_565). Built here (not earlier) because it needs
+    # var_name, which parent_prop_infos above already derived consistently via
+    # safe_var_name() for the override_permission-bearing subset.
+    _pp_var_by_prop = {p['prop']: p['var_name'] for p in parent_prop_infos}
+    server_value_fields = [
+        {
+            'prop': _svfn,
+            'var_name': _pp_var_by_prop.get(_svfn, safe_var_name(_svfn)),
+            'override_permission': _svmeta['override_permission'],
+        }
+        for _svfn, _svmeta in _server_value_fields_raw.items()
+    ]
+    server_value_override_fields = [f for f in server_value_fields if f['override_permission']]
+
+    _svc_pre_lines: list[str] = []
+    _svc_data_lines: list[str] = []
+    for _svf in server_value_fields:
+        _sv_prop, _sv_var, _sv_op = _svf['prop'], _svf['var_name'], _svf['override_permission']
+        _sv_value_var = f'_{_sv_var}Value'
+        if _sv_op:
+            _sv_perms_var = f'_{_sv_var}Perms'
+            _svc_pre_lines.append(
+                f"    const {{ permissions: {_sv_perms_var} }} = await getModelPermissions('{model}', actorId);"
+            )
+            _svc_pre_lines.append(
+                f"    const {_sv_value_var} = ({_sv_var} && {_sv_perms_var}.{_sv_op}) ? {_sv_var} : actorId;"
+            )
+            _svc_pre_lines.append(
+                f"    const _{_sv_var}Overridden = Boolean({_sv_var}) && {_sv_value_var} !== {_sv_var};"
+            )
+        else:
+            _svc_pre_lines.append(f"    const {_sv_value_var} = actorId;")
+        _svc_data_lines.append(f"        {_sv_prop}: {_sv_value_var},")
+    server_value_pre_create_code = '\n'.join(_svc_pre_lines)
+    server_value_data_lines = '\n'.join(_svc_data_lines)
+
+    # _server_value_overrides (cmd_565 【四】): REST callers learn when their
+    # submitted value for an override-capable field was silently replaced with
+    # actorId for lack of permission — "黙って捨てるな". Not built for the
+    # plain-actor form (no override capability => nothing to be transparent
+    # about; that field's client value was never accepted, unchanged since cmd_556).
+    server_value_overrides_build_code = ''
+    if server_value_override_fields:
+        _svo_lines = ["    const _serverValueOverrides: Record<string, string> = {};"]
+        for _svof in server_value_override_fields:
+            _svo_lines.append(
+                f"    if (_{_svof['var_name']}Overridden) _serverValueOverrides['{_svof['prop']}'] = 'overridden';"
+            )
+        server_value_overrides_build_code = '\n'.join(_svo_lines)
     # Explicit pre-create statements for auto-create OTO targets (e.g. const approvable = await tx.approvable.create({ data: {} });)
     one_to_one_pre_creates = '\n'.join(
         f"    const {r['relation_name']} = await tx.{r['target']}.create({{ data: {{}} }});"
@@ -1512,16 +2591,27 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         _base_data_lines + ([one_to_one_fk_data_lines] if one_to_one_fk_data_lines else [])
     )
     # Read-only fields are preserved on update: omit them from the update `data` so
-    # Prisma leaves the stored value untouched. The server action reads absent form
-    # fields as Number(null)=0, so without this a required read-only field (e.g. a
-    # reservation pool's quantity) would be silently zeroed. Create still sets them,
-    # and the field stays in validation_data_obj so its param remains referenced.
+    # Prisma leaves the stored value untouched. x-server-value fields are included
+    # in this skip too (their own dedicated server_value_data_lines writes them
+    # instead). Plain readonly fields are no longer even parameters (see
+    # client_prop_infos above, cmd_945) — this filter still runs over the FULL
+    # parent_prop_infos because x-server-value-with-override fields DO remain
+    # parameters and must still be skipped here.
     _ro_update_skip = set(readonly_fields)
     parent_data_obj_update = '\n'.join(
-        f"        {p['prop']}: {p['var_name']},"
+        f"        {p['prop']}: {_normalized_value_expr(p['prop'], p['var_name'], p['def'])},"
         for p in parent_prop_infos if p['prop'] not in _ro_update_skip
     )
-    validation_data_obj  = '\n'.join(f"      {p['prop']}: {p['var_name']}," for p in parent_prop_infos)
+    # validate()/validateCustomRules must never see a plain readonly field's
+    # value at all (cmd_945) — it can only ever be the client's absent-from-
+    # form/body value, never the field's real persisted value, so a custom
+    # rule that inspects it directly (rather than prevRow, which IS the real
+    # persisted value) would be validating garbage. client_prop_infos already
+    # excludes those fields entirely.
+    validation_data_obj  = '\n'.join(
+        f"      {p['prop']}: {_normalized_value_expr(p['prop'], p['var_name'], p['def'])},"
+        for p in client_prop_infos
+    )
     # Synthetic object spreading created record with nested auto-create OTO stubs for afterCreate
     one_to_one_spread = ', '.join(
         f"{r['relation_name']}: {{ id: created.{r['prop_name']} }}"
@@ -1529,14 +2619,44 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     )
     one_to_one_include = ''  # not used with explicit creation approach
 
-    # Snapshot
+    # Snapshot (app-generator#576): a write-only field (is_write_only_prop --
+    # password, api_key, ...) is never returned to the client on any read
+    # path (get{{Parent}}Detail(), getters.ts.jinja2 -- see
+    # write_only_field_names above), so the `src` prop a form component
+    # receives, and therefore the `srcSnapshotRaw` it round-trips back on
+    # Save, structurally has no key for that field at all. normalizeValue()
+    # maps that always-missing key to `null` regardless of the field's real
+    # persisted value, while getCurrentSnapshot() below reads the real
+    # column straight off the row. For any actor whose write-only field is
+    # ever non-null (every credentials-registered user has a non-null
+    # `password` from day one; any user who has generated an api_key has a
+    # non-null `api_key`), that guarantees expectedSnapshot != currentSnapshot
+    # on that single field alone -- assertNotStale() then throws CONFLICT on
+    # literally every update, independent of what the user actually changed.
+    # Confirmed empirically (subtask_1068a): reproduces on a plain Save with
+    # zero field changes, for a credentials account, at both 6e8028ef and
+    # 7fb11bbc (i.e. it predates PR#564/#563 -- not a regression from either).
+    #
+    # A write-only field can only ever be legitimately changed via this same
+    # update path (there is no separate route that writes password/api_key
+    # out-of-band), and the client can never truthfully report its current
+    # value to compare against in the first place -- so unlike every other
+    # compared column, including it here can never detect a real concurrent
+    # edit, only manufacture a guaranteed false positive. Excluding it here
+    # completes cmd_801's own read-path fix (get_write_only_field_names) by
+    # applying the same predicate to this second consumer of
+    # parent_prop_infos, rather than weakening assertNotStale()'s protection
+    # for any field a legitimate race can actually occur on.
     snapshot_field_mappings = '\n'.join(
         f"    {p['prop']}: normalizeValue(safeSnapshot.{p['prop']}, '{_normalize_kind(p['def'])}'),"
         for p in parent_prop_infos
+        if p['prop'] not in write_only_field_names
     )
 
-    # Form data gets (for actions / API POST)
-    form_data_gets = _build_form_data_gets(parent_prop_infos)
+    # Form data gets (for actions / API POST). Never emits a data.get() line
+    # for a plain readonly field (cmd_945) — client_prop_infos already
+    # excludes them.
+    form_data_gets = _build_form_data_gets(client_prop_infos, set(model_def.get('required') or []))
 
     # Children (full analysis)
     children_data    = _build_child_data(children_raw, model, schema, parent_rels_raw)
@@ -1563,35 +2683,86 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # nativeEnum literal union once attachment.type has been migrated to a
     # Prisma enum) -- mirrors the field's real type in the decrypt/strip
     # cast above so it doesn't silently drift from lib/attachment/actions.ts.
-    attachment_type_prop = ((schema.get('definitions') or {}).get('attachment') or {}).get('properties', {}).get('type')
+    #
+    # _raw_def(), not a bare schema['definitions']['attachment'] lookup
+    # (cmd_788, same class of gap generators.py's own module-level
+    # attachment_type_ts() docstring documents fixing at its call site for
+    # subtask_769d): post build_user_schema.py, `attachment`'s definitions
+    # entry is `allOf: [$ref: '#/definitions/__attachment']` (Stage 4's
+    # standard indirection -- not specific to x-generate:true), so the bare
+    # `.get('properties')` lookup here silently returned {} and this always
+    # fell back to the 'number' default in every real run, not just an
+    # x-generate:true one. Only surfaced now because cmd_788's
+    # SingleAttachmentFk union type-checks this value strictly, where the
+    # pre-existing `as unknown as Array<...>` cast on the has_attachable
+    # decrypt/strip block above silently absorbed the same wrong value.
+    attachment_type_prop = (_raw_def('attachment', schema).get('properties') or {}).get('type')
     attachment_type_ts = get_ts_type(attachment_type_prop) if attachment_type_prop else 'number'
     # Embedded children: exclude independent list children (have own pages; shown read-only here).
     # Non-independent mandatory-FK list children (no own page) are embedded with full CRUD.
     # Many-to-many and optional-FK list children (use_connect=True) use connect/set.
+    #
+    # `embedded_ch` still includes an independent child once its output_type
+    # is no longer 'list' (a grid-style embed, issue #520/PR#528) -- that
+    # inclusion is needed downstream (generators.py's column_def_context /
+    # form_upsert_context) so the read-only grid columns hook and JSX still
+    # get generated for it. It is exported as ctx['non_comment_ch'] below,
+    # unchanged.
     embedded_ch      = [c for c in non_comment_ch if c['use_connect'] or c.get('output_type') != 'list' or not c['is_independent']]
 
-    child_form_data_extractions = _build_child_form_data_extractions(embedded_ch)
+    # `write_ch` narrows `embedded_ch` further for every write-path plumbing
+    # site below (service nested-create/update, route/action body fields,
+    # add/update params, staleness snapshot): an independent child (own
+    # x-generate permits new/edit) must be READ-ONLY from the parent
+    # regardless of its output_type -- only the child's own CRUD route/
+    # actions may write it (cmd_1047 "Otsu" ruling, issue #520/PR#528
+    # follow-up). PR#528 lifted the restriction on an independent child
+    # rendering embedded with a non-'list' output_type, but left this
+    # write-path plumbing still treating it as writable -- e.g.
+    # goods_receipt_line (x-approval + self-referencing FK) triggered a
+    # TS2322 in lib/goods_receipt/service.ts because its own
+    # goods_receipt_lineCreateWithoutGoods_receiptInput requires fields
+    # (item, approvable) this generic nested-create body never supplies.
+    write_ch = [c for c in embedded_ch if c['use_connect'] or not c['is_independent']]
+
+    child_form_data_extractions = _build_child_form_data_extractions(write_ch)
 
     child_params_for_add    = ', '.join(
         f"{c['child_var']}Ids: string[]" if c['use_connect'] else f"{c['child_var']}Items: {c['field_type']}[]"
-        for c in embedded_ch
+        for c in write_ch
     )
     child_params_for_update = ', '.join(
         f"{c['child_var']}Ids: string[]" if c['use_connect'] else f"{c['child_var']}Items: {c['field_type_with_id']}[]"
-        for c in embedded_ch
+        for c in write_ch
     )
     child_args_for_call = ', '.join(
         f"{c['child_var']}Ids" if c['use_connect'] else f"{c['child_var']}Items"
-        for c in embedded_ch
+        for c in write_ch
     )
 
-    child_nested_create = _build_child_nested_create(embedded_ch)
-    child_nested_update = _build_child_nested_update(embedded_ch)
+    # cmd_652: expose every connect-style child's selected id list to
+    # validateOnAdd/validateOnUpdate/afterCreate via `data['{{ property_name }}']`
+    # — WITHOUT changing their `data: Record<string, unknown>` signature. This
+    # is unconditional structural wiring (every entity's hand-written
+    # validateCustomRules(), see lib/{{ model }}/service_validation_custom.ts,
+    # can read any connect-style child selection it needs); the default
+    # no-op stub simply ignores the extra keys, so this is inert unless a
+    # hand-written hook opts in.
+    _connect_child_data_lines = '\n'.join(
+        f"      {c['property_name']}: {c['child_var']}Ids,"
+        for c in write_ch
+        if c['use_connect']
+    )
+    if _connect_child_data_lines:
+        validation_data_obj = validation_data_obj + '\n' + _connect_child_data_lines
+
+    child_nested_create = _build_child_nested_create(write_ch)
+    child_nested_update = _build_child_nested_update(write_ch)
     child_assignee_notify_create_code = _build_child_assignee_notify_create_code(
-        embedded_ch, parent, to_pascal_case(parent)
+        write_ch, parent, to_pascal_case(parent)
     )
     child_assignee_notify_update_code = _build_child_assignee_notify_update_code(
-        embedded_ch, parent, to_pascal_case(parent)
+        write_ch, parent, to_pascal_case(parent)
     )
 
     # Self-parent relationship (for tree structures)
@@ -1611,16 +2782,19 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     else:
         comment_actions_code = _build_comment_actions(comment_children, parent, model, has_assignee_id, comment_has_mention)
 
-    # Snapshot child mappings (for service)
+    # Snapshot child mappings (for service). Uses write_ch, not embedded_ch:
+    # an independent child is never touched by update{{parent}}'s own write,
+    # so it must not participate in that update's stale-snapshot comparison
+    # either (its own route/actions has its own concurrency handling).
     snapshot_child_mappings = '\n'.join(
         f"    {c['property_name']}: normalizeChildRefs(safeSnapshot.{c['property_name']}),"
-        for c in embedded_ch
+        for c in write_ch
     )
     snapshot_include_props = (
         ',\n    include: {\n      ' +
-        ',\n      '.join(f"{c['property_name']}: {{ select: {{ id: true }} }}" for c in embedded_ch) +
+        ',\n      '.join(f"{c['property_name']}: {{ select: {{ id: true }} }}" for c in write_ch) +
         '\n    }'
-        if embedded_ch else ''
+        if write_ch else ''
     )
 
     # Selection targets (page_new, page_edit)
@@ -1629,9 +2803,68 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     if bridge_child_ir:
         selection_targets = _dedupe_ordered([*selection_targets, *bridge_child_ir.get('parent_targets', [])])
 
+    # Required FK relation fields (cmd_516 Option B, page_new blocking check):
+    # a required many-to-one FK or required selector-OTO FK whose target the
+    # current user can't read makes /new unsubmittable (there is no way to
+    # populate the field), so the New page must block with an explanatory
+    # message instead of rendering a create form that can never succeed. Each
+    # entry's `field_key` matches the same Fields-namespace i18n key
+    # _autocomplete_rel_jsx() already uses for the field's label.
+    #
+    # `init_var` is pre-computed here rather than rebuilt from `target` in
+    # the template (cmd_704 [2-a]): parent_rels_raw entries
+    # are destructured in page_new.tsx.jinja2's Promise.all as
+    # `initial{Target}s`, but selector_oto_rels entries are destructured as
+    # `initialAvailable{Target}s` — a naming split the template can't see if
+    # it reconstructs the name from `target` alone.
+    required_relation_fields = [
+        {
+            'prop_name': r['prop_name'],
+            'target': r['target'],
+            'field_key': to_camel_case(r['prop_name'].removesuffix('_id') if r['prop_name'].endswith('_id') else r['prop_name']),
+            'init_var': f"initial{to_pascal_case(r['target'])}s",
+        }
+        for r in parent_rels_raw
+        if r.get('required')
+    ] + [
+        {
+            'prop_name': r['prop_name'],
+            'target': r['target'],
+            'field_key': to_camel_case(r['prop_name'].removesuffix('_id') if r['prop_name'].endswith('_id') else r['prop_name']),
+            'init_var': f"initialAvailable{to_pascal_case(r['target'])}s",
+        }
+        for r in selector_oto_rels
+        if not r.get('nullable', True)
+    ]
+
+    # A required relation FK omitted from an update call (the UI's
+    # AppFieldRelation permissionDenied branch doesn't let the acting user
+    # pick or clear it; a bare API PUT may omit it entirely) must NOT be
+    # treated as a validation failure — it must fall back to the record's
+    # current value in the DB, since the caller has no way to supply a
+    # different one. Placed in the shared service layer so both the API
+    # route and the form's server action get the guarantee. See
+    # docs/knowledge/fk-read-permission-graceful-degradation.md. Built from
+    # client_prop_infos, not the full parent_prop_infos: a plain readonly FK
+    # is never a service parameter at all (cmd_945), so it can never need this
+    # fallback either — the guard below (`f['prop_name'] in _prop_to_var`)
+    # correctly skips it rather than referencing an undeclared variable.
+    _prop_to_var = {p['prop']: p['var_name'] for p in client_prop_infos}
+    fk_preservation_update_code = '\n'.join(
+        f"    if (!{_prop_to_var[f['prop_name']]}) {{\n"
+        f"      const _fkFallback = await tx.{model}.findUnique({{ where: {{ id }}, select: {{ {f['prop_name']}: true }} }});\n"
+        f"      {_prop_to_var[f['prop_name']]} = _fkFallback?.{f['prop_name']} ?? {_prop_to_var[f['prop_name']]};\n"
+        f"    }}"
+        for f in required_relation_fields
+        if f['prop_name'] in _prop_to_var
+    )
+
     # Field categorisation (for FormUpsert / FormView)
     # Use all_oto_fk_props to exclude BOTH auto-create and selector OTO FK props from plain field treatment
-    field_categories = _categorize_form_fields(filtered_props, parent_rels_raw, gen_cfg, all_oto_fk_props)
+    _direct_attachment_fk_props = {r['prop_name'] for r in direct_attachment_rels}
+    field_categories = _categorize_form_fields(
+        filtered_props, parent_rels_raw, gen_cfg, all_oto_fk_props, _direct_attachment_fk_props,
+    )
 
     # Default props (page_new)
     def _default_value(k: str, defn: dict) -> str:
@@ -1639,9 +2872,34 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         fmt    = defn.get('format')
         is_req = k in (model_def.get('required') or [])
         is_null = _is_nullable(defn)
+        # A field excluded from `required:` while remaining DB non-nullable
+        # always has *some* Prisma `@default(...)` supplying the value on
+        # create (derive_raw_entity: `not pf.nullable and not pf.has_default`
+        # is the only path into `required:`). schema_deriver deliberately
+        # omits the `default:` json-schema key for Prisma *dynamic* defaults
+        # (now(), cuid(), uuid(), ... -- cmd_574's "server-generated, no
+        # meaning as a UI default"), so `'default' in defn` alone misses
+        # exactly the now()-backed timestamp columns this check exists for
+        # (cmd_594). This signature is the only surviving marker for that
+        # case; a static `default:` also always satisfies it.
+        has_db_default = 'default' in defn or (not is_req and not is_null)
         if actual == 'string' and fmt in ('date', 'date-time', 'time'):
+            # Previously always 'null': an untouched field then submitted ''
+            # (form_data_sets' `{sn}?.toISOString() || ''`), which the
+            # non-nullable branch of _build_form_data_gets turns into
+            # `new Date('')` (Invalid Date) -- passed straight through to
+            # Prisma's create() call and crashing it, since this whole class
+            # of field is exactly the "not required, but NOT NULL" one
+            # (proj_g occurred_at symptom, cmd_594). Seed a writable "now"
+            # instead, mirroring generators.py:_new_prop_val's DataGrid-child
+            # seed for the same field class, so the field is never blank.
+            if has_db_default:
+                return 'new Date()'
             return 'null'
         if actual in ('integer', 'number'):
+            if has_db_default and defn.get('default') is not None:
+                schema_default = defn['default']
+                return str(int(schema_default)) if actual == 'integer' else str(schema_default)
             return 'null'
         if actual == 'string':
             # Prisma nativeEnum-backed field: '' is not a member of the
@@ -1652,10 +2910,21 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             # to the union-typed FormUpsert `src` prop.
             if defn.get('_prisma_native_enum_type') and 'default' in defn:
                 return f"'{defn['default']}' as const"
+            if defn.get('_prisma_native_enum_type') and is_null and isinstance(defn.get('enum'), list) and defn['enum']:
+                # Nullable with no schema default (e.g. dashboard_widget's
+                # stack_mode/group_by_bucket on the DataGrid-child path,
+                # generators.py:_new_prop_val) — seeding with enum[0] would
+                # fabricate meaning that was never chosen (an untouched
+                # optional field silently becoming "the first listed
+                # reason"), so leave it unset instead (cmd_1010). Mirrors
+                # the nullable check generators.py's DataGrid-child seed
+                # already had; this top-level path was missing it.
+                return 'null'
             if defn.get('_prisma_native_enum_type') and isinstance(defn.get('enum'), list) and defn['enum']:
-                # No schema default (e.g. shift.status) — seed the "new" form
-                # with the first declared enum member so it still typechecks
-                # against the nativeEnum literal union.
+                # Required field with no schema default — a required
+                # column can't be left empty, so fall back to the first
+                # declared enum member so it still typechecks against the
+                # nativeEnum literal union.
                 return f"'{defn['enum'][0]}' as const"
             if isinstance(defn.get('enum'), list) and defn['enum']:
                 # Plain (non-nativeEnum) string-enum field, e.g.
@@ -1665,14 +2934,32 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 # forced-required whenever non-nullable (cmd_472/R-2:
                 # is_forced_required_field), so seeding '' here made the
                 # "new" page's own client-side validation reject its own
-                # untouched default value. Mirror the nativeEnum branches
-                # above: schema default first, else the first enum member.
+                # untouched default value for a required field. A nullable
+                # field never hits that forced-required check, so seeding
+                # enum[0] there had no such justification -- it only
+                # fabricated a choice nobody made (cmd_1010). Mirror the
+                # nativeEnum branches above: schema default first, else
+                # (nullable: '') or (required: the first enum member).
                 if 'default' in defn:
                     return f"'{defn['default']}'"
+                if is_null:
+                    return "''"
                 return f"'{defn['enum'][0]}'"
+            # Plain (non-enum) string field with a Prisma `@default(...)`
+            # (e.g. tenant_id String @default("default")): seed the writable
+            # default instead of '' so an untouched field doesn't silently
+            # overwrite it on create (cmd_594).
+            if 'default' in defn:
+                return f"'{defn['default']}'"
             return "''"
         if actual == 'boolean':
-            return 'false'
+            # Was hardcoded 'false', ignoring `@default(true)` entirely --
+            # an untouched field then always submitted explicit `false`
+            # (form_data_sets always sends the toString()'d state, never
+            # omits it), permanently overriding the DB default. Mirror
+            # generators.py:_new_prop_val's DataGrid-child seed, which
+            # already reads the schema default correctly (cmd_594).
+            return str(defn.get('default', False)).lower()
         return 'null'
 
     parent_default_props = '\n'.join(
@@ -1865,14 +3152,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         for i in _xcc_items if 'edit' in i['target']
     ]
 
-    # Service args helpers
+    # Service args helpers. client_prop_infos, not parent_prop_infos: this
+    # feeds the REST route's add{Parent}/update{Parent} call (cmd_945) — a
+    # plain readonly field is no longer a parameter of those functions at all.
     parent_service_args = ', '.join(
         f"{p['var_name']} ?? null" if _is_nullable(p['def']) else p['var_name']
-        for p in parent_prop_infos
+        for p in client_prop_infos
     )
     child_service_args = ', '.join(
         f"{c['child_var']}_ids ?? []" if c['use_connect'] else f"{c['property_name']} ?? []"
-        for c in embedded_ch
+        for c in write_ch
     )
 
     # Getters: include entries (list page).
@@ -1881,10 +3170,39 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # Prisma actually loads the data the label expression dereferences.
     from helpers.label_field import build_label_expression, render_prisma_include
 
+    def _write_only_narrowed_include(relation_name: str, target: str, label_field=None) -> str | None:
+        """Prisma include fragment for a to-one/to-many FK relation whose
+        target entity carries write-only fields (password/api_key-shaped
+        columns; see get_write_only_field_names). A plain FK relation
+        fetch (`{relation}: true`) pulls every scalar column of the
+        target row unconditionally -- target-entity write-only masking
+        (is_write_only_prop / getters.ts's `{{ parent_camel }}Safe`
+        destructure) only ever applies to an entity's OWN top-level
+        fields, never to a row reached through another entity's nested
+        FK include, so a credential column on the target leaks straight
+        through detail/list/search responses for every entity that has
+        an FK to it (subtask_854a/854b). Narrows the fetch down to
+        `{relation}: { select: { id: true, <label>: true } }` -- the same
+        shape already used for the creator/updater audit columns.
+        Returns None when target has no write-only fields, so the
+        caller's existing `: true` behavior is unaffected (no regression
+        for the common case).
+        """
+        if not target:
+            return None
+        target_props = _raw_def(target, schema).get('properties', {}) or {}
+        if not get_write_only_field_names(target_props):
+            return None
+        label = label_field if isinstance(label_field, str) and label_field else 'name'
+        return f"{relation_name}: {{ select: {{ id: true, {label}: true }} }}"
+
     def _include_entry_for_rel(rel: dict) -> str:
         target = rel.get('target', '')
         label_field = rel.get('label_field')
         if not target or not label_field or label_field == 'name':
+            narrowed = _write_only_narrowed_include(rel['relation_name'], target, label_field)
+            if narrowed:
+                return narrowed
             return f"{rel['relation_name']}: true"
         try:
             built = build_label_expression('item', label_field, target, schema)
@@ -1898,6 +3216,17 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     include_entries_list = [_include_entry_for_rel(r) for r in parent_rels]
     # Selector OTO rels are included in list so the relation column can be displayed
     include_entries_list.extend(_include_entry_for_rel(r) for r in selector_oto_rels)
+    # NOTE: direct-attachment FK rels (x-relationship type: direct) are
+    # deliberately NOT added here. include_props_list also feeds the
+    # list-page getter, and how a direct-attachment field should render as a
+    # DataGrid child cell is still an open design question (a separate,
+    # not-yet-landed change is tracking it). Pulling the relation into the
+    # list-page include now would leak encrypted_original_name/name_iv into
+    # a query path this change never audited for the strip-before-client
+    # treatment get{Parent}Detail() applies below, and would silently commit
+    # to a list-cell rendering this change deliberately does not decide.
+    # Only include_props_detail (get{Parent}Detail -- FormUpsert/FormView,
+    # the only two surfaces this change targets) gets it, below.
     include_props_list   = ', '.join(include_entries_list)
 
     # searchXxxOptions returns target rows for OTHER entities' autocompletes.
@@ -1965,7 +3294,38 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     search_include_dict: dict = {}
     _merge_include(search_include_dict, own_include_dict)
     _merge_include(search_include_dict, consumer_includes)
-    search_include_props_list = render_prisma_include(search_include_dict)
+    # own_include_dict/consumer_includes are built independently of
+    # _include_entry_for_rel above (they also fold in cross-entity
+    # labelField paths via _merge_include), so the write-only narrowing
+    # has to be reapplied here rather than inherited from that function.
+    # Only narrows a key that is STILL a bare `True` after both merges --
+    # if some other entity's labelField path needs a deeper include
+    # through this relation, that need is left as-is (no such case
+    # exists in any known consumer schema today; see subtask_854b report).
+    search_write_only_narrow: dict = {}
+    for r in list(parent_rels) + list(selector_oto_rels):
+        narrowed = _write_only_narrowed_include(r['relation_name'], r.get('target', ''), r.get('label_field'))
+        if narrowed:
+            search_write_only_narrow[r['relation_name']] = narrowed
+    search_include_entries = [
+        search_write_only_narrow[k] if v is True and k in search_write_only_narrow
+        else render_prisma_include({k: v})
+        for k, v in search_include_dict.items()
+    ]
+    search_include_props_list = ', '.join(search_include_entries)
+
+    # Comment/mention creator avatar select (cmd_803): `user.image` is a
+    # direct-attachment FK (x-relationship type:direct) in schemas that have
+    # adopted it, but still a plain `format: uri` string column in schemas
+    # that haven't. The two need different Prisma select shapes — a relation
+    # select vs a scalar `true` — or the mismatched one fails to build
+    # (TS2322/TS2551). Branch on the *consuming* schema's own `user` entity
+    # rather than assuming the shape unconditionally.
+    _creator_avatar_select = (
+        "image: { select: { path: true } }"
+        if any(r['relation_name'] == 'image' for r in get_direct_attachment_fk_props(_raw_def('user', schema)))
+        else "image: true"
+    )
 
     child_include_entries = []
     for c in children_raw:
@@ -1975,19 +3335,80 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         cdef     = _raw_def(cn, schema)
         if out_type == 'comments':
             child_include_entries.append(
-                f"{prop}: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }},"
+                f"{prop}: {{ include: {{ creator: {{ select: {{ id: true, name: true, {_creator_avatar_select} }} }},"
                 f" reactions: {{ select: {{ type: true, user_id: true }} }} }},"
                 f" orderBy: {{ created_at: 'asc' }} }}"
             )
         elif not cdef.get('properties'):
             child_include_entries.append(f"{prop}: true")
         else:
+            # write-only check takes priority over the child_rels-based
+            # deep-include logic below: a write-only-bearing child target
+            # (e.g. role.users / organization.users -> user) must never
+            # get its full row fetched via `{prop}: true` or a nested
+            # `{prop}: { include: {...} } }`, regardless of whether it
+            # also has its own FK relations to include.
+            narrowed = _write_only_narrowed_include(prop, cn)
+            if narrowed:
+                child_include_entries.append(narrowed)
+                continue
             child_rels = get_parent_relationships(cdef)
             if not child_rels:
                 child_include_entries.append(f"{prop}: true")
             else:
-                # Base include map from the child's own parent relationships
+                # Merge nested includes into the child's include map. Shared
+                # by both the child's-own-FK-labelField pass below and the
+                # parent's label_field-on-this-child pass that follows it.
+                def _merge_into_child(ci: dict, src: dict):
+                    for k, v in src.items():
+                        if v is True:
+                            ci[k] = True
+                        else:
+                            include_val = v.get('include') if isinstance(v, dict) and 'include' in v else v
+                            existing = ci.get(k)
+                            if existing is True or existing is None:
+                                ci[k] = {'include': include_val}
+                            elif isinstance(existing, dict) and 'include' in existing:
+                                # merge inner include dicts
+                                inner = existing['include']
+                                for kk, vv in (include_val.items() if isinstance(include_val, dict) else []):
+                                    if kk not in inner:
+                                        inner[kk] = vv
+                                    else:
+                                        # prefer richer nested dicts when possible
+                                        if isinstance(inner[kk], dict) and isinstance(vv, dict):
+                                            inner[kk].setdefault('include', {}).update(vv.get('include', vv))
+
+                # Base include map from the child's own parent relationships.
+                # Each relation starts as flat `true`, then gets deepened
+                # below if ITS OWN labelField walks a nested relation (e.g.
+                # inventory_id's labelField `item.sku` on a goods_receipt_line
+                # child) -- a flat `true` only fetches the FK target's own
+                # scalar columns, so a labelField segment on the target's own
+                # relation renders as undefined at runtime (issue #539).
+                # Simple (non-dotted) labelFields are left as flat `true` --
+                # same scope _include_entry_for_rel() applies for an
+                # independent entity's own getter.
                 child_include_map: dict = {r['prop_name'].removesuffix('_id'): True for r in child_rels}
+                for r in child_rels:
+                    r_label_field = r.get('label_field')
+                    r_target = r.get('target')
+                    if not r_target or not r_label_field or r_label_field == 'name':
+                        continue
+                    r_relation_name = r['prop_name'].removesuffix('_id')
+                    try:
+                        built_r = build_label_expression('item', r_label_field, r_target, schema)
+                        nested_r = built_r.get('prisma_include') or {}
+                    except ValueError:
+                        nested_r = {}
+                    if nested_r:
+                        # nested_r's keys are the FK TARGET's own relations
+                        # (e.g. inventory's `item`/`location`/`bin`) -- they
+                        # must nest *under* this relation's own key, not
+                        # merge as siblings into child_include_map (whose
+                        # keys are the CHILD's own relations, a different
+                        # namespace).
+                        _merge_into_child(child_include_map, {r_relation_name: {'include': nested_r}})
 
                 # If the parent declared a label_field on this child that walks
                 # deeper relations (e.g. 'buyer.user.name'), merge the built
@@ -2001,27 +3422,6 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                         nested = built.get('prisma_include') or {}
                     except ValueError:
                         nested = {}
-
-                    # Merge nested includes into the child's include map
-                    def _merge_into_child(ci: dict, src: dict):
-                        for k, v in src.items():
-                            if v is True:
-                                ci[k] = True
-                            else:
-                                include_val = v.get('include') if isinstance(v, dict) and 'include' in v else v
-                                existing = ci.get(k)
-                                if existing is True or existing is None:
-                                    ci[k] = {'include': include_val}
-                                elif isinstance(existing, dict) and 'include' in existing:
-                                    # merge inner include dicts
-                                    inner = existing['include']
-                                    for kk, vv in (include_val.items() if isinstance(include_val, dict) else []):
-                                        if kk not in inner:
-                                            inner[kk] = vv
-                                        else:
-                                            # prefer richer nested dicts when possible
-                                            if isinstance(inner[kk], dict) and isinstance(vv, dict):
-                                                inner[kk].setdefault('include', {}).update(vv.get('include', vv))
 
                     if nested:
                         _merge_into_child(child_include_map, nested)
@@ -2080,7 +3480,21 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                     if c.get('child_name') == 'comment':
                         _rxn = ", reactions: true" if has_reactions else ""
                         nested_parts.append(
-                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }}{_rxn} }},"
+                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, {_creator_avatar_select} }} }}{_rxn} }},"
+                            f" orderBy: {{ created_at: 'asc' }} }}"
+                        )
+                    elif c.get('child_name') == 'approval_request':
+                        # cmd_844 diff_4_2: without this orderBy, PostgreSQL's
+                        # heap order (not guaranteed to match created_at
+                        # order -- see subtask_844b's CLUSTER-reorder
+                        # machine test) decides array order, which
+                        # ApprovalSection.tsx relies on to identify "the
+                        # current round" (its own round_id grouping assumes
+                        # ascending created_at, same as the round_id-scoped
+                        # server-side queries' own `orderBy: { created_at:
+                        # 'desc' }, take: 1` pattern for the latest round).
+                        nested_parts.append(
+                            f"{c['property_name']}: {{ include: {{ {', '.join(sub_parts)} }},"
                             f" orderBy: {{ created_at: 'asc' }} }}"
                         )
                     else:
@@ -2090,7 +3504,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                     if c.get('child_name') == 'comment':
                         _rxn = ", reactions: true" if has_reactions else ""
                         nested_parts.append(
-                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, image: true }} }}{_rxn} }},"
+                            f"comments: {{ include: {{ creator: {{ select: {{ id: true, name: true, {_creator_avatar_select} }} }}{_rxn} }},"
                             f" orderBy: {{ created_at: 'asc' }} }}"
                         )
                     else:
@@ -2134,6 +3548,14 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     for r in selector_oto_rels:
         target = r.get('target', '')
         label_field = r.get('label_field')
+        # getAvailableXxxsForYyy (getters.ts.jinja2) returns raw
+        # `prisma.{target}.findMany(...)` rows straight to a Client Component
+        # prop typed against the generated (Decimal-as-string) interface —
+        # unlike search{Parent}Options/relationship_mapping, it never
+        # stringified Decimal columns, so a Decimal-bearing OTO selector
+        # target (own column, or one reached through an embedded relation
+        # via available_include below) hit TS2322 at build time.
+        r['available_needs_decimal'] = bool(target) and _entity_decimal_deep(target, schema)
         if not target or not label_field:
             r['available_include'] = ''
             continue
@@ -2145,6 +3567,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         nested = built_avail.get('prisma_include') or {}
         r['available_include'] = render_prisma_include(nested) if nested else ''
 
+    # Direct-attachment FK rels (x-relationship type: direct) only join
+    # get{Parent}Detail's include, not the list-page one -- see the
+    # include_props_list note above for why. get{Parent}Detail (getters.ts.jinja2)
+    # additionally decrypts each relation's encrypted_original_name into a
+    # plain display name and strips encrypted_original_name/name_iv before
+    # the row reaches FormUpsert/FormView, mirroring the existing
+    # has_attachable treatment (cmd_356) -- see direct_attachment_rels in
+    # this function's returned context.
+    detail_direct_attachment_entries = [f"{r['relation_name']}: true" for r in direct_attachment_rels]
+
     include_entries_detail = [
         *child_include_entries,
         *detail_parent_rel_entries,
@@ -2152,6 +3584,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         *detail_selector_oto_entries,
         *reverse_oto_include_entries,
         *flatten_non_m2o_include_entries,
+        *detail_direct_attachment_entries,
         "creator: { select: { id: true, name: true } }",
         "updater: { select: { id: true, name: true } }",
     ]
@@ -2159,22 +3592,127 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     creator_filtered_props = copy.deepcopy(filtered_props)
     creator_filtered_props['creator_id'] = {'type': 'string'}
 
+    # detail_select (subtask_892d GAP2): when x-generate.fields restricts this
+    # entity (a fields-narrowed Proxy View, e.g. supplier_return_status), the
+    # findUnique/findFirst call in get{{Parent}}Detail() must not fetch the
+    # full, unrestricted Prisma row -- the function's declared return type is
+    # the narrow {{Parent}}Detail interface (context.py's build_entity_context
+    # derives its field list from this SAME filtered_props), so an unselected
+    # full row leaks whatever columns filter_fields() excluded straight
+    # through the `...{{parent_camel}}` spread with their REAL Prisma type
+    # (e.g. a DateTime column stays `Date`, not the `string` type context.py
+    # assigns that same excluded name via its x-display.table "virtual
+    # column" fallback) -- TS2322 (subtask_892d GAP2 report,
+    # lib/supplier_return_status/getters.ts(52,3) on `shipped_at`).
+    # `creator_id` is force-included even though it is never itself a
+    # `fields:` entry (audit columns are Prisma-only, never a JSON-schema
+    # property) because context.py unconditionally types it non-optional
+    # regardless of `fields:` (parent_fields.append(FieldInfo('creator_id',
+    # 'string | null'))) -- omitting it from `select` would make the object
+    # literal miss a required property. write_only_field_names is force-
+    # included too: it is deliberately computed above (cmd_801) from the
+    # FULL, unfiltered model_def properties -- not filtered_props -- because
+    # a write-only guard (password, api_key, ...) must strip these columns
+    # even when `fields:` already hides them from the view; the strip code
+    # (`const { password: _password, ... } = {{ parent_camel }};`) still
+    # destructures them unconditionally, so `select` must still fetch them
+    # or that destructure hits a column absent from the query result
+    # entirely (TS2339 -- caught live against this repo's own `user` entity,
+    # which combines `fields:` with two `x-pii: sensitive` columns).
+    # include_entries_detail's relation entries (creator/updater/children/
+    # parent rels) are folded in verbatim: each is already a self-contained
+    # `name: true` / `name: { include: {...} } }` entry, which Prisma
+    # accepts nested inside `select` exactly as it does inside `include`.
+    # Falls back to the pre-existing unrestricted `include:` block when
+    # `fields:` is not declared -- shipment_line_status and every other
+    # entity generate byte-identical output to before.
+    detail_select = ''
+    if gen_cfg.get('fields'):
+        # Relation-shaped entries (a bare `$ref`, or a `type: array` of
+        # `$ref` items -- e.g. `user`'s own `roles`) are excluded here: they
+        # are already covered by include_entries_detail under this SAME key
+        # name (child_include_entries above uses the property name
+        # verbatim), so adding them again as a bare `{prop}: true` scalar
+        # would emit a duplicate object key.
+        def _is_relation_placeholder(v) -> bool:
+            return isinstance(v, dict) and ('$ref' in v or v.get('type') == 'array')
+        _detail_select_scalars = sorted(
+            {k for k, v in filtered_props.items() if not _is_relation_placeholder(v)}
+            | set(write_only_field_names) | {'id', 'creator_id'}
+        )
+        detail_select = ', '.join(
+            [f'{f}: true' for f in _detail_select_scalars]
+            + ([include_props_detail] if include_props_detail else [])
+        )
+
+    # decimal_display_columns: consumed by get{{ parent_pascal }}Detail's raw
+    # `...{{ parent_camel }}` spread (getters.ts.jinja2) to override each
+    # Decimal-backed column with its .toString() form, the same
+    # override-after-spread shape already used for the DateTime columns above
+    # it. Null-safe: a nullable Decimal column reads back as `null` (not a
+    # `Decimal` instance) and must pass through unconverted.
+    decimal_display_columns = [k for k in decimal_field_names if k not in _EXCLUDE_FIELDS]
+
+    def _parent_mapping_entry(k: str) -> str:
+        if k in decimal_field_names:
+            return f"    {k}: {parent_camel}.{k} !== null && {parent_camel}.{k} !== undefined ? {parent_camel}.{k}.toString() : {parent_camel}.{k},"
+        return f"    {k}: {parent_camel}.{k},"
+
     parent_mapping = '\n'.join(
-        f"    {k}: {parent_camel}.{k},"
+        _parent_mapping_entry(k)
         for k in creator_filtered_props
         if k not in _EXCLUDE_FIELDS
+        and k not in write_only_field_names  # cmd_801: list/fetchXxxPage row shape, never credential material
     )
+
+    # relationship_mapping (cmd_711f): a m2o/selector-OTO relation embedded
+    # here is a full nested object pulled straight off the Prisma row — if
+    # its target carries a Decimal column at any depth (_entity_decimal_deep),
+    # wrap it in deepStringifyDecimals() the same way decimal_display_columns
+    # does for this entity's own scalar columns, or the raw decimal.js
+    # instance reaches the client unconverted (TS2322).
+    def _relationship_mapping_entry(r: dict) -> str:
+        src = f"{parent_camel}.{r['relation_name']}"
+        if _entity_decimal_deep(r['target'], schema):
+            return f"    {r['relation_name']}: {src} ? deepStringifyDecimals({src}) : {src},"
+        return f"    {r['relation_name']}: {src},"
+
     relationship_mapping = '\n'.join(
-        f"    {r['relation_name']}: {parent_camel}.{r['relation_name']},"
+        _relationship_mapping_entry(r)
         for r in parent_rels
     ) + (
         '\n' + '\n'.join(
-            f"    {r['relation_name']}: {parent_camel}.{r['relation_name']},"
+            _relationship_mapping_entry(r)
             for r in selector_oto_rels
         ) if selector_oto_rels else ''
     )
+    relationship_mapping_needs_decimal_helper = any(
+        _entity_decimal_deep(r['target'], schema) for r in [*parent_rels, *selector_oto_rels]
+    )
     # Note: reverse_oto_rels are NOT in relationship_mapping because they are not included in
     # the list query. They are fetched only in the detail query and auto-spread via { ...entity }.
+
+    # decimal_deep_relations (cmd_711f): embedded relations reachable from
+    # get{{ parent_pascal }}Detail's raw `...{{ parent_camel }}` spread whose
+    # target carries a Decimal column at any depth — single-object embeds
+    # (m2o FK / selector-OTO / auto-create-OTO / reverse-OTO) and to-many
+    # child list embeds alike. decimal_display_columns (above) only covers
+    # this entity's own scalar columns; this covers the relation-embed case
+    # the entity spread otherwise leaves as raw decimal.js instances. See
+    # _entity_decimal_deep's docstring for why this must recurse.
+    decimal_deep_relations = [
+        {'key': r['relation_name'], 'source': r['relation_name'], 'is_list': False}
+        for r in [*parent_rels, *selector_oto_rels, *auto_create_oto_rels]
+        if _entity_decimal_deep(r['target'], schema)
+    ] + [
+        {'key': r['prop_name'], 'source': r['relation_name'], 'is_list': False}
+        for r in reverse_oto_rels
+        if _entity_decimal_deep(r['target'], schema)
+    ] + [
+        {'key': c['property_name'], 'source': c['property_name'], 'is_list': True}
+        for c in children_raw
+        if c.get('output_type') != 'comments' and _entity_decimal_deep(c['name'], schema)
+    ]
     virtual_mapping = '\n'.join(
         f"    {vc['field_name']}: virtualData.get(String({parent_camel}.id ?? ''))?.{vc['field_name']} ?? '',"
         for vc in virtual_columns
@@ -2184,12 +3722,14 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         for c in children_raw
     )
 
-    # All body fields for API routes
+    # All body fields for API routes. client_prop_infos, not parent_prop_infos:
+    # this is destructured straight off the client's request body (cmd_945) —
+    # a plain readonly field must never be read from it at all, on POST or PUT.
     all_body_fields_create = ', '.join([
         *(p['prop'] if p['prop'] == p['var_name'] else f"{p['prop']}: {p['var_name']}"
-          for p in parent_prop_infos),
+          for p in client_prop_infos),
         *(f"{c['child_var']}_ids" if c['use_connect'] else c['property_name']
-          for c in embedded_ch),
+          for c in write_ch),
     ])
     # Null placeholders for flatten rel params (API routes don't edit flatten rels inline)
     _flatten_null_args = ', '.join(
@@ -2203,6 +3743,54 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     service_args_for_update = f"actorId, id, {parent_service_args}" + (
         f", {child_service_args}" if child_service_args else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
+
+    # CSV import -> service.ts convergence (cmd_996, Issue #93): the
+    # generated import route calls add{{parent_pascal}}/update{{parent_pascal}}
+    # -- the same functions REST route.ts / Server Action actions.ts call --
+    # instead of writing via a raw tx.model.create/update, so any guard
+    # inside validateOnAdd/validateOnUpdate (x-write-locked-values,
+    # x-approval, and every hand-written service_validation_custom.ts rule)
+    # now applies to CSV import too.
+    #
+    # Not feasible when add/update's signature carries a param a flat CSV
+    # row structurally cannot supply: embedded DataGrid children
+    # (child_params_for_add/_for_update -- one CSV cell cannot express an
+    # array of child objects) or a bridge-child parent selection
+    # (bridge_child_params_str). flatten-relation params are NOT a blocker:
+    # route.ts's own service_args_for_create/_for_update already pass a
+    # hardcoded `null` for every one of them ("API routes don't edit
+    # flatten rels inline") -- import does exactly the same via
+    # flatten_null_args below.
+    import_service_call_feasible = (
+        import_eligible
+        and not bridge_child_params_str
+        and not child_params_for_add
+        and not child_params_for_update
+    )
+    # One expression per add{{parent_pascal}}/update{{parent_pascal}} parent
+    # parameter, in client_prop_infos order -- the SAME list and order
+    # parent_params_with_types (the signature itself, above) is built from.
+    # client_prop_infos, not the full parent_prop_infos: a plain readonly
+    # field (x-readonly-fields/x-readonly, e.g. an x-approval-driven status
+    # column) is excluded from the service function's own parameter list
+    # entirely (see the parent_prop_infos-vs-client_prop_infos comment
+    # above) -- using parent_prop_infos here over-supplies an argument
+    # add/update{{parent_pascal}} doesn't declare (confirmed against a real
+    # consumer schema: asn/goods_receipt_line's status column, TS2554
+    # "Expected N arguments, but got N+1").
+    #
+    # Reads the value off the row's already-merged write object
+    # (`action.data`, see api_import_route.ts.jinja2) and casts it from
+    # `unknown` to that parameter's real TS type. A cast, not a runtime
+    # conversion (e.g. a Date param stays a raw ISO string at runtime) --
+    # Prisma's JS client already accepts that shape today via the raw
+    # tx.create/update path, so this changes nothing about what a value
+    # actually looks like on the wire, only what tsc accepts.
+    import_service_parent_args = ', '.join(
+        f"(action.data.{p['prop']} as {get_ts_type(p['def'])})"
+        for p in client_prop_infos
+    )
+    flatten_null_args = _flatten_null_args
 
     # Named constants for x-internal entities (e.g. COMMENT_REACTION_TYPES)
     from generate_types import extract_named_constants
@@ -2230,6 +3818,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         parent_camel=parent_camel,
         # Schema / config
         filtered_props=filtered_props,
+        write_only_field_names=write_only_field_names,  # cmd_801
         model_def=model_def,
         gen_cfg=gen_cfg,
         can_create=can_create,
@@ -2247,6 +3836,12 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         parent_rels_raw=parent_rels_raw,
         relationship_targets=relationship_targets,
         should_filter_by_org=should_filter_by_org,
+        org_id_client_writable=org_id_client_writable,
+        org_relationship_optional=org_relationship_optional,
+        is_self_only=is_self_only,
+        self_only_admin_bypass=self_only_admin_bypass,
+        filter_values=filter_values,  # cmd_874/subtask_874f
+        filter_values_select=filter_values_select,  # cmd_874/subtask_874f
         # CSV export (Phase 1): natural-key columns + FK flatten metadata
         import_key_fields=import_key_fields,
         has_import_key=has_import_key,
@@ -2260,6 +3855,10 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         import_can_create=import_can_create,
         import_can_update=import_can_update,
         import_key_specs=import_key_specs,
+        import_fk_specs=import_fk_specs,
+        import_uses_format_label_value=import_uses_format_label_value,
+        import_unimportable_columns=import_unimportable_columns,
+        any_dotted_fk_needs_org_filter=any_dotted_fk_needs_org_filter,
         import_update_fields=import_update_fields,
         import_field_specs=import_field_specs,
         has_assignee_id=has_assignee_id,
@@ -2283,6 +3882,10 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         parent_default_props=parent_default_props,
         parent_mapping=parent_mapping,
         relationship_mapping=relationship_mapping,
+        decimal_field_names=decimal_field_names,
+        decimal_display_columns=decimal_display_columns,
+        decimal_deep_relations=decimal_deep_relations,
+        relationship_mapping_needs_decimal_helper=relationship_mapping_needs_decimal_helper,
         # Children
         children_raw=children_raw,
         children_data=children_data,
@@ -2326,13 +3929,20 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         include_props_list=include_props_list,
         search_include_props_list=search_include_props_list,
         include_props_detail=include_props_detail,
+        detail_select=detail_select,
         include_entries_detail=include_entries_detail,
         # Selection targets (page_new / page_edit)
         selection_targets=selection_targets,
+        required_relation_fields=required_relation_fields,
+        fk_preservation_update_code=fk_preservation_update_code,
         # API routes
         all_body_fields_create=all_body_fields_create,
         service_args_for_create=service_args_for_create,
         service_args_for_update=service_args_for_update,
+        # CSV import -> service.ts convergence (cmd_996, Issue #93)
+        import_service_call_feasible=import_service_call_feasible,
+        import_service_parent_args=import_service_parent_args,
+        flatten_null_args=flatten_null_args,
         # Field categories (FormUpsert / FormView)
         field_categories=field_categories,
         entity_select_options=_get_entity_options(schema),
@@ -2354,10 +3964,12 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         # One-to-one outbound FK rels
         one_to_one_rels=auto_create_oto_rels,      # auto-create OTO only (for types/service templates)
         selector_oto_rels=selector_oto_rels,        # selector OTO (autocomplete UI, filtered getters)
+        direct_attachment_rels=direct_attachment_rels,  # x-relationship type:direct FK -> attachment (cmd_788)
         reverse_oto_rels=reverse_oto_rels,          # reverse OTO: FK in target pointing back to this model
         flatten_rels=flatten_rels,                  # flatten rels: shown as accordion in detail view
         flatten_m2o_fk_props=flatten_m2o_fk_props, # FK prop names in parent for m2o flatten rels
         one_to_one_pre_creates=one_to_one_pre_creates,
+        one_to_one_fk_data_lines=one_to_one_fk_data_lines,  # cmd_614: also consumed by api_import_route's commit-time create
         one_to_one_spread=one_to_one_spread,
         one_to_one_include=one_to_one_include,
         # Page list / view / edit custom components (entity-level, plural).
@@ -2382,6 +3994,20 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         readonly_fields=readonly_fields,
         readonly_fields_api=readonly_fields_api,
         readonly_fields_api_select=readonly_fields_api_select,
+        readonly_fields_create_reject=readonly_fields_create_reject,
+        # Value-level lockdown: fields that carry at least one system-only
+        # value (x-approval set_fields and/or x-write-locked-values union),
+        # and per-field the locked values themselves. Empty dict/list when
+        # the entity declares neither (unprotected).
+        write_locked_values=write_locked_values,
+        write_locked_fields=write_locked_fields,
+        write_locked_values_select=write_locked_values_select,
+        # x-server-value: server-computed field values (cmd_556/cmd_565).
+        server_value_fields=server_value_fields,
+        server_value_override_fields=server_value_override_fields,
+        server_value_pre_create_code=server_value_pre_create_code,
+        server_value_data_lines=server_value_data_lines,
+        server_value_overrides_build_code=server_value_overrides_build_code,
         # Mention fields: x-mention: true annotations. Phase 2 templates use this list.
         mention_fields=mention_fields,
         # GDPR mode: model-level and field-level x-gdpr-mode annotations.

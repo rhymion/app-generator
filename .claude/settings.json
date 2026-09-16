@@ -19,7 +19,7 @@
       "Bash(npm run test:e2e)",
       "Bash(npm run db:generate)",
       "Bash(npm run db:push)",
-      "Bash(npm run db:seed-tenant)",
+      "Bash(npm run db:seed-baseline)",
       "Bash(npm run lint)",
       "Bash(npm audit --omit=dev --audit-level=high)",
       "Bash(pip-audit -r requirements.txt)",

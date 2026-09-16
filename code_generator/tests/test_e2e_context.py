@@ -1,4 +1,4 @@
-from generators_test import api_spec_context, helper_context, spec_context
+from generators_test import api_spec_context, helper_context, spec_context, _seed_relation_label_value
 
 
 def _entity(model: str) -> dict:
@@ -126,7 +126,15 @@ def _schema() -> dict:
 def test_spec_context_uses_deps_for_fk_primary_edit():
     ctx = spec_context("lifestyle", [], _schema(), "lifestyle", "lifestyle_detail", _entity("lifestyle")["generate_config"])
     assert ctx["use_deps_in_3_3"] is True
-    assert ctx["edit_primary_cmd"] == "        cy.selectAutocomplete('Patient', 'Test Patient 2');"
+    # cmd_594: targets the dependency helper's base instance ('Test Patient A',
+    # letter-indexed per cmd_618), not the loop's numbered instance
+    # ('Test Patient 2') — populateLifestyleData(2)'s own loop can independently
+    # attach a row to the loop-numbered target for entities whose primary FK
+    # also participates in a composite @@unique with another field the loop
+    # holds constant, causing an update-time P2002 against that sibling row
+    # (asn_line/purchase_order_line 3.3, cmd_593/594). The base instance is
+    # never produced by that loop, so it's collision-free unconditionally.
+    assert ctx["edit_primary_cmd"] == "        cy.selectAutocomplete('Patient', 'Test Patient A');"
 
 
 def test_spec_context_3_3_populates_two_when_primary_is_fk():
@@ -168,7 +176,10 @@ def test_spec_context_3_3_user_account_primary_uses_select_autocomplete():
     }
     ctx = spec_context("shift", [], schema, "shift", "shift_detail", _entity("shift")["generate_config"])
     assert ctx["populate_count_3_3"] == 2
-    assert ctx["edit_primary_cmd"] == "        cy.selectAutocomplete('User', 'Test User 2');"
+    # cmd_594: base instance, not the loop-numbered instance — see
+    # test_spec_context_uses_deps_for_fk_primary_edit above for the rationale.
+    # cmd_618: base instance is now letter-indexed ('Test User A').
+    assert ctx["edit_primary_cmd"] == "        cy.selectAutocomplete('User', 'Test User A');"
 
 
 def test_api_spec_context_omits_required_one_to_one_fk_in_missing_field_case():
@@ -215,7 +226,14 @@ def test_helper_context_self_ref_dep_keeps_required_non_self_fk_deps():
 
     ctx = helper_context("medicine", [], schema, "medicine", "medicine_detail", _entity("medicine")["generate_config"])
     prev_dep = next(d for d in ctx["self_ref_deps"] if d["var_name"] == "prev")
-    assert prev_dep["fk_deps"] == [{"prop_name": "patient_id", "dep_var_name": "patient"}]
+    # patient is medicine's primary-display FK dep, so the self-ref decoy's
+    # patient_id is routed onto the second instance (cmd_590/6908ff49): a
+    # decoy referencing the SAME patient as the record under test would
+    # render an identical primary-display label in the list, reproducing the
+    # goods_receipt_line row-mismatch bug this mechanism exists to prevent.
+    # The prop_name -> fk_deps mapping itself (this test's original intent)
+    # is unaffected; only the routed instance changed.
+    assert prev_dep["fk_deps"] == [{"prop_name": "patient_id", "dep_var_name": "patient2"}]
 
 
 def test_helper_context_primary_fk_string_labels_are_human_readable():
@@ -269,12 +287,15 @@ def test_helper_context_primary_fk_string_labels_are_human_readable():
     assert ctx["primary_fk_dep"]["target"] == "patient_rel"
     patient_no = next(f for f in ctx["primary_fk_dep"]["extra_required_fields"] if f["prop_name"] == "patient_no")
     # Values must be human-readable AND deterministic so e2e specs can assert
-    # on the rendered string (e.g. `cy.contains('Test Patient No 1')`).
-    # Idempotency for repeated dep-helper invocations is handled separately at
-    # the helper template level via findFirst-or-create on the dep's `name`
-    # field, NOT by suffixing values with Date.now().
-    assert patient_no["prisma_val"] == "'Test Patient No'"
-    assert patient_no["prisma_val_unique"] == '`Test Patient No ${i}`'
+    # on the rendered string (e.g. `cy.contains('Test Patient No 0_1')`).
+    # Idempotency for repeated dep-helper invocations (populateXxxDependencies'
+    # base/second rows) is handled separately at the helper template level via
+    # findFirst-or-create on the dep's `name` field, NOT by suffixing values
+    # with Date.now(). The per-iteration primary-FK-dep row (prisma_val_unique)
+    # instead gets a per-call callIndex prefix (cmd_620 Option β) — no
+    # find-or-create at all, so repeat calls never collide or reuse a row.
+    assert patient_no["prisma_val"] == "'Test Patient No A'"
+    assert patient_no["prisma_val_unique"] == '`Test Patient No ${callIndex}_${i}`'
 
 
 def test_api_spec_context_x_relationships_list_includes_composite_label_field():
@@ -324,3 +345,251 @@ def test_api_spec_context_x_relationships_list_includes_composite_label_field():
     fields = [r["field"] for r in ctx["x_relationships_list"]]
     assert "from_inventory" in fields
     assert ctx["x_relationships_list"][fields.index("from_inventory")]["display_col"] == "from_inventory_name"
+
+
+def _server_value_shift_schema(user_id_server_value=None):
+    user_id_field = {
+        "type": "string",
+        "x-relationship": {"type": "many-to-one", "target": "user", "labelField": "name"},
+    }
+    if user_id_server_value is not None:
+        user_id_field["x-server-value"] = user_id_server_value
+    return {
+        "definitions": {
+            "user": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {"id": {"type": "string"}, "name": {"type": "string"}},
+            },
+            "shift": {
+                "type": "object",
+                "required": ["id", "user_id", "start_time"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "user_id": user_id_field,
+                    "start_time": {"type": "string", "format": "date-time"},
+                },
+            },
+            "shift_detail": {"allOf": [{"$ref": "#/definitions/shift"}]},
+        },
+    }
+
+
+def test_spec_context_ua_field_without_server_value_gets_select_autocomplete():
+    """Sanity check (pre-fix baseline behavior, unaffected): a plain FK to
+    user with no x-server-value still gets a selectAutocomplete fill command
+    — the field genuinely renders as a form autocomplete."""
+    ctx = spec_context(
+        "shift", [], _server_value_shift_schema(None), "shift", "shift_detail",
+        _entity("shift")["generate_config"],
+    )
+    assert any("selectAutocomplete('User'" in cmd for cmd in ctx["required_fill_cmds"])
+    assert any("selectAutocomplete('User'" in cmd for cmd in ctx["all_fill_cmds"])
+
+
+def test_spec_context_ua_field_with_server_value_excluded_from_fill_commands():
+    """cmd_611/612: an x-server-value field is always readonly and excluded
+    from every form input — a UI test trying cy.selectAutocomplete() on it
+    fails outright (`Expected to find element: 'filter', but never found
+    it`) because the form never renders that autocomplete in the first
+    place. The fill-command generator must not emit that command."""
+    ctx = spec_context(
+        "shift", [], _server_value_shift_schema("actor"), "shift", "shift_detail",
+        _entity("shift")["generate_config"],
+    )
+    assert not any("selectAutocomplete('User'" in cmd for cmd in ctx["required_fill_cmds"])
+    assert not any("selectAutocomplete('User'" in cmd for cmd in ctx["all_fill_cmds"])
+
+
+def test_spec_context_ua_field_with_server_value_dict_form_also_excluded():
+    """Dict form (with override_permission) is equally excluded — the field
+    is a service parameter for the API path, but still never a form input."""
+    ctx = spec_context(
+        "shift", [], _server_value_shift_schema({"source": "actor", "override_permission": "delete"}),
+        "shift", "shift_detail", _entity("shift")["generate_config"],
+    )
+    assert not any("selectAutocomplete('User'" in cmd for cmd in ctx["required_fill_cmds"])
+    assert not any("selectAutocomplete('User'" in cmd for cmd in ctx["all_fill_cmds"])
+
+
+def _server_value_primary_shift_schema(user_id_server_value):
+    """Same shape as leave_request: user_id is BOTH the x-display.table
+    primary field AND x-server-value -- exercises the separate
+    edit_primary_cmd code path (3.3 mixed-changes edit test), distinct from
+    req_ua_spec/all_ua_spec (create/fail-edit fill commands)."""
+    return {
+        "definitions": {
+            "user": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {"id": {"type": "string"}, "name": {"type": "string"}},
+            },
+            "shift": {
+                "type": "object",
+                "required": ["id", "user_id", "start_time"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "user_id": {
+                        "type": "string",
+                        "x-relationship": {"type": "many-to-one", "target": "user", "labelField": "name"},
+                        "x-server-value": user_id_server_value,
+                    },
+                    "start_time": {"type": "string", "format": "date-time"},
+                },
+                "x-display": {"table": [{"user": {"primary": True}}]},
+            },
+            "shift_detail": {"allOf": [{"$ref": "#/definitions/shift"}]},
+        },
+    }
+
+
+def test_spec_context_server_value_primary_field_skips_edit_primary_cmd():
+    """cmd_611/612: when the x-display.table PRIMARY field is itself
+    x-server-value (leave_request.user_id's exact shape), the 3.3
+    mixed-changes edit test must not try to touch it via
+    cy.selectAutocomplete() either -- edit_primary_cmd must be None, not a
+    command against a form input that doesn't exist. populate_count_3_3
+    also drops back to 1 -- the 2-row FK-switch setup is meaningless for a
+    field the UI can never edit."""
+    ctx = spec_context(
+        "shift", [], _server_value_primary_shift_schema({"source": "actor", "override_permission": "delete"}),
+        "shift", "shift_detail", _entity("shift")["generate_config"],
+    )
+    assert ctx["edit_primary_cmd"] is None
+    assert ctx["populate_count_3_3"] == 1
+    # cmd_625b: edit_primary_cmd being None means 3.3 never touches this
+    # field, so the post-save row lookup / checkField assertions must stay
+    # at the as-created value (list_id_1/check_field_value_1), not the
+    # "as-if-edited" letter-suffixed value (list_id_updated/check_field_updated
+    # would otherwise compute as if a selectAutocomplete had run). Before this
+    # fix, spec_context computed list_id_updated/check_field_updated
+    # unconditionally whenever prim_is_fk, regardless of edit_primary_cmd
+    # being None -- leave_request's generated 3.3 test asserted 'Test User A'
+    # after an edit that never changed the User field, which stayed
+    # 'Test User 0_1' (caught via PR#47 CI, cmd_625).
+    assert ctx["list_id_updated"] == ctx["list_id_1"]
+    assert ctx["check_field_updated"] == ctx["check_field_value_1"]
+
+
+def test_spec_context_non_server_value_primary_field_still_gets_edit_primary_cmd():
+    """A primary FK to user with no x-server-value still gets the
+    selectAutocomplete edit_primary_cmd and populate_count_3_3 == 2."""
+    ctx = spec_context(
+        "shift", [], _server_value_primary_shift_schema(None), "shift", "shift_detail",
+        _entity("shift")["generate_config"],
+    )
+    # cmd_618: base instance is now letter-indexed ('Test User A').
+    assert ctx["edit_primary_cmd"] == "        cy.selectAutocomplete('User', 'Test User A');"
+    assert ctx["populate_count_3_3"] == 2
+    # cmd_633: edit_update_value ('Test User A') is the letter-suffixed dep
+    # row created only by populate{Pascal}Dependencies() -- populate_count_3_3's
+    # loop (populate{Pascal}Data) never creates it for is_user_account primary
+    # FKs (see test_seed_relation_label_value_is_user_account_excludes_
+    # callindex_prefix's sibling fixture: the loop only emits `Test User ${i}`).
+    # So 3.3 must route through populate{Pascal}Dependencies() too, or the
+    # target row the test selects never exists in the DB.
+    assert ctx["use_deps_in_3_3"] is True
+
+
+def test_seed_relation_label_value_is_user_account_excludes_callindex_prefix():
+    """cmd_625b/625g: is_user_account (target=='user') FK targets are excluded
+    from Phase2's callIndex namespace on the CREATION side --
+    test_helper.ts.jinja2's primary_fk_dep.is_user_account branch always
+    creates `Test User ${i}` (plain per-call loop index), never
+    `${callIndex}_${i}`. Before this fix, the ASSERTION side
+    (_seed_relation_label_value / _seed_path_part) didn't know this and
+    unconditionally applied the callIndex-prefixed `0_{unique_index}` format
+    to every primary FK, including is_user_account ones -- so every
+    populate{Pascal}Data/FullData-backed row's label assertion looked for
+    'Test User 0_1' against actual data 'Test User 1' and never found the
+    row (leave_request.cy.ts 1.2/1.3/3.1/3.2/3.3/4.3/6.1, cmd_625 B-system)."""
+    schema = _server_value_primary_shift_schema(None)
+    assert _seed_relation_label_value("user", "name", False, schema, unique_index=1) == "Test User 1"
+    assert _seed_relation_label_value("user", "name", False, schema, unique_index=2) == "Test User 2"
+    # No unique_index (letter-suffixed base instance) is unaffected either way.
+    assert _seed_relation_label_value("user", "name", False, schema) == "Test User A"
+
+
+def test_seed_relation_label_value_non_user_target_keeps_callindex_prefix():
+    """Sanity check (pre-fix baseline behavior, unaffected): a non-user FK
+    target keeps the callIndex-prefixed `0_{unique_index}` format."""
+    schema = _schema()
+    assert _seed_relation_label_value("patient", "name", False, schema, unique_index=1) == "Test Patient 0_1"
+
+
+def test_spec_context_is_user_account_primary_label_excludes_callindex_prefix():
+    """spec_context-level regression for the same fix: leave_request's exact
+    shape (primary FK to user) must compute list_id_1 / check_field_value_1
+    as 'Test User 1', not 'Test User 0_1' -- matching the actual seed data
+    test_helper.ts.jinja2 creates for is_user_account primary FKs."""
+    ctx = spec_context(
+        "shift", [], _server_value_primary_shift_schema(None), "shift", "shift_detail",
+        _entity("shift")["generate_config"],
+    )
+    assert ctx["list_id_1"] == "Test User 1"
+    assert ctx["check_field_value_1"] == "Test User 1"
+
+
+def _string_enum_primary_schema() -> dict:
+    """A minimal entity whose x-display.table primary field is a plain
+    string with a JSON-schema `enum:` (category 'string_enum' -- the same
+    category a Prisma nativeEnum column like agent_hierarchy.hierarchy_type
+    resolves to; see schema_deriver.derive_property's
+    `_prisma_native_enum_type` marker, which schema_deriver.py adds on top
+    of this same base shape)."""
+    return {
+        "definitions": {
+            "task_item": {
+                "type": "object",
+                "required": ["id", "status"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "status": {"type": "string", "enum": ["pending", "done"]},
+                },
+                "x-display": {
+                    "table": [
+                        {"status": {"primary": True}},
+                    ],
+                },
+            },
+            "task_item_detail": {
+                "allOf": [{"$ref": "#/definitions/task_item"}],
+            },
+        },
+    }
+
+
+def test_spec_context_string_enum_primary_uses_enum_value_not_placeholder():
+    """cmd_768: a string/native-enum primary field must assert one of its
+    actual declared enum values, not the generic 'Test {Label} 1'
+    placeholder the fallback (non-enum, non-FK, non-name) branch produces --
+    a placeholder an enum column can never actually hold, since it only ever
+    stores one of its declared members. Before this fix, `prim_meta.get(
+    'category') == 'string_enum'` matched no branch in the primary-field
+    priority chain and fell straight through to that fallback, so every
+    list/DataGrid-row lookup keyed on it (1.2/1.3/3.x/4.x/6.x) failed
+    against the real rendered value."""
+    ctx = spec_context(
+        "task_item", [], _string_enum_primary_schema(), "task_item", "task_item_detail",
+        _entity("task_item")["generate_config"],
+    )
+    assert ctx["list_id_1"] == "pending"
+    assert ctx["list_id_is_unique"] is False
+    assert ctx["after_create_id"] == "pending"
+    assert ctx["list_id_updated"] == "done"
+
+
+def test_spec_context_string_enum_primary_edit_uses_select_autocomplete():
+    """The 3.3 mixed-changes edit must drive the field as an
+    Autocomplete/Select (clearAutocomplete + selectAutocomplete) -- matching
+    how gen_fill_command/gen_clear_command already render this exact
+    category everywhere else -- not cy.clearAndFillField (a plain-text-input
+    command the field's actual widget never responds to)."""
+    ctx = spec_context(
+        "task_item", [], _string_enum_primary_schema(), "task_item", "task_item_detail",
+        _entity("task_item")["generate_config"],
+    )
+    assert ctx["edit_primary_cmd"] == (
+        "        cy.clearAutocomplete('Status');\n"
+        "        cy.selectAutocomplete('Status', 'done');"
+    )

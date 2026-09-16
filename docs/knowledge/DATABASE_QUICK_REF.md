@@ -23,14 +23,15 @@ npm run test:e2e
 npm run docker:down:test
 ```
 
-**Manual E2E approach** (if you want to keep dev server running):
+**Hot-reload E2E** (no `next build`, single command — sets up the test DB
+then runs Cypress against the dev server):
 ```bash
-# Terminal 1: Start dev server
-npm run dev
-
-# Terminal 2: Run tests (NODE_ENV=test is set automatically)
-npm run test:e2e:dev
+npm run test:e2e:dev:run
 ```
+Note: `npm run test:e2e:dev` (no `:run`) does **not** run Cypress — its last
+step is the plain `dev` script, so it only sets up the test DB and serves the
+app for manual poking. The Cypress-only step is `test:e2e:cy:dev` (verified
+against `package.json`, 2026-09-12).
 
 ## Common Commands
 

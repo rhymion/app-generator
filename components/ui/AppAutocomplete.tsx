@@ -63,9 +63,12 @@ export function AppAutocomplete({
           {...params}
           label={label}
           variant="outlined"
-          inputProps={{
-            ...params.inputProps,
-            ...(inputAriaLabel ? { 'aria-label': inputAriaLabel } : {}),
+          slotProps={{
+            ...params.slotProps,
+            htmlInput: {
+              ...params.slotProps.htmlInput,
+              ...(inputAriaLabel ? { 'aria-label': inputAriaLabel } : {}),
+            },
           }}
         />
       )}

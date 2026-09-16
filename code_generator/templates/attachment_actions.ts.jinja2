@@ -4,9 +4,10 @@
 // in code_generator/json_schema.yaml; each contributes a branch below.
 'use server';
 
-import { revalidatePath } from 'next/cache';
-import prisma from '@/lib/prisma';
-import { requirePermission } from '@/lib/authz';
+{% if owners %}import { revalidatePath } from 'next/cache';
+{% endif %}import prisma from '@/lib/prisma';
+{% if owners %}import { requirePermission } from '@/lib/authz';
+{% endif %}
 import { encryptFileName } from '@/lib/compliance/attachment_name_crypto';
 
 export type AttachmentItemInput = {
@@ -54,7 +55,7 @@ function revalidateForBridge(attachable_id: string): Promise<void> {
 {% endfor %}
       },
     })
-    .then((row) => {
+    .then(({% if owners %}row{% else %}_row{% endif %}) => {
 {% for owner in owners %}
       if (row?.{{ owner.name }}) {
         revalidatePath(`/[locale]/{{ owner.name }}/view/${row.{{ owner.name }}.id}`, 'page');

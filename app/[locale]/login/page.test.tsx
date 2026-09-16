@@ -4,14 +4,19 @@ import { signIn } from "next-auth/react";
 import LoginPage from "./page";
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
-// Mock @/i18n/navigation (replaces next/navigation in this component)
-const mockPush = vi.fn();
-const mockRefresh = vi.fn();
+// Mock @/i18n/navigation (used for the "no account? register" Link only —
+// post-login navigation uses a plain window.location assignment, see below)
 vi.mock("@/i18n/navigation", () => ({
-  useRouter: vi.fn(() => ({ push: mockPush, refresh: mockRefresh })),
   Link: ({ children, href }: { children: React.ReactNode; href: string }) => (
     <a href={href}>{children}</a>
   ),
+}));
+
+// `redirect` query param read via next/navigation's useSearchParams —
+// mutable per-test through mockSearchParamsGet.
+const mockSearchParamsGet = vi.fn((_key: string) => null as string | null);
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => ({ get: mockSearchParamsGet }),
 }));
 
 // Mock next-intl — return English strings matching messages/en.json
@@ -36,13 +41,26 @@ vi.mock("next-auth/react", () => ({
 }));
 
 describe("LoginPage", () => {
+  const originalLocation = window.location;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSearchParamsGet.mockImplementation(() => null);
+    // jsdom's window.location isn't a writable stub by default (assigning
+    // .href throws "Not implemented: navigation"), so replace it with a
+    // plain object for the duration of each test to observe the assignment
+    // the same way a real browser would perform it.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (window as any).location;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).location = { href: "" };
   });
 
   afterEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).location = originalLocation;
   });
 
   it("should render the login form", () => {
@@ -106,8 +124,45 @@ describe("LoginPage", () => {
     });
 
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith("/");
-      expect(mockRefresh).toHaveBeenCalled();
+      expect(window.location.href).toBe("/");
+    });
+  });
+
+  it("should redirect back to the original destination after sign-in when ?redirect= is a safe same-site path", async () => {
+    mockSearchParamsGet.mockImplementation((key: string) =>
+      key === "redirect" ? "/en/dashboard" : null
+    );
+    const user = userEvent.setup();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (signIn as any).mockResolvedValueOnce({ error: null });
+
+    render(<LoginPage />);
+
+    await user.type(screen.getByRole("textbox", { name: /email/i }), "john@example.com");
+    await user.type(screen.getByTestId("password"), "password123");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => {
+      expect(window.location.href).toBe("/en/dashboard");
+    });
+  });
+
+  it("falls back to '/' when ?redirect= is an open-redirect attempt (off-site URL)", async () => {
+    mockSearchParamsGet.mockImplementation((key: string) =>
+      key === "redirect" ? "https://evil.com" : null
+    );
+    const user = userEvent.setup();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (signIn as any).mockResolvedValueOnce({ error: null });
+
+    render(<LoginPage />);
+
+    await user.type(screen.getByRole("textbox", { name: /email/i }), "john@example.com");
+    await user.type(screen.getByTestId("password"), "password123");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => {
+      expect(window.location.href).toBe("/");
     });
   });
 
@@ -140,6 +195,6 @@ describe("LoginPage", () => {
     });
 
     // Should not navigate
-    expect(mockPush).not.toHaveBeenCalled();
+    expect(window.location.href).toBe("");
   });
 });

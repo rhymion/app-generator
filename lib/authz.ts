@@ -4,6 +4,8 @@ import { auth } from '@/auth';
 import prisma from '@/lib/prisma';
 import { cache } from 'react';
 import { TtlLruCache } from '@/lib/_ttl_lru';
+import { SELF_ONLY_ADMIN_BYPASS_ENTITIES } from '@/lib/self_only_admin_bypass_entities';
+import { AppError } from '@/lib/_errors';
 
 export const getSessionUserId = cache(async function getSessionUserId(): Promise<string | null> {
   const session = await auth();
@@ -13,7 +15,7 @@ export const getSessionUserId = cache(async function getSessionUserId(): Promise
 export async function getSessionUserIdOrThrow(): Promise<string> {
   const userId = await getSessionUserId();
   if (!userId) {
-    throw new Error('User not authenticated');
+    throw new AppError('SESSION_EXPIRED', 'User not authenticated');
   }
   return userId;
 }
@@ -51,7 +53,6 @@ export type ItemContext = {
 } | null | undefined;
 
 const EMPTY_FLAGS: OperationFlags = { create: false, read: false, update: false, delete: false, import: false };
-const FULL_FLAGS: OperationFlags = { create: true, read: true, update: true, delete: true, import: true };
 const READ_ONLY_FLAGS: OperationFlags = { create: false, read: true, update: false, delete: false, import: false };
 const SPECIAL_ROLE_NAMES = ['Creator', 'Assignee'] as const;
 
@@ -205,6 +206,29 @@ export const getModelPermissions = cache(async (
   });
 
   if (rows.length === 0) {
+    // x-self-only entities with admin_bypass:true (cmd_536, e.g. `setting`) are
+    // deliberately excluded from ALL_ENTITIES-driven permission grants — there is
+    // nothing to "grant" for a self-service, per-user entity — so they never have
+    // an explicit permission row for anyone. Without this fallback, the
+    // privileged role's item-level bypass — trySelfOnlyAdminBypass(), which
+    // independently re-checks role membership and writes the audit row inside
+    // each entity's own getters — would never even be reached: this coarse
+    // operation-level check would deny first. Only a READ shortcut is granted
+    // (mirroring audit_log above) — there is no admin bypass on write for these
+    // entities. Checked only in the no-rows branch so it can never shadow a real
+    // grant (e.g. `dashboard`, an ordinary entity that IS in ALL_ENTITIES and can
+    // have full CRUD granted through the ordinary path above).
+    if (SELF_ONLY_ADMIN_BYPASS_ENTITIES.has(model)) {
+      const adminRoleCount = await prisma.role.count({
+        where: { name: 'Administrator', users: { some: { id: resolvedUserId } } },
+      });
+      if (adminRoleCount > 0) {
+        const adminPerms: RichPermissions = { ...READ_ONLY_FLAGS, general: READ_ONLY_FLAGS, creator: null, assignee: null };
+        const result = { permissions: adminPerms, userId: resolvedUserId };
+        if (permissionCacheEnabled) permissionCache.set(cacheKey, result);
+        return result;
+      }
+    }
     // Default: deny all if no explicit permissions
     const full = { ...EMPTY_FLAGS, general: { ...EMPTY_FLAGS }, creator: null, assignee: null };
     const result = { permissions: full, userId: resolvedUserId };
@@ -280,7 +304,7 @@ export async function requirePermission(
     ? await resolvePermissions(permissions, item, resolvedUserId)
     : permissions;
   if (!resolved[operation]) {
-    throw new Error(`Access denied: ${model}.${operation}`);
+    throw new AppError('PERMISSION_DENIED', `Access denied: ${model}.${operation}`);
   }
   return resolved;
 }

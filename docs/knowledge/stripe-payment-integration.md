@@ -1,0 +1,219 @@
+# Stripe payment integration — `x-payment` opt-in write-once stubs
+
+**Status: Implemented (generator side only)**
+**Date: 2026-08-16 (updated 2026-08-19: lazy Stripe client construction)**
+
+## Scope decision
+
+Payments are not a default-schema feature. The generator does not generate
+a `Plan`/`Product`/`Purchase`-style entity, an authz/entitlement layer, or
+any payment UI. It provides a "plug-in point" only: a schema key
+(`x-payment`) that, when declared on any entity, causes three write-once
+stub files to be emitted the first time `generate-code` runs — the same
+write-once convention already used for
+`lib/<parent>/invalidate_handler.ts` (see
+`invalidate-no-handler-write-once-stub.md`).
+
+This mirrors how `x-generate.invalidate` is a plug-in point rather than
+generated domain behavior: the generator makes the wiring exist and build
+correctly; a human fills in the business logic.
+
+Scope is one-time purchases only (Checkout Session `mode: payment`).
+Subscription lifecycle handling (`invoice.paid`,
+`customer.subscription.deleted`, `invoice.payment_failed`, the
+`subscription_item.billing_period.start/end` fields, `billing_mode:
+'standard'`) is left for a consumer to add by hand if needed — out of
+scope for the generator stub.
+
+## What `x-payment: true` generates
+
+Declaring `x-payment: true` on any entity in `json_schema.yaml` (see that
+file's own `x-payment` vocabulary block for the authoritative
+description) causes `generate.py` to write, once:
+
+- `lib/stripe.ts` — Stripe SDK initialization. Fail-closed: throws when the
+  client is first used (any `stripe.<method>(...)` call) if
+  `STRIPE_SECRET_KEY` is unset, so a payment code path can never run
+  silently half-configured. The client is constructed lazily behind a
+  `Proxy`, not at module evaluation time -- see the "Lazy construction
+  note" below for why.
+- `app/api/payment/checkout/route.ts` — Checkout Session creation stub
+  (`POST`, session-authenticated via `getSessionUserId()`). The
+  `price_id` / `line_items` are left as a `TODO` for the consumer to wire
+  to their own entity.
+- `app/api/webhooks/stripe/route.ts` — Webhook receiver stub. Verifies
+  the signature via `req.text()` → `stripe.webhooks.constructEvent(...)`
+  (Next.js App Router route handlers have no raw `req.body` the way
+  Express does under `express.raw()` — reading as text is required).
+  Fails closed the same way as `lib/stripe.ts` if
+  `STRIPE_WEBHOOK_SECRET` is unset -- checked inside the `POST` handler,
+  not at module top level (see "Lazy construction note" below). Only
+  `checkout.session.completed` is wired by default; the business logic
+  inside that case is a `TODO`.
+
+All three are written via `_write_stub()` (write-once): once a consumer
+edits them, regeneration never overwrites the edits.
+
+## Why entity-level, not a top-level schema flag
+
+`x-payment` lives in `_ENTITY_LEVEL_DATA_KEYS` in `build_user_schema.py`
+(Category C, alongside `x-reservation`/`x-splittable`/`x-self-only`) —
+copied onto the reconstructed raw entity during the Stage 4 raw/view
+split, same as those. It is a boolean read directly off an entity
+definition (`defn.get('x-payment') is True`), not something that changes
+what pages/routes get generated for that entity itself — the three stub
+files it triggers are global (one `lib/stripe.ts`, not one per entity),
+so `generate.py` scans **all** entity definitions once
+(`_has_any_payment = any(...)`) and emits the stubs if any entity opted
+in, mirroring the existing `_has_any_mention` scan for the mention-parser
+utilities.
+
+## Secrets
+
+`STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` / `STRIPE_WEBHOOK_SECRET`
+are documented as placeholders in `.env.example` (no values). Both
+`lib/stripe.ts` and the webhook route fail closed — an app with
+`x-payment` declared but no keys configured refuses to run those code
+paths rather than silently no-op-ing (the check now happens the first
+time the code path actually runs, not at process/module boot -- see
+"Lazy construction note" below). Test keys (`sk_test_...`) are
+obtained from the Stripe Dashboard; webhook secrets for local dev via
+`stripe listen --forward-to localhost:<port>/api/webhooks/stripe`.
+
+## Lazy construction note (updated 2026-08-19: module-top-level throw removed)
+
+`lib/stripe.ts`'s stub used to run its `STRIPE_SECRET_KEY` check and
+`new Stripe(...)` construction at module top level (outside any
+function), and the webhook route stub did the same for
+`STRIPE_WEBHOOK_SECRET`. This broke `next build` in any consumer that
+declared `x-payment: true`: Next.js's "Collecting page data" build step
+evaluates every route module regardless of which HTTP methods it
+exports, so importing `app/api/payment/checkout/route.ts` (a `POST`-only
+route) pulled in `lib/stripe.ts`, whose top-level `throw` fired during
+the build itself whenever `STRIPE_SECRET_KEY` was unset -- as it normally
+is on a Vercel Preview deploy, so every Preview build for a consumer with
+`x-payment` declared failed outright.
+
+The fix defers both checks to first use instead of import/module-eval
+time:
+
+- `lib/stripe.ts` exports `stripe` as a `Proxy` wrapping a lazily
+  constructed `Stripe` client -- the real client (and its
+  `STRIPE_SECRET_KEY` check) is only built on the first property access
+  (`stripe.checkout.sessions.create(...)`, `stripe.webhooks.constructEvent(...)`,
+  etc.), so `import { stripe } from '@/lib/stripe'` alone never throws.
+  Callers are unaffected -- `stripe.<anything>` still works exactly as
+  before.
+- The webhook route's `STRIPE_WEBHOOK_SECRET` check moved from module top
+  level into the body of `POST()`.
+
+Fail-closed behavior is unchanged in substance -- a request that actually
+tries to use Stripe without the required key still throws immediately,
+with the same error messages as before. Only the *timing* moved, from
+build/import time to request time.
+
+Verified by reproducing the failure first: temporarily declaring
+`x-payment: true` on an existing entity, running `generate-code`, then
+`env -u STRIPE_SECRET_KEY -u STRIPE_WEBHOOK_SECRET -u
+STRIPE_PUBLISHABLE_KEY npm run build` reproduced the exact
+`Failed to collect page data for /api/payment/checkout` failure this note
+describes; after the fix, the same command succeeds with both
+`/api/payment/checkout` and `/api/webhooks/stripe` re-appearing in the
+build output, and a separate manual check confirmed
+`stripe.checkout.sessions.create(...)` still throws
+`STRIPE_SECRET_KEY is not set...` when actually invoked with the key
+unset.
+
+## API version note (updated 2026-08-19: literal pin removed)
+
+`lib/stripe.ts`'s stub used to pin `apiVersion: '2025-03-31.basil'` as a
+hardcoded literal. This broke `next build` in any consumer that declared
+`x-payment: true`: the `stripe` npm package's own TypeScript type for
+`apiVersion` (`LatestApiVersion`) is a single fixed literal baked into
+whatever SDK version is actually installed, and it changes on every SDK
+bump -- including patch bumps within the same `^22.x` caret range, not
+just major-version jumps. A hardcoded literal in the stub inevitably goes
+stale against a moving type, with nothing catching it because this repo's
+own default schema never exercises `x-payment` (see Verification below).
+
+The fix removes the `apiVersion` field entirely rather than updating the
+literal to whatever is current today -- replacing one literal with a
+newer one is the same defect restated, not a fix. Confirmed via the
+installed SDK's own source (`stripe.core.js`): when `apiVersion` is
+omitted, the constructor falls back to `DEFAULT_API_VERSION`, the exact
+same SDK-baked-in value the type otherwise demands as a literal
+(`props.apiVersion || DEFAULT_API_VERSION`) -- so omitting the field is
+behaviorally identical to pinning the SDK's current version, minus the
+stale-literal hazard. If a consumer needs to pin an older API version on
+purpose (e.g. mid-migration), pass `apiVersion` explicitly in their own
+hand-edit of the write-once `lib/stripe.ts` stub -- this generator no
+longer does so by default.
+
+- `subscription.current_period_start/end` is deprecated → use
+  `subscription_item.billing_period.start/end` (irrelevant to the
+  one-time-only stub generated here, but relevant if a consumer extends
+  to subscriptions).
+- `billing_mode` default changed from `standard` to `flexible` — again,
+  only matters once subscriptions are added.
+- Checkout Session `mode: 'payment'`, `stripe.checkout.sessions.create()`
+  shape, and `stripe.webhooks.constructEvent()` are unchanged.
+
+## Verification
+
+`code_generator/tests/fixtures/payment_gate/` (`paid_widget` with
+`x-payment: true`, `plain_widget` without) run through the real
+`build_user_schema.py` → `generate.py` pipeline in
+`code_generator/tests/test_payment_gate_fixture.py`, asserting:
+
+- all three stub files are written when `x-payment: true` is declared
+- both stubs' fail-closed checks are present in the generated content
+- the webhook route's `STRIPE_WEBHOOK_SECRET` check is inside the `POST`
+  handler, not at module top level (regression guard for the module-eval
+  defect described in "Lazy construction note" above)
+- the exported `stripe` client is not constructed eagerly at module scope
+  (regression guard for the same defect)
+- a hand-edited `lib/stripe.ts` is not overwritten on a second run
+  (write-once)
+- no stub is written when no entity in the schema declares `x-payment`
+  (using `code_generator/tests/fixtures/invalidate_gate/`, which declares
+  no `x-payment` key anywhere, as the negative control)
+
+None of the fixture gates (`test:payment-gate` included) run an actual
+`next build` — they stop at `tsc --noEmit`, which cannot see the
+"Collecting page data" build step that surfaced the module-eval defect
+above (a full `next build` of even a minimal fixture app runs on the
+order of 30-60s, versus ~3s for the existing tsc-based check, and would
+need its own standalone Next.js app scaffold). The two pytest assertions
+listed above are a cheaper structural guard against the same defect class
+(a module-top-level throw reappearing in either stub) — chosen
+deliberately over adding `next build` to the fixture pipeline given that
+cost difference.
+
+That test proves the stubs are *written* -- it does not type-check them.
+`npm run test:payment-gate` (`scripts/check_payment_gate_fixture.sh`) runs
+the same `payment_gate` fixture through the full
+`build_user_schema.py` → `generate.py` → `tsc --noEmit` pipeline and
+type-checks the actual generated `lib/stripe.ts` / checkout route /
+webhook route content against whatever `stripe` SDK version is installed
+-- this is what catches an `apiVersion` literal going stale (see the API
+version note above) and any future change to the installed SDK's types
+that the stub content no longer satisfies. It is a required, unconditional
+CI job (`payment-gate-fixture`), same as the mention/decimal/OTO-mandatory/
+approval-lockdown gate fixtures.
+
+This repo's own `json_schema.yaml` declares no `x-payment` entity by
+default, so the stubs are never emitted by this repo's own
+`test:e2e:build`/`test:e2e:cy:api` gate runs — by design (opt-in, not a
+default-schema feature) -- `test:payment-gate` above exists specifically
+to cover that gap. The `stripe` npm package (originally added at `^22.5.0`,
+currently `^22.6.1` in `package.json` after subsequent dependency bumps) was
+added as a runtime dependency since `lib/stripe.ts` imports it unconditionally
+once written.
+
+## Deliberately out of scope for this task
+
+A sample payment-enabled entity in a real consuming application, and
+actual Stripe test-mode connection (webhook firing against a real test
+key), are blocked on real Stripe test keys being provisioned and are
+tracked as a separate follow-up task. This task verified only that the
+generator-side mechanism (schema key → write-once stubs) works correctly.

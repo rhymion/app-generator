@@ -23,7 +23,6 @@ export default function DateTimeWrapper({label, date_time, show_date = true, sho
       <LocalizationProvider dateAdapter={AdapterDayjs}>
         { show_date && !show_time && (
         <DatePicker
-          enableAccessibleFieldDOMStructure={false}
           label={label}
           value={date_time ? dayjs(date_time) : null}
           {...(readOnly ? { readOnly: true } : {})}
@@ -33,7 +32,6 @@ export default function DateTimeWrapper({label, date_time, show_date = true, sho
         }
         { show_date && show_time && (
         <DateTimePicker
-          enableAccessibleFieldDOMStructure={false}
           views={['year', 'month', 'day', 'hours', 'minutes']}
           label={label}
           value={date_time ? dayjs(date_time) : null}
@@ -44,7 +42,6 @@ export default function DateTimeWrapper({label, date_time, show_date = true, sho
         }
         { !show_date && show_time && (
         <TimePicker
-          enableAccessibleFieldDOMStructure={false}
           views={['hours', 'minutes']}
           label={label}
           value={date_time ? dayjs(date_time) : null}

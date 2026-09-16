@@ -9,6 +9,7 @@ from build_context import (
     _categorize_form_fields,
     _build_form_data_gets,
     get_uri_kind,
+    _normalized_value_expr,
 )
 
 
@@ -1165,6 +1166,626 @@ class TestImportKeySpecsAliasedFkLookup:
 
 
 # ---------------------------------------------------------------------------
+# Issue #525: a non-dotted (plain scalar) x-import-key column's nullable
+# status was previously hardcoded False regardless of the column's actual
+# schema type — unlike the dotted branch and import_field_specs, which both
+# compute it correctly for the same underlying column. An optional key
+# column's empty CSV cell therefore never matched an existing NULL (or a
+# legacy '') row on re-import, producing duplicate rows instead of an
+# update/no-op. Modeled on the real inventory_reservation entity
+# (item_id required, label optional) that first exposed the defect.
+# ---------------------------------------------------------------------------
+
+class TestImportKeySpecsNonDottedNullable:
+    def _specs_by_raw(self, label_type):
+        schema = {
+            "definitions": {
+                "inventory_reservation": {
+                    "type": "object",
+                    "required": ["id", "item_id"],
+                    "x-import-key": ["item_id", "label"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "item_id": {"type": "string"},
+                        "label": {"type": label_type},
+                    },
+                },
+            }
+        }
+        entity = {
+            "parent": "inventory_reservation", "model": "inventory_reservation",
+            "definition_key": "inventory_reservation", "children": [],
+            "generate_config": {
+                "list": True, "view": True, "new": True, "edit": True,
+                "delete": True, "api": True, "test": False, "fields": None,
+            },
+        }
+        ctx = build_context(entity, schema)
+        return {s["raw"]: s for s in ctx["import_key_specs"]}
+
+    def test_nullable_non_dotted_key_computed_true(self):
+        """A key column typed ['string', 'null'] must resolve fk_nullable=True
+        -- the previous hardcoded False is the actual root cause of issue #525's
+        duplicate-row defect (see subtask_1046a's report)."""
+        specs = self._specs_by_raw(["string", "null"])
+        assert specs["label"]["fk_nullable"] is True
+
+    def test_required_non_dotted_key_computed_false(self):
+        """Non-regression: a plain required 'string' key column stays False --
+        required-column matching behavior must not change (out of scope)."""
+        specs = self._specs_by_raw("string")
+        assert specs["label"]["fk_nullable"] is False
+
+    def test_non_dotted_required_key_alongside_nullable_key_unaffected(self):
+        """item_id (required, non-key-nullable) must keep its own correct
+        (False) value independent of label's nullability -- nullability is
+        computed per-column, not entity-wide."""
+        specs = self._specs_by_raw(["string", "null"])
+        assert specs["item_id"]["fk_nullable"] is False
+
+
+# ---------------------------------------------------------------------------
+# cmd_530: import_fk_specs generalizes dotted-FK CSV-import resolution from
+# "x-import-key entries only" to "every screen-editable, simple-labelField
+# FK relation" — closing the gap where a FK visible+editable on screen (e.g.
+# proj_c's approval_flow.requestor_role) had zero import write path just
+# because it wasn't declared as part of x-import-key (筋2). Modeled directly
+# on proj_b's own (real) approval_flow entity: entity_name is the plain key,
+# approver_role is a required dotted-FK, requestor_role is an optional
+# screen-editable dotted-FK absent from x-import-key.
+# ---------------------------------------------------------------------------
+
+class TestImportFkSpecsScreenEditableGeneralization:
+    def _schema(self, import_key=("entity_name", "approver_role.name")):
+        return {
+            "definitions": {
+                "role": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+                },
+                "flow": {
+                    "type": "object",
+                    "required": ["id", "entity_name", "approver_role_id"],
+                    "x-import-key": list(import_key),
+                    "x-readonly-fields": ["readonly_role_id"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "entity_name": {"type": "string"},
+                        "approver_role_id": _fk_field("role", label="name"),
+                        "requestor_role_id": _fk_field("role", nullable=True, label="name"),
+                        "readonly_role_id": _fk_field("role", nullable=True, label="name"),
+                        "composite_role_id": _fk_field("role", nullable=True, label=["name", "id"]),
+                    },
+                },
+            }
+        }
+
+    def _entity(self):
+        return {
+            "parent": "flow", "model": "flow", "definition_key": "flow",
+            "children": [],
+            "generate_config": {
+                "list": True, "view": True, "new": True, "edit": True,
+                "delete": True, "api": True, "test": False, "fields": None,
+            },
+        }
+
+    def _specs_by_result_col(self, ctx):
+        return {s["result_col"]: s for s in ctx["import_fk_specs"]}
+
+    def test_key_fk_marked_is_key(self):
+        ctx = build_context(self._entity(), self._schema())
+        specs = self._specs_by_result_col(ctx)
+        assert specs["approver_role_id"]["is_key"] is True
+
+    def test_non_key_screen_editable_fk_now_importable(self):
+        ctx = build_context(self._entity(), self._schema())
+        specs = self._specs_by_result_col(ctx)
+        assert "requestor_role_id" in specs, (
+            "requestor_role is screen-editable (visible, not readonly) with a "
+            "simple labelField — it must gain an import write path even "
+            "though it's absent from x-import-key (筋2 fix)"
+        )
+        assert specs["requestor_role_id"]["is_key"] is False
+        assert specs["requestor_role_id"]["lookup_entity"] == "role"
+        assert specs["requestor_role_id"]["lookup_field"] == "name"
+        assert specs["requestor_role_id"]["fk_nullable"] is True
+
+    def test_readonly_fk_excluded_from_import_fk_specs(self):
+        ctx = build_context(self._entity(), self._schema())
+        specs = self._specs_by_result_col(ctx)
+        assert "readonly_role_id" not in specs, (
+            "x-readonly-fields marks this FK non-editable on screen — it "
+            "must NOT gain a write path just because it's exported"
+        )
+
+    def test_composite_labelfield_fk_importable_via_full_label_match(self):
+        """cmd_548: a composite/dotted labelField has no single
+        lookup field, but it IS import-resolvable by matching the whole
+        rendered label text against a pre-built label→id map — see
+        the earlier design + is_composite/import_label_expr/prisma_include
+        below."""
+        ctx = build_context(self._entity(), self._schema())
+        specs = self._specs_by_result_col(ctx)
+        assert "composite_role_id" in specs
+        spec = specs["composite_role_id"]
+        assert spec["is_composite"] is True
+        assert spec["is_dotted"] is False
+        assert spec["is_key"] is False
+        assert spec["csv_col"] == "composite_role_name"
+        assert spec["import_label_expr"], "candidate-rooted label expression must be present"
+        assert spec["lookup_entity"] == "role"
+        assert isinstance(spec["prisma_include"], dict)
+
+    def test_composite_labelfield_import_label_expr_rooted_at_candidate_var(self):
+        """The import-side expression must be rooted at the candidate row
+        variable ('c', matching the generated map-building loop var), NOT at
+        'row.<relation>' like the export label_expr — they read the same
+        underlying value through the identical helper/inputs, only the root
+        variable differs (cmd_548 あ: export/import symmetry)."""
+        ctx = build_context(self._entity(), self._schema())
+        specs = self._specs_by_result_col(ctx)
+        spec = specs["composite_role_id"]
+        assert "c." in spec["import_label_expr"] or "c?." in spec["import_label_expr"]
+        assert "row." not in spec["import_label_expr"]
+
+    def test_unimportable_columns_lists_only_readonly_display_cols(self):
+        """readonly stays unimportable; composite is now importable (cmd_548)
+        so it must NOT appear in import_unimportable_columns any more."""
+        ctx = build_context(self._entity(), self._schema())
+        assert "readonly_role_name" in ctx["import_unimportable_columns"]
+        assert "composite_role_name" not in ctx["import_unimportable_columns"]
+        assert "requestor_role_name" not in ctx["import_unimportable_columns"]
+        assert "approver_role_name" not in ctx["import_unimportable_columns"]
+
+    def test_required_non_key_fk_makes_create_feasible(self):
+        """筋2 companion: a REQUIRED FK that's screen-editable but not in
+        x-import-key used to make CREATE entirely infeasible (proj_b's own
+        pre-fix approval_flow: approver_role required + absent from
+        x-import-key -> import_can_create False, every CSV-import row hit
+        ENTITY_IMPORT_CREATE_NOT_SUPPORTED)."""
+        schema = self._schema(import_key=("entity_name",))
+        ctx = build_context(self._entity(), schema)
+        specs = self._specs_by_result_col(ctx)
+        assert specs["approver_role_id"]["is_key"] is False
+        assert ctx["import_can_create"] is True, (
+            "approver_role_id is required but now resolvable via the "
+            "generalized import_fk_specs (screen-editable, simple label) "
+            "even though it's not part of x-import-key"
+        )
+
+
+# ---------------------------------------------------------------------------
+# cmd_521: dotted x-import-key lookup entities must be org-filtered when the
+# LOOKUP entity itself has organization_id — independently of whether the
+# lookup entity happens to also be the discriminant used for the PARENT
+# model (should_filter_by_org). A dotted key into a system-global entity
+# (e.g. role, no organization_id) must NOT be filtered, or every dotted
+# lookup against it breaks (cmd_515's original gap + the trap it left).
+# ---------------------------------------------------------------------------
+
+class TestImportKeySpecsLookupEntityFilterByOrg:
+    SCHEMA = {
+        "definitions": {
+            "organization": {
+                "type": "object",
+                "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+            },
+            "role": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+            },
+            "department": {
+                "type": "object",
+                "required": ["id", "name", "organization_id"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "name": {"type": "string"},
+                    "organization_id": _fk_field("organization", label="name"),
+                },
+            },
+            # cmd_964 (Issue #88): org-scoped, but its own organization_id is
+            # OPTIONAL — an org-less "supplier" row is legitimate (matches
+            # inventory-app's real supplier/purchase_order/item shape). This
+            # is the case api_import_route.ts.jinja2's dotted-FK lookup
+            # (line ~213) used to miss: `organization_id: { in: ids } }`
+            # never matches NULL, so an org-less supplier row was
+            # unreachable via a dotted x-import-key against it.
+            "supplier": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "name": {"type": "string"},
+                    "organization_id": _fk_field("organization", nullable=True, label="name"),
+                },
+            },
+            "ticket": {
+                "type": "object",
+                "required": ["id", "name", "organization_id"],
+                "x-import-key": ["name", "role.name", "department.name", "supplier.name"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "name": {"type": "string"},
+                    "organization_id": _fk_field("organization", label="name"),
+                    "role_id": _fk_field("role", nullable=True, label="name"),
+                    "department_id": _fk_field("department", nullable=True, label="name"),
+                    "supplier_id": _fk_field("supplier", nullable=True, label="name"),
+                },
+            },
+        }
+    }
+
+    ENTITY = _entity(model="ticket")
+
+    def _specs_by_raw(self):
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        return {s["raw"]: s for s in ctx["import_key_specs"] if s["is_dotted"]}
+
+    def test_org_scoped_lookup_entity_is_filtered(self):
+        """department has organization_id → its dotted lookup must be
+        org-scoped, or a cross-org natural-key collision resolves to a
+        foreign-org row (the cmd_521 leak)."""
+        specs = self._specs_by_raw()
+        assert specs["department.name"]["lookup_entity_filter_by_org"] is True
+
+    def test_system_global_lookup_entity_is_not_filtered(self):
+        """role has no organization_id → filtering it would return zero
+        rows for every dotted role.* lookup (the trap cmd_521's design
+        doc calls out — role is legitimately visible org-wide)."""
+        specs = self._specs_by_raw()
+        assert specs["role.name"]["lookup_entity_filter_by_org"] is False
+
+    def test_org_required_lookup_entity_is_not_marked_optional(self):
+        """department's own organization_id is required (non-nullable) →
+        the OR-null branch must not fire (harmless no-op case, cmd_964)."""
+        specs = self._specs_by_raw()
+        assert specs["department.name"]["lookup_entity_org_relationship_optional"] is False
+
+    def test_org_optional_lookup_entity_is_marked_optional(self):
+        """cmd_964 (Issue #88): supplier's own organization_id is nullable →
+        the dotted lookup must admit NULL rows too, or an org-less supplier
+        can never be re-matched by CSV import."""
+        specs = self._specs_by_raw()
+        assert specs["supplier.name"]["lookup_entity_filter_by_org"] is True
+        assert specs["supplier.name"]["lookup_entity_org_relationship_optional"] is True
+
+    def test_org_optional_lookup_entity_renders_or_null_where_clause(self):
+        """The rendered template must actually emit the OR-null form for the
+        org-optional lookup entity, not just carry the flag unused."""
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        from generate import _make_env
+        rendered = _make_env().get_template('api_import_route.ts.jinja2').render(**ctx)
+        assert (
+            "where: { name: _supplier_csv_val, OR: [{ organization_id: { in: _importOrgIds } }, "
+            "{ organization_id: null }] }" in rendered
+        )
+        # department (org-required) keeps the plain form, unchanged.
+        assert "where: { name: _department_csv_val, organization_id: { in: _importOrgIds } }" in rendered
+
+    def test_any_dotted_fk_needs_org_filter_true_when_any_spec_needs_it(self):
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        assert ctx["any_dotted_fk_needs_org_filter"] is True
+
+    def test_any_dotted_fk_needs_org_filter_false_when_no_lookup_entity_is_org_scoped(self):
+        """Non-regression: a parent with only system-global dotted lookups
+        (no org-scoped lookup entity in the mix) must not gain the
+        _importOrgIds computation/import at all."""
+        schema = {
+            "definitions": {
+                "role": self.SCHEMA["definitions"]["role"],
+                "permission": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "x-import-key": ["name", "role.name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "role_id": _fk_field("role", nullable=True, label="name"),
+                    },
+                },
+            }
+        }
+        ctx = build_context(_entity(model="permission"), schema)
+        assert ctx["any_dotted_fk_needs_org_filter"] is False
+
+    def test_any_dotted_fk_needs_org_filter_true_for_non_key_fk_too(self):
+        """cmd_530 P-3: import_fk_specs generalizes org-filter detection
+        beyond x-import-key — a screen-editable NON-key FK into an
+        org-scoped lookup entity must also trigger
+        any_dotted_fk_needs_org_filter (and carry the same organization_id
+        filter into its own resolution code), or cmd_521's org-isolation
+        fix would only cover key FKs, silently reopening the cross-org leak
+        for any non-key dotted FK newly made importable by this task."""
+        schema = {
+            "definitions": {
+                "organization": self.SCHEMA["definitions"]["organization"],
+                "department": self.SCHEMA["definitions"]["department"],
+                "ticket": {
+                    "type": "object",
+                    "required": ["id", "name", "organization_id"],
+                    "x-import-key": ["name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "organization_id": _fk_field("organization", label="name"),
+                        "department_id": _fk_field("department", nullable=True, label="name"),
+                    },
+                },
+            }
+        }
+        ctx = build_context(_entity(model="ticket"), schema)
+        specs = {s["result_col"]: s for s in ctx["import_fk_specs"]}
+        assert specs["department_id"]["is_key"] is False
+        assert specs["department_id"]["lookup_entity_filter_by_org"] is True
+        assert ctx["any_dotted_fk_needs_org_filter"] is True
+
+    def test_organization_and_user_lookup_targets_are_excluded_even_with_organization_id(self):
+        """Same exclusion list as should_filter_by_org (cmd_515): a dotted
+        key that resolves to 'organization' or 'user' is never filtered by
+        this mechanism, even though both models plausibly have an id an
+        org-filter could apply to — filtering 'organization' rows by
+        organization_id would be nonsensical (self-referential), and
+        'user' membership works differently (org roster, not row-owned)."""
+        schema = {
+            "definitions": {
+                # Both 'organization' and 'user' are given their own
+                # organization_id property here (semantically odd, but
+                # deliberate) so this test isolates the name-based exclusion
+                # itself — proving it fires independently of the has_org_id
+                # check, not merely because these two happen to lack the
+                # column in a more realistic schema.
+                "organization": {
+                    "type": "object",
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "organization_id": _fk_field("organization", nullable=True, label="name"),
+                    },
+                },
+                "user": {
+                    "type": "object",
+                    "required": ["id", "name", "organization_id"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "organization_id": _fk_field("organization", label="name"),
+                    },
+                },
+                "ticket": {
+                    "type": "object",
+                    "required": ["id", "name", "organization_id"],
+                    "x-import-key": ["name", "organization.name", "user.name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "organization_id": _fk_field("organization", label="name"),
+                        "user_id": _fk_field("user", nullable=True, label="name"),
+                    },
+                },
+            }
+        }
+        ctx = build_context(_entity(model="ticket"), schema)
+        specs = {s["raw"]: s for s in ctx["import_key_specs"] if s["is_dotted"]}
+        assert specs["organization.name"]["lookup_entity_filter_by_org"] is False
+        assert specs["user.name"]["lookup_entity_filter_by_org"] is False
+
+
+# ---------------------------------------------------------------------------
+# cmd_548 (per the earlier design, option ko): composite/dotted labelField FKs
+# become importable via full-label-text matching. Org isolation must apply
+# to the composite candidate-row map exactly like it does to the simple
+# dotted-FK lookup above — an org-scoped lookup entity must be filtered, a
+# system-global one must not.
+# ---------------------------------------------------------------------------
+
+class TestCompositeLabelFieldImportOrgFilter:
+    SCHEMA = {
+        "definitions": {
+            "organization": {
+                "type": "object",
+                "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+            },
+            "product": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+            },
+            "location": {
+                "type": "object",
+                "required": ["id", "name", "organization_id"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "name": {"type": "string"},
+                    "organization_id": _fk_field("organization", label="name"),
+                },
+            },
+            "inventory": {
+                "type": "object",
+                "required": ["id", "product_id", "location_id", "organization_id"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "product_id": _fk_field("product", label="name"),
+                    "location_id": _fk_field("location", label="name"),
+                    "organization_id": _fk_field("organization", label="name"),
+                },
+            },
+            "inventory_movement": {
+                "type": "object",
+                "required": ["id", "name", "organization_id"],
+                "x-import-key": ["name"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "name": {"type": "string"},
+                    "organization_id": _fk_field("organization", label="name"),
+                    "from_inventory_id": _fk_field(
+                        "inventory", nullable=True, label=["product.name", "location.name"],
+                    ),
+                },
+            },
+        }
+    }
+
+    ENTITY = _entity(model="inventory_movement")
+
+    def _spec(self):
+        ctx = build_context(self.ENTITY, self.SCHEMA)
+        specs = {s["result_col"]: s for s in ctx["import_fk_specs"]}
+        return ctx, specs["from_inventory_id"]
+
+    def test_composite_fk_marked_is_composite(self):
+        _, spec = self._spec()
+        assert spec["is_composite"] is True
+        assert spec["csv_col"] == "from_inventory_name"
+
+    def test_composite_fk_lookup_entity_with_org_id_is_filtered(self):
+        """inventory has organization_id -> the pre-built candidate map must
+        be org-scoped, or a cross-org row's label could resolve the FK
+        (the organization boundary failure mode cmd_548 guards against)."""
+        _, spec = self._spec()
+        assert spec["lookup_entity_filter_by_org"] is True
+
+    def test_composite_fk_pulls_in_any_dotted_fk_needs_org_filter(self):
+        ctx, _ = self._spec()
+        assert ctx["any_dotted_fk_needs_org_filter"] is True
+
+    def test_composite_fk_prisma_include_covers_nested_relations(self):
+        """The candidate-row query needs product+location included to
+        compute the label — this is the same prisma_include the export
+        side already resolves via the identical helper call."""
+        _, spec = self._spec()
+        assert spec["prisma_include"].get("product") is True
+        assert spec["prisma_include"].get("location") is True
+
+    def test_composite_fk_not_in_unimportable_columns(self):
+        ctx, _ = self._spec()
+        assert "from_inventory_name" not in ctx["import_unimportable_columns"]
+
+    def test_system_global_lookup_entity_composite_fk_not_org_filtered(self):
+        """A composite-label FK into a system-global entity (no
+        organization_id) must NOT be org-filtered — filtering it would
+        return zero candidates for every row (same trap as cmd_521's
+        dotted-FK case, generalized to the composite map)."""
+        schema = {
+            "definitions": {
+                "permission_a": {
+                    "type": "object",
+                    "required": ["id", "code"],
+                    "properties": {"id": _base_props()["id"], "code": {"type": "string"}},
+                },
+                "permission_b": {
+                    "type": "object",
+                    "required": ["id", "code"],
+                    "properties": {"id": _base_props()["id"], "code": {"type": "string"}},
+                },
+                "role_bundle": {
+                    "type": "object",
+                    "required": ["id", "code"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "code": {"type": "string"},
+                        "permission_a_id": _fk_field("permission_a", label="code"),
+                        "permission_b_id": _fk_field("permission_b", label="code"),
+                    },
+                },
+                "grant": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "x-import-key": ["name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "role_bundle_id": _fk_field(
+                            "role_bundle", nullable=True,
+                            label=["permission_a.code", "permission_b.code"],
+                        ),
+                    },
+                },
+            }
+        }
+        ctx = build_context(_entity(model="grant"), schema)
+        specs = {s["result_col"]: s for s in ctx["import_fk_specs"]}
+        assert specs["role_bundle_id"]["is_composite"] is True
+        assert specs["role_bundle_id"]["lookup_entity_filter_by_org"] is False
+
+
+# ---------------------------------------------------------------------------
+# cmd_621: a composite labelField whose path includes a date/time-formatted
+# segment must flow has_format=True end to end — from build_label_expression()
+# through x_relationships_list['import_has_format'], into the composite
+# import_fk_specs entry's 'has_format', and up to the route-level
+# import_uses_format_label_value flag consumed by api_import_route.ts.jinja2
+# (see test_import_template_branches.py for the template-side half of this
+# guard). Mirrors the real-world break: proj_g goods_receipt_line's labelField
+# is [product.code, lot_number, expiration_date] where expiration_date is
+# `type: string, format: date` — its generated import route referenced
+# formatLabelValue with no import (PR#16, "Cannot find name 'formatLabelValue'").
+# ---------------------------------------------------------------------------
+
+class TestCompositeLabelFieldImportUsesFormatLabelValue:
+    SCHEMA = {
+        "definitions": {
+            "product": {
+                "type": "object",
+                "required": ["id", "code"],
+                "properties": {"id": _base_props()["id"], "code": {"type": "string"}},
+            },
+            "goods_receipt_line": {
+                "type": "object",
+                "required": ["id", "name", "expiration_date"],
+                "x-import-key": ["name"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "name": {"type": "string"},
+                    "lot_number": {"type": "string"},
+                    "expiration_date": {"type": "string", "format": "date"},
+                    "product_id": _fk_field("product", label="code"),
+                },
+            },
+            "purchase_order_line": {
+                "type": "object",
+                "required": ["id", "name"],
+                "x-import-key": ["name"],
+                "properties": {
+                    "id": _base_props()["id"],
+                    "name": {"type": "string"},
+                    "goods_receipt_line_id": _fk_field(
+                        "goods_receipt_line", nullable=True,
+                        label=["product.code", "lot_number", "expiration_date"],
+                    ),
+                },
+            },
+        }
+    }
+
+    def _ctx(self):
+        return build_context(_entity(model="purchase_order_line"), self.SCHEMA)
+
+    def test_composite_spec_with_date_segment_marked_has_format(self):
+        ctx = self._ctx()
+        specs = {s["result_col"]: s for s in ctx["import_fk_specs"]}
+        spec = specs["goods_receipt_line_id"]
+        assert spec["is_composite"] is True
+        assert spec["has_format"] is True
+
+    def test_route_level_flag_set_when_any_composite_spec_has_format(self):
+        ctx = self._ctx()
+        assert ctx["import_uses_format_label_value"] is True
+
+    def test_route_level_flag_false_when_no_composite_spec_needs_it(self):
+        """Non-regression companion: TestCompositeLabelFieldImportOrgFilter's
+        inventory_movement fixture (composite labelField, no date segment)
+        must NOT set the route-level flag."""
+        ctx = build_context(
+            _entity(model="inventory_movement"),
+            TestCompositeLabelFieldImportOrgFilter.SCHEMA,
+        )
+        assert ctx["import_uses_format_label_value"] is False
+
+
+# ---------------------------------------------------------------------------
 # DP-2 (cmd_394 §5, Option D): export display_col names the actual labelField
 # instead of always assuming "_name". Zero-breaking-change on any schema where
 # every FK labelField happens to be 'name' (true of every currently
@@ -1364,16 +1985,32 @@ class TestDP1cVisibleSourceOnlyCreateFeasibility:
 
 
 # ---------------------------------------------------------------------------
-# cmd_421 Batch3: CSV import of an entity with a required internal bridge FK
-# (raised previously for inventory_movement's approvable_id — DP-B "確認"
-# item). No entity-specific handling exists anywhere in build_context.py for
-# this; the same generic _create_feasible gap-check (required field not in
-# export_scalar_fields and not import-resolvable) already excludes bridge FKs
-# because get_internal_bridge_fk_prop_names() is unioned into the export
-# exclusion set. This test proves that generic mechanism actually produces
-# the correct, safe outcome for import (CREATE gated off, UPDATE still
-# available) rather than a broken route or a 500 at runtime — it is
-# structural verification, not new behavior.
+# cmd_421 Batch3 (corrected by cmd_609): CSV import of an entity with a
+# required internal bridge FK (raised previously for inventory_movement's
+# approvable_id — DP-B "to confirm" item).
+#
+# cmd_421's original comment here claimed get_internal_bridge_fk_prop_names()
+# was already unioned into _create_feasible's gap-check, making CREATE
+# correctly infeasible "structural verification, not new behavior". That
+# claim was wrong: get_internal_bridge_fk_prop_names() was (and, for the
+# export-column allowlist, still is) unioned only into the *export*
+# exclusion set (_fk_prop_names, used to build export_scalar_fields) —
+# _create_feasible's own gap-check never called it, so a required bridge FK
+# was excluded from export_scalar_fields (correctly — it must never appear
+# as a CSV column) but then NOT removed from the required-fields gap set,
+# since subtracting export_scalar_fields only removes names that ARE in it.
+# The net (undetected, since this test's own assertion baked the bug in as
+# "expected") result was import_can_create=False for every entity with a
+# required bridge FK — and when combined with edit:false (import_can_update
+# also False), the entire import route collapsed to the
+# ENTITY_IMPORT_NOT_SUPPORTED 400 stub (api_import_route.ts.jinja2:24), even
+# though CREATE is genuinely fine: the service layer creates and wires the
+# bridge row itself, it was never meant to come from the CSV.
+#
+# cmd_609 fixes this: _create_feasible now also subtracts
+# get_internal_bridge_fk_prop_names(model_def, schema) directly, so a
+# required bridge FK no longer counts as an unfillable gap. CREATE is
+# feasible; this test now asserts the corrected (True) outcome.
 # ---------------------------------------------------------------------------
 
 class TestRequiredInternalBridgeFkImportFeasibility:
@@ -1424,19 +2061,39 @@ class TestRequiredInternalBridgeFkImportFeasibility:
         assert "approvable_id" not in ctx["export_scalar_fields"]
         assert all(spec["name"] != "approvable_id" for spec in ctx["import_field_specs"])
 
-    def test_required_bridge_fk_gates_off_create_but_not_update(self):
+    def test_required_bridge_fk_does_not_gate_off_create(self):
         schema = self._schema()
         ctx = build_context(self._entity(), schema)
         assert ctx["import_eligible"] is True
-        assert ctx["import_can_create"] is False, (
-            "approvable_id is required but has no visible CSV source (bridge "
-            "FK) — CREATE must be infeasible, matching the generic "
-            "_create_feasible gap-check, not a broken/500-producing route"
+        assert ctx["import_can_create"] is True, (
+            "approvable_id is required but is server-managed plumbing (the "
+            "service layer creates and wires it at CREATE time) — a required "
+            "internal bridge FK must NOT count as an unfillable gap, or "
+            "CREATE is wrongly gated off (cmd_609)"
         )
         assert ctx["import_can_update"] is True, (
-            "UPDATE never needs to supply approvable_id, so it stays "
-            "available even though CREATE is gated off"
+            "UPDATE never needs to supply approvable_id either, so it stays "
+            "available"
         )
+
+    def test_required_bridge_fk_plus_edit_false_does_not_collapse_route(self):
+        """The specific compound failure cmd_609 fixes: x-generate.edit=false
+        (import_can_update=False structurally) combined with the pre-fix
+        _create_feasible bug (import_can_create wrongly False) made
+        api_import_route.ts.jinja2:24's `{% if not import_can_create and not
+        import_can_update %}` collapse the entire route to the
+        ENTITY_IMPORT_NOT_SUPPORTED 400 stub. With the fix, import_can_create
+        is True even though edit is false, so the route stays live."""
+        schema = self._schema()
+        entity = self._entity()
+        entity["generate_config"]["edit"] = False
+        ctx = build_context(entity, schema)
+        assert ctx["import_can_update"] is False
+        assert ctx["import_can_create"] is True
+        route_collapses_to_400_stub = (
+            not ctx["import_can_create"] and not ctx["import_can_update"]
+        )
+        assert route_collapses_to_400_stub is False
 
 
 class TestFormDataGetsPrismaNativeEnum:
@@ -1500,3 +2157,510 @@ class TestDefaultPropsPrismaNativeEnum:
     def test_plain_string_field_default_is_empty_string(self):
         ctx = build_context(_entity("widget"), self._schema({"type": "string"}))
         assert "status: '',"  in ctx["parent_default_props"]
+
+
+class TestSelfOnlyContextFlags:
+    """cmd_536: is_self_only / self_only_admin_bypass, as seen by templates
+    via build_context()'s actual output — not just the schema_helpers
+    function in isolation. The shorthand form's admin_bypass must default
+    to False (the loose/permissive direction is never the implicit
+    default) — verified end-to-end through build_context(), matching what
+    getters.ts.jinja2 etc. actually receive."""
+
+    def _schema(self, x_self_only) -> dict:
+        defs = {
+            "widget": {
+                "type": "object",
+                "required": ["id", "name"],
+                "properties": {**_base_props(), "creator_id": {"type": "string"}},
+            },
+        }
+        if x_self_only is not None:
+            defs["widget"]["x-self-only"] = x_self_only
+        return {"definitions": defs}
+
+    def test_no_x_self_only_both_flags_false(self):
+        ctx = build_context(_entity("widget"), self._schema(None))
+        assert ctx["is_self_only"] is False
+        assert ctx["self_only_admin_bypass"] is False
+
+    def test_shorthand_true_is_self_only_but_admin_bypass_defaults_false(self):
+        ctx = build_context(_entity("widget"), self._schema(True))
+        assert ctx["is_self_only"] is True
+        assert ctx["self_only_admin_bypass"] is False
+
+    def test_dict_form_without_admin_bypass_key_defaults_false(self):
+        ctx = build_context(_entity("widget"), self._schema({}))
+        assert ctx["is_self_only"] is True
+        assert ctx["self_only_admin_bypass"] is False
+
+    def test_dict_form_admin_bypass_true_is_honored(self):
+        ctx = build_context(_entity("widget"), self._schema({"admin_bypass": True}))
+        assert ctx["is_self_only"] is True
+        assert ctx["self_only_admin_bypass"] is True
+
+    def test_dict_form_admin_bypass_false_explicit(self):
+        ctx = build_context(_entity("widget"), self._schema({"admin_bypass": False}))
+        assert ctx["is_self_only"] is True
+        assert ctx["self_only_admin_bypass"] is False
+
+
+# ---------------------------------------------------------------------------
+# cmd_611/612: org_relationship_optional. An org-scoped model whose own
+# `organization` relationship is OPTIONAL needs its read-scope filters to
+# admit NULL rows too — `organization_id: { in: [...] }` never matches NULL
+# in SQL, so without this an org-less row becomes invisible to every
+# org-scoped actor, including its own creator, the moment organization
+# stops being required. A required-org model must NOT get this OR-null
+# branch (it would be meaningless dead code — organization_id is never null
+# there).
+# ---------------------------------------------------------------------------
+
+class TestOrgRelationshipOptional:
+    @staticmethod
+    def _schema(organization_required: bool) -> dict:
+        return {
+            "definitions": {
+                "organization": {
+                    "type": "object",
+                    "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+                },
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "name"] + (["organization_id"] if organization_required else []),
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "organization_id": _fk_field("organization", nullable=not organization_required),
+                    },
+                },
+            }
+        }
+
+    def test_flag_true_when_organization_optional(self):
+        ctx = build_context(_entity("widget"), self._schema(organization_required=False))
+        assert ctx["should_filter_by_org"] is True
+        assert ctx["org_relationship_optional"] is True
+
+    def test_flag_false_when_organization_required(self):
+        ctx = build_context(_entity("widget"), self._schema(organization_required=True))
+        assert ctx["should_filter_by_org"] is True
+        assert ctx["org_relationship_optional"] is False
+
+    def test_flag_false_when_no_organization_relationship_at_all(self):
+        schema = {
+            "definitions": {
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+                },
+            }
+        }
+        ctx = build_context(_entity("widget"), schema)
+        assert ctx["should_filter_by_org"] is False
+        assert ctx["org_relationship_optional"] is False
+
+
+class TestOrgRelationshipOptionalRenderedTemplates:
+    """Deviation-injection coverage for the four templates patched to admit
+    NULL-organization rows: getters.ts.jinja2 (list + detail),
+    actions.ts.jinja2 (delete), api_detail_route.ts.jinja2 (PUT + DELETE),
+    api_import_route.ts.jinja2 (import match-by-key)."""
+
+    @staticmethod
+    def _entity_ctx(organization_required: bool):
+        schema = TestOrgRelationshipOptional._schema(organization_required)
+        return build_context(_entity("widget"), schema)
+
+    @staticmethod
+    def _env():
+        from generate import _make_env
+        return _make_env()
+
+    def test_getters_list_admits_null_when_optional(self):
+        from generators import service_context
+        ctx = self._entity_ctx(organization_required=False)
+        full_ctx = {**ctx, **service_context(ctx, TestOrgRelationshipOptional._schema(False))}
+        rendered = self._env().get_template('getters.ts.jinja2').render(**full_ctx)
+        assert 'OR: [{ organization_id: { in: associatedOrganizationIds } }, { organization_id: null }]' in rendered
+
+    def test_getters_list_stays_unfiltered_or_when_required(self):
+        from generators import service_context
+        ctx = self._entity_ctx(organization_required=True)
+        full_ctx = {**ctx, **service_context(ctx, TestOrgRelationshipOptional._schema(True))}
+        rendered = self._env().get_template('getters.ts.jinja2').render(**full_ctx)
+        assert 'and.push({ organization_id: { in: associatedOrganizationIds } });' in rendered
+        assert 'organization_id: null' not in rendered
+
+    def test_api_detail_route_admits_null_when_optional(self):
+        ctx = self._entity_ctx(organization_required=False)
+        rendered = self._env().get_template('api_detail_route.ts.jinja2').render(**ctx)
+        assert rendered.count('OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }]') == 2
+
+    def test_api_detail_route_stays_unfiltered_or_when_required(self):
+        ctx = self._entity_ctx(organization_required=True)
+        rendered = self._env().get_template('api_detail_route.ts.jinja2').render(**ctx)
+        assert 'organization_id: null' not in rendered
+
+
+class TestOrgRelationshipOptionalAndScopingWithSelfOnly:
+    """The org-null OR clause must stay scoped INSIDE the org condition --
+    combined with a sibling creator_id/self-only restriction via AND, never
+    flattened so the OR swallows the whole where clause and silently
+    disables the creator/assignee scoping. Uses x-self-only (unconditional
+    creator_id restriction, no permission setting can widen it) as the
+    sharpest available probe: if the OR ever leaked out to cover the whole
+    where object, this is the combination most likely to visibly break
+    (every row would become reachable regardless of ownership)."""
+
+    @staticmethod
+    def _schema() -> dict:
+        return {
+            "definitions": {
+                "organization": {
+                    "type": "object",
+                    "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+                },
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "x-self-only": True,
+                    "x-import-key": ["name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "creator_id": {"type": "string"},
+                        "organization_id": _fk_field("organization", nullable=True),
+                    },
+                },
+            }
+        }
+
+    def _ctx(self):
+        return build_context(_entity("widget"), self._schema())
+
+    def _env(self):
+        from generate import _make_env
+        return _make_env()
+
+    def test_flags_combine_as_expected(self):
+        ctx = self._ctx()
+        assert ctx["should_filter_by_org"] is True
+        assert ctx["org_relationship_optional"] is True
+        assert ctx["is_self_only"] is True
+
+    def test_getters_detail_creator_id_is_sibling_not_inside_or_array(self):
+        """get{Parent}Detail's where object: `id`, `OR: [...]`, `creator_id`
+        as three sibling keys -- Prisma ANDs sibling where-keys together, so
+        this is the correct (safe) shape. The unsafe shape would be
+        `creator_id` appearing INSIDE the `OR: [...]` array instead."""
+        ctx = self._ctx()
+        rendered = self._env().get_template('getters.ts.jinja2').render(**ctx)
+        # Detail getter's where block: OR line followed later by creator_id
+        # as a sibling property (self_only, no admin_bypass -> unconditional).
+        assert 'OR: [{ organization_id: { in: associatedOrganizationIds } }, { organization_id: null }],' in rendered
+        assert '      creator_id: userId,' in rendered
+        # The unsafe shape: creator_id nested inside the OR array's brackets.
+        assert 'organization_id: null } }, { creator_id' not in rendered
+
+    def test_api_detail_route_put_creator_id_check_runs_after_org_scoped_fetch(self):
+        """PUT: existing row is fetched scoped by the org OR, THEN a
+        separate, unconditional creator_id check runs in application code
+        (not inside the same Prisma where) -- org-optional visibility never
+        substitutes for the ownership check."""
+        ctx = self._ctx()
+        rendered = self._env().get_template('api_detail_route.ts.jinja2').render(**ctx)
+        assert 'OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }] }' in rendered
+        assert 'if (existing.creator_id !== actorId) {' in rendered
+
+    def test_actions_delete_creator_id_filter_runs_after_org_scoped_fetch(self):
+        """Delete server action: rows are fetched scoped by the org OR
+        (Prisma where), then filtered to the caller's own rows in
+        application code (Array.filter) -- a completely separate step, not
+        combined into the same Prisma where clause at all."""
+        ctx = self._ctx()
+        rendered = self._env().get_template('actions.ts.jinja2').render(**ctx)
+        assert 'OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }] }' in rendered
+        assert 'filter(item => item.creator_id === userId)' in rendered
+
+    def test_api_import_route_matchwhere_creator_id_is_sibling_not_inside_or_array(self):
+        """CSV import's _matchWhere (self_only + should_filter_by_org
+        branch): `...keyWhere`, `OR: [...]`, `creator_id: actorId` as
+        sibling object properties -- same safe AND-of-siblings shape as the
+        detail getter, not creator_id folded into the OR array."""
+        ctx = self._ctx()
+        rendered = self._env().get_template('api_import_route.ts.jinja2').render(**ctx)
+        assert (
+            "OR: [{ organization_id: { in: _importOrgIds } }, { organization_id: null }], creator_id: actorId };"
+            in rendered
+        )
+        assert 'organization_id: null } }, { creator_id' not in rendered
+
+    def test_list_access_where_org_or_and_creator_assignee_or_are_separate_and_ed_array_elements(self):
+        """Non-self-only case: build{Parent}AccessWhere pushes the org-null
+        OR and a general/creator/assignee-restricted-permission OR as TWO
+        SEPARATE elements of the `and` array, and every caller spreads that
+        array into an explicit `AND: [...accessAnd, ...]` -- structurally
+        distinct from (but equally safe as) the sibling-key-in-one-object
+        shape the other templates use."""
+        schema = {
+            "definitions": {
+                "organization": {
+                    "type": "object",
+                    "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+                },
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "x-import-key": ["name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "organization_id": _fk_field("organization", nullable=True),
+                    },
+                },
+            }
+        }
+        ctx = build_context(_entity("widget"), schema)
+        from generators import service_context
+        full_ctx = {**ctx, **service_context(ctx, schema)}
+        rendered = self._env().get_template('getters.ts.jinja2').render(**full_ctx)
+        assert "and.push({ OR: [{ organization_id: { in: associatedOrganizationIds } }, { organization_id: null }] });" in rendered
+        assert "and.push({ OR: or });" in rendered
+
+
+# ---------------------------------------------------------------------------
+# subtask_892d GAP1: §7.1 raw-inline-child nested-create/update must
+# populate creator_id/updater_id on each child row when the child's own
+# Prisma model carries those columns -- never derivable from the JSON
+# schema alone (audit columns are deliberately never a `fields:` entry), so
+# checked against a registered Prisma-model map instead (set_prisma_models(),
+# mirroring generators_test.py's existing set_prisma_uniques() pattern).
+# Reuses test_readonly_fields.py's board/widget fixture -- the same shape as
+# the real dashboard/dashboard_widget precedent, which has neither column
+# and must stay byte-for-byte unaffected.
+# ---------------------------------------------------------------------------
+
+class TestChildAuditFieldInjection:
+    @staticmethod
+    def _reset():
+        from build_context import set_prisma_models
+        set_prisma_models({})
+
+    @staticmethod
+    def _widget_child(ctx):
+        widgets = [c for c in ctx["non_comment_ch"] if c["property_name"] == "widgets"]
+        assert len(widgets) == 1
+        return widgets[0]
+
+    @staticmethod
+    def _widget_model_with_audit_fields():
+        from schema_deriver import PrismaModel, PrismaField
+        return PrismaModel(name="widget", fields={
+            "id": PrismaField(name="id", prisma_type="String", nullable=False, is_list=False, is_id=True),
+            "creator_id": PrismaField(name="creator_id", prisma_type="String", nullable=False, is_list=False),
+            "updater_id": PrismaField(name="updater_id", prisma_type="String", nullable=False, is_list=False),
+        })
+
+    def test_child_without_audit_columns_gets_no_injection(self):
+        """dashboard_widget precedent: no creator_id/updater_id registered
+        for the child's Prisma model -- nested create/update must render
+        exactly as before this fix (no injected lines)."""
+        from build_context import set_prisma_models
+        from test_readonly_fields import _board_entity, _board_schema
+        set_prisma_models({})
+        try:
+            ctx = build_context(_board_entity(), _board_schema())
+            assert self._widget_child(ctx)["has_audit_fields"] is False
+            assert "creator_id: actorId" not in ctx["child_nested_create"]
+            assert "updater_id: actorId" not in ctx["child_nested_create"]
+            assert "creator_id: actorId" not in ctx["child_nested_update"]
+            assert "updater_id: actorId" not in ctx["child_nested_update"]
+        finally:
+            self._reset()
+
+    def test_child_with_audit_columns_gets_injected_on_nested_create(self):
+        from build_context import set_prisma_models
+        from test_readonly_fields import _board_entity, _board_schema
+        set_prisma_models({"widget": self._widget_model_with_audit_fields()})
+        try:
+            ctx = build_context(_board_entity(), _board_schema())
+            assert self._widget_child(ctx)["has_audit_fields"] is True
+            create_block = ctx["child_nested_create"]
+            assert "create: widgetsItems.map(f => ({" in create_block
+            assert "creator_id: actorId," in create_block
+            assert "updater_id: actorId," in create_block
+        finally:
+            self._reset()
+
+    def test_update_path_injects_audit_fields_only_on_newly_added_rows(self):
+        """The nested update's `update:` sub-array (existing rows, keyed by
+        id) must NOT get creator_id/updater_id re-injected -- creator_id is
+        immutable post-creation, and Prisma's update input type already
+        makes updater_id optional there (no TS2322 either way), so only the
+        `create:` sub-array (new rows added during an update) is in scope."""
+        from build_context import set_prisma_models
+        from test_readonly_fields import _board_entity, _board_schema
+        set_prisma_models({"widget": self._widget_model_with_audit_fields()})
+        try:
+            ctx = build_context(_board_entity(), _board_schema())
+            nested_update = ctx["child_nested_update"]
+            update_branch, create_branch = nested_update.split("create: widgetsItems", 1)
+            assert "creator_id: actorId," in create_branch
+            assert "updater_id: actorId," in create_branch
+            assert "creator_id: actorId" not in update_branch
+            assert "updater_id: actorId" not in update_branch
+        finally:
+            self._reset()
+
+
+# ---------------------------------------------------------------------------
+# subtask_892d GAP2: an x-generate.fields-restricted Proxy View's
+# get{Parent}Detail() findUnique/findFirst call must select only the
+# narrowed field set (+ id/creator_id, unconditionally required by the
+# Detail type per context.py's build_entity_context) rather than the full,
+# unrestricted row -- otherwise a column filter_fields() excluded leaks
+# through the `...{{parent_camel}}` spread with its REAL Prisma type,
+# mismatching whatever type context.py derived for that same excluded name
+# (report: lib/supplier_return_status/getters.ts(52,3) TS2322 on
+# `shipped_at`, a real DateTime column filtered out by `fields: [status]`
+# but reintroduced as a `string`-typed "virtual column" because it also
+# appears in x-display.table). shipment_line_status (no `fields:`
+# restriction) must render byte-identical output to before this fix.
+# ---------------------------------------------------------------------------
+
+class TestDetailSelectForFieldsRestrictedEntity:
+    @staticmethod
+    def _schema():
+        return {
+            "definitions": {
+                "proxy_base": {
+                    "type": "object",
+                    "required": ["id", "status"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "status": {"type": "string", "enum": ["draft", "shipped"]},
+                        # Excluded by `fields: [status]` below -- must never
+                        # leak through the raw findUnique/findFirst spread.
+                        "shipped_at": {"type": ["string", "null"], "format": "date-time"},
+                    },
+                },
+                "proxy_base_detail": {
+                    "x-generate": {
+                        "list": False, "view": False, "new": False, "edit": True,
+                        "delete": False, "api": True, "test": False, "fields": None,
+                    },
+                    "allOf": [{"$ref": "#/definitions/proxy_base"}],
+                },
+            }
+        }
+
+    def _entity(self, fields_restriction):
+        return _entity(
+            "proxy_base",
+            gen_cfg={
+                "list": False, "view": False, "new": False, "edit": True,
+                "delete": False, "api": True, "test": False,
+                "fields": fields_restriction,
+            },
+        )
+
+    @staticmethod
+    def _env():
+        from generate import _make_env
+        return _make_env()
+
+    def test_fields_restricted_entity_gets_narrow_select(self):
+        ctx = build_context(self._entity(["status"]), self._schema())
+        assert ctx["detail_select"] != ""
+        assert "id: true" in ctx["detail_select"]
+        assert "status: true" in ctx["detail_select"]
+        assert "creator_id: true" in ctx["detail_select"]
+        assert "shipped_at: true" not in ctx["detail_select"]
+
+    def test_unrestricted_entity_gets_no_select(self):
+        ctx = build_context(self._entity(None), self._schema())
+        assert ctx["detail_select"] == ""
+
+    def test_rendered_getters_uses_select_not_include_when_restricted(self):
+        ctx = build_context(self._entity(["status"]), self._schema())
+        rendered = self._env().get_template("getters.ts.jinja2").render(**ctx)
+        first_query = rendered.split("findUnique(", 1)[1].split(");", 1)[0]
+        assert "select:" in first_query
+        assert "include:" not in first_query
+        assert "shipped_at" not in first_query
+
+    def test_rendered_getters_keeps_include_when_unrestricted(self):
+        """No regression for an entity with no `fields:` restriction (e.g.
+        shipment_line_status) -- pre-existing `include:`-based query,
+        unchanged."""
+        ctx = build_context(self._entity(None), self._schema())
+        rendered = self._env().get_template("getters.ts.jinja2").render(**ctx)
+        first_query = rendered.split("findUnique(", 1)[1].split(");", 1)[0]
+        # "select:" still appears nested inside include's own creator/updater
+        # sub-objects (pre-existing, unrelated to this fix) -- what must NOT
+        # appear is a top-level `select:` key as a sibling of `include:`.
+        assert "    include: {" in first_query
+        assert "    select: {" not in first_query
+        assert "AND: [\n      ...accessAnd," in rendered
+
+
+class TestNormalizedValueExprWriteOnly:
+    """app-generator#576: a write-only field (password, api_key -- string
+    fields with x-custom-component target: [upsert], no 'view') must never
+    have an untouched ('') client submission coerced to NULL the way an
+    ordinary nullable plain-text field's is. The client never receives a
+    write-only field's real persisted value on any read path, so its form
+    state starts at '' and stays '' unless the user takes an explicit
+    action (change password, regenerate key) -- '' here means "never
+    touched", not "the user observed and cleared a real value" the way it
+    does for an ordinary field (e.g. image_id, which must still resolve to
+    `null` so the "remove avatar" flow keeps working). See
+    _normalized_value_expr's docstring for the full incident writeup:
+    confirmed empirically (subtask_1068a) that the pre-fix `null` behavior
+    silently wiped a real admin account's password to NULL on a plain Save
+    that touched nothing."""
+
+    def _write_only_defn(self, nullable: bool = True) -> dict:
+        return {
+            "type": ["string", "null"] if nullable else "string",
+            "x-custom-component": {"target": ["upsert"]},
+        }
+
+    def test_write_only_field_uses_undefined_not_null_on_empty(self):
+        expr = _normalized_value_expr("password", "password", self._write_only_defn())
+        assert expr == "password === '' ? undefined : password"
+
+    def test_write_only_field_api_key_var_name(self):
+        expr = _normalized_value_expr("api_key", "apiKey", self._write_only_defn())
+        assert expr == "apiKey === '' ? undefined : apiKey"
+
+    def test_write_only_field_with_view_target_is_NOT_treated_as_write_only(self):
+        """A field declaring target: [upsert, view] has an author-provided
+        safe view widget -- is_write_only_prop excludes it on purpose, so
+        it must keep the ordinary nullable-string null-coalescing rule."""
+        defn = {
+            "type": ["string", "null"],
+            "x-custom-component": {"target": ["upsert", "view"]},
+        }
+        expr = _normalized_value_expr("badge", "badge", defn)
+        assert expr == "badge === '' ? null : badge"
+
+    def test_ordinary_nullable_plain_string_field_unaffected_still_uses_null(self):
+        """image_id (no x-custom-component at all) must keep resolving ''
+        to null -- the "remove avatar" flow depends on this NOT changing:
+        '' there is the user's real, explicit choice to clear the FK, not
+        an artifact of a masked write-only field."""
+        defn = {"type": ["string", "null"], "x-relationship": {"target": "attachment", "type": "direct"}}
+        expr = _normalized_value_expr("image_id", "imageId", defn)
+        assert expr == "imageId === '' ? null : imageId"
+
+    def test_non_nullable_write_only_field_still_uses_undefined(self):
+        """Even if a write-only field were declared non-nullable, there is
+        no legitimate reason for an untouched form submission to overwrite
+        it -- undefined (skip) is correct regardless of nullability, unlike
+        the ordinary-field branch which is deliberately scoped to nullable
+        columns only."""
+        expr = _normalized_value_expr("password", "password", self._write_only_defn(nullable=False))
+        assert expr == "password === '' ? undefined : password"

@@ -16,6 +16,12 @@ from pathlib import Path
 
 from helpers.naming import to_camel_case, to_title_case
 from helpers.schema_helpers import filter_fields
+from nav_config import build_nav_config, nav_list_entities, upsert_nav_group_i18n
+
+# The locale whose messages/*.json values ARE the schema-computed defaults
+# (see i18n/routing.ts defaultLocale). Every other locale file's newly-added
+# key carries that same English text as an untranslated placeholder.
+_SOURCE_LOCALE_FILENAME = 'en.json'
 
 
 def _raw_def(entity_name: str, schema: dict) -> dict:
@@ -88,7 +94,6 @@ _CUSTOM_COMPONENT_FIELD_KEYS: dict[str, dict[str, str]] = {
         'approvalRequests': 'Approval Requests',
         'message': 'Message',
         'reject': 'Reject',
-        'resubmit': 'Re-submit',
     },
 }
 
@@ -152,10 +157,19 @@ def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
 
             rel = prop.get('x-relationship', {})
             rel_type = rel.get('type')
-            if rel_type in ('many-to-one', 'one-to-one'):
-                # FK field (regular m2o or selector o2o): strip _id suffix for the
-                # display key. Generated FormUpsert/FormView use tf('<base>') as the
-                # picker label (e.g. medicine.prev_id → tf('prev')).
+            if rel_type in ('many-to-one', 'one-to-one', 'direct'):
+                # FK field (regular m2o, selector o2o, or direct-attachment):
+                # strip _id suffix for the display key. Generated FormUpsert/
+                # FormView use tf('<base>') as the picker/upload label (e.g.
+                # medicine.prev_id → tf('prev'); product.warranty_card_id →
+                # tf('warrantyCard'), see SingleAttachmentUpload's `label`
+                # prop wiring in generators.py). Direct-attachment FKs are
+                # deliberately excluded from get_parent_relationships()
+                # (schema_helpers.get_direct_attachment_fk_props's docstring)
+                # but still need the same stripped-suffix key here, or the
+                # unstripped 'warrantyCardId' key gets emitted instead and
+                # tf('warrantyCard') falls back to rendering the raw
+                # namespaced key string in the UI.
                 base = prop_name[:-3] if prop_name.endswith('_id') else prop_name
                 key = to_camel_case(base)
                 label = to_title_case(base)
@@ -200,7 +214,17 @@ def _collect_field_keys(entities: list, schema: dict) -> dict[str, str]:
                     continue
                 cp_rel = cp_prop.get('x-relationship', {})
                 cp_rel_type = cp_rel.get('type')
-                if cp_rel_type in ('many-to-one', 'one-to-one'):
+                if cp_rel_type in ('many-to-one', 'one-to-one', 'direct'):
+                    # 'direct' (cmd_793): a direct-attachment FK carries the
+                    # same stripped-suffix key convention as an m2o/o2o FK
+                    # here (see the entity-level loop above for why) -- a
+                    # child table's column header must match whatever label
+                    # key the field actually renders under elsewhere, and
+                    # this loop otherwise falls through to the unstripped
+                    # 'imageId' key below, which nothing else in the
+                    # generated output ever looks up (MISSING_MESSAGE risk
+                    # if a future column ever renders it, and stray noise in
+                    # messages/*.json until then).
                     base = cp_name[:-3] if cp_name.endswith('_id') else cp_name
                     keys.setdefault(to_camel_case(base), to_title_case(base))
                 elif cp_rel_type == 'one-to-one_bridge':
@@ -249,16 +273,19 @@ def _merge_file_wins_messages(
 # JSON file updater
 # ---------------------------------------------------------------------------
 
-def _update_json(path: Path, additions: dict[str, dict[str, str]]) -> bool:
+def _update_json(path: Path, additions: dict[str, dict[str, str]]) -> tuple[bool, dict[str, list[str]]]:
     """
     Deep-merge additions into the JSON file at `path`.
     `additions` is {sectionName: {key: value}}.
-    Returns True if the file was changed.
+    Returns (changed, added_keys) where `added_keys` is {sectionName: [key, ...]}
+    for every key that did not already exist in the file (i.e. was actually
+    written by this call, as opposed to a key the file already had).
     """
     with open(path, encoding='utf-8') as f:
         data = json.load(f)
 
     changed = False
+    added_keys: dict[str, list[str]] = {}
     for section, entries in additions.items():
         if section not in data:
             data[section] = {}
@@ -267,6 +294,7 @@ def _update_json(path: Path, additions: dict[str, dict[str, str]]) -> bool:
             if key not in data[section]:
                 data[section][key] = value
                 changed = True
+                added_keys.setdefault(section, []).append(key)
 
     # Sort keys within each section that has additions
     for section in additions:
@@ -281,33 +309,93 @@ def _update_json(path: Path, additions: dict[str, dict[str, str]]) -> bool:
             json.dump(data, f, indent=2, ensure_ascii=False)
             f.write('\n')
 
-    return changed
+    return changed, added_keys
+
+
+# ---------------------------------------------------------------------------
+# messages/*.json — Nav.groups.<slug> upsert (nested, unlike the flat
+# Fields/EntityLabel/Nav sections `_update_json` handles)
+# ---------------------------------------------------------------------------
+
+def _update_nav_group_i18n_file(path: Path, groups: list) -> tuple[bool, list[str]]:
+    """Upsert messages['Nav']['groups'][slug] for every nav group — never
+    overwrites an existing value (see nav_config.upsert_nav_group_i18n).
+    Returns (changed, added_slugs)."""
+    if not groups:
+        return False, []
+
+    with open(path, encoding='utf-8') as f:
+        messages = json.load(f)
+
+    changed = False
+    added: list[str] = []
+    for group in groups:
+        if upsert_nav_group_i18n(messages, group['slug'], group['label']):
+            changed = True
+            added.append(group['slug'])
+
+    if changed:
+        # Keep Nav.groups sorted the same way _update_json sorts other sections.
+        messages['Nav']['groups'] = dict(sorted(messages['Nav']['groups'].items(), key=lambda x: x[0].lower()))
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(messages, f, indent=2, ensure_ascii=False)
+            f.write('\n')
+
+    return changed, added
 
 
 # ---------------------------------------------------------------------------
 # site-config.ts updater
 # ---------------------------------------------------------------------------
 
-def _update_site_config(path: Path, nav_entities: list) -> bool:
+def _update_site_config(path: Path, nav_entities: list, nav_config: dict) -> bool:
     content = path.read_text(encoding='utf-8')
 
     existing_hrefs = set(re.findall(r'href:\s*"(/[^"]*)"', content))
+    entity_group = nav_config['entity_group']
 
-    new_lines = []
+    new_link_lines = []
     for entity in nav_entities:
         href = f'/{entity["parent"]}'
-        if href not in existing_hrefs:
-            label = to_title_case(entity['parent'])
-            new_lines.append(f'    {{ label: "{label}", href: "{href}" }},')
+        if href in existing_hrefs:
+            continue
+        label = to_title_case(entity['parent'])
+        group_info = entity_group.get(entity['parent'])
+        if group_info:
+            new_link_lines.append(
+                f'    {{ label: "{label}", href: "{href}", '
+                f'group: "{group_info["group"]}", order: {group_info["order"]} }},'
+            )
+        else:
+            new_link_lines.append(f'    {{ label: "{label}", href: "{href}" }},')
 
-    if not new_lines:
+    existing_group_slugs = set(re.findall(r'slug:\s*"([^"]*)"', content))
+    new_group_lines = []
+    for group in nav_config['groups']:
+        if group['slug'] in existing_group_slugs:
+            continue
+        fields = [f'slug: "{group["slug"]}"', f'labelKey: "groups.{group["slug"]}"', f'order: {group["order"]}']
+        if group.get('icon'):
+            fields.append(f'icon: "{group["icon"]}"')
+        if group.get('parent'):
+            fields.append(f'parent: "{group["parent"]}"')
+        new_group_lines.append(f'    {{ {", ".join(fields)} }},')
+
+    if not new_link_lines and not new_group_lines:
         return False
 
-    insertion = '\n'.join(new_lines)
-    content = content.replace(
-        '] satisfies NavLink[]',
-        f'{insertion}\n  ] satisfies NavLink[]',
-    )
+    if new_link_lines:
+        insertion = '\n'.join(new_link_lines)
+        content = content.replace(
+            '] satisfies NavLink[]',
+            f'{insertion}\n  ] satisfies NavLink[]',
+        )
+    if new_group_lines:
+        insertion = '\n'.join(new_group_lines)
+        content = content.replace(
+            '] satisfies NavGroup[]',
+            f'{insertion}\n  ] satisfies NavGroup[]',
+        )
     path.write_text(content, encoding='utf-8')
     return True
 
@@ -353,12 +441,9 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
     `entities` — the full list returned by extract_entities().
     `output_dir` — project root (same as passed to generate()).
     """
-    # Entities that appear in the sidebar nav:
-    # must be a "primary" entity (parent == model) with a list page.
-    nav_entities = [
-        e for e in entities
-        if e['parent'] == e['model'] and e['generate_config'].get('list', True)
-    ]
+    # Entities that appear in the sidebar nav — shared with cleanup.py's
+    # own removal pass, see nav_config.nav_list_entities (cmd_817).
+    nav_entities = nav_list_entities(entities)
 
     # EntityLabel keys for all entities (including alternate-model entities like setting*)
     entity_label_entries = {
@@ -375,6 +460,11 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
     # Field keys across all entities
     field_keys = _collect_field_keys(entities, schema)
 
+    # Nested sidebar navigation groups (x-nav.parent / x-nav-groups). Raises
+    # NavValidationError (fail-closed) for a cycle, excess depth, or unknown
+    # icon name — propagates to the caller, aborting generation.
+    nav_config = build_nav_config(entities, schema)
+
     # nativeEnum option keys (one section per Prisma enum / x-enum-namespace)
     native_enum_ns = _collect_native_enum_namespaces(schema)
 
@@ -389,6 +479,13 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
             namespace_sections.setdefault(ns, {}).update(ns_entries)
 
     # --- messages/*.json ---
+    # `_SOURCE_LOCALE_FILENAME` is the locale whose values ARE the schema
+    # defaults (see module docstring / i18n/routing.ts defaultLocale). Any key
+    # newly added to a *different* locale file carries that same English
+    # default text as a placeholder — it has never been translated. Surface
+    # those so a partial translation gap is visible in the build log instead
+    # of silently looking like a successful, fully-translated run (cmd_560).
+    untranslated_report: dict[str, dict[str, list[str]]] = {}
     messages_dir = output_dir / 'messages'
     for lang_file in sorted(messages_dir.glob('*.json')):
         additions: dict[str, dict[str, str]] = {
@@ -397,14 +494,28 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
             'Fields': field_keys,
             **namespace_sections,
         }
-        changed = _update_json(lang_file, additions)
+        changed, added_keys = _update_json(lang_file, additions)
+
+        nav_groups_changed, added_group_slugs = _update_nav_group_i18n_file(lang_file, nav_config['groups'])
+        if added_group_slugs:
+            added_keys.setdefault('Nav', []).extend(f'groups.{slug}' for slug in added_group_slugs)
+        changed = changed or nav_groups_changed
+
         status = 'Updated' if changed else 'No changes'
         print(f'  {status}: {lang_file.relative_to(output_dir)}')
+        if lang_file.name != _SOURCE_LOCALE_FILENAME and added_keys:
+            untranslated_report[lang_file.name] = added_keys
+
+    if untranslated_report:
+        print(f'\n  WARNING: untranslated keys added (English placeholder, needs manual translation):')
+        for filename, sections in untranslated_report.items():
+            for section, keys in sections.items():
+                print(f'    {filename} [{section}]: {", ".join(sorted(keys))}')
 
     # --- lib/site-config.ts ---
     site_config = output_dir / 'lib' / 'site-config.ts'
     if site_config.exists():
-        changed = _update_site_config(site_config, nav_entities)
+        changed = _update_site_config(site_config, nav_entities, nav_config)
         status = 'Updated' if changed else 'No changes'
         print(f'  {status}: {site_config.relative_to(output_dir)}')
 

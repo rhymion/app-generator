@@ -1,7 +1,6 @@
-import { describe, it, expect, afterAll } from 'vitest';
-import { ChildProcess } from 'child_process';
+import { describe, it, expect } from 'vitest';
 import * as net from 'net';
-import { startServer, stopServer, signUp, signIn, waitForPortFree } from './helpers';
+import { startServer, waitForPortFree } from './helpers';
 
 const PORT = 3001;
 
@@ -27,7 +26,7 @@ const PORT = 3001;
     if (!server) {
       server = await startServer('dev:full', PORT, { timeout: 600_000, env: { NODE_ENV: 'development' } });
     }
-    // seeded user from scripts/seed-tenant.ts
+    // seeded user from scripts/seed-baseline.ts
     const res = await signIn(PORT, {
       email: 'admin@example.com',
       password: 'password123',

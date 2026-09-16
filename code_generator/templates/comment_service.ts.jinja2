@@ -1,0 +1,25 @@
+// Service layer for the shared `comment` model (the `commentable` bridge —
+// see docs/knowledge/schema-yaml-configuration.md §"x-internal at the entity
+// level"). `comment` has no x-generate (no standalone pages/API of its own);
+// every write reaches it through a parent entity's comment server actions
+// (see build_context.py's _build_comment_actions_bridge) or the comment
+// reactions API route. Both call these functions instead of `prisma.comment.*`
+// directly so check_generated.py's write:direct rule is satisfied the same
+// way it is for any other entity's service.ts.
+import prisma from '@/lib/prisma';
+
+export async function createComment(data: {
+  message: string;
+  commentable_id: string;
+  creator_id: string;
+}): Promise<{ id: string }> {
+  return prisma.comment.create({ data });
+}
+
+export async function updateComment(id: string, data: { message: string }): Promise<void> {
+  await prisma.comment.update({ where: { id }, data });
+}
+
+export async function deleteComment(id: string): Promise<void> {
+  await prisma.comment.delete({ where: { id } });
+}

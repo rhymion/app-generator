@@ -13,7 +13,7 @@ describe('API: CSV Import batch2 (cmd_328) — dotted FK + Tier2/Tier3 authoriza
     Cypress.session.clearAllSavedSessions();
   });
 
-  // test4 (redesigned per the design review, subtask_328d): the original "other org row" scenario
+  // test4 (redesigned per the design review): the original "other org row" scenario
   // is N/A for this schema (all 5 importable entities have should_filter_by_org=False).
   // Replaced with: an actor whose permission for 'role' has import:false is rejected
   // at Tier2 (assertPermission), before any row is even parsed for match/create/update.
@@ -43,7 +43,7 @@ describe('API: CSV Import batch2 (cmd_328) — dotted FK + Tier2/Tier3 authoriza
 
   // test5: Tier3 rejection when updating a row the actor cannot update.
   //
-  // NOTE ON DESIGN DEVIATION (Creator-role isolation): subtask_328d's design proposed
+  // NOTE ON DESIGN DEVIATION (Creator-role isolation): the earlier design proposed
   // a Creator-role actor who owns some rows but not others, updating a row created by
   // someone else. Investigation found `permissions.import` is derived ONLY from
   // general (non-Creator/Assignee) permission rows (lib/authz.ts ~line 246:

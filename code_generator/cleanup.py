@@ -3,14 +3,32 @@
 cleanup.py — Remove files and entries created by the code generator.
 
 For fully overwritten files: deletes them entirely.
-For appended files (messages/*.json, lib/site-config.ts,
-app/[locale]/@sidebar/page.tsx): removes only the generated entries,
-preserving manual content.
+For appended files (lib/site-config.ts, app/[locale]/@sidebar/page.tsx):
+removes only the generated entries, preserving manual content.
+
+messages/*.json (en.json, ja.json, ...) are never touched by this script.
+Their Fields/EntityLabel/Nav entries can carry human-translated content
+(e.g. ja.json), and this script has no way to distinguish "entity genuinely
+removed from the project" from "entity still in the schema, but this cleanup
+run happens to also be tearing down an unrelated temp fixture" -- deleting by
+current-schema-membership treated both cases the same and previously wiped
+translations wholesale (cmd_560). See docs/knowledge/i18n-locale-routing.md.
 
 Stubs (form_validation.ts, service_validation.ts) are deleted unless
 --keep-stubs is passed, since they may contain user customizations.
-service_after_create.ts is generated write-once; cleanup deletes it only
-when the file still matches the original stub template output.
+service_after_create.ts (cmd_923a) is a permanent write-once hook stub, like
+service_validation_custom.ts -- never swept here, even for an orphaned
+entity, since a hand-customized copy is indistinguishable from a pristine
+one without re-rendering it per entity (the file's default body embeds the
+entity name in its docstring, unlike the truly boilerplate-invariant stubs
+this script does prune). The same applies to cmd_923b's six siblings --
+service_after_update.ts, service_after_delete.ts,
+service_validation_delete.ts, service_after_submit.ts,
+service_before_approve.ts, service_before_reject.ts, and
+service_before_withdraw.ts -- none of which this script explicitly deletes;
+they simply aren't in the file lists below, so a leftover copy in an
+orphaned entity's lib dir is (like service_after_create.ts) the reason
+_rmdir_tree() can leave that directory behind non-empty.
 
 --prune-orphans sweeps files that are generator-shaped but no longer
 expected by the current schema (e.g., a column_def.tsx left behind after
@@ -35,19 +53,29 @@ Examples:
 import json
 import re
 import sys
+import time
 from pathlib import Path
 
 import yaml
 
 from generate_types import extract_entities
-from helpers.naming import to_camel_case
-from helpers.schema_helpers import filter_fields
 from manifest import MANIFEST_FILENAME, sha256_file
+from nav_config import build_nav_config, nav_list_entities
 
 _SYSTEM_PROPS = {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'}
 
-# Handwritten files that happen to look like generator-shaped paths.
-# prune_orphans() will never delete these, even if no schema entity matches.
+# generate-code -> cleanup (wrong order) leaves every just-written file
+# pristine (hash-matching), so it reads as safe-to-delete even though none
+# of it was actually stale.
+_MANIFEST_FRESH_THRESHOLD_S = 60
+
+# Paths that must never be deleted by cleanup, even when a manifest entry or
+# an orphan-sweep heuristic matches them: both handwritten files that happen
+# to look like generator-shaped paths, and generator-emitted-but-git-tracked
+# feature files (mention/compliance/audit_log/etc.) whose regeneration is
+# conditional on schema toggles (x-mention, x-pii, search:true, ...) that may
+# not be present every time generate-code next runs. Consulted by both
+# _prune_orphans() (via _is_protected()) and _clean_from_manifest().
 HANDWRITTEN_ALLOWLIST: frozenset[str] = frozenset([
     # register pages (handwritten auth flow)
     "app/[locale]/register/page.tsx",
@@ -61,20 +89,32 @@ HANDWRITTEN_ALLOWLIST: frozenset[str] = frozenset([
     # login pages
     "app/[locale]/login/page.tsx",
     "app/[locale]/login/page.test.tsx",
+    # audit_log built-in feature (not a json_schema.yaml `definitions:` entity,
+    # so _prune_orphans' per-entity heuristics mistake it for an orphan)
+    "components/audit_log/FormView.tsx",
+    "lib/audit_log/getters.ts",
+    "lib/audit_log/types.ts",
+    # always-generated cypress support files, git-tracked (not gitignored)
+    "cypress/support/db-helpers.ts",
+    "cypress/support/generated-tasks.ts",
+    # compliance / PII anonymization (conditional on x-pii fields existing)
+    "lib/compliance/anonymize_user.ts",
+    # dashboard's service_validation.ts is git-tracked (unlike other entities'
+    # service_validation.ts, which are gitignored, per-entity build artifacts)
+    "lib/dashboard/service_validation.ts",
+    # full-text search GIN index support (conditional on search: true fields)
+    "lib/db-init.ts",
+    "scripts/create-gin-indexes.sql",
+    # @mention support (conditional on x-mention: true fields existing)
+    "lib/mention/parser.ts",
+    "lib/mention/search.ts",
+    # reaction feature named constants (conditional on reaction fields existing)
+    "lib/reaction_constants.ts",
+    # x-self-only admin-bypass allowlist (imported unconditionally by lib/authz.ts)
+    "lib/self_only_admin_bypass_entities.ts",
+    # seed script scaffold, always generated
+    "scripts/generated/seed-entities.ts",
 ])
-
-# Boilerplate content of service_after_create.ts as emitted by
-# templates/service_after_create_stub.ts.jinja2. Mirror the template output
-# exactly (including trailing newline) so the equality check below stays
-# tight — any user customization, even reformatting, will preserve the file.
-_SERVICE_AFTER_CREATE_BOILERPLATE = (
-    "export async function afterCreate(\n"
-    "  _tx: unknown,\n"
-    "  _created: Record<string, unknown>,\n"
-    "  _data: Record<string, unknown>,\n"
-    "): Promise<void> {}\n"
-)
-
 
 # ---------------------------------------------------------------------------
 # File helpers
@@ -161,6 +201,18 @@ def _clean_from_manifest(out: Path, keep_stubs: bool = False) -> bool:
     if not manifest_path.exists():
         return False
 
+    manifest_age_s = time.time() - manifest_path.stat().st_mtime
+    if manifest_age_s < _MANIFEST_FRESH_THRESHOLD_S:
+        print(
+            f'\nWARNING: {MANIFEST_FILENAME} was updated {manifest_age_s:.0f}s ago.\n'
+            'Running cleanup immediately after generate-code will delete all just-generated '
+            'files (they all hash-match, so they are all pristine-deletable).\n'
+            'Correct order: cleanup -> generate-code (clean-slate), not generate-code -> cleanup.\n'
+            'Continuing in 3 seconds -- Ctrl-C to abort.',
+            file=sys.stderr,
+        )
+        time.sleep(3)
+
     print(f'\nDeleting generated files from {manifest_path}...')
     data = json.loads(manifest_path.read_text(encoding='utf-8'))
 
@@ -171,6 +223,9 @@ def _clean_from_manifest(out: Path, keep_stubs: bool = False) -> bool:
         for parent in Path(rel).parents:
             if parent != Path('.'):
                 dirs.add(out / parent)
+        if rel in HANDWRITTEN_ALLOWLIST:
+            print(f'  PROTECTED (allowlist): {rel}')
+            continue
         if keep_stubs and entry.get('mode') == 'stub':
             print(f'  Kept {path} (stub, --keep-stubs)')
             continue
@@ -192,85 +247,28 @@ def _clean_from_manifest(out: Path, keep_stubs: bool = False) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Key collection (mirrors generators_i18n.py)
-# ---------------------------------------------------------------------------
-
-def _collect_field_keys(entities: list, schema: dict) -> set:
-    from generators_i18n import _CUSTOM_COMPONENT_FIELD_KEYS
-    keys = set()
-    for entity in entities:
-        model = entity['model']
-        gen_cfg = entity['generate_config']
-        model_def = schema['definitions'].get(model, {})
-        props = filter_fields(model_def.get('properties', {}), gen_cfg.get('fields'))
-        for prop_name, prop in props.items():
-            if prop_name in _SYSTEM_PROPS:
-                continue
-            rel = prop.get('x-relationship', {})
-            if rel.get('type') == 'many-to-one':
-                base = prop_name[:-3] if prop_name.endswith('_id') else prop_name
-                keys.add(to_camel_case(base))
-            elif rel.get('type') == 'one-to-one':
-                continue  # internal bridge model, not user-facing
-            else:
-                keys.add(to_camel_case(prop_name))
-        for child in entity.get('children', []):
-            keys.add(to_camel_case(child['property_name']))
-        # Custom component keys (entity-level x-custom-components is a list).
-        def_key = entity.get('definition_key', '')
-        custom_comps = schema['definitions'].get(def_key, {}).get('x-custom-components') or []
-        if isinstance(custom_comps, list):
-            for custom_comp in custom_comps:
-                if not isinstance(custom_comp, dict):
-                    continue
-                comp_name = custom_comp.get('name', '')
-                keys.update(_CUSTOM_COMPONENT_FIELD_KEYS.get(comp_name, {}).keys())
-    return keys
-
-
-# ---------------------------------------------------------------------------
 # Appended-file cleaners
 # ---------------------------------------------------------------------------
 
-def _clean_messages(path: Path, entity_label_keys: set, nav_keys: set, field_keys: set) -> None:
-    if not path.exists():
-        return
-    with open(path, encoding='utf-8') as f:
-        data = json.load(f)
-
-    changed = False
-    for section, keys in [
-        ('EntityLabel', entity_label_keys),
-        ('Nav',         nav_keys),
-        ('Fields',      field_keys),
-    ]:
-        if section not in data:
-            continue
-        for key in list(data[section].keys()):
-            if key in keys:
-                del data[section][key]
-                changed = True
-        if not data[section]:
-            del data[section]
-
-    if changed:
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-            f.write('\n')
-        print(f'  Cleaned {path}')
-    else:
-        print(f'  No changes: {path}')
-
-
-def _clean_site_config(path: Path, nav_hrefs: list) -> None:
+def _clean_site_config(path: Path, nav_hrefs: list, nav_group_slugs: list) -> None:
     if not path.exists():
         return
     content = path.read_text(encoding='utf-8')
     original = content
     for href in nav_hrefs:
-        # Matches: { label: "...", href: "/parent" },  (with leading whitespace / newline)
+        # Matches: { label: "...", href: "/parent" },  or, when the entity is
+        # nested under a nav group: { label: "...", href: "/parent", group: "slug", order: N },
+        # (with leading whitespace / newline)
         content = re.sub(
-            r'[ \t]*\{ label: "[^"]*", href: "' + re.escape(href) + r'" \},\n?',
+            r'[ \t]*\{ label: "[^"]*", href: "' + re.escape(href)
+            + r'"(?:, group: "[^"]*", order: -?\d+)? \},\n?',
+            '',
+            content,
+        )
+    for slug in nav_group_slugs:
+        # Matches: { slug: "...", labelKey: "...", order: N[, icon: "..."][, parent: "..."] },
+        content = re.sub(
+            r'[ \t]*\{ slug: "' + re.escape(slug) + r'".*? \},\n?',
             '',
             content,
         )
@@ -412,9 +410,8 @@ def _prune_orphans(out: Path, entities: list, keep_stubs: bool = False) -> None:
                 f = lib_dir / 'service_validation.ts'
                 if not _is_protected(f):
                     _delete(f)
-            sac = lib_dir / 'service_after_create.ts'
-            if not _is_protected(sac):
-                _delete_if_boilerplate(sac, _SERVICE_AFTER_CREATE_BOILERPLATE)
+            # service_after_create.ts (cmd_923a): permanent write-once stub,
+            # like service_validation_custom.ts just above -- never swept.
             _rmdir_tree(lib_dir)
 
     # components/<entity>/ — FormUpsert/FormView/form_validation for removed entities.
@@ -440,6 +437,19 @@ def _prune_orphans(out: Path, entities: list, keep_stubs: bool = False) -> None:
 
 
 def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False, prune_orphans: bool = False) -> None:
+    schema_path_obj = Path(schema_path)
+    if not schema_path_obj.exists():
+        print(
+            f'ERROR: Schema not found at {schema_path}\n'
+            'This script expects the built schema (code_generator/.generated/json_schema.yaml), '
+            'the same file generate.py consumes. Run it via `npm run cleanup` / `npm run '
+            'cleanup:all`, which build it automatically -- or, if invoking cleanup.py directly, '
+            'run `python3 code_generator/build_user_schema.py code_generator/json_schema.yaml '
+            'prisma/schema.prisma --out code_generator/.generated/json_schema.yaml` first.',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     with open(schema_path) as f:
         schema = yaml.safe_load(f)
 
@@ -512,14 +522,8 @@ def _clean_schema_driven(out: Path, entities: list, test_entities: list,
             _delete(lib_dir / 'actions.ts')
             if not keep_stubs:
                 _delete(lib_dir / 'service_validation.ts')
-        # service_after_create.ts is generated with _write_stub (write-once,
-        # never overwritten — user may customize it). Delete only when the
-        # file still matches the original stub template output.
-        if can_new:
-            _delete_if_boilerplate(
-                lib_dir / 'service_after_create.ts',
-                _SERVICE_AFTER_CREATE_BOILERPLATE,
-            )
+        # service_after_create.ts (cmd_923a): permanent write-once stub, like
+        # service_validation_custom.ts -- never deleted here either.
         _delete(lib_dir / 'chart-getters.ts')  # safe if not present
 
         # components/
@@ -607,7 +611,7 @@ def _clean_schema_driven(out: Path, entities: list, test_entities: list,
     _delete_if_generated(out / 'app' / 'api' / 'dashboard' / 'aggregate' / 'route.ts')
     _try_rmdir(out / 'app' / 'api' / 'dashboard' / 'aggregate')
     _try_rmdir(out / 'app' / 'api' / 'dashboard')
-    _delete_if_generated(out / 'lib' / 'attachment' / 'actions.ts')
+    _delete_if_generated(out / 'lib' / 'attachment' / 'bridge_actions.ts')
     _try_rmdir(out / 'lib' / 'attachment')
 
     _try_rmdir(out / 'docs' / 'generated')
@@ -616,25 +620,42 @@ def _clean_schema_driven(out: Path, entities: list, test_entities: list,
 
 def _clean_appended_files(out: Path, entities: list, schema: dict) -> None:
     """Remove only the generator-injected ENTRIES from files that are appended on
-    top of user-owned content: messages/*.json, lib/site-config.ts, and
+    top of user-owned content: lib/site-config.ts and
     app/[locale]/@sidebar/page.tsx. These files are never deleted outright and are
     deliberately absent from the manifest, so this runs in both manifest and
-    fallback modes."""
+    fallback modes.
+
+    messages/*.json is deliberately NOT touched here. Unlike site-config.ts/
+    sidebar (pure nav href/label pairs, always re-derivable byte-for-byte from
+    the schema), messages/*.json Fields/EntityLabel/Nav entries carry
+    human-translated content (e.g. ja.json). Deleting a key "because this
+    schema's entities still need it" (the only signal available here — this
+    function has no notion of "entity that used to exist" vs. "entity still in
+    the schema, but the run happens to include a throwaway fixture too")
+    previously deleted translations wholesale whenever cleanup ran against a
+    schema that still listed real production entities alongside a temp
+    fixture, and a subsequent generate-code re-added them as English
+    placeholders — see docs/knowledge/i18n-locale-routing.md "cleanup.py must
+    never delete messages/*.json entries" (cmd_560). generators_i18n.py's own
+    `_update_json` already treats these files as append-only (never removes an
+    existing key); cleanup.py now honors the same invariant by not touching
+    them at all.
+    """
     print('\nCleaning appended files...')
 
-    nav_entities = [
-        e for e in entities
-        if e['parent'] == e['model'] and e['generate_config'].get('list', True)
-    ]
-    entity_label_keys = {to_camel_case(e['parent']) for e in entities}
-    nav_keys          = {to_camel_case(e['parent']) for e in nav_entities}
-    field_keys        = _collect_field_keys(entities, schema)
-    nav_hrefs         = [f'/{e["parent"]}' for e in nav_entities]
+    # Must retract the same nav entries generate added — shared with
+    # generators_i18n.py's own generate-side filter, see
+    # nav_config.nav_list_entities (cmd_817).
+    nav_entities = nav_list_entities(entities)
+    nav_hrefs = [f'/{e["parent"]}' for e in nav_entities]
 
-    for lang_file in sorted((out / 'messages').glob('*.json')):
-        _clean_messages(lang_file, entity_label_keys, nav_keys, field_keys)
+    # Nav groups clean by their own rules (independent of nav_entities' list
+    # gate) — build_nav_config is intentionally re-run here rather than
+    # threaded through from generate.py, mirroring how nav_entities itself is
+    # recomputed locally rather than passed in.
+    nav_group_slugs = [g['slug'] for g in build_nav_config(entities, schema)['groups']]
 
-    _clean_site_config(out / 'lib' / 'site-config.ts', nav_hrefs)
+    _clean_site_config(out / 'lib' / 'site-config.ts', nav_hrefs, nav_group_slugs)
     _clean_sidebar(out / 'app' / '[locale]' / '@sidebar' / 'page.tsx', nav_hrefs)
 
 

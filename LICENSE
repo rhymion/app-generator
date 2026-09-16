@@ -70,6 +70,35 @@ or any Modified Version into its own commercial products or services,
 including schema definition tools, AI agents, and hosted application
 generation services.
 
+GENERATED OUTPUT
+
+"Generated Output" means the source code, configuration files, database
+schemas, migrations, tests, and other artifacts produced by running the
+Licensed Work or a Modified Version thereof, together with any
+application built from such artifacts.
+
+Notwithstanding any other provision of this License:
+
+(a) Generated Output is not part of the Licensed Work and is not a
+    Modified Version of it, even where it incorporates code, text, or
+    structure originating in templates, scaffolding, or other files
+    contained in the Licensed Work.
+
+(b) Licensor grants you a perpetual, worldwide, irrevocable,
+    royalty-free, non-exclusive license to use, copy, modify,
+    distribute, sublicense, and commercialize Generated Output for any
+    purpose, with no obligation to Licensor.
+
+(c) The Change Date, the Competing Use restriction, and the termination
+    provisions of this License do not apply to Generated Output. The
+    rights granted in paragraph (b) survive any termination or
+    expiration of your rights in the Licensed Work.
+
+(d) Paragraph (b) grants no rights in the Licensed Work itself. It does
+    not permit extracting, reassembling, or otherwise deriving from
+    Generated Output a code generator, template set, or equivalent
+    tool.
+
 ---
 
 BUSINESS SOURCE LICENSE 1.1 TERMS

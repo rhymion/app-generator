@@ -105,6 +105,28 @@ describe('createRedisRateLimiter', () => {
     expect(fake.eval).not.toHaveBeenCalled();
   });
 
+  it('fails open and logs when Redis is unreachable (Issue #587)', async () => {
+    const fake = makeFakeClient();
+    const limiter = createRedisRateLimiter(BUCKETS, { client: fake as never });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // No decision enqueued — the fake client's `eval` throws, simulating an
+    // unreachable Redis (connection refused / timeout).
+
+    const decision = await limiter.check('tight', '1.1.1.1');
+
+    // Fail OPEN: the request is allowed through rather than 500ing the
+    // whole /api/auth/* surface (pre-fix behaviour: this threw uncaught).
+    expect(decision.allowed).toBe(true);
+    expect(decision.remaining).toBe(Number.POSITIVE_INFINITY);
+    expect(decision.retryAfterSeconds).toBe(0);
+
+    // Never silent: the degraded window must be visible in server logs.
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const [tag, payload] = errorSpy.mock.calls[0];
+    expect(tag).toBe('[rate-limit:fail_open]');
+    expect(JSON.parse(payload as string)).toMatchObject({ bucket: 'tight' });
+  });
+
   it('throws at construction when neither client nor REDIS_URL is provided', () => {
     const previous = process.env.REDIS_URL;
     delete process.env.REDIS_URL;

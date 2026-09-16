@@ -17,6 +17,9 @@ import { DEFAULT_PAGE_SIZE{% if needs_formatting %}, type PageOpts{% endif %} } 
 {% if list_uses_format_label_value %}
 import { formatLabelValue } from '@/lib/_format';
 {% endif %}
+{% if list_uses_decimal_format %}
+import { formatDecimalDisplay } from '@/lib/_decimal_format';
+{% endif %}
 import AppListToolbar from '@/components/ui/layout/AppListToolbar';
 {% if can_api and can_list and can_export %}
 import ExportCsvButton from '@/components/_standard/ExportCsvButton';
@@ -148,9 +151,8 @@ async function {{ parent_pascal }}ListContent({
         fetchPage={ {% if needs_formatting %}fetchFormatted{{ parent_pascal }}Page{% else %}fetch{{ parent_pascal }}Page{% endif %} }
         permissions={userPermissions}
         basePath="/{{ parent }}"
-{% if is_bridge_child %}
-        allowCreate={false}
-{% endif %}
+        allowCreate={ {{ 'true' if (can_create and not is_bridge_child) else 'false' }} }
+        allowEdit={ {{ 'true' if can_update else 'false' }} }
 {% if can_delete %}
         removeAction={remove{{ parent_pascal }}}
 {% endif %}

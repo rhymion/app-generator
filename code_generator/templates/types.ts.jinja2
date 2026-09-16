@@ -19,11 +19,17 @@ export type {{ parent | pascal_case }} = {
   {{ field.name }}{% if field.optional %}?{% endif %}: {{ field.ts_type }};
 {% endfor %}
 {% for rel in parent_rels %}
-  {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+  {{ rel.relation_name }}?: {% if rel.write_only_narrowed %}{ id: string; {{ rel.label_field }}: string }{% else %}{{ rel.target | pascal_case }}{% endif %} | null;
+{% endfor %}
+{% for dar in direct_attachment_rels %}
+  {{ dar.relation_name }}?: { id: string; name: string; path: string; type: {{ attachment_type_ts }} } | null;
 {% endfor %}
 {% for oto in one_to_one_rels %}
   {{ oto.relation_name }}?: {
     id: string;
+{% if oto.target == 'approvable' %}
+    creator_id?: string | null;
+{% endif %}
 {% for child in oto.children %}
     {{ child.property_name }}: {
 {% for field in child.fields %}
@@ -34,7 +40,7 @@ export type {{ parent | pascal_case }} = {
 {% if rel.relation_name == 'approval_flow' %}
       {{ rel.relation_name }}?: ({{ rel.target | pascal_case }} & { preceded_by?: { id: string }[] }) | null;
 {% else %}
-      {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+      {{ rel.relation_name }}?: {% if rel.write_only_narrowed %}{ id: string; {{ rel.label_field }}: string }{% else %}{{ rel.target | pascal_case }}{% endif %} | null;
 {% endif %}
 {% endfor %}
       approval_histories?: {
@@ -48,12 +54,12 @@ export type {{ parent | pascal_case }} = {
 {% elif child.child_name == 'comment' %}
       created_at?: string | Date | null;
       updated_at?: string | Date | null;
-      creator?: { id: string; name: string; image?: string | null } | null;
+      creator?: { id: string; name: string; image?: { path: string } | string | null } | null;
       reactionCounts: Array<{ type: {{ reaction_value_type }}; count: number }>;
       myReactionTypes: ({{ reaction_value_type }})[];
 {% else %}
 {% for rel in child.relationships %}
-      {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+      {{ rel.relation_name }}?: {% if rel.write_only_narrowed %}{ id: string; {{ rel.label_field }}: string }{% else %}{{ rel.target | pascal_case }}{% endif %} | null;
 {% endfor %}
 {% endif %}
     }[];
@@ -74,7 +80,7 @@ export type {{ rel.target | pascal_case }}Option = {
 {% if children or reverse_oto_rels or flatten_rels %}
 export type {{ parent | pascal_case }}Detail = {{ parent | pascal_case }} & {
 {% for child in children %}
-  {{ child.property_name }}: {{ child.name | pascal_case }}[];
+  {{ child.property_name }}: {% if child.write_only_narrowed %}{ id: string; name: string }{% else %}{{ child.name | pascal_case }}{% endif %}[];
 {% endfor %}
 {% for rel in reverse_oto_rels %}
   {{ rel.prop_name }}?: {{ rel.target | pascal_case }} | null;
@@ -93,12 +99,12 @@ export type {{ child.name | pascal_case }} = {
   {{ field.name }}: {{ field.ts_type }};
 {% endfor %}
 {% for rel in child.relationships %}
-  {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+  {{ rel.relation_name }}?: {% if rel.write_only_narrowed %}{ id: string; {{ rel.label_field }}: string }{% else %}{{ rel.target | pascal_case }}{% endif %} | null;
 {% endfor %}
 {% if child.output_type == 'comments' %}
   created_at?: string | Date | null;
   updated_at?: string | Date | null;
-  creator?: { id: string; name: string; image?: string | null } | null;
+  creator?: { id: string; name: string; image?: { path: string } | string | null } | null;
   reactionCounts: Array<{ type: {{ reaction_value_type }}; count: number }>;
   myReactionTypes: ({{ reaction_value_type }})[];
 {% endif %}
@@ -141,14 +147,17 @@ export type FormViewProps = Readonly<{
     {{ field.name }}{% if field.optional %}?{% endif %}: {{ field.ts_type }};
 {% endfor %}
 {% for rel in parent_rels %}
-    {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+    {{ rel.relation_name }}?: {% if rel.write_only_narrowed %}{ id: string; {{ rel.label_field }}: string }{% else %}{{ rel.target | pascal_case }}{% endif %} | null;
 {% endfor %}
 {% for child in children %}
-    {{ child.property_name }}: {{ child.name | pascal_case }}[];
+    {{ child.property_name }}: {% if child.write_only_narrowed %}{ id: string; name: string }{% else %}{{ child.name | pascal_case }}{% endif %}[];
 {% endfor %}
 {% for oto in one_to_one_rels %}
     {{ oto.relation_name }}?: {
       id: string;
+{% if oto.target == 'approvable' %}
+      creator_id?: string | null;
+{% endif %}
 {% for child in oto.children %}
       {{ child.property_name }}: {
 {% for field in child.fields %}
@@ -159,7 +168,7 @@ export type FormViewProps = Readonly<{
 {% if rel.relation_name == 'approval_flow' %}
         {{ rel.relation_name }}?: ({{ rel.target | pascal_case }} & { preceded_by?: { id: string }[] }) | null;
 {% else %}
-        {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+        {{ rel.relation_name }}?: {% if rel.write_only_narrowed %}{ id: string; {{ rel.label_field }}: string }{% else %}{{ rel.target | pascal_case }}{% endif %} | null;
 {% endif %}
 {% endfor %}
         approval_histories?: {
@@ -173,12 +182,12 @@ export type FormViewProps = Readonly<{
 {% elif child.child_name == 'comment' %}
         created_at?: string | Date | null;
         updated_at?: string | Date | null;
-        creator?: { id: string; name: string; image?: string | null } | null;
+        creator?: { id: string; name: string; image?: { path: string } | string | null } | null;
         reactionCounts: Array<{ type: {{ reaction_value_type }}; count: number }>;
         myReactionTypes: ({{ reaction_value_type }})[];
 {% else %}
 {% for rel in child.relationships %}
-        {{ rel.relation_name }}?: {{ rel.target | pascal_case }} | null;
+        {{ rel.relation_name }}?: {% if rel.write_only_narrowed %}{ id: string; {{ rel.label_field }}: string }{% else %}{{ rel.target | pascal_case }}{% endif %} | null;
 {% endfor %}
 {% endif %}
       }[];
@@ -193,12 +202,21 @@ export type FormViewProps = Readonly<{
     {{ rel.prop_name }}?: {{ rel.target | pascal_case }} | null;
 {% endif %}
 {% endfor %}
+{% for dar in direct_attachment_rels %}
+    {{ dar.relation_name }}?: { id: string; name: string; path: string; type: {{ attachment_type_ts }} } | null;
+{% endfor %}
     created_at?: string | Date;
     updated_at?: string | Date;
     creator?: { id: string; name: string } | null;
     updater?: { id: string; name: string } | null;
   };
   permissions?: ModelPermissions;
+{% if comment_has_mention %}
+  /** Whether the viewer may link mentioned users' names to their profile page (cmd_522). */
+  canViewUserProfile?: boolean;
+  /** Maps mentioned user id → display name, for MentionText (cmd_522). */
+  mentionUserContext?: Record<string, string>;
+{% endif %}
 {% if entity_view_components or entity_edit_components %}
   currentUserRoleIds?: string[];
   currentUserId?: string | null;
@@ -208,8 +226,17 @@ export type FormViewProps = Readonly<{
 export type FormUpsertProps = Readonly<FormViewProps & {
   isEdit: boolean;
 {% for target in all_option_targets %}
-  initial{{ target | pascal_case }}s?: {{ target | pascal_case }}[];
-  search{{ target | pascal_case }}Options?: (query: string, includeIds: string[]) => Promise<{{ target | pascal_case }}[]>;
+  {# permissionDenied: set when the current user lacks read on {{ target }} —
+     the FK field renders disabled-but-clearable instead of the page
+     crashing. Passed as its own boolean prop (not read off the array below)
+     because a non-index property attached to an array does not survive
+     the Server-to-Client Component serialization boundary — the page
+     computes it server-side, before the array crosses that boundary, and
+     passes it down alongside the array. See
+     docs/knowledge/fk-read-permission-graceful-degradation.md. #}
+  initial{{ target | pascal_case }}s?: {{ target | pascal_case }}[] & { permissionDenied?: boolean };
+  initial{{ target | pascal_case }}sPermissionDenied?: boolean;
+  search{{ target | pascal_case }}Options?: (query: string, includeIds: string[], limit?: number, context?: { callerEntity?: string; formValues?: Record<string, unknown> }) => Promise<{{ target | pascal_case }}[] & { permissionDenied?: boolean }>;
 {% endfor %}
   currentUserId?: string | null;
 {% if is_bridge_child %}

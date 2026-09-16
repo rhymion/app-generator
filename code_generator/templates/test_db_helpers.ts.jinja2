@@ -1,4 +1,4 @@
-// AUTO-GENERATED - DO NOT EDIT (hand-edited sections: grantAllEntityPermissions, createLimitedApiUser, createSessionUserWithPermission, createApiUserWithPermission)
+// AUTO-GENERATED - DO NOT EDIT (hand-edited sections: grantAllEntityPermissions, createLimitedApiUser, createSessionUserWithPermission, createApiUserWithPermission, createCrossOrgScenario)
 import 'dotenv/config'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/app/generated/prisma/client';
@@ -189,18 +189,27 @@ export async function createLimitedApiUser(entityName: string): Promise<string> 
 }
 
 /**
- * Create an API-key-bearing user with a custom permission set for a given model,
- * NOT enrolled in any organization. Needed for cmd_452 org-isolation X-API-Key
- * route tests (detail GET/PUT/DELETE, list, export): createLimitedApiUser only
- * covers the all-false explicit-deny case, and createSessionUserWithPermission
- * issues no api_key (session-only). This is the "has the RBAC role but is a
- * different org" IDOR fixture — analogous to attachment/helper.ts's
- * addUserToOrganizationByEmail, but deliberately the negative (non-member) case.
+ * Create an API-key-bearing user with a custom permission set for a given model.
+ * Needed for cmd_452 org-isolation X-API-Key route tests (detail GET/PUT/DELETE,
+ * list, export): createLimitedApiUser only covers the all-false explicit-deny
+ * case, and createSessionUserWithPermission issues no api_key (session-only).
+ *
+ * `organizationId`, when supplied, enrolls the new user in that one organization
+ * — org membership (not `organization`-entity read permission) is what governs
+ * reaching a should_filter_by_org row the actor belongs to, so a fixture
+ * exercising "has the RBAC role but can't read the `organization` entity itself"
+ * must still grant membership, or every should_filter_by_org PUT/DELETE
+ * existence check (`api_detail_route.ts.jinja2`, `getAssociatedOrganizations`-
+ * scoped) 404s before the scenario under test is ever reached — org isolation
+ * firing, not the thing being tested (cmd_799). Omit it (or pass no
+ * organization at all) for the original cmd_452 IDOR fixture shape: an actor
+ * enrolled in zero organizations, deliberately a different org from any row's.
  */
 export async function createApiUserWithPermission(
   entityName: string,
   flags: { create?: boolean; read?: boolean; update?: boolean; delete?: boolean; import?: boolean },
   label = 'custom',
+  organizationId?: string,
 ): Promise<string> {
   const testUser = await prisma.user.findUnique({
     where: { email: TEST_CREDENTIALS.email },
@@ -242,6 +251,7 @@ export async function createApiUserWithPermission(
       password: 'not_needed',
       api_key: apiKey,
       roles: { connect: [{ id: customRole.id }] },
+      ...(organizationId ? { organizations: { connect: [{ id: organizationId }] } } : {}),
     },
   });
 
@@ -306,6 +316,109 @@ export async function createSessionUserWithPermission(
   });
 
   return email;
+}
+
+/**
+ * Creates a cross-org test fixture for G3: orgA (the main
+ * test user, TEST_CREDENTIALS/TEST_API_KEY, IS a member of), orgB (the main
+ * test user is NOT a member of), and — when entityId is supplied — reassigns
+ * that existing {{ entityName }} row into orgB.
+ *
+ * Deliberately generic across entities: rather than re-deriving each entity's
+ * full FK/required-field construction logic here (already handled by that
+ * entity's own db:populate<Entity> task), the caller creates the row first via
+ * db:populate<Entity> and passes its id in — this helper's only entity-aware
+ * step is a direct Prisma reassignment of that row's organization_id, which
+ * every should_filter_by_org entity has by construction. Deliberately bypasses
+ * the service layer's own org-membership validation (lib/<entity>/service.ts)
+ * — constructing a "row belongs to an org the actor isn't a member of" fixture
+ * is the whole point, so going around that validation for fixture setup is
+ * correct, not a bug.
+ */
+export async function createCrossOrgScenario(
+  entityName: string,
+  entityId?: string,
+): Promise<{ orgA: { id: string }; orgB: { id: string }; entityInOrgB?: { id: string } }> {
+  const testUser = await prisma.user.findUnique({
+    where: { email: TEST_CREDENTIALS.email },
+  });
+  if (!testUser) throw new Error('Test user not found. Run db:seed first.');
+
+  const orgA = await prisma.organization.create({
+    data: {
+      name: `CrossOrgA_${entityName}_${createId()}`,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+      users: { connect: [{ id: testUser.id }] },
+    },
+  });
+  const orgB = await prisma.organization.create({
+    data: {
+      name: `CrossOrgB_${entityName}_${createId()}`,
+      creator_id: testUser.id,
+      updater_id: testUser.id,
+      // Deliberately NOT connecting testUser — orgB is the "foreign" org.
+    },
+  });
+
+  let entityInOrgB: { id: string } | undefined;
+  if (entityId) {
+    const updated = await (prisma as Record<string, any>)[entityName].update({
+      where: { id: entityId },
+      data: { organization_id: orgB.id },
+    });
+    entityInOrgB = { id: updated.id };
+  }
+
+  return JSON.parse(JSON.stringify({ orgA: { id: orgA.id }, orgB: { id: orgB.id }, entityInOrgB }));
+}
+
+// Every Prisma model, in the same enumeration `resetTestDatabase()` already
+// derives from the schema — reused here so the write-once side-effect
+// round-trip probe below (cmd_941 gate 2) never drifts from the model list
+// as the schema grows.
+export const ALL_PRISMA_MODELS = [
+{% for level in deletion_levels %}
+{% for model in level %}
+  '{{ model }}',
+{% endfor %}
+{% endfor %}
+];
+
+/**
+ * cmd_941 gate 2: snapshot every OTHER Prisma model's current row content —
+ * the "what did this operation touch" probe for the write-once side-effect
+ * round-trip test. See docs/knowledge/write-once-side-effect-roundtrip-test.md
+ * for the full pattern (create → edit → snapshot → revert-edit → snapshot →
+ * assert the revert touched at least one of whatever the edit touched).
+ *
+ * Row order is never assumed stable: each row is serialized independently
+ * and the per-model list is sorted before joining, so two snapshots compare
+ * equal iff the row *content* is unchanged, regardless of return order.
+ * `excludeModel` is the entity under test's own model — its own row is
+ * expected to change and is not "another model".
+ */
+export async function snapshotOtherModels(excludeModel: string): Promise<Record<string, string>> {
+  const snapshot: Record<string, string> = {};
+  for (const model of ALL_PRISMA_MODELS) {
+    if (model === excludeModel) continue;
+    const delegate = (prisma as Record<string, any>)[model];
+    if (typeof delegate?.findMany !== 'function') continue;
+    const rows: unknown[] = await delegate.findMany();
+    snapshot[model] = rows.map((row) => JSON.stringify(row)).sort().join('\n');
+  }
+  return snapshot;
+}
+
+/**
+ * Models whose snapshotOtherModels() content differs between two calls —
+ * i.e. were created in, updated in, or deleted from in between.
+ */
+export function diffTouchedModels(
+  before: Record<string, string>,
+  after: Record<string, string>,
+): string[] {
+  return Object.keys(before).filter((model) => before[model] !== after[model]);
 }
 
 export { prisma };

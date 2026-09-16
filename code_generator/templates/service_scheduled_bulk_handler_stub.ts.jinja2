@@ -1,0 +1,21 @@
+// GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
+// x-scheduled-tasks (bulk) handler for task_id: {{ task_id }}
+
+/**
+ * Called once per scheduled run of the `{{ task_id }}` task — bulk mode: no
+ * row selection, no entity binding (top-level `x-scheduled-tasks`, cmd_790).
+ * Implement the side effect here, or delegate to an existing script's /
+ * Server Action's exported entry point — do not re-implement business logic
+ * that already exists elsewhere (cmd_750/subtask_741a AC2, cmd_790 AC4). For
+ * example, a "reset demo data" task should import and call the project's own
+ * reset script rather than reimplementing the wipe/reseed steps here:
+ *
+ *   const { main } = await import('@/scripts/reset-demo');
+ *   await main();
+ *
+ * @param systemActorId - the scheduled-task service account's user id
+ */
+export async function {{ handler }}(systemActorId: string): Promise<void> {
+  // TODO: implement scheduled-task side effects here
+  void systemActorId;
+}

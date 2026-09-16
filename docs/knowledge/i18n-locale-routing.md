@@ -98,24 +98,26 @@ The project uses `proxy.ts` as its middleware entry point (not `middleware.ts`).
 2. **Auth protection** — non-public paths require a valid JWT; unauthenticated users are redirected to `/{locale}/login`
 
 ```ts
-// proxy.ts (simplified)
+// proxy.ts (simplified — current implementation wraps with Auth.js v5's
+// `auth()` from `auth.ts`'s `NextAuth(authConfig)`, not the older next-auth
+// `getToken()` helper; the real file also handles /api/auth/* rate-limiting
+// and an MFA challenge redirect, omitted here)
 const intlMiddleware = createIntlMiddleware(routing);
 const PUBLIC_PATHS = ['/login', '/register'];
 
-export async function proxy(req: NextRequest) {
+export const proxy = auth((req) => {
   // determine path without locale prefix
   const isPublicPath = PUBLIC_PATHS.some(p => pathnameWithoutLocale === p);
   const intlResponse = intlMiddleware(req);   // handles locale redirect/rewrite
 
   if (isPublicPath) return intlResponse;
 
-  const token = await getToken({ req, secret: process.env.AUTH_SECRET });
-  if (!token) {
+  if (!req.auth) {
     url.pathname = `/${locale}/login`;
     return NextResponse.redirect(url);
   }
   return intlResponse;
-}
+});
 
 export const config = {
   matcher: ['/((?!api|_next|_vercel|.*\\..*).*)'],
@@ -185,21 +187,23 @@ export default async function LocaleLayout({ children, params }) {
 
 2. Create the message file `messages/fr.json` with all required keys (copy `en.json` as a starting template).
 
-3. Update the `localeLabels` map in `app/[locale]/@header/page.tsx`:
-   ```ts
-   const localeLabels: Record<string, string> = {
-     en: "EN",
-     ja: "日本語",
-     fr: "FR",
-   };
-   ```
-
-4. Update `i18n/request.ts` — widen the type guard to include the new locale:
+3. Update `i18n/request.ts` — widen the type guard to include the new locale:
    ```ts
    if (!locale || !routing.locales.includes(locale as 'en' | 'ja' | 'fr')) {
    ```
 
-That's all — next-intl handles the rest automatically.
+That's all — next-intl handles the rest automatically. The header's locale
+switcher (`app/[locale]/@header/page.tsx`) no longer needs a manual update:
+a hardcoded `localeLabels` map (`en: "EN"`, `ja: "日本語"`, ...) was replaced
+by `getLocaleLabel()`, which derives each option's display name from
+`Intl.DisplayNames` — adding a locale to `routing.locales` above is the only
+change needed to expose it in the picker (commit `237b8c6b`, "Replace EN/JA
+buttons with locale autocomplete in header").
+
+> This 3-step procedure is for the **site UI locale** (chrome, labels,
+> forms). It does not apply to Terms of Service / Privacy Policy content
+> locales, which are resolved independently of `routing.locales` — see
+> [legal-documents.md](./legal-documents.md#design-document-locale-is-decoupled-from-the-site-ui-locale).
 
 ---
 
@@ -273,6 +277,37 @@ API routes are **not** locale-prefixed — they stay at `app/api/[entity]/`:
 ```python
 api_dir = out / 'app' / 'api' / parent
 ```
+
+### `messages/*.json` are append-only, never generator-truncated
+
+`code_generator/generators_i18n.py::update_i18n_and_config` (called at the end
+of every `generate-code` run) treats every `messages/*.json` file as
+append-only: `_update_json` adds a key only when it is genuinely missing and
+never removes or overwrites an existing one, so a manually-translated
+`messages/ja.json` value always survives a normal `generate-code` run. `en.json`
+is the source-of-truth locale (`i18n/routing.ts` `defaultLocale`); any key
+newly added to a *different* locale file carries that same English text as an
+untranslated placeholder, and the build log prints a `WARNING: untranslated
+keys added` line naming exactly which keys still need translation — check for
+that line after `generate-code`, don't assume a clean "Updated: messages/ja.json"
+line means everything is translated.
+
+**`code_generator/cleanup.py` must never delete entries from `messages/*.json`.**
+It used to: `_clean_appended_files` computed the Fields/EntityLabel/Nav keys
+belonging to whatever schema was passed and deleted every matching key from
+`messages/*.json` — including entries for real, still-in-use entities, because
+`npm run cleanup` always rebuilds its schema argument fresh from whatever
+`json_schema.yaml` currently says (there is no "only the removed entity" input
+available to it). Running `npm run cleanup` while a temp fixture entity was
+still present in the schema (e.g. to remove that fixture's generated files
+before reverting the schema file — a normal fixture-testing workflow) wiped
+every real entity's translated keys too. A subsequent `generate-code` then
+looked at those now-missing keys as "genuinely missing" and refilled them with
+the English schema default — the observed symptom was `messages/ja.json`
+turning wholesale English. `cleanup.py` now leaves `messages/*.json` alone
+entirely (it still cleans `lib/site-config.ts` and
+`app/[locale]/@sidebar/page.tsx`, which are pure schema-derived href/label
+pairs with no human-edited content, so re-deriving them is safe).
 
 ---
 

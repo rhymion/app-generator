@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { vi, describe, it, expect } from 'vitest';
 import CardListClient from './CardListClient';
 
 vi.mock('next-intl', () => ({
@@ -88,6 +88,11 @@ describe('CardListClient', () => {
       expect(screen.getByRole('button', { name: 'Create New Item' })).toBeInTheDocument();
       expect(screen.getByText('Alpha')).toBeInTheDocument();
     });
+
+    it('hides create button when allowCreate=false even though permissions.create=true (x-generate.new: false means no /new page exists)', () => {
+      render(<CardListClient src={[]} basePath={basePath} permissions={allPerms} allowCreate={false} />);
+      expect(screen.queryByRole('button', { name: 'Create New Item' })).not.toBeInTheDocument();
+    });
   });
 
   describe('Update', () => {
@@ -105,6 +110,11 @@ describe('CardListClient', () => {
       render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} />);
       const editLink = screen.getByRole('button', { name: 'Edit' }).closest('a');
       expect(editLink).toHaveAttribute('href', '/items/edit/1');
+    });
+
+    it('hides edit button when allowEdit=false even though permissions.update=true (x-generate.edit: false means no /edit page exists)', () => {
+      render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} allowEdit={false} />);
+      expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
     });
   });
 

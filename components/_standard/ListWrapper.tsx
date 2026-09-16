@@ -52,6 +52,9 @@ function ListWrapper(
               </Link>
             }
             secondary={
+              // item.value is an arbitrary uploaded-file URL of unknown origin/dimensions;
+              // next/image needs a configured remote pattern and fixed dimensions, out of scope here.
+              // eslint-disable-next-line @next/next/no-img-element
               <img src={item.value} alt={item.label || ''} style={{ maxWidth: 100, maxHeight: 100, objectFit: 'contain', marginTop: 4 }} />
             }
           />

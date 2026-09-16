@@ -5,6 +5,32 @@ argument-hint: <model or schema change description>
 
 This is a **generate-schema** task. Read CLAUDE.md before starting.
 
+## Key rules (read first)
+
+- The resulting schema does not have to match any ER diagram or
+  external design document verbatim. Shaping the schema around
+  what the generator actually supports (relationship types,
+  `x-*` extension keys, generated code paths) is a legitimate
+  design choice, not a deviation that needs excusing.
+- Before treating a generator limitation as a reason to reshape
+  the schema, check whether an existing `x-*` key (see
+  `docs/knowledge/schema-yaml-configuration.md`) already covers
+  the case. Built-in keys are the default, proactive choice even
+  when the task description doesn't name them — this applies
+  with extra force in fast-track mode, where no confirmation
+  step catches a missed key.
+
+Traps that actually cost time in a real fast-track run (measured from
+a full ER-diagram-only session, not guessed):
+
+- FK to an embedded entity (one with `x-generate` disabled) breaks the
+  build if required — promote the target to a standalone entity first.
+- Reset the test DB (`docker compose down -v` before the next
+  `test:e2e:build`) after every schema change — a stale DB produces
+  confusing, unrelated-looking failures.
+- Run long commands (`test:e2e:build` etc.) in the background with a
+  wait-loop — foreground execution hits typical CLI time limits.
+
 Minimum docs to read before starting:
 - `docs/knowledge/prisma-schema-conventions.md`
 - `docs/knowledge/schema-yaml-configuration.md`
@@ -18,6 +44,121 @@ Task: $ARGUMENTS
 - Create Prisma schema first, then create JSON schema.
 - If the user requests a model similar to a built-in model (comment, attachment, etc.),
   first confirm whether the built-in model can be used instead.
+
+## Examples of `x-*` key usage (from proj_c)
+
+Short, annotated excerpts from a real 51-entity consumer schema
+(`app-template`), not full copies. Use these as a shape to imitate,
+not a schema to paste in.
+
+Hide an internal/bridge entity from the generated UI and API entirely:
+
+```yaml
+approvable:
+  x-generate:
+    list: false
+    view: false
+    new: false
+    edit: false
+    delete: false
+    invalidate: false
+    api: false
+    test: false
+```
+<!-- why: this entity exists only to be referenced by other entities'
+     approval wiring — it has no screens or CRUD of its own. -->
+
+Resolve an FK autocomplete/column label from a related field (or a
+composite of fields) instead of the target's raw id:
+
+```yaml
+fields:
+  approval_flow_id:
+    x-relationship:
+      labelField: [entity_name, approver_role.name]
+```
+<!-- why: a bare id is meaningless to a user; labelField lets the
+     dropdown/column show a human-readable, possibly composite name. -->
+
+Mark which field(s) uniquely identify a row for CSV import matching:
+
+```yaml
+role:
+  x-import-key: [name]
+```
+<!-- why: without x-import-key an entity is export-only — import is
+     blocked (see the key's own description block for the phase split). -->
+
+Lock system-managed fields so generated forms can't edit them:
+
+```yaml
+inventory:
+  x-readonly-fields:
+    - quantity
+    - reserved_quantity
+```
+<!-- why: these fields are maintained by transaction/reservation logic,
+     not by direct user edits — the form should show, not accept, them. -->
+
+Or lock a single field directly on the property, without an entity-level list:
+
+```yaml
+inventory:
+  fields:
+    reserved_quantity:
+      x-readonly: true
+```
+<!-- why: same rendering effect as x-readonly-fields for one field, but
+     scoped differently — see "x-readonly vs x-readonly-fields" below for
+     which to reach for. -->
+
+### `x-readonly` vs `x-readonly-fields`: which one to use
+
+Both make a field non-editable in the generated form (shown, not accepted,
+on edit). They differ in **scope**, not effect:
+
+| | `x-readonly` | `x-readonly-fields` |
+|---|---|---|
+| Where declared | on the property itself, under `fields:` | entity-level list, alongside `x-generate` |
+| Scope | the Prisma model — every view built on it | the one view entity it's declared on |
+| Use when | the field must never be editable through *any* view of this model (e.g. a computed/system column) | only *this* view should lock the field down; other views of the same model may still let it be edited |
+
+Properties always live on the Prisma model, not the view, which is why
+`x-readonly` is model-wide and `x-readonly-fields` is view-scoped — see
+`docs/knowledge/readonly-field-form-rendering.md` for the mechanism.
+
+### `x-filter-values`: view-scoped row restriction
+Restrict a view to only the rows matching a fixed set of field values:
+
+```yaml
+active_setting:
+  allOf: [{ $ref: '#/definitions/setting' }]
+  x-generate: { ... }
+  x-filter-values:
+    status: [active, pending]
+    is_archived: [false]
+```
+<!-- why: shows only rows where status is one of [active, pending] AND
+     is_archived is false — a proxy view that should only ever handle a
+     subset of the underlying model's rows (e.g. an "active orders" view of
+     a shared `order` model). -->
+
+Map of `field: [allowed values, ...]`. Multiple fields combine with **AND**;
+multiple values for one field combine with **IN**. There is no NOT/OR form
+— add one only once a real use case needs it, not speculatively.
+
+Like `x-readonly-fields`, this is entity-level metadata that stays on the
+view entity that declares it — it never leaks onto other views sharing the
+same underlying model.
+
+Enforcement is server-side, unconditional, and covers every read and write
+path (list, detail, export, search, and PUT/DELETE including the Server
+Action delete path) — a filtered-out row 404s exactly like an
+`x-self-only` violation, judged against the row's state **before** the
+write. No permission setting can widen past it — it composes with every
+other row-scope condition via AND, never OR. See
+`docs/knowledge/filter-values-row-scope.md` for the full list of
+enforcement points and the pre-image semantics.
 
 ## Common rules
 
@@ -34,19 +175,38 @@ Task: $ARGUMENTS
 
 Run in this order:
 
-1. `npm run test:pytest`      — Python unit tests for code generator
-2. `npm run test:vitest`     — vitest unit/component tests
-3. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
-4. `npm run check:generated` — generated code matches templates/schema
-5. `npm run test:e2e:cy:api` — API Cypress specs only
-6. `npm run lint`
+1. `npm run lint`            — **must run before any of the generate-code steps below** (see note)
+2. `npm run test:pytest`      — Python unit tests for code generator
+3. `npm run test:vitest`     — vitest unit/component tests
+4. `npm run test:e2e:build`  — docker:up:test + generate-code + db:push + db:generate + db:seed-baseline + build
+5. `npm run check:generated` — generated code matches templates/schema
+6. `npm run test:e2e:cy:api` — API Cypress specs only
 7. `npm audit --omit=dev --audit-level=high`
+8. `npm run check:readme-sync` — fails closed if this branch's diff touches
+   README.md without also touching README_ja.md (or vice versa)
 
-Steps 1 and 2 run unconditionally, with no "unchanged" exemption: CI's
+**Step 1 (`npm run lint`) must run on a checkout where `generate-code` has
+not yet run** — that is what CI's `Lint` job actually checks (`npm ci && npm
+run lint`, no `generate-code` step, see `.github/workflows/ci.yml`). On a
+worktree where `generate-code` already ran in an earlier session, run `npm
+run cleanup` immediately before this step to remove the generated output
+first (do **not** use `git clean` — forbidden by CLAUDE.md D004). Linting
+after generate-code checks a much larger, differently-calibrated file set
+than CI ever sees and has caused false gate failures unrelated to the
+current change — see cmd_600 /
+`docs/knowledge/lint-gate-must-match-ci-precondition.md`.
+
+Steps 2 and 3 run unconditionally, with no "unchanged" exemption: CI's
 `unit-tests` and `pytest` jobs run on every push/PR to `main`/`master` with
 no path filter, so a local gate that conditionally skips either can go green
 while CI goes red on the same commit (see
 `docs/knowledge/gate-exemption-must-be-machine-checkable.md` — cmd_498).
+
+Step 8 only proves both README files were touched, not that their content
+actually agrees — a new `x-*` schema key generally needs a README.md
+bullet (see `## Features`); if this task's diff includes one, bring
+README_ja.md's content up to date with it (and vice versa) before this
+step, not after. See `docs/knowledge/readme-en-ja-sync-gate.md`.
 
 ## Debug priority
 
@@ -57,6 +217,8 @@ while CI goes red on the same commit (see
 | Test fails | 1. generated test code bug |
 | Other test fails | 1. generation logic missing a case → 2. product code bug |
 
-> **Note**: When running lint or typecheck in isolation, prefix with
-> `npm run generate-code` first. See `AGENTS.md §Generated-code prerequisites
-> for gates` for the full rule.
+> **Note**: When running typecheck (`npx tsc --noEmit`) in isolation, prefix
+> with `npm run generate-code` first. See `AGENTS.md §Generated-code
+> prerequisites for gates` for the full rule. `npm run lint` is the
+> exception — never prefix it with `generate-code` (see Completion gate
+> step 1 above).

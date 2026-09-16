@@ -251,9 +251,8 @@ describe('API: GET /api/search', () => {
       }).then((res) => {
         expect(res.status).to.eq(200);
         const facets: Record<string, number> = res.body.facets;
-        const results: { entity_type: string }[] = res.body.results;
-        // Verify facet counts are consistent with actual results (within page)
-        Object.entries(facets).forEach(([type, count]) => {
+        // Verify facet counts are well-formed
+        Object.entries(facets).forEach(([_type, count]) => {
           expect(count).to.be.greaterThan(0);
           expect(typeof count).to.eq('number');
         });

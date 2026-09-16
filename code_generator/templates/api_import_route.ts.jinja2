@@ -2,22 +2,43 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Papa from 'papaparse';
 import prisma from '@/lib/prisma';
-import { getModelPermissions, assertPermission, canAccess{% if should_filter_by_org %}, getSessionUserId{% endif %} } from '@/lib/authz';
-import { handleApiError } from '@/lib/api-auth';
+import { getModelPermissions, assertPermission{% if import_can_update and not is_self_only %}, canAccess{% endif %} } from '@/lib/authz';
+import { handleApiError, resolveActorId } from '@/lib/api-auth';
 import { unescapeImportValue } from '@/lib/_csv';
 import { generateImportToken, verifyImportToken } from '@/lib/_import';
-{% if should_filter_by_org %}
+{% if import_uses_format_label_value %}
+import { formatLabelValue } from '@/lib/_format';
+{% endif %}
+{% if should_filter_by_org or any_dotted_fk_needs_org_filter %}
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 {% endif %}
+{% if import_service_call_feasible and (import_can_create or import_can_update) %}
+// cmd_996 (Issue #93): import writes through the same service.ts convergence
+// point REST route.ts / Server Action actions.ts use, instead of a raw
+// tx.model.create/update — see the commit loop below.
+import { {% if import_can_create %}add{{ parent_pascal }}{% endif %}{% if import_can_create and import_can_update %}, {% endif %}{% if import_can_update %}update{{ parent_pascal }}{% endif %} } from '@/lib/{{ parent }}/service';
+import { AppError } from '@/lib/_errors';
+{% endif %}
 
-const MAX_IMPORT_ROWS = 5_000;
-const MAX_IMPORT_BYTES = 10 * 1024 * 1024; // 10MB
+// Env var names (IMPORT_MAX_*) intentionally use the opposite word order
+// from these constant names (MAX_IMPORT_*) — see .env.example. Renaming
+// either side would ripple into every generated api_import_route.ts across
+// every entity, so the mismatch is documented here instead of "fixed".
+const MAX_IMPORT_ROWS = Number(process.env.IMPORT_MAX_ROWS ?? '5000');
+const MAX_IMPORT_BYTES = Number(process.env.IMPORT_MAX_BYTES ?? String(10 * 1024 * 1024)); // 10MB
 
 type ImportRowError = { row: number; code: string; message: string };
 type ImportResult = {
   summary: { total: number; succeeded: number; failed: number; dryRun: boolean };
   errors: ImportRowError[];
   confirmToken?: string;
+  // cmd_964 (per ruling): a CSV column with no write path (UNIMPORTABLE_COLUMNS
+  // below) is a column whose value can never have been written by this same
+  // import route in the first place -- so ignoring it on import loses
+  // nothing a user could have intended (unlike silently dropping a column
+  // that WAS writable, cmd_530's concern). Reported here instead of failing
+  // the whole import, so the caller can see what was skipped.
+  skippedColumns?: string[];
 };
 
 {% if not import_can_create and not import_can_update %}
@@ -32,9 +53,31 @@ export async function POST() {
   );
 }
 {% else %}
-type FieldSpec = { name: string; ts_type: 'string' | 'number' | 'boolean'; nullable: boolean; is_key: boolean; is_update: boolean };
+type FieldSpec = { name: string; ts_type: 'string' | 'number' | 'boolean' | 'decimal'; nullable: boolean; is_key: boolean; is_update: boolean };
+// Decimal-format cells: optional sign, digits, optional fractional part —
+// matches what a Prisma Decimal column accepts. No thousands separators.
+const DECIMAL_CELL_RE = /^-?\d+(\.\d+)?$/;
 const FIELD_SPECS: FieldSpec[] = {{ import_field_specs | tojson }};
 const KEY_COLUMNS: string[] = {{ import_key_specs | map(attribute='csv_col') | list | tojson }};
+// cmd_530: exported FK columns with no CSV-import write path (composite/dotted
+// labelField, or read-only on screen) — presence in the CSV header is rejected
+// rather than silently accepted and discarded.
+const UNIMPORTABLE_COLUMNS: string[] = {{ import_unimportable_columns | tojson }};
+{% if write_locked_fields and not import_service_call_feasible %}
+// Write-locked values (see service_validation.ts's identical concept):
+// values a field may only receive through the system. CSV import writes
+// directly via a transaction call and never runs through
+// service_validation.ts, so the same check is duplicated here.
+type WriteLockedField = { key: string; values: unknown[] };
+const WRITE_LOCKED_FIELDS: WriteLockedField[] = [
+{% for field in write_locked_fields %}
+  { key: '{{ field }}', values: {{ write_locked_values[field] | tojson }} },
+{% endfor %}
+] ;
+function findLockedViolation(data: Record<string, unknown>): WriteLockedField | undefined {
+  return WRITE_LOCKED_FIELDS.find((f) => f.key in data && f.values.includes(data[f.key]));
+}
+{% endif %}
 
 type PendingAction =
   | { op: 'create'; row: number; data: Record<string, unknown> }
@@ -52,6 +95,12 @@ function coerceValue(raw: string | undefined, spec: FieldSpec): { ok: true; valu
     const n = Number(v);
     return Number.isFinite(n) ? { ok: true, value: n } : { ok: false };
   }
+  if (spec.ts_type === 'decimal') {
+    // Format-checked, but kept as the original string (never Number()) —
+    // Prisma accepts a decimal string directly, so this never risks the
+    // float rounding error a Number() round-trip would introduce.
+    return DECIMAL_CELL_RE.test(v.trim()) ? { ok: true, value: v.trim() } : { ok: false };
+  }
   if (spec.ts_type === 'boolean') {
     if (v === 'true' || v === '1') return { ok: true, value: true };
     if (v === 'false' || v === '0') return { ok: true, value: false };
@@ -62,14 +111,11 @@ function coerceValue(raw: string | undefined, spec: FieldSpec): { ok: true; valu
 
 export async function POST(request: NextRequest) {
   try {
-{% if should_filter_by_org %}
-    const actorId = await getSessionUserId();
+    // cmd_648: dual-auth — X-API-Key/Authorization header when present,
+    // session cookie otherwise (see app/api/search/route.ts).
+    const actorId = await resolveActorId(request);
     if (!actorId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const { permissions } = await getModelPermissions('{{ parent }}', actorId);
-{% else %}
-    const { permissions, userId: actorId } = await getModelPermissions('{{ parent }}');
-    if (!actorId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-{% endif %}
     try {
       await assertPermission(permissions, 'import', '{{ parent }}');
     } catch {
@@ -116,19 +162,70 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+    // cmd_964 (per ruling): a column in UNIMPORTABLE_COLUMNS has no write path
+    // on this entity by definition (read-only or a non-resolvable composite/
+    // dotted label) -- its value could never have been written by import in
+    // the first place, so its presence is ignored rather than rejecting the
+    // whole file. Every code path below only ever reads a column it knows
+    // how to handle (FIELD_SPECS / KEY_COLUMNS / import_fk_specs), so an
+    // unimportable column in `raw` is simply never looked at again; nothing
+    // else needs to change to make "ignore" mean "ignore". Still reported
+    // back (skippedColumns) so ignoring it is visible, not silent.
+    const skippedColumns = UNIMPORTABLE_COLUMNS.filter((c) => headerFields.includes(c));
 
     const errors: ImportRowError[] = [];
     const actions: PendingAction[] = [];
-{% if should_filter_by_org %}
+{% if should_filter_by_org or any_dotted_fk_needs_org_filter %}
     const _importAssocOrgs = await getAssociatedOrganizations(actorId);
     const _importOrgIds = _importAssocOrgs.map((o) => o.id);
 {% endif %}
+{% for spec in import_fk_specs %}
+{% if spec.is_composite %}
+    // cmd_548: composite/dotted labelField FK — {{ spec.raw }}. There is no
+    // single scalar to look up by, so the whole rendered label is matched
+    // instead: build a label->id[] map once (NOT per row) from every
+    // candidate {{ spec.lookup_entity }} row, using the SAME label
+    // expression the export getter renders (see x_relationships_list /
+    // import_label_expr in build_context.py) — export and import can never
+    // disagree on what a label looks like. Skipped entirely when the CSV
+    // header doesn't include this column, so an import that doesn't touch
+    // this FK never pays for the full-table read.
+    const _{{ spec.var_prefix }}_label_map = new Map<string, string[]>();
+    if (headerFields.includes('{{ spec.csv_col }}')) {
+      const _{{ spec.var_prefix }}_candidates = await prisma.{{ spec.lookup_entity }}.findMany({
+        include: {{ spec.prisma_include | tojson }},
+{% if spec.lookup_entity_filter_by_org and spec.lookup_entity_org_relationship_optional %}
+        where: { OR: [{ organization_id: { in: _importOrgIds } }, { organization_id: null }] },
+{% elif spec.lookup_entity_filter_by_org %}
+        where: { organization_id: { in: _importOrgIds } },
+{% elif spec.lookup_entity_filter_by_self_id %}
+        where: { id: { in: _importOrgIds } },
+{% endif %}
+      });
+      for (const c of _{{ spec.var_prefix }}_candidates) {
+        const _lbl = ({{ spec.import_label_expr }}).trim();
+        if (!_{{ spec.var_prefix }}_label_map.has(_lbl)) _{{ spec.var_prefix }}_label_map.set(_lbl, []);
+        _{{ spec.var_prefix }}_label_map.get(_lbl)!.push(c.id);
+      }
+    }
+{% endif %}
+{% endfor %}
 
     for (let i = 0; i < rows.length; i++) {
       const rowNum = i + 2; // 1-indexed CSV row, +1 for the header row
       const raw = rows[i];
 
       const keyWhere: Record<string, unknown> = {};
+      // Issue #525: per-key match conditions, AND'd together for the
+      // findMany() below (kept separate from `keyWhere`'s flat CREATE-data
+      // values). A nullable key column contributes an `OR` clause here so
+      // an empty CSV cell matches an existing row stored as either NULL or
+      // '' -- the actual defect was an incoming '' never matching a
+      // pre-existing NULL row. Using a dedicated `AND` array (rather than
+      // spreading an `OR` key straight onto the where object) avoids
+      // colliding with the unrelated top-level `OR` the org-filter branches
+      // below already use for their own purpose.
+      const keyMatchConds: Record<string, unknown>[] = [];
 {% for spec in import_key_specs %}
 {% if spec.is_dotted %}
       // Dotted FK: {{ spec.raw }} → lookup {{ spec.lookup_entity }} by {{ spec.lookup_field }}
@@ -143,7 +240,7 @@ export async function POST(request: NextRequest) {
       {
 {% endif %}
         const _{{ spec.var_prefix }}_rows = await prisma.{{ spec.lookup_entity }}.findMany({
-          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val },
+          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val{% if spec.lookup_entity_filter_by_org and spec.lookup_entity_org_relationship_optional %}, OR: [{ organization_id: { in: _importOrgIds } }, { organization_id: null }]{% elif spec.lookup_entity_filter_by_org %}, organization_id: { in: _importOrgIds }{% elif spec.lookup_entity_filter_by_self_id %}, id: { in: _importOrgIds }{% endif %} },
           select: { id: true },
         });
         if (_{{ spec.var_prefix }}_rows.length === 0) {
@@ -159,8 +256,100 @@ export async function POST(request: NextRequest) {
         _{{ spec.result_col }} = _{{ spec.var_prefix }}_rows[0].id;
       }
       keyWhere.{{ spec.result_col }} = _{{ spec.result_col }};
+      keyMatchConds.push({ {{ spec.result_col }}: _{{ spec.result_col }} });
+{% else %}
+{% if spec.fk_nullable %}
+      {
+        const _{{ spec.csv_col }}_val = unescapeImportValue(raw['{{ spec.csv_col }}'] ?? '');
+        if (_{{ spec.csv_col }}_val === '') {
+          // Issue #525: empty cell on a nullable key column -- normalize
+          // to null for CREATE, and match either NULL or '' on lookup (a
+          // pre-fix row may have persisted '' instead of NULL).
+          keyWhere.{{ spec.csv_col }} = null;
+          keyMatchConds.push({ OR: [{ {{ spec.csv_col }}: null }, { {{ spec.csv_col }}: '' }] });
+        } else {
+          keyWhere.{{ spec.csv_col }} = _{{ spec.csv_col }}_val;
+          keyMatchConds.push({ {{ spec.csv_col }}: _{{ spec.csv_col }}_val });
+        }
+      }
 {% else %}
       keyWhere.{{ spec.csv_col }} = unescapeImportValue(raw['{{ spec.csv_col }}'] ?? '');
+      keyMatchConds.push({ {{ spec.csv_col }}: keyWhere.{{ spec.csv_col }} });
+{% endif %}
+{% endif %}
+{% endfor %}
+
+      // cmd_530: non-key FK relations that are screen-editable — resolved the
+      // same way as a dotted x-import-key, but written to fkData (CREATE and
+      // UPDATE) instead of keyWhere (these never participate in row matching).
+      // cmd_607: fkData itself is only ever read by the CREATE branch below —
+      // declaring it unconditionally left it as a dead variable on
+      // create-not-supported entities (e.g. user), so it's gated the same way.
+{% if import_can_create %}
+      const fkData: Record<string, unknown> = {};
+{% endif %}
+{% for spec in import_fk_specs %}
+{% if not spec.is_key %}
+{% if spec.is_composite %}
+      // Composite-label FK (map lookup, cmd_548): {{ spec.raw }} → {{ spec.lookup_entity }}
+      let _{{ spec.result_col }}: string | null = null;
+      const _{{ spec.var_prefix }}_csv_val = unescapeImportValue(raw['{{ spec.csv_col }}'] ?? '').trim();
+{% if spec.fk_nullable %}
+      if (_{{ spec.var_prefix }}_csv_val === '') {
+        // Empty → FK = null (nullable FK is allowed to be unset)
+        _{{ spec.result_col }} = null;
+      } else {
+{% else %}
+      {
+{% endif %}
+        const _{{ spec.var_prefix }}_ids = _{{ spec.var_prefix }}_label_map.get(_{{ spec.var_prefix }}_csv_val);
+        if (!_{{ spec.var_prefix }}_ids || _{{ spec.var_prefix }}_ids.length === 0) {
+          errors.push({ row: rowNum, code: 'NOT_FOUND',
+            message: `Row ${rowNum}: no {{ spec.lookup_entity }} matches label '${_{{ spec.var_prefix }}_csv_val}' (column {{ spec.csv_col }})` });
+          continue;
+        }
+        if (_{{ spec.var_prefix }}_ids.length > 1) {
+          errors.push({ row: rowNum, code: 'MULTI_MATCH',
+            message: `Row ${rowNum}: ${_{{ spec.var_prefix }}_ids.length} {{ spec.lookup_entity }} rows share label '${_{{ spec.var_prefix }}_csv_val}' (column {{ spec.csv_col }}) — ensure each {{ spec.lookup_entity }} record has a unique label, or use the '{{ spec.result_col }}' column to identify rows by ID` });
+          continue;
+        }
+        _{{ spec.result_col }} = _{{ spec.var_prefix }}_ids[0];
+      }
+{% if import_can_create %}
+      fkData.{{ spec.result_col }} = _{{ spec.result_col }};
+{% endif %}
+{% else %}
+      // Non-key FK: {{ spec.raw }} → lookup {{ spec.lookup_entity }} by {{ spec.lookup_field }}
+      let _{{ spec.result_col }}: string | null = null;
+      const _{{ spec.var_prefix }}_csv_val = unescapeImportValue(raw['{{ spec.csv_col }}'] ?? '');
+{% if spec.fk_nullable %}
+      if (_{{ spec.var_prefix }}_csv_val === '') {
+        // Empty → FK = null (nullable FK is allowed to be unset)
+        _{{ spec.result_col }} = null;
+      } else {
+{% else %}
+      {
+{% endif %}
+        const _{{ spec.var_prefix }}_rows = await prisma.{{ spec.lookup_entity }}.findMany({
+          where: { {{ spec.lookup_field }}: _{{ spec.var_prefix }}_csv_val{% if spec.lookup_entity_filter_by_org and spec.lookup_entity_org_relationship_optional %}, OR: [{ organization_id: { in: _importOrgIds } }, { organization_id: null }]{% elif spec.lookup_entity_filter_by_org %}, organization_id: { in: _importOrgIds }{% elif spec.lookup_entity_filter_by_self_id %}, id: { in: _importOrgIds }{% endif %} },
+          select: { id: true },
+        });
+        if (_{{ spec.var_prefix }}_rows.length === 0) {
+          errors.push({ row: rowNum, code: 'NOT_FOUND',
+            message: `Row ${rowNum}: no {{ spec.lookup_entity }} with {{ spec.lookup_field }}='${_{{ spec.var_prefix }}_csv_val}'` });
+          continue;
+        }
+        if (_{{ spec.var_prefix }}_rows.length > 1) {
+          errors.push({ row: rowNum, code: 'MULTI_MATCH',
+            message: `Row ${rowNum}: multiple {{ spec.lookup_entity }} match {{ spec.lookup_field }}='${_{{ spec.var_prefix }}_csv_val}' — deduplicate first` });
+          continue;
+        }
+        _{{ spec.result_col }} = _{{ spec.var_prefix }}_rows[0].id;
+      }
+{% if import_can_create %}
+      fkData.{{ spec.result_col }} = _{{ spec.result_col }};
+{% endif %}
+{% endif %}
 {% endif %}
 {% endfor %}
 
@@ -177,13 +366,44 @@ export async function POST(request: NextRequest) {
       }
       if (rowHasError) continue;
 
-{% if should_filter_by_org %}
+{% if should_filter_by_org and is_self_only %}
+      // Built as a separately-typed const (not spread inline into the call)
+      // so TS doesn't have to jointly infer this object's type and the
+      // Prisma findMany() overload in one step — inline spreads here can
+      // hit TS7022 (self-referential implicit-any) against generic Prisma
+      // args typing.
+{% if org_relationship_optional %}
+      const _matchWhere: Record<string, unknown> = { AND: keyMatchConds, OR: [{ organization_id: { in: _importOrgIds } }, { organization_id: null }], creator_id: actorId };
+{% else %}
+      const _matchWhere: Record<string, unknown> = { AND: keyMatchConds, organization_id: { in: _importOrgIds }, creator_id: actorId };
+{% endif %}
       const matches = await prisma.{{ model }}.findMany({
-        where: { ...keyWhere, organization_id: { in: _importOrgIds } },
+        where: _matchWhere,
+        select: {{ item_context_select }},
+      });
+{% elif should_filter_by_org %}
+{% if org_relationship_optional %}
+      const _matchWhere: Record<string, unknown> = { AND: keyMatchConds, OR: [{ organization_id: { in: _importOrgIds } }, { organization_id: null }] };
+{% else %}
+      const _matchWhere: Record<string, unknown> = { AND: keyMatchConds, organization_id: { in: _importOrgIds } };
+{% endif %}
+      const matches = await prisma.{{ model }}.findMany({
+        where: _matchWhere,
+        select: {{ item_context_select }},
+      });
+{% elif is_self_only %}
+      // x-self-only: import can only see/match the caller's own rows — a
+      // natural-key collision with another user's row must not surface as
+      // MULTI_MATCH or silently update it; it's treated as no match (falls
+      // through to CREATE, which then fails on the DB's own uniqueness
+      // constraint if one exists — a generic write error, not a leak).
+      const _matchWhere: Record<string, unknown> = { AND: keyMatchConds, creator_id: actorId };
+      const matches = await prisma.{{ model }}.findMany({
+        where: _matchWhere,
         select: {{ item_context_select }},
       });
 {% else %}
-      const matches = await prisma.{{ model }}.findMany({ where: keyWhere, select: {{ item_context_select }} });
+      const matches = await prisma.{{ model }}.findMany({ where: { AND: keyMatchConds }, select: {{ item_context_select }} });
 {% endif %}
 
       if (matches.length > 1) {
@@ -197,10 +417,25 @@ export async function POST(request: NextRequest) {
           errors.push({ row: rowNum, code: 'ACCESS_DENIED', message: 'Not permitted to create this entity' });
           continue;
         }
-        // keyWhere is merged in so resolved dotted-FK columns (e.g. role_id, not part of
-        // FIELD_SPECS since FK columns are excluded from export_scalar_fields) are actually
-        // written on create; direct key fields duplicate an already-identical value in `data`.
-        actions.push({ op: 'create', row: rowNum, data: { ...data, ...keyWhere, creator_id: actorId, updater_id: actorId } });
+{% if write_locked_fields and not import_service_call_feasible %}
+        {
+          // A newly-created row has no persisted value to fall back to, so
+          // any locked value on CREATE is unconditionally rejected.
+          const _lockedViolation = findLockedViolation(data);
+          if (_lockedViolation) {
+            errors.push({
+              row: rowNum, code: 'APPROVAL_LOCKED_VALUE',
+              message: `Row ${rowNum}, column '${_lockedViolation.key}': '${data[_lockedViolation.key]}' can only be set by the system`,
+            });
+            continue;
+          }
+        }
+{% endif %}
+        // keyWhere and fkData are merged in so resolved dotted-FK columns (e.g. role_id,
+        // not part of FIELD_SPECS since FK columns are excluded from export_scalar_fields)
+        // are actually written on create; direct key fields duplicate an already-identical
+        // value in `data`.
+        actions.push({ op: 'create', row: rowNum, data: { ...data, ...keyWhere, ...fkData, creator_id: actorId, updater_id: actorId } });
 {% else %}
         errors.push({ row: rowNum, code: 'ENTITY_IMPORT_CREATE_NOT_SUPPORTED', message: 'This entity does not support CSV-import row creation' });
 {% endif %}
@@ -210,16 +445,66 @@ export async function POST(request: NextRequest) {
       // matches.length === 1
 {% if import_can_update %}
       const existing = matches[0];
+{% if is_self_only %}
+      // x-self-only: ownership is the sole gate — matches was already
+      // creator_id-scoped above, so this always holds here; kept explicit
+      // rather than relying on the query, per the "no escape" invariant.
+      const canUpdate = existing.creator_id === actorId;
+{% else %}
       const canUpdate = await canAccess('{{ parent }}', 'update', actorId, existing);
+{% endif %}
       if (!canUpdate) {
         errors.push({ row: rowNum, code: 'ACCESS_DENIED', message: 'Not permitted to update this row' });
         continue;
       }
+{% if write_locked_fields and not import_service_call_feasible %}
+      {
+        const _lockedViolation = findLockedViolation(data);
+        if (_lockedViolation) {
+          // A resubmission of the value the row already holds is not a
+          // lockdown violation -- it was already written by a prior
+          // operation.
+          const _lockedCurrent = (await prisma.{{ model }}.findUnique({
+            where: { id: existing.id },
+            select: {{ write_locked_values_select }},
+          })) as Record<string, unknown> | null;
+          if (!_lockedCurrent || _lockedCurrent[_lockedViolation.key] !== data[_lockedViolation.key]) {
+            errors.push({
+              row: rowNum, code: 'APPROVAL_LOCKED_VALUE',
+              message: `Row ${rowNum}, column '${_lockedViolation.key}': '${data[_lockedViolation.key]}' can only be set by the system`,
+            });
+            continue;
+          }
+        }
+      }
+{% endif %}
       const updateData: Record<string, unknown> = { updater_id: actorId };
 {% for f in import_update_fields %}
       updateData.{{ f }} = data.{{ f }};
 {% endfor %}
+      // cmd_530: FK relations (key and non-key) are also rewritten on update — for a key
+      // FK, keyWhere already matched, so this value is a no-op that was previously
+      // structurally impossible to write (1); for a non-key FK, this is the actual fix
+      // for the CSV column being silently dropped (2).
+{% for spec in import_fk_specs %}
+      updateData.{{ spec.result_col }} = _{{ spec.result_col }};
+{% endfor %}
+{% if import_service_call_feasible %}
+      // cmd_996: update{{ parent_pascal }}'s positional signature needs a
+      // value for every parent field, including key/unchanged ones
+      // updateData deliberately omits (a raw tx.update() with an absent key
+      // leaves it untouched -- fine for the raw-tx path, but
+      // validateOnUpdate's REQUIRED_FIELDS check rejects `undefined` for a
+      // still-required field like the natural key). `data` already carries
+      // every export_scalar_field's CSV value (including key columns --
+      // FIELD_SPECS is built from export_scalar_fields, not filtered by
+      // import_key_fields), so merging it under updateData (which adds
+      // updater_id and the resolved FK columns) supplies the same "resubmit
+      // the whole record" shape a REST PUT body already has.
+      actions.push({ op: 'update', row: rowNum, id: existing.id, data: { ...data, ...updateData } });
+{% else %}
       actions.push({ op: 'update', row: rowNum, id: existing.id, data: updateData });
+{% endif %}
 {% else %}
       errors.push({ row: rowNum, code: 'ENTITY_IMPORT_UPDATE_NOT_SUPPORTED', message: 'This entity does not support CSV-import row updates' });
 {% endif %}
@@ -227,7 +512,11 @@ export async function POST(request: NextRequest) {
 
     if (errors.length > 0) {
       return NextResponse.json(
-        { summary: { total: rows.length, succeeded: 0, failed: errors.length, dryRun }, errors } satisfies ImportResult,
+        {
+          summary: { total: rows.length, succeeded: 0, failed: errors.length, dryRun },
+          errors,
+          ...(skippedColumns.length > 0 ? { skippedColumns } : {}),
+        } satisfies ImportResult,
       );
     }
 
@@ -237,6 +526,7 @@ export async function POST(request: NextRequest) {
           summary: { total: rows.length, succeeded: actions.length, failed: 0, dryRun: true },
           errors: [],
           confirmToken: generateImportToken(actorId, '{{ parent }}'),
+          ...(skippedColumns.length > 0 ? { skippedColumns } : {}),
         } satisfies ImportResult,
       );
     }
@@ -253,12 +543,75 @@ export async function POST(request: NextRequest) {
 
     const commitErrors: ImportRowError[] = [];
     let succeeded = 0;
+{% if import_service_call_feasible %}
+    // cmd_996 (Issue #93): each row commits through add{{ parent_pascal }}/
+    // update{{ parent_pascal }} -- the same service.ts convergence point
+    // REST route.ts / Server Action actions.ts call -- instead of a raw
+    // tx.model.create/update, so validateOnAdd/validateOnUpdate (schema
+    // rules, x-write-locked-values, x-approval, and every hand-written
+    // service_validation_custom.ts rule) now guards CSV import too. Each
+    // call opens its own transaction (add/update{{ parent_pascal }}'s own
+    // `prisma.$transaction`), so rows commit and fail independently --
+    // there is deliberately no single outer transaction wrapping the whole
+    // batch here (there never really was one in effect: the prior single
+    // shared transaction still let one row's caught failure leave earlier
+    // rows in the same batch committed, since each row's error was caught
+    // per-iteration rather than re-thrown).
+    for (const action of actions) {
+      try {
+        if (action.op === 'create') {
+{% if import_can_create %}
+          await add{{ parent_pascal }}(actorId, {{ import_service_parent_args }}{% if flatten_null_args %}, {{ flatten_null_args }}{% endif %});
+{% else %}
+          // Unreachable: import_can_create is false for this entity, so no
+          // 'create' action is ever queued above -- kept only so this
+          // branch stays syntactically valid.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await prisma.{{ model }}.create({ data: action.data as any });
+{% endif %}
+        } else {
+{% if import_can_update %}
+          await update{{ parent_pascal }}(actorId, action.id, {{ import_service_parent_args }}{% if flatten_null_args %}, {{ flatten_null_args }}{% endif %}, null);
+{% else %}
+          // Unreachable: import_can_update is false for this entity, so no
+          // 'update' action is ever queued above -- kept only so this
+          // branch stays syntactically valid.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await prisma.{{ model }}.update({ where: { id: action.id }, data: action.data as any });
+{% endif %}
+        }
+        succeeded++;
+      } catch (err) {
+        if (err instanceof AppError) {
+          // Row-level translation of the service layer's exception (cmd_530:
+          // never let a rejected write silently read back as success).
+          commitErrors.push({
+            row: action.row, code: err.code,
+            message: `Row ${action.row}${err.field ? `, column '${err.field}'` : ''}: ${err.message}`,
+          });
+        } else {
+          commitErrors.push({ row: action.row, code: 'WRITE_FAILED', message: err instanceof Error ? err.message : String(err) });
+        }
+      }
+    }
+{% else %}
     await prisma.$transaction(async (tx) => {
       for (const action of actions) {
         try {
           if (action.op === 'create') {
+{% if one_to_one_pre_creates %}
+{{ one_to_one_pre_creates }}
+            await tx.{{ model }}.create({
+              data: {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                ...(action.data as any),
+{{ one_to_one_fk_data_lines }}
+              },
+            });
+{% else %}
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await tx.{{ model }}.create({ data: action.data as any });
+{% endif %}
           } else {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await tx.{{ model }}.update({ where: { id: action.id }, data: action.data as any });
@@ -269,11 +622,13 @@ export async function POST(request: NextRequest) {
         }
       }
     });
+{% endif %}
 
     return NextResponse.json(
       {
         summary: { total: rows.length, succeeded, failed: commitErrors.length, dryRun: false },
         errors: commitErrors,
+        ...(skippedColumns.length > 0 ? { skippedColumns } : {}),
       } satisfies ImportResult,
     );
   } catch (error) {

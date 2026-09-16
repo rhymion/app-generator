@@ -50,14 +50,12 @@ export async function afterApprove(
     });
   }
 
-  // Step 3: Fetch both inventory pools with their location for denormalized copy.
+  // Step 3: Fetch both inventory pools (id copy, cmd_562 — no include needed).
   const fromInventory = await tx.{{ pool_entity }}.findUniqueOrThrow({
     where: { id: entity.{{ ledger_source.fromPoolIdField }} },
-    include: { location: true },
   });
   const toInventory = await tx.{{ pool_entity }}.findUniqueOrThrow({
     where: { id: entity.{{ ledger_source.toPoolIdField }} },
-    include: { location: true },
   });
 
   const qty = entity.{{ ledger_source.quantity_delta_field }};
@@ -69,10 +67,13 @@ export async function afterApprove(
       event_type: 'move',
       quantity_delta: -qty,
       reserved_delta: 0,
-      product_id: fromInventory.product_id,
-      location: fromInventory.location?.name ?? '',
-      lot_number: fromInventory.lot_number,
-      expiration_date: fromInventory.expiration_date,
+      {{ pool_item_field }}: fromInventory.{{ pool_item_field }},
+      {{ pool_location_field }}: fromInventory.{{ pool_location_field }},
+      {{ pool_lot_field }}: fromInventory.{{ pool_lot_field }},
+      {{ pool_expiration_field }}: fromInventory.{{ pool_expiration_field }},
+      {% if pool_bin_field %}
+      {{ pool_bin_field }}: fromInventory.{{ pool_bin_field }}, // cmd_991, opt-in
+      {% endif %}
       approved_via: approvableId,
       created_by_id: approvedByUserId,
       creator_id: approvedByUserId,
@@ -87,10 +88,13 @@ export async function afterApprove(
       event_type: 'move',
       quantity_delta: +qty,
       reserved_delta: 0,
-      product_id: toInventory.product_id,
-      location: toInventory.location?.name ?? '',
-      lot_number: toInventory.lot_number,
-      expiration_date: toInventory.expiration_date,
+      {{ pool_item_field }}: toInventory.{{ pool_item_field }},
+      {{ pool_location_field }}: toInventory.{{ pool_location_field }},
+      {{ pool_lot_field }}: toInventory.{{ pool_lot_field }},
+      {{ pool_expiration_field }}: toInventory.{{ pool_expiration_field }},
+      {% if pool_bin_field %}
+      {{ pool_bin_field }}: toInventory.{{ pool_bin_field }}, // cmd_991, opt-in
+      {% endif %}
       approved_via: approvableId,
       created_by_id: approvedByUserId,
       creator_id: approvedByUserId,

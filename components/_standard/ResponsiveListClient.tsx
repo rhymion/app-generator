@@ -5,6 +5,7 @@ import DataGridClient from './DataGridClient';
 import CardListClient from './CardListClient';
 import type { ModelPermissions } from '@/lib/authz';
 import type { PageOpts, PageResult } from '@/lib/_pagination';
+import type { ActionFailure } from '@/lib/_errors';
 
 interface BaseEntity {
   id: string;
@@ -32,7 +33,7 @@ interface ResponsiveListClientProps<T extends BaseEntity> {
   initialPageSize?: number;
   fetchPage?: (opts: PageOpts) => Promise<PageResult<T>>;
   basePath: string;
-  removeAction?: (ids: string[]) => Promise<void>;
+  removeAction?: (ids: string[]) => Promise<ActionFailure | void>;
   invalidateAction?: (id: string) => Promise<void>;
   entityLabel?: string;
   displayFields?: DisplayFieldConfig<T>[];
@@ -44,8 +45,12 @@ interface ResponsiveListClientProps<T extends BaseEntity> {
   /** When true, edit links open in a new tab. Used in parent-embedded bridge grids. */
   openLinksInNewTab?: boolean;
   /** When false, the "+" create button is hidden even if the user has create permission.
-   * Used for bridge-child entities, which cannot be created standalone (only via a parent). */
+   * Used for bridge-child entities, which cannot be created standalone (only via a parent),
+   * and for entities whose x-generate.new is false (no /new page exists to link to). */
   allowCreate?: boolean;
+  /** When false, the edit icon is hidden even if the user has update permission.
+   * Used for entities whose x-generate.edit is false (no /edit page exists to link to). */
+  allowEdit?: boolean;
 }
 
 export default function ResponsiveListClient<T extends BaseEntity>({
@@ -65,6 +70,7 @@ export default function ResponsiveListClient<T extends BaseEntity>({
   mobileBreakpoint = 768,
   openLinksInNewTab,
   allowCreate,
+  allowEdit,
 }: ResponsiveListClientProps<T>) {
   const isMobile = useMediaQuery(`(max-width: ${mobileBreakpoint}px)`);
 
@@ -84,6 +90,7 @@ export default function ResponsiveListClient<T extends BaseEntity>({
         permissions={permissions}
         primaryField={primaryField}
         allowCreate={allowCreate}
+        allowEdit={allowEdit}
       />
     );
   }
@@ -105,6 +112,7 @@ export default function ResponsiveListClient<T extends BaseEntity>({
       primaryField={primaryField}
       openLinksInNewTab={openLinksInNewTab}
       allowCreate={allowCreate}
+      allowEdit={allowEdit}
     />
   );
 }

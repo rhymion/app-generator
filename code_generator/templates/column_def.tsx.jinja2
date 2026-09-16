@@ -1,7 +1,6 @@
-import type { GridColDef{% if needs_datetime_imports or needs_entity_autocomplete_cell %}, GridRenderEditCellParams{% endif %} } from '@/components/ui/data';
+import type { GridColDef{% if needs_entity_autocomplete_cell %}, GridRenderEditCellParams{% endif %} } from '@/components/ui/data';
 import { useTranslations } from 'next-intl';
 {% if needs_datetime_imports %}
-import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
 import dayjs from 'dayjs';
 {% endif %}
 {% if needs_entity_autocomplete_cell %}
@@ -9,6 +8,9 @@ import EntityAutocompleteCellEditor, { entityAutocompleteValueFormatter, type En
 {% endif %}
 {% if uses_format_label_value %}
 import { formatLabelValue } from '@/lib/_format';
+{% endif %}
+{% if uses_decimal_format %}
+import { formatDecimalDisplay } from '@/lib/_decimal_format';
 {% endif %}
 
 {% for child in column_children %}

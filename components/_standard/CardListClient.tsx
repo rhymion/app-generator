@@ -23,6 +23,9 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import type { ModelPermissions } from '@/lib/authz';
 import type { PageOpts, PageResult } from '@/lib/_pagination';
+import type { ActionFailure } from '@/lib/_errors';
+import { errorMessageKey } from '@/lib/_errors';
+import { AppAlert } from '@/components/ui';
 
 interface BaseEntity {
   id: string;
@@ -49,7 +52,7 @@ interface CardListClientProps<T extends BaseEntity> {
   initialPageSize?: number;
   fetchPage?: (opts: PageOpts) => Promise<PageResult<T>>;
   basePath: string;
-  removeAction?: (ids: string[]) => Promise<void>;
+  removeAction?: (ids: string[]) => Promise<ActionFailure | void>;
   entityLabel?: string;
   /** Fields to display. Defaults to name + description. */
   displayFields?: DisplayFieldConfig<T>[];
@@ -57,8 +60,12 @@ interface CardListClientProps<T extends BaseEntity> {
   /** Which field to display prominently as the card title. Defaults to 'name'. */
   primaryField?: keyof T;
   /** When false, the "+" create button is hidden even if the user has create permission.
-   * Used for bridge-child entities, which cannot be created standalone (only via a parent). */
+   * Used for bridge-child entities, which cannot be created standalone (only via a parent),
+   * and for entities whose x-generate.new is false (no /new page exists to link to). */
   allowCreate?: boolean;
+  /** When false, the edit icon is hidden even if the user has update permission.
+   * Used for entities whose x-generate.edit is false (no /edit page exists to link to). */
+  allowEdit?: boolean;
 }
 
 function formatValue<T>(item: T, field: keyof T, format?: 'date-time' | 'date' | 'time', showSeconds?: boolean): string {
@@ -87,6 +94,7 @@ export default function CardListClient<T extends BaseEntity>({
   permissions = { create: true, read: true, update: true, delete: true, import: true },
   primaryField = 'name' as keyof T,
   allowCreate = true,
+  allowEdit = true,
 }: CardListClientProps<T>) {
   const [items, setItems] = useState<T[]>(initialRows ?? src ?? []);
   const [page, setPage] = useState<number>(initialPage ?? 0);
@@ -108,9 +116,11 @@ export default function CardListClient<T extends BaseEntity>({
   };
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const tf = useTranslations('Fields');
   const tc = useTranslations('Common');
+  const terr = useTranslations('Errors');
   const defaultDisplayFields: DisplayFieldConfig<T>[] = displayFields ?? [
     { field: 'name' as keyof T, headerName: tf('name') },
     { field: 'description' as keyof T, headerName: tf('description') },
@@ -130,8 +140,12 @@ export default function CardListClient<T extends BaseEntity>({
   const handleDeleteConfirm = () => {
     if (selectedIds.size > 0 && removeAction) {
       const ids = Array.from(selectedIds);
+      setDeleteError(null);
       startTransition(async () => {
-        await removeAction(ids);
+        const result = await removeAction(ids);
+        if (result && !result.ok) {
+          setDeleteError(terr(errorMessageKey(result.errorCode)));
+        }
       });
       setSelectedIds(new Set());
     }
@@ -139,7 +153,10 @@ export default function CardListClient<T extends BaseEntity>({
   };
 
   return (
-    <Box>
+    <Box data-testid="mobile-card-list">
+      {deleteError && (
+        <AppAlert severity="error" mb={2}>{deleteError}</AppAlert>
+      )}
       <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
         {permissions.create && allowCreate && (
           <NextLink href={`${basePath}/new`}>
@@ -168,7 +185,9 @@ export default function CardListClient<T extends BaseEntity>({
 
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         {items.length === 0 ? (
-          <Typography color="text.secondary">No items found.</Typography>
+          <Typography sx={{
+            color: "text.secondary"
+          }}>No items found.</Typography>
         ) : (
           items.map((item) => {
             const isSelected = selectedIds.has(item.id);
@@ -204,7 +223,9 @@ export default function CardListClient<T extends BaseEntity>({
                       if (!href) return null;
                       return (
                         <Box key={String(fieldConfig.field)} sx={{ mt: 0.5 }}>
-                          <Typography variant="caption" color="text.secondary" component="span">
+                          <Typography variant="caption" component="span" sx={{
+                            color: "text.secondary"
+                          }}>
                             {fieldConfig.headerName}:{' '}
                           </Typography>
                           <a href={href} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.875rem', wordBreak: 'break-all' }}>
@@ -217,7 +238,9 @@ export default function CardListClient<T extends BaseEntity>({
                     if (!value) return null;
                     return (
                       <Box key={String(fieldConfig.field)} sx={{ mt: 0.5 }}>
-                        <Typography variant="caption" color="text.secondary" component="span">
+                        <Typography variant="caption" component="span" sx={{
+                          color: "text.secondary"
+                        }}>
                           {fieldConfig.headerName}:{' '}
                         </Typography>
                         <Typography variant="body2" component="span">
@@ -227,7 +250,7 @@ export default function CardListClient<T extends BaseEntity>({
                     );
                   })}
                 </CardContent>
-                {permissions.update && (
+                {permissions.update && allowEdit && (
                   <CardActions sx={{ justifyContent: 'flex-end' }}>
                     <NextLink href={`${basePath}/edit/${item.id}`}>
                       <Tooltip title="Edit">
@@ -255,7 +278,9 @@ export default function CardListClient<T extends BaseEntity>({
           >
             {tc('previousPage')}
           </Button>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" sx={{
+            color: "text.secondary"
+          }}>
             {page + 1}
           </Typography>
           <Button

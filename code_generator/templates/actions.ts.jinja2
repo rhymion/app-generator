@@ -2,20 +2,35 @@
 
 import { redirect } from 'next/navigation';
 {% if comment_actions_code or (can_list and can_delete) or can_invalidate %}import { revalidatePath } from 'next/cache';
-{% endif %}import { getSessionUserIdOrThrow, requirePermission, getModelPermissions } from '@/lib/authz';
-{% if can_invalidate and invalidate_module %}
-import { {{ invalidate_handler }} } from '@/{{ invalidate_module }}';
+{% endif %}{% if can_create or can_update or can_invalidate or has_commentable or can_delete %}import { {% if can_create or can_update or can_invalidate or has_commentable %}getSessionUserIdOrThrow, requirePermission{% if can_delete %}, {% endif %}{% endif %}{% if can_delete %}getModelPermissions{% endif %} } from '@/lib/authz';
 {% endif %}
-import prisma from '@/lib/prisma';
-{% if comment_actions_code %}import { notify } from '@/lib/_notifier';
-{% endif %}{% if comment_has_mention %}import { encodeMentions, type UserLookup } from '@/lib/mention/parser';
+{% if can_create or can_update or can_delete %}import { AppError, type ActionFailure } from '@/lib/_errors';
+{% endif %}
+{% if can_invalidate %}
+{% if invalidate_module %}
+import { {{ invalidate_handler }} } from '@/{{ invalidate_module }}';
+{% else %}
+{# no handler/module configured: fall back to the write-once stub (cmd_583).
+   Aliased on import -- the stub's export is also named invalidate{{ parent_pascal }},
+   which collides with this file's own wrapper function of the same name below. #}
+import { invalidate{{ parent_pascal }} as _invalidate{{ parent_pascal }}Stub } from '@/lib/{{ parent }}/invalidate_handler';
+{% endif %}
+{% if has_invalidate_guard %}
+import { assertInvalidateAllowed } from './invalidate_guard';
+{% endif %}
+{% endif %}
+{% if uses_prisma %}import prisma from '@/lib/prisma';
+{% endif %}{% if comment_actions_code %}import { notify } from '@/lib/_notifier';
+{% endif %}{% if comment_has_mention %}import { extractMentionedUserIds } from '@/lib/mention/parser';
 {% endif %}{% if has_commentable %}import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 import type { CommentReactionSummary } from './types';
+import { createComment, updateComment, deleteComment } from '@/lib/comment/service';
+import { createReaction, deleteReaction } from '@/lib/reaction/service';
 {% endif %}
 {% if service_imports %}
 import { {{ service_imports }} } from './service';
 {% endif %}
-{% if should_filter_by_org and (can_create or can_update or can_delete) %}
+{% if should_filter_by_org and (can_update or can_delete) %}
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 {% endif %}
 {% if can_create or can_update %}
@@ -27,32 +42,65 @@ export async function upsert{{ parent_pascal }}(data: FormData) {
 {% endif %}
 {% if can_delete %}
 export async function remove{{ parent_pascal }}(ids: string[]) {
+  try {
 {% if should_filter_by_org %}
-  const { permissions: userPermissions, userId } = await getModelPermissions('{{ parent }}');
-  if (!userId) throw new Error('No permission to delete');
-  const _assocOrgs = await getAssociatedOrganizations(userId);
-  const _assocOrgIds = _assocOrgs.map((o) => o.id);
-  const {{ parent_camel }}s = await prisma.{{ model }}.findMany({
-    where: { id: { in: ids }, organization_id: { in: _assocOrgIds } },
-    select: { id: true, creator_id: true },
-  });
+    const {% if is_self_only %}{ userId }{% else %}{ permissions: userPermissions, userId }{% endif %} = await getModelPermissions('{{ parent }}');
+    if (!userId) throw new AppError('PERMISSION_DENIED', 'No permission to delete');
+    const _assocOrgs = await getAssociatedOrganizations(userId);
+    const _assocOrgIds = _assocOrgs.map((o) => o.id);
+{% if org_relationship_optional %}
+    const {{ parent_camel }}s = await prisma.{{ model }}.findMany({
+      where: { id: { in: ids }, OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }] },
+      select: { id: true, creator_id: true{% for field in filter_values %}, {{ field }}: true{% endfor %} },
+    });
 {% else %}
-  const [{ permissions: userPermissions, userId }, {{ parent_camel }}s] = await Promise.all([
-    getModelPermissions('{{ parent }}'),
-    await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true } }),
-  ]);
+    const {{ parent_camel }}s = await prisma.{{ model }}.findMany({
+      where: { id: { in: ids }, organization_id: { in: _assocOrgIds } },
+      select: { id: true, creator_id: true{% for field in filter_values %}, {{ field }}: true{% endfor %} },
+    });
 {% endif %}
-  const filtered{{ parent_pascal }}s = userPermissions.general.delete
-    ? {{ parent_camel }}s
-    : {{ parent_camel }}s.filter(item =>
-        (userPermissions.creator?.delete && item.creator_id === userId) ||
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (userPermissions.assignee?.delete && (item as any).assignee_id === userId)
-      );
-  if (filtered{{ parent_pascal }}s.length === 0) {
-    throw new Error('No permission to delete');
+{% else %}
+    const [{% if is_self_only %}{ userId }{% else %}{ permissions: userPermissions, userId }{% endif %}, {{ parent_camel }}s] = await Promise.all([
+      getModelPermissions('{{ parent }}'),
+      await prisma.{{ model }}.findMany({ where: { id: { in: ids } }, select: { id: true, creator_id: true{% for field in filter_values %}, {{ field }}: true{% endfor %} } }),
+    ]);
+{% endif %}
+{% if is_self_only %}
+    // x-self-only: no general.delete/Creator-role override — ownership is
+    // the sole gate, unconditionally (no admin bypass on delete).
+    const _filteredByRole{{ parent_pascal }}s = {{ parent_camel }}s.filter(item => item.creator_id === userId);
+{% else %}
+    const _filteredByRole{{ parent_pascal }}s = userPermissions.general.delete
+      ? {{ parent_camel }}s
+      : {{ parent_camel }}s.filter(item =>
+          (userPermissions.creator?.delete && item.creator_id === userId) ||
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (userPermissions.assignee?.delete && (item as any).assignee_id === userId)
+        );
+{% endif %}
+{% if filter_values %}
+    // x-filter-values: ANDed on top of role-based scope above — a row
+    // outside the filtered view is never deletable via this action, even
+    // by a caller who otherwise has delete permission (cmd_874/subtask_874f).
+    const filtered{{ parent_pascal }}s = _filteredByRole{{ parent_pascal }}s.filter(item => (
+{% for field, values in filter_values.items() %}
+      ({{ values | tojson }} as unknown[]).includes((item as Record<string, unknown>).{{ field }}){% if not loop.last %} &&{% endif %}
+
+{% endfor %}
+    ));
+{% else %}
+    const filtered{{ parent_pascal }}s = _filteredByRole{{ parent_pascal }}s;
+{% endif %}
+    if (filtered{{ parent_pascal }}s.length === 0) {
+      throw new AppError('PERMISSION_DENIED', 'No permission to delete');
+    }
+    await delete{{ parent_pascal }}({% if is_audited %}userId, {% endif %}filtered{{ parent_pascal }}s.map(item => item.id));
+  } catch (e) {
+    if (e instanceof AppError) {
+      return { ok: false, errorCode: e.code } satisfies ActionFailure;
+    }
+    throw e;
   }
-  await delete{{ parent_pascal }}({% if is_audited %}userId, {% endif %}filtered{{ parent_pascal }}s.map(item => item.id));
 {% if can_list %}
   revalidatePath('/[locale]/{{ parent }}', 'page');
 {% endif %}
@@ -66,11 +114,14 @@ export async function invalidate{{ parent_pascal }}(id: string): Promise<void> {
   const userId = await getSessionUserIdOrThrow();
   // TODO: separate 'invalidate' permission from 'delete' in future
   await requirePermission('{{ parent }}', 'delete', undefined, userId);
+  {% if has_invalidate_guard %}
+  const _invalidateGuardRow = await prisma.{{ model }}.findUnique({ where: { id }, select: { {{ lockdown_field }}: true } });
+  assertInvalidateAllowed(_invalidateGuardRow);
+  {% endif %}
   {% if invalidate_module %}
   await {{ invalidate_handler }}(id);
   {% else %}
-  // write-once stub: implement invalidate{{ parent_pascal }} in lib/{{ parent }}/invalidate_handler.ts
-  throw new Error('invalidate{{ parent_pascal }}: handler not configured');
+  await _invalidate{{ parent_pascal }}Stub(id);
   {% endif %}
   revalidatePath('/[locale]/{{ parent }}', 'page');
 }
@@ -103,10 +154,10 @@ export async function toggle{{ parent_pascal }}CommentReaction(
   });
   let active: boolean;
   if (existing) {
-    await prisma.reaction.delete({ where: { id: existing.id } });
+    await deleteReaction(existing.id);
     active = false;
   } else {
-    await prisma.reaction.create({ data: { comment_id: commentId, user_id: userId, type } });
+    await createReaction({ comment_id: commentId, user_id: userId, type });
     active = true;
   }
 

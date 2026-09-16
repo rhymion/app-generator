@@ -2,9 +2,11 @@
 
 > **Source**: Extracted from `docs/knowledge/schema-yaml-configuration.md` Appendix.
 > This page summarizes the **generator mechanism as it currently behaves**. For the design
-> rationale and decision history behind these mechanisms, see the top-level design docs:
-> `docs/reservation-receiving-redesign.md`, `docs/split-generalization-design.md`,
-> `docs/generic-primitives-redesign.md`, `docs/reservation-split-approval-reject-design.md`.
+> rationale and decision history behind these mechanisms, see the `planning/` design docs in the
+> separate `rhymion/app-generator-project-docs` repository (not part of this repo — these design
+> docs were never tracked here): `planning/reservation-receiving-redesign.md`,
+> `planning/split-generalization-design.md`, `planning/generic-primitives-redesign.md`,
+> `planning/reservation-split-approval-reject-design.md`.
 
 The reservation/split/receiving system is a set of **generic primitives** — `x-reservation`,
 `x-splittable`, `x-ledger-source` — that any entity can opt into. They are not inventory-specific:
@@ -55,6 +57,22 @@ pointing at `approval_flow`'s approve/reject instead. Do not re-add an `actions`
 {product_id: product_id}`) candidates are always pre-filtered to the same product. This path
 never needed the item3 guard below — the gap was in the *explicit*, user-picked inventory paths
 described in §3.
+
+### 1.2 `excludeId` must be threaded through on create, not just update
+
+`assertNoDuplicateReservation()` (`service_validation.ts.jinja2`) accepts an `excludeId` argument
+so a reservation can be checked for overlap against every *other* row without also matching
+itself. `reserve{Parent}Core` already receives `requestId` — the id of the row it just created —
+as an argument, but until an earlier fix neither of its two call sites (the item-pool candidate-loop
+branch, used when `availabilitySource: overlap`; and the single-candidate status branch) passed
+`requestId` through as `excludeId`. The just-created row then satisfied its own overlap check,
+which (depending on branch and candidate count) either rejected a non-conflicting reservation
+outright or silently reassigned the requester to a different candidate than the one they picked.
+`update{Parent}`'s own call site was unaffected — it was already passing the row's own `id` as
+`excludeId` — so this was a create-path-only gap. The lesson generalizes: any new call site added
+to `reserve{Parent}Core` (or an analogous "create + immediately overlap-check the row you just
+created" flow) must pass its own `requestId`/row id as `excludeId`; the parameter existing on the
+function signature is not enough by itself.
 
 ## 2. `x-splittable` — dividing a line item
 
@@ -136,12 +154,12 @@ using generic mechanisms that already existed for other relations:
   multi-path array (product name + location + lot number) so list columns (e.g.
   `purchase_per_item`, `receiving_receipt_line`) render a human-readable composite label instead
   of the raw `cuid`, via the generic `build_label_expression` mechanism
-  (`helpers/label_field.py`) already used elsewhere (e.g. the split dialog, since cmd_304 FIX-4).
+  (`helpers/label_field.py`) already used elsewhere (e.g. the split dialog, since an earlier task's FIX-4 item).
   This is a schema-config change (labelField value), not a new generator capability.
 - **Internal bridge FK hidden from detail views too**: `inventory_transactionable_id` (the
   internal one-to-one bridge FK created automatically by the generator, analogous to
   `approvable_id`) is excluded from `FormView.tsx` in addition to `column_def.tsx`. Previously
-  the internal-bridge-FK auto-exclusion (cmd_304 FIX-3) only applied to list columns; the same
+  the internal-bridge-FK auto-exclusion (the same earlier task's FIX-3 item) only applied to list columns; the same
   exclusion now applies to the `form_view` template so detail pages don't leak the bridge id
   either. The field remains present in the Prisma model and writable by the service layer — only
   UI surfacing changed. See `schema-yaml-configuration.md` §4.5 for the general `x-internal`
@@ -156,7 +174,194 @@ is **always terminal** — there is no "temporary rejection / resubmit" path for
 receiving entities (that pattern exists only for `leave_request`); re-assigning quantity to a
 different lot goes through split instead.
 
-## 7. Not yet implemented — do not treat as current behavior
+## 7. `x-ledger-entities` domain config — item/location/lot/expiration field names
+
+`x-ledger-entities.<domain_key>` aggregates the three entities a ledger domain touches — `pool`
+(e.g. `inventory`), `ledger` (e.g. `inventory_transaction`), `transactionable` (the per-event
+bridge, e.g. `inventory_transactionable`) — resolved via `resolve_ledger_domain()`
+(`helpers/schema_helpers.py`) and referenced by `x-splittable.ledgerDomain` / `x-ledger-source
+.ledgerDomain` / `x-reservation.transaction.ledgerDomain`.
+
+As of a later change, the domain also **requires** four more keys naming the pool entity's own
+columns — no defaults, matching OD-1 (§ the domain-generalization design's "declare, don't infer" precedent):
+
+- `itemField` — the pool entity's FK column to the item-master entity (e.g. `product_id`).
+- `locationField` — the pool entity's FK column to the location entity (e.g. `location_id`).
+- `lotField` — the pool entity's lot-number scalar column (e.g. `lot_number`).
+- `expirationField` — the pool entity's expiration-date scalar column (e.g. `expiration_date`).
+
+```yaml
+x-ledger-entities:
+  inventory_domain:
+    pool: inventory
+    ledger: inventory_transaction
+    transactionable: inventory_transactionable
+    itemField: product_id
+    locationField: location_id
+    lotField: lot_number
+    expirationField: expiration_date
+```
+
+**Why this exists**: every one of `generators.py`'s ledger-transaction reservation code,
+`split_action_route.ts.jinja2`'s auto-allocate/lot-mismatch logic, and the three
+`ledger_*_stub.ts.jinja2` once-stub templates used to hardcode these four column names as the
+literal strings `product_id`/`location`/`location_id`/`lot_number`/`expiration_date`. Any
+consumer naming the item-master entity or these columns differently (e.g. `item`/`item_id`) got
+**no error** — the split auto-allocate WHERE clause silently rendered a permanently-undefined
+`.None` property access (Prisma treats it as "no filter", not a type error), and the
+lot/product-mismatch guard (§4) silently never ran at all.
+
+The item-master entity a split entity's own FK must target (used by the split-route
+lot/product-mismatch check, §4) is likewise resolved from `itemField`'s `x-relationship.target`
+on the pool entity, not from a literal `target == 'product'` comparison — so it works regardless
+of what the item-master entity, or the split entity's own FK to it, happen to be named.
+
+**Migration note for an existing consumer already using `x-ledger-entities`**: this is a breaking
+schema-config change — `generate-code` fails immediately (naming the domain and the missing key)
+until all four keys are added. Adding them with values matching the consumer's *current* column
+names changes no generated output (verified: the once-stub templates render byte-identical to
+the current on-disk file when the four keys match existing names) — the only immediately visible
+effect is that the previously-dead lot/product-mismatch guard and `primary: true` support (below)
+switch on wherever a name mismatch had been silently suppressing them.
+
+### 7.1 Location is an id-FK on the ledger entity too (the location id-FK migration — supersedes PR #269)
+
+**This section describes the current design.** `locationField` (§7) is now an id-FK column on
+*both* the pool entity and the ledger entity (the same shape `itemField` already had on both
+sides) — every ledger row write is a plain id copy (`ledger.location_id = pool.location_id`), not
+a denormalized display-string snapshot.
+
+PR #269 (described in prior revisions of this doc, now removed) took a different approach:
+it kept the ledger's `locationField` column a denormalized display string and taught the write to
+render it through the pool entity's declared `x-relationship.labelField` instead of hardcoding
+`.name`, plus a *reverse* `findFirst({ where: { <labelField>: <string> } })` lookup wherever the
+ledger's own string needed to be turned back into a location row (afterReject re-identification,
+split's parent-reserved-row release). Decision (2026-08-04, across several revisions culminating in the location id-FK migration): don't keep
+patching the string-snapshot design — hold location by id, exactly like item already is. This
+makes the entire labelField-rendering/reverse-lookup mechanism moot: there's no display string to
+render at write time and no string to invert back to a row at read time, since the row already
+carries the id directly.
+
+`resolve_ledger_domain()` reflects this — it no longer returns `location_relation`,
+`location_label_field`, or `location_label_target`, and no longer inspects the pool entity's
+`x-relationship` declaration on `locationField` at all (that declaration still exists on the pool
+entity for the *generic* schema-driven UI label system — autocomplete, list views, CSV export —
+entirely independent of this ledger-domain resolver). `generate.py`'s `_ledger_stub_field_vars()`
+now returns only `pool_location_field`, the same shape as `pool_item_field`/`pool_lot_field`/
+`pool_expiration_field`.
+
+**Migration note for an existing consumer still on the string-column design** (as of the location id-FK migration):
+this is a schema + data migration, not just a config change — see
+`docs/knowledge/appendix/cmd562-location-id-fk-consumer-migration.md` for the concrete Prisma
+migration, backfill classification query, and json_schema.yaml diff. Unlike §7's four-key
+addition (config-only, no generated-output change when values match existing names), this one
+does change generated output: every `ledger_*_stub.ts.jinja2` / `split_action_route.ts.jinja2` call
+site and `generators.py`'s reserve-phase write switch from string-snapshot to id-copy, and the
+Prisma schema itself gains a real FK relation + `onDelete: Restrict` constraint on the ledger's
+location column where none existed before.
+
+### 7.2 onDelete: Restrict and rename auditing
+
+Two related decisions from the same location id-FK migration ruling:
+
+- **A referenced location cannot be deleted.** The new `inventory_transaction.location_id` FK is
+  declared `onDelete: Restrict` (matching the existing `product_id`/`item_id` FK on the same
+  entity — both are identity dimensions of the append-only ledger row; letting either disappear
+  out from under a historical transaction row would corrupt the ledger's meaning). This is a
+  Postgres-level constraint, verified by attempting to delete a referenced vs. unreferenced
+  location row against a real database (not inferred from the schema declaration alone) — see the
+  migration doc referenced above for the reproduction.
+- **A location rename leaves a record.** Renaming a location entity is permitted (unlike delete,
+  which Restrict blocks outright) on the condition that a record of who renamed it and when
+  survives. This does **not** require new generator work: `x-audit: true` (an existing,
+  entity-agnostic flag — see `build_context.py`'s `is_audited`, proven generic by
+  `test_audit_logging.py`) already wraps every `update{Entity}`/`delete{Entity}` call in
+  `recordAuditEvent()`, writing an `audit_log` row with the actor, the target table/id, and a
+  timestamp. Declaring `x-audit: true` on the `location` entity is sufficient — a schema-only
+  change (the migration doc adds it for any consumer still on the pre-migration design). It records
+  that a rename happened, by
+  whom, and when; it does not (yet) capture the old/new name values or offer a per-entity history
+  UI — both explicitly deferred to future work.
+
+### 7.3 `binField` — an opt-in fifth dimension
+
+Unlike the four fields in §7 (OD-1 required, no default — a domain missing one fails
+`resolve_ledger_domain` before any code generates), `binField` is genuinely optional: a domain
+may omit it entirely, and `resolve_ledger_domain()` resolves `bin_field: None` with no error.
+`generate.py`'s `_ledger_stub_field_vars()` mirrors this as `pool_bin_field` (also `None` when
+undeclared). Every site that reads it — the four §7 templates plus `generators.py`'s
+reserve-phase (`_build_ledger_reservation_allocation_code`) and per-line resubmit-claim
+(`_build_reservation_guard_and_resubmit_approval_lines`) ledger-row builders — is guarded (jinja2
+`{% if pool_bin_field %}`, Python `if bin_field:`), so a domain that never declares `binField`
+renders byte-identical output to before this key existed (verified empirically: `generate.py`
+run twice — unmodified generator vs. this change — against a real consumer's unmodified
+`json_schema.yaml`/`schema.prisma` (an app-template checkout that already declares
+`x-ledger-entities.inventory_domain` without `binField`), output trees diffed recursively across
+all 1259 generated files with zero differences besides an incidental schema-file-path
+bookkeeping field in `.generated-manifest.json`).
+
+```yaml
+x-ledger-entities:
+  inventory_domain:
+    pool: inventory
+    ledger: inventory_transaction
+    transactionable: inventory_transactionable
+    itemField: product_id
+    locationField: location_id
+    lotField: lot_number
+    expirationField: expiration_date
+    binField: bin_id   # opt-in -- omit entirely for a pool with no bin dimension
+```
+
+**Why opt-in rather than OD-1-required-with-null-sentinel (contrast with §10.4)**: §10.4 argues
+that making one of the *existing* four required fields silently optional would reintroduce the bug
+class §7 fixed (a schema author forgetting the key gets no error, just silently-disabled
+behavior). `binField` is not that case — it is a genuinely new fifth dimension that never existed
+in any consumer's schema before this change, so there is no pre-existing "everyone declares it"
+expectation for a missing key to silently violate. An absent `binField` reads unambiguously as
+"this pool has no bin dimension," which is the actual, common case (as of this change, every
+consumer's inventory pool: no bin column at all).
+
+**Two ambiguous-resolution bugs fixed while adding bin support**: two sites re-identify a pool row
+via a tuple match on item/location/lot/expiration with **no unique id** —
+`ledger_write_stub.ts.jinja2`'s `afterReject` `inventoryCache` re-identification (only reachable
+when the entity's `x-ledger-source.reject_event_type` is declared — zero consumers do today) and
+`split_action_route.ts.jinja2`'s parent reserved-inventory release (reachable today, e.g.
+`purchase_per_item`). Once bin is a real dimension, two pool rows can share the same
+item/location/lot/expiration and differ only by bin — the same ambiguous-resolution shape a prior
+fix (`release_hold.ts`) addressed for a different call site. Both sites now join
+`bin_field`/`pool_bin_field` into their where clause when the domain declares it, closing this gap
+before any consumer's `binField` declaration could trip it (verified against real
+`purchase_per_item`/`purchase_order` output derived from the same app-template checkout above:
+with `binField: bin_id` declared, the parent-release `updateMany` where clause gains
+`...(_row.bin_id != null ? { bin_id: _row.bin_id } : {})`).
+
+**Consumer-side migration** (adding bin to an existing consumer whose `inventory`/
+`inventory_transaction` already carry a real `bin_id` column pre-dating this generator support) is
+out of this change's scope — tracked separately. This section covers only the generator-side
+opt-in mechanism; declaring `binField` in an existing consumer's schema is safe to do
+independently (no `validate.py` allowlist rejects an unrecognized `x-ledger-entities.<domain>`
+key), but only the `split_action_route.ts.jinja2`-generated file regenerates automatically —
+every GENERATED ONCE stub (the four templates in §7, once already materialized on disk) requires
+the same hand-patch discipline any other write-once file does.
+
+## 8. Reference-name vs. entity-name mismatch and `primary: true`
+
+`helper_context()`'s dependency resolution distinguishes a **reference name** (the property name
+minus `_id`, e.g. `product`, also the `x-display.table` key when that FK is the primary display
+column) from the **entity name** it targets (e.g. `item`) — these coincide for most schemas
+(`product` entity referenced as `product`) but are independent by design (`x-relationTarget`
+lets a relation's Prisma name diverge from its property name; nothing requires the entity name to
+match either). Previously, the `needs_second` check comparing these two used the wrong
+axis entirely (entity name vs. reference name, snake_case vs. camelCase) and so only worked by
+coincidence for single-word, self-matching names — any entity whose primary FK's reference name
+differed from its target entity name, or was multi-word, silently lost `primary: true` support
+(the generated create/update test assertions fall back to a plain `id`-based check instead of the
+richer name-based one). Fixed to compare on a single, consistent axis (`var_name`, camelCase,
+resolved through the same reference-name-stem logic already used for multi-FK-to-the-same-target
+disambiguation elsewhere in this file).
+
+## 9. Not yet implemented — do not treat as current behavior
 
 **x-reservation key reduction (item2) is unapproved and unimplemented.** The `x-reservation`
 key structure documented in §1 above (`pool`/`request`/`policy`/`result`, three current uses:
@@ -165,3 +370,85 @@ to classify each key as generator-read vs. dead and remove/replace unused keys (
 `count` mode) is pending review and approval (dashboard action item) as of this writing — it has not
 been designed into code. Do not assume any `x-reservation` key documented here has been removed
 or replaced until that design lands and a follow-up doc update reflects the actual diff.
+
+## 10. When a consumer's location/lot column doesn't fit the current shape (design notes)
+
+This section works through what happens for shapes `locationField`/`lotField` might take beyond
+the current consumers' shape, and whether/how a future consumer could be
+supported. **Design notes only for §10.2-10.4 — none of that is implemented.** §10.1 was resolved
+by the location id-FK migration.
+
+### 10.1 Location is a plain string, not a relation (resolved by that migration)
+
+If `locationField` (e.g. `location`) is declared as a bare `type: string` column with no
+`x-relationship` at all — no location *entity* exists, just free text:
+
+- **Does it work today? Yes**, as of that migration. §7.1's id-copy design doesn't inspect
+  `x-relationship` on `locationField` at all — it only ever reads
+  `pool_row.{location_field}`/writes `ledger_row.{location_field}` as a plain property copy,
+  regardless of whether that property happens to be a FK or a bare scalar. This was a side effect
+  of that migration's simplification, not a dedicated fix for this shape — recorded here because it
+  changes this section's older "no" answer (from the earlier label-rendering design, which did
+  require `x-relationship.target`).
+- **What changed**: `resolve_ledger_domain()` no longer looks up the pool entity's properties or
+  its `x-relationship` block at all (§7.1) — it purely passes through the four declared field
+  names. There is no relation-vs-scalar branch left to need, because there is no relation-aware
+  code path left at all.
+
+### 10.2 Lot number is a table (FK), not a scalar
+
+If `lotField` (e.g. `lot_number`) is itself a many-to-one relation to a `lot` entity (lot numbers
+issued from a registry, carrying their own metadata) rather than a free-text/numeric scalar
+column, then:
+
+- **Does it work today?** Yes, in the same sense §10.1 now does — `lot_field` is read as
+  `_candidate.{lot_field}` (§7, a direct scalar property copy) and written to the ledger row's own
+  `lotField` column unchanged, whether that value is a FK id or a free-text lot number. Unlike
+  §10.1's old (earlier-design-era) shape, there was never a label-rendering branch for `lotField` to begin
+  with — this row has always been a plain copy, so there's nothing left to resolve here beyond
+  noting the symmetry with location post-migration.
+- **Stopgap for a lot-registry FK wanting a human-readable ledger snapshot**: since the copy is
+  now always an id-or-whatever-the-column-is (matching item/location's post-migration shape), a
+  consumer wanting a *display* value in the ledger row rather than an opaque id would need a
+  separate denormalized scalar column on the pool entity (populated by whatever writes the FK),
+  with `lotField` pointed at that scalar column instead of the FK. This is unchanged from before
+  the location id-FK migration — it was never in scope for either fix.
+
+### 10.3 The consumer doesn't track this dimension at all
+
+If a consumer's pool entity has no location concept whatsoever (e.g. a single-warehouse consumer
+with no location/shelf/bin distinction), then:
+
+- **Does it work today?** No — `locationField` (like `itemField`/`lotField`/`expirationField`) is
+  OD-1 required with no default (§7); a domain missing the key fails `resolve_ledger_domain` before
+  any code generates.
+- **What would be needed?** See §10.4 — an explicit "not tracked" declaration, not merely omitting
+  the key.
+- **Stopgap today**: none — every current consumer tracks location, lot, and
+  expiration. A consumer that doesn't would need §10.4 designed and implemented first; there is no
+  workaround available today that doesn't require adding an unused placeholder column.
+
+### 10.4 Representing "not tracked" under OD-1
+
+OD-1 (§7, "declare, don't infer") means every one of `itemField`/`locationField`/`lotField`/
+`expirationField` is currently **required** — omitting one is indistinguishable from forgetting to
+add it; the domain simply fails to resolve. That's the right default for the common case (every
+current consumer tracks all four), but it gives §10.3's consumer no way to say "I have decided not
+to track this dimension" versus "I haven't finished configuring this domain yet."
+
+**Recommended direction (not implemented)**: keep every key required, but accept an explicit
+sentinel value meaning "intentionally not tracked" — e.g. `locationField: null` (a JSON Schema/YAML
+null, not simply absent) — rather than making the key optional. `resolve_ledger_domain` would then
+resolve `location_field` to `None`, and every call site that currently assumes `location_field` is
+always a real column (the ledger row's own write key, post-migration) would need an explicit
+`if location_field:` branch that omits that field entirely rather than writing a broken `None`
+key.
+
+Why an explicit sentinel over an optional key: an optional key that silently defaults to "not
+tracked" when absent reintroduces exactly the bug class §7/§7.1 fixed — a schema author who simply
+forgets the key gets no error, just a domain that silently stops tracking location. Requiring the
+key to be *present* with an explicit `null` forces the decision to be visible in the schema diff
+and reviewable, the same way `x-self-only`'s `admin_bypass` shorthand deliberately never defaults
+to the permissive direction (`docs/knowledge` cross-reference: see the self-only-entity design
+note). No consumer needs this today, so it has not been built — recorded here so the next time
+this question comes up, it doesn't need re-litigating from scratch.

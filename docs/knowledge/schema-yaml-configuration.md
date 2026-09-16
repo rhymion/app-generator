@@ -136,8 +136,12 @@ user:
     password:
       x-custom-component:
         target: [upsert]   # rendered by custom component, not default input
-    image:
-      format: uri
+    image_id:
+      x-relationship:
+        target: attachment
+        type: direct        # this repo's own schema uses a direct-attachment FK for
+                             # user.image today (§5); a plain `image: {format: uri}`
+                             # string field is an equally valid alternative per-schema choice
   required: [roles]
   properties:
     roles:
@@ -255,12 +259,12 @@ cases, verified directly against `code_generator/build_user_schema.py`:
 **1. Auto-derived — zero `fields:` entry needed.** If the entity's `properties:` block declares
 the *resolved relation object* (e.g. `role: {$ref: "#/definitions/role"}`) and the corresponding
 FK scalar column (`role_id`) is **not** listed under `fields:` at all, `_auto_infer_fk_fields()`
-(`code_generator/build_user_schema.py:181-198`) detects it: it scans `properties:` for relation-
+(`code_generator/build_user_schema.py:204-224`) detects it: it scans `properties:` for relation-
 object entries, looks up the Prisma model's `relation_fk_fields` for that relation
 (`code_generator/schema_deriver.py`'s `PrismaField.relation_fk_fields`, populated by parsing the
 Prisma `@relation(fields: [...])` clause), and injects `{role_id: {"x-relationship": {}}}` into
 the field spec before derivation runs. `_derive_relationship()`
-(`code_generator/schema_deriver.py:332-356`) then fills the empty override with the only two
+(`code_generator/schema_deriver.py:413-445`) then fills the empty override with the only two
 Prisma-derivable defaults: `type: many-to-one` and `labelField: name`.
 
   This is the live default schema's actual `permission` entity — `role_id` never appears under
@@ -301,10 +305,10 @@ Prisma-derivable defaults: `type: many-to-one` and `labelField: name`.
 
   Even when `target` is written explicitly, it is **cross-checked, not trusted**: if it
   contradicts what Prisma's own `@relation` says, `build_user_schema.py` raises a
-  `SchemaDivergenceError` and the build fails (`code_generator/schema_deriver.py:338-343`). You
+  `SchemaDivergenceError` and the build fails (`code_generator/schema_deriver.py:421-424`). You
   cannot declare a wrong target; you can only omit it (Prisma-derived) or confirm it.
 
-**A note on scope**: an initiative (cmd_438) to further reduce the user-visible surface of pure
+**A note on scope**: an initiative to further reduce the user-visible surface of pure
 bridge/standalone entities (e.g. splitting `x-schema-visibility` metadata into its own file, on
 top of the `approvable`/`commentable`/`attachable` split already shipped) is in progress but was
 explicitly ruled out of the 3.0.0 scope and deferred to a later 3.x release. Everything in this
@@ -323,7 +327,7 @@ logic `generate.py` runs against the intermediate schema. In outline:
    An entity with none of those keys (e.g. `comment`, `reaction`, `attachment`,
    `dashboard_widget` in the default schema) has nothing to split and is reconstructed as a
    single "standalone raw" entity with no `__`-prefixed sibling at all
-   (`build_user_schema.py:236-249`).
+   (`build_user_schema.py:259-284`, `_build_standalone_raw`).
 2. `extract_entities()` treats any `__`-prefixed key with a `properties.id` as a raw model
    (`generate_types.py:90-95`), then resolves each view key to its raw entity by walking `allOf`
    `$ref` chains (`_resolve_raw_key`, lines 101-118) — usually one hop (`role` → `__role`), two
@@ -377,7 +381,7 @@ current, not legacy. `setting` (§1.1) is the framework's own example: it's a se
 the `user` Prisma model, so it's written as `allOf: [{$ref: user}, {...}]` rather than being
 mistaken for `user`'s own raw/view pair. Writing an entity whose name **does** match a Prisma
 model in this `allOf` pass-through shape is rejected at build time
-(`_validate_entity_names`, `build_user_schema.py:148-165`) — the builder assumes any
+(`_validate_entity_names`, `build_user_schema.py:172-201`) — the builder assumes any
 Prisma-model-named entity is that model's own single-file definition, and an `allOf` wrapper
 there would silently discard your intent instead of erroring cleanly, so it errors instead.
 
@@ -423,6 +427,15 @@ Files that are **never overwritten** (extension points):
 
 These stubs are created once on first generation and then left alone.
 
+> **Naming note:** `x-generate` is reserved for this entity-level generation-flags
+> block. Don't reuse the `x-generate` key name for a property-level control (e.g. under a
+> `properties.{field}` entry) even if the intent is unrelated — the two meanings collide and
+> confuse readers, and no generator code reads an `x-generate` key placed under `properties`
+> anyway. If property-level generation control is ever needed, give it its own key name. Also:
+> a field that never renders in the UI needs no schema declaration at all as long as it's
+> defined in `prisma/schema.prisma` (see §3.1 below) — don't add a `properties` entry just to
+> mark a field hidden.
+
 ### 3.1 Field whitelist (`x-generate.fields`)
 
 When `x-generate.fields` is provided only those properties appear in the form and view pages.
@@ -459,6 +472,7 @@ supplies everything Prisma can't express.
 | `DateTime` (+ `format: time` override) | `string` | `Date` | Time only (`@db.Timetz(0)`) |
 | `String` (+ `format: uri` override) | `string` | `string` | URL; rendered as image or link |
 | `Int` | `integer` | `number` | |
+| `Decimal` (+ `@db.Decimal(p, s)`) | `string` | `string` | **Not** `number` — a deliberate product decision: a JS-float mapping risks silent rounding error (`0.1 + 0.2` style) on every read/write/CSV round-trip. Rendered as a numeric-styled text input (`inputMode="decimal"`), never the `number`-typed `NumberField`. `s` (scale) is auto-reflected as `x-decimal-scale`, bounding the input format check's max decimal places. |
 | `Boolean` | `boolean` | `boolean` | |
 | Prisma `enum` type | `string` | Literal-union string type | nativeEnum — see §4.3 |
 
@@ -483,7 +497,8 @@ under the field's `fields:` override.
 | `format: date-time` | Renders MUI X DateTimePicker |
 | `format: date` | Renders MUI X DatePicker |
 | `format: time` | Renders MUI X TimePicker |
-| `format: uri` | Renders image preview or link |
+| `format: uri` | Renders image preview or link (see `x-uri-kind` below) |
+| `x-uri-kind: image` \| `link` | Only meaningful on a `format: uri` field. Default `image`: renders `ImageUpload` (create/edit) and an image preview on the single-record view page only — an image is never drawn inside any DataGrid cell (list page, BridgeGrid, or an inline editable child DataGrid, §7.1). `link`: renders a plain URL text input (create/edit, `type="url"`) and a clickable external link (`AppFieldExternalLink`) on the single-record view page; also renders as a clickable link wherever the field is listed in `x-display.table` (the list page's DataGrid and a BridgeGrid's read-only embedded grid share the same `uriKind` wiring). Inside an inline editable child DataGrid (§7.1) both kinds fall through to a plain editable text cell — a URL is legitimately editable as text, unlike an image. |
 | `format: regex` | Hint that the value is a regex; rendered as text input |
 | `default` | Pre-fills the field in new form. **Not** auto-derived from Prisma's `@default(...)` even when one exists — the legacy schema sometimes omitted it even where Prisma had a default, so its presence is always a deliberate, user-authored `fields:` entry. |
 
@@ -499,6 +514,8 @@ enum ApprovalRequestStatus {
   approved
   rejected
   terminal_rejected
+  withdrawn
+  split_invalidated
 }
 
 model approval_request {
@@ -517,15 +534,17 @@ approval_request:
         - approved
         - rejected
         - terminal_rejected
+        - withdrawn
+        - split_invalidated
 ```
 
 Member names must be lowercase snake_case (`code_generator/validate.py` rejects anything else at
 generation time — see `docs/knowledge/enum-member-naming.md`).
 
-`schema_deriver.py`'s `_json_type_for()` (lines 238-249) checks whether the Prisma column's type
+`schema_deriver.py`'s `_json_type_for()` (lines 290-301) checks whether the Prisma column's type
 is a name found in `prisma_enums` (parsed from `enum { ... }` blocks in `schema.prisma`); if so
 the JSON Schema `type` is `"string"` and a `_prisma_native_enum_type` marker is attached to the
-property (`derive_property`, lines 288-295) so downstream TypeScript generation emits a literal-
+property (`derive_property`, line 347) so downstream TypeScript generation emits a literal-
 union type (`'pending' | 'approved' | ...`) instead of a generic `string`, and forms/DataGrids
 render translated labels keyed off the enum member names
 (`code_generator/generators_i18n.py`'s `_collect_native_enum_namespaces`,
@@ -533,7 +552,7 @@ render translated labels keyed off the enum member names
 actual member name as a Postgres enum value — not an array index.
 
 The default app schema (`code_generator/json_schema.yaml`) has zero `minimum`/`maximum` int-enum
-fields as of the cmd_457 migration (24 fields moved from int-enum to nativeEnum) — every enum
+fields as of an earlier migration (24 fields moved from int-enum to nativeEnum) — every enum
 field in the current default schema is nativeEnum-backed.
 
 **Legacy int-enum — still supported, not recommended for new fields.** `type: integer` with
@@ -564,29 +583,40 @@ nativeEnum for new fields: reordering or inserting a label in the middle of a le
 list silently reassigns every existing row's stored index to a different label, which a
 nativeEnum's named Postgres values cannot do.
 
+A specific enum value can be declared system-write-only — blocked from a plain create/update
+across screen, Server Action, REST API, and CSV import, but still writable via a direct
+transaction call — with the entity-level `x-write-locked-values` key; see
+`docs/knowledge/x-write-locked-values-field-lockdown.md`.
+
 ### 4.4 The `id` field
 
 Every entity automatically gets an `id` property (`properties["id"] = {"type": "string",
 "pattern": "^c[a-z0-9]{24,}$"}`, added unconditionally by `derive_raw_entity`,
-`schema_deriver.py:374`) — you never declare `id` under `fields:`. The Prisma counterpart must
+`schema_deriver.py:463`) — you never declare `id` under `fields:`. The Prisma counterpart must
 use `@id @default(cuid())`; the pattern is a CUID format check used only to identify the ID
 field, not for client validation.
 
 ### 4.5 `x-internal` Field Classification
 
-Setting `x-internal: true` on a field's `fields:` override marks it as internally managed. The
-generator excludes such fields from UI forms and list columns while keeping them in the Prisma
-model and writable by server actions.
+`x-internal` is an **entity-level key only** — every generator reference to it reads an entity
+definition (`generate_types.py`'s "Skip x-internal entities" check, its named-constant
+extraction for x-internal enum entities), never a property. Declaring it under a `fields:`
+override (`fields: {<col>: {x-internal: true}}`) is rejected by `validate.py` as a field-level
+misuse of an entity-level key — it is never a way to hide a single field.
 
-**Use cases:**
-- Fields the generator controls internally that users should not edit directly
-- Examples: reaction aggregation counters, system-generated metadata flags
+There is currently no dedicated flag for "hide this one scalar field from forms and list
+columns while keeping it in the Prisma model and writable by server-side code." The closest
+real tools, depending on what's actually needed:
+- **The field only needs to be non-editable, not invisible** (e.g. a counter users may see but
+  never set directly): use `x-readonly` / `x-readonly-fields` (§4.7) — the field stays visible
+  but is excluded from the client payload entirely, so only server-side code can change it.
+- **The field belongs on a support/bridge record that is never surfaced to users at all**
+  (e.g. `reaction`, `approvable`): give the whole *entity* `x-internal` (below), not the field.
 
-```yaml
-fields:
-  status_count:
-    x-internal: true   # managed by server action; hidden from forms and list columns
-```
+*(An earlier revision of this section presented the field-level form above as valid. The
+generator never read `x-internal` off a property — it silently did nothing — and a later
+fail-closed validation pass added the explicit rejection above so a schema author gets an
+error instead of a no-op.)*
 
 **`x-internal` at the entity level**
 
@@ -675,6 +705,56 @@ fields:
 
 `x-ui.rows` and `x-ui.width` can be combined: the generator applies the Box wrapper first, then the multiline attribute.
 
+### 4.7 Readonly Fields (`x-readonly` / `x-readonly-fields`)
+
+Marks a field readonly in the generated `FormUpsert.tsx` (the field stays visible but not
+editable). Both annotations feed the same `readonly_fields` set and render identically — a
+relation shows its `labelField` via `<AppFieldRelation>`, date/time fields render formatted
+(not a raw ISO string), booleans and enums show their labeled value, and `format: uri` fields
+show `<ImageDisplay>` (or `<AppFieldExternalLink>` for `x-uri-kind: link`) — the same
+type-dispatch `FormView.tsx` already uses, not a raw `String(value)` dump.
+
+```yaml
+fields:
+  status:
+    x-readonly: true          # per-property — always readonly, on every view of this model
+```
+
+```yaml
+some_view_entity:
+  x-readonly-fields: [parent_goods_receipt_line_id, name]   # entity-level — this view only
+```
+
+| | `x-readonly` (`fields:` override) | `x-readonly-fields` (entity-level list) |
+|---|---|---|
+| Scope | Model/raw-wide — properties live on the raw entity, so it applies to every view built on that model. No way to scope it to a single view. | View-scoped — lives on the view entity that declares it, applies only to that view. A proxy view can declare it without locking the field down on another view of the same underlying model. |
+
+**Naming convention**: `x-readonly-fields` entries must be the exact property name — the FK
+column (e.g. `parent_goods_receipt_line_id`), never the relation name
+(`parent_goods_receipt_line`). Generation fails closed (`ValueError`) if an entry doesn't
+resolve to a real property on the entity.
+
+**Known limitation**: neither annotation reaches a DataGrid child's inline editing — a
+readonly-declared child field still renders as an editable grid cell, and the generated
+`create()`/`update()` calls still accept and persist client-sent values for it with no
+server-side guard. Treat DataGrid child fields as currently unprotectable by either
+annotation. See `docs/knowledge/readonly-field-form-rendering.md` for the full rendering
+type-dispatch table and the cross-view scoping fix's test coverage.
+
+**Server-side invariant**: for a parent-level readonly field (this section — not the
+DataGrid-child limitation above), the generated Server Action and REST routes never read the
+client's submitted value at all — not `data.get()` on the FormData, not a destructure off a
+POST/PUT body. The field is never a parameter of the generated service function either
+(`client_prop_infos` in `build_context.py` excludes it entirely from the parameter list, the
+`validate()`/`validateCustomRules()` payload, and both bodies' extraction — the same treatment
+`x-server-value`-without-override fields already got). Before this fix, the value *was* still
+read (and still excluded from the actual Prisma write, which was already correct) — so a
+non-nullable field's absence from the client payload silently became a wrong-but-valid value
+(`Number(null)` → `0`, `new Date(null)` → the Unix epoch, or `''`) instead of `undefined`, and
+any hand-written `validateCustomRules()` logic that inspected the field directly (instead of
+`prevRow`, the actual persisted value) could reject a save that never touched it. Always read a
+readonly field's real value from `prevRow`, never from `data`, in custom validation.
+
 ---
 
 ## 5. Many-to-One Relationships (`x-relationship`)
@@ -747,6 +827,184 @@ model booking {
 
 The resolved-object property (`resource`) must appear under `properties:` as a `$ref`.
 If it is missing, the generator will not include it in `include:` clauses.
+
+### `labelField` is also the autocomplete search source
+
+The generated `search{Entity}Options` getter (`getters.ts.jinja2`) substring-matches not only
+the entity's own text columns but also, for each FK, the field named in that FK's
+`x-relationship.labelField` — a one-hop nested Prisma `where` (e.g. searching `booking` also
+matches on `resource.name`). This is auto-derived
+(`helpers/schema_helpers.py: derive_searchable_relation_fields`); there is nothing to opt into
+beyond declaring `labelField` itself, and nothing to name separately — a retired `searchField`
+attribute used to serve this role independently, but letting the searched field and the
+displayed field diverge was the exact failure mode that got it removed (`validate.py` now
+rejects any schema that still declares it).
+
+Not every `labelField` qualifies:
+
+| labelField shape | Searchable? |
+|---|---|
+| Plain string field (`name`, `order_no`, ...) | Yes |
+| `enum` field, even if `type: string` (Prisma nativeEnum) | No — the screen shows the i18n-translated label, the DB stores the untranslated literal; a substring match against the raw value can never hit what the user typed |
+| `date` / `date-time` / `time` format field | No — `contains` is a string-only Prisma operator |
+| `integer` / `number` field | No |
+| CUID-pattern id field (e.g. `labelField: id`) | No — same exclusion `derive_text_fields` applies to a bare `id` |
+| Dotted path (`approver_role.name`) | No today — the template renders one nested `where` hop only; a second hop would need a template change (no schema currently needs it) |
+| Composite list (`[f1, f2]`) | Evaluated per element — only the qualifying elements become searchable |
+
+There is no UI affordance today for telling a user which part of a composite/mixed label is
+actually searchable — schema authors should keep this table in mind when choosing `labelField`
+for a relation likely to be searched by autocomplete.
+
+### Direct Attachment FK (`type: direct`) — a single file, not a selectable relation
+
+`x-relationship: { target: attachment, type: direct }` is a distinct marker from every other
+relationship type on this page — declare it when an entity needs to point at exactly one
+uploaded file (a profile picture, a signed contract), not a list of attachments (the existing
+`attachable_id` bridge, section 7.6) and not a selectable relation with its own pages (section 5
+above, section 7.5 one-to-one selector). `attachment` has no list/view/new/edit pages of its
+own; the field renders as a file-upload widget (`SingleAttachmentUpload`), never an
+`EntityAutocomplete`.
+
+```yaml
+some_entity:
+  fields:
+    profile_picture_id:        # nullable -- omit from `required:`
+      x-relationship:
+        target: attachment
+        type: direct
+    contract_file_id:          # required -- a REQUIRED direct-attachment FK is legal
+      x-relationship:
+        target: attachment
+        type: direct
+  required:
+    - contract_file_id
+```
+
+Required-ness comes from the entity's own `required:` list (or Prisma non-nullability), the
+same as every other field on this page -- there is no separate `required` key inside
+`x-relationship` for this type. Do not declare `type: many-to-one` or `type: one-to-one` for a
+field targeting `attachment` -- those types feed the autocomplete-selector machinery
+(`search{Target}Options`, CSV export/import FK-label flattening, dashboard chart groupable
+fields), none of which make sense for a file. `type: direct` is deliberately excluded from all
+of it.
+
+Prisma alignment -- the FK column is nullable-or-required to taste, `@unique` (true 1:1), and
+the relation back to `attachment` uses `onDelete: SetNull` when the column is nullable or
+`onDelete: Restrict` when required (deleting a still-referenced required attachment must not
+silently orphan the row):
+
+```prisma
+model some_entity {
+  profile_picture_id String?     @unique
+  profile_picture    attachment? @relation("SomeEntityProfilePicture", fields: [profile_picture_id], references: [id], onDelete: SetNull)
+  contract_file_id   String      @unique
+  contract_file      attachment  @relation("SomeEntityContractFile", fields: [contract_file_id], references: [id], onDelete: Restrict)
+}
+```
+
+Every direct-attachment FK is a two-sided Prisma relation, like any other: `attachment` -- a
+single shared internal model every `type: direct` declaration across the whole schema points
+at -- also needs a matching back-reference field, one per declaring entity+field, named
+`{entity}_{relation_name}` with type `{entity}?` (always optional on this side, even when the
+forward FK is required -- an attachment row can exist with nothing pointing at it yet):
+
+```prisma
+model attachment {
+  # ... existing fields ...
+  some_entity_profile_picture some_entity? @relation("SomeEntityProfilePicture")
+  some_entity_contract_file   some_entity? @relation("SomeEntityContractFile")
+}
+```
+
+`attachment.attachable_id` is nullable (`onDelete: SetNull`) -- a direct-attachment FK creates
+an attachment row with no bridge owner at all, so `attachable_id` stays permanently null for
+that row's whole life; that is the normal, permanent state, not a transient one pending cleanup.
+Both this and the back-reference field above are manual `prisma/schema.prisma` edits you must
+apply *before* declaring the first `type: direct` field, the same as every other
+Prisma-alignment note on this page -- `generate.py` does not write either for you (unlike a
+bridge model's own FKs, which `inject_bridge_into_schema` does inject: a bridge's model is
+entirely generator-owned, `attachment` is a hand-maintained shared model a consumer may have
+customized, so an automatic append here could conflict with that). `generate.py` does check for
+both: it fails the build with an explicit message if any entity declares `type: direct` while
+`attachment.attachable_id` is still non-nullable (`validate_direct_attachment_prerequisite`) or
+while any declaration's back-reference field is missing
+(`validate_direct_attachment_reverse_fields`), and it never emits
+`lib/attachment/direct_actions.ts` (or requires either prerequisite at all) unless at least one
+entity actually uses the feature -- a consumer that hasn't adopted `type: direct` anywhere is
+never asked to touch the `attachment` model (subtask_788b; the file used to be emitted
+unconditionally and broke every consumer's `tsc` build regardless of whether they used the
+feature, see CHANGELOG).
+
+Implementation-internals notes from when this feature was built (why the generator's TS-type
+resolution for `attachment.type` must read the raw entity definition rather than the plain
+entity properties, the encrypted-filename decrypt/strip pass the generated getter applies
+before the row reaches a client component, why the field's label is derived from the relation
+name rather than the FK column name, and why the upload server action is passed into
+`SingleAttachmentUpload` as a prop instead of imported inside it) are recorded alongside the
+fixture test that exercises this branch
+(`code_generator/tests/fixtures/direct_attachment_gate/`) rather than repeated here. DataGrid
+child-cell rendering of a direct-attachment field is an open design question, not yet landed --
+this page does not cover it.
+
+**`user.image` and the comment/mention creator avatar**: this repo's own demo schema moved
+`user.image` to a direct-attachment FK (`image_id`), but a consumer schema that still declares
+`user.image` as a plain `format: uri` string is equally valid -- `type: direct` is opt-in per
+schema, not a repo-wide migration. `build_context.py`'s comment/mention creator avatar select
+(the `x-mention`/`commentable` include for `comments: { creator: { select: { ..., image } } }
+}`) branches on the *consuming* schema's own `user` entity
+(`get_direct_attachment_fk_props(_raw_def('user', schema))`) rather than assuming the FK shape
+unconditionally -- a schema without the FK gets a plain `image: true` scalar select, one with it
+gets `image: { select: { path: true } }`. `types.ts.jinja2`'s three `child.child_name ==
+'comment'` / `output_type == 'comments'` branches type `creator.image` as the permissive `{
+path: string } | string | null` union to match either shape without needing that same
+schema-conditional branch threaded into the template. The shared, non-templated
+`components/_standard/CommentListWrapper.tsx` mirrors that same union and derives `avatarSrc`
+with a `typeof` check, since a static `_standard` component cannot itself branch per consumer
+schema. Growing `code_generator/tests/fixtures/mention_gate/` with a second, plain-string
+`user.image` variant (its current fixture only exercises the FK-shaped branch) is tracked as a
+follow-up rather than done here.
+
+### Named-constant parent (`constantParent`) — `x-internal` enum entities only
+
+An `x-internal` entity (section 9) that also has an `enum` field (e.g. `reaction.type`) gets an
+exported TypeScript constant -- `{PARENT}_{ENTITY}_TYPES` (`extract_named_constants`,
+`generate_types.py`). When such an entity has one or more non-`user` many-to-one FKs, exactly
+one of them must be marked `constantParent: true` inside its `x-relationship` -- that field's
+target becomes `PARENT`:
+
+```yaml
+reaction:
+  x-internal:
+    page: false
+    embed: false
+    api: custom
+  fields:
+    type:
+      enum: [like, love, laugh, surprised, sad]
+    user_id:
+      x-relationship: {}
+    comment_id:
+      x-relationship:
+        labelField: id
+        constantParent: true   # -> COMMENT_REACTION_TYPES
+```
+
+`constantParent` is never inferred from `fields:`/`properties:` declaration order: a purely
+order-derived pick (the historical behavior -- "the first non-`user` many-to-one FK
+encountered") let an unrelated schema edit rename an already-shipped constant out from under its
+consumers without warning -- adding a second FK field (e.g. `organization_id`) anywhere before
+`comment_id` silently turned `COMMENT_REACTION_TYPES` into `ORGANIZATION_REACTION_TYPES`,
+breaking every hand-written consumer of the old name (the comment-reactions API route, the
+toggle server action). `build_user_schema.py`'s Category-C pass-through carries `constantParent`
+from `json_schema.yaml` straight into the derived schema alongside `type`/`target`/`labelField`,
+same as any other `x-relationship` key.
+
+This is a fail-closed check, not a fallback: `generate.py` raises `SchemaValidationError` at
+generation time if an `x-internal` enum entity has at least one non-`user` many-to-one FK and
+none (or more than one) of them declares `constantParent: true`. An entity with *no* non-`user`
+many-to-one FK at all needs no declaration -- there is no candidate to disambiguate, so the
+constant is named `{ENTITY}_TYPES` (e.g. an entity with only a `user_id` FK, or none).
 
 ---
 
@@ -964,10 +1222,14 @@ model parent1_list {
 
 ### 7.3 Independent children (`x-generate` on child, `x-outputType: list` on parent)
 
-When a child entity has its own `x-generate` (its own list/view/edit pages), it must appear
-in the parent's `properties:` with `x-outputType: list`. The generator **validates** this:
-a child with `x-generate` that appears as `x-outputType: table` or `x-outputType: comments`
-is a configuration error.
+When a child entity has its own `x-generate` (its own list/view/edit pages), it appears in
+the parent's `properties:` with either `x-outputType: list` (this section) or any other
+non-`list`, non-`comments` `x-outputType` such as `None` (§7.4 below — a read-only embedded
+grid, regardless of the child's own new/edit/delete capability). The generator **validates**
+only one combination as a configuration error: a child with `x-generate` that appears with
+`x-outputType: comments` — the comment-thread rendering path is not the read-only grid used
+by every other non-`list` value, so it stays restricted to children that disable
+new/edit/delete entirely.
 
 ```yaml
 epic:
@@ -975,7 +1237,7 @@ epic:
   properties:
     features:
       type: array
-      x-outputType: list     # required when child has x-generate
+      x-outputType: list     # editable/autocomplete embedding — see Rules 1-2 below
       items:
         $ref: "#/definitions/feature"
 ```
@@ -1053,6 +1315,54 @@ model bug {
 ```
 
 ---
+
+### 7.4 Read-only embedded grid for independent children (non-`list`, non-`comments` `x-outputType`)
+
+An independent child (has its own `x-generate`, its own list/view/new/edit/delete pages and
+API/Server Action routes) may also be embedded in the parent's view with any `x-outputType`
+other than `list` or `comments` (e.g. `None`) — regardless of whether the child's own
+`x-generate` permits new/edit/delete. Unlike §7.3's `x-outputType: list` case, this is not
+conditioned on the FK being mandatory or optional; it is always read-only:
+
+```yaml
+dashboard:
+  x-generate: { list: true, view: true, ... }
+  properties:
+    widgets:
+      type: array                # embedded (no x-generate) child — unaffected by this section
+      items:
+        $ref: "#/definitions/dashboard_widget"
+    scratch_children:
+      type: array
+      x-outputType: 'None'        # independent child, embedded read-only regardless of its own CRUD
+      items:
+        $ref: "#/definitions/scratch_child"
+```
+
+**Why this is always safe**: BOTH the parent's view page and its edit page render such a
+child through the same read-only `FieldsViewGrid` (`components/_standard/
+FieldsViewGrid.tsx`) used for every other non-`list`, non-`comments` child — its columns are
+generated with `editable: false` hardcoded at the call site (`use{Prop}Columns(false)`, no
+`EntityAutocompleteCellConfig` args), and `FieldsViewGrid` itself never renders Add/Edit/Delete
+UI. No write path is exposed by the embedding itself, no matter what the child's own
+`x-generate` declares — this holds for the parent's own service too (no
+`child_nested_create`/`child_nested_update`, no add/update params for it). The child's own
+standalone CRUD routes (`app/api/{child}/...`, `lib/{child}/actions.ts`), if any, are generated
+independently and are the sole write path — unaffected by whether or how it is embedded in a
+parent's view or edit page.
+
+> The edit-page half of this guarantee (the parent's `FormUpsert.tsx`/service never treating
+> such a child as writable) was a follow-up fix, not part of this section's original landing —
+> see this file's own changelog entry for the fix and its empirical verification. Before that
+> fix, `FormUpsert.tsx` built a fully writable `DataGridClient` for such a child regardless of
+> its independence, which could produce a `service.ts` type error for a child with its own
+> required relation fields the generic nested-create body never supplied (e.g. an
+> `x-approval`-bearing, self-referencing line child).
+
+`x-outputType: comments` is the one exception that keeps the original restriction (a child
+with `x-generate` must disable new/edit/delete entirely to use it) — the comment-thread
+rendering path is not `FieldsViewGrid`, so an independently write-capable child there is
+unverified-safe and stays a configuration error (`generate_types.py`'s `extract_entities()`).
 
 ## 7.6 Polymorphic Bridge Children (`x-bridge`)
 
@@ -1200,11 +1510,15 @@ properties:
 | `list` | Many-to-many | Read-only list | Autocomplete — add/delete only (no edit) |
 | `list` | Independent child (has `x-generate`), **mandatory** FK | Read-only list | Read-only list — no buttons |
 | `list` | Independent child (has `x-generate`), **optional** FK | Read-only list | Autocomplete — add/delete only (no edit) |
+| any other value (e.g. `None`) | Independent child (has `x-generate`), any FK — see §7.4 | Read-only `FieldsViewGrid` | Read-only `FieldsViewGrid` — no buttons |
 | `comments` | Comment thread | Comment list | Comment input + list with edit/delete per item |
 
-**Validation rule:** if a child entity has `x-generate`, it _must_ use `x-outputType: list`
-under the parent's `properties:`. Using `table` or `comments` for a generated child is a
-configuration error caught at generator run time.
+**Validation rule:** if a child entity has `x-generate`, using `x-outputType: comments` for
+it requires disabling new/edit/delete entirely — otherwise it is a configuration error
+caught at generator run time. Every other `x-outputType` (including `list`, `table`, or
+omitting it entirely so it resolves to `None`) is always allowed for a generated child,
+regardless of its own new/edit/delete capability, because every non-`list`, non-`comments`
+value renders through the read-only `FieldsViewGrid` embedding (§7.4).
 
 ### Non-array `$ref` properties — `x-outputType: flatten`
 
@@ -1315,7 +1629,14 @@ booking:
 | `primary: true` | This column's cell links to the view or edit page |
 | `width` | Pixel width of the DataGrid column |
 
-If `x-display` is omitted entirely, the list page shows all fields in definition order.
+If `x-display.table` is omitted entirely, the generated list page (`page_list.tsx.jinja2`) emits
+no `displayFields`/`primaryField` props at all, and `ResponsiveListClient`/`DataGridClient` fall
+back to their own hardcoded default columns — `name` and `description` — **not** "all fields in
+definition order". If the entity has neither of those two exact field names (e.g. its primary
+display field is called `title`), the list page silently renders blank/id-only cells for every
+row with no build or type error (found via `personal_note` — see
+`docs/knowledge/self-only-entity.md`). Always declare `x-display.table` with a `primary: true`
+column whenever the entity's natural label field isn't literally named `name`.
 
 When a table column refers to a relationship name (e.g., `resource`), the generator renders
 `resource.name` (the `labelField`) in that column.
@@ -1334,6 +1655,32 @@ The entity must have `start_time` and `end_time` fields.
 **Generated files:**
 - `lib/{entity}/chart-getters.ts` — query that builds `GanttItem[]`
 - `app/[locale]/{entity}/chart/page.tsx` — page wrapping `<GanttChart>`
+
+**Which fields end up on the chart, and which one becomes the tooltip:** every other
+**required** field on the entity (i.e. not nullable, and not the FK/`start_time`/`end_time`/
+`id`/`created_at`/`updated_at`/`creator_id` fields already covered above) is projected onto the
+generated `{Entity}ForChart` type, by resolved type:
+
+| Field type | Projected? | As |
+|---|---|---|
+| String (plain or a nativeEnum) | Yes | `string` |
+| DateTime (any `format`: `date-time`, `date`, or `time`) | No | — |
+| Decimal | Yes | `string` (precision-preserving — see §15 Prisma type alignment) |
+| Int (or a numeric enum with no string labels) | Yes | `number` |
+| A numeric enum with string labels | Yes | `number`, tooltip shows the label |
+| Boolean | No | — |
+
+DateTime columns are never shown in the chart tooltip, regardless of `format`.
+`page_chart.tsx` is an async server component, so formatting a DateTime there
+would render it in the server's timezone rather than the client's local time.
+If a chart consumer needs a DateTime value in the tooltip, format it
+client-side in `GanttChart` using `lib/_format.ts`'s `formatLabelValue` —
+do not project it from the getter.
+
+Of the projected fields, only the **first one in the entity's field declaration order**
+becomes the Gantt-item tooltip. Declaring a new required field ahead of the field a chart
+consumer currently relies on for its tooltip changes which one wins — check declaration order
+when adding a required field to a charted entity.
 
 ### Combining table and chart
 
@@ -1514,7 +1861,12 @@ export async function addLeaveRequest(...) {
     const created = await tx.leave_request.create({
       data: { ..., approvable_id: approvable.id },
     });
-    await afterCreate(tx, created as Record<string, unknown>, { ... });
+    // Approval-request creation itself is emitted inline here (edge-trigger
+    // code, see docs/knowledge/appendix/approval-flow.md §16.4) — not via
+    // the afterCreate hook below.
+    await afterCreate(tx, created.id);   // post-create hook, always called
+                                          // for a can_create entity — see
+                                          // docs/knowledge/post-create-side-effect-hook.md
     return { id: created.id };
   });
 }
@@ -1772,6 +2124,17 @@ respected in most contexts:
 or set `labelField` explicitly in every `x-relationship` / `x-relationships` referencing it.
 The generator validates this and reports an error if neither is present.
 
+**`labelField` is a display-only declaration, but CSV import also uses it for row lookup
+.** When a many-to-one FK has no `x-import-key`, CSV import resolves the referenced row
+by querying on the FK's `labelField` value (`import_fk_specs.lookup_field` in
+`build_context.py`), the same field the CSV export column is named after. This is within the
+declaration's intended scope as long as `labelField` points to a human-readable field that is
+effectively unique (`name`, `code`, etc.) — the common case today. If a schema ever points
+`labelField` at a field that is mutable or not unique, this dual use breaks down the same way the
+earlier ledger reverse-lookup design did; at that point, consider a dedicated identification-only
+declaration rather than continuing to overload `labelField`. Not needed today (a later survey covered
+every call site and recommended keeping this as-is).
+
 ---
 
 ### 15.3 Definition naming conventions
@@ -1795,7 +2158,7 @@ whose Prisma model has no `id` column is invisible to the generator.
 
 These fields are treated specially regardless of what the schema says, and are never written
 under `fields:` at all (they're Prisma-only, injected by the generator — §4.4,
-`code_generator/generators.py` line ~195: *"creator_id/updater_id are Prisma-only audit fields
+`code_generator/generators.py` line ~381: *"creator_id/updater_id are Prisma-only audit fields
 (not in json_schema.yaml)"*):
 
 | Field | Behaviour |
@@ -1921,6 +2284,94 @@ If a user requests a FK that would target an embedded entity, reject the request
 
 ---
 
+## 16. `x-self-only` — Permission-Independent Access Invariant
+
+Place on the entity. Declares "only the record's creator can ever access it" as a fixed
+property of the entity, independent of any `general`/`Creator` permission grant — a role
+with `general.read: true` on a self-only entity still only sees its own rows.
+
+```yaml
+personal_note:
+  x-generate: { list: true, view: true, new: true, edit: true, delete: true, api: true }
+  x-self-only: true            # shorthand — equivalent to { admin_bypass: false }
+```
+
+```yaml
+personal_note:
+  x-generate: { ... }
+  x-self-only:
+    admin_bypass: true         # allow an audited Administrator-role bypass on reads
+```
+
+`admin_bypass` defaults to `false` and must be written out explicitly to enable it — the
+permissive direction is never implicit.
+
+**Unconditional enforcement**: every read/write code path (`getters.ts`, `search_helpers.ts`,
+`actions.ts`, `api_bulk_route.ts`, `api_detail_route.ts`, `service.ts`) drops the
+`general.read`/`update`/`delete` escape entirely for a self-only entity and checks
+`creator_id === actorId` as the sole gate. A non-owner's row reads as `404 Not Found`, not
+`403 Forbidden`. CSV import/export forces `creator_id` into `import_unimportable_columns`
+(never user-supplied) and scopes both to the caller's own rows.
+
+**Admin bypass, when enabled**: applies to reads only (list/detail/search/FK candidates) —
+never delete, update, or cross-entity full-text search. The bypass and its audit-log write
+are inseparable: a failed audit write denies the bypass rather than granting it silently.
+
+**Validation**: the underlying Prisma model must have a `creator_id` column, and `creator_id`
+must never appear in `x-import-key` (always session-stamped, never user-supplied).
+
+**Composes with org isolation**: an entity with both `organization_id` and `x-self-only` gets
+both filters, ANDed — never OR.
+
+See `docs/knowledge/self-only-entity.md` for the proxy-view case (`setting`, a self-only view
+over `user`), the admin-bypass allowlist mechanism, and Stage 2 (DB-level RLS) status.
+
+---
+
+## 17. `x-filter-values` — View-Scoped Row Restriction
+
+Place on a proxy view entity (`allOf: [{ $ref: <model> }]`). Restricts the view to rows whose
+field values match a fixed allowlist — enforced unconditionally, server-side, on every read
+and write path, not just in the UI.
+
+```yaml
+active_setting:
+  allOf: [{ $ref: '#/definitions/setting' }]
+  x-generate: { ... }
+  x-filter-values:
+    status: [active, pending]
+    is_archived: [false]
+```
+
+Map of `field: [allowed values, ...]`. Multiple fields combine with **AND**; multiple values
+for one field combine with **IN**. No NOT/OR form exists yet.
+
+Like `x-readonly-fields` (§4.7), this is view-scoped entity-level metadata — it stays on the
+declaring view entity and never leaks onto another view of the same underlying model. Every
+field named must be an existing property; generation fails closed (`ValueError`) on an
+unresolved field name.
+
+**Unconditional enforcement**: pushed as an `AND` clause alongside org isolation and
+`x-self-only` in `getters.ts` (list/export/FK candidates/detail — a filtered-out row's detail
+GET returns `404`), `search_helpers.ts` (parameterized `IN (...)`, never string-concatenated),
+`api_detail_route.ts`/`api_bulk_route.ts` (pre-image check before PUT/DELETE), `actions.ts`'s
+`remove{Entity}`, and `service.ts`'s `update{Entity}` (the write path both routes funnel
+through). `delete{Entity}` itself has no internal check — mirroring the `x-self-only`
+precedent, every caller does its own pre-image fetch-and-filter first.
+
+**Pre-image semantics**: a write is judged against the row's state *before* the write, never
+the incoming body. A transition *out of* the filtered view succeeds; a row already outside the
+view is rejected regardless of what the request body contains.
+
+**Does not restrict create** — a new row can be created with any value; it simply won't appear
+in, or be reachable through, that view once created. Not a general-purpose user-facing filter
+either — `FILTERABLE_FIELDS`/`buildFilter()` operate independently on top of this fixed floor.
+
+See `docs/knowledge/filter-values-row-scope.md` for the full per-file enforcement-point list
+and the composition rule with org isolation and `x-self-only`.
+
+---
+
 ## Appendix
 
 For detailed subsystem documentation, see:
@@ -2004,6 +2455,7 @@ For detailed subsystem documentation, see:
 | `String` | `string` |
 | `String?` | `[string, "null"]` |
 | `Int` | `integer` |
+| `Decimal` (+ `@db.Decimal(p, s)`) | `string` (never `number` — precision-preserving) |
 | `Boolean` | `boolean` |
 | `DateTime` + `format: date-time` override | `string` |
 | `DateTime` + `format: date` override | `string` |

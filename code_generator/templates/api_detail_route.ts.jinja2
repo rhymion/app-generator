@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
-import prisma from '@/lib/prisma';
-{% if can_view %}
+{% if (can_view and comment_has_mention) or can_update or can_delete %}import prisma from '@/lib/prisma';
+{% endif %}{% if can_view %}
 import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
+{% endif %}
+{% if can_view and comment_has_mention %}
+import { decodeMentions, extractMentionedUserIds, type UserContext } from '@/lib/mention/parser';
+import { getTranslations } from 'next-intl/server';
 {% endif %}
 {% if can_update or can_delete %}
 import { {% if can_update %}update{{ parent_pascal }}{% endif %}{% if can_update and can_delete %}, {% endif %}{% if can_delete %}delete{{ parent_pascal }}{% endif %}{% if reservation_config and reservation_config.mode == 'count' %}, ReservationMutationError{% endif %} } from '@/lib/{{ parent }}/service';
@@ -17,12 +21,55 @@ export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId: actorId } = await authenticateApiKey(request);
-    const item = await get{{ parent_pascal }}Detail(id{% if should_filter_by_org %}, actorId{% endif %});
+    const item = await get{{ parent_pascal }}Detail(id{% if should_filter_by_org or is_self_only %}, actorId{% endif %});
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
     await requireApiPermission(actorId, '{{ parent }}', 'read', item);
+{% if comment_has_mention %}
+    // Mention decode (cmd_522c): get{{ parent_pascal }}Detail() returns RAW
+    // @[user_id:<id>] markers (needed by the page/FormView path's
+    // <MentionText>). This REST route's JSON contract predates that split
+    // and still returns plain decoded names (M1, test_api_spec.cy.ts.jinja2)
+    // — so decoding happens here, at the API boundary, instead.
+    const _mentionUserIds = new Set<string>();
+{% if named_constants and has_commentable %}
+    for (const c of item.{{ commentable_rel_name }}?.comments ?? []) {
+      if (c.creator?.id) _mentionUserIds.add(c.creator.id);
+      for (const uid of extractMentionedUserIds(c.message)) _mentionUserIds.add(uid);
+    }
+{% endif %}
+{% for child in children_raw %}
+{% if child.output_type == 'comments' %}
+    for (const c of item.{{ child.property_name }} ?? []) {
+      if (c.creator?.id) _mentionUserIds.add(c.creator.id);
+      for (const uid of extractMentionedUserIds(c.message)) _mentionUserIds.add(uid);
+    }
+{% endif %}
+{% endfor %}
+    const _mentionUsers = _mentionUserIds.size
+      ? await prisma.user.findMany({ where: { id: { in: [..._mentionUserIds] } }, select: { id: true, name: true } })
+      : [];
+    const _mentionUserContext: UserContext = Object.fromEntries(_mentionUsers.map((u) => [u.id, u.name]));
+    const _tCommon = await getTranslations('Common');
+    const _decodeComment = <T extends { message: string }>(c: T) => ({ ...c, message: decodeMentions(c.message, _mentionUserContext, _tCommon('deletedUser')) });
+    const decodedItem = {
+      ...item,
+{% if named_constants and has_commentable %}
+      {{ commentable_rel_name }}: item.{{ commentable_rel_name }}
+        ? { ...item.{{ commentable_rel_name }}, comments: item.{{ commentable_rel_name }}.comments.map(_decodeComment) }
+        : item.{{ commentable_rel_name }},
+{% endif %}
+{% for child in children_raw %}
+{% if child.output_type == 'comments' %}
+      {{ child.property_name }}: item.{{ child.property_name }}.map(_decodeComment),
+{% endif %}
+{% endfor %}
+    };
+    return NextResponse.json(decodedItem);
+{% else %}
     return NextResponse.json(item);
+{% endif %}
   } catch (error) {
     return handleApiError(error);
   }
@@ -36,14 +83,38 @@ export async function PUT(request: NextRequest, { params }: Params) {
 {% if should_filter_by_org %}
     const _assocOrgs = await getAssociatedOrganizations(actorId);
     const _assocOrgIds = _assocOrgs.map((o) => o.id);
+{% if org_relationship_optional %}
+    const existing = await prisma.{{ model }}.findFirst({ where: { id, OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }] }, select: {{ item_context_select }} });
+{% else %}
     const existing = await prisma.{{ model }}.findFirst({ where: { id, organization_id: { in: _assocOrgIds } }, select: {{ item_context_select }} });
+{% endif %}
 {% else %}
     const existing = await prisma.{{ model }}.findUnique({ where: { id }, select: {{ item_context_select }} });
 {% endif %}
     if (!existing) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
+{% if filter_values %}
+    // x-filter-values: judged against the PRE-image row fetched above, not
+    // the incoming PUT body — a legitimate transition out of the filtered
+    // view (e.g. status pending -> approved) must still succeed; only a row
+    // already outside the view is rejected (cmd_874/subtask_874f, ruling_C).
+{% for field, values in filter_values.items() %}
+    if (!({{ values | tojson }} as unknown[]).includes((existing as Record<string, unknown>).{{ field }})) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+{% endfor %}
+{% endif %}
+{% if is_self_only %}
+    // x-self-only: no general.update/Creator-role override — ownership is
+    // the sole gate, unconditionally (no admin bypass on write). "Not
+    // found" (not 403) for a non-owner's row, per the cmd_523 pattern.
+    if (existing.creator_id !== actorId) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+{% else %}
     await requireApiPermission(actorId, '{{ parent }}', 'update', existing);
+{% endif %}
     const body = await request.json();
     const { {{ all_body_fields_create }} } = body;
 {% if readonly_fields_api %}
@@ -77,14 +148,34 @@ export async function DELETE(request: NextRequest, { params }: Params) {
 {% if should_filter_by_org %}
     const _assocOrgs = await getAssociatedOrganizations(actorId);
     const _assocOrgIds = _assocOrgs.map((o) => o.id);
+{% if org_relationship_optional %}
+    const existing = await prisma.{{ model }}.findFirst({ where: { id, OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }] }, select: {{ item_context_select }} });
+{% else %}
     const existing = await prisma.{{ model }}.findFirst({ where: { id, organization_id: { in: _assocOrgIds } }, select: {{ item_context_select }} });
+{% endif %}
 {% else %}
     const existing = await prisma.{{ model }}.findUnique({ where: { id }, select: {{ item_context_select }} });
 {% endif %}
     if (!existing) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
+{% if filter_values %}
+    // x-filter-values: judged against the PRE-image row (cmd_874/subtask_874f, ruling_C).
+{% for field, values in filter_values.items() %}
+    if (!({{ values | tojson }} as unknown[]).includes((existing as Record<string, unknown>).{{ field }})) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+{% endfor %}
+{% endif %}
+{% if is_self_only %}
+    // x-self-only: no general.delete/Creator-role override — ownership is
+    // the sole gate, unconditionally (no admin bypass on delete).
+    if (existing.creator_id !== actorId) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+{% else %}
     await requireApiPermission(actorId, '{{ parent }}', 'delete', existing);
+{% endif %}
     await delete{{ parent_pascal }}({% if is_audited %}actorId, {% endif %}[id]);
     return new NextResponse(null, { status: 204 });
   } catch (error) {

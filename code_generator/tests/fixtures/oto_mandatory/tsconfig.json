@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/lib/oto_gate_item/*": ["./lib/oto_gate_item/*"],
+      "@/lib/oto_gate_target/*": ["./lib/oto_gate_target/*"],
+      "@/components/oto_gate_item/*": ["./components/oto_gate_item/*"],
+      "@/components/oto_gate_target/*": ["./components/oto_gate_target/*"],
+      "@/lib/prisma": ["./lib/prisma.ts"],
+      "@/lib/authz": ["./lib/authz.ts"],
+      "@/app/generated/prisma/client": ["./prisma/.generated-client/client"],
+      "@/*": ["../*"]
+    }
+  },
+  "include": [
+    "app/[locale]/oto_gate_item/new/page.tsx",
+    "lib/oto_gate_item/getters.ts"
+  ],
+  "exclude": ["node_modules"]
+}

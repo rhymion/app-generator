@@ -1,21 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireSession, handleApiError } from '@/lib/api-auth';
+import { requireDualAuth, handleApiError } from '@/lib/api-auth';
 import { ApiError } from '@/lib/api-auth';
 import prisma from '@/lib/prisma';
 import { getUserRoleIds } from '@/lib/authz';
 import { assertApprovalOrder } from '@/lib/approval_request/order-check';
 import { isTerminalReject, dispatchOnRejected } from '@/lib/approval_request/on_rejected_dispatch';
+import { dispatchBeforeReject } from '@/lib/approval_request/on_before_reject_dispatch';
 import { getApprovalRequestRecipient } from '@/lib/approval_request/actions';
 import { notify } from '@/lib/_notifier';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const { userId } = await requireSession();
+    // cmd_648: dual-auth — X-API-Key/Authorization header when present,
+    // session cookie otherwise (see app/api/search/route.ts).
+    const { userId } = await requireDualAuth(request);
 
     const req = await prisma.approval_request.findUnique({
       where: { id },
-      select: { approval_flow: { select: { approver_role_id: true, entity_name: true } } },
+      select: {
+        round_id: true,
+        approvable_id: true,
+        approval_flow: { select: { approver_role_id: true, entity_name: true } },
+      },
     });
     if (!req?.approval_flow) throw new ApiError(404, 'Approval request not found');
 
@@ -38,6 +45,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       (typeof body?.reason_kind === 'number') ? body.reason_kind : undefined;
 
     const updated = await prisma.$transaction(async (tx) => {
+      // cmd_923b: pre-rejection dispatch, before any write in this
+      // transaction -- a throw here rejects the rejection attempt entirely.
+      if (req.approvable_id) {
+        await dispatchBeforeReject(tx, req.approval_flow.entity_name, req.approvable_id, userId);
+      }
       const result = await tx.approval_request.update({
         where: { id },
         data: { status: newStatus },
@@ -51,6 +63,43 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       await tx.approval_history.create({
         data: { approval_request_id: id, pre_status: 0, post_status: newStatusOrdinal, message: message ?? null, creator_id: userId, reason_kind: reasonKind ?? null },
       });
+
+      // cmd_844 PD-2 (cmd_863c fix: unconditional on terminal-ness -- see
+      // lib/approval_request/actions_core.ts's rejectApprovalRequest() for
+      // the full rationale, mirrored here): a rejection closes this whole
+      // round -- any other still-pending row in the same round (a later
+      // stage that never got its turn) is auto-cancelled to 'withdrawn'
+      // (the existing status value reused, not a new 'cancelled' one).
+      // Previously skipped for a terminal rejection, which left a
+      // terminally-rejected round's still-pending sibling row orphaned at
+      // 'pending' forever -- the entity's own on_rejected dispatch writes
+      // the ENTITY's field, never another approval_request row's status.
+      const siblingPending = await tx.approval_request.findMany({
+        where: {
+          approvable_id: result.approvable_id,
+          round_id: req.round_id,
+          status: 'pending',
+          id: { not: id },
+        },
+        select: { id: true },
+      });
+      if (siblingPending.length > 0) {
+        await tx.approval_request.updateMany({
+          where: { id: { in: siblingPending.map((r) => r.id) } },
+          data: { status: 'withdrawn' },
+        });
+        // pre_status is 0 ('pending') for every row here -- guaranteed by
+        // the status: 'pending' filter above, not a stale hardcode.
+        await tx.approval_history.createMany({
+          data: siblingPending.map((r) => ({
+            approval_request_id: r.id,
+            pre_status: 0,
+            post_status: 4,
+            message: null,
+            creator_id: userId,
+          })),
+        });
+      }
 
       // on_rejected dispatch
       const approvableData = await tx.approvable.findUnique({
@@ -92,7 +141,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         title: `Your ${entityName ?? 'request'} was rejected`,
         href,
         approvalRequestId: id,
-        status: 'rejected',
+        // cmd_539: was hard-coded to 'rejected' even for a terminal
+        // rejection — the notification fired either way, but its payload
+        // misreported the actual outcome.
+        status: newStatus,
         message: message ?? null,
       });
     }

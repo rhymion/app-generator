@@ -35,7 +35,7 @@ type MfaUserSelect = {
 type MfaPrismaClient = {
   user: {
     findUnique: (args: { where: { id: string }; select: { id: true; email: true; mfa_secret: true; mfa_enabled: true } }) => Promise<MfaUserSelect | null>;
-    update: (args: { where: { id: string }; data: Partial<{ mfa_secret: string | null; mfa_enabled: boolean }> }) => Promise<unknown>;
+    update: (args: { where: { id: string }; data: Partial<{ mfa_secret: string | null; mfa_enabled: boolean; mfa_token_version: { increment: number } }> }) => Promise<unknown>;
   };
   mfa_recovery_code: {
     deleteMany: (args: { where: { user_id: string } }) => Promise<unknown>;
@@ -117,9 +117,13 @@ export async function completeEnrollment(
   await db().mfa_recovery_code.createMany({
     data: codes.map((c) => ({ user_id: userId, code_hash: c.hash })),
   });
+  // mfa_token_version increments here (not on disable/regenerate): this is
+  // the transition that creates the session-persistence gap (cmd_527 §4.3)
+  // — an already-active JWT minted before MFA was enabled must be forced
+  // to re-verify, not just future sign-ins.
   await db().user.update({
     where: { id: userId },
-    data: { mfa_enabled: true },
+    data: { mfa_enabled: true, mfa_token_version: { increment: 1 } },
   });
   return { recoveryCodes: codes.map((c) => c.plaintext) };
 }

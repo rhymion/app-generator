@@ -35,11 +35,18 @@ from dataclasses import dataclass, field as _dc_field
 from pathlib import Path
 
 # Category A scalar type mapping (design doc Sec.3 Category A table).
+# `Decimal`: mapped to "string", not "number" -- per ruling (cmd_705, 2026-08-15).
+# Prisma's Decimal (decimal.js) round-trips through a JS `number` with float
+# rounding error (e.g. 0.1 + 0.2); a string preserves exact precision through
+# JSON response / form value / CSV round-trip. See
+# `_prisma_decimal_type` below for how downstream codegen distinguishes a
+# Decimal-backed string field from an ordinary string field.
 _SCALAR_JSON_TYPE = {
     "String": "string",
     "Boolean": "boolean",
     "Int": "integer",
     "DateTime": "string",
+    "Decimal": "string",
 }
 
 _CUID_PATTERN = "^c[a-z0-9]{24,}$"
@@ -50,6 +57,11 @@ _FIELD_HEAD_RE = re.compile(
 )
 _RELATION_FIELDS_RE = re.compile(r'fields\s*:\s*\[([^\]]*)\]')
 _BLOCK_UNIQUE_RE = re.compile(r'@@unique\(\s*\[([^\]]*)\]')
+# `@db.Decimal(precision, scale)` -- not matched by _ATTR_RE (its `@(\w+)`
+# group can't cross the `.`). Only `scale` is consumed downstream (max
+# decimal places for input format validation); precision is parsed too for
+# completeness but not currently used.
+_DB_DECIMAL_RE = re.compile(r'@db\.Decimal\(\s*(\d+)\s*,\s*(\d+)\s*\)')
 
 
 class SchemaDivergenceError(Exception):
@@ -63,12 +75,15 @@ class PrismaField:
     nullable: bool
     is_list: bool
     is_id: bool = False
+    is_unique: bool = False
     is_updated_at: bool = False
     has_default: bool = False
     default_value: object = None
     default_is_dynamic: bool = False  # now(), cuid(), uuid() -- not a literal
     is_relation_object: bool = False
     relation_fk_fields: tuple = ()  # local scalar FK column names, for relation-object fields
+    decimal_precision: int | None = None  # @db.Decimal(p, s) -- p
+    decimal_scale: int | None = None  # @db.Decimal(p, s) -- s
 
 
 @dataclass
@@ -120,16 +135,26 @@ def _parse_field_line(line: str) -> PrismaField | None:
     rest = line[head.end():]
 
     is_id = False
+    is_unique = False
     is_updated_at = False
     has_default = False
     default_value = None
     default_is_dynamic = False
     is_relation_object = False
     relation_fk_fields: tuple = ()
+    decimal_precision = None
+    decimal_scale = None
+
+    m_decimal = _DB_DECIMAL_RE.search(rest)
+    if m_decimal:
+        decimal_precision = int(m_decimal.group(1))
+        decimal_scale = int(m_decimal.group(2))
 
     for attr_name, attr_args in _ATTR_RE.findall(rest):
         if attr_name == "id":
             is_id = True
+        elif attr_name == "unique":
+            is_unique = True
         elif attr_name == "updatedAt":
             is_updated_at = True
         elif attr_name == "default":
@@ -142,7 +167,7 @@ def _parse_field_line(line: str) -> PrismaField | None:
                 relation_fk_fields = tuple(
                     part.strip() for part in m.group(1).split(",") if part.strip()
                 )
-        # @unique, @db.* -- not needed for json-schema derivation, ignored
+        # @db.* -- not needed for json-schema derivation, ignored
 
     return PrismaField(
         name=name,
@@ -150,12 +175,15 @@ def _parse_field_line(line: str) -> PrismaField | None:
         nullable=nullable,
         is_list=is_list,
         is_id=is_id,
+        is_unique=is_unique,
         is_updated_at=is_updated_at,
         has_default=has_default,
         default_value=default_value,
         default_is_dynamic=default_is_dynamic,
         is_relation_object=is_relation_object,
         relation_fk_fields=relation_fk_fields,
+        decimal_precision=decimal_precision,
+        decimal_scale=decimal_scale,
     )
 
 
@@ -204,6 +232,30 @@ def parse_prisma_schema(path: Path) -> dict:
                 model.fields[pf.name] = pf
         models[model_name] = model
     return models
+
+
+def collect_unique_columns(models: dict) -> dict:
+    """Return ``{model_name: {'single': [col, ...], 'composite': [[col, ...], ...]}}``.
+
+    `single` lists columns carrying a field-level `@unique`; `composite` lists
+    every `@@unique([...])` column group. The `@id` column is deliberately
+    excluded -- it is always a generated cuid, so it can never be the key a
+    deterministic test fixture is looked up by.
+
+    This is a Prisma-only fact that intentionally does NOT flow into the
+    derived JSON schema (`derive_property`): uniqueness constrains *writes*,
+    not the JSON shape, and the Stage 2/4 golden references assert the derived
+    shape byte-for-byte. Consumers (currently `generators_test.py`, for
+    find-or-create idempotency in the Cypress populate helpers) read it
+    straight off the parsed Prisma models instead.
+    """
+    out: dict = {}
+    for model_name, model in models.items():
+        out[model_name] = {
+            "single": [f.name for f in model.fields.values() if f.is_unique and not f.is_id],
+            "composite": [list(cols) for cols in model.unique_constraints],
+        }
+    return out
 
 
 def parse_prisma_enums(path: Path) -> dict:
@@ -294,18 +346,47 @@ def derive_property(
         # `type` stays "string" above (Class B: API/JSON shape unchanged).
         prop["_prisma_native_enum_type"] = pf.prisma_type
 
+    if pf.prisma_type == "Decimal":
+        # Internal marker (not a real JSON schema keyword, stripped before any
+        # client-facing output): the exposed `type` is "string" above (a
+        # deliberate product decision -- precision-preserving, avoids JS
+        # float rounding error), but downstream codegen (form input
+        # rendering, CSV coercion, display formatting, DataGrid-child
+        # test-value seeding) needs to distinguish this from an ordinary
+        # string field. Mirrors `_prisma_native_enum_type`.
+        prop["_prisma_decimal_type"] = True
+        if pf.decimal_scale is not None:
+            # Auto-reflected from `@db.Decimal(p, s)` (Category A, like the
+            # `default:` auto-reflection at cmd_574) -- not a user-schema
+            # override. Used to bound the input format check's max decimal
+            # places so a value the DB would reject on the scale (not the
+            # rounding-error) axis gets a UI-level error instead of an opaque
+            # Prisma write failure.
+            prop["x-decimal-scale"] = pf.decimal_scale
+        if pf.decimal_precision is not None:
+            # Auto-reflected alongside x-decimal-scale (cmd_754): lets
+            # generated-test value builders (generators_test.py) derive a
+            # value that actually fits `@db.Decimal(p, s)` instead of a fixed
+            # literal like '10.00', which overflows a narrow column such as
+            # Decimal(5, 4).
+            prop["x-decimal-precision"] = pf.decimal_precision
+
     fk_target = model.fk_target(field_name)
     if fk_target is not None and not user_field_overrides.get("_no_fk_pattern"):
         prop["pattern"] = _CUID_PATTERN
 
-    # `default:` is NOT auto-derived from Prisma's `@default(...)` -- the
-    # legacy schema sometimes omits it even when Prisma has one (e.g.
-    # attachment.type has `@default(0)` in Prisma but no `default:` in the
-    # legacy JSON schema), so its presence is a Category C, user-authored
-    # decision. Only Prisma's *nullability* (used for `required`, below)
-    # is Category A.
+    # `default:` (cmd_574): a static Prisma `@default(...)` is now auto-
+    # reflected into the derived json schema property (Category A) unless
+    # the user schema already declares its own `default:` (Category C,
+    # which always wins -- e.g. attachment.type intentionally omits
+    # `default:` even though Prisma has `@default(0)`, to keep the UI from
+    # auto-filling it). Dynamic Prisma defaults (now(), cuid(), uuid(),
+    # autoincrement()) are excluded -- they're server-generated and have no
+    # meaning as a UI default.
     if "default" in user_field_overrides:
         prop["default"] = user_field_overrides["default"]
+    elif pf.has_default and not pf.default_is_dynamic:
+        prop["default"] = pf.default_value
 
     # Layer Category C overrides (everything the user schema specified for
     # this field) on top -- these are never derivable from Prisma, so a
@@ -346,9 +427,17 @@ def _derive_relationship(model: PrismaModel, field_name: str, fk_target, user_re
     # all (e.g. "one-to-one_bridge" for internal bridge tables) -- that is
     # genuine Category C content, not a derivable fact to cross-check, so
     # an explicit `type` is used as-is rather than validated.
-    rel = {"type": user_rel.get("type", "many-to-one"), "target": fk_target}
-    label_field = user_rel.get("labelField", "name")  # DP-R4-1: default 'name'
-    rel["labelField"] = label_field
+    rel_type = user_rel.get("type", "many-to-one")
+    rel = {"type": rel_type, "target": fk_target}
+    # DP-R4-1: default labelField 'name' -- but only for a selectable
+    # relation. A direct-attachment FK (`type: direct`) points at
+    # `attachment`, which has no list/view page and thus no label to
+    # resolve (get_direct_attachment_fk_props() never reads labelField);
+    # defaulting one in here would silently attach a meaningless key that
+    # no downstream code consumes.
+    if rel_type != "direct":
+        label_field = user_rel.get("labelField", "name")
+        rel["labelField"] = label_field
     for key, value in user_rel.items():
         if key in ("target", "type", "labelField"):
             continue

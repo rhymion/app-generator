@@ -2,11 +2,101 @@ name: CI
 
 on:
   push:
-    branches: [master, main]
+    branches: [master, main, develop]
   pull_request:
-    branches: [master, main]
+    branches: [master, main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  detect-changes:
+    name: Detect docs-only change
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.check.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Classify this diff as docs-only or not (machine-checked path judgment)
+        # Path-based, not a human "this is docs-only" claim in the commit
+        # message or PR text (cmd_498: "a condition the machine doesn't see
+        # is a hole, not an exemption"). Only e2e-tests below is gated on
+        # this job's output via needs:+if: (cmd_725: lint/unit-tests/audit/
+        # audit-full-scope/pytest/mention-gate-fixture/
+        # mention-gate-plain-image-fixture/decimal-gate-fixture/
+        # oto-mandatory-gate-fixture/approval-lockdown-gate-fixture/
+        # payment-gate-fixture/uri-kind-gate-fixture keep running
+        # unconditionally — e2e-tests is
+        # the dominant cost (~57-60 min per cmd_719) and the other ten stay
+        # as a safety net against a path-judgment mistake here). Not a
+        # top-level `paths-ignore:` trigger filter — that would make the
+        # workflow (and its checks) not run at all for a docs-only push/PR,
+        # indistinguishable in the PR Checks list from the check never
+        # having existed. Gating the job instead makes it show up as
+        # "Skipped" — visible, not silently absent.
+        #
+        # This repo's docs/ tree is not all documentation: docs/consumer-
+        # commands/ holds the canonical source distributed to every
+        # consumer repo's own CI workflow and gate definitions (ci.yml,
+        # generate-schema.md, update-code.md, update-component.md) — editing
+        # it is a change to what every consumer runs, not prose about this
+        # repo. So it is checked and excluded from the docs-only exemption
+        # BEFORE the general docs/** exclusion below, not folded into it:
+        # git pathspec exclude magic has no re-include operator (a later
+        # positive pathspec cannot carve a path back out of an earlier
+        # ':(exclude)docs/**' — verified empirically, exclude always wins),
+        # so a single combined pathspec list cannot express "docs/** except
+        # docs/consumer-commands/**". AGENTS.md and .claude/commands/*.md
+        # are excluded from this repo's exemption list for the same
+        # reason — they carry this repo's own gate definitions (CLAUDE.md
+        # "Gate SoT Rule") — but need no separate check: unlike
+        # docs/consumer-commands/**, they were never added to the exclude
+        # list below in the first place, so a change to either already
+        # falls outside every ':(exclude)' pattern and is counted as a
+        # real (non-docs) change by the general check on its own.
+        id: check
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          if [ -z "${BASE:-}" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BASE" 2>/dev/null; then
+            echo "No usable base commit (new branch or shallow history) — running the full suite (fail-closed)."
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "$(git diff --name-only "$BASE" HEAD -- docs/consumer-commands)" ]; then
+            echo "docs/consumer-commands/** changed — this is the canonical source distributed to consumers, not docs-only."
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --quiet "$BASE" HEAD -- . \
+              ':(exclude)docs/**' \
+              ':(exclude)README.md' ':(exclude)README_ja.md' \
+              ':(exclude)CHANGELOG.md' ':(exclude)CLAUDE.md' \
+              ':(exclude)LICENSE'; then
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  example-file-credential-leak-check:
+    name: Example-file Credential Leak Check
+    runs-on: ubuntu-latest
+    # Mechanical, fail-closed scan of every `.example` file for a real-looking
+    # secret/ID pattern (cmd_829: VERCEL_ORG_ID's real team ID had leaked into
+    # .env.vercel.production.local.example). Needs no build/generate-code
+    # step and no `detect-changes` gating -- it reads only committed files, so
+    # it always runs, on every push and PR.
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash scripts/check-example-file-leaks.sh
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -72,8 +162,8 @@ jobs:
     # check. Who reviews this output and how often is documented in the
     # same doc; this job only produces the signal, it does not consume it.
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '24.18.0'
           cache: 'npm'
@@ -111,7 +201,7 @@ jobs:
           '
       - name: Upload audit JSON artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: npm-audit-full-scope
           path: audit-full-scope.json
@@ -119,6 +209,8 @@ jobs:
 
   e2e-tests:
     name: E2E Tests
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     env:
       NODE_ENV: test
@@ -152,6 +244,24 @@ jobs:
         # dependency on repository secrets and keeps behavior identical for
         # every PR type.
         run: echo "AUTH_SECRET=$(openssl rand -base64 32)" >> .env.test.local
+      - name: Enable the test-only mock Google OAuth provider (cmd_527)
+        # Registers an extra CredentialsProvider under id:"google" in
+        # auth.ts, used only by cypress/e2e/auth/mfa.cy.ts to exercise the
+        # OAuth+MFA code path without any real Google credentials or
+        # outbound network call — see docs/knowledge/authentication.md
+        # "MFA on the OAuth path". Safe to always set in this workflow:
+        # this job only ever runs against the ephemeral CI test database,
+        # never a real deployment, and the flag adds a provider, it never
+        # removes or weakens one.
+        #
+        # This env var alone is NOT sufficient to register the provider
+        # (cmd_528): auth.ts also requires the filesystem sentinel written
+        # by scripts/write-mock-oauth-sentinel.js, which runs automatically
+        # via the `pre*` hooks on the `test:e2e:build`/`test:e2e:cy:start`
+        # npm scripts invoked below. Real deploy pipelines (`vercel-build`,
+        # `build:full`) never run that script, so this flag alone leaking
+        # into a real deployment's env vars can't enable the mock provider.
+        run: echo "MOCK_GOOGLE_OAUTH_TEST=true" >> .env.test.local
       - name: Verify required test env is non-empty (fail-closed)
         # Guards right at env-generation time so a future accidental
         # regression back to an empty/undefined value fails fast here
@@ -177,3 +287,331 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Run pytest
         run: pytest code_generator/tests
+
+  mention-gate-fixture:
+    name: Mention Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_535 (following cmd_532): a small fixture entity (commentable +
+    # comment + x-mention: true) run through the real generate-code -> tsc
+    # pipeline, catching regressions in the `named_constants and
+    # has_commentable` branch of getters.ts.jinja2 / api_detail_route.ts.
+    # jinja2 -- a branch this repo's own generate-code/build (the e2e-tests
+    # job) never compiles, because no entity in this repo's own
+    # json_schema.yaml wires a commentable relation. No path filter, same as
+    # unit-tests/pytest above, per docs/knowledge/gate-exemption-must-be-
+    # machine-checkable.md. See docs/knowledge/mention-system.md.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:mention-gate
+
+  mention-gate-plain-image-fixture:
+    name: Mention Gate Plain-Image Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_803: sibling of mention-gate-fixture above with `user.image` left
+    # as a plain `format: uri` string column instead of a direct-attachment
+    # FK (`image_id`) -- mention-gate-fixture's own `user.image_id` is
+    # FK-shaped, so it only ever type-checked one of the two Prisma select
+    # shapes build_context.py's comment/mention creator avatar select can
+    # produce. A consumer schema with `x-mention: true` and a plain-string
+    # `user.image` is equally valid and was, until this fixture existed,
+    # never exercised by this repo's own gates -- exactly how a consumer
+    # (not this repo) first hit the break. No path filter, same rationale as
+    # mention-gate-fixture above. See
+    # docs/knowledge/schema-yaml-configuration.md "user.image and the
+    # comment/mention creator avatar".
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:mention-gate-plain-image
+
+  decimal-gate-fixture:
+    name: Decimal Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_705: a small fixture entity (required + nullable Decimal column,
+    # each with an explicit @db.Decimal(p, s) scale) run through the real
+    # generate-code -> tsc pipeline, catching regressions in the
+    # Decimal-specific branches of schema_deriver.py / getters.ts.jinja2 /
+    # form_upsert_context (generators.py) / form_validation.ts.jinja2 /
+    # service_validation.ts.jinja2 / api_import_route.ts.jinja2 -- branches
+    # this repo's own generate-code/build (the e2e-tests job) never
+    # compiles, because no entity in this repo's own json_schema.yaml has a
+    # Decimal-typed field. No path filter, same as unit-tests/pytest/
+    # mention-gate-fixture above, per docs/knowledge/gate-exemption-must-be-
+    # machine-checkable.md. See scripts/check_decimal_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:decimal-gate
+
+  oto-mandatory-gate-fixture:
+    name: OTO Mandatory Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_704 [2-a]: a small fixture entity pair
+    # (oto_gate_target, a one-to-one selector target with its own pages, and
+    # oto_gate_item, whose FK to it is REQUIRED -- non-nullable) run through
+    # the real generate-code -> tsc pipeline, catching regressions in the
+    # required_relation_fields/selector_oto_rels split in build_context.py
+    # and the `{{ f.init_var }}` reference it drives in page_new.tsx.jinja2
+    # -- a branch this repo's own generate-code/build (the e2e-tests job)
+    # never compiles, because no entity in this repo's own json_schema.yaml
+    # has a required one-to-one selector FK, and neither does any currently
+    # known consumer schema. No path filter, same as unit-tests/pytest/
+    # mention-gate-fixture above, per docs/knowledge/gate-exemption-must-be-
+    # machine-checkable.md. See scripts/check_oto_mandatory_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:oto-mandatory-gate
+
+  oto-decimal-gate-fixture:
+    name: OTO Decimal Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_754[2]: a small fixture entity pair (oto_decimal_gate_target, a
+    # one-to-one selector target carrying a Decimal column, and
+    # oto_decimal_gate_item, whose FK to it is a nullable
+    # `type: one-to-one` selector) run through the real generate-code ->
+    # tsc pipeline, catching regressions in
+    # `getAvailable{Target}sFor{Parent}` (getters.ts.jinja2), which used to
+    # return the target's raw Prisma rows unconditionally -- a Decimal
+    # column on the target hit TS2322 at the page_new.tsx/page_edit.tsx
+    # call site (a Client Component prop typed against the generated,
+    # Decimal-as-string interface). A branch this repo's own generate-code/
+    # build (the e2e-tests job) never compiles, because no entity in this
+    # repo's own json_schema.yaml has a one-to-one selector FK at all. No
+    # path filter, same as unit-tests/pytest/mention-gate-fixture/
+    # decimal-gate-fixture/oto-mandatory-gate-fixture above, per
+    # docs/knowledge/gate-exemption-must-be-machine-checkable.md. See
+    # scripts/check_oto_decimal_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:oto-decimal-gate
+
+  chart-decimal-gate-fixture:
+    name: Chart Decimal Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_755[1]: a small fixture entity pair (chart_decimal_gate_row, the
+    # chart's row_by target, and chart_decimal_gate_item, which declares
+    # x-display.chart and carries a REQUIRED Decimal column) run through
+    # the real generate-code -> tsc pipeline, catching regressions in
+    # get{Parent}sForChart (chart_getters.ts.jinja2), which used to assign
+    # a required Decimal column straight off the raw Prisma row into a
+    # field the generated {Parent}ForChart interface types as `string` --
+    # a TS2322 at the chart-getters.ts/chart/page.tsx call site. A branch
+    # this repo's own generate-code/build (the e2e-tests job) never
+    # compiles, because no entity in this repo's own json_schema.yaml
+    # combines x-display.chart with a required Decimal column. No path
+    # filter, same as unit-tests/pytest/mention-gate-fixture/
+    # decimal-gate-fixture/oto-mandatory-gate-fixture/oto-decimal-gate-fixture
+    # above, per docs/knowledge/gate-exemption-must-be-machine-checkable.md.
+    # See scripts/check_chart_decimal_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:chart-decimal-gate
+
+  chart-scalar-gate-fixture:
+    name: Chart Scalar Gate Fixture Check
+    runs-on: ubuntu-latest
+    # A small fixture entity pair (chart_scalar_gate_row, the chart's
+    # row_by target, and chart_scalar_gate_item, which declares
+    # x-display.chart and carries a REQUIRED plain Int column, a REQUIRED
+    # DateTime column other than start_time/end_time, and a REQUIRED
+    # Boolean column) run through the real generate-code -> tsc pipeline,
+    # catching regressions in chart_context() (generators.py): a required
+    # plain Int/Float column silently dropped from the chart projection
+    # entirely, and a required DateTime column other than start_time/
+    # end_time assigned straight off the raw Prisma row into a field the
+    # generated {Parent}ForChart interface types as `string` -- the same
+    # TS2322 class the chart-decimal-gate job above catches for Decimal,
+    # just for a different type. A branch this repo's own generate-code/
+    # build (the e2e-tests job) never compiles, because no entity in this
+    # repo's own json_schema.yaml combines x-display.chart with a required
+    # Int/Float or extra required DateTime column. No path filter, same as
+    # unit-tests/pytest/mention-gate-fixture/decimal-gate-fixture/
+    # oto-mandatory-gate-fixture/oto-decimal-gate-fixture/
+    # chart-decimal-gate-fixture above, per
+    # docs/knowledge/gate-exemption-must-be-machine-checkable.md.
+    # See scripts/check_chart_scalar_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:chart-scalar-gate
+
+  approval-lockdown-gate-fixture:
+    name: Approval Lockdown Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_732: a small fixture entity (a nativeEnum status field with
+    # x-approval.on_approved/on_rejected.set_fields declared on it) run
+    # through the real generate-code -> tsc pipeline, catching regressions
+    # in derive_approval_locked_values (helpers/schema_helpers.py), the
+    # disabled-option rendering in form_upsert_context (generators.py), the
+    # APPROVAL_LOCKED_FIELDS check in service_validation.ts.jinja2 (shared
+    # by the REST API route and the Server Action write path), and its
+    # duplicate in api_import_route.ts.jinja2 (CSV import bypasses the
+    # service layer entirely) -- branches this repo's own generate-code/
+    # build (the e2e-tests job) never compiles, because no entity in this
+    # repo's own json_schema.yaml declares x-approval. No path filter, same
+    # as unit-tests/pytest/mention-gate-fixture above, per docs/knowledge/
+    # gate-exemption-must-be-machine-checkable.md. See
+    # scripts/check_approval_lockdown_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:approval-lockdown-gate
+
+  payment-gate-fixture:
+    name: Payment Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_753: a small fixture entity (x-payment: true) run through the real
+    # generate-code -> tsc pipeline, catching regressions in the write-once
+    # Stripe integration stub templates (stripe_lib_stub.ts.jinja2,
+    # stripe_checkout_route_stub.ts.jinja2, stripe_webhook_route_stub.ts.
+    # jinja2) -- including a stale Stripe SDK apiVersion literal, the exact
+    # drift that motivated this gate (the stub pinned a literal that the
+    # installed `stripe` SDK's own type no longer accepted). A branch this
+    # repo's own generate-code/build (the e2e-tests job) never compiles,
+    # because no entity in this repo's own json_schema.yaml declares
+    # x-payment: true. No path filter, same as unit-tests/pytest/
+    # mention-gate-fixture/decimal-gate-fixture/oto-mandatory-gate-fixture/
+    # approval-lockdown-gate-fixture above, per docs/knowledge/gate-
+    # exemption-must-be-machine-checkable.md. See
+    # scripts/check_payment_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:payment-gate
+
+  direct-attachment-gate-fixture:
+    name: Direct Attachment Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_788: a small fixture entity (direct_attachment_gate_item, with a
+    # nullable and a REQUIRED x-relationship: { target: attachment, type:
+    # direct } FK field) run through the real generate-code -> tsc pipeline,
+    # catching regressions in the SingleAttachmentUpload/
+    # SingleAttachmentDisplay generation branches (form_upsert_context/
+    # form_view_context in generators.py, the decrypt/strip pass in
+    # getters.ts.jinja2, and the inline attachment shape in types.ts.jinja2)
+    # -- a brand-new feature this repo's own generate-code/build (the
+    # e2e-tests job) never compiles, because no entity in this repo's own
+    # json_schema.yaml declares x-relationship.type: direct, and neither
+    # does any currently known consumer schema. No path filter, same as
+    # unit-tests/pytest/mention-gate-fixture/oto-mandatory-gate-fixture/
+    # payment-gate-fixture above, per docs/knowledge/gate-exemption-must-be-
+    # machine-checkable.md. See scripts/check_direct_attachment_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:direct-attachment-gate
+
+  uri-kind-gate-fixture:
+    name: Uri Kind Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_792: a small fixture parent/child pair (uri_kind_gate_wrapper /
+    # uri_kind_gate_item) run through the real generate-code -> tsc
+    # pipeline, catching regressions in page_list_context's list-page
+    # DataGrid uriKind wiring (generators.py) and confirming
+    # column_def_context's editable child DataGrid deliberately leaves
+    # both uri kinds as a plain editable text cell (no image/link branch
+    # at all -- a cmd_792 decision, not an oversight). A branch this
+    # repo's own generate-code/build (the e2e-tests job) never compiles,
+    # because neither of this repo's own two format:uri fields
+    # (user.image, attachment.path) is ever listed in an x-display.table
+    # column set or embedded as a one-to-many child's column. No path
+    # filter, same as unit-tests/pytest/mention-gate-fixture/decimal-
+    # gate-fixture/approval-lockdown-gate-fixture above, per
+    # docs/knowledge/gate-exemption-must-be-machine-checkable.md. See
+    # scripts/check_uri_kind_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:uri-kind-gate

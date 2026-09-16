@@ -2,8 +2,15 @@
 
 import { dispatchOnApproved } from '@/lib/approval_request/on_approved_dispatch';
 import { isTerminalReject, dispatchOnRejected } from '@/lib/approval_request/on_rejected_dispatch';
-import { resolveApprovableTarget } from '@/lib/approval_request/resolve_target';
+import { dispatchOnWithdrawn, hasOnWithdrawn } from '@/lib/approval_request/on_withdrawn_dispatch';
+import { resolveApprovableTarget, resolveApprovableModel } from '@/lib/approval_request/resolve_target';
 import { createApprovalActions } from '@/lib/approval_request/actions_core';
+// cmd_923b: pre-action validation dispatchers -- see actions_core.ts's
+// ApprovalActionDeps doc for why these are injected the same way as the
+// on_approved/on_rejected/on_withdrawn dispatchers above.
+import { dispatchBeforeApprove } from '@/lib/approval_request/on_before_approve_dispatch';
+import { dispatchBeforeReject } from '@/lib/approval_request/on_before_reject_dispatch';
+import { dispatchBeforeWithdraw } from '@/lib/approval_request/on_before_withdraw_dispatch';
 
 // This is the only place in the approval_request flow that statically
 // imports the generator-emitted collaborators (code_generator/generate.py,
@@ -13,14 +20,21 @@ import { createApprovalActions } from '@/lib/approval_request/actions_core';
 // §2.4.
 const approvalActions = createApprovalActions({
   resolveApprovableTarget,
+  resolveApprovableModel,
   dispatchOnApproved,
   dispatchOnRejected,
   isTerminalReject,
+  dispatchOnWithdrawn,
+  hasOnWithdrawn,
+  dispatchBeforeApprove,
+  dispatchBeforeReject,
+  dispatchBeforeWithdraw,
 });
 
 export async function getApprovalRequestRecipient(id: string): Promise<{
   recipientId: string | null;
   entityName: string | null;
+  targetId: string | null;
   href: string | undefined;
 }> {
   return approvalActions.getApprovalRequestRecipient(id);
@@ -38,6 +52,10 @@ export async function rejectApprovalRequest(
   return approvalActions.rejectApprovalRequest(id, message, options);
 }
 
-export async function resubmitApprovalRequest(id: string, message?: string): Promise<void> {
-  return approvalActions.resubmitApprovalRequest(id, message);
+// cmd_844: takes the approvable id, not a specific approval_request id --
+// withdrawal is now round-scoped (see actions_core.ts's
+// withdrawApprovalRequest doc).
+export async function withdrawApprovalRequest(approvableId: string, message?: string): Promise<void> {
+  return approvalActions.withdrawApprovalRequest(approvableId, message);
 }
+

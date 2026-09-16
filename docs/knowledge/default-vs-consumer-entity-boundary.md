@@ -25,7 +25,7 @@ or once a shipped doc asserts it as a "current fact" about the base template's o
 ## The default entity set
 
 The generator's own baseline schema (`code_generator/json_schema.yaml` +
-`code_generator/json_schema_internal.yaml`) defines exactly 15 entities: `approvable`,
+`code_generator/json_schema_internal.yaml`) defines exactly 16 entities: `approvable`,
 `approval_flow`, `approval_request`, `attachable`, `attachment`, `comment`, `commentable`,
 `dashboard`, `dashboard_widget`, `notification`, `organization`, `permission`, `reaction`,
 `role`, `setting`, `user`.
@@ -38,7 +38,7 @@ every consumer, not one consumer's business domain: `audit_log`, `mfa_recovery_c
 Anything else (`purchase_order`, `receiving_receipt`, `leave_request`, `inventory`, `location`,
 etc.) is a consumer's own domain entity, defined in that consumer's `prj/code_generator/
 json_schema.yaml`. See also [[authorization-default-deny]] `## Adding Tests for a New Entity` for
-the `scripts/seed-tenant.ts` instance of this same rule.
+the `scripts/seed-baseline.ts` instance of this same rule.
 
 ## Established extension point for consumer-specific test infrastructure
 
@@ -49,7 +49,7 @@ Consumer-specific Cypress task registrations belong in the consuming project's o
 `prj/cypress/support/project-tasks.ts` (that file's own header comment says as much), never
 hardcoded into the shared `cypress.config.ts`.
 
-## cmd_488 findings (2026-07-29)
+## Findings (2026-07-29)
 
 - `code_generator/helpers/schema_helpers.py` (`get_approval_lines_props`,
   `get_splittable_bridge_field`): `purchase_order`/`receiving_receipt` appear only in docstring
@@ -67,7 +67,7 @@ hardcoded into the shared `cypress.config.ts`.
   description with no enumerated entity names.
 - `cypress.config.ts`: 9 hardcoded task registrations (`db:seedReservationInventory` etc.)
   imported `./cypress/support/purchase_order/reservation_helper` unconditionally — same class of
-  violation as the `scripts/seed-tenant.ts` `leave_request` block removed in cmd_478, and already
+  violation as the `scripts/seed-baseline.ts` `leave_request` block removed earlier, and already
   flagged on the dashboard as a follow-up from that cmd. Consolidated into this cmd (see report)
   and removed from `cypress.config.ts`. **Companion action required** in `app-template`
   (out of scope here — this repo's `app-template` scan was read-only): add the 9 equivalent
@@ -75,16 +75,15 @@ hardcoded into the shared `cypress.config.ts`.
   `app-generator` submodule pointer is bumped to include this commit, or the
   `purchase_order`-domain reservation e2e specs will break at that point (decoupled by the
   submodule pin, not immediately). See the report for the exact registrations to add.
-- **Known gap, not fixed here (needs generator design work, filed as follow-up)**:
-  `code_generator/templates/ledger_write_stub.ts.jinja2` and `split_action_route.ts.jinja2` both
-  contain a literal `tx.location.findFirst(...)` Prisma call in their `afterReject`/split-reject
-  paths. `location` is not part of the `x-ledger-entities` domain config (`pool`/`ledger`/
-  `transactionable` only) — it is hardcoded, not schema-driven, contradicting
-  `docs/knowledge/appendix/inventory-domain-generalization-design.md`'s own stated design intent
-  ("target: whatever the customer names their location entity"). Any consumer generating this
-  stub for an `x-ledger-source` entity with `reject_event_type` set, without a literal `location`
-  Prisma model, would get a template that fails to type-check. Proper fix requires adding a
-  `location`-equivalent key to the `x-ledger-entities` domain resolution
-  (`schema_helpers.py::resolve_ledger_domain`) and threading it through `generate.py`/
-  `build_context.py` into both templates — schema-config design work beyond this triage cmd's
-  scope, recommended as a dedicated follow-up cmd.
+- **Known gap at the time — since closed by a follow-up**: `code_generator/templates/
+  ledger_write_stub.ts.jinja2` and `split_action_route.ts.jinja2` used to contain a literal
+  `tx.location.findFirst(...)` Prisma call in their `afterReject`/split-reject paths, hardcoded
+  rather than schema-driven, contradicting `docs/knowledge/appendix/
+  inventory-domain-generalization-design.md`'s stated design intent ("target: whatever the
+  customer names their location entity"). This has since been fixed exactly the way this section
+  recommended: `resolve_ledger_domain` (`code_generator/helpers/schema_helpers.py:589`) now
+  resolves a `location_field` key (alongside `item_field`/`lot_field`/`expiration_field`) from the
+  `x-ledger-entities` domain config, and both templates render `{{ pool_location_field }}`
+  wherever the literal `location` model/column name used to appear — no literal
+  `tx.location.findFirst`/`.location.` reference remains in either template. The domain config's
+  own docstring documents the earlier hardcoding as the reason for the change.

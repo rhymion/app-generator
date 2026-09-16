@@ -2,7 +2,7 @@
 
 import prisma from '@/lib/prisma';
 import type { {{ parent_pascal }}, {{ parent_pascal }}Detail } from '@/lib/{{ parent }}/types';
-import { assertPermission, getModelPermissions, resolvePermissions, toPermissions{% if should_filter_by_org %}, getSessionUserIdOrThrow{% endif %} } from '@/lib/authz';
+import { assertPermission, getModelPermissions, resolvePermissions, toPermissions{% if should_filter_by_org or is_self_only %}, getSessionUserIdOrThrow{% endif %} } from '@/lib/authz';
 import type { Operation, RichPermissions } from '@/lib/authz';
 import {
   type PageOpts, type PageResult,
@@ -11,20 +11,25 @@ import {
 {% if should_filter_by_org %}
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 {% endif %}
+{% if is_self_only and self_only_admin_bypass %}
+import { trySelfOnlyAdminBypass } from '@/lib/self_only';
+{% endif %}
 {% if non_creator_virtual_columns %}
 import { resolveVirtualColumns } from '@/lib/{{ parent }}/virtual_resolvers';
 {% endif %}
-{% if has_attachable %}
+{% if has_attachable or direct_attachment_rels %}
 import { decryptFileName } from '@/lib/compliance/attachment_name_crypto';
 {% endif %}
 {% if comment_has_mention %}
-import { decodeMentions, extractMentionedUserIds, type UserContext } from '@/lib/mention/parser';
-import { getTranslations } from 'next-intl/server';
+import { extractMentionedUserIds, type UserContext } from '@/lib/mention/parser';
 {% endif %}
 import { filterAutocompleteOptions, type AutocompleteFilterContext } from '@/lib/{{ parent }}/autocomplete_filter';
 import { filterListQuery } from '@/lib/{{ parent }}/list_filter';
 {% if export_uses_format_label_value %}
 import { formatLabelValue } from '@/lib/_format';
+{% endif %}
+{% if decimal_deep_relations or relationship_mapping_needs_decimal_helper %}
+import { deepStringifyDecimals{% if selector_oto_rels | selectattr('available_needs_decimal') | list %}, type DeepStringifyDecimals{% endif %} } from '@/lib/_decimal';
 {% endif %}
 
 // Allow-lists for sort/filter — anything not in here is silently dropped at
@@ -32,18 +37,35 @@ import { formatLabelValue } from '@/lib/_format';
 const SORTABLE_FIELDS = new Set<string>([{{ sortable_fields_quoted }}]);
 const FILTERABLE_FIELDS = new Set<string>([{{ filterable_fields_quoted }}]);
 
-/** Build the where clauses that enforce read scope (org + Creator/Assignee). */
-function build{{ parent_pascal }}AccessWhere(
+/** Build the where clauses that enforce read scope (org + Creator/Assignee{% if is_self_only %} / self-only{% endif %}). */
+async function build{{ parent_pascal }}AccessWhere(
   perms: RichPermissions,
   userId: string | null,
 {% if should_filter_by_org %}
   associatedOrganizationIds: string[],
 {% endif %}
-): Record<string, unknown>[] {
+): Promise<Record<string, unknown>[]> {
   const and: Record<string, unknown>[] = [];
 {% if should_filter_by_org %}
+{% if org_relationship_optional %}
+  and.push({ OR: [{ organization_id: { in: associatedOrganizationIds } }, { organization_id: null }] });
+{% else %}
   and.push({ organization_id: { in: associatedOrganizationIds } });
 {% endif %}
+{% endif %}
+{% if is_self_only %}
+  // x-self-only: creator_id is unconditional — no permission setting
+  // (general.read, Creator/Assignee role) can widen or bypass it.
+  if (!userId) {
+    and.push({ id: '__no_access__' });
+{% if self_only_admin_bypass %}
+  } else if (await trySelfOnlyAdminBypass('{{ parent }}', userId)) {
+    // Bypass granted (and audited) — no creator_id restriction.
+{% endif %}
+  } else {
+    and.push({ creator_id: userId });
+  }
+{% else %}
   if (!perms.general.read) {
     const or: Record<string, unknown>[] = [];
     if (perms.creator?.read && userId) or.push({ creator_id: userId });
@@ -57,22 +79,54 @@ function build{{ parent_pascal }}AccessWhere(
       and.push({ OR: or });
     }
   }
+{% endif %}
+{% if filter_values %}
+  // x-filter-values: this view only shows rows matching every field's
+  // allowed-value list — ANDed alongside org/self-only above, never OR
+  // (cmd_874/subtask_874f).
+{% for field, values in filter_values.items() %}
+  and.push({ {{ field }}: { in: {{ values | tojson }} } });
+{% endfor %}
+{% endif %}
   return and;
 }
 
-export async function get{{ parent_pascal }}Detail(id: string{% if should_filter_by_org %}, userId: string{% endif %}): Promise<{{ parent_pascal }}Detail | null> {
+export async function get{{ parent_pascal }}Detail(id: string{% if should_filter_by_org or is_self_only %}, userId: string{% endif %}): Promise<{{ parent_pascal }}Detail | null> {
 {% if should_filter_by_org %}
   const associatedOrganizations = await getAssociatedOrganizations(userId);
   const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
 {% endif %}
-  const {{ parent_camel }} = await prisma.{{ model }}.{% if should_filter_by_org %}findFirst{% else %}findUnique{% endif %}({
+{% if is_self_only and self_only_admin_bypass %}
+  const _selfOnlyBypass = await trySelfOnlyAdminBypass('{{ parent }}', userId);
+{% endif %}
+  const {{ parent_camel }} = await prisma.{{ model }}.{% if should_filter_by_org or is_self_only %}findFirst{% else %}findUnique{% endif %}({
     where: {
       id,
 {% if should_filter_by_org %}
+{% if org_relationship_optional %}
+      OR: [{ organization_id: { in: associatedOrganizationIds } }, { organization_id: null }],
+{% else %}
       organization_id: { in: associatedOrganizationIds },
 {% endif %}
+{% endif %}
+{% if is_self_only %}
+{% if self_only_admin_bypass %}
+      ...(!_selfOnlyBypass ? { creator_id: userId } : {}),
+{% else %}
+      creator_id: userId,
+{% endif %}
+{% endif %}
+{% if filter_values %}
+{% for field, values in filter_values.items() %}
+      {{ field }}: { in: {{ values | tojson }} },
+{% endfor %}
+{% endif %}
     },
-{% if include_props_detail %}
+{% if detail_select %}
+    select: {
+      {{ detail_select }}
+    },
+{% elif include_props_detail %}
     include: {
       {{ include_props_detail }}
     },
@@ -83,24 +137,25 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
     return null;
   }
 
-{% if named_constants and has_commentable and comment_has_mention %}
-  // Resolve @[user_id:<id>] mentions to display names before this row crosses
-  // into FormView (client component) — the raw id must never reach the UI, and
-  // an unresolved id (anonymized/deleted user) falls back to a placeholder
-  // inside decodeMentions() itself (gdpr-design.md Section 4.2).
-  const _rawComments = {{ parent_camel }}.{{ commentable_rel_name }}?.comments ?? [];
-  const _mentionUserIds = new Set<string>();
-  for (const c of _rawComments) {
-    if (c.creator_id) _mentionUserIds.add(c.creator_id);
-    for (const uid of extractMentionedUserIds(c.message)) _mentionUserIds.add(uid);
-  }
-  const _mentionUsers = _mentionUserIds.size
-    ? await prisma.user.findMany({ where: { id: { in: [..._mentionUserIds] } }, select: { id: true, name: true } })
-    : [];
-  const _mentionUserContext: UserContext = Object.fromEntries(_mentionUsers.map((u) => [u.id, u.name]));
-  const _tCommon = await getTranslations('Common');
+{% if write_only_field_names %}
+  // cmd_801: credential-material fields (password, api_key, ... — see
+  // is_write_only_prop()) never reach a read path. Destructured out here so
+  // the return spread below can never re-leak them, whether via the REST
+  // API JSON response (api_detail_route.ts.jinja2) or the view page's
+  // server data (get{{ parent_pascal }}DetailPageData() below) -- this is the
+  // single choke point both consumers share.
+  const { {% for f in write_only_field_names %}{{ f }}: _{{ f }}, {% endfor %}...{{ parent_camel }}Safe } = {{ parent_camel }};
 {% endif %}
 {% if named_constants and has_commentable %}
+  // NOTE (cmd_522c): `message` here is the RAW stored string — @[user_id:<id>]
+  // markers intact, never decoded to plain names server-side in this shared
+  // getter. get{{ parent_pascal }}Detail() is consumed both by the REST API
+  // route (which decodes to plain text for its JSON contract — see
+  // api_detail_route.ts.jinja2) and by get{{ parent_pascal }}DetailPageData()
+  // (which exposes the raw text + a mentionUserContext id→name map to
+  // FormView, so <MentionText> can render per-mention links). Decoding here
+  // would destroy the ids MentionText needs and force the two consumers to
+  // diverge some other way.
   const _commentable = {{ parent_camel }}.{{ commentable_rel_name }} ? {
     ...{{ parent_camel }}.{{ commentable_rel_name }},
     comments: {{ parent_camel }}.{{ commentable_rel_name }}.comments.map((c) => {
@@ -114,11 +169,7 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
         },
         [],
       );
-{% if comment_has_mention %}
-      return { ...rest, message: decodeMentions(rest.message, _mentionUserContext, _tCommon('deletedUser')), reactionCounts, myReactionTypes: [] as ({{ reaction_value_type }})[] };
-{% else %}
       return { ...rest, reactionCounts, myReactionTypes: [] as ({{ reaction_value_type }})[] };
-{% endif %}
     }),
   } : {{ parent_camel }}.{{ commentable_rel_name }};
 {% endif %}
@@ -134,7 +185,7 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
         { id: string; type: {{ attachment_type_ts }}; order: number; name: string; path: string; attachable_id: string; encrypted_original_name?: string | null; name_iv?: string | null }
       >
     ).map((raw) => {
-      const { encrypted_original_name, name_iv, ...rest } = raw;
+      const { encrypted_original_name, name_iv: _name_iv, ...rest } = raw;
       let displayName = rest.name;
       if (encrypted_original_name) {
         try {
@@ -149,8 +200,38 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
     }),
   } : {{ parent_camel }}.{{ attachable_rel_name }};
 {% endif %}
+{% for dar in direct_attachment_rels %}
+  // {{ dar.relation_name }}: a direct-attachment FK (x-relationship type: direct).
+  // encrypted_original_name/name_iv are Prisma-only columns pulled in by the
+  // `{{ dar.relation_name }}: true` include -- decrypt to the display name and
+  // strip both fields here for the same reason as {{ attachable_rel_name if has_attachable else 'the attachable bridge' }}
+  // above (cmd_356): the ciphertext/IV must never cross into FormView/
+  // FormUpsert (client components) via the `src` prop.
+  //
+  // Built via an IIFE (not `let x = ...; if (x) { x = {...} }`) so the
+  // stripped-shape return value's type is inferred fresh rather than having
+  // to satisfy the wider raw-include type `{{ dar.relation_name }}` was
+  // first assigned from (which still requires encrypted_original_name/
+  // name_iv) -- a `let` reassignment there is a real type error, not just a
+  // style choice.
+  const _{{ dar.relation_name }} = ((raw: typeof {{ parent_camel }}.{{ dar.relation_name }}) => {
+    if (!raw) return raw;
+    const { encrypted_original_name, name_iv: _name_iv, ...rest } = raw;
+    let displayName = rest.name;
+    if (encrypted_original_name) {
+      try {
+        displayName = decryptFileName(encrypted_original_name);
+      } catch (e) {
+        // Legacy/rotated-key records: fall back to the stored (UUID) name
+        // rather than throwing and breaking the whole detail page.
+        console.warn('attachment name decrypt failed:', e instanceof Error ? e.message : e);
+      }
+    }
+    return { ...rest, name: displayName };
+  })({{ parent_camel }}.{{ dar.relation_name }});
+{% endfor %}
   return {
-    ...{{ parent_camel }},
+    ...{% if write_only_field_names %}{{ parent_camel }}Safe{% else %}{{ parent_camel }}{% endif %},
 {% for rel in reverse_oto_rels if rel.relation_name != rel.prop_name %}
     {{ rel.prop_name }}: {{ parent_camel }}.{{ rel.relation_name }},
 {% endfor %}
@@ -163,10 +244,31 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
 {% if has_attachable %}
     {{ attachable_rel_name }}: _{{ attachable_rel_name }},
 {% endif %}
+{% for dar in direct_attachment_rels %}
+    {{ dar.relation_name }}: _{{ dar.relation_name }},
+{% endfor %}
 {% for dtcol in datetime_display_columns %}
     {{ dtcol }}: {{ parent_camel }}.{{ dtcol }}
       ? {{ parent_camel }}.{{ dtcol }}.toISOString().replace('T', ' ').slice(0, 19)
       : '',
+{% endfor %}
+{% for dcol in decimal_display_columns %}
+    // Decimal columns arrive from Prisma as decimal.js instances, not a
+    // plain value the Server-to-Client Component boundary can serialize —
+    // stringify here (precision-preserving; no JS float conversion) rather
+    // than passing the raw instance through the `...{{ parent_camel }}` spread.
+    {{ dcol }}: {{ parent_camel }}.{{ dcol }} !== null && {{ parent_camel }}.{{ dcol }} !== undefined ? {{ parent_camel }}.{{ dcol }}.toString() : {{ parent_camel }}.{{ dcol }},
+{% endfor %}
+{% for drel in decimal_deep_relations %}
+    // {{ drel.source }} embeds a relation that carries a Decimal column
+    // (directly or through one of its own relations) — the `...{{ parent_camel }}`
+    // spread above passes it through as raw decimal.js instance(s);
+    // deepStringifyDecimals() walks it and converts every one to string.
+{% if drel.is_list %}
+    {{ drel.key }}: ({{ parent_camel }}.{{ drel.source }} ?? []).map((_item) => deepStringifyDecimals(_item)),
+{% else %}
+    {{ drel.key }}: {{ parent_camel }}.{{ drel.source }} ? deepStringifyDecimals({{ parent_camel }}.{{ drel.source }}) : {{ parent_camel }}.{{ drel.source }},
+{% endif %}
 {% endfor %}
 {% if bridge_child_ir and bridge_parent_options %}
     parent_type: (() => {
@@ -188,7 +290,7 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
 }
 
 export async function get{{ parent_pascal }}DetailPageData(id: string, operation: Operation = 'read') {
-{% if should_filter_by_org %}
+{% if should_filter_by_org or is_self_only %}
   const userId = await getSessionUserIdOrThrow();
   const [{{ parent_camel }}, { permissions: basePermissions }] = await Promise.all([
     get{{ parent_pascal }}Detail(id, userId),
@@ -202,7 +304,44 @@ export async function get{{ parent_pascal }}DetailPageData(id: string, operation
 {% endif %}
   const resolved = await resolvePermissions(basePermissions, {{ parent_camel }}, userId ?? '');
   await assertPermission(resolved, operation, '{{ parent }}');
+{% if comment_has_mention %}
+  // canViewUserProfile (cmd_522): whether the viewer may link mentioned users'
+  // names to their profile page — passed to the comment display component
+  // rather than baked into the row itself, since it reflects the *viewer's*
+  // permissions on the `user` model, not any property of {{ parent }}.
+  const { permissions: _mentionUserPerms } = await getModelPermissions('user', userId ?? null);
+  // mentionUserContext (cmd_522c): id → display name map for every user
+  // referenced (as creator or @mention) in this row's comment thread(s) —
+  // built here (not inside get{{ parent_pascal }}Detail()) so it stays out of
+  // the REST API's JSON contract and only reaches the page/FormView path.
+  const _mentionUserIds = new Set<string>();
+{% if named_constants and has_commentable %}
+  for (const c of {{ parent_camel }}?.{{ commentable_rel_name }}?.comments ?? []) {
+    if (c.creator?.id) _mentionUserIds.add(c.creator.id);
+    for (const uid of extractMentionedUserIds(c.message)) _mentionUserIds.add(uid);
+  }
+{% endif %}
+{% for child in children_raw %}
+{% if child.output_type == 'comments' %}
+  for (const c of {{ parent_camel }}?.{{ child.property_name }} ?? []) {
+    if (c.creator?.id) _mentionUserIds.add(c.creator.id);
+    for (const uid of extractMentionedUserIds(c.message)) _mentionUserIds.add(uid);
+  }
+{% endif %}
+{% endfor %}
+  const _mentionUsersForPage = _mentionUserIds.size
+    ? await prisma.user.findMany({ where: { id: { in: [..._mentionUserIds] } }, select: { id: true, name: true } })
+    : [];
+  const mentionUserContext: UserContext = Object.fromEntries(_mentionUsersForPage.map((u) => [u.id, u.name]));
+  return {
+    {{ parent_camel }},
+    userPermissions: await toPermissions(resolved),
+    canViewUserProfile: _mentionUserPerms.read,
+    mentionUserContext,
+  };
+{% else %}
   return { {{ parent_camel }}, userPermissions: await toPermissions(resolved) };
+{% endif %}
 }
 
 export async function get{{ parent_pascal }}NewPageAccessCheck() {
@@ -227,7 +366,7 @@ export async function get{{ parent_pascal }}Page(
   const associatedOrganizations = userId ? await getAssociatedOrganizations(userId) : [];
   const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
 {% endif %}
-  const accessAnd = build{{ parent_pascal }}AccessWhere(perms, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
+  const accessAnd = await build{{ parent_pascal }}AccessWhere(perms, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
   const filterAnd = buildFilter(opts.filter, FILTERABLE_FIELDS);
   const customWhere = filterListQuery(opts.filter ?? {});
   const where = {
@@ -317,20 +456,31 @@ export async function search{{ parent_pascal }}Options(
   includeIds: string[] = [],
   limit: number = 50,
   context: AutocompleteFilterContext = {},
-): Promise<{{ parent_pascal }}[]> {
+): Promise<{{ parent_pascal }}[] & { permissionDenied?: boolean }> {
 {% if should_filter_by_org %}
   const userId = await getSessionUserIdOrThrow();
   const { permissions } = await getModelPermissions('{{ parent }}', userId);
 {% else %}
   const { permissions, userId } = await getModelPermissions('{{ parent }}');
 {% endif %}
-  await assertPermission(permissions, 'read', '{{ parent }}');
+  if (!permissions.read) {
+    // Option B (cmd_516): the caller lacks read on {{ parent }} itself — this
+    // happens when a *different* entity's create/edit form searches for a
+    // {{ parent }} FK option and the current user can't read {{ parent }}.
+    // This used to throw via assertPermission() and crash the whole
+    // referencing page's Server Component render (Promise.all rejection).
+    // Returning an empty, flagged result instead lets the FK field render
+    // disabled with an explanatory message rather than taking the page down —
+    // see docs/knowledge/fk-read-permission-graceful-degradation.md.
+    return Object.assign([] as {{ parent_pascal }}[], { permissionDenied: true });
+  }
 {% if should_filter_by_org %}
   const associatedOrganizations = await getAssociatedOrganizations(userId);
   const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
 {% endif %}
-  const accessAnd = build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
+  const accessAnd = await build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
 
+{% if searchable_text_fields or searchable_relation_fields %}
   const trimmed = query.trim();
   // Token-split AND search: each whitespace-separated token must match at
   // least one searchable field (OR), and every token must match (AND) —
@@ -340,7 +490,9 @@ export async function search{{ parent_pascal }}Options(
   // (e.g. a null optional labelField segment) so `contains: ''` never
   // silently wildcard-matches every row.
   const tokens = trimmed.split(/\s+/).filter(Boolean);
+{% endif %}
   const matchOr: Record<string, unknown>[] = [];
+{% if searchable_text_fields or searchable_relation_fields %}
   if (tokens.length > 0) {
     const searchAnd = tokens.map((token) => {
       const orClauses: Record<string, unknown>[] = [];
@@ -354,6 +506,7 @@ export async function search{{ parent_pascal }}Options(
     });
     matchOr.push({ AND: searchAnd });
   }
+{% endif %}
   if (includeIds.length > 0) {
     // Always include currently-selected rows regardless of token search —
     // an OR sibling of the token-AND block, not ANDed with it, so a
@@ -365,6 +518,9 @@ export async function search{{ parent_pascal }}Options(
     AND: [
       ...accessAnd,
       ...(matchOr.length > 0 ? [{ OR: matchOr }] : []),
+{% if can_invalidate %}
+      { invalidated_at: null },
+{% endif %}
       ...(customWhere && Object.keys(customWhere).length > 0 ? [customWhere] : []),
     ],
   };
@@ -405,11 +561,23 @@ export async function search{{ parent_pascal }}Options(
  * `current{{ parent_pascal }}Id` keeps the {{ oto.target }} attached to the {{ parent }} currently being
  * edited available. The query runs in a single Prisma round-trip (notIn against
  * the set of already-taken target ids) — no full-table scan via getAll.
+ *
+ * Checks read permission on {{ oto.target }} before listing (cmd_516 case g) —
+ * this previously ran with NO permission check at all (an unconditional
+ * listing of {{ oto.target }} regardless of the caller's read access). Mirrors
+ * search{{ parent_pascal }}Options' graceful-degradation contract: returns an
+ * empty, flagged result rather than throwing, so the {{ parent }} create/edit
+ * page doesn't crash either — see
+ * docs/knowledge/fk-read-permission-graceful-degradation.md.
  */
 export async function getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pascal }}(
   current{{ parent_pascal }}Id?: string | null,
   limit: number = 50,
 ) {
+  const { permissions } = await getModelPermissions('{{ oto.target }}');
+  if (!permissions.read) {
+    return [] as unknown as {% if oto.available_needs_decimal %}DeepStringifyDecimals<Awaited<ReturnType<typeof prisma.{{ oto.target }}.findMany>>>{% else %}Awaited<ReturnType<typeof prisma.{{ oto.target }}.findMany>>{% endif %} & { permissionDenied: true };
+  }
   const takenTargets = await prisma.{{ model }}.findMany({
     where: {
 {% if oto.nullable %}
@@ -423,7 +591,7 @@ export async function getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pa
     .map(r => r.{{ oto.prop_name }})
     .filter((id): id is string => id !== null);
   const safeLimit = Math.min(Math.max(Math.floor(limit) || 50, 1), 200);
-  return prisma.{{ oto.target }}.findMany({
+  const rows = await prisma.{{ oto.target }}.findMany({
     where: takenIds.length > 0 ? { id: { notIn: takenIds } } : {},
     take: safeLimit,
     // Order by id — the target's "natural" label column varies per entity, and
@@ -436,6 +604,15 @@ export async function getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pa
     include: { {{ oto.available_include }} },
 {% endif %}
   });
+{% if oto.available_needs_decimal %}
+  // {{ oto.target }} carries a Decimal column (own or embedded), and these
+  // rows are handed straight to a Client Component prop typed against the
+  // generated interface (Decimal as string) — mirrors the relation_mapping
+  // stringify done for {{ oto.target }} embeds elsewhere in this file.
+  return deepStringifyDecimals(rows);
+{% else %}
+  return rows;
+{% endif %}
 }
 {% endfor %}
 
@@ -459,9 +636,17 @@ export async function get{{ parent_pascal }}ChunkForExport(
   const associatedOrganizations = await getAssociatedOrganizations(userId);
   const associatedOrganizationIds = associatedOrganizations.map((o) => o.id);
 {% else %}
-  const { permissions } = await getModelPermissions('{{ parent }}');
+  // cmd_658: this branch used to omit userId, so getModelPermissions() fell
+  // back to getSessionUserId() — silently reading the caller's browser
+  // session cookie instead of the actor this function was called with. Every
+  // export API test always authenticated via cy.login (a real session), so
+  // this was invisible; switching those tests to X-API-Key (cmd_658, no
+  // session cookie) exposed it as a real bug: an API-key-only caller with
+  // genuine 'read' permission (already asserted by the route) got back
+  // permissions: EMPTY_FLAGS here and silently exported zero rows.
+  const { permissions } = await getModelPermissions('{{ parent }}', userId);
 {% endif %}
-  const accessAnd = build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
+  const accessAnd = await build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
   const rows = await prisma.{{ model }}.findMany({
     where: { AND: accessAnd },
     orderBy: { created_at: 'asc' },
@@ -474,9 +659,20 @@ export async function get{{ parent_pascal }}ChunkForExport(
   return rows.map((row) => {
     const result: Record<string, unknown> = {
 {% for field in export_scalar_fields %}
+{% if field in decimal_field_names %}
+      // Decimal → string (precision-preserving; not Number()) so the CSV
+      // cell holds the exact stored value, not a float-rounded one.
+      '{{ field }}': (row as Record<string, unknown>)['{{ field }}'] != null ? String((row as Record<string, unknown>)['{{ field }}']) : (row as Record<string, unknown>)['{{ field }}'],
+{% else %}
       '{{ field }}': (row as Record<string, unknown>)['{{ field }}'],
+{% endif %}
 {% endfor %}
     };
+{% if is_self_only %}
+    // x-self-only: creator_id is exported as a read-only diagnostic column —
+    // it is never accepted back on import (see import_unimportable_columns).
+    result['creator_id'] = (row as Record<string, unknown>)['creator_id'];
+{% endif %}
 {% for rel in x_relationships_list %}
     // Flatten {{ rel.field }}_id → display value (joined across all labelField
     // segments when composite/dotted). Always set so the CSV header stays

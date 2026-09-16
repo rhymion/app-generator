@@ -1,0 +1,68 @@
+// Self-contained fixture Prisma schema for the OTO-selector Decimal-gate
+// check (cmd_754[2]). NOT the project's real
+// prisma/schema.prisma -- this file exists only to give the fixture
+// json_schema.yaml enough real Prisma models to run through the actual
+// build_user_schema.py -> generate.py -> tsc pipeline in isolation,
+// exercising the branch this gate was added to catch:
+// `getAvailable{Target}sFor{Parent}` (getters.ts.jinja2) returning raw,
+// un-serialized Decimal columns from a one-to-one selector's target entity.
+// Mirrors the structure of tests/fixtures/oto_mandatory/schema.prisma.
+
+generator client {
+  provider = "prisma-client"
+  output   = "./.generated-client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model user {
+  id              String                     @id @default(cuid())
+  name            String
+  email           String                     @unique
+  created_items   oto_decimal_gate_item[]   @relation("OtoDecimalGateItemCreator")
+  updated_items   oto_decimal_gate_item[]   @relation("OtoDecimalGateItemUpdater")
+  created_targets oto_decimal_gate_target[] @relation("OtoDecimalGateTargetCreator")
+  updated_targets oto_decimal_gate_target[] @relation("OtoDecimalGateTargetUpdater")
+}
+
+// The one-to-one selector target: has its own identity (own list/view/new/
+// edit pages, like a real selector target always does -- e.g. the real
+// insurance-schema-generation consumer's policy_party/premium_schedule),
+// picked via the `getAvailable{Target}sFor{Parent}` autocomplete getter --
+// never nested under the parent as a bridge/auto-create relation. Carries a
+// Decimal column (amount) with an explicit @db.Decimal(p, s) scale, the one
+// property this fixture exists to exercise.
+model oto_decimal_gate_target {
+  id              String                 @id @default(cuid())
+  name            String
+  amount          Decimal                @db.Decimal(10, 2)
+  oto_decimal_gate_item oto_decimal_gate_item?
+  created_at      DateTime               @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime               @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user                   @relation("OtoDecimalGateTargetCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user                   @relation("OtoDecimalGateTargetUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// The entity this fixture exists for: a can_new/can_edit entity with a
+// nullable `type: one-to-one` selector FK to oto_decimal_gate_target.
+model oto_decimal_gate_item {
+  id                       String                  @id @default(cuid())
+  name                     String
+  oto_decimal_gate_target_id String?               @unique
+  oto_decimal_gate_target  oto_decimal_gate_target? @relation(fields: [oto_decimal_gate_target_id], references: [id])
+  created_at               DateTime                @default(now()) @db.Timestamptz(0)
+  updated_at               DateTime                @updatedAt @db.Timestamptz(0)
+  creator_id               String
+  creator                  user                    @relation("OtoDecimalGateItemCreator", fields: [creator_id], references: [id])
+  updater_id                String
+  updater                  user                    @relation("OtoDecimalGateItemUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+  @@index([oto_decimal_gate_target_id])
+}

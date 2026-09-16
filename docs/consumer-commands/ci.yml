@@ -1,0 +1,216 @@
+# CANONICAL SOURCE (see docs/knowledge/ci-workflow-canonical-source.md).
+# This file is the shared content of `.github/workflows/ci.yml` used by
+# every consumer repo generated from this generator (app-template /
+# inventory-app / insurance-app). It is distributed to consumers as a
+# plain copy (not a symlink) because GitHub Actions resolves workflow
+# files — including whether a push/pull_request even triggers a run —
+# from the target repository's own tree, not from a checked-out
+# submodule; a symlink into `app-generator/` would risk silently
+# breaking trigger discovery, unlike the `.claude/commands/*.md` and
+# `scripts/vercel-*.sh` cases where a symlink is read only after the
+# repository is already checked out by a running job/agent.
+#
+# When editing: change this file, then copy the result verbatim into
+# each consumer's `.github/workflows/ci.yml` (the header comment below,
+# from "name: CI" onward, IS the file consumers should have — everything
+# above this line is canonical-source-only annotation and must not be
+# copied).
+name: CI
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-canonical-ci:
+    name: Verify ci.yml matches canonical source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - name: Diff this file's body against app-generator's canonical source
+        # Machine-checked, not a human "I copied it verbatim" claim — same
+        # reasoning as the detect-changes job below ("a condition
+        # the machine doesn't see is a hole, not an exemption"). Both sides
+        # are extracted from "name: CI" onward: this file's own body (per
+        # the canonical source's header, everything from that line IS what
+        # a consumer should have), and the canonical source's body with its
+        # own canonical-source-only annotation header stripped the same
+        # way. Compares against the submodule commit this repo currently
+        # pins, not app-generator's latest — a stale submodule pointer is a
+        # separate, already-covered concern (bumping it is a real code
+        # change, excluded from the docs-only skip below), not this job's
+        # job. See docs/knowledge/ci-workflow-canonical-source.md "Drift
+        # check" for what to do when this fails, and for the missing-file
+        # case just below (this job's own bootstrapping edge case, found
+        # verifying against app-template: a submodule pointer pinned to a
+        # commit older than the one that introduced this canonical file in
+        # the first place has nothing to compare against yet — that is not
+        # drift and must not fail the build).
+        run: |
+          set -euo pipefail
+          CANONICAL=app-generator/docs/consumer-commands/ci.yml
+          if [ ! -f "$CANONICAL" ]; then
+            echo "::notice::Canonical source $CANONICAL is not present at the commit this repo's app-generator submodule currently pins (older than the commit that introduced it) — nothing to compare against yet. Not a drift; the check activates automatically once the submodule pointer is next bumped past that commit."
+            exit 0
+          fi
+          sed -n '/^name: CI$/,$p' "$CANONICAL" > /tmp/canonical-body.yml
+          sed -n '/^name: CI$/,$p' .github/workflows/ci.yml > /tmp/this-body.yml
+          if ! diff -u /tmp/canonical-body.yml /tmp/this-body.yml; then
+            echo "::error::.github/workflows/ci.yml has drifted from the canonical source ($CANONICAL, at the commit this repo's app-generator submodule currently pins). Copy the canonical body (from 'name: CI' onward) verbatim into this file."
+            exit 1
+          fi
+
+  detect-changes:
+    name: Detect docs-only change
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.check.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Classify this diff as docs-only or not (machine-checked path judgment)
+        # Path-based, not a human "this is docs-only" claim in the commit
+        # message or PR text ("a condition the machine doesn't see
+        # is a hole, not an exemption"). e2e-tests below is gated on this
+        # job's output via needs:+if:, not a top-level `paths-ignore:`
+        # trigger filter — paths-ignore would make the workflow (and its
+        # check) not run at all for a docs-only push/PR, which is
+        # indistinguishable in the PR Checks list from the check simply
+        # never having existed. Gating the job instead makes it show up
+        # as "Skipped" — visible, not silently absent. See
+        # docs/knowledge/ci-workflow-canonical-source.md "Docs-only E2E
+        # skip" for the fail-closed list of excluded paths, including why
+        # `:(exclude,glob)*.md` is root-anchored (glob magic sets
+        # FNM_PATHNAME, so `*` does not cross `/`) rather than a bare
+        # `*.md`/`**/*.md` — a bare pattern would also silently exempt
+        # `.claude/commands/*.md`, `.codex/prompts/*.md`, and
+        # `.claude/skills/**/SKILL.md`, which stay deliberately
+        # non-exempt (agent tooling, not proven safe to skip). The
+        # `scripts/check_*`/`scripts/check-*`/`scripts/vercel-*.sh`/
+        # `scripts/gcp-*.sh` lines below are a narrow subset of
+        # `scripts/**`, not the whole tree — see "Docs-only E2E skip —
+        # scripts/** (partial)" in the same doc for why a blanket
+        # `scripts/**` exclusion was rejected (this same job's script
+        # body also runs, unmodified, as app-generator's own
+        # `.github/workflows/ci.yml` `detect-changes` step, where
+        # `scripts/**` is the full top-level tree including scripts this
+        # very e2e-tests job invokes, e.g. `write-mock-oauth-sentinel.js`
+        # and `docker-compose-env.js` — a hole a blanket exclusion would
+        # open there even though a consumer repo's own top-level
+        # `scripts/**` never contains those).
+        id: check
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          if [ -z "${BASE:-}" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BASE" 2>/dev/null; then
+            echo "No usable base commit (new branch or shallow history) — running the full suite (fail-closed)."
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --quiet "$BASE" HEAD -- . \
+              ':(exclude)docs/**' \
+              ':(exclude)spec/**' \
+              ':(exclude,glob)*.md' \
+              ':(exclude)README.md' ':(exclude)README_ja.md' \
+              ':(exclude)CHANGELOG.md' ':(exclude)AGENTS.md' ':(exclude)CLAUDE.md' \
+              ':(exclude)LICENSE' \
+              ':(exclude,glob)scripts/check_*' ':(exclude,glob)scripts/check-*' \
+              ':(exclude,glob)scripts/vercel-*.sh' ':(exclude,glob)scripts/gcp-*.sh'; then
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  e2e-tests:
+    name: E2E Tests
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - name: Generate package-lock.json for npm cache
+        run: npm install --package-lock-only
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - name: Cache Cypress binary
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - name: Install app-generator Node.js dependencies
+        working-directory: app-generator
+        run: npm install
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install app-generator Python dependencies
+        working-directory: app-generator
+        run: pip install -r requirements.txt
+      - name: Generate disposable test-only AUTH_SECRET (not a production secret)
+        # AUTH_SECRET is a throwaway value scoped to this CI run only, so
+        # it's generated in-workflow instead of read from repository
+        # secrets. GitHub does not pass repository secrets to
+        # Dependabot-authored `pull_request` runs or to fork PRs, so
+        # referencing secrets.AUTH_SECRET here made CI unusable for those
+        # PRs: the secret resolved empty, got written to .env.test.local
+        # anyway, and only surfaced much later as an Auth.js MissingSecret
+        # failure deep into the UI test suite.
+        run: echo "AUTH_SECRET=$(openssl rand -base64 32)" >> app-generator/.env.test.local
+      - name: Enable the test-only mock Google OAuth provider
+        # Registers an extra CredentialsProvider under id:"google" in
+        # auth.ts, used only by cypress/e2e/auth/mfa.cy.ts to exercise the
+        # OAuth+MFA code path without any real Google credentials or
+        # outbound network call — see
+        # app-generator/docs/knowledge/authentication.md "MFA on the
+        # OAuth path". Safe to always set in this workflow: this job only
+        # ever runs against the ephemeral CI test database, never a real
+        # deployment, and the flag adds a provider, it never removes or
+        # weakens one.
+        #
+        # This env var alone is NOT sufficient to register the provider:
+        # auth.ts also requires the filesystem sentinel written by
+        # scripts/write-mock-oauth-sentinel.js, which runs automatically
+        # via the `pre*` hooks on the `test:e2e:build`/`test:e2e:cy:start`
+        # npm scripts invoked below. Real deploy pipelines never run that
+        # script, so this flag alone leaking into a real deployment's env
+        # vars can't enable the mock provider.
+        run: echo "MOCK_GOOGLE_OAUTH_TEST=true" >> app-generator/.env.test.local
+      - name: Verify required test env is non-empty (fail-closed)
+        # Guards right at env-generation time so a future accidental
+        # regression back to an empty/undefined value fails fast here
+        # instead of resurfacing as a confusing downstream test failure.
+        run: |
+          if [ -z "$(grep '^AUTH_SECRET=' app-generator/.env.test.local | cut -d= -f2-)" ]; then
+            echo "::error::AUTH_SECRET resolved empty in app-generator/.env.test.local — refusing to continue."
+            exit 1
+          fi
+      - name: Generate code, start test database, push schema and build
+        run: npm run test:e2e:build
+      - name: Check generated output for banned patterns (write:direct, raw SQL)
+        # Was never wired into CI (only ran as a local generate-schema.md
+        # completion-gate step, so it only executed on schema-changing
+        # tasks). Runs after the build step above so the generated
+        # lib/app tree it scans actually exists on disk.
+        run: npm run check:generated
+      - name: Run API E2E tests
+        run: npm run test:e2e:cy:start

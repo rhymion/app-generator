@@ -15,8 +15,11 @@ export default function ImageDisplay({
 
   return (
     <div style={{ marginTop: '8px' }}>
-      <img 
-        src={url} 
+      {/* url is an arbitrary uploaded-file URL of unknown origin/dimensions; next/image
+          needs a configured remote pattern and fixed dimensions, out of scope here. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={url}
         alt={alt} 
         title={url.split('/').slice(-1)[0]}
         style={{ 

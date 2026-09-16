@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # One-time database seeding via the existing app-migrate Cloud Run Job.
 #
-# Sequence ("db:seed-tenant"):
-#   1. Repoint app-migrate to `npm run db:seed-tenant`
+# Sequence ("db:seed-baseline"):
+#   1. Repoint app-migrate to `npm run db:seed-baseline`
 #   2. Execute the Job and wait
 #   3. Restore app-migrate to its normal command `npx prisma migrate deploy`
 #      (NOT `db push` — the production strategy is migrate deploy)
@@ -63,11 +63,11 @@ echo "  REGION: ${REGION}"
 echo ""
 
 # Step 1: repoint the Job to the seed command.
-echo "[Step 1] Updating ${JOB} to 'npm run db:seed-tenant'..."
+echo "[Step 1] Updating ${JOB} to 'npm run db:seed-baseline'..."
 run gcloud run jobs update "$JOB" \
   --region="${REGION}" \
   --command="npm" \
-  --args="run,db:seed-tenant"
+  --args="run,db:seed-baseline"
 echo "  OK: ${JOB} set to seed command."
 
 # Step 2: execute and wait. On failure, --wait returns non-zero and the EXIT trap

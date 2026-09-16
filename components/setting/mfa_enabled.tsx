@@ -21,7 +21,7 @@ const MFA_ERROR_KEYS: Record<MfaErrorCode, string> = {
   UNKNOWN_ERROR: 'errorUnknown',
 };
 
-export default function MfaEnabled({value, onChange, isEdit}: {value: boolean, onChange: (val: boolean) => void, isEdit: boolean}) {
+export default function MfaEnabled({value, onChange, isEdit: _isEdit}: {value: boolean, onChange: (val: boolean) => void, isEdit: boolean}) {
   const t = useTranslations('Mfa');
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -41,7 +41,33 @@ export default function MfaEnabled({value, onChange, isEdit}: {value: boolean, o
       }
       setCode('');
       setShowDisableForm(false);
-      router.refresh();
+      // Sync the parent FormUpsert's local `mfaEnabled` state (app-generator#563):
+      // this component is a custom_upsert field embedded in the setting edit
+      // form, and that form's own `mfaEnabled` useState only gets its initial
+      // value from `value` on mount -- it never re-reads `value` afterwards, so
+      // without this call the parent still believes MFA is on. Left unfixed, a
+      // "Save" click right after this disable writes the parent's stale
+      // mfaEnabled=true back over the mfa_secret=null/mfa_enabled=false that
+      // disableMfaAction() just committed, locking the user out (mfa_enabled
+      // true but no working secret).
+      //
+      onChange(false);
+      // router.refresh() is still needed too, but NOT inside this
+      // transition: measured directly, calling it in the same transition as
+      // the onChange() above reliably prevented onChange's update from ever
+      // reaching the screen (the "MFA Enabled" chip stayed stuck 8+ seconds;
+      // a plain hard reload showed the correct, already-persisted state
+      // throughout). Deferring it to a macrotask lets onChange's state
+      // update commit and paint first. It's still required for a separate
+      // reason: FormUpsert's own `srcSnapshot` (the optimistic-concurrency
+      // guard passed to the update action) is derived from the `src` prop
+      // via useMemo, so it only catches up to this disable once a fresh
+      // `src` arrives from the server -- without it, a "Save" right after
+      // this disable is correctly rejected as stale ("record has been
+      // updated since you opened it") because mfa_enabled changed
+      // server-side out from under the page, but the user has no path to
+      // resolve that beyond a manual reload.
+      setTimeout(() => router.refresh(), 0);
     });
   }
 

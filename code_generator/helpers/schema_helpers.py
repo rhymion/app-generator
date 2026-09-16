@@ -6,6 +6,233 @@ _DATE_FORMATS = frozenset({'date', 'date-time', 'time'})
 _SYSTEM_FIELDS = frozenset({'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'})
 
 
+def _get_actual_type(defn: dict) -> str | None:
+    t = defn.get('type')
+    if isinstance(t, list):
+        return next((x for x in t if x != 'null'), None)
+    return t
+
+
+def resolve_set_fields(entity_props: dict, raw: dict) -> dict:
+    """Resolve an x-approval set_fields {field: value} map to the values the
+    write actually persists — legacy int-enum labels resolve to their
+    ordinal; every other field passes through unchanged. Shared by the
+    approval/rejection dispatch context builder and the value-lockdown
+    derivation below, so both agree on the exact value a set_fields entry
+    writes.
+    """
+    resolved = {}
+    for field, value in raw.items():
+        prop_def = entity_props.get(field, {})
+        actual = _get_actual_type(prop_def)
+        enum_vals = prop_def.get('enum')
+        if actual in ('integer', 'number') and isinstance(enum_vals, list) and isinstance(value, str):
+            lower_labels = [str(v).lower() for v in enum_vals]
+            if value.lower() not in lower_labels:
+                raise ValueError(
+                    f"set_fields: label '{value}' not found in enum {enum_vals} "
+                    f"for field '{field}'"
+                )
+            resolved[field] = lower_labels.index(value.lower())
+        else:
+            resolved[field] = value
+    return resolved
+
+
+def derive_write_locked_values(model_def: dict) -> dict[str, list]:
+    """Per entity, the (field, value) pairs that only the system may
+    write — union of:
+      - x-approval.on_approved/on_rejected.set_fields values (unchanged
+        behavior from the former derive_approval_locked_values)
+      - x-write-locked-values explicit declarations (entity-level x-* key,
+        {field_name: [value, ...]}) — works independently of x-approval.
+
+    Field-scoped, not entity-wide: locking a field's whole range would also
+    block values an ordinary create needs (e.g. the initial pending
+    value) — only the specific values named are locked. Not bundled across
+    entities either — a value that is locked on one entity may be an
+    ordinary user-writable value on another.
+
+    Returns {} when neither source declares anything. Callers must treat
+    an empty result as "unprotected", not as "nothing to protect here".
+    """
+    locked: dict[str, list] = {}
+    entity_props = model_def.get('properties', {})
+
+    # Source 1: x-approval set_fields (unchanged behavior)
+    x_approval = model_def.get('x-approval')
+    if x_approval:
+        for stage in ('on_approved', 'on_rejected'):
+            raw = (x_approval.get(stage) or {}).get('set_fields') or {}
+            resolved = resolve_set_fields(entity_props, raw)
+            for field, value in resolved.items():
+                values = locked.setdefault(field, [])
+                if value not in values:
+                    values.append(value)
+
+    # Source 2: x-write-locked-values (new, x-approval-independent)
+    _merge_x_write_locked(locked, model_def)
+
+    return locked
+
+
+def is_canonical_model_view(model: str, view_entry: dict, schema: dict) -> bool:
+    """Whether `view_entry` IS the model's own canonical screen, as opposed
+    to a genuinely separate proxy view of the same underlying model.
+
+    Structural, not name-based (a raw/view-split canonical entity's view
+    name equals the model name today, e.g. `role` backed by `__role`, but
+    an older/hand-built intermediate schema may instead pair a bare raw
+    key like `item` with a `_detail`-suffixed view like `item_detail` --
+    matching `def_key == model` alone misclassifies that shape). Mirrors
+    `generate_types.py`'s `_resolve_raw_key` hop-counting: the canonical
+    view's own `allOf[0].$ref` -- if it has an allOf at all -- points
+    DIRECTLY at whichever key actually holds the raw entity (`__{model}`
+    when split, `model` itself otherwise); a proxy view's `allOf[0].$ref`
+    instead points at the canonical view (one hop further away), e.g. a
+    triage desk's `allOf: [{$ref: '#/definitions/service_request'}]`
+    referencing the canonical `service_request` view rather than
+    `__service_request` directly -- the same two-hop shape documented for
+    `setting -> user -> __user`.
+    """
+    defs = schema.get('definitions', {})
+    raw_key_used = f'__{model}' if f'__{model}' in defs else model
+    allof = view_entry.get('allOf') or []
+    if not allof:
+        return True  # no split at all -- view_entry IS the raw entity
+    first = allof[0] if isinstance(allof[0], dict) else {}
+    first_ref = (first.get('$ref') or '').split('/')[-1]
+    return first_ref == raw_key_used
+
+
+def derive_write_locked_values_for_view(
+    model: str, model_def: dict, view_entry: dict, schema: dict,
+) -> dict[str, list]:
+    """View-scoped variant of `derive_write_locked_values`.
+
+    The entity's own canonical screen (see `is_canonical_model_view`) gets
+    the full union (both sources) exactly as `derive_write_locked_values
+    (model_def)` always has -- `model_def` already resolves to wherever
+    that canonical screen's own x-write-locked-values declaration actually
+    lives (a Category C key moves onto the raw twin when the entity is
+    split).
+
+    A genuinely separate proxy view of the same Prisma model (e.g. a
+    triage desk proxying the raw request model) does NOT inherit the
+    canonical screen's Source 2 (x-write-locked-values) declaration by
+    default -- transitions into those values are unlocked unless the
+    proxy view declares its own x-write-locked-values, which locks the
+    value for that view only. Source 1 (x-approval.on_approved/
+    on_rejected) is intentionally left unchanged for every view for now --
+    always read off model_def regardless of which view is being built.
+    Unhooking Source 1 the same way needs a deeper change to
+    derive_write_locked_values()'s raw-fixed read of x-approval and is
+    tracked separately; not implemented here.
+    """
+    if is_canonical_model_view(model, view_entry, schema):
+        return derive_write_locked_values(model_def)
+    return derive_write_locked_values({
+        **model_def,
+        'x-write-locked-values': view_entry.get('x-write-locked-values'),
+    })
+
+
+def _merge_x_write_locked(locked: dict[str, list], model_def: dict) -> None:
+    """Merge model_def['x-write-locked-values'] into `locked` in place.
+
+    Shared by derive_write_locked_values (Source 2 above) and
+    derive_post_decision_freeze_values (Source 2 below) so both
+    derivations agree on the exact same x-write-locked-values merge logic
+    (cmd_1022) -- field existence / enum-membership validity is
+    validate.py's responsibility (section 11), both callers trust the
+    declaration as-is.
+    """
+    x_write_locked = model_def.get('x-write-locked-values')
+    if x_write_locked and isinstance(x_write_locked, dict):
+        for field, values in x_write_locked.items():
+            if not isinstance(values, list):
+                continue  # validate.py rejects the malformed declaration
+            existing = locked.setdefault(field, [])
+            for v in values:
+                if v not in existing:
+                    existing.append(v)
+
+
+def derive_post_decision_freeze_values(raw_def: dict) -> dict[str, list]:
+    """Per x-approval entity, the (field, value) pairs a *row* freezes into
+    once it reaches a genuinely decided state -- post-submission
+    (submit_on), approved (on_approved), or a *terminal* rejection
+    (on_rejected when terminal: true) -- plus any x-write-locked-values
+    declaration.
+
+    Deliberately excludes non-terminal on_rejected and on_withdrawn (846b
+    amendment): the original design treats a non-terminally-rejected or
+    withdrawn row as if the submission had never happened -- outside the
+    scope of a post-submission freeze entirely. A terminal rejection has
+    no such resubmission path back to submit_on (the fail-closed
+    unreachable-resubmission gate documented alongside 846b), so it stays
+    a decided, frozen record -- unlike the non-terminal case, this is NOT
+    a case 846b intended to leave open.
+
+    Distinct from derive_write_locked_values() above: that function
+    answers "what may the *payload* never write" (create/update
+    validation) and must keep its existing, wider meaning (it feeds
+    build_context.py's write_locked_values, unrelated to row-level
+    edit/delete lockdown). This function answers a narrower question --
+    "is the *row itself*, right now, in a decided state that forbids
+    editing/deleting/invalidating it at all" -- consumed only by
+    approval_lockdown_context() (generators.py) (cmd_1022).
+    """
+    locked: dict[str, list] = {}
+    x_approval = raw_def.get('x-approval')
+    if x_approval:
+        entity_props = raw_def.get('properties', {})
+
+        # submit_on (always included). Inlined rather than calling
+        # generators.py's resolve_approval_submit_on() -- that would create
+        # a circular import, since generators.py already imports from this
+        # module (schema_helpers.py). The "exactly one field" shape is
+        # trusted here, same as resolve_approval_submit_on() itself; a
+        # malformed multi-field submit_on is a schema authoring error out
+        # of scope for this function to detect.
+        submit_on_raw = x_approval.get('submit_on') or {}
+        if submit_on_raw:
+            resolved_submit = resolve_set_fields(entity_props, submit_on_raw)
+            submit_field, submit_value = next(iter(resolved_submit.items()))
+            values = locked.setdefault(submit_field, [])
+            if submit_value not in values:
+                values.append(submit_value)
+
+        # on_approved (unconditional -- unchanged from 846b's original
+        # scope).
+        on_approved_sf = (x_approval.get('on_approved') or {}).get('set_fields') or {}
+        for field, value in resolve_set_fields(entity_props, on_approved_sf).items():
+            values = locked.setdefault(field, [])
+            if value not in values:
+                values.append(value)
+
+        # on_rejected -- ONLY when terminal (cmd_1022's extension to 846b).
+        on_rejected_block = x_approval.get('on_rejected') or {}
+        if on_rejected_block.get('terminal'):
+            on_rejected_sf = on_rejected_block.get('set_fields') or {}
+            for field, value in resolve_set_fields(entity_props, on_rejected_sf).items():
+                values = locked.setdefault(field, [])
+                if value not in values:
+                    values.append(value)
+
+        # on_withdrawn: NEVER included (846b) -- no code path touches it.
+
+    # Source 2: x-write-locked-values (same merge as derive_write_locked_values above)
+    _merge_x_write_locked(locked, raw_def)
+
+    return locked
+
+
+# Backward-compat alias — kept during the migration window so any import
+# of the old name keeps working.
+derive_approval_locked_values = derive_write_locked_values
+
+
 def is_string_prop(prop: dict) -> bool:
     t = prop.get('type')
     if isinstance(t, str):
@@ -13,6 +240,40 @@ def is_string_prop(prop: dict) -> bool:
     if isinstance(t, list):
         return 'string' in t and all(v in ('string', 'null') for v in t)
     return False
+
+
+def is_write_only_prop(prop: dict) -> bool:
+    """True for a string-typed field the writer has restricted to
+    upsert-only rendering via `x-custom-component` (target includes
+    'upsert' but not 'view') — e.g. password, api_key. The value is
+    credential material, not display data: it must never cross into a
+    read path (view page, API detail/list/export/search response body).
+
+    Scoped to string fields with no declared 'view' target on purpose.
+    A boolean status field like mfa_enabled can *also* be upsert-only at
+    the field level while still needing its live value passed to an
+    entity-level x-custom-components status widget (e.g. MfaToggle) — that
+    field isn't secret material, just routed through a custom control, so
+    it must stay out of this predicate (`is_string_prop` gates it out).
+    A field that declares target: [upsert, view] has an author-provided
+    safe view widget and also falls outside this predicate.
+    """
+    if not is_string_prop(prop):
+        return False
+    xc = prop.get('x-custom-component', {})
+    if not isinstance(xc, dict):
+        return False
+    target = xc.get('target') or []
+    return 'upsert' in target and 'view' not in target
+
+
+def get_write_only_field_names(properties: dict) -> list[str]:
+    """Names of write-only fields (see is_write_only_prop) on this entity,
+    in declaration order."""
+    return [
+        name for name, prop in properties.items()
+        if isinstance(prop, dict) and is_write_only_prop(prop)
+    ]
 
 
 def derive_text_fields(properties: dict) -> list[str]:
@@ -46,6 +307,13 @@ def derive_text_fields(properties: dict) -> list[str]:
         # Non-text formats
         if prop.get('format') in ('date', 'date-time', 'time', 'uri'):
             continue
+        # Decimal-backed fields: exposed as JSON type "string" (precision-
+        # preserving), but Prisma's Decimal column does not support the
+        # `contains` filter this list feeds into (search_helpers.ts.jinja2 /
+        # autocomplete_filter.ts.jinja2) -- a string-shape check alone can't
+        # tell a Decimal column from an ordinary text column.
+        if prop.get('_prisma_decimal_type'):
+            continue
         # Write-only fields (e.g. password, api_key)
         xc = prop.get('x-custom-component', {})
         if isinstance(xc, dict) and 'upsert' in (xc.get('target') or []):
@@ -57,26 +325,148 @@ def derive_text_fields(properties: dict) -> list[str]:
     return result
 
 
-def derive_searchable_relation_fields(properties: dict) -> list[dict]:
-    """FK relation fields opted into cross-relation substring search.
+def _label_field_paths(label_field) -> list[str]:
+    if isinstance(label_field, str):
+        return [label_field] if label_field else []
+    if isinstance(label_field, list):
+        return [str(p) for p in label_field if p]
+    return []
 
-    A property with `x-relationship.searchField: <name>` contributes a
-    `{relation, field}` pair so the generated searchXxxOptions getter can
-    additionally match rows by a field on the related entity (e.g. inventory
-    matching by its product's name), via a one-hop Prisma nested `where`.
-    Opt-in (schema-driven) — no relation is joined into search unless
-    explicitly marked, so existing autocomplete behaviour is unaffected.
+
+def derive_searchable_relation_fields(properties: dict, schema: dict) -> list[dict]:
+    """FK relation fields whose `x-relationship.labelField` resolves to a
+    searchable string field on the target entity, opted into cross-relation
+    substring search for the generated searchXxxOptions getter (a one-hop
+    Prisma nested `where`, e.g. inventory matching by its product's name).
+
+    Reads `labelField` — the SAME source `build_label_expression()` uses for
+    the CSV-import full-match (cmd_548) and for the label rendered on
+    screen — rather than a separate `searchField` attribute. There used to
+    be a `searchField`, declared independently on the FK; it was retired
+    (cmd_552) because nothing stopped it from drifting away from
+    `labelField`, at which point the field shown to the user and the field
+    actually searched would silently differ. Deriving from `labelField`
+    makes that divergence structurally impossible. Any schema still
+    declaring `searchField` is now a validation error — see validate.py.
+
+    A composite `labelField` ([f1, f2]) is evaluated element by element —
+    each qualifying element contributes its own `{relation, field}` entry.
+    Two kinds of element are excluded:
+      - dotted paths (`approver_role.name`): resolving the FK's *own*
+        FK to another entity would need a second nested `where` hop, which
+        getters.ts.jinja2 does not render (one-hop only; no schema case
+        needs it today — see docs/knowledge/label-field-search-semantics.md).
+      - non-string-searchable fields: same filter as `derive_text_fields`
+        (string type, no `enum`, not a date/uri `format`, not a CUID-pattern
+        id) — `contains` is a string-only Prisma operator, and an enum's
+        screen label is translated while its stored value is not, so a
+        substring match against the raw value would never hit (cmd_493).
     """
     result = []
     for field_name, prop in properties.items():
         if not isinstance(prop, dict):
             continue
         rel = prop.get('x-relationship') or {}
-        search_field = rel.get('searchField')
-        if not search_field or not rel.get('target'):
+        target = rel.get('target')
+        label_field = rel.get('labelField')
+        if not target or not label_field:
             continue
         relation_name = field_name.removesuffix('_id') if field_name.endswith('_id') else field_name
-        result.append({'relation': relation_name, 'field': search_field})
+        target_props = get_entity_properties(target, schema)
+        for path in _label_field_paths(label_field):
+            if '.' in path:
+                continue
+            final_prop = target_props.get(path)
+            if not isinstance(final_prop, dict):
+                continue
+            if not is_string_prop(final_prop):
+                continue
+            if isinstance(final_prop.get('enum'), list):
+                continue
+            if final_prop.get('format') in ('date', 'date-time', 'time', 'uri'):
+                continue
+            pattern = final_prop.get('pattern', '')
+            if pattern and re.search(r'\^c\[a-z0-9\]', pattern):
+                continue
+            result.append({'relation': relation_name, 'field': path})
+    return result
+
+
+def derive_cross_entity_searchable_fields(entity_name: str, schema: dict) -> list[dict]:
+    """Additional `{relation, field}` entries for entity_name's own
+    searchXxxOptions(), sourced from OTHER entities' composite `labelField`
+    declarations that reference entity_name through one of entity_name's OWN
+    relations (cmd_627: e.g. goods_receipt_line.inventory_id declares
+    `labelField: [item.sku, location.code, ...]` — the `location.code`
+    segment is a dotted path relative to goods_receipt_line, but only ONE
+    hop relative to inventory itself, since `location` is one of inventory's
+    own FK relations).
+
+    `derive_searchable_relation_fields()` only looks at entity_name's OWN
+    `fields` block, so it never sees this: nothing on inventory itself
+    declares `location.code` anywhere — the declaration lives entirely on
+    the *referencing* entity (goods_receipt_line). Without this pass, the
+    Cypress test-fixture generator (`build_string_only_label_expression`,
+    used by generators_test.py to compute what a test TYPES into the
+    autocomplete) and the runtime search generator
+    (`derive_searchable_relation_fields`, used by build_context.py to
+    compute what searchXxxOptions() actually QUERIES) can silently
+    disagree — the exact drift `labelField`-sourcing (cmd_552) was meant to
+    make structurally impossible, just one hop further out than that fix
+    reached. See docs/knowledge/label-field-search-semantics.md, which
+    documented this exact case as "no schema case needs it today" — proj_g's
+    goods_receipt_line/approval_flow now do.
+
+    Purely additive: only ever widens the OR-list of a search's per-token
+    match — existing searchable fields and their behavior are unchanged.
+    """
+    own_props = get_entity_properties(entity_name, schema)
+    own_relations: dict[str, str] = {}
+    for prop_name, prop in own_props.items():
+        if not isinstance(prop, dict) or not prop_name.endswith('_id'):
+            continue
+        rel = prop.get('x-relationship') or {}
+        target = rel.get('target')
+        if not target:
+            continue
+        own_relations[prop_name.removesuffix('_id')] = target
+
+    result = []
+    seen = set()
+    for other_entity, other_def in schema.get('definitions', {}).items():
+        # NOTE: self-reference (other_entity == entity_name) is intentionally
+        # NOT skipped — a self-ref m2m (e.g. approval_flow.preceded_by
+        # targeting approval_flow itself) is exactly the case this exists
+        # for, and it's never covered by derive_searchable_relation_fields
+        # (which only looks at entity_name's OWN fields with a non-dotted
+        # labelField).
+        if not isinstance(other_def, dict):
+            continue
+        for prop_name, prop in (other_def.get('properties') or {}).items():
+            if not isinstance(prop, dict):
+                continue
+            rel = prop.get('x-relationship') or {}
+            if rel.get('target') != entity_name:
+                continue
+            for path in _label_field_paths(rel.get('labelField')):
+                if '.' not in path:
+                    continue
+                relation_name, _, final_field = path.partition('.')
+                if relation_name not in own_relations or (relation_name, final_field) in seen:
+                    continue
+                nested_target = own_relations[relation_name]
+                final_prop = get_entity_properties(nested_target, schema).get(final_field)
+                if not isinstance(final_prop, dict) or not is_string_prop(final_prop):
+                    continue
+                if isinstance(final_prop.get('enum'), list):
+                    continue
+                if final_prop.get('format') in ('date', 'date-time', 'time', 'uri'):
+                    continue
+                pattern = final_prop.get('pattern', '')
+                if pattern and re.search(r'\^c\[a-z0-9\]', pattern):
+                    continue
+                seen.add((relation_name, final_field))
+                result.append({'relation': relation_name, 'field': final_field})
     return result
 
 
@@ -160,6 +550,23 @@ def get_approval_lines_props(parent_def: dict, model: str, schema: dict) -> list
     return props
 
 
+def get_self_only_flags(entity_def: dict) -> tuple[bool, bool]:
+    """Resolve an entity's `x-self-only` declaration to (is_self_only, admin_bypass).
+
+    Accepts both the shorthand (`x-self-only: true`) and the explicit dict
+    form (`x-self-only: {admin_bypass: true}`). The shorthand's admin_bypass
+    always defaults to False: the loose/permissive direction must never be
+    the implicit default, so a schema reader can tell who can see a
+    self-only entity's rows without checking elsewhere.
+    """
+    x_self_only = entity_def.get('x-self-only')
+    if x_self_only is True:
+        return True, False
+    if isinstance(x_self_only, dict):
+        return True, bool(x_self_only.get('admin_bypass', False))
+    return False, False
+
+
 def get_splittable_bridge_field(entity_def: dict) -> str:
     """The property name on an x-splittable entity that holds its per-child
     ledger/reservation bridge FK (e.g. purchase_per_item / receiving_receipt_line's
@@ -180,22 +587,75 @@ def get_splittable_bridge_field(entity_def: dict) -> str:
 
 
 def resolve_ledger_domain(schema: dict, domain_key: str) -> dict:
-    """Resolve x-ledger-entities[domain_key] to {pool, ledger, transactionable}.
+    """Resolve x-ledger-entities[domain_key] to
+    {pool, ledger, transactionable, item_field, location_field,
+    lot_field, expiration_field}.
 
     OD-1 underlying idea: config required, no defaults. Raises ValueError if
     the domain or any of its required keys is not declared in the schema.
+
+    item_field/location_field/lot_field/expiration_field are the pool
+    entity's own column names for its item-master FK, location FK, lot
+    number, and expiration date (e.g. 'product_id', 'location_id',
+    'lot_number', 'expiration_date'). cmd_546: previously these were
+    hardcoded literals throughout generators.py and the ledger_* stub /
+    split_action_route templates, which silently broke (no error) for any
+    consumer naming these columns differently (e.g. one consumer's
+    item-master FK is named 'product_id' as a workaround specifically
+    because it was hardcoded here). The ledger entity's own columns reuse
+    these same names (current consumer schemas declare them identically on
+    both sides; no consumer has ever diverged the two).
+
+    cmd_562: location_field is now an id-FK on *both* the pool and the
+    ledger entity (matching item_field's existing shape) — the ledger row
+    write is a plain id copy (`ledger.location_id = pool.location_id`), not
+    a denormalized display-string snapshot. This resolver previously also
+    derived location_relation (the Prisma relation accessor, e.g.
+    'location_id' -> 'location') and location_label_field/
+    location_label_target (the pool entity's x-relationship.labelField/
+    .target on location_field) so the ledger stub / split-route templates
+    could render a `.name`-equivalent snapshot string and later reverse-look
+    -up that string back to a location row. None of that machinery is
+    needed once the ledger column is an id itself: there is no display
+    string to render and no reverse lookup to invert. PR #269 (cmd_550)
+    built exactly that machinery to fix the previous hardcoded-`.name`
+    plain-string design; cmd_562 removes both the old bug and the fix
+    wholesale in favor of the strictly simpler id-FK design (see
+    docs/knowledge/appendix/inventory-reservation-split.md).
+
+    cmd_991: bin_field is OPT-IN, unlike the four fields above — a
+    domain may omit `binField` entirely (no bin dimension for that pool),
+    in which case bin_field is None and every ledger-row/tuple-match site
+    that reads it (guarded by `{% if pool_bin_field %}` in the jinja2
+    templates, `if bin_field:` in generators.py) renders exactly as before
+    this key existed (golden-diff-zero for a consumer that never declares
+    binField, e.g. proj_c's inventory_domain). This mirrors the same
+    schema-declares-camelCase / generator-internals-use-snake_case split as
+    the four required fields (`binField` -> `bin_field`) — see
+    cmd_990/991 design note: a prior attempt to read `domain.get('binField')`
+    directly (skipping this resolver) would have collided with the
+    internal snake_case dict this function returns.
     """
     domains = schema.get('x-ledger-entities') or {}
     if domain_key not in domains:
         raise ValueError(f"x-ledger-entities.{domain_key!r} not declared in schema")
     domain = domains[domain_key]
-    for required_key in ('pool', 'ledger', 'transactionable'):
+    for required_key in (
+        'pool', 'ledger', 'transactionable',
+        'itemField', 'locationField', 'lotField', 'expirationField',
+    ):
         if required_key not in domain:
             raise ValueError(f"x-ledger-entities.{domain_key!r}.{required_key!r} is required")
     return {
         'pool': domain['pool'],
         'ledger': domain['ledger'],
         'transactionable': domain['transactionable'],
+        'item_field': domain['itemField'],
+        'location_field': domain['locationField'],
+        'lot_field': domain['lotField'],
+        'expiration_field': domain['expirationField'],
+        # cmd_991: OPT-IN — no required_key check, defaults to None.
+        'bin_field': domain.get('binField'),
     }
 
 
@@ -696,6 +1156,63 @@ def get_parent_relationships(parent_def: dict, schema: dict | None = None) -> li
             'autocomplete_context_fields': list(prop.get('x-autocomplete-context') or []),
         })
     return result
+
+
+def get_direct_attachment_fk_props(parent_def: dict) -> list[dict]:
+    """Returns direct-attachment FK metadata: fields declaring
+    `x-relationship: { target: attachment, type: direct }` (cmd_788/subtask_780a).
+
+    Deliberately separate from get_parent_relationships() (which only matches
+    `type in ('many-to-one', 'one-to-one')`): a direct-attachment FK is NOT a
+    selectable relation — its target (`attachment`) has no list/view/new/edit
+    pages of its own, and the field is rendered as a file-upload widget
+    (SingleAttachmentUpload), never an EntityAutocomplete. Keeping it off
+    get_parent_relationships' return value means it stays out of every
+    autocomplete-specific code path (search{Target}Options, CSV export/import
+    FK-label flattening, dashboard chart groupable fields) for free — none of
+    those switch on x-relationship.type == 'direct', so an unrecognized type
+    silently falls through and the field is excluded, matching how those
+    subsystems already treat `attachment` as a non-selectable internal model.
+
+    Each entry: {prop_name, relation_name, required}. `relation_name` is
+    `prop_name` with a trailing `_id` stripped (e.g. `profile_picture_id` ->
+    `profile_picture`), matching the Prisma relation-field naming convention
+    used elsewhere in this generator (get_parent_relationships' callers strip
+    `_id` the same way).
+    """
+    props = parent_def.get('properties', {})
+    required = set(parent_def.get('required') or [])
+    result = []
+    for prop_name, prop in props.items():
+        rel = prop.get('x-relationship')
+        if not rel or rel.get('type') != 'direct' or rel.get('target') != 'attachment':
+            continue
+        relation_name = prop_name.removesuffix('_id') if prop_name.endswith('_id') else prop_name
+        result.append({
+            'prop_name': prop_name,
+            'relation_name': relation_name,
+            'required': prop_name in required,
+        })
+    return result
+
+
+def schema_has_direct_attachment_fk(schema: dict) -> bool:
+    """True if any entity in the schema declares a direct-attachment FK
+    (`x-relationship: {target: attachment, type: direct}`, cmd_788).
+
+    Walks the raw (`__`-prefixed) entities directly -- same scope as
+    get_direct_attachment_fk_props()'s per-entity callers -- since FK
+    properties always live on the raw entity, never the bare view. Shared by
+    generate.py (whether to emit lib/attachment/direct_actions.ts at all,
+    subtask_788b) and validate.py (whether to require the
+    attachment.attachable_id Prisma-alignment prerequisite) so the two never
+    drift onto different triggers.
+    """
+    return any(
+        get_direct_attachment_fk_props(defn)
+        for name, defn in (schema.get('definitions') or {}).items()
+        if name.startswith('__') and isinstance(defn, dict)
+    )
 
 
 def find_fk_derivation_path(parent: str, parent_def: dict, target_q: str, schema: dict) -> dict | None:

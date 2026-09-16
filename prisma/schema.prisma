@@ -53,7 +53,13 @@ model user {
   email                     String              @unique
   password                  String?
   api_key                   String?
-  image                     String?
+  // Direct-attachment FK (cmd_793): the user's own uploaded avatar.
+  // Nullable/SetNull, matching every other optional direct-attachment FK on
+  // this page (docs/knowledge/schema-yaml-configuration.md "Direct
+  // Attachment FK") -- no longer populated from an OAuth provider's profile
+  // image (see lib/auth/create-user.ts).
+  image_id                  String?             @unique
+  image                     attachment?         @relation("UserImage", fields: [image_id], references: [id], onDelete: SetNull)
   emailVerified             DateTime?
   // 1.2: every user belongs to exactly one tenant. The `@default("default")`
   // matches the bootstrap tenant id seeded by scripts/seed-its.ts and the
@@ -71,6 +77,12 @@ model user {
   mfa_secret                String?
   mfa_enabled               Boolean             @default(false)
   mfa_recovery_codes        mfa_recovery_code[]
+  // Bumped whenever MFA is enabled (lib/mfa/enrollment.ts completeEnrollment).
+  // auth.ts's jwt() callback snapshots this into the JWT at sign-in and
+  // re-compares it on every subsequent request; a mismatch re-arms
+  // mfa_pending so an already-active session can't outlive a later MFA
+  // enable for up to JWT_MAX_AGE (cmd_527, docs/knowledge/authentication.md).
+  mfa_token_version          Int                 @default(0)
   accounts                  Account[]
   sessions                  Session[]
   created_at                DateTime            @default(now()) @db.Timestamptz(0)
@@ -101,6 +113,7 @@ model user {
   audit_logs                audit_log[]
   notifications             notification[]      @relation("NotificationUser")
   anonymized_at             DateTime?            // Timestamp when PII was scrubbed (GDPR anonymization)
+  invalidated_at            DateTime?            // Generic invalidate mechanism (cmd_564); set alongside anonymized_at by anonymizeUser()
 
   @@index([api_key])
   @@index([creator_id])
@@ -192,6 +205,7 @@ model approval_flow {
   creator          user @relation("ApprovalFlowCreator", fields: [creator_id], references: [id])
   updater_id       String
   updater          user @relation("ApprovalFlowUpdater", fields: [updater_id], references: [id])
+  @@unique([entity_name, approver_role_id])
   @@index([creator_id])
   @@index([approver_role_id])
   @@index([requestor_role_id])
@@ -203,6 +217,13 @@ enum ApprovalRequestStatus {
   approved
   rejected
   terminal_rejected
+  withdrawn
+  // cmd_963: split invalidates the parent's current round instead of
+  // deleting its approval_request rows (deletion cascaded to delete linked
+  // approval_history, losing audit trail). canSubmitForApproval treats a
+  // round containing this status as permanently closed, same as
+  // terminal_rejected -- the parent's rows may never resubmit once split.
+  split_invalidated
 }
 
 model approval_request {
@@ -212,11 +233,21 @@ model approval_request {
   approval_flow_id String
   approval_flow    approval_flow @relation(fields: [approval_flow_id], references: [id])
   status           ApprovalRequestStatus @default(pending)
+  // cmd_844: identifies which submission ("round") this row belongs to --
+  // every approval_request row created in the same submit transaction
+  // shares one round_id (cuid, generated once per submission). Lets
+  // canSubmitForApproval/canWithdrawApproval reason about "all rows of the
+  // current round" instead of a single non-deterministically-selected row
+  // (see docs/knowledge/appendix/approval-flow.md multistage-round note).
+  // Backfilled to round_id = id for pre-migration rows (each is its own
+  // independent round).
+  round_id         String
   approval_histories approval_history[]
   created_at       DateTime @default(now()) @db.Timestamptz(0)
   updated_at       DateTime @updatedAt @db.Timestamptz(0)
   @@index([approvable_id])
   @@index([approval_flow_id])
+  @@index([round_id])
 }
 
 model approval_history {
@@ -297,8 +328,23 @@ model attachment {
   path                   String
   encrypted_original_name String?
   name_iv                String?
-  attachable_id          String
-  attachable             attachable @relation(fields: [attachable_id], references: [id], onDelete: Cascade)
+  // Nullable (cmd_788): a direct-attachment FK (x-relationship type:direct,
+  // e.g. some_entity.attachment_id -> attachment.id) creates an attachment
+  // row with no attachable bridge owner at all -- attachable_id stays null
+  // for that row's whole life. onDelete: SetNull (not Cascade) because a
+  // null attachable_id is a normal, permanent state here, not a transient
+  // one pending cleanup: deleting the attachable bridge row must not cascade
+  // into deleting an attachment that a direct FK might still reference.
+  attachable_id          String?
+  attachable             attachable? @relation(fields: [attachable_id], references: [id], onDelete: SetNull)
+  // Direct-attachment FK back-references (cmd_793): one per entity+field
+  // declaring `x-relationship: { target: attachment, type: direct }`.
+  // Naming convention: field `{entity}_{relation_name}`, type `{entity}?`,
+  // `@relation("{Entity}{RelationName}")` matching the owning side's
+  // relation name -- see docs/knowledge/schema-yaml-configuration.md
+  // "Direct Attachment FK". These are hand-written, not generator-injected
+  // (validate_direct_attachment_reverse_fields checks them at generate time).
+  user_image             user?      @relation("UserImage")
   created_at             DateTime   @default(now()) @db.Timestamptz(0)
   updated_at             DateTime   @updatedAt @db.Timestamptz(0)
   @@index([attachable_id])

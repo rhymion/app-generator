@@ -1,12 +1,43 @@
 # Inventory Domain Generalization — Design Document
 
-> **cmd_310** · 2026-07-13 · **Status: APPROVED — rulings OD-1~8 + RC-1 + RC-2 applied (subtask_310f/310g/310h)**
+> **Design decision** · 2026-07-13 · **Status: APPROVED — rulings OD-1~8 + RC-1 + RC-2 applied**
 >
-> **Scope**: Design only. Implementation follows separate cmds after cmd_309 is serialized and
+> **Scope**: Design only. Implementation follows separate tasks after the prerequisite migration work is serialized and
 > closed (same working tree; concurrent modification forbidden).
 >
-> **Related**: `appendix/inventory-reservation-split.md` (current behavior reference, cmd_309 item5)
+> **Related**: `appendix/inventory-reservation-split.md` (current behavior reference, prerequisite migration item 5)
 > `docs/generic-primitives-redesign.md` (upstream design rationale)
+
+> **Currency note (verified against `origin/develop` HEAD, 2026-09-12): this design is now fully
+> implemented — treat the body below as a historical design record, not an open plan.**
+> - Phase 1 (P0 config-read fix): `lineTransactionableField` is read from
+>   `x-reservation.result.lineTransactionableField` (`code_generator/generate.py`,
+>   `helpers/schema_helpers.py`) — no literal `'inventory_transactionable_id'` membership check remains.
+> - Phase 2 (`x-ledger-entities` top-level declarations): implemented and since generalized further —
+>   `helpers/schema_helpers.py:590-658` (`resolve_ledger_domain()`), `code_generator/validate.py:1079-1098`,
+>   required everywhere via `ledgerDomain` (`generate.py`, `generators.py`, `build_context.py`). x-receiving
+>   is fully abolished: `x-receiving`, `ReceivingConfirmForm.tsx`, and the confirm route no longer exist
+>   anywhere in this tree (confirmed absent by search).
+> - Phase 3 (rename + richer ship skeleton): `InsufficientInventoryError` no longer exists anywhere in
+>   this tree; `InsufficientPoolCapacityError` is the class name throughout `code_generator/generators.py`,
+>   `templates/service.ts.jinja2`, `templates/api_route.ts.jinja2`, etc.
+> - Phase 5 (movement/adjustment): `templates/ledger_move_stub.ts.jinja2` and `templates/ledger_adjust_stub.ts.jinja2`
+>   exist and are wired in `generate.py` (`event_type == 'move'` / `'adjust'` branches).
+> - The `x-ledger-entities` mechanism was subsequently generalized **beyond** what this document
+>   describes: four more required keys (`itemField`/`locationField`/`lotField`/`expirationField`) and
+>   an opt-in fifth (`binField`) were added on top of the `pool`/`ledger`/`transactionable` triad this
+>   document defines. See `appendix/inventory-reservation-split.md` §7-7.3 for the current,
+>   actively-maintained description of the mechanism as it exists today — that document, not this
+>   one, is the current-behavior reference. Phase 4 (warehouse/location entity + FK) is reflected in
+>   that same document's §7.1 as a more general "any consumer's `locationField`" id-FK mechanism
+>   rather than the literal new `warehouse`/`location` top-level entities sketched in §3 below — this
+>   repository's own dogfood schema (`code_generator/json_schema.yaml`) does not itself declare a
+>   `location`/`warehouse` entity, so §3's exact schema snippet was not verified against a live
+>   example here; the underlying FK mechanism it relies on (plain `x-relationship` many-to-one) is
+>   unchanged and standard.
+> This document's own historical design rationale (why OD-1~8 were decided the way they were) remains
+> accurate and is kept for that reason — do not delete it (`appendix/cmd562-location-id-fk-consumer-migration.md`
+> and `inventory-reservation-split.md` §7 both cite it as the "declare, don't infer" precedent).
 
 ---
 
@@ -16,7 +47,7 @@
 > (`inventory` / `inventory_transaction` / `inventory_transactionable`) to **generic primitives
 > where customers declare roles with x-* markers and the generator resolves by marker, not name**."
 >
-> — cmd_310 north_star (direct quote)
+> — this document's approving task, north_star field (direct quote)
 
 ### 0.1 Governing Design Principle (OD-1~8 underlying idea)
 
@@ -256,7 +287,7 @@ inventory:
 | OD-5 | x-receiving **abolished** — `ReceivingConfirmForm.tsx` + confirm route deleted (no replacement) — see §4.5 |
 | OD-7 | inventory_movement: **single entity** with `from_inventory_id`/`to_inventory_id`; generator emits 2 ledger rows |
 
-### 4.2 Current Asymmetry (from subtask_310c)
+### 4.2 Current Asymmetry (from an earlier design review)
 
 | Operation | Entity | Mechanism | Code style |
 |---|---|---|---|
@@ -321,6 +352,12 @@ to be reachable in a currently-exercised user path and its deletion breaks the b
 receiving flow, the implementor must **stop and raise the issue for maintainer review** rather than
 proceeding with blind deletion. The ruling is based on the premise that the form is
 unused in the current approval flow; if that premise is wrong, escalate.
+
+**Update (a later follow-up)**: item 2 above ("confirm route... deleted") was not literally true at the time
+this section was written — only `ReceivingConfirmForm.tsx` and its `generate.py` call site were
+removed; `code_generator/templates/receiving_confirm_route.ts.jinja2` itself was left behind,
+unreferenced by any `_render()`/`_write()` call, until that follow-up deleted it. See `CHANGELOG.md`
+(`### Internal`, same follow-up) for the full grep evidence trail.
 
 ### 4.6 Standalone Release Action — Deletion Safety (C.2 Verification Result)
 
@@ -392,7 +429,7 @@ and catch blocks). Per ruling, this is accepted. All callers must update when re
 
 ## 6. Staged Implementation Plan (B)
 
-> All phases assume cmd_309 is fully serialized and closed before any implementation begins.
+> All phases assume the prerequisite migration work is fully serialized and closed before any implementation begins.
 > Phases are independent cmds; each requires its own QC gate.
 
 ### Phase 1 — Smallest Safe Fix (P0, no schema change)
@@ -461,7 +498,7 @@ and catch blocks). Per ruling, this is accepted. All callers must update when re
 
 ## 7. Rulings Applied — Record
 
-The following decisions from the original Open Decisions (subtask_310e) are now resolved:
+The following decisions from the original Open Decisions record are now resolved:
 
 | OD | Decision | Adopted design |
 |---|---|---|
@@ -495,9 +532,9 @@ Confirmed 2026-07-13: adopt "Ship" over "Fulfill" for the Phase 3 renamed operat
 
 ---
 
-## 9. Appendix: x-reservation Config Reference (from subtask_310d)
+## 9. Appendix: x-reservation Config Reference (from an earlier design record)
 
-*(Unchanged from subtask_310e — verbatim extraction for reference only)*
+*(Unchanged from that earlier record — verbatim extraction for reference only)*
 
 Three current x-reservation declarations:
 
@@ -550,4 +587,4 @@ Only `purchase_order` gains the `ledgerDomain` reference in Phase 2.
 ---
 
 *Document end. All confirmations resolved (OD-1–8, RC-1, RC-2) as of 2026-07-13. Design phase complete.*
-*Implementation begins after cmd_309 serialization. Phase order: 1 → 2 → 3 → 4 → 5.*
+*Implementation begins after the prerequisite migration work is serialized. Phase order: 1 → 2 → 3 → 4 → 5.*

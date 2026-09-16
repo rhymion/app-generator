@@ -20,14 +20,28 @@ describe('API: User Invalidate (cmd_243)', () => {
       }).then((res) => {
         expect(res.status).to.eq(200);
         expect(res.body.success).to.eq(true);
-        // Verify PII scrubbed: fetch user via API and confirm anonymization
+        // Verify PII scrubbed: fetch user via API and confirm anonymization.
+        // `name` is checked via /api/user itself; `email` is not part of
+        // user's own x-generate.fields (deliberately -- it is exposed only
+        // through the self-only, admin-bypass-with-audit `setting` proxy
+        // view, see json_schema.yaml's `setting` entity comment), so its
+        // post-scrub value is verified through /api/setting/<id> instead
+        // (subtask_892d GAP2: get{Parent}Detail()'s findUnique/findFirst is
+        // now select-scoped to the declared fields, so /api/user no longer
+        // leaks columns outside that declared set -- email included).
         cy.request({
           url: `${API_BASE}/${userId}`,
           headers: { 'X-API-Key': TEST_API_KEY },
         }).then((getRes) => {
           expect(getRes.status).to.eq(200);
           expect(getRes.body.name).to.eq('[deleted]');
-          expect(getRes.body.email).to.include('@deleted.invalid');
+        });
+        cy.request({
+          url: `/api/setting/${userId}`,
+          headers: { 'X-API-Key': TEST_API_KEY },
+        }).then((settingRes) => {
+          expect(settingRes.status).to.eq(200);
+          expect(settingRes.body.email).to.include('@deleted.invalid');
         });
       });
     });

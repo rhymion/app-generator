@@ -1,0 +1,79 @@
+// Self-contained fixture Prisma schema for the direct-attachment FK gate
+// (cmd_788). NOT the project's real prisma/schema.prisma -- this file
+// exists only to give the fixture json_schema.yaml enough real Prisma
+// models to run through the actual build_user_schema.py -> generate.py ->
+// tsc pipeline in isolation, exercising x-relationship: { target:
+// attachment, type: direct }.
+
+generator client {
+  provider = "prisma-client"
+  output   = "./.generated-client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model user {
+  id            String                        @id @default(cuid())
+  name          String
+  email         String                        @unique
+  image         String?
+  created_items direct_attachment_gate_item[] @relation("DirectAttachmentGateItemCreator")
+  updated_items direct_attachment_gate_item[] @relation("DirectAttachmentGateItemUpdater")
+}
+
+// Same shape as the real prisma/schema.prisma's `attachable`/`attachment`
+// models (post-cmd_788: attachable_id nullable, onDelete: SetNull) -- a
+// direct-attachment FK creates an attachment row with no bridge owner at
+// all, so attachable_id stays permanently null for that row.
+model attachable {
+  id          String       @id @default(cuid())
+  attachments attachment[]
+}
+
+enum AttachmentType {
+  image
+  file
+  video
+  audio
+}
+
+model attachment {
+  id                      String         @id @default(cuid())
+  type                    AttachmentType @default(image)
+  order                   Int            @default(0)
+  name                    String
+  path                    String
+  encrypted_original_name String?
+  name_iv                 String?
+  attachable_id           String?
+  attachable              attachable?    @relation(fields: [attachable_id], references: [id], onDelete: SetNull)
+  direct_attachment_gate_item_profile_picture direct_attachment_gate_item? @relation("DirectAttachmentGateItemProfilePicture")
+  direct_attachment_gate_item_contract_file   direct_attachment_gate_item? @relation("DirectAttachmentGateItemContractFile")
+  created_at              DateTime       @default(now()) @db.Timestamptz(0)
+  updated_at              DateTime       @updatedAt @db.Timestamptz(0)
+  @@index([attachable_id])
+}
+
+// The entity this fixture exists for: profile_picture_id is a NULLABLE
+// direct-attachment FK (onDelete: SetNull -- deleting the attachment just
+// clears the pointer); contract_file_id is a REQUIRED one (onDelete:
+// Restrict -- a required reference must not be silently orphaned by
+// deleting the file it points to).
+model direct_attachment_gate_item {
+  id                 String      @id @default(cuid())
+  name               String
+  profile_picture_id String?     @unique
+  profile_picture    attachment? @relation("DirectAttachmentGateItemProfilePicture", fields: [profile_picture_id], references: [id], onDelete: SetNull)
+  contract_file_id   String      @unique
+  contract_file      attachment  @relation("DirectAttachmentGateItemContractFile", fields: [contract_file_id], references: [id], onDelete: Restrict)
+  created_at         DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at         DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id         String
+  creator            user        @relation("DirectAttachmentGateItemCreator", fields: [creator_id], references: [id])
+  updater_id         String
+  updater            user        @relation("DirectAttachmentGateItemUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}

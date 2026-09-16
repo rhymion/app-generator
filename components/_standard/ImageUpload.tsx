@@ -70,33 +70,38 @@ export default function ImageUpload({
           margin="normal"
           helperText={error || helperText}
           error={!!error}
-          InputProps={{
-            endAdornment: (
-              <span style={{ marginLeft: '8px', whiteSpace: 'nowrap' }}>
-                <button
-                  type="button"
-                  onClick={() => document.getElementById('image-upload-button')?.click()}
-                  disabled={uploading}
-                  style={{
-                    padding: '8px 16px',
-                    backgroundColor: uploading ? '#ccc' : '#1976d2',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: uploading ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {uploading ? 'Uploading...' : 'Upload'}
-                </button>
-              </span>
-            ),
+          slotProps={{
+            input: {
+              endAdornment: (
+                <span style={{ marginLeft: '8px', whiteSpace: 'nowrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => document.getElementById('image-upload-button')?.click()}
+                    disabled={uploading}
+                    style={{
+                      padding: '8px 16px',
+                      backgroundColor: uploading ? '#ccc' : '#1976d2',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: uploading ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {uploading ? 'Uploading...' : 'Upload'}
+                  </button>
+                </span>
+              ),
+            },
           }}
         />
       </label>
       {value && (
         <div style={{ marginTop: '8px' }}>
-          <img 
-            src={value} 
+          {/* value is an arbitrary uploaded-file URL of unknown origin/dimensions; next/image
+              needs a configured remote pattern and fixed dimensions, out of scope here. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={value}
             alt="Preview" 
             style={{ 
               maxWidth: '200px', 
