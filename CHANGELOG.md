@@ -134,7 +134,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **New dev/verification-only script `scripts/grant-all-permissions.ts`**
   (`npm run db:grant-all-permissions`) grants the `Administrator` role full CRUD on every
   independent entity in one step, including any entity a consumer project adds. `audit_log`/
-  `mfa_recovery_code` stay excluded. `scripts/seed-tenant.ts` (the production seed) is unchanged.
+  `mfa_recovery_code` stay excluded. `scripts/seed-baseline.ts` (the production seed) is unchanged.
   See `docs/knowledge/seed-baseline-credential-hardening.md`.
 - **New opt-in Neon serverless driver adapter for `lib/prisma.ts`, gated by `USE_NEON_ADAPTER`.**
   `scripts/vercel-env.sh` now injects it as `"true"` on every consumer app provisioned via
@@ -233,7 +233,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `noindex` unless `lib/site-config.ts`'s `seo.noindex` is explicitly `false`; an app with no
   `seo` block at all is also now noindexed. See
   `docs/knowledge/noindex-default-and-branding-env-vars.md`.
-- **`scripts/seed-tenant.ts` now also seeds `Creator` and `Assignee` roles.** `Creator` is
+- **`scripts/seed-baseline.ts` now also seeds `Creator` and `Assignee` roles.** `Creator` is
   granted exactly `setting.read`+`setting.update`; `Assignee` is seeded with no permissions
   (placeholder for future use). See `docs/knowledge/seed-baseline-credential-hardening.md`.
 - **Removed the dead in-process notification store from `lib/_notifier.ts`** (a no-op read
@@ -658,11 +658,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   still in production use. `cleanup.py` no longer touches `messages/*.json` at all;
   `generate-code` now also warns when a freshly-added key was added to a non-English locale
   file, so a partial translation gap is visible. See `docs/knowledge/i18n-locale-routing.md`.
-- **Re-submitting a rejected approval request never notified the approver** — the resubmit
-  path reuses the existing `approval_request` row rather than creating a new one, so the
-  creation-only notification never re-fired. Both the Server Action and REST route now
-  re-notify after the status flip. A related payload bug (rejection notification's `status`
-  field hardcoded to `'rejected'` even for a `terminal_rejected` outcome) is also fixed.
+- **Re-submitting a rejected approval request via the (since-retired) dedicated resubmit
+  action/route never notified the approver** — that path reused the existing
+  `approval_request` row instead of creating a new one, so the creation-only notification
+  never re-fired. Fixed for both the Server Action and REST route at the time; the dedicated
+  path itself was retired later in this same cycle (see the edge-trigger entry under
+  Changed above) — today's ordinary-edit resubmission always creates a fresh row and
+  notifies normally, per `docs/knowledge/appendix/approval-flow.md` §16.4/§16.6. Separately
+  (still true today): a related payload bug (rejection notification's `status` field
+  hardcoded to `'rejected'` even for a `terminal_rejected` outcome) is also fixed.
 - **Fixed `migrate:deploy` running through Neon's pooled connection instead of a direct one**
   — Prisma's migration engine needs a session-scoped advisory lock a transaction-mode pooler
   doesn't guarantee. `prisma.config.ts` now prefers a new `DIRECT_URL` env var; **on Vercel
