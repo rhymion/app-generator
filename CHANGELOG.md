@@ -3,7 +3,7 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
-## [4.0.0] - 2026-09-16
+## [4.0.0] - 2026-09-17
 ### Security
 - **Closed a bypass letting an ordinary user set an `x-approval` field to a value reserved for
   `on_approved`/`on_rejected` `set_fields`**, directly via the form, REST API, or CSV import —
