@@ -597,19 +597,6 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `keyMatchConds` array kept separate from the org-filter branches' own `OR`
   usage so the two conditions never collide. See
   `docs/knowledge/import-key-null-empty-equivalence.md`.
-### Security
-- **`.env.vercel.production.local.example` no longer carries a real Vercel
-  team ID.** A previous commit had left a real value in `VERCEL_ORG_ID`;
-  replaced with an obviously-fake placeholder (`team_REPLACE_WITH_YOUR_TEAM_ID`),
-  and the file now opens with an explicit "this is a template, not a copy of
-  real values" notice. Added `scripts/check-example-file-leaks.sh`, a new CI
-  job (`example-file-credential-leak-check`) that fails the build if any
-  tracked `*.example` file contains a real-looking secret/ID pattern
-  (`team_...`, `ghp_`/`github_pat_`, `sk-`, `npm_`, a `postgres(ql)://` URL
-  with a non-placeholder host, or a 32+ char base64-like string).
-  `NEXT_PUBLIC_*` keys are allowlisted by name (client-bundle vars are never
-  secret-bearing by design). Scope is the `.example` files themselves and
-  this new mechanical gate only — existing git history is unchanged.
 
 ### Changed
 - **Approval-request creation moves off the write-once `afterCreate` hook
@@ -771,23 +758,6 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   never covered. See docs/knowledge/schema-yaml-configuration.md "user.image
   and the comment/mention creator avatar".
 
-### Security
-- **Any authenticated user could manually trigger a scheduled task, not just
-  an authorized operator**: the generated `/api/scheduled-tasks/[task]`
-  route's non-`CRON_SECRET` path called plain `requireDualAuth`, which
-  accepts any valid session cookie or `X-API-Key` with no role or
-  permission check at all — reproduced against a real database (an
-  `admin@example.com` API-key call succeeded with 200 before the fix). The
-  route now calls a new `requireScheduledTaskRole` (`lib/api-auth.ts`),
-  which additionally requires membership in a new dedicated
-  `ScheduledTaskRunner` role — including for the Administrator account,
-  which is rejected with 403 unless separately granted the role.
-  `scripts/seed-baseline.ts` seeds this role unconditionally with **zero
-  members**; an operator must explicitly grant it via the Role management
-  UI before any account can trigger a scheduled task outside of Vercel
-  Cron's own `CRON_SECRET` path (confirmed still working unchanged after
-  the fix). See `docs/knowledge/scheduled-task-operations.md`.
-
 ### Removed
 - **`scripts/seed.ts` (`npm run db:seed`)** — unused ITS (issue-tracking-system)
   sample-data script. Not referenced by any npm script, prisma seed hook, or
@@ -825,6 +795,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   within it) is missing entirely is *also* noindexed, not indexed. See
   `docs/knowledge/noindex-default-and-branding-env-vars.md` for the mechanism,
   why `robots.txt` `Disallow` was rejected, and consumer-impact notes.
+- **`scripts/seed-tenant.ts` now also seeds `Creator` and `Assignee` roles.** `Creator` is
+  granted exactly `setting.read`+`setting.update`, letting a non-admin user reach their own
+  `/setting` page via `x-self-only`; `Assignee` is seeded with no permissions (placeholder for
+  future use).
+- **Removed the dead in-process notification store from `lib/_notifier.ts`** (a no-op
+  `Map`-based read path with zero production callers, plus its startup `console.log`).
+  `notify()`'s write path is unchanged except its return type, now `void` (the return value was
+  unused everywhere).
 
 ### Added
 - **`x-relationship: { target: attachment, type: direct }`** — new single-file FK field
@@ -843,6 +821,44 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `x-scheduled-task`, for operations spanning many entities or an entire table with no row
   filter. Shares the task registry and `vercel.json` `crons` array with the entity-level form.
   See "Bulk mode" in `docs/knowledge/scheduled-task-operations.md`.
+- **Docs-only changes now skip the Vercel build** for the three consumer projects, via
+  `scripts/vercel-ignore-check.sh` + a root-level `vercel.json` stub (`ignoreCommand`) in each
+  consumer repo — a Root-Directory-scoped `ignoreCommand` inside this repo's own `vercel.json` is
+  never read by Vercel, confirmed empirically. See `docs/knowledge/vercel-docs-only-ignore-command.md`.
+- **New `verify-canonical-ci` job in the canonical consumer `.github/workflows/ci.yml`** checks
+  out the consumer's `app-generator` submodule and fails if its own body differs from the
+  submodule's distributed `docs/consumer-commands/ci.yml` copy — closes the gap where a
+  distributed copy silently drifted from canonical (a step's `name:` and several comments had
+  already diverged). See `docs/knowledge/ci-workflow-canonical-source.md`.
+- **New opt-in Stripe payment integration, gated by a new `x-payment` entity-level schema key.**
+  Declaring `x-payment: true` writes three write-once stub files on first `generate-code`:
+  `lib/stripe.ts`, `app/api/payment/checkout/route.ts`, and `app/api/webhooks/stripe/route.ts`
+  (signature-verified). Scope is one-time purchases only; `.env.example` gains the three Stripe
+  env var placeholders. See `docs/knowledge/stripe-payment-integration.md`.
+- **`scripts/vercel-{setup,deploy,env,teardown}.sh` and `.env.vercel.production.local.example`
+  promoted to a single canonical source**, replacing independently-drifting copies across
+  app-template/inventory-app/insurance-app — also fixes a real gap found in the process
+  (app-template's copy was missing `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD`). See
+  `docs/knowledge/vercel-deploy-scripts-canonical-source.md`.
+- **New Prisma `Decimal` support in the code generator, mapped to JSON schema type `"string"`
+  (never `"number"`)** to avoid silent float-rounding error on read/write/CSV round-trip —
+  previously unsupported (`schema_deriver.py` raised `SchemaDivergenceError`). Spans schema
+  derivation, form/CSV validation, the numeric-styled form input, and a new `test:decimal-gate`
+  fixture (this repo's own schema has no Decimal field, so nothing would otherwise compile these
+  branches).
+- **New dev/verification-only script `scripts/grant-all-permissions.ts`**
+  (`npm run db:grant-all-permissions`) grants the `Administrator` role full CRUD on every
+  independent entity in one step, including any entity a consumer project adds. `audit_log`/
+  `mfa_recovery_code` stay excluded. `scripts/seed-tenant.ts` (the production seed) is unchanged.
+  See `docs/knowledge/seed-baseline-credential-hardening.md`.
+- **New opt-in Neon serverless driver adapter for `lib/prisma.ts`, gated by `USE_NEON_ADAPTER`.**
+  `scripts/vercel-env.sh` now injects it as `"true"` on every consumer app provisioned via
+  `vercel-setup.sh`; unset or any other value falls through to the existing `PrismaPg` path
+  unchanged. GCP Cloud Run and local/CI are unaffected.
+- **New `npm run lint:prj` script (`scripts/lint_prj_synced.py`)** lints only a consumer's own
+  `prj/`-tracked `.ts`/`.tsx` files at their real synced destination paths, without linting this
+  repo's templates or the consumer's fully generated codebase. Fails closed (non-zero exit) if
+  nothing was measured. See `docs/knowledge/consumer-prj-scoped-lint.md`.
 
 ### Fixed
 - **An `x-internal` entity's named-constant parent prefix (e.g.
@@ -954,660 +970,98 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   operational guide for this mechanism (HTTP method, `CRON_SECRET`, cron
   limits, the system-actor account, and how to tell whether a scheduled
   task is actually firing).
-
-### Internal
-- Dependabot no longer proposes routine cypress minor/patch bumps — the
-  15.16.0 -> 15.19.0 jump broke `dashboard.cy.ts` in CI (test-infra only, no
-  product regression). See
-  [docs/knowledge/testing-cypress.md](docs/knowledge/testing-cypress.md#cypress-version-held-back).
-- **Fixed a silent output-path collision between the polymorphic attachable-bridge
-  actions and a standard per-entity CRUD actions file when `attachment` is
-  independently generated** (`generate.py`, `generators.py`). Once a consumer
-  schema adds an `x-generate` block to the `attachment` entity itself (needed
-  to target it with a standard OTO-selector FK from another entity), two
-  independent writers previously both targeted `lib/attachment/actions.ts` —
-  the always-on bridge actions template and the standard per-entity actions
-  file — and whichever ran last silently clobbered the other's exports,
-  breaking `components/_standard/AttachmentSection.tsx`'s import of
-  `setAttachmentsForBridge`. The bridge actions output now lives at
-  `lib/attachment/bridge_actions.ts`, a path that can never collide.
-  Also fixed `attachment_type_ts()` resolving the `attachment` entity via a
-  bare `schema['definitions']` lookup, which silently missed the
-  `allOf`/`$ref` indirection an independently-generated `attachment` gets
-  and fell back to the wrong hardcoded `'number'` type. No consumer
-  currently sets `x-generate` on `attachment`, so existing schema output is
-  behaviorally unaffected other than the file rename. Verified via lint,
-  `test:pytest`, `test:vitest`, all 8 fixture gates, a full `test:e2e:build`
-  against an isolated DB, and — for the specific pattern this unblocks (a
-  standard OTO FK to an independently-generated `attachment` entity with
-  nullable `creator_id`/`updater_id` for bridge-created rows) — an isolated
-  scratch entity pair proving `tsc --noEmit` passes end-to-end across the
-  whole app, both mandatory Cypress gates (`test:e2e:cy:api` 240/240,
-  `test:e2e:cy:ui` 190/190, zero skips), `npm audit`, and `pip-audit`.
-- **Fixed the generated `setup<Entity>ApprovalFlow()`/`setup<Entity>OrderedApprovalFlow()`
-  test helper never granting its synthetic requestor/approver/no-role test
-  users membership in a membership-scoped dependency** (`test_helper.ts.jinja2`).
-  For an approval-flow entity whose schema also declares a required/optional
-  FK to a membership-scoped entity (e.g. `organization`, detected the same
-  way `populate<Entity>Dependencies()` already detects it —
-  `x-relationships.users` → `has_user_accounts`), the synthetic users never
-  belonged to any such dependency. Their create-form's FK autocomplete for
-  that dependency then always returned zero candidates (membership-scoped
-  search filters by membership) and the generated approval-flow tests
-  (`7.1`/`7.2`/`7.4`/`7.6`/`7.7`/`7.8`) could never submit or view the
-  record — reported against a real-world consumer schema (`claim`/
-  `endorsement`/`payout`, approval-role-gated `7.2` failing). Both helpers
-  now call `populate<Entity>Dependencies()` up front and grant each
-  synthetic user membership in every such dependency, mirroring the
-  membership grant `populate<Entity>Dependencies()` already gives the
-  default test user. Verified against a fresh fixture entity added to the
-  app-template regression fortress (`maintenance_ticket`, org-scoped +
-  approval-flow): the fortress's `7.1`/`7.2`/`7.4`/`7.6`/`7.7`/`7.8` were
-  red before this fix (autocomplete stuck on "No options") and green after,
-  both desktop (`21/21`) and API (`45/45`) specs.
-- **Fixed a Decimal/date field crashing the write when a user cleared it,
-  for any non-nullable-but-not-required column** (`build_context.py`'s
-  `_build_form_data_gets()`). An untouched-then-cleared field submits `''`
-  via `FormData`; a bare `data.get(prop) as string` cast passed that
-  straight to Prisma, which rejected an empty Decimal outright
-  (`Failed to parse empty string. Expected decimal String.`) and an empty
-  date as `Invalid Date`. This is a product-code defect, not a test defect
-  — clearing an optional numeric or date field is an ordinary user action.
-  Now falls back to the field's schema default (or `'0'`/`new Date()` when
-  no default is declared) for the non-required case; a genuinely required
-  field's empty submission is left alone, since it already fails the
-  existing `REQUIRED_FIELDS`/`isMissingValue` check in
-  `service_validation.ts` cleanly. Separately, DataGrid child rows had **no
-  validation of their own at all** — `validateOnAdd`/`validateOnUpdate`
-  only ever checked the parent's fields — so a cleared required child date
-  reached Prisma raw and threw an uncaught `PrismaClientValidationError`.
-  `service.ts.jinja2`'s shared create/update catch block now wraps
-  `PrismaClientValidationError`/`PrismaClientKnownRequestError` (beyond the
-  existing `P2002` case) as a clean `AppError('VALIDATION', ...)`. See
+- **Fixed a silent output-path collision between polymorphic attachable-bridge actions and a
+  standard per-entity CRUD actions file** when `attachment` itself gets an `x-generate` block —
+  both writers previously targeted `lib/attachment/actions.ts`, and whichever ran last silently
+  clobbered the other's exports. Bridge actions output now lives at `lib/attachment/bridge_actions.ts`.
+  No consumer currently sets `x-generate` on `attachment`, so existing output is unaffected other
+  than the file rename.
+- **Fixed generated approval-flow test helpers never granting synthetic test users membership in
+  a membership-scoped FK dependency** (`test_helper.ts.jinja2`) — an approval-flow entity with a
+  required/optional FK to e.g. `organization` had its create-form FK autocomplete always return
+  zero candidates, so tests `7.1`/`7.2`/`7.4`/`7.6`/`7.7`/`7.8` could never submit or view the
+  record. Both helpers now grant the needed membership up front.
+- **Fixed a Decimal or date field crashing the write when a user cleared it**, for any
+  non-nullable-but-not-required column — an untouched-then-cleared field submitted `''`, which
+  Prisma rejected outright. Now falls back to the field's schema default; DataGrid child rows also
+  gained their own validation (previously none at all). See
   `docs/knowledge/decimal-and-date-empty-string-clear-crash.md`.
-- **Fixed several generated UI e2e test gaps surfaced by testing a large
-  real-world consumer schema end-to-end**, all in `generators_test.py` /
-  `label_field.py` / `test_spec.cy.ts.jinja2` / `test_spec_mobile.cy.ts.jinja2`:
-  - A row/card lookup keyed on an entity's primary display value used a
-    plain substring `cy.contains(text)` — if another visible cell (a
-    different column, a dependency row, or another record sharing the same
-    primary value) happened to contain that text as a substring, the wrong
-    element got clicked and the test failed with a URL/assertion mismatch
-    instead of navigating correctly. Broadened the existing exact-match
-    helper (previously only applied to self-referential-FK primaries) to
-    every such lookup across both the desktop and mobile spec templates.
-    Where the primary value isn't reliably unique at all (e.g. an
-    `entity_select` primary whose value is shared across many rows), the
-    just-created record is now found by grid position instead of by text.
-  - A child DataGrid's FK single-select value generator used the target
-    entity's own name (`'Test {Entity} A'`) instead of the FK's declared
-    `labelField`, so it never matched the dropdown option the UI actually
-    renders when `labelField` isn't `'name'`.
-  - A non-nullable `format: uri` field was unconditionally skipped when
-    generating populate-helper test data, leaving the column unset and
-    failing every required-child-entity insert that carried one.
-  - A composite `labelField` mixing a database-searchable segment with a
-    string-enum segment (e.g. `[claim.claim_no, event_type]`) typed the
-    enum's raw value into the autocomplete search box, but the server's
-    `searchXxxOptions()` deliberately never searches enum fields (their
-    displayed label is translated; their stored value isn't) — the search
-    query's own enum token could never match anything, so the autocomplete
-    permanently showed no candidates. The Cypress-typed search string now
-    excludes non-searchable segments, matching what the server actually
-    queries.
-  - A bare string-enum `labelField` segment whose value comes from a
-    Prisma column default (omitted from the populate helper's own
-    `create()` call, since it's not required) computed a fabricated
-    placeholder as its expected UI value instead of the schema's declared
-    default / first enum member — breaking any assertion or exact-match
-    lookup built from it.
-  - A DataGrid child date/time cell's "clear a required field" test step
-    used `.type('{selectall}{backspace}')`, which Cypress rejects outright
-    for a native `datetime-local` input (no `renderEditCell` override
-    exists for DataGrid date columns, unlike the top-level form's
-    `DateTimeWrapper`). Now uses `.clear()` for that field category.
-
-  Verified end-to-end against a 68-entity real-world consumer schema:
-  before the fixes, 14 of that schema's generated UI e2e specs failed;
-  after, all 14 pass individually, the schema's remaining 80 specs (desktop
-  + mobile) show no new failures, and this repo's own full e2e suite
-  (`test:e2e:cy:api` + `test:e2e:cy:ui`, desktop + mobile) stays green.
-- **Fixed generated UI e2e tests asserting a placeholder string
-  (`'Test {Label} 1'`) instead of the actual enum value for entities whose
-  `x-display.table` primary (list-row/card-title) field is a string or
-  Prisma nativeEnum column** (category `string_enum` in
-  `code_generator/generators_test.py`). The primary-field priority chain in
-  `spec_context()` had explicit branches for `entity_select`, integer
-  `enum`, and `number`/`decimal` primaries, but none for `string_enum` — it
-  fell through to the generic text-field fallback, which generates a value
-  the enum column can never actually hold, so every list/DataGrid-row
-  lookup keyed on it (`1.2`/`1.3`/`3.x`/`4.x`/`6.x`) failed. A second,
-  related gap in the same function's 3.3 ("edits with mixed changes")
-  primary-edit-command dispatch used `cy.clearAndFillField` (a plain-text
-  command) for the same category instead of
-  `cy.clearAutocomplete`/`cy.selectAutocomplete` (how the field is actually
-  rendered — matching `gen_fill_command`/`gen_clear_command`'s existing
-  fallback for this category everywhere else). Both gaps are fixed by
-  reusing the same `cypress_create_value`/`cypress_edit_value` functions the
-  generic per-field fill/assert commands already use for `string_enum`, so
-  the primary-field assertions match exactly what the form writes and the
-  list/card actually renders. Verified end-to-end against a real consumer
-  schema (`agent_hierarchy.hierarchy_type`, a Prisma nativeEnum primary):
-  before the fix, `agent_hierarchy.cy.ts` failed at `3.3` asserting the
-  literal placeholder; after the fix, all 13 desktop + 9 mobile
-  `agent_hierarchy` tests pass. Two new unit tests
-  (`code_generator/tests/test_e2e_context.py`) cover both gaps with a
-  minimal fixture and fail without the fix. No entity in this repo's own
-  default schema, nor in the app-template or inventory-app consumer
-  schemas checked at the time of this fix, currently has a `string_enum`
-  primary field, so this path was previously untested by any existing
-  gate.
-- **Fixed `lib/_decimal.ts` pulling the Node.js Prisma client into every
-  client-side bundle, and corrected a follow-up fix attempt that broke a
-  different line in the same file.** The Decimal-display fix below wired
-  `formatDecimalDisplay` into four client-side templates
-  (`form_view.tsx.jinja2`, `form_upsert.tsx.jinja2`, `column_def.tsx.jinja2`,
-  `page_list.tsx.jinja2`) while defining it in `lib/_decimal.ts` alongside
-  `deepStringifyDecimals` (which needs `Prisma` imported as a *value* for its
-  `instanceof Prisma.Decimal` check) — pulling the whole Prisma client into
-  every consumer app's client bundle, surfacing as `TurbopackInternalError`
-  on any consumer schema with an actual Decimal field. A first fix attempt
-  changed the import to `import type { Prisma }`, which broke
-  `deepStringifyDecimals`'s own `instanceof` check in the same file
-  (`error TS1361: 'Prisma' cannot be used as a value because it was
-  imported using 'import type'`) — the type-only import can't satisfy a
-  value-level check that genuinely needs it. The real fix splits the
-  module: `formatDecimalDisplay` (Prisma-free) moved to a new
-  `lib/_decimal_format.ts`; `deepStringifyDecimals`/`DeepStringifyDecimals`
-  stay in `lib/_decimal.ts` with the value import restored. The four client
-  templates now import `formatDecimalDisplay` from `_decimal_format.ts`
-  directly, never through `_decimal.ts` (a re-export barrel would still
-  pull `_decimal.ts`'s own top-level Prisma import into the bundle).
-  Verified with a real `next build` (not just `tsc --noEmit`, which cannot
-  see this class of client/server boundary defect at all — see
-  `docs/knowledge/decimal-client-server-boundary-gate-limitation.md`):
-  reproduced the exact reported `TS1361` failure with the broken import
-  restored, confirmed the fix builds clean, and confirmed the fix breaks
-  again without it. No existing gate (this repo's own default schema has
-  zero Decimal fields) exercises this path automatically; the doc above
-  records why and gives the manual verification recipe for next time.
-- **Fixed two generated-app defects surfaced by UI e2e testing (not caught
-  by the mandatory API e2e gate): Decimal fields displaying with dropped
-  trailing zeros, and optional one-to-one selector FK autocompletes losing
-  every candidate once the user types.** (1) Read-only Decimal display
-  (detail-page fields, edit-mode readonly fields, the top-level list page,
-  and DataGrid child columns) rendered `Decimal.toString()` verbatim
-  (`"1"` instead of the declared-scale `"1.00"`) — none of these four
-  display sites padded to `x-decimal-scale`, only the edit-mode input field
-  did. Added `formatDecimalDisplay()` (`lib/_decimal.ts`, string-based
-  padding — never routes through `Number()`, which would reintroduce the
-  float rounding `Decimal` exists to avoid) and wired it into
-  `_readonly_display_field()`, `page_list_context()`, and
-  `column_def_context()`. (2) A selector one-to-one FK autocomplete (`type:
-  one-to-one` in `x-relationship`, e.g. an optional FK to an entity with its
-  own list/view/new/edit pages) showed its initial candidate list correctly
-  (`getAvailable{Target}sFor{Parent}()`, passed via `initial{Target}s`) but
-  returned zero results as soon as the user typed: `page_new.tsx.jinja2` /
-  `page_edit.tsx.jinja2` never imported or passed a `search{Target}Options`
-  prop for selector one-to-one relation targets (only for regular
-  many-to-one FK targets), so `FormUpsert.tsx`'s generated search callback
-  (`searchXOptions?.(query, includeIds) ?? []`) always resolved to an empty
-  array once the optional-chained call hit an unpassed `undefined` prop.
-  Both pages now import and pass it, mirroring the existing many-to-one
-  wiring. Neither fix changes behavior for a schema with zero Decimal
-  fields / zero selector one-to-one relations — this repo's own
-  `code_generator/json_schema.yaml` has neither, so its own e2e suite
-  cannot exercise either branch; verified instead via the
-  `decimal_gate` / `oto_decimal_gate` / `oto_mandatory_gate` fixture
-  pipelines (`build_user_schema.py` → `generate.py` → `prisma generate` →
-  `tsc`, all exit 0) and the full `code_generator` pytest suite (1375
-  passed, 1 pre-existing unrelated skip). The FK-autocomplete filtering
-  root cause was found and fixed within the time budget; a labelField that
-  itself resolves to a Decimal column (`build_label_expression()` in
-  `code_generator/helpers/label_field.py`) is a narrower, unaddressed edge
-  case — noted, not silently dropped.
-- **Fixed the generated Stripe integration stubs (`lib/stripe.ts`,
-  `app/api/webhooks/stripe/route.ts`) throwing at module top level when a
-  required Stripe env var was unset, which failed the production `next
-  build` itself (not just the route at request time) in any consumer with
-  `x-payment: true` declared.** Next.js evaluates every route module while
-  collecting page data during `next build`, regardless of the HTTP methods
-  it exports, so importing the `POST`-only checkout route pulled in
-  `lib/stripe.ts`'s top-level `throw` — meaning any deploy without
-  `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` configured (a preview
-  deploy, for example) failed the build outright. Both checks now defer to
-  first use: `lib/stripe.ts` exports its Stripe client lazily behind a
-  `Proxy` (constructed on first property access, so import alone never
-  throws), and the webhook route's secret check moved from module scope
-  into its `POST` handler. Fail-closed behavior is unchanged in
-  substance — using either code path without the required key still
-  throws immediately with the same message — only the timing moved from
-  build/import time to request time. See
-  `docs/knowledge/stripe-payment-integration.md` "Lazy construction note".
-- **Fixed the Gantt-chart getter not serializing a required Decimal column,
-  added a required `chart-decimal-gate-fixture` CI check, and corrected a
-  doc section that had documented the resulting workaround as intended
-  behavior.** `get{Parent}sForChart` (`chart_getters.ts.jinja2`), generated
-  only when `x-display.chart` is declared, assigned a required Decimal
-  column straight off the raw Prisma row (`{{ field }}: item.{{ field }},`)
-  into a field the generated `{Parent}ForChart` interface types as `string`
-  (`chart_context()` in `generators.py` resolves a Decimal column's
-  JSON-schema type as `string`, per its `_prisma_decimal_type` marker
-  (`schema_deriver.py`) -- but the raw row value is a `Prisma.Decimal`
-  instance) -- a `TS2322` at
-  build time. A production consumer schema had worked around this by
-  marking two Decimal columns nullable (nullable columns are dropped from
-  the chart projection entirely by `chart_context()`'s
-  `field_name not in required: continue`, so the type mismatch never
-  arose), and a doc section had documented that workaround as correct,
-  intentional behavior rather than as a generator defect being routed
-  around. The getter now stringifies a Decimal column the same way
-  `getters.ts`'s `decimal_display_columns` does for an entity's own
-  columns (a null-safe `.toString()`), matching every other Decimal
-  crossing the Server-to-Client Component boundary. This went undetected
-  because no entity in this repo's own default schema combines
-  `x-display.chart` with a required Decimal column, so no existing gate
-  ever type-checked this getter against one -- `npm run
-  test:chart-decimal-gate` closes that gap the same way
-  `test:decimal-gate`/`test:oto-decimal-gate` do for their own dark
-  branches, and is now a required, unconditional CI job alongside them.
-  See `.claude/commands/update-generator.md` Completion gate step 8.
-- **Extended the Gantt-chart projection to a required plain Int/Float
-  scalar and a required DateTime column other than the chart's own
-  start/end pair, and added a required `chart-scalar-gate-fixture` CI
-  check.** `chart_context()` (`generators.py`) previously projected onto
-  the generated `{Parent}ForChart` interface only a required string
-  column, or a required int/number enum with string labels -- a required
-  plain Int (or Float, if a future Prisma type addition ever supports it;
-  today only Int reaches this branch, since `schema_deriver.py`'s
-  `_SCALAR_JSON_TYPE` has no `Float` entry) was silently dropped from the
-  projection entirely, with no interface field and no chance of becoming
-  the Gantt tooltip -- an undocumented asymmetry with a required string
-  column, which was projected. Separately, a required DateTime column
-  other than `start_time`/`end_time` was assigned straight off the raw
-  Prisma row into a field the generated interface types as `string` -- a
-  `Date` instance isn't a string, the same `TS2322` class the previous
-  entry fixed for Decimal, just for a different type, and never caught
-  because no fixture combined `x-display.chart` with an extra required
-  DateTime column. Both are now handled: a plain Int/Float column is
-  projected as `number` with no stringification needed (unlike Decimal,
-  which round-trips through decimal.js specifically to avoid float
-  rounding error -- 2026-08-15's Decimal-as-string ruling), and a
-  DateTime column (any `format`: `date-time`, `date`, or `time`) is now
-  excluded from the projection entirely, not serialized -- correct
-  local-time display needs client-side formatting, out of this fix's
-  scope, and `start_time`/`end_time` already carry the chart's time
-  information. A required Boolean column is
-  now explicitly excluded (not a silent drop -- a bare true/false carries
-  little context in a Gantt-row tooltip), and a required column whose
-  resolved type isn't one of the above now fails generation loudly rather
-  than vanishing from the projection. BigInt needs no handling here
-  either: `schema_deriver.py`'s `_SCALAR_JSON_TYPE` has no `BigInt` entry,
-  so a BigInt column is already rejected during schema derivation, long
-  before it could reach this function. Only the first projected field, in
-  the entity's field declaration order, becomes the Gantt tooltip --
-  unchanged from before this change, and unaffected by it for the one
-  known consumer schema with `x-display.chart` (its own required-string
-  tooltip field is still declared first). This went undetected because no
-  entity in this repo's own default schema combines `x-display.chart`
-  with a required Int/Float or extra required DateTime column, so no
-  existing gate ever type-checked these branches -- `npm run
-  test:chart-scalar-gate` closes that gap the same way
-  `test:chart-decimal-gate` does for its own dark branch, kept as a
-  separate fixture (not an extension of `chart_decimal_gate`) to keep
-  each fixture's build/type-check independent of the other's scope and
-  history, and is now a required, unconditional CI job alongside it. The
-  chart configuration section of `docs/knowledge/schema-yaml-configuration.md`
-  now documents, per field type, what is projected onto the chart and
-  which one becomes the tooltip. See `.claude/commands/update-generator.md`
-  Completion gate step 9.
-- **Fixed a one-to-one selector's "available options" getter not
-  serializing the target entity's Decimal columns, and added a required
-  `oto-decimal-gate-fixture` CI check.**
-  `getAvailable{Target}sFor{Parent}` (`getters.ts.jinja2`) returned the
-  target's raw Prisma rows unconditionally, unlike `search{Parent}Options`
-  (`decimal_display_columns` `.toString()` override) and
-  `relationship_mapping` (`deepStringifyDecimals` wrap for an embedded
-  relation) elsewhere in the same file. A one-to-one selector whose
-  target entity carried a Decimal column hit `TS2322` at build time,
-  because the raw rows were handed straight to a Client Component prop
-  (`initialAvailable{Target}s`, consumed by `page_new.tsx`/
-  `page_edit.tsx`) typed against the generated (Decimal-as-string)
-  interface. The getter now wraps its return with `deepStringifyDecimals`
-  when the target carries a Decimal column at any depth (own column or an
-  embedded relation, via the same `_entity_decimal_deep` check
-  `relationship_mapping` already uses), matching every other Decimal
-  crossing the Server-to-Client Component boundary in this file. This
-  went undetected because no entity in this repo's own default schema has
-  a one-to-one selector FK at all, so no existing gate ever type-checked
-  this getter against a Decimal-bearing target -- `npm run
-  test:oto-decimal-gate` closes that gap the same way `test:decimal-gate`/
-  `test:oto-mandatory-gate` do for their own dark branches, and is now a
-  required, unconditional CI job alongside them. See
+- **Fixed multiple generated UI e2e test gaps** found via a 68-entity real-world schema run:
+  non-exact `cy.contains()` row/card lookups could click the wrong element; a DataGrid child FK
+  single-select generator ignored `labelField`; a non-nullable `format: uri` field was skipped in
+  populate-helper data; a composite `labelField` mixing a searchable and enum segment typed an
+  unsearchable token into autocomplete. 14 previously-failing UI e2e specs pass after the fix, no
+  new failures elsewhere.
+- **Fixed generated UI e2e tests asserting a placeholder string instead of the actual value for
+  entities whose list/card primary field is a string or Prisma nativeEnum column** (`string_enum`
+  category) — the primary-field priority chain in `spec_context()` had no branch for it, so every
+  list/DataGrid-row lookup keyed on it failed. Verified against a real nativeEnum primary: all 13
+  desktop + 9 mobile tests pass after the fix.
+- **Fixed `lib/_decimal.ts` pulling the Node.js Prisma client into every client-side bundle**,
+  surfacing as `TurbopackInternalError` on any consumer schema with a Decimal field. Split the
+  module: the Prisma-free `formatDecimalDisplay` moved to a new `lib/_decimal_format.ts`; client
+  templates now import from there directly.
+- **Fixed two generated-app defects surfaced by UI e2e testing**: read-only Decimal display
+  (detail page, edit-mode readonly, list page, DataGrid columns) rendered `Decimal.toString()`
+  verbatim instead of the declared scale (`"1"` instead of `"1.00"`); and an optional one-to-one
+  selector FK autocomplete returned zero candidates as soon as the user typed, since
+  `page_new`/`page_edit` never passed it a `search{Target}Options` prop.
+- **Fixed the generated Stripe integration stubs throwing at module top level when a required
+  Stripe env var was unset**, failing the production `next build` itself (not just the route at
+  request time) for any consumer with `x-payment: true`. Both checks now defer to first use — a
+  deploy without `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` configured no longer fails the build,
+  only the first real request. See `docs/knowledge/stripe-payment-integration.md`.
+- **Fixed the Gantt-chart getter (`x-display.chart`) not serializing a required Decimal column**,
+  a `TS2322` at build time; also corrected a doc section that had documented the resulting
+  workaround as intended behavior. The getter now stringifies the column like every other Decimal
+  crossing the Server-to-Client boundary. See `.claude/commands/update-generator.md` Completion
+  gate step 8.
+- **Extended the Gantt-chart projection (`x-display.chart`) to a required plain Int/Float scalar
+  and a required DateTime column** other than the chart's own start/end pair — both were
+  previously either silently dropped from the projection or assigned in a way that failed
+  `TS2322` at build time. A required Boolean column is now explicitly excluded; an unrecognized
+  required type now fails generation loudly instead of vanishing. See
+  `.claude/commands/update-generator.md` Completion gate step 9.
+- **Fixed a one-to-one selector's "available options" getter not serializing the target entity's
+  Decimal columns**, a `TS2322` at build time for any one-to-one selector whose target carries a
+  Decimal column. The getter now wraps its return with `deepStringifyDecimals` when needed,
+  matching every other Decimal boundary crossing in the same file. See
   `.claude/commands/update-generator.md` Completion gate step 7.
-- **`split_same_target_fk_deps()`'s same-target multi-FK fix (multiple FK fields on one entity
-  pointing at the same target, e.g. `claim.insured_party_id` / `claim.insurer_party_id` both
-  `-> party`) only rewrote the split model's own `entity_fk_deps`, leaving an unrelated dep's own
-  nested `fk_deps` entry pointing at the now-removed bare-target var** (found via a real-world
-  schema run: a `claim -> policy -> party` chain, where `policy` independently has its own
-  `party_id` FK). `resolve_dependencies()` builds `policy`'s dep object with
-  `fk_deps: [{'prop_name': 'party_id', 'dep_var_name': 'party'}]` before the split ever runs;
-  once the split replaced the bare `party` dep with `insuredParty`/`insurerParty`, that reference
-  pointed at a variable that no longer existed anywhere in `deps`, so `helper_context()`'s
-  `_dep_lookup_columns()` still emitted it verbatim — the rendered `cypress/support/<entity>/
-  helper.ts` contained `party_id: party.id` with no `const party = ...` declaration anywhere in
-  the file (a `ReferenceError` at test-run time, not a compile error, since other deps' `const`
-  declarations exist under different names). Also fixed a related ordering bug: the split deps
-  were appended to the end of `deps` instead of being inserted at the position the removed bare
-  dep occupied, so a dependent dep like `policy` could render *before* the split dep it now
-  references. Fixed by repointing any stale nested `fk_deps` reference at the first split dep for
-  that target (any one is a real, already-created record, so it satisfies the FK regardless of
-  which of the model's own fields the split was keyed on) and inserting the split deps back at
-  the original position. Added `TestSplitSameTargetFkDepsIndirectDep` and
-  `TestHelperContextIndirectDepNoDanglingReference` to
-  `code_generator/tests/test_multi_fk_same_target_var_collision.py`, confirmed to fail against
-  the pre-fix code (`party_id: party.id` present, no `const party` declaration) and pass against
-  the fix. Removes the workaround trap note added for this same defect just before this fix
-  landed (this repo's own default schema has no same-target multi-FK entity, so the trap note
-  documented a real, then-still-open gap for consumer schemas) — the defect is now fully closed
-  for both the direct split-model case and the indirect other-dep case, so the trap no longer
-  applies. Verified: full mandatory gate green (`lint`; `pytest` 1371 passed, 0 skipped;
-  `vitest` 473 passed; all four fixture gates; `test:e2e:build`; `check:generated`;
-  `test:e2e:cy:api` 240/240; `test:e2e:cy:ui` 190/190; `npm audit` 0 vulnerabilities; `pip-audit`
-  0 vulnerabilities).
-- **Removed the hardcoded Stripe `apiVersion` literal from the
-  `x-payment` write-once `lib/stripe.ts` stub, and added a required
-  `payment-gate-fixture` CI check.** The stub used to pin
-  `apiVersion: '2025-03-31.basil'`; the installed `stripe` SDK's own
-  TypeScript type for that field is a single literal baked into
-  whatever SDK version is actually installed, and it changes on every
-  SDK bump (including patch bumps within the same `^` range) -- so a
-  hardcoded literal there inevitably goes stale and breaks `next build`
-  in any consumer that declares `x-payment: true`. The stub now omits
-  the field, which the SDK's own source confirms is behaviorally
-  identical to pinning the current version (`props.apiVersion ||
-  DEFAULT_API_VERSION`), without the stale-literal hazard. This went
-  undetected because no entity in this repo's own default schema
-  declares `x-payment: true`, so no existing gate ever type-checked the
-  stub's generated content -- `npm run test:payment-gate` closes that
-  gap by running the `x-payment` fixture through the real
-  `build_user_schema.py` → `generate.py` → `tsc --noEmit` pipeline, and
-  is now a required, unconditional CI job alongside the mention/decimal/
-  OTO-mandatory/approval-lockdown gate fixtures. See
+- **Fixed `split_same_target_fk_deps()` leaving a stale reference after a same-target multi-FK
+  split** (e.g. `claim.insured_party_id`/`claim.insurer_party_id` both `-> party`) — an unrelated
+  dependency's own nested `fk_deps` entry still pointed at the removed bare-target variable,
+  rendering a generated `cypress/support/<entity>/helper.ts` with a `ReferenceError` at test-run
+  time. Also fixed a related dependency-ordering bug.
+- **Removed the hardcoded Stripe `apiVersion` literal from the `x-payment` stub** — it went stale
+  on every SDK bump (including patch bumps) and would eventually break `next build` for any
+  consumer declaring `x-payment: true`. The stub now omits the field, which the SDK's own default
+  is confirmed behaviorally identical to pinning the current version. See
   `docs/knowledge/stripe-payment-integration.md`.
-- **Added a docs-only Vercel build skip for the three consumer
-  projects.** `scripts/vercel-ignore-check.sh` (canonical
-  logic) + `vercel-ignore.json` (a tiny stub `ignoreCommand`) in this
-  repo; each consumer repo's root carries that same stub content as its
-  own real `vercel.json` file (a symlink was tried first and measurably
-  broke Vercel's config discovery — see the doc below). `ignoreCommand`
-  set inside this repo's own
-  `vercel.json` (Root-Directory-scoped, for the three Vercel projects)
-  is never read by Vercel — confirmed empirically across many probe
-  deployments — so a root-level file is required for this one key
-  specifically; `framework`/`buildCommand`/`regions` are unchanged
-  here and keep resolving as before. See
-  `docs/knowledge/vercel-docs-only-ignore-command.md` for the full
-  measured mechanics and why this deviates from a pure single-file
-  design.
-- **Added `concurrency` and a docs-only `detect-changes` gate to
-  app-generator's own `.github/workflows/ci.yml`.**
-  `concurrency: {group: ${{ github.workflow }}-${{ github.ref }},
-  cancel-in-progress: true}` cancels a superseded run on the same ref — a
-  public repo has no billed-minutes savings from this, only shorter queue
-  wait. `detect-changes` classifies each push/PR as docs-only or not via
-  `git diff` pathspec exclusion and gates only `e2e-tests` (the
-  dominant-cost job, ~57-60 min) via `needs:`+`if:` — not
-  `paths-ignore:`, so a skip shows up as "Skipped" in PR checks rather
-  than the check not existing at all. The other eight generator-specific
-  jobs (`lint`, `unit-tests`, `audit`, `audit-full-scope`, `pytest`,
-  `mention-gate-fixture`, `decimal-gate-fixture`,
-  `oto-mandatory-gate-fixture`) always run, as a safety net against a
-  path-judgment mistake. `docs/consumer-commands/**` is excluded from the
-  docs-only exemption (checked before, not folded into, the general
-  `docs/**` exclusion — git pathspec exclude has no re-include operator):
-  it is the canonical source distributed to every consumer's own CI/gate
-  definitions, not documentation about this repo, and a PR editing it
-  must still run this repo's own suite. `AGENTS.md` and
-  `.claude/commands/*.md` are excluded from the exemption for the same
-  reason (CLAUDE.md "Gate SoT Rule" — they carry this repo's own gate
-  definitions). A missing/unusable base commit (new branch, shallow
-  history) runs the full suite (fail-closed), never skips on "unknown."
-  `verify-canonical-ci` stays consumer-side only — app-generator
-  is the canonical source itself, so there is nothing meaningful for it
-  to diff against locally.
-- **Added a machine-checked drift gate for the canonical consumer
-  `.github/workflows/ci.yml`.** `docs/consumer-commands/ci.yml`
-  is distributed to consumers as a plain copy (not a symlink — GitHub
-  Actions resolves workflow files, including trigger eligibility, from
-  the target repo's own tree before any checkout happens, so a symlink
-  risks silently breaking trigger discovery). A copy can only ever be
-  claimed to be "verbatim" by whoever distributed it; the first
-  distributed copy already wasn't (a step's `name:` field carried an
-  appended internal tracking suffix, and several comments were
-  reworded). Added a `verify-canonical-ci` job to the canonical body
-  itself, so it travels with every future distribution: it checks out
-  the consumer's `app-generator` submodule, extracts both this file's
-  own body and the submodule's `docs/consumer-commands/ci.yml` body
-  (from the `name: CI` line onward) and fails the job on any diff. See
-  `docs/knowledge/ci-workflow-canonical-source.md` "Drift check" for the
-  placement rationale (consumer-side only — a generator-side check would
-  need cross-repo tokens for the two private consumers) and the
-  full-body-vs-structure-only scope decision.
-- **Added opt-in Stripe payment integration to the code generator,
-  gated by a new `x-payment` entity-level schema key.** Not a default-schema
-  feature and generates no `Plan`/`Product`/`Purchase`-style entity, authz
-  layer, or UI — declaring `x-payment: true` on any entity causes
-  `generate.py` to write three write-once stub files the first time
-  `generate-code` runs: `lib/stripe.ts` (Stripe SDK init, fails closed if
-  `STRIPE_SECRET_KEY` is unset), `app/api/payment/checkout/route.ts`
-  (Checkout Session creation), and `app/api/webhooks/stripe/route.ts`
-  (webhook receiver, signature-verified via `req.text()` →
-  `constructEvent`, fails closed if `STRIPE_WEBHOOK_SECRET` is unset). Same
-  write-once convention as `lib/<parent>/invalidate_handler.ts` —
-  a consumer's edits to these files survive regeneration. Scope is
-  one-time purchases only (Checkout Session `mode: payment`); subscription
-  lifecycle handling is left for a consumer to add. `.env.example` gained
-  `STRIPE_SECRET_KEY`/`STRIPE_PUBLISHABLE_KEY`/`STRIPE_WEBHOOK_SECRET`
-  placeholders (no values). Added `stripe` (`^22.5.0`) as a runtime
-  dependency. See `docs/knowledge/stripe-payment-integration.md`.
-- **Added `scripts/vercel-{setup,deploy,env,teardown}.sh` and
-  `.env.vercel.production.local.example` as the canonical source of the
-  Vercel deployment tooling used by generated consumer apps.**
-  These five files were previously duplicated independently across three
-  consumer repos (app-template, inventory-app, insurance-app); they were
-  found byte-identical (scripts) or near-identical (env template, missing
-  `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` in app-template only — a real
-  gap, now fixed via the shared copy) and are promoted here so consumers
-  can reference a single source instead of three independently drifting
-  copies. See `docs/knowledge/vercel-deploy-scripts-canonical-source.md`.
-- **Added Prisma `Decimal` support to the code generator, mapped to JSON schema type
-  `"string"` — never `"number"` (a deliberate product decision: a JS-float mapping risks silent
-  rounding error on read/write/CSV round-trip; the Prisma schema previously had no supported way
-  to declare a `Decimal` column at all — `schema_deriver.py` raised `SchemaDivergenceError` for
-  any entity that tried). Six layers: (1) `schema_deriver.py`'s `_SCALAR_JSON_TYPE` maps
-  `Decimal` to `string` and auto-reflects `@db.Decimal(p, s)`'s scale as `x-decimal-scale`; (2)
-  `form_validation.ts`/`service_validation.ts` gained a `DECIMAL_FIELDS` numeric-format check
-  (client + server); (3) the form renders a numeric-styled text input
-  (`AppFieldText`/`inputMode="decimal"`), not the JS-`number`-backed `NumberField`; (4) CSV
-  import/export never calls `Number()` on a Decimal cell (new `'decimal'` `ts_type`, format-
-  validated but kept as a string) and `getters.ts`'s Decimal columns are explicitly
-  `.toString()`'d before crossing the Server-to-Client Component boundary (a raw Prisma `Decimal`
-  instance there would otherwise throw — this was a hard crash, not just a display nicety); (5)
-  DataGrid-child test-row seeding gained a Decimal branch; (6) migrations use Prisma's own
-  `@db.Decimal(p, s)` support directly, no generator-specific step needed. Also fixed two
-  latent bugs surfaced while wiring this in: (a) the search-token/autocomplete-filter helper
-  previously swept any `type: "string"` field into a Prisma `contains` filter, which a Decimal
-  column doesn't support — excluded via the new internal marker; (b) `form_validation.ts.jinja2`'s
-  `DECIMAL_FIELDS = [] as const` pattern, when empty (true for every entity without a Decimal
-  field), typed the `for...of` loop variable as `never` and failed to compile — fixed with an
-  explicit array type instead of `as const`. Regression coverage: `code_generator/tests/
-  test_schema_deriver.py` (pytest, confirmed to raise `SchemaDivergenceError` against the pre-fix
-  generator and pass against the fixed one) plus a new permanent fixture gate,
-  `test:decimal-gate` (`code_generator/tests/fixtures/decimal_gate/`, mirroring the existing
-  `test:mention-gate` pattern — wired into the Completion gate and CI, since this repo's own
-  `json_schema.yaml` has no Decimal field and would otherwise never compile any of these
-  branches). Verified against a real Postgres round-trip (create, read, `.toString()`) with
-  values chosen to defeat JS-float precision, and against the CSV import format-check logic
-  directly. `Json` is out of scope for this change (existing usage is internal-only, hand-written,
-  never exposed through the `fields:`-driven schema pipeline this change touches). Checked
-  `app-template` (proj_c, zero `Decimal` usage) and `app-template-4`/`app-template-5`
-  (proj_g/proj_h): neither declares an actual Prisma `Decimal` column today, but both carry
-  code comments documenting that they chose `Int`-cents specifically because the generator
-  didn't support `Decimal` — direct evidence of the gap this change closes, though migrating
-  either consumer to `Decimal` is a separate, unstarted decision.
-- **Fixed two generator defects confirmed real by deviation-injection reproduction:**
-  - A required one-to-one selector FK (`x-relationship: {type: one-to-one, ...}` on a field listed in
-    the entity's `required`) made the generated `page_new.tsx` unbuildable. `build_context.py`'s
-    `required_relation_fields` (the Option B permission-guard list from an earlier change) merged entries from
-    `parent_rels_raw` and `selector_oto_rels` without distinguishing them, and
-    `page_new.tsx.jinja2` re-derived a single `initial{Target}s` variable name for both — correct for
-    `parent_rels_raw` entries (matching the `Promise.all` destructure) but wrong for `selector_oto_rels`
-    entries, which actually destructure as `initialAvailable{Target}s`. The guard block referenced an
-    identifier `Promise.all` never declared (`Cannot find name 'initialAppForms'`-style TypeScript
-    build failure), while the optional (nullable) form of the same relationship was unaffected. Fixed
-    by pre-computing each entry's `init_var` in `build_context.py` at the correct naming convention for
-    its source list, and having the template reference `f.init_var` directly instead of reconstructing
-    the name from `target`. Verified both-sides with a synthetic schema (required vs. optional
-    one-to-one selector to the same target): the required side's generated `page_new.tsx` referenced
-    the undeclared variable before the fix and the correctly-declared one after, with the optional
-    side's generated output byte-identical across both runs.
-  - A parent entity with no date/date-time/time field of its own, but with an inline (non-independent)
-    datagrid child that has one, generated a `FormUpsert.tsx` calling `dayjs()` (embedded by
-    `_new_prop_val()`'s child-row-default logic, part of `child_grid_setup`) without importing `dayjs`
-    — the `has_datetime_props` gate for the `dayjs` import in `form_upsert.tsx.jinja2` only checked the
-    parent's own date fields plus a `'DateTimeWrapper'` substring fallback over `_rendered_body_text`,
-    neither of which sees `child_grid_setup`'s content. Fixed by also checking `'dayjs('` against
-    `child_grid_setup` in `generators.py`'s `has_datetime_props` computation. Verified both-sides with a
-    synthetic schema (date-free parent, inline child with a `format: date` field): `dayjs` was called
-    without an import before the fix and correctly imported after.
-  - Both fixes are unit-tested (`code_generator/tests/test_form_upsert.py`,
-    `TestRequiredRelationFieldsInitVarPlainFK` / `TestSelectorOTOMandatory`'s new
-    `test_required_relation_fields_init_var_uses_available_prefix` / `TestChildGridDatetimePropsGate`),
-    confirmed to fail against the pre-fix generator and pass against the fixed one. Checked for live
-    impact against `app-template` (proj_c) and `app-template-4`'s (proj_g) actual schemas: neither has
-    any `type: one-to-one` selector relationship (only the unrelated `one-to-one_bridge` mechanism), so
-    the first defect has zero current exposure in either; the only inline, non-independent child with a
-    date field in either schema (`app-template`'s `parent1_child2`) belongs to a parent (`parent1`)
-    that already has its own `date-time` field, which already satisfied `has_datetime_props` before this
-    fix, so the second defect was also not live-exposed there either — confirmed by direct inspection of
-    each consumer's schema, not by regenerating their code.
-- **Added a `test:oto-mandatory-gate` fixture gate closing a regression-coverage hole in
-  the required-one-to-one-selector fix above.** The `test_form_upsert.py` unit tests added for that fix
-  call `build_context.py`'s functions directly; nothing in this repo's own `generate-code`/build (the
-  `test:e2e:build` gate), nor in any currently known consumer schema (`app-template`/proj_c,
-  `app-template-4`/proj_g, `inventory-app`), has an entity with a required (non-nullable)
-  `type: one-to-one` selector FK, so the actual `page_new.tsx.jinja2` template branch the fix touches
-  was never compiled by any mandatory gate — "all green" did not mean "this branch works," the same
-  gap `test:mention-gate` already closes for an unrelated branch. Follows that same pattern
-  (and the `invalidate_handler` write-once-stub precedent): a new, self-contained fixture
-  entity pair (`code_generator/tests/fixtures/oto_mandatory/` — `oto_gate_target`, a selector target
-  with its own pages, and `oto_gate_item`, whose FK to it is required) run through the real
-  `build_user_schema.py` → `generate.py` → `tsc --noEmit` pipeline
-  (`scripts/check_oto_mandatory_gate_fixture.sh`), wired into `package.json`
-  (`npm run test:oto-mandatory-gate`), CI (`.github/workflows/ci.yml`'s new
-  `oto-mandatory-gate-fixture` job, no path filter — same unconditional treatment as
-  `mention-gate-fixture`), and `.claude/commands/update-generator.md`'s Completion gate (new step 5).
-  A new fixture rather than an extension of `mention_gate` — that fixture's own scope is deliberately
-  narrow to the unrelated `commentable`/`x-mention` branch (see its `json_schema.yaml`'s design note for
-  why folding in an unrelated defect class was rejected). Verified both-sides: run against the
-  generator commit immediately before the fix above (`b0d1f298`, detached worktree, `git worktree
-  add --detach` — no `git checkout`/`reset`/`stash` on the working branch, per D004), the fixture's
-  generated `page_new.tsx` produces the exact `Cannot find name 'initialOtoGateTargets'` `tsc` failure
-  the fix corrects; run against the fixed generator, `tsc` exits 0. Real consumer relevance: the
-  external repo `menlab-auto` has two required one-to-one selectors (`pre_check.checkup_id` /
-  `checkup_result.checkup_id`) and is currently unaffected only because its generator pointer predates
-  the defect's introduction — this fixture is what stands between the defect returning and every future
-  mandatory gate staying green anyway.
-- Re-keyed `lint:prj`'s (`scripts/lint_prj_synced.py`) fail-closed condition from "zero `.ts`/`.tsx` files synced" to "`prj:sync` could not be observed running against a real `../prj`" — a consumer whose `prj/` holds only non-TypeScript content (e.g. schema/SQL/migration files) with no hand-written TS is now a legitimate PASS (with an explicit "measured N files, none .ts/.tsx" message), not a FAIL. The three genuine "could not measure" cases (`prj_sync.py` exiting non-zero, no `../prj` sibling directory, or zero synced files of any kind) still FAIL exactly as before. Verified with three injection scenarios (no `../prj` → FAIL; `../prj` with only non-TS content → PASS; `../prj` with one syntactically-broken `.ts` file → FAIL) and against a real consumer's actual `prj/` content (copied read-only into a scratch directory, the consumer's own working tree never touched): the prior implementation failed closed on that exact content, the fixed implementation passes. Also revised the module docstring, failure/pass messages, and `docs/knowledge/consumer-prj-scoped-lint.md`'s "Fail-closed" section to describe the new measured-vs-unmeasured distinction (the old text's "that is expected to be a temporary state, not a permanent green" framing is removed — a TS-free `prj/` is not temporary, it's a legitimate consumer shape).
-- Added `scripts/generated/seed-entities.ts` (auto-generated by `generate-code`, via `seed_entities_context()` in `code_generator/generators.py`) — derives the "independent entity" population of a project's schema (any entity that is a `schema['definitions']` key, has an `id` property directly, is not an x-bridge junction target, and is not an internal-only marker entity such as `approvable`/`commentable`/`attachable`/`notification`). This is consumed by a new development/verification-only script, `scripts/grant-all-permissions.ts` (`npm run db:grant-all-permissions`) — grants the `Administrator` role full CRUD on every independent entity in one step, including any entity a consumer project adds on top of the default schema. `audit_log`/`mfa_recovery_code` are excluded both structurally (never schema-defined entities) and explicitly (`ALWAYS_EXCLUDED` in the script) — verified via a deviation-injection test (`code_generator/tests/test_seed_entities_context.py`) and a live-database check confirming zero write-access permission rows on `audit_log` after running the script. `scripts/seed-tenant.ts` (the production seed) is unchanged — it keeps its existing fixed, least-privilege entity enumeration; see `docs/knowledge/seed-baseline-credential-hardening.md` for the full design and the distinction from the similarly-named Cypress-only `grantAllEntityPermissions()` test helper.
-- `scripts/seed-tenant.ts` now also seeds `Creator` and `Assignee` roles (resolved by name in `lib/authz.ts`, no per-user role assignment needed). `Creator` is granted exactly `setting.read` + `setting.update`, so a non-admin user can reach their own `/setting` page via the existing `x-self-only` mechanism; `Assignee` is seeded with no permissions (placeholder for future use). Verified against a live database, including the negative case: a user whose `creator_id` does not equal their own id is correctly denied read/update access to their own settings row.
-- Documented (and verified against a live database) a `creator_id` self-reference exception for the `user` entity: every generated `add<Entity>()` sets `creator_id` to the acting user unconditionally, which is wrong for `user` itself (a newly created user could never reach their own `/setting` page, since it filters by `creator_id === the logged-in user's id`). A hand-written `lib/user/service_after_create.ts` hook fixes this — tried first per the generator's existing write-once-stub customization convention, and found sufficient (no new schema flag needed). Not reachable by default (`user.x-generate.new` is `false`); documented in `docs/knowledge/seed-baseline-credential-hardening.md` for any consumer project that enables user creation.
-- **Fixed an SSL deprecation warning during `db:seed-tenant`/runtime queries against Neon**:
-  `pg-connection-string`'s one-time `deprecatedSslModeWarning` fires whenever a connection string's
-  `sslmode` is `prefer`/`require`/`verify-ca` — Neon's connection strings embed `sslmode=require` by
-  default. No first-party code sets any SSL option explicitly (repo-wide grep for
-  `sslmode|ssl:|rejectUnauthorized|NODE_TLS` in `.ts`/`.js` returns zero hits). Confirmed by direct
-  inspection of the installed `pg-connection-string@2.11.0` source, and by a live `pg.Pool.connect()`
-  attempt, that `sslmode=require` and `sslmode=verify-full` produce a byte-identical resulting `ssl`
-  config today — so this is currently cosmetic, not a live weakness — but the deprecation notice means
-  `require`/`prefer`/`verify-ca` will adopt weaker standard libpq semantics once
-  `pg-connection-string`/`pg` reach their next major version, while `verify-full` is guaranteed to keep
-  today's stricter behavior across that bump. Added `lib/db-url.ts`'s `pinSslModeVerifyFull()`, a pure
-  string transform applied in `lib/prisma.ts` and `scripts/seed-tenant.ts` right before constructing the
-  `PrismaPg` adapter: rewrites `prefer`/`require`/`verify-ca` to `verify-full`, no-op otherwise (so
-  local/CI Postgres URLs, which have no `sslmode` param, are unaffected). `prisma migrate deploy`
-  (`vercel-build`) does not go through `pg-connection-string` at all — Prisma's migration engine is a
-  separate Rust-based connector — so it was never affected. Not fixed by suppressing the warning
-  (`NODE_NO_WARNINGS` or similar): that would hide the future behavior change instead of freezing
-  today's safe behavior. Verified live (real `pool.connect()` attempt, no Neon/Vercel connection
-  involved): the warning fires for a raw `sslmode=require` DSN and is silent for the same DSN passed
-  through `pinSslModeVerifyFull()` first, with an identical connection outcome either way. 7 new unit
-  tests in `lib/db-url.test.ts`. Full root-cause writeup:
+- **Fixed two generator defects**: a required one-to-one selector FK made the generated
+  `page_new.tsx` unbuildable (`Cannot find name` — wrong `init_var` naming for
+  `selector_oto_rels` entries); and a parent with no date field of its own but an inline DataGrid
+  child with one generated a `dayjs()` call with no import (`has_datetime_props` didn't check
+  child-grid content). Neither defect is currently live in this repo's own schema, app-template,
+  or app-generator's proj_g schema.
+- **Fixed `npm run lint:prj`'s fail-closed condition being too strict**: a consumer whose `prj/`
+  holds only non-TypeScript content (e.g. schema/SQL files, no hand-written TS) previously failed
+  outright; it now passes with an explicit "measured N files, none .ts/.tsx" message. The three
+  genuine "could not measure" cases (sync failure, no `../prj`, zero synced files of any kind)
+  still fail exactly as before. See `docs/knowledge/consumer-prj-scoped-lint.md`.
+- **Fixed a pending SSL-mode deprecation against Neon connections**: `pg-connection-string`'s
+  `sslmode=require`/`prefer`/`verify-ca` will adopt weaker libpq semantics on `pg`'s next major
+  version. `lib/db-url.ts`'s new `pinSslModeVerifyFull()`, applied in `lib/prisma.ts` and
+  `scripts/seed-tenant.ts`, rewrites those to `verify-full` (currently behaviorally identical, but
+  immune to the future change); local/CI URLs with no `sslmode` param are unaffected. See
   `docs/knowledge/pg-connection-string-sslmode-deprecation.md`.
-- Added an opt-in Neon serverless driver adapter path to `lib/prisma.ts`, gated by the
-  `USE_NEON_ADAPTER` env var (added across two earlier changes). Originally shipped inactive — nothing set this
-  var anywhere. `scripts/vercel-env.sh` now injects it as the fixed literal `"true"` on both
-  Production and Preview for every consumer app provisioned via `vercel-setup.sh` (across two
-  further earlier changes), the same way `AUTH_TRUST_HOST` is injected; `vercel-teardown.sh` removes it on
-  teardown. GCP Cloud Run and local/CI still never set this var, so they are unaffected.
-  When unset, or set to anything other than the
-  literal string `"true"` (fixed in this same change — the original branch used a truthy check,
-  so `USE_NEON_ADAPTER=false` or `=0` would have incorrectly enabled it), behavior is unchanged:
-  falls straight through to the existing `PrismaPg` branch. Verified: with the var unset, `false`, and `0`, the log line stays
-  `Using direct database connection for Prisma Client` (existing `PrismaPg` path, byte-for-byte
-  unmodified); with the var set to `true`, the log line switches to
-  `Using Neon adapter for Prisma Client`. Reconciled with the `pinSslModeVerifyFull()` fix above
-  on a `develop` re-merge: `@neondatabase/serverless` (the driver behind `PrismaNeon`) bundles its
-  own copy of `pg-connection-string` with the same `sslmode` deprecation handling as `pg`, so the
-  Neon branch's connection string is now piped through `pinSslModeVerifyFull()` too, right before
-  constructing the `PrismaNeon` adapter — same guard, same reasoning, applied to both code paths
-  instead of leaving the new one exposed.
-- Added `scripts/lint_prj_synced.py` (`npm run lint:prj`) for consumer projects to lint only their own `prj/`-tracked `.ts`/`.tsx` files, at their real synced destination paths, without linting this repo's own templates or a consumer's fully generated codebase (see `docs/knowledge/consumer-prj-scoped-lint.md`). Runs `prj:sync`, parses its own `copied`/`merged` stdout as the source of truth for what to lint, and fails closed (non-zero exit) if that list is empty for any reason — never silently lints nothing and reports success. Verified standalone (no `../prj` present): fails closed as expected. Verified with a synthetic `../prj` containing one clean and one syntactically-broken `.ts` file: lints both, exits non-zero on the broken one. Does not cap the ESLint warning count (errors-only gate), unlike this repo's own `lint` script — see the knowledge doc for why a shared ceiling would not be meaningful across two structurally different populations.
-- Set `x-generate.test: false` on `approval_flow` — its generated CRUD Cypress specs (desktop/mobile/API) and support helper are being replaced by hand-written coverage that already exercises the entity_name filter/validation design from an earlier change in `cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts`, placed directly in this repo's `cypress/e2e/` so it reaches every consumer via the submodule. Verified via `generate-code`: the three specs, `cypress/support/approval_flow/helper.ts`, and the task registry entry in `cypress/support/generated-tasks.ts` are no longer written (confirmed against `.generated-manifest.json`).
-- Refactored `approval_flow_same_entity_autocomplete_filter.cy.ts` to seed its own two `Role` rows via direct `POST /api/role` calls instead of `cy.task('db:populateApprovalFlowDependencies')`, which only existed while `approval_flow`'s generated test helper (`cypress/support/approval_flow/helper.ts`) was being written — now that `test: false` removes that helper, the spec would otherwise fail its `beforeEach` on every run. Verified: 7/7 tests pass (`cypress run --spec cypress/e2e/approval_flow_same_entity_autocomplete_filter.cy.ts` against a real build), and a full-repo grep confirms no other spec references the removed generated task.
-- **Removed the dead in-process notification store from `lib/_notifier.ts`**: the module-scope
-  `console.log` on import (`[_notifier] in-memory notification store initialized...`) — audible during
-  every `next build` and `next dev`/`next start` boot — described a `Map<userId, Notification[]>` read
-  path (`listNotifications()` / `unreadCount()` / `markAllRead()` / `clearInbox()`) that had zero
-  production callers: `app/api/notifications/*` has read the `notification` Prisma table directly since
-  the table was introduced, and a full-repo grep (source + generated-code templates) found the
-  only callers of those four functions to be this module's own `lib/_notifier.test.ts`. Removed the
-  `console.log`, the `Map`, `pruneExpired()`, and the four dead functions plus `_resetForTests()`;
-  `notify()` (the write path — 6 real call sites, plus the `service.ts.jinja2`/`test_helper.ts.jinja2`/
-  `actions.ts.jinja2` generator templates) is untouched apart from its return type going from
-  `Notification` to `void` (the return value was unused everywhere). `INBOX_CAP`/`TTL_MS`/`type
-  Notification` are kept — `app/api/notifications/route.ts` imports all three for its own DB-side
-  cap/TTL. Corrected the module's header doc comment and `docs/knowledge/notification-triggers.md` (both
-  described the now-removed Map) and a stale "`notify()` itself is in-memory" comment in
-  `lib/_notifyApprovalRequest.ts`. `lib/_notifier.test.ts`'s in-memory-only coverage (per-user isolation,
-  50-entry FIFO cap, 7-day TTL eviction, `unreadCount`/`markAllRead`/`clearInbox`) was removed along with
-  the code it tested; the two tests that cover `notify()`'s own DB write (success + swallowed write
-  failure) were kept and updated for the `void` signature.
 
 ### Security
-- **Value-level write lockdown for `x-approval` entities**: a value that
-  `on_approved.set_fields`/`on_rejected.set_fields` writes when an approval request is
-  approved or rejected (e.g. a `status` field's `approved`/`rejected` value) could
-  previously also be written directly by an ordinary user through the generated form, the
-  REST API, or CSV import — nothing stopped a create/update call from setting the field to
-  that value outright, bypassing the approval/rejection step entirely. `code_generator/
-  helpers/schema_helpers.py`'s new `derive_approval_locked_values()` derives, per entity
-  and per field, the exact value set declared by that entity's own `set_fields`; the
-  shared server-side validator (`service_validation.ts.jinja2`, the single path both the
-  Server Action and the REST route call) and the CSV import route
-  (`api_import_route.ts.jinja2`, which bypasses that shared validator and needed its own
-  copy of the same check) both now reject a client-submitted value from that set, while
-  still allowing a no-op resubmit of a record's own current value so routine edits to
-  other fields on an already-approved/rejected record are not blocked. The generated form
-  (`AppFieldSelect`) also disables the option in the UI, as a usability aid — the two
-  server-side checks are the actual safety boundary, not the disabled UI option. Coverage
-  is not uniform: which entity is fully protected (both `on_approved` and `on_rejected`
-  declare `set_fields`) versus only partially protected (just one of the two does) versus
-  not protected at all (neither does) depends entirely on that entity's own schema
-  declaration — this change does not itself change which entities declare what. An
-  already-generated consumer app only gains this protection after its next
-  `generate-code`.
+- **Closed a bypass letting an ordinary user set an `x-approval` field to a value reserved for
+  `on_approved`/`on_rejected` `set_fields`**, directly via the form, REST API, or CSV import —
+  skipping the approval step entirely. Both the shared validator and the CSV import route now
+  reject such a value (a no-op resubmit of the record's own current value is still allowed).
+  Coverage depends on which of `on_approved`/`on_rejected` an entity declares `set_fields` for.
+  See `docs/knowledge/x-write-locked-values-field-lockdown.md`.
 
 ### Added
 - **CSV export/import and approve/reject now accept `X-API-Key` as well as a browser session**
@@ -2083,14 +1537,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/x-server-value-actor-delegation.md`.
 
 ### Security
-- **CREATE had no read-only field enforcement at all**: PUT's existing AP-3=B rejects a
-  submitted read-only field value that mismatches the persisted row, but CREATE has no row to
-  compare against, so a plain `x-readonly`/`x-readonly-fields` field's client-submitted value flowed
-  straight into the database on create, via both the REST route and the server action — reproduced
-  against a real database before fixing. Both entry points now reject any client-submitted value
-  for such a field on create outright (no legitimate fallback value the way `x-server-value` has
-  actorId). `x-server-value` fields are exempted from this reject; they have their own dedicated
-  resolution (see Added, above). See `docs/knowledge/x-server-value-actor-delegation.md`.
+- **CREATE had no read-only field enforcement**: unlike PUT's existing check, a client-submitted
+  value for an `x-readonly`/`x-readonly-fields` field flowed straight into the database on create,
+  via both the REST route and the server action. Both entry points now reject any client-submitted
+  value for such a field on create (`x-server-value` fields are exempted — see Added). See
+  `docs/knowledge/x-server-value-actor-delegation.md`.
 
 ### Fixed
 - **Generated Cypress test fixtures could crash or click the wrong row for entities with a
@@ -2175,17 +1626,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/appendix/cmd562-location-id-fk-consumer-migration.md` for the consumer migration.
 
 ### Security
-- **Server-action path can no longer bypass multi-stage approval ordering**: the
-  REST route (`app/api/approval_request/[id]/{approve,reject}/route.ts`) enforced
-  `preceded_by` ordering via `assertApprovalOrder()`, but the server action
-  (`lib/approval_request/actions_core.ts`'s `approveApprovalRequest`/`rejectApprovalRequest`,
-  reachable directly via Next.js Server Action RPC from any authenticated client) did not —
-  `ApprovalSection.tsx`'s `precedingApproved` check only hides the button client-side, it is
-  not an authorization boundary. Reproduced against a real database (a later-stage approval
-  succeeded while its preceding stage was still pending) before fixing; both entry points now
-  call the same `assertApprovalOrder()` gate, so rejection wording is identical. See
-  `docs/knowledge/appendix/approval-flow.md` §16.6.1 and
-  `test/flows/approval_order_bypass.test.ts`.
+- **Server Action approval endpoints could bypass multi-stage `preceded_by` ordering** — only the
+  REST route enforced it via `assertApprovalOrder()`; the Server Action reachable from any
+  authenticated client did not (a later-stage approval could succeed while an earlier stage was
+  still pending). Both entry points now call the same check. See
+  `docs/knowledge/appendix/approval-flow.md` §16.6.1.
 
 ### Fixed
 - **`npm run cleanup` could wipe every translated `messages/ja.json` entry**:
@@ -2217,160 +1662,60 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   for a `terminal_rejected` outcome (the notification itself always fired; only the payload was
   wrong). See `docs/knowledge/appendix/approval-flow.md` §16.6 and
   `docs/knowledge/notification-triggers.md`.
+- **Fixed `migrate:deploy` running through Neon's pooled connection instead of a direct one** —
+  Prisma's migration engine needs a session-scoped advisory lock that a transaction-mode pooler
+  doesn't guarantee routes to the same backend connection. `prisma.config.ts` now prefers a new
+  `DIRECT_URL` env var, falling back to `DATABASE_URL` where it isn't set; **on Vercel
+  specifically, config loading now throws if `DIRECT_URL` is unset** (fail-closed against
+  silently regressing to the pooled path). GCP Cloud Run and local/CI are unaffected. See
+  `docs/knowledge/prisma-direct-vs-pooled-connection.md`.
+- **Fixed two generated Cypress scaffold bugs**: a form with 2+ DataGrid children intermittently
+  failed with "can only scroll 1 element, you tried to scroll 2 elements" (unscoped
+  scroll-into-view selectors matched every grid on the page); and DataGrid-child
+  date/date-time/time edit cells rejected every typed value (the generated test scaffold reused
+  the top-level form's human-readable date format against the browser's native strict-ISO
+  `datetime-local` input). Any project could hit either with a future date-typed DataGrid-child
+  field.
+- **Fixed generated test helpers' `populate*Data`/`populate*FullData` silently sharing one
+  FK-dependency row across repeated calls in the same test** (no `db:reset` in between),
+  entangling logically independent test scenarios. Both find-or-creates in `test_helper.ts.jinja2`
+  are now unconditional `create()`s, with a per-entity `callIndex` counter keeping generated loop
+  values collision-free. Generated fixtures are unaffected in form; the isolation matters for
+  hand-written specs that call the same populate function more than once. See
+  `docs/knowledge/cmd614-test-data-uniqueness-design.md` §4.4.
+- **Generated test-helper dependency records now use a letter-indexed name suffix
+  (`'Test {Title} A'`/`'Test {Title} B'`) instead of `'Test {Title}'`/`'Test {Title} 2'`** — the
+  old naming collided byte-for-byte with `populate*Data(n)`'s own loop rows once a loop reached
+  `i=2`, causing find-or-create to resolve both to the same DB row. See
+  `docs/knowledge/cmd614-test-data-uniqueness-design.md` §3.
+- **Fixed `exactRe()`'s exact-match Cypress helper being gated to only 2 self-referential
+  entities** even though the `cy.contains()` substring-collision problem it guards against isn't
+  specific to self-referential deps — widened to all entities, and scoped every call site to
+  `.MuiDataGrid-cell` to avoid matching the header nav's own logged-in-user badge. Also
+  re-anchored two post-render cleanup helpers on code structure instead of comment prose (both had
+  silently stopped firing after an earlier edit) and widened one's `.then(` pattern match to
+  tolerate `async`/typed callbacks.
+- **Fixed 4 Completion gate docs (`update-generator`, `generate-schema`, `update-code`,
+  `add-component`) running `npm run lint` after `generate-code`**, linting ~230 more generated
+  files than CI's own `Lint` job ever checks and producing a mismatched warning count. `npm run
+  lint` is now the first Completion gate step in all four. See
+  `docs/knowledge/lint-gate-must-match-ci-precondition.md`.
 
-### Internal
-- **`check_generated.py`: new `test:unexplained-login` gate rule**: scans every
-  generated `cypress/e2e/api/<entity>.cy.ts` for `cy.login(` with no `dual-auth-session-canary`
-  marker comment in the 5 lines above it, so a `cy.login()` reintroduced into a future template
-  edit fails `npm run check:generated` (gate step 6) instead of silently reintroducing the
-  screen-operation coupling this same cmd removed. Deliberately not allowlist-exemptable like the
-  existing `raw:*`/`write:direct` rules — the exemption has to be the in-file marker, checkable in
-  the same diff that adds the `cy.login()` call, not a separate YAML entry a reviewer has to go
-  find (the same reasoning as before: an exemption nothing checks is a hole, not a safeguard). Verified with a fault-injection test
-  (added an unmarked `cy.login()` to a generated spec, confirmed the gate caught it, reverted) per
-  the established convention, plus 7 new `code_generator/tests/test_check_generated.py` cases. Scope:
-  only walks generated specs for now (mirrors the existing rules' entity-driven enumeration) — the
-  5 proj_b hand-written API specs and proj_c's `prj/`-owned ones are tracked separately (see the separate classification
-  report) as a follow-up, not yet covered by this rule. See
-  `docs/knowledge/testing-cypress.md`'s "API test / UI test boundary" section.
-- **Vercel's `migrate:deploy` ran through Neon's pooled connection instead of a direct one**
-  : `prisma.config.ts`'s `datasource.url` (read only by the Prisma CLI — `lib/prisma.ts`
-  reads `DATABASE_URL` independently for the running app, unaffected by this file) pointed at
-  `DATABASE_URL`, which on Vercel is Neon's pooled (PgBouncer transaction-mode) endpoint.
-  Prisma's migration engine takes a session-scoped advisory lock across a sequence of statements,
-  which a transaction-mode pooler doesn't guarantee routes to the same backend connection — a risk
-  that grows with every migration added, even though nothing has broken from it yet. Fixed by
-  having `prisma.config.ts` prefer a new `DIRECT_URL` env var when set, falling back to
-  `DATABASE_URL` everywhere it isn't (GCP Cloud Run and local/CI already connect directly, no
-  pooler in front of `DATABASE_URL` there — unchanged). Deliberately not Prisma's classic
-  `directUrl` datasource field: confirmed empirically that this project's Prisma config API
-  (`@prisma/config` 7.9.1) doesn't have one (`tsc` rejects it with `TS2353`), and `schema.prisma`'s
-  own `datasource db` block carries no `url` at all in Prisma 7 — the connection string lives only
-  in `prisma.config.ts`. To keep an unset `DIRECT_URL` from silently regressing back to the pooled
-  path on Vercel specifically, config loading now throws if Vercel's own auto-injected `VERCEL` env
-  var is set and `DIRECT_URL` is not — everywhere else the fallback stays silent because there's
-  nothing to route around. Consuming projects (`app-template`, `inventory-app`) pick this up via
-  their `app-generator` submodule pointer — neither carries its own copy of `prisma.config.ts`.
-  See `docs/knowledge/prisma-direct-vs-pooled-connection.md`.
-- `docs/knowledge/prisma-direct-vs-pooled-connection.md`'s "Setting `DIRECT_URL` on Vercel" section
-  is corrected in a follow-up: it originally described a manual, dashboard-only step. `DIRECT_URL`
-  is now injected by `app-template`'s `scripts/vercel-env.sh` alongside every other Vercel env var —
-  see that repo's CHANGELOG for the actual injection change.
-- **The `sameEntityField` generator mechanism replaced with a hand-written validation socket
-  — the business condition ("same-`entity_name`" for `approval_flow`'s `preceded_by`/`followed_by`)
-  no longer lives in `json_schema.yaml` or a `*.jinja2` template** (correcting an earlier generalization:
-  reviewed as a case of a coincidental business rule being generalized into the schema, when a
-  future self-ref relation could need an entirely different condition). Removed entirely:
-  `x-relationships.<rel>.sameEntityField` (`json_schema.yaml`), its `validate.py` checks, its
-  `code_generator/validation_context.py` `same_entity_checks` list, and the generated
-  `validateSameEntityRefs()` function `code_generator/templates/service_validation.ts.jinja2` used
-  to emit. In its place, two purely structural (schema-free) generator changes provide a socket:
-  (1) `code_generator/templates/service_validation.ts.jinja2` now unconditionally imports and calls
-  a new write-once stub, `lib/{entity}/service_validation_custom.ts`
-  (`code_generator/templates/service_validation_custom_stub.ts.jinja2`, same GENERATED-ONCE
-  skip-if-exists convention as `autocomplete_filter.ts`) — every entity gets this call, regardless
-  of whether it needs custom validation; `code_generator/build_context.py`'s `validation_data_obj`
-  now unconditionally exposes every connect-style child's selected id array so a hand-written hook
-  can read any child selection it needs; (2) `code_generator/generators.py`'s
-  `form_upsert_context()` now unconditionally splices every field with a live `useState` variable
-  onto a self-referential child's search `formValues` (previously limited to the one field named by
-  `sameEntityField`) — the generator no longer decides which field (if any) a hand-written filter
-  cares about. `approval_flow`'s actual same-`entity_name` rule is now entirely hand-written: the
-  existing `isCrossEntityRef()` predicate in `lib/approval_flow/autocomplete_filter.ts` (GENERATED
-  ONCE, unchanged) plus a new `lib/approval_flow/service_validation_custom.ts` (GENERATED ONCE) that
-  calls it as the save-time backstop. Also reverts `code_generator/generators_test.py`'s
-  `match_self_entity` self-ref dependency-fixture special-casing (which that generalization had reintroduced)
-  back to the pre-generalization baseline, and the matching selector precision in
-  `code_generator/templates/test_spec.cy.ts.jinja2`'s self-ref autocomplete-picker branch — see
-  `docs/knowledge/same-entity-validation-socket.md` (replaces
-  `docs/knowledge/same-entity-field-mechanism.md`) for the full design and history.
-- **Generated `parent1`-style Cypress spec (2+ DataGrid children on one parent form) intermittently
-  failed with "can only scroll 1 element, you tried to scroll 2 elements", and generated
-  DataGrid-child date/date-time/time edit cells rejected every typed value** (two
-  independent generator-scaffold bugs found and fixed together): (1) the generated scroll-into-view
-  helper's `.MuiDataGrid-virtualScroller` / `data-rowindex` selectors were unscoped, so on a form
-  with multiple DataGrid children (e.g. proj_c's `parent1`, with both `parent1_child1s` and
-  `parent1_child2s`) Cypress matched every grid on the page at once instead of just the target
-  child's — fixed by scoping the selectors to their own grid. (2) `generators.py`'s column_def
-  codegen renders every `date`/`date-time`/`time` field as MUI's built-in `type: 'dateTime'`
-  DataGrid column with no `renderEditCell` override, so editing goes through the browser's native
-  `datetime-local` input, which Cypress's `.type()` validates strictly as ISO `YYYY-MM-DDThh:mm`
-  — but the generated test scaffold's `fillDataGridRow` entries reused the human-readable
-  `MM/DD/YYYY` value the top-level form's `DateTimeWrapper` accepts, and even after ISO-formatting
-  that value, `editDataGridCell`'s `{selectall}`-prefix convention (needed for text/number cells)
-  still failed the same strict `.type()` validation on a datetime-local input. Fixed with a new
-  `_child_datetime_iso_value()` helper plus routing ISO-formatted values through `.clear().type()`
-  instead of the `{selectall}` pattern (text/number cells unchanged). Verified end-to-end in an
-  isolated proj_c worktree, both individually and combined with the sibling org-null fix above:
-  `parent1.cy.ts` 15/15 passing; `code_generator` pytest suite 1220 passed, 1 skipped
-  (pre-existing, unrelated), 0 failed. A repo-wide grep confirmed the underlying generator defect
-  is generic (any project could hit it with a future date-typed DataGrid-child field) even though
-  only proj_c's `parent1` currently exercises it (proj_b/proj_g's only DataGrid children have
-  text-only fields).
-- **Generated test helper's primary-FK-dep and own-record find-or-create removed; each `populate*Data`/`populate*FullData` call now gets a fully isolated slice of the primary FK dep's namespace** (Option β / Phase 2): closes the collision the Phase 1 letter-indexed fix (above) deliberately left open — `populate*Data(n)`/`populate*FullData(n)` called more than once in the same test (same DB session, no `db:reset` in between) could have their per-iteration primary-FK-dep row (`record_lookup_where`'s guard) and the primary FK dep's own row (`primary_fk_dep`'s `lookup_where_unique` guard) found-and-reused across calls, silently entangling two logically independent test scenarios into sharing one FK target row. Both find-or-creates in `test_helper.ts.jinja2` are now unconditional `create()`s. To keep the second call from tripping `@unique` on the primary FK dep's own required fields, a per-entity monotonic `callIndex` (module-scope counter shared by `populate*Data`/`populate*FullData`, persists for the life of the Cypress plugin process) is spliced into the loop value: `` `Test {Title} ${i}` `` → `` `Test {Title} ${callIndex}_${i}` ``. `callIndex` is always `0` for a generated spec's own calls (each `it()` calls a given populate helper at most once), so generated fixtures are unaffected in form beyond the literal string; the isolation matters for hand-written specs (or composite helpers) that call the same populate function more than once in one test. `record_lookup_where`'s own computation, and the now-fully-dead `lookup_where_unique`, are removed from `code_generator/generators_test.py`. D∩L=∅ (the Phase 1 invariant) is preserved — callIndex-shifted loop values still start with a digit, still disjoint from the letter-suffixed shared dep values. See `docs/knowledge/cmd614-test-data-uniqueness-design.md` §4.4.
-- **Generated test helper dep records now use a letter-indexed name suffix(`'Test {Title} A'`/`'Test {Title} B'`) instead of `'Test {Title}'`/`'Test {Title} 2'`** (Phase 1): 
-  the old dep naming collided byte-for-byte with `populate*Data(n)`'s loop rows (`` `Test {Title} ${i}` ``)
-  once a loop reached `i=2`, causing find-or-create to resolve both to the same DB row. Letters and 
-  digits are disjoint at the first differing byte, so the dep and loop namespaces can never intersect. 
-  `_get_dep_populate_fields()`/`_get_dep_extra_required_fields()` in `code_generator/generators_test.py` 
-  updated across every value branch; `prisma_val_unique` (loop values) unchanged. 
-  See `docs/knowledge/cmd614-test-data-uniqueness-design.md` §3.
-- **`exactRe()` exact-match test helper widened from 2 self-referential entities to all entities;
-  the two post-render cleanup helpers it exposed gaps in are now anchored on code structure
-  instead of comment prose, and fail loudly instead of silently no-op'ing**:
-  `test_spec.cy.ts.jinja2`'s `exactRe()` regex matcher (added earlier to stop a self-ref
-  decoy record's display name from substring-colliding with the record a spec creates) was gated
-  behind `has_self_ref_deps`, reaching only 2 of proj_c's 46 generated specs even though the
-  underlying `cy.contains()` substring problem isn't specific to self-referential deps — removed
-  the gate from the function definition and all 8 call sites. Two follow-on issues surfaced only
-  by verifying against proj_c's real schema: (1) an unscoped `cy.contains(exactRe(...))` can match
-  the header nav's own logged-in-user badge when a dependency's display name equals it (e.g.
-  `leave_request`'s `user` FK); fixed by scoping every call site to `cy.contains('.MuiDataGrid-cell',
-  exactRe(...))` — narrow enough to exclude the header, still specific enough for an exact-match
-  regex to match a single field's value rather than a whole row's concatenated text. (2) Widening
-  the gate also rewrote the comment above `exactRe()`, silently desyncing an earlier cleanup helper's
-  `_strip_unused_exact_re_helper()` — its regex was anchored on that exact comment text, so the
-  "strip if unused" cleanup would have quietly stopped firing with no error and no test failure.
-  Re-anchored on the function signature instead, and it now raises when its input contains the
-  signature but the surrounding shape doesn't match, rather than returning the input unchanged.
-  The same latent-gap shape existed in `_prefix_unused_then_callback_params()`'s
-  `_THEN_CALLBACK_RE`: it matched only the exact literal spelling `.then((x) => {` — no `async`,
-  no whitespace variance, and no TS type annotation, so every `.then((res: any) => {` in
-  `test_reservation_spec.cy.ts.jinja2` had passed through unprocessed since that helper landed.
-  Widened to tolerate that real variance while preserving the matched text verbatim, and added
-  `_check_then_callback_coverage()` so any `.then(` shape it doesn't recognize fails generation
-  loudly instead of shipping unprocessed. 10 new regression tests added to
-  `test_generated_dead_code_postprocess.py` (19 total, all passing). Verified end-to-end: `lint`
-  warning count on this branch matches the `develop` baseline exactly (5 warnings, both before and
-  after), and proj_c's full API + UI Cypress suites (57 + 86 specs) reproduce the same pre-existing,
-  unrelated failures before and after this change — zero new failures from any of the above.
-- **`npm run lint` Completion gate step reordered to run before `generate-code`**:
-  CI's `Lint` job never runs `generate-code` (`npm ci && npm run lint` only), but four
-  `.claude/commands/*.md` gates (`update-generator`, `generate-schema`, `update-code`,
-  `add-component`) ran `npm run lint` *after* a step that triggers `generate-code`, linting a
-  much larger, uncalibrated file population (~230 additional generated files) than CI ever
-  checks. This was mistaken for a 15→93 warning regression between commits (investigated
-  separately) — independent re-measurement found no such regression: the post-generate-code count
-  was already 93 at the exact commit (`c10b1b1a`, 2026-08-04) the "15" ceiling was calibrated
-  against; "15" was itself the pre-generate-code count for that same commit, byte-for-byte
-  matching the original per-rule breakdown from that earlier measurement. `npm run lint` is now the first Completion
-  gate step in all four affected files (and `AGENTS.md`'s generated-code-prerequisites rule is
-  corrected to name it as the one exception), guaranteeing local and CI report the same number.
-  See `docs/knowledge/lint-gate-must-match-ci-precondition.md`.
-- **`cypress/support/db-helpers.ts`/`generated-tasks.ts` were stale, missing `personal_note`**
-  : these committed, generator-written files predate the `personal_note` entity
-  (added later in the `x-self-only` Stage 1 work) and were never regenerated afterward —
-  `resetTestDatabase()`'s cleanup ordering never deleted `personal_note` rows, so its later
-  `user.deleteMany()` step hit `Foreign key constraint violated on the constraint:
-  personal_note_creator_id_fkey` in the `before each` hook of any spec running after
-  `personal_note` rows existed, cascading into 8 of 19 `test:e2e:cy:api` spec files failing.
-  Unrelated to the `messages/*.json` fix above; discovered only because it blocked verifying
-  that fix's own e2e gate, and bundled into the same PR to keep the gate green. Re-ran
-  `npm run generate-code` and committed the resulting `db-helpers.ts`/`generated-tasks.ts`
-  (now include `personal_note` in the Level-2 delete order, `ALL_ENTITIES`, and the three
-  `db:populatePersonalNote*` tasks).
+### Removed
+- **Removed the `x-relationships.<rel>.sameEntityField` schema key** and its generated
+  `validateSameEntityRefs()` — a coincidental business rule (self-ref `preceded_by`/`followed_by`
+  same-`entity_name` matching for `approval_flow`) had been generalized into the schema layer.
+  Replaced with a purely structural socket: every entity now gets an unconditional write-once
+  `service_validation_custom.ts` stub, and `approval_flow`'s own same-entity rule is now entirely
+  hand-written. See `docs/knowledge/same-entity-validation-socket.md` (replaces
+  `docs/knowledge/same-entity-field-mechanism.md`).
 
 ### Added
+- **New `check:generated` gate rule, `test:unexplained-login`**: scans every generated
+  `cypress/e2e/api/<entity>.cy.ts` for a `cy.login(` call with no `dual-auth-session-canary`
+  marker comment above it, so a future template edit that reintroduces screen-operation coupling
+  fails the gate instead of silently landing. See `docs/knowledge/testing-cypress.md`'s "API test
+  / UI test boundary" section.
 - **FK autocomplete search now derives from `labelField`; `x-relationship.searchField` is
   removed.** The two used to be independent declarations that could silently drift apart.
   **Breaking for schema authors**: `validate.py` now rejects any schema still declaring
@@ -2449,26 +1794,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   order-reached notification".
 
 ### Security
-- **Enforce MFA on the Google OAuth sign-in path** — previously,
-  `mfa_enabled` was only checked inside `CredentialsProvider.authorize()`,
-  so an SSO-provisioned user (`password === null`) with MFA enabled could
-  sign in via Google and reach a fully authenticated session without ever
-  being asked for a TOTP or recovery code. `auth.ts`'s `jwt()` callback now
-  sets `mfa_pending` on any non-credentials sign-in for an `mfa_enabled`
-  user; `proxy.ts` redirects every protected route to a new
-  `/mfa-challenge` page until it clears. A new `user.mfa_token_version`
-  column closes a related session-persistence gap (enabling MFA didn't
-  previously revoke an already-active JWT). See
+- **MFA could be bypassed via Google OAuth sign-in**: `mfa_enabled` was only checked in the
+  credentials sign-in path, so an SSO-provisioned user with MFA enabled reached a fully
+  authenticated session via Google without a TOTP/recovery-code prompt. The `jwt()` callback now
+  blocks every protected route behind a new `/mfa-challenge` page until MFA clears; a new
+  `user.mfa_token_version` column also revokes an already-active session when MFA is enabled. See
   `docs/knowledge/authentication.md` "MFA on the OAuth path".
-- **Second, independent gate on the test-only mock Google OAuth provider**
-  — `MOCK_GOOGLE_OAUTH_TEST=true` alone previously let anyone who
-  knows a user's email sign in as them with no password/MFA check, if the
-  flag ever leaked into a real deploy's env vars. Registering the mock
-  provider now additionally requires a filesystem sentinel file that only
-  the e2e test harness writes (`scripts/write-mock-oauth-sentinel.js`),
-  never any real build/deploy pipeline; fails closed (throws at startup) if
-  the flag is set without it. See `docs/knowledge/authentication.md`
-  "MFA on the OAuth path" → "Testing without real Google credentials".
 
 ### Fixed
 - **CSV import dotted-FK org filter gap** (security): a dotted `x-import-key` lookup
@@ -2496,84 +1827,23 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   phantom duplicate row rather than updating in place — a separate, deeper natural-key-matching
   limitation, deliberately left unfixed; see the doc's "Known gap" section. See
   `docs/knowledge/csv-import-non-key-fk-write-path.md`.
-
-### Internal
-- **Dependabot `target-branch: develop` never took effect**: Dependabot always reads
-  `.github/dependabot.yml` from the default branch, not `develop`, so `develop`'s copy of the
-  setting was inert; ported to `main`'s copy (PR #248). See
-  `docs/knowledge/dependabot-config-read-from-default-branch.md`.
-- **MUI major-update PRs grouped into one; missing Dependabot labels created**: added
-  an `npm-mui-major` group to `.github/dependabot.yml` (PR #256, the copy on `main` that
-  Dependabot reads) so major-version bumps across the whole `@mui/*` scope land as one PR
-  instead of one per package. Also created the `dependencies`/`npm`/`python`/`github-actions`
-  repo labels that Dependabot's config referenced but that never existed, so future PRs stop
-  reporting a missing-label warning.
-- **fast-uri HIGH CVE (GHSA-7p8r-x3mc-p8w7) blocking the Dependency Audit gate**:
-  transitive via `prisma` → `@prisma/dev` → `@prisma/streams-local` → `ajv@8.20.0` →
-  `fast-uri@3.1.4`; the existing `overrides.fast-uri` pin (`^3.1.4`) had itself frozen the
-  lockfile on the last vulnerable patch. Bumped the override floor to `^3.1.5` (still within
-  ajv's own `^3.0.1` requirement, so no forced major bump). Also closed the 6 moderate
-  advisories reported alongside it with narrow, non-breaking overrides: `undici` scoped to the
-  `@vercel/blob` subtree only (`^6.28.0`, leaving `jsdom`'s separate `undici@8.9.0` untouched)
-  and a global `uuid` bump (`^11.1.1`) for the `gaxios`/`teeny-request` chain under
-  `@google-cloud/storage`, verified those two only call the stable `uuid.v4()` export.
-  Deliberately did not use `npm audit fix --force`, which pulls in a `@google-cloud/storage`
-  downgrade. Verified with a clean `rm -rf node_modules && npm ci` (exit 0) and
-  `npm audit --omit=dev --audit-level=high` (0 vulnerabilities).
-- **`x-approval.set_fields` docs contradicted the implementation**: `docs/knowledge/appendix/approval-flow.md`
-  §16.9 showed `on_approved.set_fields` as a list-of-`{field, value}` entries, contradicting
-  §16.11's mapping form and the only shape `_resolve_set_fields()` (`code_generator/generate.py:289`)
-  accepts (it iterates `raw.items()`). A schema author following §16.9 as written hit an
-  uninformative `AttributeError` deep inside `generate()`. Fixed the doc example to mapping form
-  and added `validate_schema()` Section 10 (`code_generator/validate.py`) to reject a non-mapping
-  `set_fields` before generation runs, naming the entity, the offending field key(s), and the
-  correct form.
-- **`npm run lint` now enforces a warning ceiling** (`eslint --max-warnings 20`, follow-up to
-  an earlier fix): a prior triage found 216 unused-vars/expressions warnings had silently accumulated
-  behind a config gap, one of which was a genuine dead branch — a ceiling that only ratchets down
-  (never silently raised) stops that from recurring unnoticed. Seeded 5 warnings above the
-  measured `develop`-tip count (15) rather than an exact match, so one incidental warning doesn't
-  turn an unrelated PR red. See `docs/knowledge/lint-warning-ceiling-ratchet.md`.
-- **`components/*/form_validation.ts` untracked from version control** (follow-up):
-  `.gitignore` negated this generated file as if it were a customizable stub, but `generate.py`
-  writes it via the unconditional-overwrite `_write()` (not `_write_stub()`), and its template has
-  never had a customization marker even at the file's original commit — so tracking it in git gave
-  a false impression of preservable hand-edits while the generator silently clobbered them every
-  run. Removed the negation and untracked all 8 previously-committed instances; verified a full
-  delete + `generate-code` + `tsc --noEmit` + `check:generated` cycle reproduces them identically
-  with nothing else affected.
-- **cypress excluded from routine `npm-minor-and-patch` bumps**:
-  cypress 15.16.0 → 15.19.0 alone (isolated via a single-variable control
-  experiment) broke `dashboard.cy.ts`'s DataGrid cell lookup, unrelated to
-  the product code or any MUI package. `.github/dependabot.yml` (`main` and
-  `develop` copies) now excludes cypress from grouping and ignores its
-  routine minor/patch bumps; security-update PRs are unaffected. See
-  `docs/knowledge/testing-cypress.md` ("Cypress version held back").
-- **`receiving_confirm_route.ts.jinja2` deleted — orphaned since an earlier removal**: the RC-1
-  ruling (2026-07-13, `docs/knowledge/appendix/inventory-domain-generalization-design.md` §4.5)
-  abolished `x-receiving` and stated `ReceivingConfirmForm.tsx` + the confirm route were "deleted,
-  no replacement." In practice only `ReceivingConfirmForm.tsx` and its `generate.py` call site were
-  removed at the time; the route template itself was never wired into `generate.py` to begin with
-  (git history: both files were added together in the same original commit, `1cebe8ed`, alongside
-  the unrelated `x-reservation.actions` ship/release/cancel feature) and was never referenced by any
-  `_render()`/`_write()` call — an unused, dead file from day one. Confirmed no equivalent leftover
-  for ship/release/cancel: `x-reservation.actions` (the feature that originally shipped
-  `reservation_actions.ts.jinja2`) was already fully removed in that earlier change, template included.
-  Repo-wide grep for `receiving_confirm`/`ReceivingConfirmForm` across `code_generator/`,
-  `json_schema.yaml`/`json_schema_internal.yaml`, and both consumer submodule checkouts
-  (`app-template`, `app-template-4`) returns zero hits after this change.
-- **Generated-test Decimal values were a fixed literal, overflowing narrow `@db.Decimal(p, s)` columns**:
-  every Decimal test-value call site in `code_generator/generators_test.py` (`prisma_value`,
-  `cypress_create_value`, `cypress_edit_value`, `api_value`, `_get_dep_populate_fields`,
-  `_get_dep_extra_required_fields`) planted the same fixed literal (`'10.00'`, `'150.00'`,
-  `'250.00'`, ...) regardless of the column's declared precision/scale. A narrow column such as
-  `Decimal(5, 4)` rejected `'10.00'` outright with a Postgres "numeric field overflow", taking
-  every other generated test in the same spec file down with it — discovered via a real schema
-  with 36 tests failing this way. Values are now derived from the column's own `x-decimal-scale` /
-  `x-decimal-precision` (`schema_deriver.py`, auto-reflected from the Prisma schema), including
-  the all-fractional edge case (`Decimal(4, 4)`, no headroom for a nonzero integer digit).
-  Verified against a real Postgres `numeric(5,4)` column that the old literal reproduces the
-  reported overflow and the new derived value inserts successfully.
+- **Fixed a HIGH-severity transitive CVE (fast-uri, GHSA-7p8r-x3mc-p8w7) blocking the Dependency Audit gate**,
+  plus 6 moderate advisories, via narrow non-breaking `overrides` (no forced major bump, no
+  `@google-cloud/storage` downgrade). `npm audit --omit=dev --audit-level=high` now reports 0
+  vulnerabilities.
+- **Fixed `x-approval.set_fields` documentation contradicting the implementation** (showed a
+  list-of-`{field, value}` form; only a mapping form is actually accepted) — a schema author
+  following the wrong doc form hit an uninformative `AttributeError`. Corrected the doc and added
+  a `validate_schema()` check that now rejects a non-mapping `set_fields` before generation runs,
+  naming the entity and offending key.
+- **`npm run lint` now enforces a warning ceiling** (`--max-warnings 20`) after 216
+  unused-vars/expressions warnings — one a genuine dead branch — had silently accumulated behind a
+  config gap. The ceiling only ever ratchets down. See `docs/knowledge/lint-warning-ceiling-ratchet.md`.
+- **Fixed generated-test Decimal values being a fixed literal that overflowed narrow
+  `@db.Decimal(p, s)` columns** (e.g. `Decimal(5, 4)` rejecting `'10.00'` with a Postgres numeric
+  field overflow, discovered via a real schema with 36 tests failing this way) — test values are
+  now derived from the column's own `x-decimal-scale`/`x-decimal-precision`, including the
+  all-fractional edge case.
 
 ## [3.0.0] - 2026-07-30
 
