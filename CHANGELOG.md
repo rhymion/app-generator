@@ -967,12 +967,21 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/generate-code-idempotency.md`.
 
 ### Removed
-- **Removed the `x-reservation.actions` sub-feature** — the declarative
-  `ship`/`release`/`cancel` lifecycle-action mechanism. `x-reservation` is retained, scoped to
-  inventory allocation and specific-resource reservation; approval/rejection lifecycle goes
-  through the generic Approval Flow System (`x-approval`) instead. No entity in any known
-  schema ever declared an `actions` block. `validate.py` now hard-rejects a schema that still
-  declares it. See `docs/knowledge/appendix/inventory-reservation-split.md` §1.1.
+- **`x-reservation.actions` sub-feature (2026-07-30 ruling)** — the declarative
+  `ship` / `release` / `cancel` lifecycle-action mechanism under `x-reservation`
+  (`reservation_actions.ts` generation, per-action
+  `app/api/{parent}/[id]/actions/{ship,release,cancel}/route.ts` handlers, and the
+  `ReservationActionButtons` UI component) has been removed. `x-reservation` is
+  retained, scoped to exactly two roles: (1) inventory allocation (`count` mode) and
+  (2) specific-resource reservation (`item` mode, e.g. a hotel `room`). Approval/
+  rejection lifecycle for the owning entity goes through the generic Approval Flow
+  System's `approve` / (terminal) `reject` instead (`x-approval`). No entity in the
+  default schema or any known consumer schema ever declared an `actions` block, so
+  this closes zero generated-output diff for existing apps — confirmed by comparing
+  `generate-code` output before/after this change (identical). `code_generator/
+  validate.py` now hard-rejects any schema that still declares `x-reservation.actions`.
+  See [docs/knowledge/appendix/inventory-reservation-split.md](docs/knowledge/appendix/inventory-reservation-split.md)
+  §1.1.
 
 ## [2.0.0] - 2026-06-25
 
