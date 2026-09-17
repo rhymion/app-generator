@@ -7,7 +7,21 @@ on:
     branches: [master, main, develop]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # Keyed on the branch name (head_ref for pull_request, ref_name for push)
+  # rather than on github.ref, so that a push run and a pull_request run
+  # that both cover the same branch/commit land in the same concurrency
+  # group and cancel each other instead of running twice in parallel.
+  # This matters most right after a release PR merges to develop: the
+  # merge produces both a push run (branch=develop) and, while the PR is
+  # still closing, a pull_request run — under github.ref those get
+  # different group keys (refs/heads/develop vs refs/pull/<N>/merge) and
+  # never cancel each other, so the same tree gets built/tested twice.
+  #
+  # Note for later: if `main` ever gets branch protection with a required
+  # check, a push run that gets cancelled here will show up as "no check"
+  # rather than "passed" on that ref — worth remembering before relying on
+  # required-check gating on `main`, since it is currently unprotected.
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
