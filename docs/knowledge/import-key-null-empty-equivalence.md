@@ -26,6 +26,14 @@ like "a NULL row duplicating a NULL row" — the actual mismatch happens
 one step earlier, at the moment the `findMany()` match query runs
 against an incoming `''` versus a stored `NULL`.
 
+**Where that background normalization itself comes from**: a separate, earlier fix made a
+nullable plain-text field written as `''` persist as `NULL` (the same as an omitted value)
+across CREATE/UPDATE/validation generally — this is the "every other write path... already
+normalizes" fact taken as a given above. Before that fix, `''` and an omitted/`NULL` value
+could silently fail to match on a later equality lookup (e.g. inventory bin/lot matching),
+creating duplicate rows instead of updating the existing one. Scoped to plain nullable string
+columns; not extended to DataGrid child-row nested writes.
+
 ## Fix
 
 1. `build_context.py`: the non-dotted key branch's `fk_nullable` is now

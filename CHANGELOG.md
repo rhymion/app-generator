@@ -53,7 +53,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **New pre-generation check (`validate_submit_on_default_matches_prisma()`) flags a
   value-level mismatch between an `x-approval.submit_on` field's JSON `default:` and its Prisma
   `@default(...)`** — the existing cross-schema check only checked *presence*, not value
-  agreement. Scoped to `submit_on` fields only.
+  agreement. Scoped to `submit_on` fields only. See
+  `docs/knowledge/appendix/approval-flow.md` §16.19.
 - **Opt-in `binField` on `x-ledger-entities.<domain>`**, a fifth pool-entity column alongside
   the existing required `itemField`/`locationField`/`lotField`/`expirationField` (all still
   required; this key alone is optional). Omitting it is a no-op (byte-identical output). See
@@ -95,7 +96,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   this. See `docs/knowledge/schema-yaml-configuration.md` (Direct Attachment FK).
 - **`x-uri-kind: file`** — a third `format: uri` field kind alongside `image`/`link`: uploads
   via `/api/upload` like `image`, but displays as a download link/icon instead of an `<img>`.
-  Shares components with the direct-attachment FK above.
+  Shares components with the direct-attachment FK above. See
+  `docs/knowledge/schema-yaml-configuration.md`.
 - **`NEXT_PUBLIC_APP_TITLE` / `NEXT_PUBLIC_APP_COPYRIGHT`** — optional env vars overriding the
   app title and footer copyright text without a code change. Inlined at build time (a Vercel
   rebuild, not just an env var edit, is needed to pick up a change). See
@@ -128,7 +130,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   previously unsupported (`schema_deriver.py` raised `SchemaDivergenceError`). Spans schema
   derivation, form/CSV validation, the numeric-styled form input, and a new `test:decimal-gate`
   fixture (this repo's own schema has no Decimal field, so nothing would otherwise compile these
-  branches).
+  branches). See `docs/knowledge/decimal-field-generator-support.md`.
 - **New dev/verification-only script `scripts/grant-all-permissions.ts`**
   (`npm run db:grant-all-permissions`) grants the `Administrator` role full CRUD on every
   independent entity in one step, including any entity a consumer project adds. `audit_log`/
@@ -137,7 +139,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **New opt-in Neon serverless driver adapter for `lib/prisma.ts`, gated by `USE_NEON_ADAPTER`.**
   `scripts/vercel-env.sh` now injects it as `"true"` on every consumer app provisioned via
   `vercel-setup.sh`; unset or any other value falls through to the existing `PrismaPg` path
-  unchanged. GCP Cloud Run and local/CI are unaffected.
+  unchanged. GCP Cloud Run and local/CI are unaffected. See
+  `docs/knowledge/architecture-overview.md`.
 - **New `npm run lint:prj` script (`scripts/lint_prj_synced.py`)** lints only a consumer's own
   `prj/`-tracked `.ts`/`.tsx` files at their real synced destination paths, without linting this
   repo's templates or the consumer's fully generated codebase. Fails closed (non-zero exit) if
@@ -225,10 +228,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/noindex-default-and-branding-env-vars.md`.
 - **`scripts/seed-tenant.ts` now also seeds `Creator` and `Assignee` roles.** `Creator` is
   granted exactly `setting.read`+`setting.update`; `Assignee` is seeded with no permissions
-  (placeholder for future use).
+  (placeholder for future use). See `docs/knowledge/seed-baseline-credential-hardening.md`.
 - **Removed the dead in-process notification store from `lib/_notifier.ts`** (a no-op read
   path with zero production callers). `notify()`'s write path is unchanged except its return
-  type, now `void`.
+  type, now `void`. See `docs/knowledge/notification-triggers.md`.
 
 - **Generated API test spec no longer authenticates via `cy.login()` except one deliberate
   canary case** — 15 `cy.login()` call sites were classified and switched to
@@ -239,7 +242,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **`fk_read_permission_graceful_degradation.cy.ts` moved from `cypress/e2e/api/` to
   `cypress/e2e/`** — every case in this hand-written spec drives the browser and never issues a
   raw `cy.request`, so it was never actually API-gate coverage despite living under `api/`. It
-  now sits under the UI-spec glob instead.
+  now sits under the UI-spec glob instead. See
+  `docs/knowledge/fk-read-permission-graceful-degradation.md`.
 
 ### Removed
 - **Field-level schema key `x-fk-constrained`** (added in #484) — no consumer schema declared
@@ -278,10 +282,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/grant-all-permissions-x-generate-gate.md`.
 - **Composite/dotted `labelField` on an embedded DataGrid child's own FK relation
   rendered blank** (Issue #539): the child's Prisma include now resolves nested
-  relations the same way the entity's own independent list page already does.
+  relations the same way the entity's own independent list page already does. See
+  `docs/knowledge/child-datagrid-reference-columns.md`.
 - **`format: date`/`time` on an embedded DataGrid child's own field always displayed
   a fixed date+time**, ignoring the field's declared format (Issue #540): now reuses
-  the shared `formatLabelValue()` formatter; `date-time` columns are unaffected.
+  the shared `formatLabelValue()` formatter; `date-time` columns are unaffected. See
+  `docs/knowledge/child-datagrid-reference-columns.md`.
 
 - **An independent child (its own `x-generate` permits new/edit) embedded in a parent with
   a non-`list` `x-outputType` is now read-only everywhere — the parent's edit form, not just
@@ -293,9 +299,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   when nothing references them (Issue #532); and a second, previously-masked
   `ReferenceError` in the same generated Cypress test helper (a self-ref FK misclassified as
   an outer-model dependency) is fixed by tagging self-ref dependencies explicitly instead of
-  inferring them from name equality.
+  inferring them from name equality. See `docs/knowledge/schema-yaml-configuration.md` §7.4.
 - **An embedded DataGrid child's column order now follows its own `x-display.form` declaration
-  when present** — order only; which columns are shown is unchanged.
+  when present** — order only; which columns are shown is unchanged. See
+  `docs/knowledge/readonly-field-form-rendering.md`.
 - **The generated submit-for-approval Server Action no longer throws across the `'use server'`
   boundary, and its caller no longer discards the result.** Failures now return the same
   `ActionFailure` shape as ordinary create/update actions (a reservation-capacity rejection
@@ -318,7 +325,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **CSV import now commits through the same `lib/{entity}/service.ts` functions the REST
   route and Server Action use** (for entities without an embedded-DataGrid-child or
   bridge-child-parent shape), instead of bypassing `validateOnAdd`/`validateOnUpdate` and
-  every `afterCreate`/`afterUpdate` side effect via a raw `tx.model.create/update`.
+  every `afterCreate`/`afterUpdate` side effect via a raw `tx.model.create/update`. See
+  `docs/knowledge/import-create-missing-bridge-fk-fix.md`.
 - **A composite/dotted-label FK's CSV-import lookup now includes org-null candidate rows
   when its target's `organization_id` is optional**, matching the two sibling dotted-FK
   lookup branches — a shared/global reference table with a `NULL` `organization_id`
@@ -328,7 +336,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   omitted value, across CREATE/UPDATE/validation — previously the two forms could silently
   fail to match on a later equality lookup (e.g. inventory bin/lot matching), creating
   duplicate rows instead of updating the existing one. Scoped to plain nullable string
-  columns only; not yet extended to DataGrid child-row nested writes.
+  columns only; not yet extended to DataGrid child-row nested writes. See
+  `docs/knowledge/import-key-null-empty-equivalence.md`.
 - **An entity with `x-generate.edit: false` (create-only) is now fully protected against an
   orphaned edit page**: its Server Action now throws instead of silently creating a
   duplicate row when handed an existing record's id, and its view page no longer offers an
@@ -339,7 +348,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   at all on save** — not FormData, not a POST/PUT body, not even as a generated service
   function's parameter — closing a gap where a hand-written custom validation rule reading
   the field directly (instead of the persisted `prevRow`) could see a fabricated coerced
-  value and wrongly reject an unrelated save.
+  value and wrongly reject an unrelated save. See
+  `docs/knowledge/pre-edit-row-handoff-to-custom-validation.md`.
 - **A hand-written `service_validation_custom.ts` rejection of a present-but-invalid value
   no longer renders as the generic "field is required" text** a genuinely-missing value
   gets — `AppError`/`ActionFailure` now carries a `reason: 'missing' | 'invalid'`, rendered
@@ -378,12 +388,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/fk-read-permission-graceful-degradation.md`.
 - **`get_field_metas()` (test generator) mis-categorized a direct-attachment FK field as a
   plain text column**, breaking generated fill/clear test helpers for it — direct-attachment
-  fields are now excluded from that generic machinery, the same as an internal bridge FK.
+  fields are now excluded from that generic machinery, the same as an internal bridge FK. See
+  `docs/knowledge/schema-yaml-configuration.md`.
 - **i18n key collection for a child table's column headers didn't recognize `type: direct`**,
   leaving a stray unreferenced key in `messages/*.json` for a direct-attachment field
-  reachable as a many-to-many child's column.
+  reachable as a many-to-many child's column. See `docs/knowledge/schema-yaml-configuration.md`.
 - **`build_anonymize_user_context()`'s PII-scrub field ordering anchor was a literal field
-  name (`'image'`) that stopped matching once renamed to `image_id`** — anchor updated.
+  name (`'image'`) that stopped matching once renamed to `image_id`** — anchor updated. See
+  `docs/knowledge/schema-yaml-configuration.md`.
 - **The comment/mention creator avatar select assumed `user.image` is always a
   direct-attachment FK**, breaking the build for a schema where `x-mention: true` but
   `user.image` is still a plain `format: uri` string column. The select now branches on the
@@ -422,11 +434,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **Fixed a silent output-path collision between polymorphic attachable-bridge actions and a
   standard per-entity CRUD actions file** when `attachment` itself gets an `x-generate` block
   — bridge actions now write to `lib/attachment/bridge_actions.ts` instead of clobbering
-  `lib/attachment/actions.ts`. No consumer currently sets `x-generate` on `attachment`.
+  `lib/attachment/actions.ts`. No consumer currently sets `x-generate` on `attachment`. See
+  `docs/knowledge/architecture-overview.md`.
 - **Fixed generated approval-flow test helpers never granting synthetic test users
   membership in a membership-scoped FK dependency**, which made the create-form FK
   autocomplete always return zero candidates and several approval tests unable to
-  submit/view the record.
+  submit/view the record. See `docs/knowledge/testing-cypress.md`.
 - **Fixed a Decimal or date field crashing the write when a user cleared it**, for any
   non-nullable-but-not-required column — now falls back to the field's schema default;
   DataGrid child rows also gained the same validation (previously none at all). See
@@ -435,15 +448,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   (imprecise row/card lookups, a DataGrid child FK single-select ignoring `labelField`, a
   non-nullable `format: uri` field skipped in populate-helper data, an unsearchable
   composite-label autocomplete token) — 14 previously-failing UI e2e specs pass after the
-  fix, no new failures elsewhere.
+  fix, no new failures elsewhere. See `docs/knowledge/testing-cypress.md`.
 - **Fixed generated UI e2e tests asserting a placeholder string instead of the actual value
-  for entities whose list/card primary field is a string or Prisma nativeEnum column.**
+  for entities whose list/card primary field is a string or Prisma nativeEnum column.** See
+  `docs/knowledge/testing-cypress.md`.
 - **Fixed `lib/_decimal.ts` pulling the Node.js Prisma client into every client-side
   bundle**, surfacing as `TurbopackInternalError` on any consumer schema with a Decimal
-  field — the Prisma-free formatter is now split into its own module.
+  field — the Prisma-free formatter is now split into its own module. See
+  `docs/knowledge/decimal-client-server-boundary-gate-limitation.md`.
 - **Fixed two generated-app defects surfaced by UI e2e testing**: read-only Decimal display
   rendered `Decimal.toString()` verbatim instead of the declared scale; and an optional
-  one-to-one selector FK autocomplete returned zero candidates as soon as the user typed.
+  one-to-one selector FK autocomplete returned zero candidates as soon as the user typed. See
+  `docs/knowledge/decimal-field-generator-support.md`.
 - **Fixed the generated Stripe integration stubs throwing at module top level when a
   required Stripe env var was unset**, failing the production `next build` itself for any
   consumer with `x-payment: true` — both checks now defer to first use. See
@@ -461,14 +477,17 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **Fixed `split_same_target_fk_deps()` leaving a stale reference after a same-target
   multi-FK split** (e.g. two FKs on one entity both pointing at the same target) —
   rendered a generated test helper with a `ReferenceError` at test-run time. Also fixed a
-  related dependency-ordering bug.
+  related dependency-ordering bug. See
+  `docs/knowledge/self-ref-dep-fixture-unique-collision.md`.
 - **Removed the hardcoded Stripe `apiVersion` literal from the `x-payment` stub** — it went
   stale on every SDK bump and would eventually break `next build`. The SDK's own default is
   confirmed behaviorally identical. See `docs/knowledge/stripe-payment-integration.md`.
 - **Fixed two generator defects**: a required one-to-one selector FK made the generated
-  `page_new.tsx` unbuildable; and a parent with no date field of its own but an inline
-  DataGrid child with one generated a `dayjs()` call with no import. Neither defect is
-  currently live in this repo's own schema, app-template, or app-generator's proj_g schema.
+  `page_new.tsx` unbuildable (see `.claude/commands/update-generator.md` Completion gate
+  step 6); and a parent with no date field of its own but an inline DataGrid child with one
+  generated a `dayjs()` call with no import (see
+  `docs/knowledge/writable-default-value-fix.md`). Neither defect is currently live in this
+  repo's own schema, app-template, or app-generator's proj_g schema.
 - **Fixed `npm run lint:prj`'s fail-closed condition being too strict**: a consumer whose
   `prj/` holds only non-TypeScript content now passes with an explicit measurement message
   instead of failing outright; the genuine "could not measure" cases are unchanged. See
@@ -493,7 +512,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   not an error) for an `X-API-Key`-only caller with genuine `read` permission** — one of its two
   permission-check branches resolved the acting user from the session cookie instead of the
   already-authenticated actor, so a caller with no session cookie always resolved to no
-  permissions. Both branches now use the same resolved `userId`.
+  permissions. Both branches now use the same resolved `userId`. See
+  `docs/knowledge/multi-tenancy-and-permissions.md`.
 - **`FormUpsert`'s readonly-field display was type-blind**, showing a relation as a raw FK id
   with a nonexistent i18n key instead of its resolved label (enum/date/boolean/image readonly
   fields were also affected, though only cosmetically). Now reuses `FormView`'s existing
@@ -509,7 +529,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   at the same target — corrupting the seeded approver-role name text the newly-scoped selector
   now actually checks. Both are fixed; the sibling `Approve`/`Reject` selectors in the same
   tests carry the identical unscoped-selector hazard and are noted as a follow-up, out of this
-  fix's scope.
+  fix's scope. See `docs/knowledge/testing-cypress.md`.
 - **An org-scoped entity's `organization` relationship can now be declared optional, without
   breaking CREATE, making org-less rows invisible, or leaving them permanently un-updatable.**
   Declaring the relationship optional exposed four separate sites that assumed it was always
@@ -524,7 +544,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **A generated "edits with mixed changes" test for a `user`-FK primary field could select a
   row that was never actually seeded**, failing the autocomplete assertion — the edit path
   wasn't routed through the same dependency populator the create path already used for this
-  field shape. Now routed consistently.
+  field shape. Now routed consistently. See
+  `docs/knowledge/edit-test-fk-primary-target-uniqueness.md`.
 - **A generated Cypress test's per-entity `callIndex` uniqueness counter persisted for the life
   of the Cypress plugin process instead of resetting per test case**, so two `it()` blocks in
   the same spec calling the same populate helper could get different, test-order-dependent
@@ -536,7 +557,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   read of the Jinja2 source can't see that the spliced-in label expression calls it. The import
   is now gated on the same `has_format` signal 7 other templates already use for it. Also fixed
   in the same file: a misplaced `eslint-disable-next-line` comment that silently suppressed
-  nothing.
+  nothing. See `docs/knowledge/cmd607-generator-lint-debt-fix.md`.
 - **Generated UI test scaffolding no longer tries to fill an `x-server-value` field through the
   form** — two code paths generated a fill command against a field that's always excluded from
   form input by design, failing the test outright. See
@@ -544,7 +565,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **A generated test helper's find-or-create block gave `create()` a composite-labelField
   `include` but not the paired `findFirst()`**, a latent type error invisible to every gate
   (Cypress support files aren't type-checked). Both call sites in all 5 affected template
-  shapes now get the same conditional include.
+  shapes now get the same conditional include. See
+  `docs/knowledge/composite-labelfield-helper-findfirst-include-mismatch.md`.
 - **CSV import of an entity with a required internal bridge FK (e.g. `approvable_id` on an
   `x-approval` entity) was broken in two stages of the same underlying gap.** The CSV
   CREATE-feasibility gate wrongly counted a bridge FK as an unfillable required column, forcing
@@ -566,7 +588,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   entirely; both pages now render the same composite label via the existing shared helper.
   Self-referential many-to-many searches for this field now also narrow candidates to the same
   `entity_name` as the record being edited, since same-`entity_name` approval chains are an
-  intentionally supported configuration.
+  intentionally supported configuration (the narrowing half is covered by
+  `docs/knowledge/same-entity-validation-socket.md`).
 - **Generator-side lint debt invisible to CI** (CI's Lint job runs before `generate-code`, so
   it never saw output-only warnings): 83 eslint warnings across a Chai-assertion false
   positive, three dead-binding bugs in two templates, and 22 warnings from scattered scenario
@@ -632,9 +655,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   path reuses the existing `approval_request` row rather than creating a new one, so the
   creation-only notification never re-fired. Both the Server Action and REST route now
   re-notify after the status flip. A related payload bug (rejection notification's `status`
-  field hardcoded to `'rejected'` even for a `terminal_rejected` outcome) is also fixed. See
-  `docs/knowledge/appendix/approval-flow.md` §16.6 and
-  `docs/knowledge/notification-triggers.md`.
+  field hardcoded to `'rejected'` even for a `terminal_rejected` outcome) is also fixed.
 - **Fixed `migrate:deploy` running through Neon's pooled connection instead of a direct one**
   — Prisma's migration engine needs a session-scoped advisory lock a transaction-mode pooler
   doesn't guarantee. `prisma.config.ts` now prefers a new `DIRECT_URL` env var; **on Vercel
@@ -643,7 +664,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **Fixed two generated Cypress scaffold bugs**: a form with 2+ DataGrid children could fail
   with a scroll-into-view element-count error (unscoped selectors matched every grid on the
   page); and DataGrid-child date/date-time/time edit cells rejected every typed value (wrong
-  date format for the browser's native input).
+  date format for the browser's native input). See `docs/knowledge/testing-cypress.md`.
 - **Generated test helpers' `populate*Data`/`populate*FullData` silently shared one
   FK-dependency row across repeated calls in the same test, entangling logically independent
   scenarios** — both find-or-creates are now unconditional `create()`s with a per-entity
@@ -655,7 +676,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **Fixed `exactRe()`'s exact-match Cypress helper being gated to only 2 self-referential
   entities**, even though the substring-collision problem it guards against isn't specific to
   them — widened to all entities. Also re-anchored two post-render cleanup helpers that had
-  silently stopped firing after an earlier edit.
+  silently stopped firing after an earlier edit (see
+  `docs/knowledge/cmd607-generator-lint-debt-fix.md` and
+  `docs/knowledge/self-ref-dep-fixture-unique-collision.md` for this helper's own design/history).
 - **Fixed 4 Completion gate docs running `npm run lint` after `generate-code`**, linting ~230
   more generated files than CI's own Lint job ever checks. `npm run lint` is now the first
   Completion gate step in all four. See
@@ -702,13 +725,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **Fixed `x-approval.set_fields` documentation contradicting the implementation** (only a
   mapping form is actually accepted, not the documented list-of-`{field, value}` form) —
   corrected the doc and added a `validate_schema()` check that now rejects a non-mapping
-  `set_fields` before generation runs.
+  `set_fields` before generation runs. See `docs/knowledge/appendix/approval-flow.md`.
 - **`npm run lint` now enforces a warning ceiling** (`--max-warnings 20`) after 216
   unused-vars/expressions warnings had silently accumulated behind a config gap. The ceiling
   only ever ratchets down. See `docs/knowledge/lint-warning-ceiling-ratchet.md`.
 - **Fixed generated-test Decimal values being a fixed literal that overflowed narrow
   `@db.Decimal(p, s)` columns** — test values are now derived from the column's own
-  `x-decimal-scale`/`x-decimal-precision`, including the all-fractional edge case.
+  `x-decimal-scale`/`x-decimal-precision`, including the all-fractional edge case. See
+  `docs/knowledge/decimal-field-generator-support.md`.
 
 ## [3.0.0] - 2026-07-30
 

@@ -474,6 +474,31 @@ string against a strict `YYYY-MM-DDThh:mm` regex. Two things break it:
 `{selectall}`-prefix pattern (text/number cells keep the `{selectall}` pattern unchanged — this
 is a `datetime-local`-input-specific carve-out, not a general replacement).
 
+### Other known-fixed generated e2e/scaffold defects (running log)
+
+Narrower, one-off generated-test defects surfaced by real-schema runs, kept here rather than as
+standalone documents since each is a short, self-contained fix with nothing more to design:
+
+- **Approval-flow test helpers never granted synthetic test users membership in a
+  membership-scoped FK dependency**, which made the create-form FK autocomplete always return
+  zero candidates and left several generated approval tests unable to submit/view the record.
+- **A 68-entity real-world schema run surfaced multiple generated UI e2e test gaps in one pass**:
+  imprecise row/card lookups, a DataGrid child FK single-select ignoring `labelField`, a
+  non-nullable `format: uri` field skipped in populate-helper data, and an unsearchable
+  composite-label autocomplete token — 14 previously-failing UI e2e specs passed after the fix,
+  with no new failures elsewhere.
+- **Generated UI e2e tests asserted a placeholder string instead of the actual value** for any
+  entity whose list/card primary field is a plain string or a Prisma nativeEnum column.
+- **Generated approval-flow Cypress tests used unscoped, page-wide selectors that could match
+  more than one row**: a "re-submit a rejected request" test's `[aria-label="Re-submit"]` lookup
+  matched every rejected `approval_request` row once an entity had more than one applicable
+  `approval_flow`. Fixing it surfaced a second, previously-invisible bug: `helper_context()`'s
+  per-dependency loop reused the loop variable name `title`, permanently overwriting the entity's
+  own title for the rest of the function once more than one FK pointed at the same target —
+  corrupting the seeded approver-role name text the newly-scoped selector then checked. Both are
+  fixed; the sibling `Approve`/`Reject` selectors in the same tests carry the identical
+  unscoped-selector hazard and remain an open follow-up.
+
 ---
 
 ## MUI DateTimePicker patterns

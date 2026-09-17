@@ -163,6 +163,17 @@ describing the shape a future bridge could take (a plain, synchronous
 hand-written rule that needs one isn't inventing the shape from scratch —
 nothing is generated from it yet.
 
+## Follow-up: a readonly field must read from `prevRow`, never from client input
+
+A hand-written rule that wants "what does this field currently hold" should always read it off
+`prevRow` (this mechanism), not off the field as submitted by the client. For an
+`x-readonly`/`x-readonly-fields` column specifically, a later fix went further: the field is no
+longer read from client input at all on save — not FormData, not a POST/PUT body, not even as a
+parameter to a generated service function — so a hand-written rule that (incorrectly) reads the
+submitted value for a readonly field instead of `prevRow` can no longer see a fabricated/coerced
+value and wrongly reject an unrelated save. `prevRow` remains the one correct source for "the
+field's current, persisted value" for any hand-written rule, readonly or not.
+
 ## Files touched
 
 - `code_generator/templates/service.ts.jinja2` — the `_prevRow` fetch

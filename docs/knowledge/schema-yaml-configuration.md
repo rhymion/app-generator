@@ -498,7 +498,7 @@ under the field's `fields:` override.
 | `format: date` | Renders MUI X DatePicker |
 | `format: time` | Renders MUI X TimePicker |
 | `format: uri` | Renders image preview or link (see `x-uri-kind` below) |
-| `x-uri-kind: image` \| `link` | Only meaningful on a `format: uri` field. Default `image`: renders `ImageUpload` (create/edit) and an image preview on the single-record view page only — an image is never drawn inside any DataGrid cell (list page, BridgeGrid, or an inline editable child DataGrid, §7.1). `link`: renders a plain URL text input (create/edit, `type="url"`) and a clickable external link (`AppFieldExternalLink`) on the single-record view page; also renders as a clickable link wherever the field is listed in `x-display.table` (the list page's DataGrid and a BridgeGrid's read-only embedded grid share the same `uriKind` wiring). Inside an inline editable child DataGrid (§7.1) both kinds fall through to a plain editable text cell — a URL is legitimately editable as text, unlike an image. |
+| `x-uri-kind: image` \| `link` \| `file` | Only meaningful on a `format: uri` field. Default `image`: renders `ImageUpload` (create/edit) and an image preview on the single-record view page only — an image is never drawn inside any DataGrid cell (list page, BridgeGrid, or an inline editable child DataGrid, §7.1). `link`: renders a plain URL text input (create/edit, `type="url"`) and a clickable external link (`AppFieldExternalLink`) on the single-record view page; also renders as a clickable link wherever the field is listed in `x-display.table` (the list page's DataGrid and a BridgeGrid's read-only embedded grid share the same `uriKind` wiring). `file`: uploads via the same `/api/upload` route as `image`, but renders as a download link/icon instead of an `<img>` — shares its display components with the direct-attachment FK (`type: direct`, below) rather than with plain `image`/`link`. Any other value raises a schema-validation error (`x-uri-kind must be 'image', 'link', or 'file'`). Inside an inline editable child DataGrid (§7.1) all three kinds fall through to a plain editable text cell — a URL is legitimately editable as text, unlike an image. |
 | `format: regex` | Hint that the value is a regex; rendered as text input |
 | `default` | Pre-fills the field in new form. **Not** auto-derived from Prisma's `@default(...)` even when one exists — the legacy schema sometimes omitted it even where Prisma had a default, so its presence is always a deliberate, user-authored `fields:` entry. |
 
@@ -946,6 +946,18 @@ fixture test that exercises this branch
 (`code_generator/tests/fixtures/direct_attachment_gate/`) rather than repeated here. DataGrid
 child-cell rendering of a direct-attachment field is an open design question, not yet landed --
 this page does not cover it.
+
+**Three follow-up gaps in generic (non-direct-attachment-aware) generator machinery, all fixed**:
+a direct-attachment FK field was initially still treated as a plain text column by the test
+generator's `get_field_metas()`, breaking generated fill/clear test helpers for it -- direct-
+attachment fields are now excluded from that generic machinery, the same as an internal bridge
+FK. Separately, i18n key collection for a child table's column headers didn't recognize
+`type: direct`, leaving a stray unreferenced key in `messages/*.json` for a direct-attachment
+field reachable as a many-to-many child's column -- now excluded there too. And
+`build_anonymize_user_context()`'s PII-scrub field ordering anchor was a literal field name
+(`'image'`) rather than derived from the schema -- once a consuming schema renames its
+direct-attachment FK (e.g. `user.image` -> `user.image_id`, as this repo's own demo schema did,
+below), the anchor stopped matching; it is now derived rather than hardcoded.
 
 **`user.image` and the comment/mention creator avatar**: this repo's own demo schema moved
 `user.image` to a direct-attachment FK (`image_id`), but a consumer schema that still declares

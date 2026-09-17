@@ -108,3 +108,16 @@ exactRe(...))`, with `.find('a').first().click()` directly on the matched cell (
 needed — the cell is the link's direct parent). Verified via DOM inspection that each MUI DataGrid
 cell (`data-field="..."`) holds only its own field's text, so an anchored match against one cell
 excludes the header while still hitting the intended field.
+
+## Related, separately-fixed bug: `split_same_target_fk_deps()` stale reference
+
+A different bug in the same generated-test dependency-resolution neighborhood
+(`generators_test.py`), not the fixture-collision issue above: when an entity declares two or
+more FK fields pointing at the same target (e.g. two different roles both referencing `party`),
+`split_same_target_fk_deps()` is what splits those into separate, distinctly-named dep variables
+so the generated test code doesn't collapse them onto one shared variable (which would either
+throw a `ReferenceError` from a duplicate `let` declaration, in contexts that declare deps as
+local variables, or silently render every such FK pointing at the same row, in contexts that read
+deps off an object instead). A same-target multi-FK split could leave one of the split entries
+with a stale reference after the split, reproducing the `ReferenceError` the split exists to
+prevent; fixed alongside a related dependency-ordering bug in the same function.
