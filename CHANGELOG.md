@@ -261,10 +261,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/vercel-region-alignment.md`.
 - **An unreachable Redis no longer crashes `/api/auth/*`** (Issue #587): the rate
   limiter now fails OPEN on any Redis error instead of throwing, logging the degraded
-  window (`[rate-limit:fail_open]`) rather than failing silently.
+  window (`[rate-limit:fail_open]`) rather than failing silently. See
+  `docs/knowledge/authentication.md`.
 - **OAuth+MFA second-factor Server Action had no rate limiting** (Issue #588):
   `completeMfaChallenge` now has its own `auth:mfa:challenge` bucket (10 attempts / 5
-  min, keyed by user id), surfacing a `RATE_LIMITED` error on the challenge page.
+  min, keyed by user id), surfacing a `RATE_LIMITED` error on the challenge page. See
+  `docs/knowledge/authentication.md`.
 - **The generated app could show create/edit affordances (list page's "+" button,
   edit icon, and the `grant-all-permissions.ts` dev script's own grants) for an
   operation `x-generate` actually disables**, 404ing when clicked. Both the dev
@@ -272,7 +274,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `ResponsiveListClient`) now derive their allow/deny from the entity's real
   `x-generate.new`/`.edit`/`.delete`/`.list`/`.view`/`.import` (a Jinja2 `.update`
   accessor bug that had defeated the dev-script fix for `update` specifically is
-  also closed). Delete was already correct and unaffected.
+  also closed). Delete was already correct and unaffected. See
+  `docs/knowledge/grant-all-permissions-x-generate-gate.md`.
 - **Composite/dotted `labelField` on an embedded DataGrid child's own FK relation
   rendered blank** (Issue #539): the child's Prisma include now resolves nested
   relations the same way the entity's own independent list page already does.
@@ -300,7 +303,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/error-message-framework.md`.
 - **An optional (nullable) enum field with no `default:` no longer seeds the first enum
   member on the "new" form** — it now stays unset until the user picks a value; fields with
-  an explicit `default:` are unaffected.
+  an explicit `default:` are unaffected. See `docs/knowledge/nullable-enum-default-fix.md`.
 - **`sharp`/`baseline-browser-mapping` CVEs resolved** via non-breaking `npm audit fix`
   (GHSA-rgj7-g3m4-5g8c, GHSA-w5vr-8v7q-w6rv) — newly-published advisories, not a regression
   in this repo.
@@ -318,7 +321,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **A composite/dotted-label FK's CSV-import lookup now includes org-null candidate rows
   when its target's `organization_id` is optional**, matching the two sibling dotted-FK
   lookup branches — a shared/global reference table with a `NULL` `organization_id`
-  previously produced zero candidates and failed every import referencing it.
+  previously produced zero candidates and failed every import referencing it. See
+  `docs/knowledge/org-optional-entity-support.md`.
 - **A nullable plain-text field written as `''` now persists as `NULL`**, the same as an
   omitted value, across CREATE/UPDATE/validation — previously the two forms could silently
   fail to match on a later equality lookup (e.g. inventory bin/lot matching), creating
@@ -338,7 +342,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **A hand-written `service_validation_custom.ts` rejection of a present-but-invalid value
   no longer renders as the generic "field is required" text** a genuinely-missing value
   gets — `AppError`/`ActionFailure` now carries a `reason: 'missing' | 'invalid'`, rendered
-  via a distinct i18n key.
+  via a distinct i18n key. See `docs/knowledge/error-message-framework.md`.
 - **A field narrowed via `x-autocomplete-context` no longer offers an unfiltered default
   candidate list before the user types anything** — it now live-refetches through the
   context-aware search action on mount and whenever the sibling context field changes.
