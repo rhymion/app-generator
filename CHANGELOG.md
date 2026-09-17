@@ -6,133 +6,29 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [4.0.0] - 2026-09-16
 
 ### Fixed
-- **A `vercel.json` that lost its `regions` key (or predates it) was never
-  repaired by `generate-code`**: `_write_vercel_json_crons` in
-  `code_generator/generate.py` already reads back and patches this
-  otherwise hand-authored file (for the `crons` key), but a missing
-  `regions` key was previously left absent forever. It now self-heals: a
-  missing `regions` key is backfilled with the single-region default
-  (`['sin1']`); an existing value -- whatever it is -- is never touched.
-  Covered by new cases in `code_generator/tests/test_vercel_json_crons.py`.
-  See `docs/knowledge/vercel-region-alignment.md`.
-- **An unreachable Redis crashed the whole `/api/auth/*` surface instead of degrading**
-  (Issue #587): `lib/rate-limit/redis.ts`'s `check()` had no error handling around its
-  `ioredis` `eval` call, so a Redis outage produced an uncaught exception on every
-  credential/OAuth sign-in and callback request. The Redis adapter now fails OPEN on any
-  error — availability over the marginal brute-force protection lost while Redis is down —
-  and always logs the degraded window (`console.error`, tagged `[rate-limit:fail_open]`) so
-  the fallback is never silent. Covered by a new test in `lib/rate-limit/redis.test.ts`.
+- **A missing `regions` key in `vercel.json` is now backfilled** (`['sin1']` default)
+  instead of left absent forever; an existing value is never touched. See
+  `docs/knowledge/vercel-region-alignment.md`.
+- **An unreachable Redis no longer crashes `/api/auth/*`** (Issue #587): the rate
+  limiter now fails OPEN on any Redis error instead of throwing, logging the degraded
+  window (`[rate-limit:fail_open]`) rather than failing silently.
 - **OAuth+MFA second-factor Server Action had no rate limiting** (Issue #588):
-  `completeMfaChallenge` (`app/[locale]/mfa-challenge/actions.ts`) isn't reachable through
-  `proxy.ts`'s `/api/auth/*` rate-limit matcher — it's a normal page route's Server Action —
-  so it had zero protection against a stolen-session attacker brute-forcing the
-  TOTP/recovery code. Added a new `auth:mfa:challenge` rate-limit bucket (10 attempts / 5
-  min, `lib/rate-limit/index.ts`), keyed by the session's user id rather than IP: the
-  attacker already holds a valid first-factor session and can rotate IPs, but not the
-  session's user id. Surfaces a new `RATE_LIMITED` error on the challenge page. Covered by
-  a new `app/[locale]/mfa-challenge/actions.test.ts`.
-- **`grant-all-permissions.ts` (dev/verification tool) granted an operation regardless of
-  that entity's own `x-generate` configuration**: it iterated every `SEED_ENTITIES` name and
-  granted a blanket `{create, read, update, delete, import: true}`, never consulting
-  `x-generate.new`/`.edit`/`.delete`/`.list`/`.view`/`.import`. When an operation is disabled
-  (e.g. `x-generate.new: false`), `generate.py` never writes the corresponding page/route, but
-  the Administrator role still received the permission — so the generated UI showed an
-  affordance (the list page's "+" button, and the edit icon) that 404s when clicked, directly
-  undermining demo usability. `seed_entities_context()` (`code_generator/generators.py`) now
-  derives a per-entity, per-operation grant from each entity's real `x-generate` block (the
-  same `can_create`/`can_update`/`can_delete`/`can_list`/`can_view` formula
-  `build_context.py`'s own per-entity context builder uses, plus `build_context.py`'s own
-  `import_eligible` formula for `import`), exported as `SEED_ENTITY_GRANTS` in the generated
-  `scripts/generated/seed-entities.ts` alongside the existing `SEED_ENTITIES` name list.
-  `grant-all-permissions.ts` now upserts each entity's own resolved grant instead of a
-  blanket `true`, and its `DRY_RUN` output reports granted/withheld per operation. Confirmed
-  on real schemas: this repo's own `user` entity (`x-generate.new: false`, `delete: false`)
-  and, re-measured directly against the generated `SEED_ENTITY_GRANTS` object for
-  inventory-app: `purchase_order`/`inventory_adjustment`/`inventory_movement`/
-  `inventory_reservation`/`sales_order`/`supplier_return`/`goods_receipt_line_amendment`/
-  `inventory`/`inventory_transaction` (`x-generate.edit: false`, 9 entities) and
-  `asn_status`/`inventory_transaction`/`supplier_return_status`/`user`
-  (`x-generate.new: false`, 4 entities) now
-  correctly withhold `create`/`update` instead of granting it. Regression covered by
-  `code_generator/tests/test_seed_entities_context.py` and a new
-  `scripts/grant-all-permissions.test.ts` vitest suite.
-- **`seed_entities.ts.jinja2` silently rendered `update` as always `true`**: the template
-  read each entity's grant with Jinja2's `.` attribute accessor
-  (`seed_entity_grants[entity].update`). Jinja2 resolves `.` by trying `getattr()` before
-  falling back to `__getitem__()` — and Python dicts have their own built-in `update()`
-  method, so the accessor returned that bound method object (always truthy) instead of the
-  dict's `'update'` key, defeating the fix above for exactly the one operation
-  (`x-generate.edit` → `update`) it exists to scope correctly. `create`/`read`/`delete`/
-  `import` do not collide with any dict method name, so they were unaffected by the same
-  accessor style. This repo's own schema never exercises the buggy branch (no
-  `SEED_ENTITIES`-eligible entity here has `x-generate.edit: false`), so it surfaced only
-  when generating a real consumer schema and reading the actual rendered TypeScript text.
-  Fixed by switching all five fields to explicit `['key']` item access. Regression covered
-  by a new `code_generator/tests/test_seed_entities_template_render.py`, which renders the
-  real template and asserts the output text (not just the Python context dict) — the prior
-  test coverage never exercised the rendering step itself, which is exactly where this bug
-  lived.
-- **The generated list page's create ("+") button and edit icon rendered regardless of
-  `x-generate.new`/`.edit`**: independently of the `grant-all-permissions.ts` fix above, the
-  shared `DataGridClient`/`CardListClient`/`ResponsiveListClient` components gated the "+"
-  button only on `permissions.create && allowCreate` (`allowCreate` previously reflected only
-  whether the entity was a bridge child) and the edit icon only on `permissions.update`, with
-  no structural check against `x-generate.new`/`.edit` at all — so any role granted
-  create/update permission (via the Permissions UI directly, not only via
-  `grant-all-permissions.ts`) saw an affordance that 404s when clicked. This is a second,
-  independent defense layer: `allowCreate` now also reflects `x-generate.new`, and a new
-  `allowEdit` prop (mirroring `allowCreate`'s shape) reflects `x-generate.edit`, both threaded
-  from `page_list.tsx.jinja2` through all three shared list components. Delete was not part of
-  this fix: the list page already omits `removeAction` when `x-generate.delete` is `false`, so
-  `DataGridClient`'s `permissions.delete && removeAction` check already suppressed that button
-  — this is a pre-existing, correct pattern this fix extends to create/edit, not a new
-  mechanism. Confirmed with a live screenshot on inventory-app's `purchase_order`
-  (`x-generate.edit: false`): with the Administrator role's `update` permission deliberately
-  forced to `true` (simulating a hand-granted permission), the edit icon does not render.
-- **Composite/dotted `labelField` on an embedded DataGrid child's own FK relation rendered
-  blank (issue #539)**: `build_context.py`'s `child_include_entries` builder gave every FK
-  relation on an embedded (`x-outputType != list`) child a flat `true` Prisma include,
-  regardless of whether that relation's own `labelField` walks a nested relation (e.g.
-  `inventory_id`'s `labelField: [item.sku, location.code, bin.code, ...]`). A flat `true`
-  only fetches the FK target's own scalar columns, so any dotted `labelField` segment on the
-  target's own relation (`item`, `location`, `bin`) rendered as `undefined` at runtime — the
-  row displayed with 2-3 of its label segments blank. The same relation's independent list
-  page (its own `get{Entity}Detail` getter) already built the correct nested include via
-  `_include_entry_for_rel()`/`build_label_expression()`; the embedded-child code path never
-  reused that logic. Now each embedded child's own FK relations get the same nested-include
-  resolution, reusing the existing `_merge_into_child()` helper — simple (non-dotted)
-  `labelField`s are unaffected (stay a flat `true`). Confirmed on real schemas: proj_g
-  (`goods_receipt_line`, `inventory_reservation`, `shipment_line`, `asn_line` — 10 affected FK
-  relations across 4 embedding parents) and proj_c (`purchase_per_item`, `receiving_receipt_line`,
-  `asset_component` — 3 affected FK relations across 3 embedding parents) now produce Prisma
-  includes byte-identical to the corresponding independent entity's own getter. Regression
-  covered by `code_generator/tests/test_embedded_datagrid_child_dotted_labelfield_include.py`
-  (nested-include boundary, and cross-checked against the independent entity's own include).
-- **`format: date`/`time` on an embedded DataGrid child's own field always displayed a
-  fixed `YYYY-MM-DD HH:mm` (issue #540)**: `generators.py`'s `column_def_context` (the
-  embedded-child `GridColDef` builder) hard-coded `dayjs(value).format('YYYY-MM-DD HH:mm')`
-  and MUI column `type: 'dateTime'` for every `format: date`/`date-time`/`time` field,
-  ignoring the field's own declared `format`. A `format: date` column showed a spurious time
-  component, and a `format: time` column showed a spurious date component. Now reuses the
-  shared `formatLabelValue()` helper (`lib/_format.ts`, already used by the independent list
-  page's `DataGridClient`) so the displayed format matches the field's own `format`; the MUI
-  `type` is aligned too (`'date'` for `format: date`, unchanged `'dateTime'` for
-  `date-time`/`time`, since MUI's DataGrid has no dedicated `time` column type). The dead
-  `show_date_str` variable (computed but never interpolated into the generated output) is
-  removed. `date-time` columns render identically to before (unaffected). Confirmed on real
-  schemas: proj_g (`purchase_order_line.requested_delivery_date`, `asn_line.expiry_date`,
-  `goods_receipt_line.expiry_date`) and proj_c (`parent1_child2.start_date`/`end_date`).
-  Regression covered by `code_generator/tests/test_embedded_datagrid_column_date_format.py`
-  (`date`/`date-time`/`time` MUI column type and formatter, `date-time` unaffected).
-- Investigated a third, related gap flagged during the above (embedded-child DataGrid columns
-  never call `get_uri_kind()`, so an `x-uri-kind: link` field would render as plain text
-  inside an embedded DataGrid while the independent list page renders it as a link) and
-  confirmed it is **not a bug**: this exact branch was already deliberately decided and gated
-  (PR#406) — `column_def_context` keeps both `link` and `image` URI kinds as a plain editable
-  text cell in every embedded-child DataGrid, on the ruling that a URL is legitimate to type
-  into an editable cell (unlike an image, which never renders inside any grid cell anywhere in
-  this codebase). Covered by the existing `test:uri-kind-gate` fixture (gate step 13). No code
-  change made for this item.
+  `completeMfaChallenge` now has its own `auth:mfa:challenge` bucket (10 attempts / 5
+  min, keyed by user id), surfacing a `RATE_LIMITED` error on the challenge page.
+- **The generated app could show create/edit affordances (list page's "+" button,
+  edit icon, and the `grant-all-permissions.ts` dev script's own grants) for an
+  operation `x-generate` actually disables**, 404ing when clicked. Both the dev
+  script and the shared list components (`DataGridClient`/`CardListClient`/
+  `ResponsiveListClient`) now derive their allow/deny from the entity's real
+  `x-generate.new`/`.edit`/`.delete`/`.list`/`.view`/`.import` (a Jinja2 `.update`
+  accessor bug that had defeated the dev-script fix for `update` specifically is
+  also closed). Delete was already correct and unaffected.
+- **Composite/dotted `labelField` on an embedded DataGrid child's own FK relation
+  rendered blank** (Issue #539): the child's Prisma include now resolves nested
+  relations the same way the entity's own independent list page already does.
+- **`format: date`/`time` on an embedded DataGrid child's own field always displayed
+  a fixed date+time**, ignoring the field's declared format (Issue #540): now reuses
+  the shared `formatLabelValue()` formatter; `date-time` columns are unaffected.
 
 ### Added
 - **An independent child (own `x-generate`) may now be embedded in a parent's view with any
@@ -204,398 +100,78 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   (4 dedicated tests) is removed with it.
 
 ### Fixed
-- **A datagrid child's self-referencing FK (e.g. `goods_receipt_line.parent_goods_receipt_line_id
-  -> goods_receipt_line`, an `x-splittable` `parentField`) no longer pulls the datagrid's own
-  parent/ancestor entity in as an extra, org-blind dependency row** (issue #531). The "FK deps
-  needed by datagrid children" loop in `helper_context()`
-  (`code_generator/generators_test.py`) walked `resolve_dependencies(target, schema)` for every
-  autocomplete FK target unconditionally, including a self-referencing FK whose target is the
-  datagrid child's own entity type. That walk followed the child's own other required FKs (e.g.
-  `goods_receipt_line`'s own `goods_receipt_id -> goods_receipt`) and registered the datagrid's
-  own parent entity as an independent dependency outside any org scope, inflating
-  `populateXxxDependencies()`'s created-row count every time it ran and breaking org-count
-  assumptions in generated tests (`goods_receipt.cy.ts`'s "1.2 returns page with items" and "N3
-  only returns rows from the caller's own organization"). Fixed by skipping a datagrid-child
-  field's `dep_target` entirely when it equals the child's own entity type, before any
-  resolution happens -- narrower than a prior related fix (issue #531) for a related
-  `ReferenceError`, which reordered this same dependency without removing it. Two regression
-  tests locking in the ordering fix's specific behavior are updated to assert the new (narrower)
-  behavior instead.
-
-  The same unconditional "target is a real dependency" assumption was independently duplicated
-  in two more places in `generators_test.py` that also iterate a datagrid child's autocomplete
-  FK fields, and both had to be given the identical skip: the `fields_prisma` builder for
-  `populate{Parent}{Child}Data()` (the generated "add a child row to an existing parent" test
-  helper) still emitted `parent_goods_receipt_line_id: deps.parentGoodsReceiptLine.id` even
-  after the fix above removed `parentGoodsReceiptLine` from `deps` -- a dangling reference that
-  crashed every UI e2e spec exercising datagrid-child add/edit (`goods_receipt.cy.ts`'s "2.1"
-  through "6.2") with `TypeError: Cannot read properties of undefined (reading 'id')`; and the
-  `has_child_fk_deps` flag (gates whether a `deps` object is declared and populated at all)
-  still counted a self-referencing FK as a real dependency, which would have produced a false
-  `has_deps: true` for the (currently hypothetical) case of a datagrid child whose *only*
-  autocomplete FK is such a self-reference. Since this class of FK is always nullable (a
-  splittable `parentField` cannot be required -- the first, unsplit row has nothing to point
-  at), the correct behavior in the row-creation helper is to omit the field from the `create()`
-  call entirely, leaving it at its natural `null`.
-
-- **An independent child (own `x-generate` permitting new/edit) embedded in a parent with a
-  non-`list` `x-outputType` is now read-only from the parent's edit form too, not just its view
-  page** (issue #520/PR#528 follow-up). PR#528's own verification above covered only the view
-  page's `FieldsViewGrid` rendering; the edit page (`FormUpsert.tsx`) still built a fully
-  writable `DataGridClient` for such a child (add/edit/delete, `EntityAutocompleteCellConfig`
-  FK pickers), and the parent's own service still emitted `child_nested_create`/
-  `child_nested_update` for it. Root cause: `build_context.py`'s `is_independent` flag was
-  gated on `output_type == 'list'` -- harmless before PR#528 (that combination was previously
-  impossible), stale once PR#528 allowed it. Fixed by removing the gate and narrowing a new
-  `write_ch` (excludes an independent, non-connect child from every write-path site regardless
-  of output_type) while leaving the broader `embedded_ch`/`ctx['non_comment_ch']` (needed for
-  column-hook generation) unchanged; `FormUpsert.tsx` now renders such a child via the same
-  read-only `FieldsViewGrid` + `use{Prop}Columns(false)` FormView.tsx already used. Two related
-  dead-prop leaks sharing the same root cause (a self-referencing child's own relation target
-  leaking into places that assume a target is never the child's own name) were found and fixed
-  alongside it: `context.py`'s `all_option_targets`/`child_rel_targets` and
-  `build_context.py`'s `_get_selection_targets()` both produced a dead
-  `initial{Child}s`/`search{Child}Options` `FormUpsertProps` pair nothing in the generated
-  component ever used. Verified end-to-end through an isolated scratch fixture (independent
-  non-list child sharing an FK name with its parent, plus a self-referencing FK) run through
-  the real `build_user_schema.py` -> `generate.py` -> `prisma generate` -> `tsc --noEmit`
-  pipeline: the generated service's add/update functions no longer reference the child, `tsc`
-  is clean, and no dead props remain.
-- **Two real-schema-only regressions from the independent-read-only-grid-child fix above
-  (issue #520/PR#530), plus a pre-existing, unrelated generated-test-helper defect it exposed
-  (issues #531, #532):**
-  - A generated Cypress test helper (`cypress/support/<entity>/helper.ts`) could throw
-    `ReferenceError` at runtime: the datagrid-child FK-dependency-extension loop in
-    `generators_test.py` re-derived a sibling FK's already-registered dep variable name as
-    `to_camel_case(<target>)` instead of looking it up, producing a dangling reference whenever
-    a self-referencing child shares that target through its own relations (e.g. a
-    `destination_bin_id -> bin` FK alongside a `parent_line_id` self-reference on the same
-    child). Pre-existing in `generators_test.py`, unrelated to PR#530 — reproduces identically
-    against the commit immediately before it.
-  - `normalizeChildRefs` could be imported into a generated `service.ts` with nothing left to
-    reference it: the import gate checked the unnarrowed `has_non_comment_ch` instead of
-    whether the actually-rendered `snapshot_child_mappings` (built from `write_ch`, which
-    PR#530 narrows) is non-empty.
-  - A generated `FormUpsert.tsx` could destructure unused `initial{Xxx}s`/`search{Xxx}Options`
-    props: `FormUpsertProps`' target-exclusion logic already dropped a target reachable only
-    through a readonly or undisplayed *parent-level* relation, but had no equivalent exclusion
-    for a target reachable only through a read-only independent grid child's *own* FK field.
-  Both PR#530-introduced cases are fixed by keying off the actual narrowed
-  (`write_ch`/`readonly_indep_grid_ch`-aware) state instead of the unnarrowed one; the
-  pre-existing helper.ts defect is fixed by looking up each FK dependency's registered variable
-  name instead of re-deriving it.
-- **A second, previously-masked `ReferenceError` in the same generated test helper (issue
-  #531), exposed only after the `bin` fix above let execution reach it:** `helper_context()`'s
-  datagrid-child FK-dependency-extension loop calls `resolve_dependencies()` for a child's own
-  self-referencing FK target (e.g. `goods_receipt_line.parent_goods_receipt_line_id ->
-  goods_receipt_line`). That nested call has no notion of the *outer* model the whole helper is
-  for, so when the child also carries an ordinary required FK back to that outer model (e.g.
-  `goods_receipt_line.goods_receipt_id -> goods_receipt`), the nested resolution walks straight
-  through it and injects a dep entry whose `target` happens to equal the outer model's own name
-  — indistinguishable, by the existing `target == model_name` check, from a genuine
-  self-referencing FK on the outer model itself. That misclassification deferred the dep's
-  creation to `populate{Pascal}Dependencies()` (run *after* `_create{Pascal}BaseDeps()`
-  returns), while the child's own dep that needs it as an FK is non-self and rendered *inside*
-  `_create{Pascal}BaseDeps()` — a forward reference to a not-yet-declared variable, thrown only
-  at runtime. Fixed by classifying self-ref deps on an explicit tag set only by the two
-  deliberate self-ref-injection code paths, instead of on `target == model_name` alone; a dep
-  that reaches that shape via nested transitive resolution is now treated as an ordinary
-  non-self dep, created in the same function, in the list-order position it was already
-  appended at (always before the dependent that needs it). Regression test:
-  `code_generator/tests/test_datagrid_child_selfref_grandparent_backref_ordering.py`.
-  A related, separately-tracked defect this fix exposes in turn (the same decoy record now
-  created successfully also counts toward the outer entity's own-organization row totals in two
-  generic CRUD/export tests) remains open — see issue #531 for status.
+- **An independent child (its own `x-generate` permits new/edit) embedded in a parent with
+  a non-`list` `x-outputType` is now read-only everywhere — the parent's edit form, not just
+  its view page** (Issue #520). Fixing this also surfaced and closed three related generator
+  defects in the same code paths: a datagrid child's self-referencing FK (e.g. a splittable
+  `parentField`) no longer gets pulled in as a spurious extra dependency in generated tests
+  (Issue #531); a generated `service.ts`'s `normalizeChildRefs` import and an unused
+  `initial{Xxx}s`/`search{Xxx}Options` prop pair on `FormUpsert.tsx` are no longer emitted
+  when nothing references them (Issue #532); and a second, previously-masked
+  `ReferenceError` in the same generated Cypress test helper (a self-ref FK misclassified as
+  an outer-model dependency) is fixed by tagging self-ref dependencies explicitly instead of
+  inferring them from name equality.
 - **An embedded DataGrid child's column order now follows its own `x-display.form` declaration
-  when present** — order only; which columns are shown is unchanged (still governed by the
-  existing exclusion rules: `id`/`{parent}_id`/`created_at`/`updated_at`/`creator_id`,
-  `one-to-one_bridge` FKs, unrelated `*able_id` FKs). Any field not named in `x-display.form`
-  keeps being shown, appended after the named ones in their original schema order; a name in
-  `x-display.form` this child has no property for (e.g. parent info) is never newly shown.
-- **The generated submit-for-approval Server Action (`submit_for_approval.ts.jinja2`,
-  the standalone action for `x-approval.submit_on` — the only path an
-  `edit: false` entity has to ever reach it) no longer throws across the
-  `'use server'` boundary, and its caller no longer discards the
-  result.** Two independent gaps had to close together: the action threw
-  every failure (including a reservation-capacity rejection) straight past
-  React's Server Components boundary, which strips the message in
-  production; and `ApprovalSection.tsx`'s Submit button fired the action
-  without `await`ing it or reading any result, so even a correctly
-  returned failure had nowhere to go. The action now returns the same
-  `ActionFailure` shape the ordinary create/update actions already use
-  (`AppError` → its own `code`/`field`/`reason`; the reservation-specific
-  capacity error → `CAPACITY`; anything else — deliberately, so a new
-  exception type never needs a template change — the field-less `UNKNOWN`
-  code, never re-thrown). `ApprovalSection.tsx` now awaits the action
-  inside its own pending-tracked transition, disables the button while in
-  flight, and displays the failure inline via a new shared
-  `getErrorMessage()` helper in `lib/_errors.ts`. See
-  `docs/knowledge/error-message-framework.md`. A side-effect regression
-  this surfaced and fixed: wrapping the Submit button in a `<span>` (the
-  standard pattern for a `Tooltip` whose child can become disabled) while
-  the button also carried its own `aria-label` produced two DOM elements
-  with the same accessible name — `Tooltip` clones its `title` onto an
-  immediate child that has none of its own. The button's now-redundant
-  explicit `aria-label` was dropped; its own visible text already supplies
-  it.
-- **Optional (nullable) enum fields with no `default:` no longer seed the
-  first enum member on the "new" form.** `build_context.py:_default_value()`
-  (top-level create page) and `generators.py:_new_prop_val()` (DataGrid-child
-  new-row seed) each had a gap where an untouched nullable enum field was
-  silently pre-filled with its first declared value -- for nativeEnum fields
-  only on the top-level path (the DataGrid-child path already checked
-  nullability correctly), and for plain (non-nativeEnum) string-enum fields
-  on both paths. An untouched optional field now stays unset (`null` for
-  nativeEnum, `''` for plain string-enum) instead of fabricating a choice
-  nobody made; fields with an explicit `default:` are unaffected, and
-  required fields still fall back to the first enum member. Verified via
-  golden-diff (regenerating this repo's own dogfood schema produces
-  byte-identical output across all 240 generated files) plus an empirical
-  before/after check on a temporary scratch field (reverted before commit)
-  on both a top-level and a DataGrid-child entity.
-- **`sharp`/`baseline-browser-mapping` CVEs resolved** via non-breaking
-  `npm audit fix` (GHSA-rgj7-g3m4-5g8c, high, libheif via `next`'s
-  transitive dep on `sharp`; GHSA-w5vr-8v7q-w6rv, moderate, via
-  `eslint-config-next`'s dependency on `baseline-browser-mapping`). Both
-  were newly-published advisories, not a regression from any change in
-  this repo. `npm ci` still exits 0 after the lockfile update.
-- **~13 more unused-variable lint-gate warning sources root-caused**,
-  continuing the pattern documented in
-  `docs/knowledge/cmd607-generator-lint-debt-fix.md` (an import or
-  parameter declared unconditionally, while the template branch that
-  actually reads it is narrower) — across `actions.ts.jinja2`, `service.ts`
-  utility imports, `search_helpers.ts.jinja2`, `chart_getters.ts.jinja2`,
-  `column_def.tsx.jinja2`, `form_view.tsx.jinja2`, `form_upsert.tsx.jinja2`,
-  `getters.ts.jinja2`, three `service_after_*_stub.ts.jinja2` write-once
-  stubs, and three generated-cypress-test templates plus the pool
-  reservation test helper template. None of these branches are exercised
-  by this repo's own `json_schema.yaml` (no x-approval/x-mention/
-  commentable/many-to-one-in-datagrid entity, per the approval-lockdown
-  fixture's own header comment), so this repo's own lint gate never saw
-  them; found and verified by generating against a real consumer schema in
-  an isolated worktree (48 ESLint warnings dropped to 2, both in
-  hand-written files outside generator scope; a manifest-hash diff
-  confirmed only the intended entity-scoped files changed output, none
-  added or removed). See
-  `docs/knowledge/cmd607-generator-lint-debt-fix.md` for the full
-  per-template breakdown.
-- **`.env.example` now documents `IMPORT_MAX_ROWS`/`IMPORT_MAX_BYTES`**, the
-  two env vars `api_import_route.ts.jinja2` reads to override the CSV
-  import row/byte ceilings (defaults `5000` / `10485760` — 10MB). Neither
-  was documented anywhere before, so a consumer that needed to change the
-  limit had no way to discover the correct var name. Note the var names
-  intentionally keep the opposite word order from the generated code's own
-  constant names (`MAX_IMPORT_ROWS`/`MAX_IMPORT_BYTES`) — renaming either
-  side would touch every generated `api_import_route.ts` across every
-  entity, so the mismatch is called out in a comment at the constant
-  declarations instead of renamed.
-- **Internal role/honorific vocabulary removed from generator-authored
-  comments** in `api_import_route.ts.jinja2` (and the two source-only
-  files `schema_deriver.py`/`validate.py`, which don't ship but are
-  maintained code) — reworded to English, design intent preserved,
-  ticket/commit references (`cmd_NNN`) kept as-is.
-
-- **CSV import now commits through the same `lib/{entity}/service.ts`
-  functions the REST route and Server Action call, instead of a raw
-  `tx.model.create/update`, for any entity whose signature carries no
-  embedded-DataGrid-child or bridge-child-parent parameter (a flat CSV
-  row has no per-row data source for either shape; those entities keep
-  the prior raw-tx path unchanged).** Previously, import bypassed
-  `validateOnAdd`/`validateOnUpdate` entirely, so a hand-written
-  `service_validation_custom.ts` business rule -- and every
-  `afterCreate`/`afterUpdate` side effect (audit logging, notifications,
-  reservation allocation, approval edge triggers) -- never ran for
-  import; a change the screen/API refuses could still be written through
-  import. Confirmed end to end against a real consumer's seeded demo data:
-  a purchase-order-line quantity edit the screen correctly rejects (its
-  parent purchase order is not in draft status) previously imported
-  successfully and now returns the same rejection through import. The
-  import route's own former `WRITE_LOCKED_FIELDS`/`findLockedViolation()`
-  duplicate of the `x-write-locked-values`/`x-approval` value-lockdown
-  check is removed for this now-service-call-backed path -- the identical
-  check already lives in `service_validation.ts`'s `validateSchemaRules`,
-  which the shared functions call internally; it remains for the
-  raw-tx fallback path, which still bypasses the service layer. An
-  `AppError` thrown by the service layer is translated into a
-  row-numbered `ImportRowError` (field + message) instead of collapsing
-  into a generic write-failure string.
-
-- **A composite/dotted-label FK's CSV-import candidate lookup now
-  includes org-null rows when its target's own `organization_id` is
-  optional**, matching the OR-null form the two sibling dotted-FK lookup
-  branches in the same template already use. The composite-label branch
-  had been left out of that earlier fix: a lookup entity whose
-  `organization_id` is genuinely `NULL` on every row (a shared/global
-  reference table, e.g. a seed script that deliberately leaves it unset)
-  produced zero candidates for a composite label, and every import
-  referencing it failed with a "no such row" error the row's data
-  actually satisfied -- confirmed end to end against a real consumer's
-  seeded demo data (a goods-receipt-line import naming an existing
-  purchase-order-line by its composite label previously failed to
-  resolve; now resolves). Golden-diffed against a from-scratch generation
-  of a real consumer schema with no `organization_id`-bearing lookup
-  targets: zero output changed.
-
-- **A nullable plain-text field written as `''` now persists as `NULL`,
-  the same as an omitted/never-set value, wherever
-  `add{Parent}`/`update{Parent}` writes it (CREATE, UPDATE, and the data
-  object passed to `validateOnAdd`/`validateOnUpdate`/
-  `validateCustomRules`).** A blank text input, a JSON body that sends
-  `""` instead of `null`, and CSV import's already-`null`-mapped empty
-  cell had been producing two different persisted values for the same
-  "no value" state depending on which write path produced them --
-  silently breaking any later equality-match against the column, most
-  concretely a hand-written `find`-then-`create` inventory lookup keyed
-  in part on such a field: an existing `NULL`-valued row and a
-  freshly-`''`-valued one never matched, so approving a second receipt
-  line against a matching bin (with no lot number recorded) created a
-  duplicate inventory row instead of adding to the existing one.
-  Reproduced end to end against a real consumer's seeded demo data by
-  calling the actual write path and post-approval hook: before this fix,
-  a second goods-receipt-line approval with an unspecified lot number
-  created a second inventory row; after, it adds to the existing row's
-  quantity. Scoped to a plain nullable string column only -- not
-  date/time, Decimal, or a Prisma-nativeEnum field (none of which treat
-  `''` as a meaningful stand-in for "no value"), and never a non-nullable
-  string field (`''` is a legitimate, distinct value there). Surveyed
-  the mechanism's four generated write-side data-object builders for the
-  same one-line pattern; not yet extended to DataGrid child-row nested
-  create/update fields, a separate code-generation path -- flagged as a
-  candidate for the same treatment if a child-row nullable-text column is
-  later found to need it. Historical rows already holding `''` for such a
-  column are unaffected by this fix (a data-migration concern, out of
-  scope here).
-
-- **An entity with `x-generate.edit: false` (create only, no update path)
-  now throws instead of silently creating a duplicate row when its
-  Server Action receives an existing record's id.** Previously, the
-  create-only branch of `upsert{Parent}()` never read `id` off the
-  incoming FormData at all and unconditionally called `add{Parent}()`.
-  `FormUpsert.tsx` unconditionally sets `id` in FormData regardless of
-  whether the entity is editable, so an orphaned edit page left over from
-  before the entity's `x-generate.edit` flipped to `false` (and no longer
-  regenerated) could still reach the create-only action with a real
-  record id -- and the action silently created a duplicate instead of
-  failing loudly. Reproduced against a real consumer's data: a
-  `purchase_order`-shaped entity's orphaned edit page created a second
-  row for the same purchase order instead of updating the original. The
-  fix mirrors the existing symmetric guard on the update-only branch
-  (`if (!id) throw new Error('Create not supported')`): a create-only
-  body now throws `Error('Update not supported')` when handed a non-empty
-  id, before any other work begins. Scoped to the create-only branch
-  only -- no entity in this repo's own schema uses that combination, and
-  a full generated-output diff before/after this change is byte-for-byte
-  identical; see `docs/knowledge/create-only-upsert-rejects-update-intent.md`.
-
-- **The generated view page no longer offers an Edit link for an
-  `x-generate.edit: false` entity, regardless of the caller's
-  `permissions.update` value.** Previously, `FormView.tsx` computed
-  `canEdit` purely from `permissions?.update ?? true`, never checking
-  whether the entity has an update path at all -- so an orphaned edit
-  page left over from before `x-generate.edit` flipped to `false` could
-  still be linked to from the regenerated view page whenever RBAC allowed
-  it. `canEdit` is now hardcoded to `false` at generation time for a
-  create-only entity, independent of `permissions.update`. Sibling fix to
-  the `upsert{Parent}()` guard above -- same incident, same root cause;
-  see `docs/knowledge/view-page-hides-edit-link-for-immutable-entities.md`.
-  `edit: true` entities are unaffected: golden-diff confirms the rendered
-  `FormView.tsx` is byte-for-byte identical to before this change.
-
-- **A readonly field (`x-readonly` / `x-readonly-fields`) is no longer read
-  from client input at all on save -- not FormData, not a POST/PUT body, not
-  even as a generated service function's own parameter.**
-  Previously, `_build_form_data_gets()` still emitted a `data.get(<field>)`
-  line for every readonly field, and the REST routes still destructured it
-  off the request body -- the value never reached Prisma (an existing,
-  correct skip already excluded it from the write), but it still flowed
-  into `validate()`/`validateCustomRules()` as if it were real client
-  input. For a non-nullable field, `Number(null)` / `new Date(null)` /
-  a bare cast silently produced a *wrong but valid-looking* value (`0`, the
-  Unix epoch, or an empty string) instead of `undefined` -- so a
-  hand-written custom rule that read the field directly (rather than
-  `prevRow`, the actual persisted value) could see that fabricated value
-  and reject a save that never touched the field at all. Reproduced
-  end-to-end with a scratch entity: a `received_at` (readonly, non-nullable,
-  required) field combined with a realistic content-freeze custom rule
-  made every edit-and-save of an unrelated field throw
-  `received_at is locked and cannot change` before the fix, and save
-  cleanly after. `client_prop_infos` (a narrower view of `parent_prop_infos`
-  excluding readonly fields, mirroring how `x-server-value`-without-override
-  fields were already excluded) now feeds the service function's parameter
-  list, `validate()`'s payload, `_build_form_data_gets()`, and the REST
-  routes' body destructuring/service-call args; `parent_prop_infos` itself
-  is unchanged and still feeds `normalizeSnapshot()`'s staleness
-  comparison, which legitimately needs every persisted column. Confirmed
-  for both a nullable and a non-nullable readonly field, and for a required
-  relation FK. Unrelated, pre-existing behavior found (not fixed here,
-  out of scope): the REST PUT route's readonly-field compare check
-  (`AP-3=B`) can reject a same-valued resubmission of a readonly `date`/
-  `date-time` field, because it compares `String(Date)` against the raw
-  ISO string from the request body -- different textual formats for the
-  identical instant.
-- **A hand-written `service_validation_custom.ts` rejection of a value that
-  IS present (e.g. an FK that violates a business rule) no longer renders
-  as the generic "{field} is required." text a genuinely-missing value
-  gets.** `AppError`/`ActionFailure` (`lib/_errors.ts`) gained a
-  `reason?: 'missing' | 'invalid'` field for `VALIDATION`-coded errors; the
-  generated `REQUIRED_FIELDS`/one-to-one-missing checks tag `'missing'`,
-  every other schema-driven `VALIDATION` check (decimal format, dangling
-  one-to-one FK, approval-locked field) and any hand-written
-  `validateCustomRules()` rejection tag `'invalid'` (the generated
-  `service_validation.ts` wraps the custom-rules call and re-tags it, so no
-  existing consumer's hand-written file needs editing). `getErrorMessage()`
-  (`form_upsert.tsx.jinja2`) now renders a distinct `fieldInvalid` i18n key
-  for the `'invalid'` case. The REST API path (`handleApiError`) was
-  already correct — it forwards `error.message` verbatim — this only fixes
-  the Server Action / UI form path.
-- **A field whose FK candidates are narrowed via `x-autocomplete-context`
-  no longer offers an unfiltered default list before the user types
-  anything.** `EntityAutocomplete.tsx` shows `initialOptions` verbatim
-  whenever the input is empty; that list used to come from a static,
-  context-blind page-load fetch. Context-filtered relations now seed from
-  that same fetch but live-refetch through the context-aware search action
-  (`searchXOptions('', [])`, still applying `filterAutocompleteOptions()`)
-  on mount and whenever the sibling context field changes. Every other
-  relation's generated code is unchanged.
-- **A view's `x-readonly-fields` declaration no longer leaks onto every
-  other view built on the same Prisma model.** `x-readonly-fields` used to
-  be copied onto the shared raw entity during schema reconstruction
-  (`build_user_schema.py`), and `build_context.py` read it back from that
-  same raw entity — so a proxy/secondary view (e.g. a `setting` page that
-  is really just another view of `user`) could not declare a readonly
-  field without also locking it down on the model's other view(s).
-  `x-readonly-fields` now stays on the view entity that declares it, and
-  `build_context.py` reads it from the view entity itself. No current
-  schema declares `x-readonly-fields`, so this is a scope fix with no
-  observable effect until a schema actually uses it on a shared model; see
-  `docs/knowledge/readonly-field-form-rendering.md` for the full writeup
-  and `.claude/commands/generate-schema.md` for updated guidance on when
-  to use `x-readonly-fields` vs. per-property `x-readonly`.
-- **`x-readonly-fields`/`x-readonly` declared on a DataGrid child entity had
-  no effect on that child's editable grid.** A readonly-declared child
-  column still rendered as an editable cell, and the write path (child
-  `create`/`update` body construction) still accepted and persisted
-  client-sent values for it with no server-side guard. `generators.py`'s
-  child-grid column builder now forces `editable: false` on a readonly
-  column, the same pattern the `order` column already used.
-  `build_context.py`'s per-child field mapping now excludes readonly
-  fields from the `update` write payload entirely (an existing row keeps
-  its current value) while still seeding a schema-derived default for
-  `create` (a new row has no prior value to preserve). No current schema
-  declares `x-readonly-fields`/`x-readonly` on a DataGrid child entity, so
-  this is a fix with no observable effect on any existing schema; see
-  `docs/knowledge/readonly-field-form-rendering.md` for the full writeup.
-- **A CSV-import match key on an optional (nullable) plain scalar column no
-  longer treats an empty cell and a stored `NULL` as different values.**
-  `import_key_specs`' non-dotted branch hardcoded nullability to `false`
-  regardless of the column's actual schema type (unlike the dotted branch and
-  `import_field_specs`, which both compute it correctly for the same column),
-  so re-importing a row whose key column was left blank never matched the
-  existing `NULL` (or a legacy `''`) row and created a duplicate instead. The
-  generated import route now normalizes an empty cell to `null` for the
-  write, and matches either a stored `NULL` or `''` via a dedicated
-  `keyMatchConds` array kept separate from the org-filter branches' own `OR`
-  usage so the two conditions never collide. See
+  when present** — order only; which columns are shown is unchanged.
+- **The generated submit-for-approval Server Action no longer throws across the `'use server'`
+  boundary, and its caller no longer discards the result.** Failures (including a
+  reservation-capacity rejection) now return the same `ActionFailure` shape as ordinary
+  create/update actions, awaited and displayed inline by `ApprovalSection.tsx`. See
+  `docs/knowledge/error-message-framework.md`.
+- **An optional (nullable) enum field with no `default:` no longer seeds the first enum
+  member on the "new" form** — it now stays unset until the user picks a value; fields with
+  an explicit `default:` are unaffected.
+- **`sharp`/`baseline-browser-mapping` CVEs resolved** via non-breaking `npm audit fix`
+  (GHSA-rgj7-g3m4-5g8c, GHSA-w5vr-8v7q-w6rv) — newly-published advisories, not a regression
+  in this repo.
+- **~13 more unused-variable lint-gate warning sources root-caused and fixed** across
+  generator templates not exercised by this repo's own dogfood schema. See
+  `docs/knowledge/cmd607-generator-lint-debt-fix.md`.
+- **`.env.example` now documents `IMPORT_MAX_ROWS`/`IMPORT_MAX_BYTES`** (defaults 5000 /
+  10MB), the env vars that override CSV import row/byte ceilings.
+- **Internal role/honorific vocabulary removed from generator-authored comments** in
+  `api_import_route.ts.jinja2` and two source-only files; reworded to English.
+- **CSV import now commits through the same `lib/{entity}/service.ts` functions the REST
+  route and Server Action use** (for entities without an embedded-DataGrid-child or
+  bridge-child-parent shape), instead of bypassing `validateOnAdd`/`validateOnUpdate` and
+  every `afterCreate`/`afterUpdate` side effect via a raw `tx.model.create/update`.
+- **A composite/dotted-label FK's CSV-import lookup now includes org-null candidate rows
+  when its target's `organization_id` is optional**, matching the two sibling dotted-FK
+  lookup branches — a shared/global reference table with a `NULL` `organization_id`
+  previously produced zero candidates and failed every import referencing it.
+- **A nullable plain-text field written as `''` now persists as `NULL`**, the same as an
+  omitted value, across CREATE/UPDATE/validation — previously the two forms could silently
+  fail to match on a later equality lookup (e.g. inventory bin/lot matching), creating
+  duplicate rows instead of updating the existing one. Scoped to plain nullable string
+  columns only; not yet extended to DataGrid child-row nested writes.
+- **An entity with `x-generate.edit: false` (create-only) is now fully protected against an
+  orphaned edit page**: its Server Action now throws instead of silently creating a
+  duplicate row when handed an existing record's id, and its view page no longer offers an
+  Edit link regardless of the caller's `permissions.update`. See
+  `docs/knowledge/create-only-upsert-rejects-update-intent.md` and
+  `docs/knowledge/view-page-hides-edit-link-for-immutable-entities.md`.
+- **A readonly field (`x-readonly`/`x-readonly-fields`) is no longer read from client input
+  at all on save** — not FormData, not a POST/PUT body, not even as a generated service
+  function's parameter — closing a gap where a hand-written custom validation rule reading
+  the field directly (instead of the persisted `prevRow`) could see a fabricated coerced
+  value and wrongly reject an unrelated save.
+- **A hand-written `service_validation_custom.ts` rejection of a present-but-invalid value
+  no longer renders as the generic "field is required" text** a genuinely-missing value
+  gets — `AppError`/`ActionFailure` now carries a `reason: 'missing' | 'invalid'`, rendered
+  via a distinct i18n key.
+- **A field narrowed via `x-autocomplete-context` no longer offers an unfiltered default
+  candidate list before the user types anything** — it now live-refetches through the
+  context-aware search action on mount and whenever the sibling context field changes.
+- **A view's `x-readonly-fields` declaration no longer leaks onto every other view built on
+  the same Prisma model** — it now stays scoped to the view entity that declares it. No
+  current schema is affected. See `docs/knowledge/readonly-field-form-rendering.md`.
+- **`x-readonly-fields`/`x-readonly` declared on a DataGrid child entity now actually takes
+  effect** — the column renders non-editable and the write path no longer accepts a
+  client-sent value for it. No current schema is affected. See
+  `docs/knowledge/readonly-field-form-rendering.md`.
+- **A CSV-import match key on an optional plain scalar column no longer treats an empty cell
+  and a stored `NULL` as different values** — re-importing a row with a blank key column now
+  matches the existing `NULL`/`''` row instead of creating a duplicate. See
   `docs/knowledge/import-key-null-empty-equivalence.md`.
 
 ### Changed
