@@ -232,3 +232,14 @@ child's `update` path, even by a direct API request that bypasses the UI.
   fallback) in the generated create bodies, and no `name:` key at all in
   the generated update branch's write payload. Reverting the declaration
   and regenerating round-tripped the output back to a clean `git status`.
+
+### `x-display.form` also orders a DataGrid child's own columns (Fixed)
+
+Same asymmetry as `x-readonly`/`x-readonly-fields` above, this time for
+`x-display.form`: an embedded DataGrid child's generated column order
+previously ignored the child entity's own `x-display.form` declaration
+and fell back to schema-definition order regardless. The child's
+column-order resolution now reuses the same `x-display.form`-reading path
+the parent form already used — order only, per the "only reorders"
+behavior documented above; it does not change which columns the child
+grid shows.

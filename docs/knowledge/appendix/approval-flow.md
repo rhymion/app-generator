@@ -1156,3 +1156,20 @@ terminal: true`, since that value is now itself frozen. The helper now falls bac
 schema `default:` (assumed unfrozen), deriving the frozen set from `derive_post_decision_freeze_
 values()` itself rather than re-deriving a second, now-stale notion of "locked" by hand.
 
+### 16.19 Pre-generation gate: `submit_on`'s json-schema `default:` must agree with Prisma's `@default(...)`
+
+A narrower sibling of `validate_defaults_cross_schema()` (which only catches a json `default:`
+with no matching Prisma `@default()` at all — a presence check). Within `x-approval.submit_on`
+specifically, a *value*-level disagreement (both sides declare a default, but different values —
+e.g. json `default: draft` vs. Prisma `@default(pending)`) is never intentional the way it can be
+for an ordinary field: `approval_lockdown_context()` locks every row whose value equals
+`submit_on`'s own value, and the json schema's `default:` for that same field is the pre-submission
+value new rows are declared to start at. If Prisma's real column default silently drifts to equal
+`submit_on`'s value instead, every freshly created row is born already locked — a real, previously
+undetected drift is what motivated this check.
+
+`validate_submit_on_default_matches_prisma()` (`code_generator/validate.py`) runs only for
+entities that declare `submit_on`, and only for the one field it names. A field with no json
+`default:` declared at all is skipped (nothing to cross-check), as is a Prisma column with no
+`@default()` at all (already covered by `validate_defaults_cross_schema()`).
+

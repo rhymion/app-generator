@@ -52,6 +52,15 @@ against a split parent/child pair, it will need an explicit carve-out from this 
 implemented here — split e2e tests are 0 across both proj_g and proj_c as of this writing, so
 there is nothing to carve out yet; flagging the sharp edge for whoever adds the first one.
 
+## Related, separately-fixed bug: the edit path must use the same populator as create
+
+A different defect in the same "3.3 edits with mixed changes" test, for the same FK-primary
+field shape, fixed separately from the collision above: the edit path could select a target row
+that was never actually seeded in the first place, failing the autocomplete assertion outright —
+the edit path wasn't routed through the same dependency populator the create path already used
+for this field shape. Now routed consistently, so the edit test always targets a row the test's
+own fixtures actually created.
+
 ## What this doesn't fix
 
 `approval_flow`'s `precededBy`/`followedBy` both displaying as `'setting'` (a separately-noted finding) is a

@@ -1,7 +1,7 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 // Corresponding Prisma version: 7
-// Corresponding JSON schema version: 2.0
+// Corresponding JSON schema version: 4.0
 
 generator client {
   provider = "prisma-client"
@@ -53,6 +53,14 @@ model user {
   email                     String              @unique
   password                  String?
   api_key                   String?
+  // Opt-in master switch for email notifications -- container only for
+  // now, no sending mechanism exists yet. Defaults to false: an unrelated
+  // user must actively opt in, never be opted in by default. A future
+  // per-category preference (e.g. "receive X but not Y") can be added as
+  // a separate table without touching this column -- this one stays the
+  // top-level on/off switch a per-category table would still have to
+  // respect.
+  email_notifications_enabled Boolean           @default(false)
   // Direct-attachment FK (cmd_793): the user's own uploaded avatar.
   // Nullable/SetNull, matching every other optional direct-attachment FK on
   // this page (docs/knowledge/schema-yaml-configuration.md "Direct
@@ -112,6 +120,8 @@ model user {
   updated_tenants           tenant[]            @relation("TenantUpdater")
   audit_logs                audit_log[]
   notifications             notification[]      @relation("NotificationUser")
+  created_app_settings      app_setting[]       @relation("AppSettingCreator")
+  updated_app_settings      app_setting[]       @relation("AppSettingUpdater")
   anonymized_at             DateTime?            // Timestamp when PII was scrubbed (GDPR anonymization)
   invalidated_at            DateTime?            // Generic invalidate mechanism (cmd_564); set alongside anonymized_at by anonymizeUser()
 
@@ -151,6 +161,85 @@ model organization {
   updater_id  String
   updater     user       @relation("OrganizationUpdater", fields: [updater_id], references: [id])
   users       user[]     @relation("UserOrganizations")
+  app_settings app_setting[]
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// Per-organization business date override -- container only for now: no
+// read function, admin UI, scheduled-task wiring, or audit-log extension
+// exist yet, only this model. `organization_id` is nullable: a row with
+// `organization_id = NULL` is the tenant-wide default, used by any data
+// that has no organization, or whose organization has no `app_setting`
+// row of its own.
+// `@@unique([organization_id])` below covers "at most one row per org" (a
+// plain unique constraint works fine for actual non-null values).
+//
+// "At most one default row" (organization_id IS NULL) is a SEPARATE
+// invariant that cannot be expressed in this schema file at all, in two
+// stages that were each verified empirically against a real Postgres 16
+// test database rather than assumed:
+//   1. Prisma 7.10's `partialIndexes` preview feature does add a `where:`
+//      argument to `@@unique`/`@@index` (undocumented as of this writing --
+//      found by probing the schema validator's own error messages, not
+//      from any changelog). But `@@unique([organization_id], where: {
+//      organization_id: null })` still failed empirically: it lowers to
+//      plain `CREATE UNIQUE INDEX ... ON app_setting(organization_id)
+//      WHERE organization_id IS NULL`, and Postgres's default behavior
+//      treats every NULL as distinct from every other NULL even inside a
+//      partial index, so two organization_id-IS-NULL rows inserted
+//      through it were both accepted, not rejected -- disproving the
+//      constraint despite the schema looking correct. Prisma has no
+//      `nulls: NotDistinct` argument (confirmed: "No such argument" from
+//      the validator) to opt into Postgres 15+'s NULLS NOT DISTINCT
+//      behavior, so this cannot be fixed from inside the schema DSL.
+//   2. The actual fix -- a unique index on a constant expression, filtered
+//      by the same predicate, so the indexed value is a real (non-null)
+//      literal that Postgres compares by ordinary equality instead of by
+//      NULL identity -- has no representation in Prisma's schema DSL at
+//      all (`@@unique`'s field list only accepts model fields, not
+//      expressions), so it must be raw SQL:
+//        CREATE UNIQUE INDEX app_setting_default_row_unique
+//          ON app_setting ((true)) WHERE organization_id IS NULL;
+//      Verified against a real Postgres 16 container: a first
+//      organization_id-IS-NULL insert succeeds, a second is rejected with
+//      "duplicate key value violates unique constraint ... Key
+//      ((true))=(t) already exists"; a plain `db push` re-run afterwards
+//      left this raw index untouched (not dropped as drift) since
+//      Prisma's diff only pushes forward what schema.prisma declares.
+// This index is deliberately NOT included in this task's own migration --
+// see docs/knowledge/appendix/business-date-container.md for the full SQL
+// and when it is meant to be applied.
+// `creator_id`/`updater_id` stay NOT NULL, matching every other audited
+// common model in this schema (tenant/user/role/organization/permission/
+// approval_flow/dashboard all pair a required creator_id with a required
+// updater_id): a future default row's creator_id/updater_id must be the
+// pre-existing "Scheduled Task System" actor (SCHEDULED_TASK_ACTOR_EMAIL,
+// lib/scheduled-tasks/system-actor.ts), the same way scripts/seed-
+// baseline.ts already resolves an actor for every other seeded row, not a
+// null value.
+// `organization_id` (not `org_id`) follows this schema's own FK naming
+// convention (docs/knowledge/prisma-schema-conventions.md §3: every
+// x-relationship FK field needs a matching `<name>_id` column paired with
+// a `<name>` relation field derived by stripping the `_id` suffix) and is
+// the literal column name code_generator/validate.py's
+// `_REQUIRED_INDEX_COLUMNS` requires an index on.
+model app_setting {
+  id            String        @id @default(cuid())
+  organization_id String?
+  organization  organization? @relation(fields: [organization_id], references: [id])
+  business_date String
+  is_pinned     Boolean       @default(false)
+  timezone      String        @default("UTC")
+  created_at    DateTime      @default(now()) @db.Timestamptz(0)
+  updated_at    DateTime      @updatedAt @db.Timestamptz(0)
+  creator_id    String
+  creator       user          @relation("AppSettingCreator", fields: [creator_id], references: [id])
+  updater_id    String
+  updater       user          @relation("AppSettingUpdater", fields: [updater_id], references: [id])
+
+  @@unique([organization_id])
+  @@index([organization_id])
   @@index([creator_id])
   @@index([updater_id])
 }

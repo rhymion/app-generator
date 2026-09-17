@@ -309,6 +309,17 @@ There is no `app/api/approval_request/[id]/resubmit/route.ts` — the dedicated 
 retired; re-submission is now an ordinary edit through the entity's own routes (see
 `docs/knowledge/appendix/approval-flow.md` §16.4/§16.6).
 
+**Fixed: `get<Entity>ChunkForExport()` silently exported zero rows for an `X-API-Key`-only
+caller with genuine `read` permission.** The export getter takes the already-resolved `userId`
+as a parameter, but its non-org-filtered branch called `getModelPermissions('{{ parent }}',
+userId)` without actually threading that parameter through in one code path, so
+`getModelPermissions` fell back to reading the session cookie via `getSessionUserId()` instead —
+silently returning empty permissions for a caller with no session cookie at all (every
+`X-API-Key` caller). `api_export_route.ts.jinja2` itself already asserts `read` permission via
+`resolveActorId` above before ever calling this getter, so the caller was never actually
+unauthorized — the getter's own second, redundant permission check just resolved the wrong
+actor. Both of the getter's permission-check branches now use the same resolved `userId`.
+
 ### Full API route pattern with permission check
 
 ```typescript

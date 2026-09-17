@@ -121,6 +121,20 @@ Entities with no auto-create OTO relation (the common case) render the
   `approvable_id` reproduces the original `PrismaClientValidationError`
   naming the missing FK.
 
+## Superseded (Issue #93): commit-time CREATE/UPDATE now goes through `service.ts`, not a bare `tx.create`/`tx.update`
+
+The fix above still committed via a bare `tx.model.create(...)`/`.update(...)` — it fixed the
+missing bridge-FK pre-create, but every commit still bypassed `service.ts`'s
+`validateOnAdd`/`validateOnUpdate` and every `afterCreate`/`afterUpdate` side effect, the same
+way the REST route and Server Action never do. A later change routes each row through the
+generated `add<Entity>()`/`update<Entity>()` functions instead (the same `lib/{entity}/service.ts`
+functions the REST route and Server Action call), for any entity **without** an
+embedded-DataGrid-child or bridge-child-parent shape — those two shapes keep the bare
+`tx.model.create`/`.update` form this doc describes, since their nested-write shape isn't
+something the generated service function's positional signature accepts. The
+`one_to_one_pre_creates`/`one_to_one_fk_data_lines` mechanism this doc documents still applies
+verbatim to that fallback branch.
+
 ## Adjacent, out-of-scope observation
 
 While tracing `goods_receipt_line`'s generated import route to build the
