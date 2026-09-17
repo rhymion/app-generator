@@ -81,6 +81,11 @@ falls through on `null`/`undefined`.
   datetime field, default or not — including a purely optional field with no Prisma default at
   all. That's the opposite failure mode (over-eager "now" injection instead of a dropped default)
   and isn't this bug; left unchanged to keep the fix narrowly scoped.
+  **Follow-up, fixed separately**: this same branch fires for a DataGrid child's own datetime
+  field even when the *parent* entity has no date field of its own at all — the `new` page
+  template's `dayjs` import was gated on the parent's own fields alone, so that combination
+  emitted a `dayjs()` call with no import, breaking that page's own build. The import gate now
+  also checks the child's own fields.
 - Whether `now()`-backed timestamps should instead omit the FormData key entirely when untouched
   (so Prisma's own `@default(now())` fires at the actual write time, rather than seeding "the
   moment the form was opened") is a genuine, unresolved business-semantics question for fields like
