@@ -9,13 +9,13 @@
 > index that enforces "at most one tenant-wide default row." Re-verify the model still looks like
 > this before applying, since it may have changed since this doc was written.
 
-## Why this can't just be `@@unique([org_id])`
+## Why this can't just be `@@unique([organization_id])`
 
-`org_id` is nullable — a row with `org_id = NULL` is the tenant-wide default, applied to any data
-with no organization or whose organization has no `app_setting` row of its own. `@@unique([org_id])`
+`organization_id` is nullable — a row with `organization_id = NULL` is the tenant-wide default, applied to any data
+with no organization or whose organization has no `app_setting` row of its own. `@@unique([organization_id])`
 (already declared in `schema.prisma`) correctly limits each **organization** to at most one row,
 because Postgres compares actual non-null values normally. It does **not** limit the number of
-`org_id IS NULL` rows, because Postgres's default unique-constraint semantics treat every NULL as
+`organization_id IS NULL` rows, because Postgres's default unique-constraint semantics treat every NULL as
 distinct from every other NULL — an unlimited number of default rows could otherwise be created.
 
 ## What was tried and empirically failed
@@ -33,13 +33,13 @@ generator client {
 
 model app_setting {
   // ...
-  @@unique([org_id], where: { org_id: null })
+  @@unique([organization_id], where: { organization_id: null })
 }
 ```
 
-validates and lowers to `CREATE UNIQUE INDEX ... ON app_setting(org_id) WHERE org_id IS NULL`. This
+validates and lowers to `CREATE UNIQUE INDEX ... ON app_setting(organization_id) WHERE organization_id IS NULL`. This
 was applied to a real Postgres 16 test database and then disproved empirically: inserting a second
-`org_id IS NULL` row succeeded when it should have been rejected, because the index still compares
+`organization_id IS NULL` row succeeded when it should have been rejected, because the index still compares
 NULL to NULL, which Postgres never treats as a conflict, partial or not. Prisma has no `nulls:
 NotDistinct` argument to opt into Postgres 15+'s `NULLS NOT DISTINCT` behavior (the validator
 returns "No such argument" for it), so this cannot be fixed from inside the schema DSL as of this
@@ -55,7 +55,7 @@ so this must be raw SQL, added by hand to whichever migration first introduces `
 ```sql
 CREATE UNIQUE INDEX app_setting_default_row_unique
   ON app_setting ((true))
-  WHERE org_id IS NULL;
+  WHERE organization_id IS NULL;
 ```
 
 ### Empirical verification (2026-09-17, isolated worktree test database, Postgres 16)
@@ -63,19 +63,19 @@ CREATE UNIQUE INDEX app_setting_default_row_unique
 With the index applied:
 
 ```
-INSERT INTO app_setting (id, org_id, business_date, updated_at, creator_id, updater_id)
+INSERT INTO app_setting (id, organization_id, business_date, updated_at, creator_id, updater_id)
 VALUES ('as1', NULL, '2026-09-17', now(), 'u1', 'u1');
 -- INSERT 0 1
 
-INSERT INTO app_setting (id, org_id, business_date, updated_at, creator_id, updater_id)
+INSERT INTO app_setting (id, organization_id, business_date, updated_at, creator_id, updater_id)
 VALUES ('as2', NULL, '2026-09-18', now(), 'u1', 'u1');
 -- ERROR:  duplicate key value violates unique constraint "app_setting_default_row_unique"
 -- DETAIL:  Key ((true))=(t) already exists.
 ```
 
-The first `org_id IS NULL` insert succeeds; the second is rejected. A per-org row (`org_id` set)
-is unaffected — inserting two rows for the same `org_id` fails against the existing
-`app_setting_org_id_key` unique constraint instead, as expected.
+The first `organization_id IS NULL` insert succeeds; the second is rejected. A per-org row (`organization_id` set)
+is unaffected — inserting two rows for the same `organization_id` fails against the existing
+`app_setting_organization_id_key` unique constraint instead, as expected.
 
 A `prisma db push` re-run after adding this raw index left it untouched (not dropped as
 undeclared drift) — Prisma's diff only pushes forward what `schema.prisma` itself declares, it does
@@ -87,7 +87,7 @@ not delete database objects with no schema representation. This index is durable
 This migration cadence is deliberate — migrations are cut at develop-merge time, not per individual
 task (see `docs/knowledge/migration-guide.md`), so this SQL is **not** included in this task's own
 commit. Add it as part of whichever migration first creates the `app_setting` table (alongside the
-`CREATE TABLE`/`CREATE UNIQUE INDEX app_setting_org_id_key`/FK statements `prisma migrate dev`
+`CREATE TABLE`/`CREATE UNIQUE INDEX app_setting_organization_id_key`/FK statements `prisma migrate dev`
 generates automatically from the schema).
 
 ## `resetTestDatabase()` does not know about this model

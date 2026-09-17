@@ -168,30 +168,31 @@ model organization {
 
 // Per-organization business date override -- container only for now: no
 // read function, admin UI, scheduled-task wiring, or audit-log extension
-// exist yet, only this model. `org_id` is nullable: a row with
-// `org_id = NULL` is the tenant-wide default, used by any data that has no
-// organization, or whose organization has no `app_setting` row of its own.
-// `@@unique([org_id])` below covers "at most one row per org" (a plain
-// unique constraint works fine for actual non-null values).
+// exist yet, only this model. `organization_id` is nullable: a row with
+// `organization_id = NULL` is the tenant-wide default, used by any data
+// that has no organization, or whose organization has no `app_setting`
+// row of its own.
+// `@@unique([organization_id])` below covers "at most one row per org" (a
+// plain unique constraint works fine for actual non-null values).
 //
-// "At most one default row" (org_id IS NULL) is a SEPARATE invariant that
-// cannot be expressed in this schema file at all, in two stages that were
-// each verified empirically against a real Postgres 16 test database
-// rather than assumed:
+// "At most one default row" (organization_id IS NULL) is a SEPARATE
+// invariant that cannot be expressed in this schema file at all, in two
+// stages that were each verified empirically against a real Postgres 16
+// test database rather than assumed:
 //   1. Prisma 7.10's `partialIndexes` preview feature does add a `where:`
 //      argument to `@@unique`/`@@index` (undocumented as of this writing --
 //      found by probing the schema validator's own error messages, not
-//      from any changelog). But `@@unique([org_id], where: { org_id: null
-//      })` still failed empirically: it lowers to plain
-//      `CREATE UNIQUE INDEX ... ON app_setting(org_id) WHERE org_id IS
-//      NULL`, and Postgres's default behavior treats every NULL as
-//      distinct from every other NULL even inside a partial index, so two
-//      org_id-IS-NULL rows inserted through it were both accepted, not
-//      rejected -- disproving the constraint despite the schema looking
-//      correct. Prisma has no `nulls: NotDistinct` argument (confirmed:
-//      "No such argument" from the validator) to opt into Postgres 15+'s
-//      NULLS NOT DISTINCT behavior, so this cannot be fixed from inside
-//      the schema DSL.
+//      from any changelog). But `@@unique([organization_id], where: {
+//      organization_id: null })` still failed empirically: it lowers to
+//      plain `CREATE UNIQUE INDEX ... ON app_setting(organization_id)
+//      WHERE organization_id IS NULL`, and Postgres's default behavior
+//      treats every NULL as distinct from every other NULL even inside a
+//      partial index, so two organization_id-IS-NULL rows inserted
+//      through it were both accepted, not rejected -- disproving the
+//      constraint despite the schema looking correct. Prisma has no
+//      `nulls: NotDistinct` argument (confirmed: "No such argument" from
+//      the validator) to opt into Postgres 15+'s NULLS NOT DISTINCT
+//      behavior, so this cannot be fixed from inside the schema DSL.
 //   2. The actual fix -- a unique index on a constant expression, filtered
 //      by the same predicate, so the indexed value is a real (non-null)
 //      literal that Postgres compares by ordinary equality instead of by
@@ -199,13 +200,13 @@ model organization {
 //      all (`@@unique`'s field list only accepts model fields, not
 //      expressions), so it must be raw SQL:
 //        CREATE UNIQUE INDEX app_setting_default_row_unique
-//          ON app_setting ((true)) WHERE org_id IS NULL;
-//      Verified against a real Postgres 16 container: a first org_id-IS-
-//      NULL insert succeeds, a second is rejected with "duplicate key
-//      value violates unique constraint ... Key ((true))=(t) already
-//      exists"; a plain `db push` re-run afterwards left this raw index
-//      untouched (not dropped as drift) since Prisma's diff only pushes
-//      forward what schema.prisma declares.
+//          ON app_setting ((true)) WHERE organization_id IS NULL;
+//      Verified against a real Postgres 16 container: a first
+//      organization_id-IS-NULL insert succeeds, a second is rejected with
+//      "duplicate key value violates unique constraint ... Key
+//      ((true))=(t) already exists"; a plain `db push` re-run afterwards
+//      left this raw index untouched (not dropped as drift) since
+//      Prisma's diff only pushes forward what schema.prisma declares.
 // This index is deliberately NOT included in this task's own migration --
 // see docs/knowledge/appendix/business-date-container.md for the full SQL
 // and when it is meant to be applied.
@@ -217,10 +218,16 @@ model organization {
 // lib/scheduled-tasks/system-actor.ts), the same way scripts/seed-
 // baseline.ts already resolves an actor for every other seeded row, not a
 // null value.
+// `organization_id` (not `org_id`) follows this schema's own FK naming
+// convention (docs/knowledge/prisma-schema-conventions.md §3: every
+// x-relationship FK field needs a matching `<name>_id` column paired with
+// a `<name>` relation field derived by stripping the `_id` suffix) and is
+// the literal column name code_generator/validate.py's
+// `_REQUIRED_INDEX_COLUMNS` requires an index on.
 model app_setting {
   id            String        @id @default(cuid())
-  org_id        String?
-  organization  organization? @relation(fields: [org_id], references: [id])
+  organization_id String?
+  organization  organization? @relation(fields: [organization_id], references: [id])
   business_date String
   is_pinned     Boolean       @default(false)
   timezone      String        @default("UTC")
@@ -231,8 +238,8 @@ model app_setting {
   updater_id    String
   updater       user          @relation("AppSettingUpdater", fields: [updater_id], references: [id])
 
-  @@unique([org_id])
-  @@index([org_id])
+  @@unique([organization_id])
+  @@index([organization_id])
   @@index([creator_id])
   @@index([updater_id])
 }
