@@ -134,7 +134,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **New dev/verification-only script `scripts/grant-all-permissions.ts`**
   (`npm run db:grant-all-permissions`) grants the `Administrator` role full CRUD on every
   independent entity in one step, including any entity a consumer project adds. `audit_log`/
-  `mfa_recovery_code` stay excluded. `scripts/seed-tenant.ts` (the production seed) is unchanged.
+  `mfa_recovery_code` stay excluded. `scripts/seed-baseline.ts` (the production seed) is unchanged.
   See `docs/knowledge/seed-baseline-credential-hardening.md`.
 - **New opt-in Neon serverless driver adapter for `lib/prisma.ts`, gated by `USE_NEON_ADAPTER`.**
   `scripts/vercel-env.sh` now injects it as `"true"` on every consumer app provisioned via
@@ -233,7 +233,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `noindex` unless `lib/site-config.ts`'s `seo.noindex` is explicitly `false`; an app with no
   `seo` block at all is also now noindexed. See
   `docs/knowledge/noindex-default-and-branding-env-vars.md`.
-- **`scripts/seed-tenant.ts` now also seeds `Creator` and `Assignee` roles.** `Creator` is
+- **`scripts/seed-baseline.ts` now also seeds `Creator` and `Assignee` roles.** `Creator` is
   granted exactly `setting.read`+`setting.update`; `Assignee` is seeded with no permissions
   (placeholder for future use). See `docs/knowledge/seed-baseline-credential-hardening.md`.
 - **Removed the dead in-process notification store from `lib/_notifier.ts`** (a no-op read
