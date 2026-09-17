@@ -88,16 +88,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/appendix/approval-flow.md` §16.16.
 
 ### Removed
-- **Field-level schema key `x-fk-constrained`** (added in #484). The key
-  excluded an optional many-to-one FK field from the generated "3.1 adds
-  optional data and child items" test's per-field autofill when the
-  field's valid values depend on another field on the same row. Reverted:
-  no consumer schema declares it as of removal, and the one prior
-  consumer usage (an inventory-tracking app's `shipment_line.inventory_id`)
-  had already been made a required column with a different fix, which on
-  its own retired the need for the key (see that consumer's own schema
-  comment on the field). `code_generator/tests/test_fk_constrained.py`
-  (4 dedicated tests) is removed with it.
+- **Field-level schema key `x-fk-constrained`** (added in #484) — no consumer schema declared
+  it, and the one prior usage had already been made a required column by a different fix,
+  retiring the need for the key.
 
 ### Fixed
 - **An independent child (its own `x-generate` permits new/edit) embedded in a parent with
@@ -175,56 +168,19 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/import-key-null-empty-equivalence.md`.
 
 ### Changed
-- **Approval-request creation moves off the write-once `afterCreate` hook
-  (`lib/{entity}/service_after_create.ts`, now retired) into an edge-trigger
-  emitted directly into `service.ts.jinja2`'s generated `add{Parent}`/
-  `update{Parent}`.** The trigger fires on the transition into a new
-  `x-approval.submit_on: {field: value}` declaration's target value — at
-  create time from "no row" (unconditionally, if `submit_on` is undeclared —
-  the previous default), and at update time only on an explicit
-  previous-value-differs / new-value-matches edge, never a level check. Both
-  paths share a guard against a second open flow for the same approvable.
-  `approval_flow.entity_name` now resolves through the entity's view key
-  rather than its Prisma model, so a proxy view can carry its own
-  independent approval flows even when it shares a model with other views;
-  `resolve_target.ts`'s resolver and model lookup follow suit, while
-  `on_approved_dispatch.ts`/`on_rejected_dispatch.ts` stay keyed by model
-  (`x-approval` is a raw-entity-level declaration) with the server action
-  translating between the two before dispatching. `resubmitApprovalRequest`
-  (the dedicated server action, REST route, and its `ApprovalSection.tsx`
-  button) is removed — re-submission after a non-terminal rejection is now
-  an ordinary edit of the entity's own status field back to `submit_on`'s
-  value, which fires the same update-time trigger a first submission fires
-  at create time. See `docs/knowledge/appendix/approval-flow.md` §16.4/§16.6
-  for the full mechanism, including a known gap: terminal rejection's
-  "cannot resubmit" is a workflow expectation, not yet independently
-  enforced against a direct status-field write.
-- **`user.image` moved from a plain URL string to a direct-attachment FK
-  (`x-relationship: {target: attachment, type: direct}`)** — the profile
-  picture is now an uploaded file tracked as an `attachment` row (giving it
-  the same storage-cleanup inventory every other direct-attachment field
-  gets), not an arbitrary URL string. Consequences:
-  - **OAuth sign-in no longer copies the provider's profile-image URL** into
-    `user.image` (`lib/auth/create-user.ts`) — a user's avatar now comes
-    only from their own upload. The `Session.user` type augmentation
-    (`auth.ts`) no longer carries an `image` field (it would always resolve
-    to `null` under the new shape; nothing in this app read it from the
-    session).
-  - `components/_standard/CommentListWrapper.tsx`'s avatar now resolves the
-    comment creator's uploaded photo through the direct-FK relation
-    (falls back to initials, as before, when absent).
-  - Prisma: `user.image String?` → `user.image_id String? @unique` +
-    `user.image attachment? @relation(...)`. `attachment` gains a
-    back-reference field per direct-attachment declaration
-    (`user_image user? @relation("UserImage")`); a new
-    `validate_direct_attachment_reverse_fields` generate-time check
-    fails closed if a `type: direct` declaration is missing its
-    back-reference. See docs/knowledge/schema-yaml-configuration.md
-    "Direct Attachment FK".
-  - No data migration: pre-customer, no production users to preserve.
-  - `asset.manual_url` (a consumer-schema field with the same
-    misclassification) is out of scope here — tracked as a separate
-    follow-up.
+- **Approval-request creation moves off the write-once `afterCreate` hook into an
+  edge-trigger emitted directly in the generated `add{Parent}`/`update{Parent}`** — fires on
+  the transition into `x-approval.submit_on`'s target value, at create or update. **Behavior
+  change**: `resubmitApprovalRequest` (its own server action, REST route, and UI button) is
+  removed — re-submission after a non-terminal rejection is now an ordinary edit of the
+  entity's own status field back to `submit_on`'s value. See
+  `docs/knowledge/appendix/approval-flow.md` §16.4/§16.6.
+- **`user.image` moved from a plain URL string to a direct-attachment FK** — the profile
+  picture is now an uploaded file tracked as an `attachment` row. **Breaking**: OAuth sign-in
+  no longer copies the provider's profile-image URL into `user.image`; a user's avatar now
+  comes only from their own upload. Prisma: `user.image String?` → `user.image_id String?
+  @unique` plus a relation. No data migration (pre-customer). See
+  `docs/knowledge/schema-yaml-configuration.md`.
 
 ### Fixed
 - **A proxy view (`parent != model`) with `x-generate.list: true` could fail to get a
@@ -258,50 +214,25 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   consuming schema's own `user` shape. See `docs/knowledge/schema-yaml-configuration.md`.
 
 ### Removed
-- **`scripts/seed.ts` (`npm run db:seed`)** — unused ITS (issue-tracking-system)
-  sample-data script. Not referenced by any npm script, prisma seed hook, or
-  CI workflow; its only mention in the repo was a stale line in
-  `docs/knowledge/troubleshooting.md`. No replacement; if a consumer project
-  had a local, unrelated `npm run db:seed` invocation depending on this file
-  existing, that invocation now fails.
+- **Removed `scripts/seed.ts` (`npm run db:seed`)** — unused sample-data script, not
+  referenced by any npm script, prisma seed hook, or CI workflow. No replacement.
 
 ### Changed
-- **`scripts/seed-tenant.ts` renamed to `scripts/seed-baseline.ts`
-  (`npm run db:seed-tenant` → `npm run db:seed-baseline`), and its
-  neighboring credential-hardening files renamed to match**
-  (`scripts/seed-tenant-credentials.ts` → `scripts/seed-baseline-credentials.ts`,
-  `scripts/seed-tenant-credentials.test.ts` → `scripts/seed-baseline-credentials.test.ts`,
-  `docs/knowledge/seed-tenant-credential-hardening.md` →
-  `docs/knowledge/seed-baseline-credential-hardening.md`). The old name
-  described a "tenant" concept this script has nothing to do with; the new
-  name matches its actual job (seeding the baseline admin user/roles/
-  permissions every environment needs). `seed.ts` was deliberately **not**
-  reused as the new name (despite being freed up by the removal above) —
-  `cy.task('db:seed')`, a same-spelled but unrelated Cypress test-database
-  task backed by `cypress/support/db-helpers.ts`, would otherwise collide in
-  meaning with `npm run db:seed`. No backward-compatible alias is provided
-  (pre-customer, no shipped installs to preserve compatibility for).
-  **Consumer impact**: any consumer project or script invoking
-  `npm run db:seed-tenant` directly, or a `Bash(npm run db:seed-tenant)`
-  permission entry in `.claude/settings.json`, must switch to
-  `db:seed-baseline`.
-- **Generated apps now default to blocking search-engine indexing.** Generated
-  apps are primarily internal tools, and a Vercel production deployment (unlike
-  a preview deployment) gets no automatic crawler protection. `app/layout.tsx`
-  now sets `<meta name="robots" content="noindex,...">` unless
-  `lib/site-config.ts`'s `seo.noindex` is explicitly set to `false` — and
-  because the default flipped, an app whose `seo` block (or just `noindex`
-  within it) is missing entirely is *also* noindexed, not indexed. See
-  `docs/knowledge/noindex-default-and-branding-env-vars.md` for the mechanism,
-  why `robots.txt` `Disallow` was rejected, and consumer-impact notes.
+- **`scripts/seed-tenant.ts` renamed to `scripts/seed-baseline.ts`** (`npm run db:seed-tenant`
+  → `npm run db:seed-baseline`), with its neighboring credential-hardening files renamed to
+  match. No backward-compatible alias is provided. **Consumer impact**: any consumer invoking
+  `npm run db:seed-tenant` directly must switch to `db:seed-baseline`. See
+  `docs/knowledge/seed-baseline-credential-hardening.md`.
+- **Generated apps now default to blocking search-engine indexing** — `app/layout.tsx` sets
+  `noindex` unless `lib/site-config.ts`'s `seo.noindex` is explicitly `false`; an app with no
+  `seo` block at all is also now noindexed. See
+  `docs/knowledge/noindex-default-and-branding-env-vars.md`.
 - **`scripts/seed-tenant.ts` now also seeds `Creator` and `Assignee` roles.** `Creator` is
-  granted exactly `setting.read`+`setting.update`, letting a non-admin user reach their own
-  `/setting` page via `x-self-only`; `Assignee` is seeded with no permissions (placeholder for
-  future use).
-- **Removed the dead in-process notification store from `lib/_notifier.ts`** (a no-op
-  `Map`-based read path with zero production callers, plus its startup `console.log`).
-  `notify()`'s write path is unchanged except its return type, now `void` (the return value was
-  unused everywhere).
+  granted exactly `setting.read`+`setting.update`; `Assignee` is seeded with no permissions
+  (placeholder for future use).
+- **Removed the dead in-process notification store from `lib/_notifier.ts`** (a no-op read
+  path with zero production callers). `notify()`'s write path is unchanged except its return
+  type, now `void`.
 
 ### Added
 - **`x-relationship: { target: attachment, type: direct }`** — new single-file FK field
@@ -469,37 +400,16 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/fk-read-permission-graceful-degradation.md`.
 
 ### Changed
-- **Generated API test spec (`test_api_spec.cy.ts.jinja2`) no longer authenticates via
-  `cy.login()` except one deliberate case** (per a report from the project owner: `api/approval_flow.cy.ts`
-  still drove the browser login screen even after an earlier change added `X-API-Key` support to
-  export/import/approve/reject). 15 `cy.login()` call sites classified one by one: 11 in the
-  approve/reject block (12.1–15.2) simply predated that dual-auth change and had never been
-  updated to use the `api_key` the same test fixtures already expose (`setup.approverUser.api_key`
-  etc., the exact pattern the adjacent resubmit tests already used) — switched to `X-API-Key`. 2
-  in the export/import permission-denied pair (7.5/7.6) carried a comment claiming the route
-  "never reads X-API-Key"; that claim is now false — switched to
-  `db:createLimitedApiUser`, the same helper 7.2–7.4 already use, making 7.5/7.6 identical in
-  shape to their siblings. 2 more (an export/import happy-path block's `beforeEach`, and a
-  search-coverage block) had no route-specific reason to use a session at all — switched to
-  `TEST_API_KEY`. The one exception is new: `N14 also authenticates via a NextAuth session
-  cookie (dual-auth)`, a single canary proving the session-cookie half of `resolveActorId()`
-  still authenticates, kept because eliminating every `cy.login()` would silently stop measuring
-  that half of dual-auth's "works via either" guarantee. See
-  `docs/knowledge/testing-cypress.md`'s "API test / UI test boundary" section for the policy and
-  `code_generator/check_generated.py`'s new `test:unexplained-login` gate rule that now enforces
-  it (regenerated output confirmed `cy.login`-free except the one marked canary; full
-  `test:e2e:cy:api` run: 248/270 passing across all 16 relevant specs, the 22 failures isolated
-  to a single pre-existing, untracked, gitignored orphan spec — `personal_note.cy.ts`, 404s
-  because the `personal_note` entity no longer exists in `json_schema.yaml` — unrelated to this
-  change and present before it).
+- **Generated API test spec no longer authenticates via `cy.login()` except one deliberate
+  canary case** — 15 `cy.login()` call sites were classified and switched to
+  `X-API-Key`/`db:createLimitedApiUser` where the route already supports it; one is kept as a
+  canary proving the session-cookie half of dual-auth still works. See
+  `docs/knowledge/testing-cypress.md`'s "API test / UI test boundary" section and
+  `check_generated.py`'s new `test:unexplained-login` gate rule that now enforces it.
 - **`fk_read_permission_graceful_degradation.cy.ts` moved from `cypress/e2e/api/` to
-  `cypress/e2e/`**: every case in this hand-written spec drives the browser
-  (`cy.visit`/`cy.login`/`cy.selectAutocomplete`) and never issues a raw `cy.request` — it was
-  never actually `test:e2e:cy:api`-gate coverage despite living under `api/`. It now sits under
-  `test:e2e:cy:ui`'s spec glob (`cypress/e2e/*.cy.ts`) instead. (Note: the task instruction that
-  prompted this move said "move to `cypress/e2e/ui/`", but no such subdirectory exists in this
-  repo — `cypress/e2e/*.cy.ts` is the actual UI-spec convention; moving it into a nonexistent
-  `ui/` subdirectory would have dropped it from both gates' spec globs silently.)
+  `cypress/e2e/`** — every case in this hand-written spec drives the browser and never issues a
+  raw `cy.request`, so it was never actually API-gate coverage despite living under `api/`. It
+  now sits under the UI-spec glob instead.
 
 ### Fixed
 - **Server Action errors (permission denied, unique-constraint violations, stale updates, and
@@ -710,12 +620,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ### Removed
 - **Removed the `x-relationships.<rel>.sameEntityField` schema key** and its generated
-  `validateSameEntityRefs()` — a coincidental business rule (self-ref `preceded_by`/`followed_by`
-  same-`entity_name` matching for `approval_flow`) had been generalized into the schema layer.
-  Replaced with a purely structural socket: every entity now gets an unconditional write-once
-  `service_validation_custom.ts` stub, and `approval_flow`'s own same-entity rule is now entirely
-  hand-written. See `docs/knowledge/same-entity-validation-socket.md` (replaces
-  `docs/knowledge/same-entity-field-mechanism.md`).
+  `validateSameEntityRefs()` — a coincidental business rule had been generalized into the
+  schema layer. Replaced with a purely structural socket: every entity now gets an
+  unconditional write-once `service_validation_custom.ts` stub. See
+  `docs/knowledge/same-entity-validation-socket.md`.
 
 ### Added
 - **New `check:generated` gate rule, `test:unexplained-login`**: scans every generated
@@ -1059,21 +967,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/generate-code-idempotency.md`.
 
 ### Removed
-- **`x-reservation.actions` sub-feature (2026-07-30 ruling)** — the declarative
-  `ship` / `release` / `cancel` lifecycle-action mechanism under `x-reservation`
-  (`reservation_actions.ts` generation, per-action
-  `app/api/{parent}/[id]/actions/{ship,release,cancel}/route.ts` handlers, and the
-  `ReservationActionButtons` UI component) has been removed. `x-reservation` is
-  retained, scoped to exactly two roles: (1) inventory allocation (`count` mode) and
-  (2) specific-resource reservation (`item` mode, e.g. a hotel `room`). Approval/
-  rejection lifecycle for the owning entity goes through the generic Approval Flow
-  System's `approve` / (terminal) `reject` instead (`x-approval`). No entity in the
-  default schema or any known consumer schema ever declared an `actions` block, so
-  this closes zero generated-output diff for existing apps — confirmed by comparing
-  `generate-code` output before/after this change (identical). `code_generator/
-  validate.py` now hard-rejects any schema that still declares `x-reservation.actions`.
-  See [docs/knowledge/appendix/inventory-reservation-split.md](docs/knowledge/appendix/inventory-reservation-split.md)
-  §1.1.
+- **Removed the `x-reservation.actions` sub-feature** — the declarative
+  `ship`/`release`/`cancel` lifecycle-action mechanism. `x-reservation` is retained, scoped to
+  inventory allocation and specific-resource reservation; approval/rejection lifecycle goes
+  through the generic Approval Flow System (`x-approval`) instead. No entity in any known
+  schema ever declared an `actions` block. `validate.py` now hard-rejects a schema that still
+  declares it. See `docs/knowledge/appendix/inventory-reservation-split.md` §1.1.
 
 ## [2.0.0] - 2026-06-25
 
