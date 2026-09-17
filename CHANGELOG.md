@@ -503,425 +503,118 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ### Fixed
 - **Server Action errors (permission denied, unique-constraint violations, stale updates, and
-  more) showed a "Minified React error #441" screen with no actionable text instead of the
-  underlying reason** (design from an earlier proposal): Next.js strips a thrown error's `message`
-  at the Server Components render boundary in production, replacing it with the minified error
-  text and an opaque digest — this happened for every error thrown by `upsertXxx`/`removeXxx`'s
-  service-layer calls, regardless of how actionable the underlying error was. Fixed per
-  `docs/knowledge/error-message-framework.md`'s Layer 2 design: added a typed `AppError`/
-  `ActionResult` taxonomy (new write-once `lib/_errors.ts`), converted the named throw sites
-  (`lib/authz.ts`, `lib/normalize.ts`, `service.ts.jinja2`, `service_validation.ts.jinja2`) to
-  throw `AppError`, and had `actions.ts.jinja2`'s `upsertXxx`/`removeXxx` catch it and return an
-  `ActionFailure` value instead of letting it propagate — the value survives production
-  untouched, since it is data, not an exception crossing the render boundary. The client renders
-  the corresponding message via a new `Errors` i18n namespace (`messages/en.json`, translated to
-  `messages/ja.json`). `removeXxx` (bulk delete) was extended beyond the original per-file
-  checklist, since a permission-denied delete would otherwise still crash — `DataGridClient.tsx`/
-  `CardListClient.tsx` now show the failure via `AppAlert` and roll back the optimistic row
-  removal instead. Also fixed, found only empirically during implementation (no throw site for it
-  existed anywhere): a genuine DB-level `@unique`/`@@unique` violation surfaced as an uncaught
-  `Prisma.PrismaClientKnownRequestError` (P2002) — `service.ts.jinja2` now converts it to
-  `AppError('CONFLICT', ...)`, reading the violated field name via a new `p2002Field()` helper
-  (`lib/_errors.ts`) written against this Prisma version's actual driver-adapter error shape,
-  which differs from the classic `meta.target` most Prisma examples show. Org isolation
-  violations continue to surface as `NOT_FOUND` (unchanged from earlier behavior) — never as
-  "permission denied", which would leak that the record exists in another organization. `error.tsx`
-  now shows a static, safe `Errors.pageError` i18n key instead of a hardcoded string; it remains
-  the fallback for truly unexpected errors and for permission checks on Server Component pages
-  (`assertPermission`, list/detail access), which cannot return a data value the way a Server
-  Action can. New hand-written UI e2e coverage,
-  `cypress/e2e/error_message_delivery.cy.ts`, exercises all three scenarios end-to-end
-  (unique-constraint violation, stale update, permission denied) against a full production build,
-  confirming the inline message renders and the page never falls through to `error.tsx`. Full
-  mandatory gate green (1238 pytest, 459 vitest, 240 API e2e — 0 skipped in any suite — plus the
-  new UI spec, 0 npm audit findings).
-- **`get<Entity>ChunkForExport()` silently exported zero rows for an `X-API-Key`-only caller
-  with genuine `read` permission** (found while removing `cy.login()` from generated
-  export API tests): `getters.ts.jinja2`'s CSV-export getter has two branches for computing
-  permissions — the `should_filter_by_org` branch correctly calls
-  `getModelPermissions('<entity>', userId)` with the `userId` the export route already resolved
-  (via `resolveActorId()`'s dual-auth) and passed in; the other branch called
-  `getModelPermissions('<entity>')` with no `userId` at all, which falls back to
-  `getSessionUserId()` inside `authz.ts`. Every export API test always authenticated via
-  `cy.login()` (a real session cookie), so this was invisible — `getSessionUserId()` happened to
-  resolve the same actor. Switching those tests to `X-API-Key` (no session cookie present)
-  exposed it: `getSessionUserId()` returns `null`, `getModelPermissions()` returns
-  `EMPTY_FLAGS`, and the export's own access-where builder filters out every row — a 200 response
-  with an empty CSV body, not an error, for a caller the *route* had already confirmed has read
-  access. Fixed by passing `userId` through in both branches. Verified: `dashboard.cy.ts`'s N6/N11/
-  N12/N13 (which use `to.include` assertions that fail on empty data, unlike N1/N2/N5's
-  `to.not.include`, which pass vacuously either way) went from failing (`expected [''] to include
-  'name'`) to passing after the fix, confirmed on a from-scratch server + build.
-- **`FormUpsert`'s readonly-field display was type-blind, showing raw FK ids with a nonexistent
-  i18n key instead of the relation's label**: the readonly-field loop in
-  `form_upsert_context()` rendered every readonly field the same way —
-  `String(src.<prop>)` with `tf(to_camel_case(prop))` as the label — regardless of type. For a
-  relation, the property name is `<rel>_id`, so this produced an untranslated
-  `tf('parentGoodsReceiptLineId')` label and the raw id as the value instead of the relation's
-  resolved `labelField`. The same blind loop also affected enum (raw untranslated stored code),
-  date/datetime/time, boolean, and image (`format: uri`) readonly fields, though those remained
-  legible (unstyled) rather than incorrect. Fixed by extracting `form_view_context()`'s existing
-  per-type dispatch (FormView is always read-only, so it already rendered every type correctly)
-  into a shared `_readonly_display_field()`, reused by both `form_view_context()` and
-  `form_upsert_context()` — the two paths can no longer render the same field differently.
-  Also added a fail-closed check: an `x-readonly-fields` entry that doesn't resolve to an actual
-  property (e.g. the relation name instead of the FK column) now raises at generation time
-  instead of silently leaving the field fully editable. See
+  more) showed an opaque "Minified React error #441" screen instead of the underlying reason**
+  — Next.js strips a thrown error's message at the Server Components render boundary in
+  production. Fixed via a typed `AppError`/`ActionFailure` taxonomy (`lib/_errors.ts`): named
+  throw sites now throw `AppError`, and `upsertXxx`/`removeXxx` (including bulk delete) catch it
+  and return a value instead of letting it propagate, rendered via a new `Errors` i18n
+  namespace. A genuine DB-level unique-constraint violation (`P2002`) is now also converted to
+  `AppError('CONFLICT', ...)` instead of surfacing as an uncaught exception. Org isolation
+  violations continue to surface as `NOT_FOUND`, never "permission denied" (would leak that the
+  record exists in another org). See `docs/knowledge/error-message-framework.md`.
+- **`get<Entity>ChunkForExport()` silently exported zero rows (a `200` with an empty CSV body,
+  not an error) for an `X-API-Key`-only caller with genuine `read` permission** — one of its two
+  permission-check branches resolved the acting user from the session cookie instead of the
+  already-authenticated actor, so a caller with no session cookie always resolved to no
+  permissions. Both branches now use the same resolved `userId`.
+- **`FormUpsert`'s readonly-field display was type-blind**, showing a relation as a raw FK id
+  with a nonexistent i18n key instead of its resolved label (enum/date/boolean/image readonly
+  fields were also affected, though only cosmetically). Now reuses `FormView`'s existing
+  per-type display dispatch; an `x-readonly-fields` entry that doesn't resolve to an actual
+  property now fails at generation time instead of silently leaving the field editable. See
   `docs/knowledge/readonly-field-form-rendering.md`.
-- **Generated "requestor can re-submit a rejected request" approval test used a page-wide,
-  unscoped `[aria-label="Re-submit"]` lookup** (real case: `purchase_per_item.cy.ts`
-  7.8, seen as `cy.click() can only be called on a single element. Your subject contained 2
-  elements.` in a full 150-spec CI run, passing in isolation): `ApprovalSection.tsx` renders one
-  Re-submit `IconButton` per `approval_request` row with `status === 'rejected'`, all sharing the
-  same static `aria-label="Re-submit"` — and an entity can legitimately have a second, "ungated"
-  `approval_flow` (`requestor_role_id: null`, applying to every requestor) alongside a role-gated
-  one (see the adjacent 7.1 test's own comment: "both flows apply → 2 approval_requests"), so once
-  more than one of an approvable's requests is rejected, more than one element matches. Two full
-  local reproductions matching the exact failing CI commit and exact preceding 23-spec order could
-  not force the second row, so the triggering condition from that CI run stays unconfirmed — but
-  the selector was unsafe by construction regardless, the same "only one graspable" assumption
-  already fixed for `parent1` in an earlier change, the self-referential decoy in another earlier change, and
-  `goods_receipt_line` candidate selection. Fixed by scoping the interaction to the specific
-  `approval_flow`'s own table row (via its approver-role-name `<td>`, exact-matched with the
-  existing `exactRe()` helper, then `.closest('tr')`) instead of a page-wide selector. The
-  sibling `[aria-label="Approve"]` / `[aria-label="Reject"]` lookups in the same describe block
-  (tests 7.4/7.5/7.6/7.7/7.9) carry the identical latent hazard and were left unscoped — noted for
-  a follow-up cmd, out of this task's scope. Verified: `purchase_per_item.cy.ts` 9/9 passing
-  individually and in a full 23-spec CI-order run (`approval_flow.cy.ts` through
-  `purchase_per_item.cy.ts`, matching the exact failing CI run's spec order) against the exact
-  submodule commit that failed in CI; `code_generator` pytest suite 1227 passed, 0 skipped after
-  `generate-code`.
-- **`helper_context()`'s per-dependency loop variable shadowed the entity-level `title`**
-  (`code_generator/generators_test.py`, found verifying the fix above): the multi-FK-to-same-target
-  dep-splitting loop (e.g. `inventory_movement`'s `from_inventory_id`/`to_inventory_id`, both
-  pointing at `inventory`) reused the bare name `title` for each per-dependency label, permanently
-  overwriting the outer `title = to_title_case(parent)` for the rest of the function — so
-  `helper_context()`'s returned `title` (used by `test_helper.ts.jinja2` to name every approval-flow
-  seed role, e.g. `Test {{ title }} Approver Role`) silently became the *last-processed FK's* label
-  (`"To Inventory"`) instead of the entity's own title (`"Inventory Movement"`), while
-  `spec_context()` (no such loop) still returned the correct title — a cross-context mismatch
-  invisible until a test asserted on the seeded role's display text. The fix above's
-  `exactRe('Test {{ title }} Approver Role')` scoping does exactly that, so it surfaced the bug on
-  every entity hitting this pattern (`inventory_movement.cy.ts` 7.8 failed:
-  `Expected to find content: '/^Test Inventory Movement Approver Role$/' within the selector: 'td'
-  but never did`) — the old page-wide `[aria-label="Re-submit"]` selector never looked at role text,
-  so the mismatch had no test-visible effect before this task. Renamed the loop-local variable to
-  `dep_title`. Verified: instrumented `helper_context()`/`spec_context()` directly for
-  `inventory_movement` (`title` now `'Inventory Movement'` from both, previously `'To Inventory'`
-  vs `'Inventory Movement'`); `inventory_movement.cy.ts` 14/14 passing standalone after
-  `generate-code`; `code_generator` pytest suite unaffected (1227 passed, 0 skipped, same count
-  before and after this fix — no fixture relied on the shadowed value).
-- **A parent record created with a NULL `organization` (added in an earlier change that made the relationship optional) became permanently
-  un-updatable — `upsert<Parent>()`'s pre-permission existence check threw `Error('Not found')`
-  even for its own creator**: `generators.py`'s `_actor_and_existing_block()` filtered
-  strictly on `organization_id: { in: _orgIds } }`, which never matches `NULL` in SQL, unlike its
-  three sibling org-filter sites (`remove<Parent>()` in `actions.ts.jinja2`,
-  `get<Parent>Detail()` in `getters.ts.jinja2`, and the CSV import route in
-  `api_import_route.ts.jinja2`), which already admitted a NULL-organization row via the same
-  `org_relationship_optional` OR-null clause. Wired the same (previously computed but unused)
-  context value into the upsert existence check so create/update, delete, and read now treat a
-  null organization consistently. Verified against proj_c's `parent1` entity in an isolated
-  worktree: the update-existence-check regression case now passes; `code_generator` pytest suite
-  1220 passed, 1 skipped (pre-existing, unrelated), 0 failed.
-- **Cross-entity global search never surfaced a row whose `organization` relationship was NULL**:
-  `search_helpers.ts.jinja2`'s per-entity access clause filtered strictly on
-  `{{ org_id_field }} IN (${ associatedOrgIds })`, which never matches `NULL` in SQL. Once an
-  org-scoped entity's `organization` relationship becomes optional (per the earlier change noted above), an org-less row
-  was invisible to `buildSearchQuery()` for every caller, including its own creator — the one
-  remaining call site still using the pre-that-change unconditional-deny shape (every other
-  `org_relationship_optional` site — `actions.ts.jinja2`, `getters.ts.jinja2`,
-  `api_detail_route.ts.jinja2`, `api_import_route.ts.jinja2` — already had the OR-null admission
-  via that same set of earlier changes). Fixed by wiring the same `org_relationship_optional` computation into
-  `generate.py`'s search-entity context (search builds its own independent Prisma.sql fragments,
-  so it needed its own plumbing rather than reusing the object-filter templates' existing
-  context), gated at both org-filter sites in the template (the direct access clause and its
-  `parent.`-qualified `no_page_children` sibling). Verified against a real Postgres DB via proj_c's
-  `parent1` entity: `api/parent1.cy.ts`'s N10 spec failed with `expected false to equal true`
-  before this fix, passed after. See `docs/knowledge/org-optional-entity-support.md` for the full
-  design context, including a follow-up gap found but not fixed in this pass (CSV import's
-  dotted-FK lookup-target org filter doesn't admit a NULL-organization row on the lookup target
-  side either).
-- **Generated 3.3 "edits with mixed changes" test for a `user`-FK primary field selected a
-  `Test User A` row that was never seeded, failing the `cy.selectAutocomplete` assertion**
-  (real case: `shift`/`shift_template`): `spec_context()`'s `is_user_account` primary-FK
-  branch builds `edit_update_value` from the letter-suffixed dependency instance (`Test User A`,
-  from `_seed_relation_label_value`'s `unique_index=None` fallback) but only routed the edit
-  through `populate{Pascal}Dependencies()` (`use_deps_in_3_3`) for the `selectAutocomplete`
-  create/fail-edit paths — the `is_user_account` branch of `populate{Pascal}Data`'s own
-  per-iteration loop (`test_helper.ts.jinja2`) only ever creates `Test User ${i}`, never a
-  letter-suffixed row, so relying on `populate_count_3_3` alone left the target row absent from
-  the DB. Fixed by setting `use_deps_in_3_3 = has_deps` for this case too (`generators_test.py`),
-  so the 3.3 edit is routed through the dependency populator like the other `is_user_account`
-  paths already are. Verified: `shift.cy.ts`/`shift_template.cy.ts` (desktop + mobile) 40/40
-  passing in an isolated worktree; full `code_generator` pytest suite 1216 passed, 0 skipped.
-- **Generated Cypress test's per-entity `callIndex` counter (an earlier isolation counter,
-  `` `Test {Title} ${callIndex}_${i}` ``) persisted for the life of the Cypress plugin process, not
-  per test case** ("per-test-case callIndex reset"): a generated spec's own `it()` blocks
-  are hardcoded to expect `callIndex=0`, but two `it()` blocks in the same spec calling the same
-  `populate*Data`/`populate*FullData` helper gave the second block `callIndex=1`, failing its
-  assertions — and separately meant a single `it()` run in isolation could produce different
-  generated values than the same `it()` run as part of the full spec (order-dependence). Fixed by
-  adding a `_reset{Pascal}CallSeq()` export to the generated test helper, wiring it to a
-  `db:reset{Pascal}CallSeq` Cypress task, and calling that task at the top of every generated
-  spec's `beforeEach` — desktop, mobile, and API. (The API spec template was missed in the first
-  pass — `api_spec_context()` never computed `primary_fk_dep` either, the same gap the desktop/mobile
-  contexts had — and added in a follow-up once code review caught it before merge.) Guarded by the
-  same condition (`primary_fk_dep` with `extra_required_fields`, not a user-account FK) that decides
-  whether the counter exists at all, so entities that never needed the counter get none of the new
-  plumbing. Hand-written specs calling the same populate functions are not automatically covered by
-  this reset (each has its own `beforeEach`) — see the new rule and worked example in
-  `docs/knowledge/cmd614-test-data-uniqueness-design.md` §6.2 for how to keep such specs safe
-  (round-trip the actual seeded value, or add the same reset call). Verified end-to-end against
-  proj_b's `approval_flow` (its only entity meeting the guard condition): isolated single-`it()`
-  runs and full-suite runs produce identical generated values; full mandatory gate (lint / pytest /
-  vitest / mention-gate / e2e:build / check:generated / cy:api 236/236 / cy:ui 177/177 / npm audit /
-  pip-audit) green.
-- **`api_import_route.ts.jinja2`'s composite-labelField FK resolution referenced
-  `formatLabelValue()` with no import once a labelField segment needed date/time formatting, breaking
-  the TS build**: an earlier fix removed this import as unconditionally-dead lint debt — correct at
-  the time (no entity's `import_label_expr` called it yet), but `import_label_expr` is a *string built
-  in `build_context.py`* and spliced in via `{{ }}`, so a static read of the `.jinja2` source can never
-  see whether it calls `formatLabelValue()`. A later labelField-composition change made composite
-  labelFields with date/time segments call it (real case: proj_g `goods_receipt_line`, labelField
-  `[product.code, lot_number, expiration_date]` — broke a downstream consumer's build with "Cannot find
-  name 'formatLabelValue'"). Fixed by gating the import on `import_uses_format_label_value` (`build_context.py`:
-  `any(s.get('has_format') for s in import_fk_specs)`, threaded from `build_label_expression()`'s own
-  `has_format` — the same mechanism 7 other templates already use for this same import). Both directions
-  verified: a composite labelField with a date segment gets the import (proj_g `goods_receipt_line`,
-  reproduced via a real `build_context()` call with a date-typed labelField segment — see
-  `TestCompositeLabelFieldImportUsesFormatLabelValue` in `test_build_context.py`), and one without still
-  omits it (no regression of the original lint-debt fix). Re-audited the same commit's other two
-  dead-binding fixes (`fkData`, `richPerms`) — neither shares this blind spot, both gate usage behind
-  the identical static `{% if %}` as their declaration. Also fixed, same file (code review finding on a
-  downstream consumer PR): an `eslint-disable-next-line` comment on the auto-create-OTO branch sat two
-  lines above the `as any` it was meant to suppress (directly above `await tx.{{ model }}.create({`
-  instead of the `data: { ...(action.data as any),` line), silently failing to suppress anything.
-  Regression tests (deviation-injection confirmed: revert either fix → new test fails at the same
-  spot): `test_format_label_value_imported_when_composite_spec_needs_it` /
-  `..._import_absent_when_flag_false_even_with_composite_spec` /
-  `test_bridge_create_eslint_disable_immediately_precedes_as_any` in `test_import_template_branches.py`.
-  Full `code_generator` pytest suite: 1181 passed, 0 regressions. See
-  `docs/knowledge/cmd607-generator-lint-debt-fix.md` (correction note under Root cause 2, item 1).
-- **Generated UI test scaffold no longer tries to fill an `x-server-value` field through the
-  form.** Two `spec_context()` code paths (create/fail-edit fill commands via
-  `req_ua_spec`/`all_ua_spec`, and the "edits with mixed changes" test's `edit_primary_cmd` when
-  the field is also the entity's `x-display.table` primary column) generated
-  `cy.selectAutocomplete()` against a field that's always excluded from every form input by
-  `x-server-value`'s design — the form never renders that autocomplete, so the generated test
-  failed outright (`Expected to find element: 'filter', but never found it`). Both paths now skip
-  such fields entirely. See `docs/knowledge/x-server-value-actor-delegation.md`.
-
-- **Generated test helper's find-or-create dep block gave `create()` an `include` for
-  composite-labelField resolution but not the paired `findFirst()`, a latent TS2551/TS2339 type error
-  in every affected `cypress/support/*/helper.ts`**: when a many-to-one relationship's
-  `labelField` is composite (e.g. `[purchase_order.po_number, item.sku]`), the generated dep record's
-  label expression reads an included relation (`record.purchase_order?.po_number`) that only exists on
-  the `create()` branch's inferred type — the `findFirst()`-declared variable's type lacks it, since
-  `test_helper.ts.jinja2` only spliced `dep.prisma_include_str` into `create()`. Reproduced in proj_g's
-  `goods_receipt_line/helper.ts` (`purchase_order_line`/`asn_line` deps). Currently invisible to every
-  gate — `tsconfig.json` excludes `cypress/` from `next build`'s type-check scope, and `cypress run`
-  transpiles support files without type-checking — confirmed via an isolated `tsc --noEmit` pass and a
-  deviation-injection round-trip (revert → error reappears at the same 2 lines; re-apply → clean).
-  Fix: the same conditional `include` now applies to both the `findFirst()` and `create()` call in all
-  5 identically-shaped call sites in the template. proj_g's full `test:e2e:build` + `test:e2e:cy:api`
-  (30 specs / 616 tests) both pass post-fix, and an isolated `tsc --noEmit` over proj_g's entire
-  `cypress/support/**` confirms zero remaining errors of this class across all 5 composite-labelField
-  occurrences in its schema. proj_c has one dormant occurrence of the same latent bug class (not
-  exercised here — its generator pointer hasn't bumped to include this fix yet). Covered by a new
-  regression test (`test_composite_labelfield_helper_findfirst_include.py`, following an established convention: render
-  the actual jinja2 template, assert the generated TypeScript). Full `code_generator` pytest suite:
-  1130 passed (+2 new), 0 regressions. See
-  `docs/knowledge/composite-labelfield-helper-findfirst-include-mismatch.md`.
-
-- **The CSV-import commit-time CREATE path built its Prisma `create()` call entirely from the
-  dry-run-computed row data, bypassing the same auto-create-bridge-FK pre-create mechanism
-  (`one_to_one_pre_creates` / FK-merge) that the normal `add<Entity>()` service function already
-  uses**: any entity with a required internal bridge FK (e.g. `approvable_id` on an
-  `x-approval` entity) failed CSV-import row creation at commit time with a Prisma
-  `PrismaClientValidationError` for the missing FK, even after an earlier fix correctly let
-  `import_can_create` come out `true` for such entities. The dry run (which never touches the DB)
-  reported success and issued a `confirmToken`, making the failure visible only on commit — a
-  concrete trap for anyone confirming a dry run that "succeeded". Concrete trigger: `goods_receipt_line`
-  (an `x-approval` entity) importing a CSV row whose natural key doesn't match an existing row.
-  `api_import_route.ts.jinja2`'s commit-time create branch now consumes the same
-  `one_to_one_pre_creates` / `one_to_one_fk_data_lines` context vars `service.ts.jinja2` already
-  renders — not a new mechanism, not a hand-listed entity name — gated on whether the entity has
-  any auto-create one-to-one relations at all, so entities without one render byte-identical output
-  to before. `one_to_one_fk_data_lines` is now also exposed standalone in `build_context.py`'s
-  returned context dict (previously inlined only into `parent_data_obj`, unavailable to any
-  template other than `service.ts.jinja2`). Verified both directions: a non-bridge entity's
-  generated import route is unchanged, and a direct DB-level replay of the fixed
-  `goods_receipt_line` transaction (against a real Postgres instance) succeeds and correctly
-  populates `approvable_id`, while the same data without the fix reproduces the original
-  `PrismaClientValidationError`. New/updated pytest coverage in `test_import_template_branches.py`
-  and `test_auto_create_oto.py` fails against the pre-fix template (deviation injection). Full
-  `code_generator` pytest suite: 1134 passed, 0 skipped. See
-  `docs/knowledge/import-create-missing-bridge-fk-fix.md`.
-
-- **An org-scoped entity's `organization` relationship can now be declared optional without
-  breaking CREATE or making org-less rows invisible.** Two gaps, both only surfacing once an
-  entity's `organization` relationship is removed from `required`: (1) `service.ts.jinja2`'s
-  CREATE-path org-membership check called `Array.includes()` on a value that is `string | null`
-  once the relationship is optional — a real `next build` compile error, not a lint nit — fixed by
-  mirroring the guard the UPDATE path already had; (2) every generated read/write scope filter
-  (`organization_id: { in: [...] }`) never matches SQL `NULL`, so an org-less row became invisible
-  to every org-scoped actor, including its own creator — confirmed as a real, not theoretical,
-  break: a testbed entity's basic generated CRUD tests failed en masse the moment its organization
-  relationship became optional and it was added to the standard test-permission infrastructure.
-  Fixed with a new `org_relationship_optional` flag that admits `organization_id: null` alongside
-  the actor's own organizations, applied everywhere the current model's own org scoping is
-  checked (list, detail, delete action, PUT/DELETE existence check, CSV import match-by-key). A
+- **Generated approval-flow Cypress tests used unscoped, page-wide selectors that could match
+  more than one row** — a "re-submit a rejected request" test's `[aria-label="Re-submit"]`
+  lookup matched every rejected `approval_request` row when an entity has more than one
+  applicable `approval_flow`, and a related, previously-invisible bug surfaced while fixing it:
+  `helper_context()`'s per-dependency loop reused the loop variable name `title`, permanently
+  overwriting the entity's own title for the rest of the function once more than one FK pointed
+  at the same target — corrupting the seeded approver-role name text the newly-scoped selector
+  now actually checks. Both are fixed; the sibling `Approve`/`Reject` selectors in the same
+  tests carry the identical unscoped-selector hazard and are noted as a follow-up, out of this
+  fix's scope.
+- **An org-scoped entity's `organization` relationship can now be declared optional, without
+  breaking CREATE, making org-less rows invisible, or leaving them permanently un-updatable.**
+  Declaring the relationship optional exposed four separate sites that assumed it was always
+  set: the CREATE-path membership check (a real `next build` compile error once the value could
+  be `string | null`); every generated read/write scope filter, which never matches SQL `NULL`
+  (making an org-less row invisible to every actor including its own creator); the
+  update/delete existence check (thrown `Not found` even for the row's own creator); and
+  cross-entity global search. All four are now covered by a shared `org_relationship_optional`
+  NULL-admission flag applied everywhere the current model's own org scoping is checked. A
   required-org entity's generated output is unaffected. See
   `docs/knowledge/org-optional-entity-support.md`.
-
-- **CSV import's dotted/composite-label FK lookup left the `organization` lookup target itself
-  completely unfiltered** — the existing `('organization', 'user')` exclusion in the org-filter
-  discriminant is correct (neither model has an `organization_id` column to filter candidates on),
-  but for `organization` specifically it meant no filter applied at all: a CSV row naming *any*
-  organization in the system, not just one the actor belongs to, would resolve and get attached.
-  Fixed with a new `lookup_entity_filter_by_self_id` flag that filters organization candidates by
-  their own `id` being in the actor's associated-org list instead. See the "Follow-up" section of
-  `docs/knowledge/csv-import-dotted-fk-org-filter.md`.
-
-- **`approval_flow.preceded_by`/`followed_by` rendered a different label on the View page than on
-  the Edit page for the same row**: View rendered `approver_role.name || entity_name`
-  (dropping `entity_name` entirely whenever a role was set), Edit rendered
-  `entity_name + ' - ' + approver_role.name`. The legacy `secondaryLabelField` mechanism that caused
-  this (only honored in one of the several label-rendering call sites) is removed entirely — zero
-  remaining references, grep-verified. `labelField` is now the composite list form
-  (`[entity_name, approver_role.name]`), rendered identically everywhere via the existing
-  `build_label_expression()` helper. Fixed a related crash: `generators_test.py`'s list-children
-  spec-label prediction called `.split()` directly on a labelField, assuming it was always a string
-  — list-form labelFields now route through the existing `_seed_relation_label_value()` helper.
-  Self-referential many-to-many searches (the pattern `preceded_by`/`followed_by` use) now pass the
-  record being edited through as `context.formValues`, making the previously-unreachable
-  `autocomplete_filter.ts` insertion point usable for this case; every other entity's default `{}`
-  stub is unaffected. Added `lib/approval_flow/autocomplete_filter.ts`: narrows
-  `preceded_by`/`followed_by` candidates to the same `entity_name` as the record being edited
-  (same-`entity_name` approval chains — e.g. a `purchase_order` chain's draft/manager/finance
-  stages — are an intentionally supported configuration, not test-data noise). Verified: 1130
-  pytest passing (0 skipped), full `test:e2e:cy:api` gate 236/236 passing (0 skipped), plus a new
-  hand-written `approval_flow_same_entity_autocomplete_filter.cy.ts` (2/2 passing) proving
-  same-entity_name candidates appear, different-entity_name candidates don't, and View/Edit render
-  the identical label.
-  
-- **`_create_feasible` (the CSV CREATE-feasibility gate) never excluded FKs to internal bridge
-  models (e.g. `approvable_id`, `x-relationship.type: one-to-one_bridge`), wrongly counting them as
-  unfillable required columns and gating off `import_can_create`**: a bridge FK is
-  server-managed plumbing the service layer creates and wires at CREATE time — it was already
-  correctly excluded from CSV *export*, but nothing then removed it from the required-fields gap
-  set, so it stayed a "gap" and `import_can_create` came out `False`. Combined with
-  `x-generate.edit: false`, this collapsed the entire generated `import/route.ts` to the
-  `ENTITY_IMPORT_NOT_SUPPORTED` 400 stub (`api_import_route.ts.jinja2:24`), not just CREATE — the
-  concrete trigger is `goods_receipt_line` (a pending edit:false ruling for that entity from an earlier task).
-  A prior earlier test for this exact scenario asserted the buggy value as correct, under the
-  mistaken belief the exclusion already happened; that test's assertion and rationale are corrected
-  as part of this fix. `_create_feasible` now subtracts `get_internal_bridge_fk_prop_names()` —
-  the same shared helper `validate.py` and `generators_test.py` already call — rather than a
-  hand-maintained name list. A genuinely unfillable required FK to a real (non-bridge) entity is
-  unaffected and remains infeasible as before. Verified both directions via an isolated
-  `build_context()` harness (no entity in this repo's own schema combines a required bridge FK with
-  edit:false) and updated/new pytest coverage in `test_build_context.py`, including deviation
-  injection (assertions fail against the pre-fix code). Full `code_generator` pytest suite: 1131
-  passed, 0 skipped. See `docs/knowledge/create-feasible-internal-bridge-fk-fix.md`.
-
-- **Generator-side lint debt invisible to CI**: `npm run generate-code && npm run lint`
-  surfaced 83 eslint warnings (0 errors) that CI's `Lint` job — which runs before `generate-code`,
-  never after — could never see. Broken down: 48 were a Chai getter-assertion false positive
-  (`expect(x).to.be.true`/`.to.exist` read as unused expressions by
-  `@typescript-eslint/no-unused-expressions`, which has no notion of Chai's assertion-chain side
-  effects), fixed by scoping that rule off for `cypress/e2e/api/**/*.cy.ts` in `eslint.config.mjs`.
-  The remaining 30 `no-unused-vars` warnings were three unrelated dead-binding bugs in
-  `api_import_route.ts.jinja2` (`formatLabelValue` imported but never referenced; `fkData` declared
-  and written even when `import_can_create` is false and nothing reads it) and
-  `api_bulk_route.ts.jinja2` (`richPerms` bound even for `x-self-only` entities, which never read it
-  — the permission check itself still runs, just unbound), plus two ordinary stale imports in
-  hand-written (non-generated) `audit_log` test files, plus 22 warnings whose triggering condition is
-  scattered across dozens of independent scenario branches in `test_spec.cy.ts.jinja2` — fixed via two
-  new self-healing post-render helpers in `generate.py` (`_strip_unused_exact_re_helper`,
-  `_prefix_unused_then_callback_params`) that inspect the actual rendered TypeScript output rather
-  than trying to mirror every branch condition in Python. 83 → 5 warnings (the remaining 5 are an
-  unrelated, pre-existing `@next/next/no-img-element` suggestion on static `components/_standard/*`
-  files, deliberately out of scope). 15 new pytest tests, 0 regressions (1130 → 1145 passed, 0 SKIP).
-  See `docs/knowledge/cmd607-generator-lint-debt-fix.md`.
-
-- **x-reservation test-helper generation only ever resolved the pool entity's criteria-field FK,
-  silently omitting any OTHER required FK on the pool entity**: when a pool entity (e.g.
-  `inventory`) has a required FK beyond the one named in `x-reservation.request.criteria` (e.g.
-  `location_id`, added 2026-08-06 alongside `product_id`), three separate generated-test code paths
-  built `prisma.<pool>.create()` calls that omitted it, all failing at seed time with a
-  missing-required-column Prisma error: `_reservation_base()`
-  (`test_reservation_helper.ts.jinja2`'s `seedReservationXxx*` helpers), and `helper_context()`'s
-  `reservation_lines_pool_seed`/`reservation_nolines_pool_seed` blocks
-  (`test_helper.ts.jinja2`'s `populate{{Pascal}}Dependencies()` pool-seed snippet — the one actually
-  responsible for the reported failures: `cypress/support/purchase_order/helper.ts`'s
-  `prisma.inventory.create()`, driving 20/27 failures in proj_c's `purchase_order.cy.ts` plus 1 in
-  `purchase_order_reservation_gen.cy.ts`, 21 total). All three now reuse
-  `resolve_dependencies()`/`get_entity_fk_deps()` (the same machinery `helper_context()` already
-  uses for `populateXxxDependencies`) to resolve the pool entity's required FKs beyond the criteria
-  field, including transitive chains — reusing an already-resolved dep var where one exists (e.g. a
-  datagrid child's own autocomplete FK already pulled the same target in) instead of creating a
-  duplicate row. Also fixes a latent, currently-dormant adjacent bug found while tracing this:
-  `populate{{Pascal}}Dependencies()` returned `{}` unconditionally whenever `deps` and
-  `reservation_nolines_pool_seed` were both empty, without checking `reservation_lines_pool_seed`.
-  Entities whose pool has no extra required FK (the common case, e.g. `supply_request`/`supply_pool`)
-  render byte-identical output. Covered by 15 new injected-fixture tests (following an established convention: render
-  the actual jinja2 template, assert generated TypeScript sets the column) across
-  `test_reservation_helper_pool_extra_fk.py` and `test_helper_pool_extra_fk.py`. Verified live in an
-  isolated proj_c worktree, both specs isolated (28/28 passing, up from 7/28 before) and as part of
-  the full 57-spec `test:e2e:cy:api` suite (976 tests: 936 passing/40 failing/9 red specs, up from
-  915/61/11 before the fix — exactly the 21 targeted failures resolved, zero new failures anywhere
-  else; SKIP=0 both runs). The 40 failures/9 red specs that remain are pre-existing and out of this
-  fix's scope (37 failures across 8 specs are the separate hand-written-helper class fixed by
-  an earlier change; 3 failures in 1 spec are an unrelated `x-self-only` 404-vs-403 issue). proj_g has zero
-  `x-reservation` consumer entities (feature unused there) — confirmed by mechanically walking its
-  schema with the fixed generator's own context builders, N/A for this bug class. Full
-  `code_generator` pytest suite: 1127 passed, 0 regressions. See
+- **A generated "edits with mixed changes" test for a `user`-FK primary field could select a
+  row that was never actually seeded**, failing the autocomplete assertion — the edit path
+  wasn't routed through the same dependency populator the create path already used for this
+  field shape. Now routed consistently.
+- **A generated Cypress test's per-entity `callIndex` uniqueness counter persisted for the life
+  of the Cypress plugin process instead of resetting per test case**, so two `it()` blocks in
+  the same spec calling the same populate helper could get different, test-order-dependent
+  values and fail. A reset task is now called at the top of every generated spec's `beforeEach`
+  (desktop, mobile, and API). Hand-written specs calling the same populate functions are not
+  automatically covered — see `docs/knowledge/cmd614-test-data-uniqueness-design.md` §6.2.
+- **`api_import_route.ts.jinja2` could reference `formatLabelValue()` with no import once a
+  composite labelField segment needed date/time formatting, breaking the TS build** — a static
+  read of the Jinja2 source can't see that the spliced-in label expression calls it. The import
+  is now gated on the same `has_format` signal 7 other templates already use for it. Also fixed
+  in the same file: a misplaced `eslint-disable-next-line` comment that silently suppressed
+  nothing.
+- **Generated UI test scaffolding no longer tries to fill an `x-server-value` field through the
+  form** — two code paths generated a fill command against a field that's always excluded from
+  form input by design, failing the test outright. See
+  `docs/knowledge/x-server-value-actor-delegation.md`.
+- **A generated test helper's find-or-create block gave `create()` a composite-labelField
+  `include` but not the paired `findFirst()`**, a latent type error invisible to every gate
+  (Cypress support files aren't type-checked). Both call sites in all 5 affected template
+  shapes now get the same conditional include.
+- **CSV import of an entity with a required internal bridge FK (e.g. `approvable_id` on an
+  `x-approval` entity) was broken in two stages of the same underlying gap.** The CSV
+  CREATE-feasibility gate wrongly counted a bridge FK as an unfillable required column, forcing
+  the entire generated import route to the "not supported" stub for such an entity — fixed by
+  excluding bridge FKs from that gate, the same way they're already excluded from CSV export.
+  That in turn exposed a second gap: the commit-time CREATE path built its Prisma `create()`
+  call from dry-run data alone, bypassing the auto-create-bridge-FK mechanism the normal
+  service function already uses, so commit still failed with a Prisma validation error after a
+  dry run had already reported success. Both are fixed; entities without an auto-create
+  one-to-one relation are unaffected. See
+  `docs/knowledge/create-feasible-internal-bridge-fk-fix.md` and
+  `docs/knowledge/import-create-missing-bridge-fk-fix.md`.
+- **CSV import's dotted/composite-label FK lookup left `organization`-as-lookup-target
+  completely unfiltered** — a CSV row could name any organization in the system, not just one
+  the actor belongs to, and have it resolve and get attached. Now filtered to the actor's own
+  associated organizations. See `docs/knowledge/csv-import-dotted-fk-org-filter.md`.
+- **`approval_flow.preceded_by`/`followed_by` rendered a different label on the View page than
+  on the Edit page for the same row** — the legacy mechanism causing the mismatch is removed
+  entirely; both pages now render the same composite label via the existing shared helper.
+  Self-referential many-to-many searches for this field now also narrow candidates to the same
+  `entity_name` as the record being edited, since same-`entity_name` approval chains are an
+  intentionally supported configuration.
+- **Generator-side lint debt invisible to CI** (CI's Lint job runs before `generate-code`, so
+  it never saw output-only warnings): 83 eslint warnings across a Chai-assertion false
+  positive, three dead-binding bugs in two templates, and 22 warnings from scattered scenario
+  branches — reduced to 5 (pre-existing, out of scope). See
+  `docs/knowledge/cmd607-generator-lint-debt-fix.md`.
+- **`x-reservation` test-helper generation only ever resolved the pool entity's criteria-field
+  FK, silently omitting any other required FK on the pool entity**, failing test seeding with a
+  missing-required-column error for any pool entity with an extra required FK. All three
+  affected generated-test code paths now resolve the pool entity's required FKs generally,
+  including transitive chains. Entities whose pool has no extra required FK are unaffected. See
   `docs/knowledge/x-reservation-pool-entity-extra-fk-fix.md`.
-
-- **A field with a Prisma `@default(...)` but no schema `default:` marker (dynamic defaults like
-  `now()`) or with a static default the generator ignored (number/boolean/plain-string) silently
-  lost that default on the "new" page whenever the user left it untouched**: for
-  `DateTime @default(now())` NOT NULL columns, the "new" page seeded `null`, the browser then
-  submitted `''`, and the server turned that into `new Date('')` (Invalid Date) — crashing
-  `create()` outright for any consumer entity with such a column (the concrete symptom this fixes:
-  `inventory_transaction.occurred_at`-style fields in downstream consumers). Number fields with a
-  nonzero default silently became `0`; boolean fields with `@default(true)` always submitted
-  `false`; plain (non-enum) string fields with a default always submitted `''` — none of these
-  crashed, but all silently discarded the schema's declared default. `_default_value()`
-  (`page_new.tsx`'s initial form state) now seeds a writable default for all four field classes —
-  `new Date()` for datetime fields excluded from `required:` while remaining DB non-nullable (the
-  only surviving signal for a dynamic default, since `schema_deriver` deliberately omits the
-  `default:` key for `now()`/`cuid()`/etc.), the schema's literal `default:` value for
-  number/boolean/plain-string. `_new_prop_val()` (DataGrid child new-row seeding) already handled
-  boolean/number correctly; only its plain-string/plain-string-enum branches needed the same fix.
-  Also fixed a related `NumberField` JSX bug where `src.p || undefined` would have silently blanked
-  a legitimate `0` default (`0 || undefined` is falsy) — changed to `??`. Verified via isolated
-  before/after Cypress UI comparisons in both proj_g (the target crash flips FAIL→PASS, zero
-  regressions) and proj_c (the full 86-spec/781-test UI suite is an exact match before/after — zero
-  regressions). `test:e2e:cy:api` cannot exercise this class of bug at all (it drives the REST API
-  directly, never the browser form's default-seeding JS) — a gate blind spot worth keeping in mind
-  for this field-default family specifically. See `docs/knowledge/writable-default-value-fix.md`.
-- **`npm run cleanup`'s defaults deleted write-once stubs while leaving true orphans behind, and a
-  reordered `generate-code` → `cleanup` run silently deleted the entire just-generated tree**
-  (building on an earlier fix that pointed cleanup at the Stage-4 built schema):
-  `cleanup` now passes `--prune-orphans --keep-stubs` (the safe default — sweep stale entity
-  boilerplate, keep customizable stubs) where it previously passed neither (orphans ignored, stubs
-  deleted); `cleanup:all` keeps `--prune-orphans` alone (full clean-slate, stubs deleted too).
-  `cleanup.py` also fails fast with an actionable message instead of a raw traceback when its
-  schema argument doesn't exist, and now warns (without blocking) when
-  `.generated-manifest.json` was written under a minute ago — running `cleanup` immediately after
-  `generate-code` deletes every just-generated file, since they all hash-match and therefore all
-  read as pristine-deletable; correct order is `cleanup` → `generate-code`, not the reverse.
-  Separately, `build_user_schema.py`'s raw/view split silently dropped a bridge-child entity's
-  `x-bridge` declaration whenever that entity also carried `x-generate` (neither the resulting raw
-  nor view entity retained it), which would have made `generate.py` skip `<Child>BridgeGrid.tsx`
-  generation for any Stage-4 schema combining `x-bridge` with `x-generate`; `x-bridge` is now
-  carried onto the raw entity like `x-display` and the other entity-level annotations, and
-  `generate.py`'s own `BridgeGrid.tsx` emission now reads the raw entity via `_raw_def()` instead
-  of the view entity directly. No consumer of this generator currently combines `x-bridge` with
-  `x-generate`, so this had not yet surfaced as a build failure. See `docs/knowledge/cleanup.md`
-  and `docs/knowledge/schema-restructuring-build-order.md`.
+- **A field with a dynamic Prisma `@default(...)` (e.g. `now()`) or an ignored static default
+  (number/boolean/plain-string) silently lost that default on the "new" page when left
+  untouched** — for a non-nullable `DateTime @default(now())` column this crashed `create()`
+  outright; the others silently discarded the schema's declared default. The "new" page now
+  seeds a writable default for all four field classes. Also fixed a related bug where a
+  legitimate `0` default could be blanked. See `docs/knowledge/writable-default-value-fix.md`.
+- **`npm run cleanup`'s defaults deleted write-once stubs while leaving true orphans behind,
+  and running it right after `generate-code` silently deleted the entire just-generated tree**
+  (every file hash-matches the fresh manifest and reads as pristine-deletable) — `cleanup` now
+  defaults to `--prune-orphans --keep-stubs` and warns when run within a minute of generation;
+  correct order is `cleanup` → `generate-code`, not the reverse. Also fixed: a bridge-child
+  entity's `x-bridge` declaration was silently dropped when combined with `x-generate`, which
+  would have skipped its `BridgeGrid.tsx` generation (no current consumer combines the two).
+  See `docs/knowledge/cleanup.md` and `docs/knowledge/schema-restructuring-build-order.md`.
 
 ### Added
 - **`x-server-value` now supports actor delegation**: `x-server-value: {source: actor,
