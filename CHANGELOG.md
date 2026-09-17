@@ -4,31 +4,32 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [4.0.0] - 2026-09-16
+### Security
+- **Closed a bypass letting an ordinary user set an `x-approval` field to a value reserved for
+  `on_approved`/`on_rejected` `set_fields`**, directly via the form, REST API, or CSV import —
+  skipping the approval step entirely. Both the shared validator and the CSV import route now
+  reject such a value (a no-op resubmit of the record's own current value is still allowed).
+  Coverage depends on which of `on_approved`/`on_rejected` an entity declares `set_fields` for.
+  See `docs/knowledge/x-write-locked-values-field-lockdown.md`.
 
-### Fixed
-- **A missing `regions` key in `vercel.json` is now backfilled** (`['sin1']` default)
-  instead of left absent forever; an existing value is never touched. See
-  `docs/knowledge/vercel-region-alignment.md`.
-- **An unreachable Redis no longer crashes `/api/auth/*`** (Issue #587): the rate
-  limiter now fails OPEN on any Redis error instead of throwing, logging the degraded
-  window (`[rate-limit:fail_open]`) rather than failing silently.
-- **OAuth+MFA second-factor Server Action had no rate limiting** (Issue #588):
-  `completeMfaChallenge` now has its own `auth:mfa:challenge` bucket (10 attempts / 5
-  min, keyed by user id), surfacing a `RATE_LIMITED` error on the challenge page.
-- **The generated app could show create/edit affordances (list page's "+" button,
-  edit icon, and the `grant-all-permissions.ts` dev script's own grants) for an
-  operation `x-generate` actually disables**, 404ing when clicked. Both the dev
-  script and the shared list components (`DataGridClient`/`CardListClient`/
-  `ResponsiveListClient`) now derive their allow/deny from the entity's real
-  `x-generate.new`/`.edit`/`.delete`/`.list`/`.view`/`.import` (a Jinja2 `.update`
-  accessor bug that had defeated the dev-script fix for `update` specifically is
-  also closed). Delete was already correct and unaffected.
-- **Composite/dotted `labelField` on an embedded DataGrid child's own FK relation
-  rendered blank** (Issue #539): the child's Prisma include now resolves nested
-  relations the same way the entity's own independent list page already does.
-- **`format: date`/`time` on an embedded DataGrid child's own field always displayed
-  a fixed date+time**, ignoring the field's declared format (Issue #540): now reuses
-  the shared `formatLabelValue()` formatter; `date-time` columns are unaffected.
+- **CREATE had no read-only field enforcement**: unlike PUT's existing check, a client-submitted
+  value for an `x-readonly`/`x-readonly-fields` field flowed straight into the database on create,
+  via both the REST route and the server action. Both entry points now reject any client-submitted
+  value for such a field on create (`x-server-value` fields are exempted — see Added). See
+  `docs/knowledge/x-server-value-actor-delegation.md`.
+
+- **Server Action approval endpoints could bypass multi-stage `preceded_by` ordering** — only the
+  REST route enforced it via `assertApprovalOrder()`; the Server Action reachable from any
+  authenticated client did not (a later-stage approval could succeed while an earlier stage was
+  still pending). Both entry points now call the same check. See
+  `docs/knowledge/appendix/approval-flow.md` §16.6.1.
+
+- **MFA could be bypassed via Google OAuth sign-in**: `mfa_enabled` was only checked in the
+  credentials sign-in path, so an SSO-provisioned user with MFA enabled reached a fully
+  authenticated session via Google without a TOTP/recovery-code prompt. The `jwt()` callback now
+  blocks every protected route behind a new `/mfa-challenge` page until MFA clears; a new
+  `user.mfa_token_version` column also revokes an already-active session when MFA is enabled. See
+  `docs/knowledge/authentication.md` "MFA on the OAuth path".
 
 ### Added
 - **An independent child (own `x-generate`) may now be embedded in a parent's view with any
@@ -87,12 +88,198 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   a generation-time `ValueError` naming the entity and failed condition. See
   `docs/knowledge/appendix/approval-flow.md` §16.16.
 
+- **`x-relationship: { target: attachment, type: direct }`** — new single-file FK field
+  declaration (a profile picture, a signed contract), rendered via `SingleAttachmentUpload`/
+  `SingleAttachmentDisplay`. Unlike the existing `attachable_id` bridge, this `attachment` has
+  no list/view/new/edit pages of its own. `attachment.attachable_id` is now nullable to allow
+  this. See `docs/knowledge/schema-yaml-configuration.md` (Direct Attachment FK).
+- **`x-uri-kind: file`** — a third `format: uri` field kind alongside `image`/`link`: uploads
+  via `/api/upload` like `image`, but displays as a download link/icon instead of an `<img>`.
+  Shares components with the direct-attachment FK above.
+- **`NEXT_PUBLIC_APP_TITLE` / `NEXT_PUBLIC_APP_COPYRIGHT`** — optional env vars overriding the
+  app title and footer copyright text without a code change. Inlined at build time (a Vercel
+  rebuild, not just an env var edit, is needed to pick up a change). See
+  `docs/knowledge/noindex-default-and-branding-env-vars.md`.
+- **`x-scheduled-tasks`** (top-level, plural) — a bulk, entity-agnostic sibling of
+  `x-scheduled-task`, for operations spanning many entities or an entire table with no row
+  filter. Shares the task registry and `vercel.json` `crons` array with the entity-level form.
+  See "Bulk mode" in `docs/knowledge/scheduled-task-operations.md`.
+- **Docs-only changes now skip the Vercel build** for the three consumer projects, via
+  `scripts/vercel-ignore-check.sh` + a root-level `vercel.json` stub (`ignoreCommand`) in each
+  consumer repo — a Root-Directory-scoped `ignoreCommand` inside this repo's own `vercel.json` is
+  never read by Vercel, confirmed empirically. See `docs/knowledge/vercel-docs-only-ignore-command.md`.
+- **New `verify-canonical-ci` job in the canonical consumer `.github/workflows/ci.yml`** checks
+  out the consumer's `app-generator` submodule and fails if its own body differs from the
+  submodule's distributed `docs/consumer-commands/ci.yml` copy — closes the gap where a
+  distributed copy silently drifted from canonical (a step's `name:` and several comments had
+  already diverged). See `docs/knowledge/ci-workflow-canonical-source.md`.
+- **New opt-in Stripe payment integration, gated by a new `x-payment` entity-level schema key.**
+  Declaring `x-payment: true` writes three write-once stub files on first `generate-code`:
+  `lib/stripe.ts`, `app/api/payment/checkout/route.ts`, and `app/api/webhooks/stripe/route.ts`
+  (signature-verified). Scope is one-time purchases only; `.env.example` gains the three Stripe
+  env var placeholders. See `docs/knowledge/stripe-payment-integration.md`.
+- **`scripts/vercel-{setup,deploy,env,teardown}.sh` and `.env.vercel.production.local.example`
+  promoted to a single canonical source**, replacing independently-drifting copies across
+  app-template/inventory-app/insurance-app — also fixes a real gap found in the process
+  (app-template's copy was missing `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD`). See
+  `docs/knowledge/vercel-deploy-scripts-canonical-source.md`.
+- **New Prisma `Decimal` support in the code generator, mapped to JSON schema type `"string"`
+  (never `"number"`)** to avoid silent float-rounding error on read/write/CSV round-trip —
+  previously unsupported (`schema_deriver.py` raised `SchemaDivergenceError`). Spans schema
+  derivation, form/CSV validation, the numeric-styled form input, and a new `test:decimal-gate`
+  fixture (this repo's own schema has no Decimal field, so nothing would otherwise compile these
+  branches).
+- **New dev/verification-only script `scripts/grant-all-permissions.ts`**
+  (`npm run db:grant-all-permissions`) grants the `Administrator` role full CRUD on every
+  independent entity in one step, including any entity a consumer project adds. `audit_log`/
+  `mfa_recovery_code` stay excluded. `scripts/seed-tenant.ts` (the production seed) is unchanged.
+  See `docs/knowledge/seed-baseline-credential-hardening.md`.
+- **New opt-in Neon serverless driver adapter for `lib/prisma.ts`, gated by `USE_NEON_ADAPTER`.**
+  `scripts/vercel-env.sh` now injects it as `"true"` on every consumer app provisioned via
+  `vercel-setup.sh`; unset or any other value falls through to the existing `PrismaPg` path
+  unchanged. GCP Cloud Run and local/CI are unaffected.
+- **New `npm run lint:prj` script (`scripts/lint_prj_synced.py`)** lints only a consumer's own
+  `prj/`-tracked `.ts`/`.tsx` files at their real synced destination paths, without linting this
+  repo's templates or the consumer's fully generated codebase. Fails closed (non-zero exit) if
+  nothing was measured. See `docs/knowledge/consumer-prj-scoped-lint.md`.
+
+- **CSV export/import and approve/reject now accept `X-API-Key` as well as a browser session**
+  — these five routes previously resolved the caller only via a session, so an external
+  API-key client could never call them. Added `resolveActorId()`/`requireDualAuth()` to
+  `lib/api-auth.ts` (same dual-auth pattern as `app/api/search/route.ts`). See
+  `docs/knowledge/testing-cypress.md`.
+- **New API-only regression test**: `test_api_spec.cy.ts.jinja2` gains "4.5 returns 200 for GET
+  when the acting user cannot read `<fk target>`", alongside the pre-existing 4.4. See
+  `docs/knowledge/fk-read-permission-graceful-degradation.md`.
+
+- **`x-server-value` now supports actor delegation**: `x-server-value: {source: actor,
+  override_permission: <Operation>}` lets an actor holding that permission supply an explicit
+  value on create instead of always defaulting to their own id (e.g. filing on someone else's
+  behalf). The REST create response gains an optional `_server_value_overrides` flag when this
+  happens. The plain string form `x-server-value: "actor"` is unchanged. See
+  `docs/knowledge/x-server-value-actor-delegation.md`.
+
+- **New `check:generated` gate rule, `test:unexplained-login`**: scans every generated
+  `cypress/e2e/api/<entity>.cy.ts` for a `cy.login(` call with no `dual-auth-session-canary`
+  marker comment above it, so a future template edit that reintroduces screen-operation coupling
+  fails the gate instead of silently landing. See `docs/knowledge/testing-cypress.md`'s "API test
+  / UI test boundary" section.
+- **FK autocomplete search now derives from `labelField`; `x-relationship.searchField` is
+  removed.** The two used to be independent declarations that could silently drift apart.
+  **Breaking for schema authors**: `validate.py` now rejects any schema still declaring
+  `searchField`. See `docs/knowledge/schema-yaml-configuration.md` §5.
+- **CSV import now supports composite/dotted `labelField` FK columns** (previously export-only)
+  — a CSV cell is matched against the full rendered label text. An ambiguous match is rejected
+  at row granularity (`MULTI_MATCH`). See `docs/knowledge/csv-import-composite-labelfield.md`.
+- **`x-self-only`: new entity-level flag for permission-independent, per-creator data
+  isolation (Stage 1).** No permission grant (including `general.read`) can widen it; a
+  non-owner's row reads as `404 Not Found`. `x-self-only: { admin_bypass: true }` allows
+  privileged read, with a mandatory (fail-closed) audit write. The account **Settings** page now
+  uses this (other users' settings are no longer reachable via any permission grant). Row-Level
+  Security (Stage 2) is not implemented. See `docs/knowledge/self-only-entity.md`.
+- **Post-login redirect-back with open-redirect protection** — signing in now returns to the
+  originally-requested page (`?redirect=`) instead of always landing on `/`.
+  `safeRedirectPath()` rejects off-site/protocol-relative/backslash-trick values, falling back
+  to `/`. See `docs/knowledge/unauthenticated-page-redirect.md`.
+- **`@mention` support, server and client.** New `MentionInput`/`MentionText` components and a
+  `searchMentionUserOptions()` server action; wires into any entity's `x-mention: true` field
+  and comment threads. Fires a new `'mentioned_in_comment'` notification. See
+  `docs/knowledge/mention-system.md`.
+- **Generated permission-denial and cross-org isolation API tests (batch A)**: every generated
+  `cypress/e2e/api/<entity>.cy.ts` now includes PUT/DELETE/export/import permission-denial
+  tests and, for org-scoped entities, cross-organization isolation tests. Adds the
+  `db:createCrossOrgScenario` test-fixture task. See `docs/knowledge/permission-e2e-test-design.md`.
+- **Graceful degradation for foreign-key read-permission gaps** — a role that can create/edit
+  an entity but lacks read on one of its FK targets used to crash the create/edit page entirely;
+  the affected field now renders disabled instead (read-only + blocks `/new` if required,
+  clearable if optional). No Prisma/migration change. See
+  `docs/knowledge/fk-read-permission-graceful-degradation.md`.
+- **Terms of Service / Privacy Policy pages** (`/[locale]/legal/terms`,
+  `/[locale]/legal/privacy`), linked from registration. Per-locale plain Markdown under
+  `content/legal/`; both are explicitly labeled templates requiring legal review before real
+  use. See `docs/knowledge/legal-documents.md`.
+
+### Changed
+- **Approval-request creation moves off the write-once `afterCreate` hook into an
+  edge-trigger emitted directly in the generated `add{Parent}`/`update{Parent}`** — fires on
+  the transition into `x-approval.submit_on`'s target value, at create or update. **Behavior
+  change**: `resubmitApprovalRequest` (its own server action, REST route, and UI button) is
+  removed — re-submission after a non-terminal rejection is now an ordinary edit of the
+  entity's own status field back to `submit_on`'s value. See
+  `docs/knowledge/appendix/approval-flow.md` §16.4/§16.6.
+- **`user.image` moved from a plain URL string to a direct-attachment FK** — the profile
+  picture is now an uploaded file tracked as an `attachment` row. **Breaking**: OAuth sign-in
+  no longer copies the provider's profile-image URL into `user.image`; a user's avatar now
+  comes only from their own upload. Prisma: `user.image String?` → `user.image_id String?
+  @unique` plus a relation. No data migration (pre-customer). See
+  `docs/knowledge/schema-yaml-configuration.md`.
+
+- **`scripts/seed-tenant.ts` renamed to `scripts/seed-baseline.ts`** (`npm run db:seed-tenant`
+  → `npm run db:seed-baseline`), with its neighboring credential-hardening files renamed to
+  match. No backward-compatible alias is provided. **Consumer impact**: any consumer invoking
+  `npm run db:seed-tenant` directly must switch to `db:seed-baseline`. See
+  `docs/knowledge/seed-baseline-credential-hardening.md`.
+- **Generated apps now default to blocking search-engine indexing** — `app/layout.tsx` sets
+  `noindex` unless `lib/site-config.ts`'s `seo.noindex` is explicitly `false`; an app with no
+  `seo` block at all is also now noindexed. See
+  `docs/knowledge/noindex-default-and-branding-env-vars.md`.
+- **`scripts/seed-tenant.ts` now also seeds `Creator` and `Assignee` roles.** `Creator` is
+  granted exactly `setting.read`+`setting.update`; `Assignee` is seeded with no permissions
+  (placeholder for future use).
+- **Removed the dead in-process notification store from `lib/_notifier.ts`** (a no-op read
+  path with zero production callers). `notify()`'s write path is unchanged except its return
+  type, now `void`.
+
+- **Generated API test spec no longer authenticates via `cy.login()` except one deliberate
+  canary case** — 15 `cy.login()` call sites were classified and switched to
+  `X-API-Key`/`db:createLimitedApiUser` where the route already supports it; one is kept as a
+  canary proving the session-cookie half of dual-auth still works. See
+  `docs/knowledge/testing-cypress.md`'s "API test / UI test boundary" section and
+  `check_generated.py`'s new `test:unexplained-login` gate rule that now enforces it.
+- **`fk_read_permission_graceful_degradation.cy.ts` moved from `cypress/e2e/api/` to
+  `cypress/e2e/`** — every case in this hand-written spec drives the browser and never issues a
+  raw `cy.request`, so it was never actually API-gate coverage despite living under `api/`. It
+  now sits under the UI-spec glob instead.
+
 ### Removed
 - **Field-level schema key `x-fk-constrained`** (added in #484) — no consumer schema declared
   it, and the one prior usage had already been made a required column by a different fix,
   retiring the need for the key.
 
+- **Removed `scripts/seed.ts` (`npm run db:seed`)** — unused sample-data script, not
+  referenced by any npm script, prisma seed hook, or CI workflow. No replacement.
+
+- **Removed the `x-relationships.<rel>.sameEntityField` schema key** and its generated
+  `validateSameEntityRefs()` — a coincidental business rule had been generalized into the
+  schema layer. Replaced with a purely structural socket: every entity now gets an
+  unconditional write-once `service_validation_custom.ts` stub. See
+  `docs/knowledge/same-entity-validation-socket.md`.
+
 ### Fixed
+- **A missing `regions` key in `vercel.json` is now backfilled** (`['sin1']` default)
+  instead of left absent forever; an existing value is never touched. See
+  `docs/knowledge/vercel-region-alignment.md`.
+- **An unreachable Redis no longer crashes `/api/auth/*`** (Issue #587): the rate
+  limiter now fails OPEN on any Redis error instead of throwing, logging the degraded
+  window (`[rate-limit:fail_open]`) rather than failing silently.
+- **OAuth+MFA second-factor Server Action had no rate limiting** (Issue #588):
+  `completeMfaChallenge` now has its own `auth:mfa:challenge` bucket (10 attempts / 5
+  min, keyed by user id), surfacing a `RATE_LIMITED` error on the challenge page.
+- **The generated app could show create/edit affordances (list page's "+" button,
+  edit icon, and the `grant-all-permissions.ts` dev script's own grants) for an
+  operation `x-generate` actually disables**, 404ing when clicked. Both the dev
+  script and the shared list components (`DataGridClient`/`CardListClient`/
+  `ResponsiveListClient`) now derive their allow/deny from the entity's real
+  `x-generate.new`/`.edit`/`.delete`/`.list`/`.view`/`.import` (a Jinja2 `.update`
+  accessor bug that had defeated the dev-script fix for `update` specifically is
+  also closed). Delete was already correct and unaffected.
+- **Composite/dotted `labelField` on an embedded DataGrid child's own FK relation
+  rendered blank** (Issue #539): the child's Prisma include now resolves nested
+  relations the same way the entity's own independent list page already does.
+- **`format: date`/`time` on an embedded DataGrid child's own field always displayed
+  a fixed date+time**, ignoring the field's declared format (Issue #540): now reuses
+  the shared `formatLabelValue()` formatter; `date-time` columns are unaffected.
+
 - **An independent child (its own `x-generate` permits new/edit) embedded in a parent with
   a non-`list` `x-outputType` is now read-only everywhere — the parent's edit form, not just
   its view page** (Issue #520). Fixing this also surfaced and closed three related generator
@@ -167,22 +354,6 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   matches the existing `NULL`/`''` row instead of creating a duplicate. See
   `docs/knowledge/import-key-null-empty-equivalence.md`.
 
-### Changed
-- **Approval-request creation moves off the write-once `afterCreate` hook into an
-  edge-trigger emitted directly in the generated `add{Parent}`/`update{Parent}`** — fires on
-  the transition into `x-approval.submit_on`'s target value, at create or update. **Behavior
-  change**: `resubmitApprovalRequest` (its own server action, REST route, and UI button) is
-  removed — re-submission after a non-terminal rejection is now an ordinary edit of the
-  entity's own status field back to `submit_on`'s value. See
-  `docs/knowledge/appendix/approval-flow.md` §16.4/§16.6.
-- **`user.image` moved from a plain URL string to a direct-attachment FK** — the profile
-  picture is now an uploaded file tracked as an `attachment` row. **Breaking**: OAuth sign-in
-  no longer copies the provider's profile-image URL into `user.image`; a user's avatar now
-  comes only from their own upload. Prisma: `user.image String?` → `user.image_id String?
-  @unique` plus a relation. No data migration (pre-customer). See
-  `docs/knowledge/schema-yaml-configuration.md`.
-
-### Fixed
 - **A proxy view (`parent != model`) with `x-generate.list: true` could fail to get a
   sidebar nav entry, or fail to have it retracted on teardown** — three gates in the add
   path were keyed on `parent == model` (false for every proxy view), and `cleanup.py` kept
@@ -213,84 +384,6 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `user.image` is still a plain `format: uri` string column. The select now branches on the
   consuming schema's own `user` shape. See `docs/knowledge/schema-yaml-configuration.md`.
 
-### Removed
-- **Removed `scripts/seed.ts` (`npm run db:seed`)** — unused sample-data script, not
-  referenced by any npm script, prisma seed hook, or CI workflow. No replacement.
-
-### Changed
-- **`scripts/seed-tenant.ts` renamed to `scripts/seed-baseline.ts`** (`npm run db:seed-tenant`
-  → `npm run db:seed-baseline`), with its neighboring credential-hardening files renamed to
-  match. No backward-compatible alias is provided. **Consumer impact**: any consumer invoking
-  `npm run db:seed-tenant` directly must switch to `db:seed-baseline`. See
-  `docs/knowledge/seed-baseline-credential-hardening.md`.
-- **Generated apps now default to blocking search-engine indexing** — `app/layout.tsx` sets
-  `noindex` unless `lib/site-config.ts`'s `seo.noindex` is explicitly `false`; an app with no
-  `seo` block at all is also now noindexed. See
-  `docs/knowledge/noindex-default-and-branding-env-vars.md`.
-- **`scripts/seed-tenant.ts` now also seeds `Creator` and `Assignee` roles.** `Creator` is
-  granted exactly `setting.read`+`setting.update`; `Assignee` is seeded with no permissions
-  (placeholder for future use).
-- **Removed the dead in-process notification store from `lib/_notifier.ts`** (a no-op read
-  path with zero production callers). `notify()`'s write path is unchanged except its return
-  type, now `void`.
-
-### Added
-- **`x-relationship: { target: attachment, type: direct }`** — new single-file FK field
-  declaration (a profile picture, a signed contract), rendered via `SingleAttachmentUpload`/
-  `SingleAttachmentDisplay`. Unlike the existing `attachable_id` bridge, this `attachment` has
-  no list/view/new/edit pages of its own. `attachment.attachable_id` is now nullable to allow
-  this. See `docs/knowledge/schema-yaml-configuration.md` (Direct Attachment FK).
-- **`x-uri-kind: file`** — a third `format: uri` field kind alongside `image`/`link`: uploads
-  via `/api/upload` like `image`, but displays as a download link/icon instead of an `<img>`.
-  Shares components with the direct-attachment FK above.
-- **`NEXT_PUBLIC_APP_TITLE` / `NEXT_PUBLIC_APP_COPYRIGHT`** — optional env vars overriding the
-  app title and footer copyright text without a code change. Inlined at build time (a Vercel
-  rebuild, not just an env var edit, is needed to pick up a change). See
-  `docs/knowledge/noindex-default-and-branding-env-vars.md`.
-- **`x-scheduled-tasks`** (top-level, plural) — a bulk, entity-agnostic sibling of
-  `x-scheduled-task`, for operations spanning many entities or an entire table with no row
-  filter. Shares the task registry and `vercel.json` `crons` array with the entity-level form.
-  See "Bulk mode" in `docs/knowledge/scheduled-task-operations.md`.
-- **Docs-only changes now skip the Vercel build** for the three consumer projects, via
-  `scripts/vercel-ignore-check.sh` + a root-level `vercel.json` stub (`ignoreCommand`) in each
-  consumer repo — a Root-Directory-scoped `ignoreCommand` inside this repo's own `vercel.json` is
-  never read by Vercel, confirmed empirically. See `docs/knowledge/vercel-docs-only-ignore-command.md`.
-- **New `verify-canonical-ci` job in the canonical consumer `.github/workflows/ci.yml`** checks
-  out the consumer's `app-generator` submodule and fails if its own body differs from the
-  submodule's distributed `docs/consumer-commands/ci.yml` copy — closes the gap where a
-  distributed copy silently drifted from canonical (a step's `name:` and several comments had
-  already diverged). See `docs/knowledge/ci-workflow-canonical-source.md`.
-- **New opt-in Stripe payment integration, gated by a new `x-payment` entity-level schema key.**
-  Declaring `x-payment: true` writes three write-once stub files on first `generate-code`:
-  `lib/stripe.ts`, `app/api/payment/checkout/route.ts`, and `app/api/webhooks/stripe/route.ts`
-  (signature-verified). Scope is one-time purchases only; `.env.example` gains the three Stripe
-  env var placeholders. See `docs/knowledge/stripe-payment-integration.md`.
-- **`scripts/vercel-{setup,deploy,env,teardown}.sh` and `.env.vercel.production.local.example`
-  promoted to a single canonical source**, replacing independently-drifting copies across
-  app-template/inventory-app/insurance-app — also fixes a real gap found in the process
-  (app-template's copy was missing `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD`). See
-  `docs/knowledge/vercel-deploy-scripts-canonical-source.md`.
-- **New Prisma `Decimal` support in the code generator, mapped to JSON schema type `"string"`
-  (never `"number"`)** to avoid silent float-rounding error on read/write/CSV round-trip —
-  previously unsupported (`schema_deriver.py` raised `SchemaDivergenceError`). Spans schema
-  derivation, form/CSV validation, the numeric-styled form input, and a new `test:decimal-gate`
-  fixture (this repo's own schema has no Decimal field, so nothing would otherwise compile these
-  branches).
-- **New dev/verification-only script `scripts/grant-all-permissions.ts`**
-  (`npm run db:grant-all-permissions`) grants the `Administrator` role full CRUD on every
-  independent entity in one step, including any entity a consumer project adds. `audit_log`/
-  `mfa_recovery_code` stay excluded. `scripts/seed-tenant.ts` (the production seed) is unchanged.
-  See `docs/knowledge/seed-baseline-credential-hardening.md`.
-- **New opt-in Neon serverless driver adapter for `lib/prisma.ts`, gated by `USE_NEON_ADAPTER`.**
-  `scripts/vercel-env.sh` now injects it as `"true"` on every consumer app provisioned via
-  `vercel-setup.sh`; unset or any other value falls through to the existing `PrismaPg` path
-  unchanged. GCP Cloud Run and local/CI are unaffected.
-- **New `npm run lint:prj` script (`scripts/lint_prj_synced.py`)** lints only a consumer's own
-  `prj/`-tracked `.ts`/`.tsx` files at their real synced destination paths, without linting this
-  repo's templates or the consumer's fully generated codebase. Fails closed (non-zero exit) if
-  nothing was measured. See `docs/knowledge/consumer-prj-scoped-lint.md`.
-
-### Fixed
 - **An `x-internal` entity's named-constant parent prefix (e.g. `COMMENT_REACTION_TYPES`)
   was derived from schema declaration order**, so an unrelated schema edit could silently
   rename an already-shipped constant. Now resolved from an explicit
@@ -381,37 +474,6 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `sslmode` param are unaffected. See
   `docs/knowledge/pg-connection-string-sslmode-deprecation.md`.
 
-### Security
-- **Closed a bypass letting an ordinary user set an `x-approval` field to a value reserved for
-  `on_approved`/`on_rejected` `set_fields`**, directly via the form, REST API, or CSV import —
-  skipping the approval step entirely. Both the shared validator and the CSV import route now
-  reject such a value (a no-op resubmit of the record's own current value is still allowed).
-  Coverage depends on which of `on_approved`/`on_rejected` an entity declares `set_fields` for.
-  See `docs/knowledge/x-write-locked-values-field-lockdown.md`.
-
-### Added
-- **CSV export/import and approve/reject now accept `X-API-Key` as well as a browser session**
-  — these five routes previously resolved the caller only via a session, so an external
-  API-key client could never call them. Added `resolveActorId()`/`requireDualAuth()` to
-  `lib/api-auth.ts` (same dual-auth pattern as `app/api/search/route.ts`). See
-  `docs/knowledge/testing-cypress.md`.
-- **New API-only regression test**: `test_api_spec.cy.ts.jinja2` gains "4.5 returns 200 for GET
-  when the acting user cannot read `<fk target>`", alongside the pre-existing 4.4. See
-  `docs/knowledge/fk-read-permission-graceful-degradation.md`.
-
-### Changed
-- **Generated API test spec no longer authenticates via `cy.login()` except one deliberate
-  canary case** — 15 `cy.login()` call sites were classified and switched to
-  `X-API-Key`/`db:createLimitedApiUser` where the route already supports it; one is kept as a
-  canary proving the session-cookie half of dual-auth still works. See
-  `docs/knowledge/testing-cypress.md`'s "API test / UI test boundary" section and
-  `check_generated.py`'s new `test:unexplained-login` gate rule that now enforces it.
-- **`fk_read_permission_graceful_degradation.cy.ts` moved from `cypress/e2e/api/` to
-  `cypress/e2e/`** — every case in this hand-written spec drives the browser and never issues a
-  raw `cy.request`, so it was never actually API-gate coverage despite living under `api/`. It
-  now sits under the UI-spec glob instead.
-
-### Fixed
 - **Server Action errors (permission denied, unique-constraint violations, stale updates, and
   more) showed an opaque "Minified React error #441" screen instead of the underlying reason**
   — Next.js strips a thrown error's message at the Server Components render boundary in
@@ -526,22 +588,6 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   would have skipped its `BridgeGrid.tsx` generation (no current consumer combines the two).
   See `docs/knowledge/cleanup.md` and `docs/knowledge/schema-restructuring-build-order.md`.
 
-### Added
-- **`x-server-value` now supports actor delegation**: `x-server-value: {source: actor,
-  override_permission: <Operation>}` lets an actor holding that permission supply an explicit
-  value on create instead of always defaulting to their own id (e.g. filing on someone else's
-  behalf). The REST create response gains an optional `_server_value_overrides` flag when this
-  happens. The plain string form `x-server-value: "actor"` is unchanged. See
-  `docs/knowledge/x-server-value-actor-delegation.md`.
-
-### Security
-- **CREATE had no read-only field enforcement**: unlike PUT's existing check, a client-submitted
-  value for an `x-readonly`/`x-readonly-fields` field flowed straight into the database on create,
-  via both the REST route and the server action. Both entry points now reject any client-submitted
-  value for such a field on create (`x-server-value` fields are exempted — see Added). See
-  `docs/knowledge/x-server-value-actor-delegation.md`.
-
-### Fixed
 - **Generated Cypress test fixtures could crash or click the wrong row for entities with a
   self-referential FK** — a self-ref dependency record's create call had no find-or-create
   guard, so calling the populate helper more than once in the same spec could duplicate the row
@@ -572,14 +618,6 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/appendix/inventory-reservation-split.md` §7.1-7.2 and
   `docs/knowledge/appendix/cmd562-location-id-fk-consumer-migration.md`.
 
-### Security
-- **Server Action approval endpoints could bypass multi-stage `preceded_by` ordering** — only the
-  REST route enforced it via `assertApprovalOrder()`; the Server Action reachable from any
-  authenticated client did not (a later-stage approval could succeed while an earlier stage was
-  still pending). Both entry points now call the same check. See
-  `docs/knowledge/appendix/approval-flow.md` §16.6.1.
-
-### Fixed
 - **`npm run cleanup` could wipe every translated `messages/ja.json` entry** — it deleted
   every Fields/EntityLabel/Nav key for any entity in the passed schema, including entities
   still in production use. `cleanup.py` no longer touches `messages/*.json` at all;
@@ -618,55 +656,6 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Completion gate step in all four. See
   `docs/knowledge/lint-gate-must-match-ci-precondition.md`.
 
-### Removed
-- **Removed the `x-relationships.<rel>.sameEntityField` schema key** and its generated
-  `validateSameEntityRefs()` — a coincidental business rule had been generalized into the
-  schema layer. Replaced with a purely structural socket: every entity now gets an
-  unconditional write-once `service_validation_custom.ts` stub. See
-  `docs/knowledge/same-entity-validation-socket.md`.
-
-### Added
-- **New `check:generated` gate rule, `test:unexplained-login`**: scans every generated
-  `cypress/e2e/api/<entity>.cy.ts` for a `cy.login(` call with no `dual-auth-session-canary`
-  marker comment above it, so a future template edit that reintroduces screen-operation coupling
-  fails the gate instead of silently landing. See `docs/knowledge/testing-cypress.md`'s "API test
-  / UI test boundary" section.
-- **FK autocomplete search now derives from `labelField`; `x-relationship.searchField` is
-  removed.** The two used to be independent declarations that could silently drift apart.
-  **Breaking for schema authors**: `validate.py` now rejects any schema still declaring
-  `searchField`. See `docs/knowledge/schema-yaml-configuration.md` §5.
-- **CSV import now supports composite/dotted `labelField` FK columns** (previously export-only)
-  — a CSV cell is matched against the full rendered label text. An ambiguous match is rejected
-  at row granularity (`MULTI_MATCH`). See `docs/knowledge/csv-import-composite-labelfield.md`.
-- **`x-self-only`: new entity-level flag for permission-independent, per-creator data
-  isolation (Stage 1).** No permission grant (including `general.read`) can widen it; a
-  non-owner's row reads as `404 Not Found`. `x-self-only: { admin_bypass: true }` allows
-  privileged read, with a mandatory (fail-closed) audit write. The account **Settings** page now
-  uses this (other users' settings are no longer reachable via any permission grant). Row-Level
-  Security (Stage 2) is not implemented. See `docs/knowledge/self-only-entity.md`.
-- **Post-login redirect-back with open-redirect protection** — signing in now returns to the
-  originally-requested page (`?redirect=`) instead of always landing on `/`.
-  `safeRedirectPath()` rejects off-site/protocol-relative/backslash-trick values, falling back
-  to `/`. See `docs/knowledge/unauthenticated-page-redirect.md`.
-- **`@mention` support, server and client.** New `MentionInput`/`MentionText` components and a
-  `searchMentionUserOptions()` server action; wires into any entity's `x-mention: true` field
-  and comment threads. Fires a new `'mentioned_in_comment'` notification. See
-  `docs/knowledge/mention-system.md`.
-- **Generated permission-denial and cross-org isolation API tests (batch A)**: every generated
-  `cypress/e2e/api/<entity>.cy.ts` now includes PUT/DELETE/export/import permission-denial
-  tests and, for org-scoped entities, cross-organization isolation tests. Adds the
-  `db:createCrossOrgScenario` test-fixture task. See `docs/knowledge/permission-e2e-test-design.md`.
-- **Graceful degradation for foreign-key read-permission gaps** — a role that can create/edit
-  an entity but lacks read on one of its FK targets used to crash the create/edit page entirely;
-  the affected field now renders disabled instead (read-only + blocks `/new` if required,
-  clearable if optional). No Prisma/migration change. See
-  `docs/knowledge/fk-read-permission-graceful-degradation.md`.
-- **Terms of Service / Privacy Policy pages** (`/[locale]/legal/terms`,
-  `/[locale]/legal/privacy`), linked from registration. Per-locale plain Markdown under
-  `content/legal/`; both are explicitly labeled templates requiring legal review before real
-  use. See `docs/knowledge/legal-documents.md`.
-
-### Fixed
 - **Mention-collection loops read the wrong field off the comment relation** — two code paths
   read `c.creator_id`, but the comment type only declares `creator?: { id, name, image }` (a
   compile error on any schema whose `comment_has_mention` branch actually renders). Both now
@@ -687,15 +676,6 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `approval_order_reached` notification once a flow's ordering constraint is satisfied. See
   `docs/knowledge/notification-triggers.md`.
 
-### Security
-- **MFA could be bypassed via Google OAuth sign-in**: `mfa_enabled` was only checked in the
-  credentials sign-in path, so an SSO-provisioned user with MFA enabled reached a fully
-  authenticated session via Google without a TOTP/recovery-code prompt. The `jwt()` callback now
-  blocks every protected route behind a new `/mfa-challenge` page until MFA clears; a new
-  `user.mfa_token_version` column also revokes an already-active session when MFA is enabled. See
-  `docs/knowledge/authentication.md` "MFA on the OAuth path".
-
-### Fixed
 - **CSV import dotted-FK org filter gap**: a dotted `x-import-key` lookup on an
   organization-scoped entity's CSV import route was not itself organization-filtered — a
   same-named row owned by a different organization could resolve and get linked to the
