@@ -143,8 +143,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **New entity-level schema key `x-write-locked-values` declares field values that only the
   system may write, independent of `x-approval`.** Composes (union) with `x-approval`'s locked
   values — existing `x-approval` entities are unaffected. **Defaults to *unlocked* on a proxy
-  view** (opt back in by declaring the key on the view itself). See
-  `docs/knowledge/x-write-locked-values-field-lockdown.md`.
+  view** (opt back in by declaring the key on the view itself). **Renamed**:
+  `derive_approval_locked_values()` → `derive_write_locked_values()`;
+  `APPROVAL_LOCKED_FIELDS`/`ApprovalLockedField` → `WRITE_LOCKED_FIELDS`/`WriteLockedField` in
+  `service_validation.ts` and the CSV import route (its `APPROVAL_LOCKED_VALUE` error code string
+  is unchanged). See `docs/knowledge/x-write-locked-values-field-lockdown.md`.
 - **Post-decision row freeze now also applies to a *terminal* rejection, not just approval.**
   **Behavior change**: an entity declaring `on_rejected.terminal: true` now rejects
   edit/delete/invalidate (`403 *_forbidden:approval_locked`) on a row at that terminal value,
