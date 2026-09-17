@@ -201,6 +201,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `/[locale]/legal/privacy`), linked from registration. Per-locale plain Markdown under
   `content/legal/`; both are explicitly labeled templates requiring legal review before real
   use. See `docs/knowledge/legal-documents.md`.
+- **New `app_setting` model** — a per-organization business-date override, container only for
+  now: no read function, admin UI, scheduled-task wiring, or audit-log extension exists yet,
+  only the model itself (`organization_id`, `business_date`, `is_pinned`, `timezone`). See
+  `docs/knowledge/appendix/business-date-container.md`.
+- **New `user.email_notifications_enabled` column** — an opt-in master switch for email
+  notifications, container only for now: no sending mechanism exists yet. Defaults to `false`;
+  an unrelated user must actively opt in, never be opted in by default.
 
 ### Changed
 - **Approval-request creation moves off the write-once `afterCreate` hook into an
