@@ -651,6 +651,32 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
         approval_indexed = prop_name in _parent_approval_lines
         approval_array_var = f'_{child_var}ApprIds' if approval_indexed else ''
 
+        # Issue #604: an approval-lines / ledger_transaction-reservation-lines
+        # child (get_approval_lines_props) is, by the contract documented on
+        # _build_ledger_reservation_allocation_code and
+        # _build_approval_lines_pre_create_code, ALWAYS nested-created with the
+        # parent -- that pre-create/nested-create pairing is its only creation
+        # path. Such a child commonly also declares its own x-generate (list:
+        # true, view: true) so each line gets its own approve/reject page, but
+        # with new/edit/api left false (it has no write path of its own). The
+        # generic is_independent computation above only checks "does
+        # x-generate exist at all", so it cannot distinguish that shape from a
+        # child with a genuine independent CRUD path of its own (e.g.
+        # goods_receipt_line, x-generate.new: true) -- the cmd_1047 write_ch
+        # narrowing (embedded_ch/write_ch below) was built to keep the LATTER
+        # read-only from the parent, not this one. Left unoverridden, an
+        # approval-lines child that also carries its own list/view page was
+        # silently dropped from write_ch/child_nested_create entirely (no
+        # nested-create emitted at all), while
+        # _build_approval_lines_pre_create_code still unconditionally emitted
+        # a reference to the {child_var}Items parameter that write_ch's
+        # exclusion had just stopped declaring -- an undefined-variable
+        # TypeScript build break (TS2304) for purchase_order.items /
+        # receiving_receipt.lines once their lines entities gained their own
+        # list/view pages.
+        if approval_indexed:
+            is_independent = False
+
         # cmd_413: child rows carrying their own assignee_id (e.g.
         # receiving_receipt_line under receiving_receipt) never got a
         # Trigger #1 notify — the parent-level has_assignee_id gate only
