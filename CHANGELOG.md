@@ -658,15 +658,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   still in production use. `cleanup.py` no longer touches `messages/*.json` at all;
   `generate-code` now also warns when a freshly-added key was added to a non-English locale
   file, so a partial translation gap is visible. See `docs/knowledge/i18n-locale-routing.md`.
-- **Re-submitting a rejected approval request via the (since-retired) dedicated resubmit
-  action/route never notified the approver** — that path reused the existing
-  `approval_request` row instead of creating a new one, so the creation-only notification
-  never re-fired. Fixed for both the Server Action and REST route at the time; the dedicated
-  path itself was retired later in this same cycle (see the edge-trigger entry under
-  Changed above) — today's ordinary-edit resubmission always creates a fresh row and
-  notifies normally, per `docs/knowledge/appendix/approval-flow.md` §16.4/§16.6. Separately
-  (still true today): a related payload bug (rejection notification's `status` field
-  hardcoded to `'rejected'` even for a `terminal_rejected` outcome) is also fixed.
+- **Re-submitting via the (since-retired) dedicated resubmit action/route never notified the
+  approver** — that path was retired later in this cycle (see the edge-trigger entry under
+  Changed above); today's ordinary-edit resubmission always creates a fresh row and notifies
+  normally, per `docs/knowledge/appendix/approval-flow.md` §16.4/§16.6.
+- Separately (still true today): a related payload bug — rejection notification's `status`
+  field hardcoded to `'rejected'` even for a `terminal_rejected` outcome — is also fixed.
 - **Fixed `migrate:deploy` running through Neon's pooled connection instead of a direct one**
   — Prisma's migration engine needs a session-scoped advisory lock a transaction-mode pooler
   doesn't guarantee. `prisma.config.ts` now prefers a new `DIRECT_URL` env var; **on Vercel
