@@ -297,9 +297,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **An embedded DataGrid child's column order now follows its own `x-display.form` declaration
   when present** — order only; which columns are shown is unchanged.
 - **The generated submit-for-approval Server Action no longer throws across the `'use server'`
-  boundary, and its caller no longer discards the result.** Failures (including a
-  reservation-capacity rejection) now return the same `ActionFailure` shape as ordinary
-  create/update actions, awaited and displayed inline by `ApprovalSection.tsx`. See
+  boundary, and its caller no longer discards the result.** Failures now return the same
+  `ActionFailure` shape as ordinary create/update actions (a reservation-capacity rejection
+  as a new `CAPACITY` code, anything else as `UNKNOWN`), awaited and displayed inline by
+  `ApprovalSection.tsx`. See
   `docs/knowledge/error-message-framework.md`.
 - **An optional (nullable) enum field with no `default:` no longer seeds the first enum
   member on the "new" form** — it now stays unset until the user picks a value; fields with
