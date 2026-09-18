@@ -253,6 +253,30 @@ async function main() {
     });
   }
 
+  // ── Business date container default row ───────────────────────────────────
+  // The tenant-wide default `app_setting` row (organization_id: null) that
+  // date-resolution logic falls back to when an organization has no row of
+  // its own — see docs/knowledge/appendix/business-date-container.md. The
+  // partial unique index enforcing "at most one such row" is applied by hand
+  // to whichever migration first creates this table (not managed here), but
+  // findFirst-then-create (matching the role-seeding pattern above) already
+  // keeps this script itself idempotent on repeat runs.
+  const defaultAppSetting = await prisma.app_setting.findFirst({
+    where: { organization_id: null },
+  });
+  if (!defaultAppSetting) {
+    await prisma.app_setting.create({
+      data: {
+        organization_id: null,
+        business_date: new Date().toISOString().slice(0, 10),
+        is_pinned: false,
+        timezone: 'UTC',
+        creator_id: admin.id,
+        updater_id: admin.id,
+      },
+    });
+  }
+
   console.log('Tenant seeded successfully!');
 }
 
