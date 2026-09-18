@@ -38,7 +38,7 @@ model app_setting {
 ```
 
 validates and lowers to `CREATE UNIQUE INDEX ... ON app_setting(organization_id) WHERE organization_id IS NULL`. This
-was applied to a real Postgres 16 test database and then disproved empirically: inserting a second
+was applied to a real Postgres 18 test database and then disproved empirically: inserting a second
 `organization_id IS NULL` row succeeded when it should have been rejected, because the index still compares
 NULL to NULL, which Postgres never treats as a conflict, partial or not. Prisma has no `nulls:
 NotDistinct` argument to opt into Postgres 15+'s `NULLS NOT DISTINCT` behavior (the validator
@@ -58,7 +58,7 @@ CREATE UNIQUE INDEX app_setting_default_row_unique
   WHERE organization_id IS NULL;
 ```
 
-### Empirical verification (2026-09-17, isolated worktree test database, Postgres 16)
+### Empirical verification (2026-09-17, isolated worktree test database, Postgres 18)
 
 With the index applied:
 

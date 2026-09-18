@@ -138,7 +138,7 @@ GET /api/search?q=<query>[&entityTypes=<entityName>[,<entityName>...]][&page=<n>
 **This mechanism changed after v1.5.0.** Japanese (and now all-language) substring matching
 runs on the standard `pg_trgm` contrib extension, not `pg_bigm` — no custom PostgreSQL Docker
 image is needed. `docker-compose.dev.yml`/`docker-compose.test.yml`/`docker-compose.prod.yml`
-all use plain `postgres:16`. `docker/Dockerfile.postgres` and `docker/pg_bigm.tar.gz` still exist
+all use plain `postgres:18`. `docker/Dockerfile.postgres` and `docker/pg_bigm.tar.gz` still exist
 in the tree but are no longer referenced by any compose file, script, or generator code (grep
 confirmed, 2026-09-12) — they appear to be orphaned leftovers from the original pg_bigm design.
 
