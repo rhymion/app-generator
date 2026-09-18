@@ -3,6 +3,19 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [Unreleased]
+### Fixed
+- **Generated `service.ts` failed to build (`TS2304: Cannot find name`) for an
+  `x-approval-lines` / `x-reservation` (`ledger_transaction`) lines entity that
+  also declares its own `x-generate` (list/view pages, e.g. for a per-line
+  approve/reject UI) with no write path of its own (`new`/`edit`/`api: false`)**
+  — such an entity was misclassified as independent (its own `x-generate`
+  existing was read as "has a write path elsewhere"), which silently dropped
+  its nested-create from the parent's `add`/`update` function while the
+  approval-lines pre-create code still referenced the now-undeclared array
+  parameter (issue #604). See `code_generator/build_context.py`'s
+  `_build_child_data`.
+
 ## [4.0.0] - 2026-09-17
 ### Security
 - **Closed a bypass letting an ordinary user set an `x-approval` field to a value reserved for
