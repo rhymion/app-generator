@@ -50,6 +50,24 @@ Run in this order:
 19. `pip-audit -r requirements.txt`
 20. `npm run check:readme-sync` — fails closed if this branch's diff touches
     README.md without also touching README_ja.md (or vice versa)
+21. **Consumer-schema coverage check (conditional)** — required only when
+    this PR's diff touches `x-generate`/`x-approval` combination-judgment
+    logic, or the generated-code/hand-written-code boundary
+    (`build_context.py`; `generators_test.py`'s helper/context-builder
+    functions; anything under `code_generator/generators*.py`). When it
+    does, the PR is not gate-complete until at least one of the following
+    has been done and recorded in the PR/task report:
+    - (i) a dogfood-schema entity (`code_generator/json_schema.yaml`)
+      already exercises the specific combination changed, or
+    - (ii) an explicit consumer-worktree scratch-entity verification was
+      performed: add a throwaway entity to a real consumer schema (a
+      separate, isolated worktree — never the shared checkout) and run it
+      through `prj:sync`/generate-code end to end, then discard it without
+      committing.
+
+    Does not apply to a change confined to neither of those two areas (a
+    straightforward bugfix elsewhere, for example) — this step exists to
+    close a specific detection gap, not to add blanket overhead.
 
 **Step 1 (`npm run lint`) must run on a checkout where `generate-code` has
 not yet run** — that is what CI's `Lint` job actually checks (`npm ci && npm
@@ -308,6 +326,20 @@ Step 20 only proves both README files were touched, not that their content
 actually agrees — if this task's diff includes a README.md change, bring
 README_ja.md's content up to date with it (and vice versa) before this
 step, not after. See `docs/knowledge/readme-en-ja-sync-gate.md`.
+
+**Step 21**: this repo's own dogfood schema and hand-written base models are
+a fixed, finite combinatorial space — a real consumer's schema legitimately
+contains more `x-generate` flag combinations, more `x-approval` shapes, and
+more hand-written base models than this repo's own CI ever exercises. Three
+separate generator defects (#604, #607/#608/#609, #614) landed on the same
+day and were each caught only once a real consumer schema hit them, never by
+this repo's own gate. Steps 4-13 above already close specific instances of
+this same gap one fixture at a time as they're discovered; step 21 is the
+general backstop for combination-judgment/boundary changes that don't yet
+have a dedicated fixture gate — it does not replace adding one when a
+change is narrow and permanent enough to be worth a fixture (see step 4's
+note above for the extend-vs-new-fixture rationale), only catches what
+hasn't been fixture-ized yet.
 
 ## Debug priority
 
