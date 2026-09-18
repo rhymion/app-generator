@@ -1287,24 +1287,29 @@ def get_child_render_type(child: dict, schema: dict = None, parent_model_name: s
     if child.get('output_type') == 'comments':
         return 'comments'
     # issue #538 (a follow-up to the read-only embed decision, issue
-    # #520/PR#528/PR#530): an independent
-    # child (own x-generate — own list/view/new/edit/delete pages) that is
-    # NOT self-referencing renders read-only from the parent — generators.py's
-    # form_upsert_context() narrows it out of the editable-grid machinery
-    # (readonly_indep_grid_ch) and build_context.py's write_ch excludes it
-    # from nested create/update, same as build_context.py's own
-    # `is_independent` flag (mirrored here: `not is_many_to_many and
-    # bool(x-generate)` on the child's raw schema entry). A self-referencing
-    # independent child (child['name'] == parent_model_name) is excluded from
-    # this narrowing on the generator side too (build_context.py's
-    # `use_connect` gates on `child_name == model`), so it keeps the normal
-    # writable 'datagrid' render type here.
-    if (
-        schema is not None
-        and child['name'] != parent_model_name
-        and bool((schema.get('definitions') or {}).get(child['name'], {}).get('x-generate'))
-    ):
-        return 'readonly-datagrid'
+    # #520/PR#528/PR#530): an independent child -- one that can create,
+    # edit, or delete its own rows through its own new/edit/delete pages,
+    # NOT merely one that has some x-generate block at all (cmd_1098
+    # correction; a list/view-only child, e.g. receiving_receipt_line, has
+    # no write path of its own and stays writable from the parent) -- that
+    # is NOT self-referencing renders read-only from the parent —
+    # generators.py's form_upsert_context() narrows it out of the
+    # editable-grid machinery (readonly_indep_grid_ch) and build_context.py's
+    # write_ch excludes it from nested create/update, same as
+    # build_context.py's own `is_independent` flag (mirrored here: `not
+    # is_many_to_many and child_has_own_write_capability(x-generate)` on
+    # the child's raw schema entry — defaults match generate_types.py's
+    # `generate_config`, a missing new/edit/delete key defaults to True). A
+    # self-referencing independent child (child['name'] == parent_model_name)
+    # is excluded from this narrowing on the generator side too
+    # (build_context.py's `use_connect` gates on `child_name == model`), so
+    # it keeps the normal writable 'datagrid' render type here.
+    if schema is not None and child['name'] != parent_model_name:
+        _child_x_generate = (schema.get('definitions') or {}).get(child['name'], {}).get('x-generate') or {}
+        if _child_x_generate and any(
+            _child_x_generate.get(k, True) is not False for k in ('new', 'edit', 'delete')
+        ):
+            return 'readonly-datagrid'
     return 'datagrid'
 
 
@@ -2906,6 +2911,28 @@ def helper_context(
             _lockdown_default_value = (_lockdown_props.get(_lockdown_field) or {}).get('default')
             if _lockdown_default_value is not None and _lockdown_default_value not in _lockdown_freeze_values:
                 _lockdown_candidate = _lockdown_default_value
+
+        # cmd_1096 (issue #608): tiers 1-3 above all fail when the schema's
+        # own default for the lockdown field IS itself a frozen value (e.g.
+        # a terminal on_rejected with no on_withdrawn, and default ==
+        # submit_on's own target) -- the exact approval_edit_terminal_test
+        # shape. Previously the escape hatch just gave up here, leaving the
+        # fixture at the raw DB default (the locked value), which 403'd
+        # every generic CRUD test built on it (4.1/4.2/9.1/9.2/10.1/10.2)
+        # even though none of them exercise approval flow. Tier 4: scan the
+        # field's own enum for any value _lockdown_freeze_values doesn't
+        # already cover -- the same kind of scan resubmit_unsubmitted_
+        # value_literal above already performs for a different purpose
+        # (the 14.5 "created but not yet submitted" test). Only when even
+        # that comes up empty does the field stay omitted, same as before.
+        if _lockdown_candidate is None:
+            _lockdown_enum_values = (_lockdown_props.get(_lockdown_field) or {}).get('enum')
+            if isinstance(_lockdown_enum_values, list):
+                _lockdown_spare_value = next(
+                    (v for v in _lockdown_enum_values if v not in _lockdown_freeze_values), None,
+                )
+                if _lockdown_spare_value is not None:
+                    _lockdown_candidate = _lockdown_spare_value
 
         if _lockdown_candidate is not None:
             _lockdown_override_literal = (

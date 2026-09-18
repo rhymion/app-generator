@@ -5,6 +5,28 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Fixed
+- **Generated old-form 14.4 resubmit-after-withdraw API test always failed
+  with 400 for an `x-approval` entity with a non-terminal `on_rejected` but
+  no `on_withdrawn` declared** (issue #607) — a later server-side rule
+  rejects any withdrawal for such an entity outright, but the generated
+  test still unconditionally asserted the withdraw call itself succeeded
+  with 200. `test_api_spec.cy.ts.jinja2`'s old-form 14.4 branch is now
+  gated on `has_on_withdrawn`; when absent, a separate variant is generated
+  instead, asserting the withdraw call is rejected with 400 and the
+  approval_request is left untouched (mirroring the existing 14.2M/14.3M
+  multistage withdraw-lockout pattern).
+
+- **Post-approval edit/delete lockdown's generic fixture had no escape
+  hatch when the schema's own default for the lockdown field was itself a
+  frozen value** (issue #608) — for an entity with a terminal `on_rejected`,
+  no `on_withdrawn`, and a default equal to `submit_on`'s own target value,
+  the 3-tier fallback in `generators_test.py`'s lockdown-override
+  computation gave up entirely, leaving the generic `populate{Pascal}Data()`
+  fixture at the raw (locked) DB default — which 403'd every generic CRUD
+  test built on it (4.1/4.2/9.1/9.2/10.1/10.2), even though none of them
+  exercise approval flow. Added a 4th fallback tier: scan the field's own
+  enum for a value outside the frozen-values set.
+
 - **Generated `service.ts` failed to build (`TS2304: Cannot find name`) for an
   `x-approval-lines` / `x-reservation` (`ledger_transaction`) lines entity that
   also declares its own `x-generate` (list/view pages, e.g. for a per-line
@@ -15,6 +37,28 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   approval-lines pre-create code still referenced the now-undeclared array
   parameter (issue #604). See `code_generator/build_context.py`'s
   `_build_child_data`.
+
+- **`is_independent`'s root computation treated ANY `x-generate` block —
+  even a list/view-only one — as proof a child manages its own
+  create/edit/delete, wrongly hiding the parent form's "Add"/edit/delete
+  controls for a child that cannot actually write itself** (e.g.
+  `receiving_receipt_line`, whose `x-generate` sets `new`/`edit`/`delete`
+  all `False`). The line for whether a parent may still add/edit/delete a
+  child is whether the CHILD can write itself, not whether it merely has a
+  page. `build_context.py`'s `_build_child_data` now computes
+  `is_independent` from `new`/`edit`/`delete` (see the new
+  `helpers.schema_helpers.child_has_own_write_capability`), not bare
+  `x-generate` presence; the `nested_writable` flag from the #604 fix above
+  is unchanged. Also corrected the two other places that mirrored the old
+  (wrong) computation: `generate.py`'s `_entity_is_write_reachable` (the
+  equivalent check for `x-approval`'s write-reachability axis) and
+  `generators_test.py`'s `get_child_render_type` (the generated test
+  suite's own expected-render-type mirror). Issue #609, which had reported
+  this same child's "Add" control reappearing as a regression, was itself
+  filed on the wrong premise — that reappearance was the correct behavior
+  its schema calls for, once measured against the actual generated code
+  rather than the (also incorrect) `receiving_receipt.lines`-has-its-own-
+  new/edit-pages assumption its reproduction steps carried.
 
 ## [4.0.0] - 2026-09-17
 ### Security

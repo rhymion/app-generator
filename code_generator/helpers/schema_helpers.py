@@ -519,6 +519,29 @@ def get_detail_properties(parent: str, schema: dict, detail_key: str | None = No
     return None
 
 
+def child_has_own_write_capability(x_generate: dict | None) -> bool:
+    """True if `x_generate` (a child entity's own x-generate block) grants
+    the child at least one of new/edit/delete -- i.e. the child can create,
+    edit, or delete its own rows through its own generated page(s)/route(s).
+
+    This is the line for whether a PARENT's edit form may still offer to
+    add/edit/delete this child inline (issue #520, cmd_1098 correction):
+    whether the child can write itself, not merely whether it has any
+    x-generate block at all (a list/view-only child, e.g. one whose
+    x-generate explicitly sets new/edit/delete all False, has no write path
+    of its own and must stay addable/editable from the parent). Defaults
+    match generate_types.py's `generate_config` (a missing new/edit/delete
+    key defaults to True, same as every other x-generate flag).
+
+    Returns False when `x_generate` is falsy (no block at all, or an empty
+    block) -- a child with no x-generate has no page of its own to write
+    through, so it is trivially not independently write-capable.
+    """
+    if not x_generate:
+        return False
+    return any(x_generate.get(k, True) is not False for k in ('new', 'edit', 'delete'))
+
+
 def get_approval_lines_props(parent_def: dict, model: str, schema: dict) -> list[str]:
     """Embedded-line properties whose approvable_id must be pre-created before
     the parent create/update (nested-create can't back-fill a NOT NULL FK).
