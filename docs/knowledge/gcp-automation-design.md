@@ -15,11 +15,11 @@ eliminating manual dependencies to establish sustainable operation.
 ## 1. Operation Sequence
 
 Complete procedure for initial GCP environment setup through deployment. **The
-order below is load-bearing** — `gcp-deploy.sh` (Step 4) needs the `Dockerfile`
+order below is load-bearing** — `gcp-deploy.sh` (Step 3) needs the `Dockerfile`
 that only `generate-code` (Step A) produces, and `generate-code` only produces
 the GCP artifacts when `x-cloud` is already enabled at the time it runs.
 Running `generate-code` before enabling `x-cloud` — then discovering the
-missing `Dockerfile` in Step 4 and patching one in by hand instead of going
+missing `Dockerfile` in Step 3 and patching one in by hand instead of going
 back to Step A — silently leaves the upload route on the default Vercel Blob
 path instead of GCS, because both artifacts come from the same generator gate
 (`code_generator/generate.py`, the `x-cloud` block) and only a real
@@ -43,7 +43,7 @@ they show up as untracked files after this step; regenerated on every
 `generate-code` run), sets `next.config.ts`'s
 `output: 'standalone'`, and switches the upload/serve routes to
 GCS-Signed-URL (overriding the default Vercel Blob routes). None of these
-exist in the tree beforehand. This step is a hard requirement of Step 4
+exist in the tree beforehand. This step is a hard requirement of Step 3
 (`gcp-deploy.sh`) — but, as verified below, NOT a requirement of Step 2
 (`gcp-setup.sh`), which runs to completion without it.
 
@@ -51,9 +51,16 @@ exist in the tree beforehand. This step is a hard requirement of Step 4
 
 ```bash
 cp .env.production.local.example .env.production.local
-# Fill in required values: PROJECT_ID / DB_PASSWORD / AUTH_SECRET / UPSTASH_EMAIL / UPSTASH_API_KEY
-# PRISMA_DATABASE_URL can be left blank at this point (obtain in Step 3)
-# DB_PASSWORD / AUTH_SECRET are generate-once-persist: if left blank,
+# Fill in required values: PROJECT_ID / DATABASE_URL / DIRECT_URL / AUTH_SECRET /
+#   UPSTASH_EMAIL / UPSTASH_API_KEY / SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD
+# DATABASE_URL / DIRECT_URL are Neon connection strings obtained from the Neon
+#   console (pooled endpoint / unpooled endpoint respectively — see
+#   docs/knowledge/prisma-direct-vs-pooled-connection.md). This script does not
+#   provision Neon itself; reuse the same Neon project as the Vercel deployment
+#   if there is one, or create a new Neon project first.
+# PRISMA_DATABASE_URL can be left blank at this point (obtain in the Accelerate
+#   revival procedure, docs/knowledge/manual-ops.md §1, if ever needed)
+# AUTH_SECRET is generate-once-persist: if left blank,
 #   gcp-env.sh will auto-generate on first run and write back to .env.production.local
 ```
 
@@ -63,49 +70,35 @@ cp .env.production.local.example .env.production.local
 bash scripts/gcp-setup.sh
 ```
 
-Does not read or depend on any `generate-code` output (verified 2026-08-12:
-`DRY_RUN=true` run against a tree with no `Dockerfile` present completed all
-6 steps; the script contains no reference to `Dockerfile`/`docker build` at
-all). Step A above is not a prerequisite for this step, but do it first
-anyway per the sequence above — there is no benefit to deferring it.
+Does not read or depend on any `generate-code` output (verified 2026-08-12,
+re-verified after the Cloud SQL→Neon reconnection: the script contains no
+reference to `Dockerfile`/`docker build` at all). Step A above is not a
+prerequisite for this step, but do it first anyway per the sequence above —
+there is no benefit to deferring it.
 
 Operations performed (idempotent — safe to re-run):
 - Enable GCP APIs
 - Create Artifact Registry
-- Create Cloud SQL instance/DB/user → obtain public IP (DATABASE_URL_PUBLIC)
 - Create service account + IAM bindings
 - Automatically create Redis DB via Upstash Management API → obtain REDIS_URL
 - Register the following in Secret Manager:
-  - app-database-url (DATABASE_URL socket)
+  - app-database-url (Neon `DATABASE_URL`, pooled)
+  - app-direct-database-url (Neon `DIRECT_URL`, unpooled — used only by the
+    `app-migrate` Job, see Step 3 below)
   - app-nextauth-secret (AUTH_SECRET)
   - app-gcs-bucket-name (GCS_BUCKET)
   - app-redis-url (REDIS_URL)
 - Create GCS bucket + IAM bindings
-- At the end: **echo DATABASE_URL_PUBLIC → prompt to register in Prisma Console**
-- **⚠️ app-prisma-database-url is not created yet (until Step 3 is complete)**
 
-### Step 3: [Optional, currently disabled] Obtain Accelerate URL from Prisma Console
+There is no longer a Cloud SQL instance/DB/user to create, no public IP to
+obtain, and no "register in Prisma Console" prompt at the end — the DB is
+already provisioned (as a Neon project) before this script runs; it only
+reads the connection strings from `.env.production.local` and registers them
+as secrets. Accelerate (`PRISMA_DATABASE_URL` / `app-prisma-database-url`)
+stays off by default, same as before this change — see
+`docs/knowledge/manual-ops.md §1` if it is ever re-enabled.
 
-> **Decision (2026-07-04, rca_267a §6, approved with addendum): the direct
-> Cloud SQL socket path (`DATABASE_URL`) is the DEFAULT production DB path, not
-> Accelerate.** Accelerate has never successfully reached this environment's
-> Cloud SQL instance — it fails with P1001 due to `GOOGLE_MANAGED_INTERNAL_CA` TLS
-> verification (see `rca_266a_accelerate_cloudsql.md` / `rca_267a_db_path_decision.md`
-> in the internal reports). The maintainer is following up with Prisma
-> support separately; this step is skipped for normal setup/deploy.
->
-> Skip straight to Step 4 unless you are specifically re-testing Accelerate.
-
-If re-testing Accelerate anyway (this step still cannot be automated — the Prisma
-Platform API does not support URL issuance):
-1. Go to https://console.prisma.io
-2. Register the project connection using `DATABASE_URL_PUBLIC` output in Step 2
-3. Enable Prisma Accelerate → obtain the issued `prisma+postgres://...` URL
-4. Set it as `PRISMA_DATABASE_URL` in `.env.production.local`
-5. See `docs/knowledge/manual-ops.md §1` for the revival toggle in
-   `scripts/gcp-deploy.sh` (commented out, not deleted) that must also be re-enabled.
-
-### Step 4: Run gcp-deploy.sh (image build + deploy)
+### Step 3: Run gcp-deploy.sh (image build + deploy)
 
 ```bash
 bash scripts/gcp-deploy.sh
@@ -133,37 +126,39 @@ confirm the `Dockerfile` is actually present before deploying — the build
 step alone is safe to test this way since it fails locally, before any
 push/`gcloud` mutation, if the file is missing.
 
-Operations performed (default = direct socket path, Option A):
+Operations performed (default = Neon pooled/direct connection):
 - Docker image build + push to Artifact Registry (service + migrate images)
-- Migration Job: `prisma migrate deploy` via direct `DATABASE_URL` socket
+- Migration Job: `prisma migrate deploy` via Neon `DIRECT_URL` (unpooled) —
+  see `docs/knowledge/prisma-direct-vs-pooled-connection.md` for why
+  migrations must not run through the pooled endpoint
 - Run seed
 - Cloud Run Service deploy:
-  - `--add-cloudsql-instances` (for DATABASE_URL direct socket)
   - `--set-secrets`: DATABASE_URL / AUTH_SECRET / GCS_BUCKET / REDIS_URL
   - `--set-env-vars`: AUTH_TRUST_HOST=true / NODE_ENV=production
-  - `--max-instances=10` — paired with the `lib/prisma.ts` PrismaPg pool cap
-    (`max: 2`) so 10 instances × 2 pool ≤ 20 connections, under the
-    db-f1-micro `max_connections=25` ceiling (rca_267a §1/§6). If instance
-    count or pool size changes, re-derive this budget.
+  - `--max-instances=10` — this instance cap and the `lib/prisma.ts`
+    PrismaPg pool cap (`max: 2`) were previously sized against the
+    db-f1-micro Cloud SQL tier's `max_connections=25` ceiling. That specific
+    arithmetic constraint is retired along with Cloud SQL: Neon's pooled
+    endpoint (PgBouncer) is designed for exactly this many-short-lived-
+    connections-over-few-backend-connections fan-out, and the connection
+    ceiling is now a property of the Neon plan/compute size instead of a
+    fixed Cloud SQL tier. `--max-instances=10` itself is left unchanged
+    here (no evidence-based replacement number to put in its place) — if it
+    needs to be raised, check the Neon project's own connection limits
+    first, not this script's Cloud-SQL-era comment.
   - Output Service URL (`gcloud run services describe --format='value(status.url)'`)
 
 The Accelerate wiring (Step 0 secret registration + `PRISMA_DATABASE_URL`
 guard + `--set-secrets` entry) is commented out in `gcp-deploy.sh`, not
-deleted. To revive it: uncomment those three blocks, complete Step 3 above,
-and set `PRISMA_DATABASE_URL` in `.env.production.local` — no other code
-changes needed (`lib/prisma.ts` already branches on that variable).
-
-**Scaling beyond the 10×2 budget**: raise the Cloud SQL tier to
-`db-g1-small` (`max_connections≈50`) and adjust `--max-instances`/pool
-`max` proportionally (e.g. 10×5=50) rather than reintroducing Accelerate
-or an external pooler — see rca_267a §2 for why Managed Connection Pooling
-(Enterprise Plus only) and a PgBouncer sidecar (Cloud Run has no sidecar
-support) were both rejected.
+deleted. To revive it: uncomment those three blocks, complete the Accelerate
+revival procedure in `docs/knowledge/manual-ops.md §1`, and set
+`PRISMA_DATABASE_URL` in `.env.production.local` — no other code changes
+needed (`lib/prisma.ts` already branches on that variable).
 
 ### On Redeploy (no infrastructure changes)
 
 ```bash
-bash scripts/gcp-deploy.sh  # Run Step 4 only
+bash scripts/gcp-deploy.sh  # Run Step 3 only
 ```
 
 gcp-setup.sh is idempotent so re-running is safe,
@@ -175,8 +170,10 @@ but if there are no infrastructure changes, gcp-deploy.sh alone is sufficient.
 bash scripts/gcp-teardown.sh  # 2-step confirmation safety guard
 ```
 
-Teardown: delete Upstash Redis (API) + delete GCP project (soft-delete).
-Delete the Prisma Console project manually (see `docs/manual-ops.md §4`).
+Teardown: delete Upstash Redis (API) + delete GCP project (soft-delete). Does
+not touch the Neon project (Neon lifecycle is managed separately, outside
+these scripts). Delete the Prisma Console/Accelerate project manually if the
+revival procedure in `docs/knowledge/manual-ops.md §1` was ever used.
 
 ---
 
