@@ -2907,6 +2907,28 @@ def helper_context(
             if _lockdown_default_value is not None and _lockdown_default_value not in _lockdown_freeze_values:
                 _lockdown_candidate = _lockdown_default_value
 
+        # cmd_1096 (issue #608): tiers 1-3 above all fail when the schema's
+        # own default for the lockdown field IS itself a frozen value (e.g.
+        # a terminal on_rejected with no on_withdrawn, and default ==
+        # submit_on's own target) -- the exact approval_edit_terminal_test
+        # shape. Previously the escape hatch just gave up here, leaving the
+        # fixture at the raw DB default (the locked value), which 403'd
+        # every generic CRUD test built on it (4.1/4.2/9.1/9.2/10.1/10.2)
+        # even though none of them exercise approval flow. Tier 4: scan the
+        # field's own enum for any value _lockdown_freeze_values doesn't
+        # already cover -- the same kind of scan resubmit_unsubmitted_
+        # value_literal above already performs for a different purpose
+        # (the 14.5 "created but not yet submitted" test). Only when even
+        # that comes up empty does the field stay omitted, same as before.
+        if _lockdown_candidate is None:
+            _lockdown_enum_values = (_lockdown_props.get(_lockdown_field) or {}).get('enum')
+            if isinstance(_lockdown_enum_values, list):
+                _lockdown_spare_value = next(
+                    (v for v in _lockdown_enum_values if v not in _lockdown_freeze_values), None,
+                )
+                if _lockdown_spare_value is not None:
+                    _lockdown_candidate = _lockdown_spare_value
+
         if _lockdown_candidate is not None:
             _lockdown_override_literal = (
                 "'" + str(_lockdown_candidate).replace("\\", "\\\\").replace("'", "\\'") + "'"

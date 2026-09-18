@@ -42,11 +42,25 @@ class TestReservationLinesEntityWithOwnListViewPage:
         entity = _entity_spec('purchase_order', schema, children=[_lines_child()])
         return build_context(entity, schema), schema
 
-    def test_lines_entity_is_not_treated_as_independent_for_parent_writes(self):
+    def test_lines_entity_is_nested_writable_but_stays_independent(self):
+        """Issue #609 correction: is_independent itself must NOT be forced
+        to False for an approval-indexed child -- it also drives the
+        parent form's read-only-vs-writable rendering decision (issue
+        #520/PR#528/PR#530), which must stay keyed off "does this child
+        have its own dedicated CRUD page" alone. nested_writable is the
+        separate flag that keeps the parent's own service nested-creating
+        this child regardless."""
         ctx, _ = self._ctx()
         children = {c['property_name']: c for c in ctx['children_data']}
         assert children['items']['approval_indexed'] is True
-        assert children['items']['is_independent'] is False, (
+        assert children['items']['is_independent'] is True, (
+            "an approval-lines child with its own list/view page IS "
+            "independent (own dedicated CRUD page) -- forcing this to "
+            "False (the pre-#609-fix behavior) silently un-hides the "
+            "parent form's 'Add' control issue #520/PR#528/PR#530 "
+            "deliberately removed for it"
+        )
+        assert children['items']['nested_writable'] is True, (
             "an approval-lines child with no write path of its own (new: "
             "false, api: false) must stay writable via the parent's own "
             "nested-create regardless of its own x-generate.list/view pages"
@@ -148,11 +162,17 @@ class TestPlainApprovalLinesEntityWithOwnListViewPage:
         entity = _entity_spec('receiving_receipt', schema, children=children)
         return build_context(entity, schema), schema
 
-    def test_lines_entity_is_not_treated_as_independent_for_parent_writes(self):
+    def test_lines_entity_is_nested_writable_but_stays_independent(self):
+        """Issue #609 correction -- see the sibling test's docstring above
+        (TestReservationLinesEntityWithOwnListViewPage) for the full
+        reasoning; this is the plain x-approval-lines shape (no
+        x-reservation) named as receiving_receipt.lines in issue #609
+        itself."""
         ctx, _ = self._ctx()
         children = {c['property_name']: c for c in ctx['children_data']}
         assert children['lines']['approval_indexed'] is True
-        assert children['lines']['is_independent'] is False
+        assert children['lines']['is_independent'] is True
+        assert children['lines']['nested_writable'] is True
 
     def test_add_function_declares_the_lines_array_parameter(self):
         ctx, _ = self._ctx()

@@ -5,6 +5,42 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Fixed
+- **Generated old-form 14.4 resubmit-after-withdraw API test always failed
+  with 400 for an `x-approval` entity with a non-terminal `on_rejected` but
+  no `on_withdrawn` declared** (issue #607) — a later server-side rule
+  rejects any withdrawal for such an entity outright, but the generated
+  test still unconditionally asserted the withdraw call itself succeeded
+  with 200. `test_api_spec.cy.ts.jinja2`'s old-form 14.4 branch is now
+  gated on `has_on_withdrawn`; when absent, a separate variant is generated
+  instead, asserting the withdraw call is rejected with 400 and the
+  approval_request is left untouched (mirroring the existing 14.2M/14.3M
+  multistage withdraw-lockout pattern).
+
+- **Post-approval edit/delete lockdown's generic fixture had no escape
+  hatch when the schema's own default for the lockdown field was itself a
+  frozen value** (issue #608) — for an entity with a terminal `on_rejected`,
+  no `on_withdrawn`, and a default equal to `submit_on`'s own target value,
+  the 3-tier fallback in `generators_test.py`'s lockdown-override
+  computation gave up entirely, leaving the generic `populate{Pascal}Data()`
+  fixture at the raw (locked) DB default — which 403'd every generic CRUD
+  test built on it (4.1/4.2/9.1/9.2/10.1/10.2), even though none of them
+  exercise approval flow. Added a 4th fallback tier: scan the field's own
+  enum for a value outside the frozen-values set.
+
+- **A regression (from the issue #604 fix above) silently re-enabled the
+  parent form's "Add" control for an `x-approval-lines` child that also has
+  its own list/view page** (issue #609, e.g. `receiving_receipt.lines`) —
+  the #604 fix forced `is_independent` itself to `False` for such a child,
+  but `is_independent` also drives the parent form's read-only-vs-writable
+  rendering decision (the issue #520/PR#528/PR#530 ruling that this child
+  stays read-only on the parent's page). `build_context.py`'s
+  `_build_child_data` now keeps `is_independent` keyed purely on "does this
+  child have its own dedicated `x-generate` CRUD page" (restoring the form
+  read-only decision), and introduces a separate `nested_writable` flag for
+  the parent-service nested-create/update wiring #604 needed — both are
+  now true simultaneously for this shape, instead of conflating the two
+  into one flag.
+
 - **Generated `service.ts` failed to build (`TS2304: Cannot find name`) for an
   `x-approval-lines` / `x-reservation` (`ledger_transaction`) lines entity that
   also declares its own `x-generate` (list/view pages, e.g. for a per-line

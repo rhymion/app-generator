@@ -658,24 +658,29 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
         # parent -- that pre-create/nested-create pairing is its only creation
         # path. Such a child commonly also declares its own x-generate (list:
         # true, view: true) so each line gets its own approve/reject page, but
-        # with new/edit/api left false (it has no write path of its own). The
-        # generic is_independent computation above only checks "does
-        # x-generate exist at all", so it cannot distinguish that shape from a
-        # child with a genuine independent CRUD path of its own (e.g.
-        # goods_receipt_line, x-generate.new: true) -- the cmd_1047 write_ch
-        # narrowing (embedded_ch/write_ch below) was built to keep the LATTER
-        # read-only from the parent, not this one. Left unoverridden, an
-        # approval-lines child that also carries its own list/view page was
-        # silently dropped from write_ch/child_nested_create entirely (no
-        # nested-create emitted at all), while
-        # _build_approval_lines_pre_create_code still unconditionally emitted
-        # a reference to the {child_var}Items parameter that write_ch's
-        # exclusion had just stopped declaring -- an undefined-variable
-        # TypeScript build break (TS2304) for purchase_order.items /
-        # receiving_receipt.lines once their lines entities gained their own
-        # list/view pages.
-        if approval_indexed:
-            is_independent = False
+        # with new/edit/api left false (it has no write path of its own).
+        #
+        # Issue #609 (PR#606 regression, corrected here): #604's original fix
+        # forced is_independent itself to False for an approval-indexed
+        # child. But is_independent is not single-purpose -- generators.py's
+        # form-rendering code (indep_list_ch/readonly_indep_grid_ch) also
+        # keys off it to decide whether the PARENT's edit form renders this
+        # child as an interactive, writable field group (own "Add"/remove
+        # controls) versus a read-only view grid, per issue #520/PR#528/
+        # PR#530's ruling that an approval-lines child with its own list/view
+        # page stays read-only on the parent's page (only its own dedicated
+        # CRUD route may write it). Forcing is_independent to False silently
+        # un-hid that "Add" control for receiving_receipt.lines.
+        #
+        # nested_writable is the separate axis #604 actually needed: whether
+        # the parent's own generated service function must still perform a
+        # nested create/update for this child, regardless of whether it also
+        # has its own list/view page. embedded_ch/write_ch (below) key off
+        # THIS flag for write-path plumbing; is_independent itself is left
+        # untouched, so the form-rendering decision stays keyed off "does
+        # this child have its own dedicated CRUD page" alone, independent of
+        # whether the parent's service layer also needs to nested-create it.
+        nested_writable = (not is_independent) or approval_indexed
 
         # cmd_413: child rows carrying their own assignee_id (e.g.
         # receiving_receipt_line under receiving_receipt) never got a
@@ -698,6 +703,7 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             'is_many_to_many':  is_many_to_many,
             'use_connect':      use_connect,
             'is_independent':   is_independent,
+            'nested_writable':  nested_writable,
             'output_type':      output_type,
             'props_no_id':      props_no_id,
             'props_with_id':    props_with_id,
@@ -2734,7 +2740,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # form_upsert_context) so the read-only grid columns hook and JSX still
     # get generated for it. It is exported as ctx['non_comment_ch'] below,
     # unchanged.
-    embedded_ch      = [c for c in non_comment_ch if c['use_connect'] or c.get('output_type') != 'list' or not c['is_independent']]
+    #
+    # Uses `nested_writable`, not `is_independent` directly (issue #609):
+    # an approval-lines child with its own list/view page is independent
+    # (own dedicated CRUD page, so generators.py's readonly_indep_grid_ch
+    # still renders it read-only on the parent form) but must still flow
+    # through here so its nested-create/update code gets generated below --
+    # nested_writable is True for exactly this shape even though
+    # is_independent is also True. See the nested_writable comment in
+    # _build_child_data above.
+    embedded_ch      = [c for c in non_comment_ch if c['use_connect'] or c.get('output_type') != 'list' or c['nested_writable']]
 
     # `write_ch` narrows `embedded_ch` further for every write-path plumbing
     # site below (service nested-create/update, route/action body fields,
@@ -2749,7 +2764,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # TS2322 in lib/goods_receipt/service.ts because its own
     # goods_receipt_lineCreateWithoutGoods_receiptInput requires fields
     # (item, approvable) this generic nested-create body never supplies.
-    write_ch = [c for c in embedded_ch if c['use_connect'] or not c['is_independent']]
+    # Uses `nested_writable`, not `is_independent` directly -- same #609
+    # reasoning as embedded_ch above.
+    write_ch = [c for c in embedded_ch if c['use_connect'] or c['nested_writable']]
 
     child_form_data_extractions = _build_child_form_data_extractions(write_ch)
 
