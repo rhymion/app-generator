@@ -90,16 +90,20 @@ commit. Add it as part of whichever migration first creates the `app_setting` ta
 `CREATE TABLE`/`CREATE UNIQUE INDEX app_setting_organization_id_key`/FK statements `prisma migrate dev`
 generates automatically from the schema).
 
-## `resetTestDatabase()` does not know about this model
+## `resetTestDatabase()` and this model
 
 `cypress/support/db-helpers.ts`'s `resetTestDatabase()` deletion order is generated from
 `code_generator/json_schema.yaml` definitions (`generators_test.py`'s `db_helpers_context`), not
 from `prisma/schema.prisma` directly. `app_setting` is a hand-written base-schema model with no
-`json_schema.yaml` entry, so it is invisible to that ordering logic. Today this is harmless because
-nothing creates `app_setting` rows (no seed step, no read/write path exists yet), so
-`prisma.user.deleteMany()` never has a dependent row to conflict with. **Once a future task adds a
-real write path** (the read function, admin UI, or scheduled-task wiring this container
-deliberately excludes), `resetTestDatabase()`'s hardcoded list must add an
-`await prisma.app_setting.deleteMany();` step before the `user`-deletion level, or Cypress test
-resets will fail with `app_setting_creator_id_fkey`/`app_setting_updater_id_fkey` violations the
-moment a real `app_setting` row exists in a test run.
+`json_schema.yaml` entry, so it is structurally invisible to that schema-driven ordering logic —
+and `scripts/seed-baseline.ts` writes a real `app_setting` row on every test run, so
+`prisma.user.deleteMany()` does have a dependent row to conflict with.
+
+`db_helpers_context()` handles this by auto-detecting hand-written base Prisma models: any model
+declared directly in `prisma/schema.prisma` (not in `json_schema.yaml`) that references `user` or
+a schema-declared entity, and that nothing else references back, is scheduled for deletion in the
+first wave — the same mechanism that already covered `audit_log`/`mfa_recovery_code` before
+`app_setting` existed. No per-model hardcoding is needed for `app_setting` specifically. See
+`db_helpers_context`'s own docstring/comments (`code_generator/generators_test.py`) for the full
+design, and `code_generator/tests/test_db_helpers_system_table_autodetect.py` for the regression
+coverage.

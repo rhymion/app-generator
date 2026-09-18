@@ -2658,7 +2658,11 @@ def generate(schema_path: str, output_dir: str) -> None:
     # own spec asserts an exact seed-only row count, so it must count this same set,
     # not just the raw test-spec entity list, or the two silently drift apart.
     _test_entity_names = sorted(e['parent'] for e in test_entities)
-    db_ctx = db_helpers_context(schema, test_entity_names=_test_entity_names)
+    # `_prisma_models` (parsed above for Prisma uniqueness facts) is reused here
+    # so resetTestDatabase()'s deletion order also covers hand-written base
+    # Prisma models invisible to `schema['definitions']` (Issue #614)
+    # — see db_helpers_context's own docstring/comments for the full design.
+    db_ctx = db_helpers_context(schema, test_entity_names=_test_entity_names, prisma_models=_prisma_models)
     _test_entity_count = len(db_ctx['test_entity_names'])
     cypress_support = out / 'cypress' / 'support'
     cypress_e2e    = out / 'cypress' / 'e2e'

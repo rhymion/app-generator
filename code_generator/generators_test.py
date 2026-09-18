@@ -5409,7 +5409,11 @@ def api_spec_context(
 # db-helpers.ts context
 # ---------------------------------------------------------------------------
 
-def db_helpers_context(schema: dict, test_entity_names: list[str] | None = None) -> dict:
+def db_helpers_context(
+    schema: dict,
+    test_entity_names: list[str] | None = None,
+    prisma_models: dict | None = None,
+) -> dict:
     """Build context for cypress/support/db-helpers.ts.
 
     Determines the correct deletion order for all Prisma models by:
@@ -5419,6 +5423,10 @@ def db_helpers_context(schema: dict, test_entity_names: list[str] | None = None)
        (all models reference it via creator_id/updater_id even when not in schema).
     4. Grouping into deletion waves so that all dependents of an entity are
        deleted before the entity itself.
+    5. Auto-detecting hand-written base Prisma models (declared directly in
+       prisma/schema.prisma, not in json_schema.yaml) that reference a
+       schema-declared entity or `user` and have no inbound reference of
+       their own — see "System tables" below.
 
     test_entity_names: sorted list of entity names for which test specs are generated.
     These seed ALL_ENTITIES in the template — the permission grant set must at least
@@ -5428,6 +5436,14 @@ def db_helpers_context(schema: dict, test_entity_names: list[str] | None = None)
     `location` via `inventory`'s `location.name` label) — such entities have no test
     spec of their own (x-generate.test: false) but still require read permission at
     runtime for autocomplete label lookups.
+
+    prisma_models: {model_name: PrismaModel} as returned by
+    schema_deriver.parse_prisma_schema() against the FINAL output
+    prisma/schema.prisma (base hand-written models + generated entity
+    models merged). Optional so existing callers/tests that only care about
+    the schema-driven graph keep working unchanged; when omitted, no
+    hand-written system tables are auto-detected (same as before this
+    mechanism existed).
     """
     defs = schema['definitions']
 
@@ -5522,13 +5538,78 @@ def db_helpers_context(schema: dict, test_entity_names: list[str] | None = None)
             assigned.add(name)
             remaining.remove(name)
 
-    # System tables: not in json_schema.yaml definitions, but have FK constraints
-    # that block user.deleteMany(). audit_log uses onDelete: Restrict — must be
-    # deleted before user rows. mfa_recovery_code is Cascade but explicit ordering
-    # avoids any partial-delete race during test reset.
-    system_first = [t for t in ['audit_log', 'mfa_recovery_code'] if t not in base_entities]
+    # --- System tables: hand-written base Prisma models, auto-detected ---
+    # A "system table" is a model declared directly in prisma/schema.prisma
+    # (audit_log, mfa_recovery_code, app_setting, ...) with no json_schema.yaml
+    # definitions entry at all — structurally invisible to the FK graph built
+    # above, which only ever walks `schema['definitions']`. Left out of
+    # `deletion_levels`, such a model's rows are never cleaned up by
+    # resetTestDatabase(), so a FK from it to `user` (creator_id/updater_id,
+    # as every audited model carries) or to another schema-declared entity
+    # blocks that entity's own deleteMany() call — app-generator
+    # Issue #614 (app_setting_creator_id_fkey).
+    #
+    # This used to be a two-name hardcoded list (audit_log, mfa_recovery_code)
+    # that needed a manual edit for every new hand-written model added to the
+    # base schema (#604 → #609 → #614 already repeated the pattern three
+    # times). Generalized here by reusing schema_deriver.parse_prisma_schema()
+    # (the same Prisma-DSL reader generate.py already uses to build
+    # `prisma_models` for uniqueness facts) instead of re-deriving Prisma
+    # parsing logic:
+    #
+    #   1. Any model in the parsed Prisma schema that is NOT a base_entities
+    #      key is a hand-written candidate (invisible to the schema-driven
+    #      graph above).
+    #   2. A candidate only qualifies if it has at least one `@relation(...)`
+    #      FK column targeting `user` or a base_entities member — i.e. it can
+    #      actually block that target's deleteMany() the way app_setting does.
+    #   3. A qualifying candidate is auto-scheduled only if nothing else in
+    #      the FULL Prisma schema (base models and schema-declared entity
+    #      models alike) references it back — a true dependency leaf, the
+    #      same shape audit_log/mfa_recovery_code already had. A hand-written
+    #      model WITH inbound references (e.g. `approvable`, referenced by
+    #      `approval_request`) is left untouched rather than guessed at:
+    #      correctly ordering it relative to its own referencers is a
+    #      separate, pre-existing question this function has never answered
+    #      for schema-invisible models, and guessing wrong here would risk a
+    #      new FK violation instead of fixing one. Fail-closed, matching this
+    #      project's test-rules posture (CLAUDE.md "fail-closed" — an unclear
+    #      case is left alone and reported, not silently routed around).
+    #
+    # Qualifying tables are inserted as their own leaf wave, before every
+    # schema-driven level — identical position to the old hardcoded
+    # `system_first`, since by construction nothing depends on them.
+    system_first: list[str] = []
+    if prisma_models:
+        def _outbound_targets(model) -> set[str]:
+            targets: set[str] = set()
+            for f in model.fields.values():
+                if not f.is_relation_object:
+                    continue
+                for fk_col in f.relation_fk_fields:
+                    target = model.fk_target(fk_col)
+                    if target:
+                        targets.add(target)
+            return targets
+
+        referenced_by_something: set[str] = set()
+        for model in prisma_models.values():
+            referenced_by_something |= _outbound_targets(model)
+
+        schedulable_targets = set(base_entities) | {'user'}
+        system_first = sorted(
+            name for name, model in prisma_models.items()
+            if name not in base_entities
+            and name not in referenced_by_something
+            and _outbound_targets(model) & schedulable_targets
+        )
     if system_first:
-        levels.insert(0, system_first)
+        # Prisma Client delegate names lowercase only the model's own first
+        # character (e.g. `Account` -> `prisma.account`, `audit_log` ->
+        # `prisma.audit_log` unchanged) — hand-written base models mix both
+        # snake_case and PascalCase naming, unlike json_schema.yaml-declared
+        # entities, which are always already-lowercase snake_case.
+        levels.insert(0, [name[:1].lower() + name[1:] for name in system_first])
 
     # --- Widen the permission-grant entity set with labelField hop targets ---
     # An entity with x-generate.test: false has no test spec of its own but may
