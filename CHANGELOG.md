@@ -27,20 +27,6 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   exercise approval flow. Added a 4th fallback tier: scan the field's own
   enum for a value outside the frozen-values set.
 
-- **A regression (from the issue #604 fix above) silently re-enabled the
-  parent form's "Add" control for an `x-approval-lines` child that also has
-  its own list/view page** (issue #609, e.g. `receiving_receipt.lines`) —
-  the #604 fix forced `is_independent` itself to `False` for such a child,
-  but `is_independent` also drives the parent form's read-only-vs-writable
-  rendering decision (the issue #520/PR#528/PR#530 ruling that this child
-  stays read-only on the parent's page). `build_context.py`'s
-  `_build_child_data` now keeps `is_independent` keyed purely on "does this
-  child have its own dedicated `x-generate` CRUD page" (restoring the form
-  read-only decision), and introduces a separate `nested_writable` flag for
-  the parent-service nested-create/update wiring #604 needed — both are
-  now true simultaneously for this shape, instead of conflating the two
-  into one flag.
-
 - **Generated `service.ts` failed to build (`TS2304: Cannot find name`) for an
   `x-approval-lines` / `x-reservation` (`ledger_transaction`) lines entity that
   also declares its own `x-generate` (list/view pages, e.g. for a per-line
@@ -51,6 +37,28 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   approval-lines pre-create code still referenced the now-undeclared array
   parameter (issue #604). See `code_generator/build_context.py`'s
   `_build_child_data`.
+
+- **`is_independent`'s root computation treated ANY `x-generate` block —
+  even a list/view-only one — as proof a child manages its own
+  create/edit/delete, wrongly hiding the parent form's "Add"/edit/delete
+  controls for a child that cannot actually write itself** (e.g.
+  `receiving_receipt_line`, whose `x-generate` sets `new`/`edit`/`delete`
+  all `False`). The line for whether a parent may still add/edit/delete a
+  child is whether the CHILD can write itself, not whether it merely has a
+  page. `build_context.py`'s `_build_child_data` now computes
+  `is_independent` from `new`/`edit`/`delete` (see the new
+  `helpers.schema_helpers.child_has_own_write_capability`), not bare
+  `x-generate` presence; the `nested_writable` flag from the #604 fix above
+  is unchanged. Also corrected the two other places that mirrored the old
+  (wrong) computation: `generate.py`'s `_entity_is_write_reachable` (the
+  equivalent check for `x-approval`'s write-reachability axis) and
+  `generators_test.py`'s `get_child_render_type` (the generated test
+  suite's own expected-render-type mirror). Issue #609, which had reported
+  this same child's "Add" control reappearing as a regression, was itself
+  filed on the wrong premise — that reappearance was the correct behavior
+  its schema calls for, once measured against the actual generated code
+  rather than the (also incorrect) `receiving_receipt.lines`-has-its-own-
+  new/edit-pages assumption its reproduction steps carried.
 
 ## [4.0.0] - 2026-09-17
 ### Security

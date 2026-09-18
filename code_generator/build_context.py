@@ -24,6 +24,7 @@ from helpers.schema_helpers import (
     get_direct_attachment_fk_props,
     get_write_only_field_names,
     is_write_only_prop,
+    child_has_own_write_capability,
 )
 from helpers.label_field import build_label_expression, render_prisma_include
 from helpers.bridge_direction import (
@@ -528,8 +529,21 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             and is_optional_fk_to_parent(child_def, model)
         )
         use_connect = is_many_to_many or child_name == model or is_optional_fk_list
-        # Independent child: has its own view definition with x-generate --
-        # managed on its own page(s); the parent form shows it read-only.
+        # Independent child: can create, edit, or delete its own rows
+        # through its own generated page(s)/route(s) -- the parent form
+        # shows it read-only, since only the child's own CRUD can write it.
+        #
+        # Corrected (cmd_1098): whether the parent may still add/edit/delete
+        # this child inline is decided by whether the CHILD can write itself
+        # (new/edit/delete), not by whether it merely has an x-generate block
+        # at all. A child whose x-generate declares list/view only (new,
+        # edit, delete all False -- e.g. receiving_receipt_line) has no write
+        # path of its own and must stay addable/editable from the parent;
+        # the earlier `bool(x-generate)` formula wrongly treated it as
+        # independent (read-only on the parent) merely because it has its
+        # own list/view page. See helpers.schema_helpers.
+        # child_has_own_write_capability's docstring for the exact rule and
+        # defaults.
         #
         # Not gated on output_type == 'list': before issue #520/PR#528, an
         # independent (own x-generate) child could only ever be output_type
@@ -543,10 +557,10 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
         # removed) silently fell through to is_independent=False, which
         # embedded_ch's own child_nested_create/child_nested_update
         # generation (below) then treated as writable via the parent's own
-        # service, producing a TS2322 (cmd_1047 "Otsu" ruling, subtask_1047g).
+        # service, producing a TS2322 (cmd_1047 ruling, subtask_1047g).
         is_independent = (
             not is_many_to_many
-            and bool(schema['definitions'].get(child_name, {}).get('x-generate'))
+            and child_has_own_write_capability(schema['definitions'].get(child_name, {}).get('x-generate'))
         )
         child_props_dict = child_def.get('properties', {})
 
@@ -2756,7 +2770,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # add/update params, staleness snapshot): an independent child (own
     # x-generate permits new/edit) must be READ-ONLY from the parent
     # regardless of its output_type -- only the child's own CRUD route/
-    # actions may write it (cmd_1047 "Otsu" ruling, issue #520/PR#528
+    # actions may write it (cmd_1047 ruling, issue #520/PR#528
     # follow-up). PR#528 lifted the restriction on an independent child
     # rendering embedded with a non-'list' output_type, but left this
     # write-path plumbing still treating it as writable -- e.g.

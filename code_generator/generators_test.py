@@ -1287,24 +1287,29 @@ def get_child_render_type(child: dict, schema: dict = None, parent_model_name: s
     if child.get('output_type') == 'comments':
         return 'comments'
     # issue #538 (a follow-up to the read-only embed decision, issue
-    # #520/PR#528/PR#530): an independent
-    # child (own x-generate — own list/view/new/edit/delete pages) that is
-    # NOT self-referencing renders read-only from the parent — generators.py's
-    # form_upsert_context() narrows it out of the editable-grid machinery
-    # (readonly_indep_grid_ch) and build_context.py's write_ch excludes it
-    # from nested create/update, same as build_context.py's own
-    # `is_independent` flag (mirrored here: `not is_many_to_many and
-    # bool(x-generate)` on the child's raw schema entry). A self-referencing
-    # independent child (child['name'] == parent_model_name) is excluded from
-    # this narrowing on the generator side too (build_context.py's
-    # `use_connect` gates on `child_name == model`), so it keeps the normal
-    # writable 'datagrid' render type here.
-    if (
-        schema is not None
-        and child['name'] != parent_model_name
-        and bool((schema.get('definitions') or {}).get(child['name'], {}).get('x-generate'))
-    ):
-        return 'readonly-datagrid'
+    # #520/PR#528/PR#530): an independent child -- one that can create,
+    # edit, or delete its own rows through its own new/edit/delete pages,
+    # NOT merely one that has some x-generate block at all (cmd_1098
+    # correction; a list/view-only child, e.g. receiving_receipt_line, has
+    # no write path of its own and stays writable from the parent) -- that
+    # is NOT self-referencing renders read-only from the parent —
+    # generators.py's form_upsert_context() narrows it out of the
+    # editable-grid machinery (readonly_indep_grid_ch) and build_context.py's
+    # write_ch excludes it from nested create/update, same as
+    # build_context.py's own `is_independent` flag (mirrored here: `not
+    # is_many_to_many and child_has_own_write_capability(x-generate)` on
+    # the child's raw schema entry — defaults match generate_types.py's
+    # `generate_config`, a missing new/edit/delete key defaults to True). A
+    # self-referencing independent child (child['name'] == parent_model_name)
+    # is excluded from this narrowing on the generator side too
+    # (build_context.py's `use_connect` gates on `child_name == model`), so
+    # it keeps the normal writable 'datagrid' render type here.
+    if schema is not None and child['name'] != parent_model_name:
+        _child_x_generate = (schema.get('definitions') or {}).get(child['name'], {}).get('x-generate') or {}
+        if _child_x_generate and any(
+            _child_x_generate.get(k, True) is not False for k in ('new', 'edit', 'delete')
+        ):
+            return 'readonly-datagrid'
     return 'datagrid'
 
 

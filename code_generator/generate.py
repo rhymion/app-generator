@@ -38,6 +38,8 @@ from helpers.schema_helpers import resolve_set_fields as _resolve_set_fields
 from helpers.schema_helpers import schema_has_direct_attachment_fk
 from helpers.schema_helpers import get_parent_fk_props
 from helpers.schema_helpers import is_optional_fk_to_parent
+from helpers.schema_helpers import get_approval_lines_props
+from helpers.schema_helpers import child_has_own_write_capability
 from generators import (
     chart_context,
     page_list_context,
@@ -738,18 +740,32 @@ def _ledger_stub_field_vars(domain: dict, schema: dict) -> dict:
 def _entity_is_write_reachable(entity_name: str, defs: dict) -> bool:
     """True if entity_name's own field values can be written by some
     ancestor entity's nested create/update, i.e. it is a one-to-many list
-    child that is neither independent (own x-generate, shown read-only on
-    the parent form and excluded from the parent's nested write body -- see
-    build_context.py's `embedded_ch` filter, `not c['is_independent']`) nor
-    use_connect (a many-to-many or nullable-FK list child, which only
-    connects/sets existing ids -- no field-value write at all).
+    child that is neither independent (own new/edit/delete write path,
+    shown read-only on the parent form and excluded from the parent's
+    nested write body -- see build_context.py's `embedded_ch`/`write_ch`
+    filters, `c['nested_writable']`) nor use_connect (a many-to-many or
+    nullable-FK list child, which only connects/sets existing ids -- no
+    field-value write at all).
 
-    Mirrors build_context.py's `_build_child_data`/`embedded_ch` computation
-    without needing the full ctx-building pipeline -- this runs earlier, in
-    generate()'s definitions-scan pass, before any ctx exists. Does not
-    special-case many-to-many list children (no schema in current use
-    combines x-approval with an m2m list-child relationship); treated the
-    same as any other list child here, since a m2m child is always
+    Mirrors build_context.py's `_build_child_data`/`embedded_ch`/`write_ch`
+    computation without needing the full ctx-building pipeline -- this runs
+    earlier, in generate()'s definitions-scan pass, before any ctx exists.
+    Corrected (cmd_1098): independence is decided by whether the entity can
+    write itself via new/edit/delete (child_has_own_write_capability), not
+    by whether it merely has an x-generate block at all -- a list/view-only
+    entity (new/edit/delete all False) has no write path of its own and
+    stays reachable through an ancestor's nested create/update. And, same
+    as `nested_writable`'s `or approval_indexed` term (issue #609): even an
+    entity that IS independently write-capable stays reachable through a
+    SPECIFIC ancestor relation that is approval-indexed
+    (get_approval_lines_props) for that ancestor -- such a relation is
+    always nested-created together with its parent by contract (see
+    _build_approval_lines_pre_create_code), regardless of the child's own
+    write capability.
+
+    Does not special-case many-to-many list children (no schema in current
+    use combines x-approval with an m2m list-child relationship); treated
+    the same as any other list child here, since a m2m child is always
     use_connect and so is already excluded via is_optional_fk_to_parent's
     fallback returning False only for a genuinely non-nullable FK -- an m2m
     child has no such column at all (bridge table), which would
@@ -765,26 +781,30 @@ def _entity_is_write_reachable(entity_name: str, defs: dict) -> bool:
     # search_entities() reads it the same way, defs['definitions'].get(bare)
     # falling back to the '__'-prefixed form only when the bare key is
     # missing -- generate.py:~2170).
-    if (defs.get(entity_name) or {}).get('x-generate') or own_def.get('x-generate'):
-        return False
+    own_x_generate = (defs.get(entity_name) or {}).get('x-generate') or own_def.get('x-generate') or {}
+    entity_is_independent = child_has_own_write_capability(own_x_generate)
     own_props = own_def.get('properties') or {}
     for other_key, other_def in defs.items():
         if not other_key.startswith('__') or other_key == own_key:
             continue
         other_name = other_key[2:]
-        is_list_child = any(
-            isinstance(p, dict) and p.get('type') == 'array'
+        matching_props = [
+            p_name for p_name, p in (other_def.get('properties') or {}).items()
+            if isinstance(p, dict) and p.get('type') == 'array'
             and (p.get('items') or {}).get('$ref', '').rsplit('/', 1)[-1] == entity_name
-            for p in (other_def.get('properties') or {}).values()
-        )
-        if not is_list_child:
+        ]
+        if not matching_props:
             continue
         fk_props = get_parent_fk_props(own_def, other_name) & set(own_props)
         if not fk_props:
             continue
         if is_optional_fk_to_parent(own_def, other_name):
             continue
-        return True
+        if not entity_is_independent:
+            return True
+        approval_lines_props = set(get_approval_lines_props(other_def, other_name, {'definitions': defs}))
+        if approval_lines_props & set(matching_props):
+            return True
     return False
 
 
@@ -2484,7 +2504,13 @@ def generate(schema_path: str, output_dir: str) -> None:
             is_m2m = (child.get('relationship') or {}).get('type') == 'many-to-many'
             if is_m2m:
                 continue
-            # skip children with independent detail pages
+            # skip children with independent detail pages -- a different axis
+            # from build_context.py's `is_independent` (cmd_1098: whether the
+            # PARENT may add/edit/delete this child, gated on the child's own
+            # new/edit/delete). This is "does the child have its own page to
+            # route search results to at all", true for any x-generate flag
+            # (even list/view-only), so it is deliberately left as bare
+            # `bool(x-generate)` (reviewed, not changed, under cmd_1098).
             child_has_detail = bool(
                 schema['definitions'].get(child_name, {}).get('x-generate')
             )
@@ -2511,7 +2537,7 @@ def generate(schema_path: str, output_dir: str) -> None:
                 continue  # m2o flatten: FK in parent → skip (Phase3)
             target = fr['target']
             if bool(schema['definitions'].get(target, {}).get('x-generate')):
-                continue  # target has own page
+                continue  # target has own page (same page-existence axis as above, cmd_1098-reviewed)
             target_base_def   = (
                 schema['definitions'].get(f'__{target}', {})
                 or schema['definitions'].get(target, {})
