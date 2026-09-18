@@ -2660,7 +2660,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     _test_entity_names = sorted(e['parent'] for e in test_entities)
     # `_prisma_models` (parsed above for Prisma uniqueness facts) is reused here
     # so resetTestDatabase()'s deletion order also covers hand-written base
-    # Prisma models invisible to `schema['definitions']` (cmd_1100/Issue #614)
+    # Prisma models invisible to `schema['definitions']` (Issue #614)
     # — see db_helpers_context's own docstring/comments for the full design.
     db_ctx = db_helpers_context(schema, test_entity_names=_test_entity_names, prisma_models=_prisma_models)
     _test_entity_count = len(db_ctx['test_entity_names'])

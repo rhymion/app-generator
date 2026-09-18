@@ -22,7 +22,10 @@ export async function resetTestDatabase() {
   // Delete all records in correct order to respect foreign key constraints
   // Delete child tables first, then parent tables
 
-  // Level 1: audit_log, mfa_recovery_code
+  // Level 1: account, session, approval_history, audit_log, mfa_recovery_code
+  await prisma.account.deleteMany();
+  await prisma.session.deleteMany();
+  await prisma.approval_history.deleteMany();
   await prisma.audit_log.deleteMany();
   await prisma.mfa_recovery_code.deleteMany();
 
@@ -403,6 +406,9 @@ export async function createCrossOrgScenario(
 // round-trip probe below (cmd_941 gate 2) never drifts from the model list
 // as the schema grows.
 export const ALL_PRISMA_MODELS = [
+  'account',
+  'session',
+  'approval_history',
   'audit_log',
   'mfa_recovery_code',
   'app_setting',

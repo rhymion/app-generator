@@ -5546,7 +5546,7 @@ def db_helpers_context(
     # `deletion_levels`, such a model's rows are never cleaned up by
     # resetTestDatabase(), so a FK from it to `user` (creator_id/updater_id,
     # as every audited model carries) or to another schema-declared entity
-    # blocks that entity's own deleteMany() call — cmd_1100/app-generator
+    # blocks that entity's own deleteMany() call — app-generator
     # Issue #614 (app_setting_creator_id_fkey).
     #
     # This used to be a two-name hardcoded list (audit_log, mfa_recovery_code)
