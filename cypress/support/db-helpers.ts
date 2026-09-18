@@ -26,21 +26,22 @@ export async function resetTestDatabase() {
   await prisma.audit_log.deleteMany();
   await prisma.mfa_recovery_code.deleteMany();
 
-  // Level 2: approval_request, attachment, dashboard_widget, notification, organization, permission, reaction
+  // Level 2: app_setting, approval_request, attachment, dashboard_widget, notification, permission, reaction
+  await prisma.app_setting.deleteMany();
   await prisma.approval_request.deleteMany();
   await prisma.attachment.deleteMany();
   await prisma.dashboard_widget.deleteMany();
   await prisma.notification.deleteMany();
-  await prisma.organization.deleteMany();
   await prisma.permission.deleteMany();
   await prisma.reaction.deleteMany();
 
-  // Level 3: approvable, approval_flow, attachable, comment, dashboard
+  // Level 3: approvable, approval_flow, attachable, comment, dashboard, organization
   await prisma.approvable.deleteMany();
   await prisma.approval_flow.deleteMany();
   await prisma.attachable.deleteMany();
   await prisma.comment.deleteMany();
   await prisma.dashboard.deleteMany();
+  await prisma.organization.deleteMany();
 
   // Level 4: commentable, role
   await prisma.commentable.deleteMany();
@@ -104,6 +105,7 @@ export async function seedTestDatabase() {
 }
 
 export const ALL_ENTITIES = [
+  'app_setting',
   'approval_flow',
   'dashboard',
   'organization',
@@ -403,11 +405,11 @@ export async function createCrossOrgScenario(
 export const ALL_PRISMA_MODELS = [
   'audit_log',
   'mfa_recovery_code',
+  'app_setting',
   'approval_request',
   'attachment',
   'dashboard_widget',
   'notification',
-  'organization',
   'permission',
   'reaction',
   'approvable',
@@ -415,6 +417,7 @@ export const ALL_PRISMA_MODELS = [
   'attachable',
   'comment',
   'dashboard',
+  'organization',
   'commentable',
   'role',
   'user',

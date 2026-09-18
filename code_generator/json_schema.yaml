@@ -494,3 +494,41 @@ definitions:
         items:
           $ref: "#/definitions/dashboard_widget"
 
+  app_setting:
+    # Business-date container (docs/knowledge/appendix/business-date-container.md):
+    # organization_id nullable — a NULL row is the tenant-wide default, a
+    # non-NULL row is a per-organization override. Both `organization_id`
+    # unique constraints (non-null via @@unique, NULL-row-singleton via the
+    # hand-written partial index) already exist in prisma/schema.prisma and
+    # are managed outside this generator (§ design doc "When to apply").
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: false
+      invalidate: false
+      api: true
+      test: true
+      search: false
+    x-display:
+      table:
+        - business_date:
+            primary: true
+            width: 150
+        - organization:
+            width: 200
+        - is_pinned:
+            width: 100
+        - timezone:
+            width: 150
+    fields:
+      business_date: {}
+      is_pinned:
+        default: false
+      timezone:
+        default: "UTC"
+    properties:
+      organization:
+        $ref: "#/definitions/organization"
+

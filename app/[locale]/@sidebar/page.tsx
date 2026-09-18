@@ -17,6 +17,7 @@ const navTranslationKeys: Record<string, string> = {
   "/permission": "permission",
   "/approval_flow": "approvalFlow",
   "/dashboard": "dashboard",
+  "/app_setting": "appSetting",
 };
 
 export default function Sidebar({ hiddenHrefs = [] }: { hiddenHrefs?: string[] }) {
