@@ -196,7 +196,7 @@ docker run --name postgres-test \
   -e POSTGRES_PASSWORD=postgres \
   -e POSTGRES_DB=my_next_test \
   -p 5433:5432 \
-  -d postgres:16
+  -d postgres:18
 
 # Update .env.test
 DATABASE_URL="postgresql://postgres:postgres@localhost:5433/my_next_test"
