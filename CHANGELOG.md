@@ -5,6 +5,22 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Fixed
+- **`resetTestDatabase()` did not delete `app_setting` rows before `user`,
+  breaking every API Cypress spec's `before each` hook** (issue #614) — the
+  generated deletion order (`db_helpers_context()` in
+  `code_generator/generators_test.py`) was derived purely from
+  `json_schema.yaml`-declared entities, so a hand-written base Prisma model
+  with no `json_schema.yaml` entry (`app_setting`, added by the
+  business-date-container feature) was invisible to it. Once
+  `scripts/seed-baseline.ts` started writing a real `app_setting` row, any
+  consumer with at least one `user` hit `app_setting_creator_id_fkey` on
+  the very first test reset, 100% of the time. Generalized the previous
+  two-name hardcoded exception list (`audit_log`, `mfa_recovery_code`) into
+  auto-detection: any hand-written model referencing `user` or a
+  schema-declared entity, with no inbound reference of its own, is now
+  scheduled for cleanup automatically — no per-model code change needed for
+  `app_setting` or any future addition of the same shape.
+
 - **Generated old-form 14.4 resubmit-after-withdraw API test always failed
   with 400 for an `x-approval` entity with a non-terminal `on_rejected` but
   no `on_withdrawn` declared** (issue #607) — a later server-side rule
