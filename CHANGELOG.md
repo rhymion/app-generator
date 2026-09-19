@@ -5,6 +5,22 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Fixed
+- **`docker compose up` silently accepted a named Postgres volume left over
+  from before the PostgreSQL 16→18 upgrade (issue #610), which then made
+  every downstream step fail with an unrelated-looking "Can't reach
+  database server"** (issue #643) — postgres:18's entrypoint
+  (docker-library/postgres#1259) refuses to start against a volume whose
+  root still holds a flat, pre-18 cluster, but `up -d` returns as soon as
+  the container is created, not once postgres is actually accepting
+  connections, so the failure was invisible until `db:push`/seed/Cypress
+  hit it several steps later. `scripts/docker-compose-env.js` now runs a
+  read-only pre-check before any `up` command: if a postgres service's
+  resolved named volume already exists and its root holds a `PG_VERSION`
+  file that doesn't match the image's major version, it refuses to run
+  `docker compose` at all and names the volume plus the fix (discard and
+  recreate it). A volume that doesn't exist yet, or is already correctly
+  laid out, passes through unchanged.
+
 - **`resetTestDatabase()` did not delete `app_setting` rows before `user`,
   breaking every API Cypress spec's `before each` hook** (issue #614) — the
   generated deletion order (`db_helpers_context()` in
