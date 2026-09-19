@@ -13,9 +13,15 @@ loadEnvConfig(path.resolve(process.cwd()), process.env.NODE_ENV !== 'production'
 // unaffected by this file. See docs/knowledge/prisma-direct-vs-pooled-connection.md.
 //
 // Vercel's DATABASE_URL is the pooled Neon endpoint, so migrations there
-// need a separate direct (unpooled) URL: DIRECT_URL. GCP Cloud Run and
-// local/CI already connect directly (no pooler in front of DATABASE_URL),
-// so DIRECT_URL is unnecessary — and must stay unnecessary — there.
+// need a separate direct (unpooled) URL: DIRECT_URL. GCP Cloud Run's
+// DATABASE_URL is now also a pooled Neon endpoint (see
+// docs/knowledge/gcp-automation-design.md) and needs DIRECT_URL for the
+// same reason — gcp-deploy.sh's app-migrate Job always sets it via the
+// app-direct-database-url secret, so the fallback below picks it up there
+// without needing the throw-guard that VERCEL gets (GCP has no equivalent
+// system env var to gate on; the required Secret Manager binding is the
+// structural safeguard instead). Local/CI still connect directly (no
+// pooler in front of DATABASE_URL), so DIRECT_URL stays unnecessary there.
 //
 // Vercel sets VERCEL=1 automatically at build and runtime (documented
 // system env var: https://vercel.com/docs/environment-variables/system-environment-variables).
