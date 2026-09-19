@@ -161,7 +161,12 @@ model organization {
   updater_id  String
   updater     user       @relation("OrganizationUpdater", fields: [updater_id], references: [id])
   users       user[]     @relation("UserOrganizations")
-  app_settings app_setting[]
+  // Reverse side of app_setting's `@@unique([organization_id])` FK (issue #681):
+  // singular/optional, not an array -- the unique constraint caps this at
+  // 0-or-1 rows per organization, and Prisma's own 1:1 relation syntax
+  // requires the non-FK side to be `Model?`, not `Model[]`, for the client
+  // type to reflect that real cardinality instead of a misleading array.
+  app_setting app_setting?
   @@index([creator_id])
   @@index([updater_id])
 }
