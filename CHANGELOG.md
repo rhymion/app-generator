@@ -4,6 +4,23 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- **`app_setting`'s `organization` relation was declared one-to-many
+  (`app_settings app_setting[]`) while `@@unique([organization_id])`
+  constrains it to one-to-one** (issue #681) — `organization.app_setting`
+  is now a singular, optional relation field (`app_setting?`), and
+  `code_generator/json_schema.yaml`'s `organization_id` FK now declares
+  `x-relationship: {type: one-to-one, target: organization}`, which also
+  makes the New/Edit page's organization picker exclude organizations that
+  already have an `app_setting` row. Fixing this surfaced a related
+  generator bug: `build_context.py`'s `has_org_rel`/`org_id_client_writable`
+  scanned a relationship list that excludes one-to-one FKs, so marking the
+  organization FK as one-to-one silently turned off org-isolation
+  (`should_filter_by_org`) for `app_setting` while the Cypress
+  test-generation path kept generating cross-org-isolation tests expecting
+  it enforced — both now scan the same unfiltered relationship list. No
+  migration/DDL impact (no migration for `app_setting` has been cut in this
+  repo yet; the fix is Prisma relation metadata only).
 
 ## [4.1.0] - 2026-09-19
 ### Fixed

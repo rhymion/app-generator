@@ -1798,7 +1798,24 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         for r in parent_rels_raw
     ]
 
-    has_org_rel          = any(r['target'] == 'organization' for r in parent_rels)
+    # issue #681: scanning `parent_rels` (OTO-excluded) instead of
+    # `_all_parent_rels_raw` (unfiltered) here missed an organization FK
+    # marked `x-relationship: {type: one-to-one}` entirely — has_org_rel came
+    # back False, silently turning off org-isolation (should_filter_by_org)
+    # for such an entity's generated route/service code, while
+    # generators_test.py's OWN has_org_rel (built from unfiltered
+    # get_parent_relationships(), generators_test.py:4492/4550) still saw the
+    # organization FK and kept generating the G3 cross-org-isolation Cypress
+    # spec expecting 404s — a real generated-test-vs-generated-runtime
+    # mismatch (spec asserts an isolation the route no longer enforces), not
+    # a fixture artifact. A one-to-one FK to organization is a *stricter*
+    # form of belonging to an organization than many-to-one, so it must
+    # count for org-scoping exactly like a many-to-one one does; scanning the
+    # unfiltered list (same source generators_test.py and generate.py's own
+    # search-context `has_organization_id` already use) makes all three
+    # agree. See TestOrgRelHonorsOneToOneSelector in
+    # code_generator/tests/test_build_context.py for the regression coverage.
+    has_org_rel          = any(r['target'] == 'organization' for r in _all_parent_rels_raw)
     should_filter_by_org = has_org_rel and model not in ('organization', 'user')
     # cmd_611/612: an org-scoped model whose organization relation is itself
     # OPTIONAL (organization_id nullable) needs its read-scope filter to admit
@@ -1808,7 +1825,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # required. Harmless no-op for a required-org model: organization_id is
     # never null there, so the extra OR branch never actually fires.
     org_relationship_optional = should_filter_by_org and not next(
-        (r['required'] for r in parent_rels if r['target'] == 'organization'), True
+        (r['required'] for r in _all_parent_rels_raw if r['target'] == 'organization'), True
     )
 
     # is_self_only / self_only_admin_bypass: entity-level access invariant
@@ -2553,7 +2570,11 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # client-writable there is no client-supplied value to validate, so the
     # guard is correctly omitted rather than patched to reference a
     # parameter that would have no legitimate value to receive.
-    _org_fk_prop = next((r['prop_name'] for r in parent_rels if r['target'] == 'organization'), None)
+    # issue #681: scan _all_parent_rels_raw (unfiltered), not parent_rels
+    # (OTO-excluded) — same has_org_rel fix above, applied here too so a
+    # client-writable organization_id FK marked one-to-one still gets its
+    # create/update-time foreign-org validation guard (G3.1/G3.4).
+    _org_fk_prop = next((r['prop_name'] for r in _all_parent_rels_raw if r['target'] == 'organization'), None)
     org_id_client_writable = bool(
         should_filter_by_org and _org_fk_prop and _org_fk_prop not in _ro_client_exclude
     )

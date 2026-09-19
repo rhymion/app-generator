@@ -9,6 +9,16 @@
 > index that enforces "at most one tenant-wide default row." Re-verify the model still looks like
 > this before applying, since it may have changed since this doc was written.
 
+## Relationship cardinality
+
+`organization.app_setting` is a singular, optional relation field (`app_setting?`), not an array
+(`app_setting[]`) — matching `@@unique([organization_id])`'s real cardinality (at most one row per
+organization). `code_generator/json_schema.yaml`'s `app_setting.organization_id` carries
+`x-relationship: {type: one-to-one, target: organization}`, which also makes the New/Edit page's
+organization picker (`getAvailableOrganizationsForAppSetting` in `lib/app_setting/getters.ts`) list
+only organizations that don't already have an `app_setting` row, instead of the plain many-to-one
+default a bare `$ref` implies.
+
 ## Why this can't just be `@@unique([organization_id])`
 
 `organization_id` is nullable — a row with `organization_id = NULL` is the tenant-wide default, applied to any data
@@ -94,16 +104,18 @@ generates automatically from the schema).
 
 `cypress/support/db-helpers.ts`'s `resetTestDatabase()` deletion order is generated from
 `code_generator/json_schema.yaml` definitions (`generators_test.py`'s `db_helpers_context`), not
-from `prisma/schema.prisma` directly. `app_setting` is a hand-written base-schema model with no
-`json_schema.yaml` entry, so it is structurally invisible to that schema-driven ordering logic —
-and `scripts/seed-baseline.ts` writes a real `app_setting` row on every test run, so
-`prisma.user.deleteMany()` does have a dependent row to conflict with.
+from `prisma/schema.prisma` directly. `app_setting` has its own `json_schema.yaml` entry (full
+list/view/new/edit/api/test CRUD), so it goes through the same schema-driven ordering as any other
+generated entity — it deletes at the same wave as `approval_request`/`attachment`/
+`dashboard_widget`/`notification`/`permission`/`reaction`, ahead of `user`, since
+`scripts/seed-baseline.ts` writes a real `app_setting` row on every test run and
+`prisma.user.deleteMany()` needs that dependent row gone first. No per-model hardcoding is needed
+for `app_setting` specifically.
 
-`db_helpers_context()` handles this by auto-detecting hand-written base Prisma models: any model
-declared directly in `prisma/schema.prisma` (not in `json_schema.yaml`) that references `user` or
-a schema-declared entity, and that nothing else references back, is scheduled for deletion in the
-first wave — the same mechanism that already covered `audit_log`/`mfa_recovery_code` before
-`app_setting` existed. No per-model hardcoding is needed for `app_setting` specifically. See
-`db_helpers_context`'s own docstring/comments (`code_generator/generators_test.py`) for the full
-design, and `code_generator/tests/test_db_helpers_system_table_autodetect.py` for the regression
-coverage.
+(This model started life container-only — a hand-written `prisma/schema.prisma` addition with no
+`json_schema.yaml` entry at all, relying on `db_helpers_context()`'s auto-detection of hand-written
+base Prisma models for deletion ordering, the same mechanism that still covers `audit_log`/
+`mfa_recovery_code`. That auto-detection path no longer applies to `app_setting` once its
+`json_schema.yaml` entry and generated CRUD pages/API were added; see
+`code_generator/tests/test_db_helpers_system_table_autodetect.py` for the auto-detection mechanism
+itself, which still exists for genuinely `json_schema.yaml`-absent base models.)
