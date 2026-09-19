@@ -4,6 +4,8 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
+
+## [4.1.0] - 2026-09-19
 ### Fixed
 - **`docker compose up` silently accepted a named Postgres volume left over
   from before the PostgreSQL 16→18 upgrade (issue #610), which then made
