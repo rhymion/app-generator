@@ -40,6 +40,7 @@ from helpers.schema_helpers import get_parent_fk_props
 from helpers.schema_helpers import is_optional_fk_to_parent
 from helpers.schema_helpers import get_approval_lines_props
 from helpers.schema_helpers import child_has_own_write_capability
+from keys import x_approval as approval_key
 from generators import (
     chart_context,
     page_list_context,
@@ -1502,7 +1503,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         _bridge_field = get_splittable_bridge_field(_def_val)
         _has_inventory_bridge = bool(
             _bridge_field in _split_entity_props
-            and (_def_val.get('x-approval', {}) or {}).get('on_approved', {}).get('emit_hook')
+            and approval_key.get_or_empty(_def_val).get('on_approved', {}).get('emit_hook')
         )
 
         # cmd_307 FIX-β: entities whose x-ledger-source has event_type 'receive'
@@ -1942,7 +1943,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     for _val_def_key, _val_def_val in defs.items():
         if not _val_def_key.startswith('__'):
             continue
-        _val_x_approval = _val_def_val.get('x-approval')
+        _val_x_approval = approval_key.get(_val_def_val)
         if not _val_x_approval:
             continue
         _val_entity_name = _val_def_key[2:]
@@ -1961,7 +1962,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     for def_key, def_val in defs.items():
         if not def_key.startswith('__'):
             continue
-        x_approval = def_val.get('x-approval')
+        x_approval = approval_key.get(def_val)
         if not x_approval:
             continue
         on_approved = x_approval.get('on_approved', {})
@@ -2092,7 +2093,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     for def_key, def_val in defs.items():
         if not def_key.startswith('__'):
             continue
-        x_approval = def_val.get('x-approval')
+        x_approval = approval_key.get(def_val)
         if not x_approval:
             continue
         on_rejected = x_approval.get('on_rejected', {})
@@ -2144,7 +2145,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     for def_key, def_val in defs.items():
         if not def_key.startswith('__'):
             continue
-        x_approval = def_val.get('x-approval')
+        x_approval = approval_key.get(def_val)
         if not x_approval:
             continue
         on_withdrawn = x_approval.get('on_withdrawn', {})
@@ -2194,7 +2195,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     for def_key, def_val in defs.items():
         if not def_key.startswith('__'):
             continue
-        x_approval = def_val.get('x-approval')
+        x_approval = approval_key.get(def_val)
         if not x_approval:
             continue
         def_key = def_key[2:]

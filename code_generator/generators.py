@@ -24,6 +24,7 @@ from helpers.schema_helpers import (
     resolve_set_fields,
     derive_post_decision_freeze_values,
 )
+from keys import x_approval as approval_key
 from build_context import get_uri_kind
 
 
@@ -1665,7 +1666,7 @@ def _build_reservation_mutation_guard_update_ledger(rc: dict, model: str, schema
     check_parts = [f'ex.{f} !== incoming.{f}' for f in select_fields_set]
     criteria_check = ' || '.join(check_parts)
 
-    _lines_entity_has_approval = bool(_raw_def(lines_entity, schema or {}).get('x-approval'))
+    _lines_entity_has_approval = approval_key.has(_raw_def(lines_entity, schema or {}))
     if lines_entity and _lines_entity_has_approval:
         return _build_reservation_guard_and_resubmit_approval_lines(
             rc, model, schema or {}, lines_entity, lines_var, line_txable_f,
@@ -2785,7 +2786,7 @@ def resolve_approval_submit_on(raw_def: dict) -> tuple[str | None, object]:
     entry is expected -- the edge trigger only has meaning for a single
     field's transition. Returns (None, None) when submit_on is absent.
     """
-    x_approval = raw_def.get('x-approval') or {}
+    x_approval = approval_key.get_or_empty(raw_def)
     raw = x_approval.get('submit_on') or {}
     if not raw:
         return None, None
@@ -4576,7 +4577,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
     has_on_withdrawn = False
     if _fv_approvable_rel is not None:
         has_on_withdrawn = bool(
-            (model_def.get('x-approval') or {}).get('on_withdrawn')
+            approval_key.get_or_empty(model_def).get('on_withdrawn')
         )
 
     return {
