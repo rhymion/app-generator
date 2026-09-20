@@ -2,6 +2,8 @@
 
 import re
 
+from keys import x_approval as approval_key
+
 _DATE_FORMATS = frozenset({'date', 'date-time', 'time'})
 _SYSTEM_FIELDS = frozenset({'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'})
 
@@ -60,7 +62,7 @@ def derive_write_locked_values(model_def: dict) -> dict[str, list]:
     entity_props = model_def.get('properties', {})
 
     # Source 1: x-approval set_fields (unchanged behavior)
-    x_approval = model_def.get('x-approval')
+    x_approval = approval_key.get(model_def)
     if x_approval:
         for stage in ('on_approved', 'on_rejected'):
             raw = (x_approval.get(stage) or {}).get('set_fields') or {}
@@ -184,7 +186,7 @@ def derive_post_decision_freeze_values(raw_def: dict) -> dict[str, list]:
     approval_lockdown_context() (generators.py) (cmd_1022).
     """
     locked: dict[str, list] = {}
-    x_approval = raw_def.get('x-approval')
+    x_approval = approval_key.get(raw_def)
     if x_approval:
         entity_props = raw_def.get('properties', {})
 
@@ -568,7 +570,7 @@ def get_approval_lines_props(parent_def: dict, model: str, schema: dict) -> list
             detail_props = get_detail_properties(model, schema) or {}
             ref = ((detail_props.get(lines_prop) or {}).get('items') or {}).get('$ref', '')
             lines_entity = ref.rsplit('/', 1)[-1]
-            if lines_entity and (schema.get('definitions', {}).get(lines_entity) or {}).get('x-approval'):
+            if lines_entity and approval_key.has(schema.get('definitions', {}).get(lines_entity) or {}):
                 props.append(lines_prop)
     return props
 

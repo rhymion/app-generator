@@ -21,6 +21,7 @@ from helpers.schema_helpers import (
     get_direct_attachment_fk_props, schema_has_direct_attachment_fk,
     is_write_only_prop,
 )
+from keys import x_approval as approval_key
 from manifest import sha256_file
 from schema_deriver import parse_prisma_schema
 
@@ -544,7 +545,7 @@ def validate_submit_on_default_matches_prisma(schema: dict, prisma_schema_path: 
         # `_raw_def()`); a paired view's own `defn` simply won't have it, so
         # no dedup logic is needed here -- each submit_on is only ever
         # findable once, straight off whichever definition declares it.
-        submit_on_raw = (defn.get('x-approval') or {}).get('submit_on') or {}
+        submit_on_raw = approval_key.get_or_empty(defn).get('submit_on') or {}
         if not submit_on_raw:
             continue
         if len(submit_on_raw) != 1:
@@ -1890,7 +1891,7 @@ def validate_schema(schema: dict) -> None:
     for def_key, defn in defs.items():
         if not _SNAKE_CASE.match(def_key):
             continue
-        x_approval = defn.get('x-approval')
+        x_approval = approval_key.get(defn)
         if not x_approval:
             continue
         for stage in ('on_approved', 'on_rejected'):
@@ -2029,7 +2030,7 @@ def validate_schema(schema: dict) -> None:
         # through instead of catching it.
         _model_name = _resolve_backing_model_name(def_key, defs)
         _raw_entry = defs.get(f'__{_model_name}') or defs.get(_model_name) or {}
-        x_approval = _raw_entry.get('x-approval') or {}
+        x_approval = approval_key.get_or_empty(_raw_entry)
         submit_on_raw = x_approval.get('submit_on') or {}
         on_withdrawn_sf = (x_approval.get('on_withdrawn') or {}).get('set_fields') or {}
         on_rejected_block = x_approval.get('on_rejected') or {}
