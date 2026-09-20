@@ -2262,6 +2262,68 @@ class TestOrgRelationshipOptional:
         assert ctx["org_relationship_optional"] is False
 
 
+# ---------------------------------------------------------------------------
+# issue #681: has_org_rel / should_filter_by_org must still fire when the FK to
+# `organization` is declared `x-relationship: {type: one-to-one}` (a
+# selector OTO), not just the plain `many-to-one` default. Before this fix,
+# has_org_rel scanned `parent_rels` — which excludes every OTO-marked prop
+# name (parent_rels_raw's own filtering, so selector_oto_rels doesn't produce
+# duplicate relation fields) — so an org FK marked one-to-one silently
+# vanished from org-scoping entirely: should_filter_by_org came back False,
+# turning off the org-isolation guard in the generated route/service code,
+# while generators_test.py's OWN has_org_rel (built from unfiltered
+# get_parent_relationships(), which already treats 'one-to-one' as a
+# recognised FK type) kept generating the G3 cross-org-isolation Cypress
+# spec regardless — a generated-test-vs-generated-runtime mismatch, not a
+# fixture artifact. Discovered via app_setting (business-date container,
+# organization_id nullable + @@unique) when it was marked as a one-to-one
+# selector to fix its own Prisma relation cardinality mismatch; the real G3
+# Cypress spec failed 4/4 (201/200/422/200 instead of 404) against an
+# unmodified develop-tip worktree before this fix, and passed 4/4 after.
+# ---------------------------------------------------------------------------
+
+class TestOrgRelHonorsOneToOneSelector:
+    @staticmethod
+    def _schema() -> dict:
+        return {
+            "definitions": {
+                "organization": {
+                    "type": "object",
+                    "properties": {"id": _base_props()["id"], "name": {"type": "string"}},
+                },
+                "widget": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "properties": {
+                        "id": _base_props()["id"],
+                        "name": {"type": "string"},
+                        "organization_id": {
+                            "type": ["string", "null"],
+                            "pattern": "^c[a-z0-9]{24,}$",
+                            "x-relationship": {"type": "one-to-one", "target": "organization"},
+                        },
+                    },
+                },
+            }
+        }
+
+    def test_should_filter_by_org_true_for_one_to_one_organization_fk(self):
+        ctx = build_context(_entity("widget"), self._schema())
+        assert ctx["should_filter_by_org"] is True
+        # organization_id is nullable here, matching app_setting's own shape.
+        assert ctx["org_relationship_optional"] is True
+        # The FK still surfaces as a selector OTO, not a plain parent rel —
+        # this fix must not fold it back into parent_rels/duplicate it.
+        assert any(r["prop_name"] == "organization_id" for r in ctx["selector_oto_rels"])
+        assert not any(r["prop_name"] == "organization_id" for r in ctx["parent_rels"])
+
+    def test_org_id_client_writable_true_for_one_to_one_organization_fk(self):
+        ctx = build_context(_entity("widget"), self._schema())
+        # The create/update-time foreign-org validation guard (G3.1/G3.4)
+        # depends on org_id_client_writable finding the FK too.
+        assert ctx["org_id_client_writable"] is True
+
+
 class TestOrgRelationshipOptionalRenderedTemplates:
     """Deviation-injection coverage for the four templates patched to admit
     NULL-organization rows: getters.ts.jinja2 (list + detail),

@@ -19,8 +19,13 @@ on_approved.set_fields/on_rejected.set_fields/on_withdrawn.set_fields.
 _entity_is_write_reachable() determines the E axis for a candidate entity
 that declares x-generate.edit: false -- true only if some OTHER entity
 embeds it as a non-independent, non-use_connect one-to-many list child
-(full nested field writes), mirroring build_context.py's `embedded_ch`
-filter without needing the full ctx-building pipeline.
+(full nested field writes), or as an approval-indexed relation (always
+nested-created with its parent regardless of the child's own write
+capability -- issue #609), mirroring build_context.py's `embedded_ch`/
+`write_ch`/`nested_writable` computation without needing the full
+ctx-building pipeline. Independence itself (cmd_1098) is decided by
+whether the child can write itself via new/edit/delete, not by whether it
+merely has an x-generate block at all.
 
 Also verified directly against the real x-approval entities in two consumer
 repos' current schemas (origin/develop, fetched 2026-08-29 -- proj_c seven
@@ -248,10 +253,10 @@ class TestRealConsumerSchemas:
 # ---------------------------------------------------------------------------
 
 class TestEntityIsWriteReachable:
-    def test_own_x_generate_declared_is_independent_never_reachable(self):
-        # receiving_receipt_line-shaped: has its own x-generate (list/view
-        # pages), embedded as a required-FK list child of a parent -- still
-        # excluded, because build_context.py's embedded_ch never embeds an
+    def test_own_new_declared_true_is_independent_never_reachable(self):
+        # A child that still has its own `new` (defaults True, since only
+        # `edit` is declared here) is write-capable on its own -- excluded,
+        # because build_context.py's embedded_ch/write_ch never embed an
         # independent child regardless of the FK's nullability.
         defs = {
             '__parent': {
@@ -261,6 +266,75 @@ class TestEntityIsWriteReachable:
             },
             '__child': {
                 'x-generate': {'list': True, 'view': True, 'edit': False},
+                'properties': {
+                    'parent_id': {'type': 'string'},
+                    'status': {'type': 'string'},
+                },
+            },
+        }
+        assert _entity_is_write_reachable('child', defs) is False
+
+    def test_list_view_only_child_all_write_flags_explicitly_false_is_reachable(self):
+        # Corrected (cmd_1098): receiving_receipt_line's REAL shape -- own
+        # list/view pages, but new/edit/delete all explicitly False (no
+        # write path of its own). Before the cmd_1098 fix, ANY x-generate
+        # block at all (even list/view-only) was wrongly treated as
+        # independent; the child has no write path of its own here, so it
+        # must stay reachable through the parent's nested create/update.
+        defs = {
+            '__parent': {
+                'properties': {
+                    'lines': {'type': 'array', 'items': {'$ref': '#/definitions/child'}},
+                },
+            },
+            '__child': {
+                'x-generate': {
+                    'list': True, 'view': True,
+                    'new': False, 'edit': False, 'delete': False,
+                },
+                'properties': {
+                    'parent_id': {'type': 'string'},
+                    'status': {'type': 'string'},
+                },
+            },
+        }
+        assert _entity_is_write_reachable('child', defs) is True
+
+    def test_independent_child_still_reachable_via_approval_indexed_relation(self):
+        # Even a child that IS independently write-capable (own `new`)
+        # stays reachable through a SPECIFIC ancestor relation that is
+        # approval-indexed (x-approval-lines) -- that relation is always
+        # nested-created together with its parent by contract, regardless
+        # of the child's own write capability (mirrors nested_writable's
+        # `or approval_indexed` term, issue #609).
+        defs = {
+            '__parent': {
+                'x-approval-lines': ['lines'],
+                'properties': {
+                    'lines': {'type': 'array', 'items': {'$ref': '#/definitions/child'}},
+                },
+            },
+            '__child': {
+                'x-generate': {'list': True, 'view': True, 'new': True},
+                'properties': {
+                    'parent_id': {'type': 'string'},
+                    'status': {'type': 'string'},
+                },
+            },
+        }
+        assert _entity_is_write_reachable('child', defs) is True
+
+    def test_independent_child_not_approval_indexed_stays_not_reachable(self):
+        # Sibling of the above: the SAME independent child, but the
+        # ancestor relation is NOT approval-indexed -- stays excluded.
+        defs = {
+            '__parent': {
+                'properties': {
+                    'lines': {'type': 'array', 'items': {'$ref': '#/definitions/child'}},
+                },
+            },
+            '__child': {
+                'x-generate': {'list': True, 'view': True, 'new': True},
                 'properties': {
                     'parent_id': {'type': 'string'},
                     'status': {'type': 'string'},

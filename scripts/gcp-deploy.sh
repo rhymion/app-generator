@@ -5,12 +5,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/gcp-env.sh"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NOTE: The service runs on the DIRECT SOCKET path (DATABASE_URL + Cloud SQL
-# socket), NOT Prisma Accelerate. Accelerate has never successfully reached this
-# Cloud SQL instance — it returns P1001 "Can't reach database server" even though
-# the DB is reachable and the connection string is correct (verified 2026-07-03).
-# The PoC "working" state was always the socket path. The Accelerate wiring below
-# is COMMENTED OUT (not deleted) so it can be revived if that link is ever fixed.
+# NOTE: The service runs against Neon (DATABASE_URL = pooled endpoint for app
+# runtime queries, DIRECT_URL = unpooled endpoint for the migrate Job), NOT
+# Prisma Accelerate and NOT the retired Cloud SQL direct-socket path — see
+# docs/knowledge/gcp-automation-design.md. The Accelerate wiring below is
+# COMMENTED OUT (not deleted) so it can be revived if that link is ever fixed.
 # To revive Accelerate: uncomment the guard, Step 0, and the PRISMA_DATABASE_URL
 # entry in the Step 4 --set-secrets list.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -54,7 +53,7 @@ run() {
 
 echo ""
 echo "================================================================="
-echo "  GCP deploy script (service + migrate: direct Cloud SQL socket)"
+echo "  GCP deploy script (service + migrate: Neon)"
 echo "================================================================="
 echo "  PROJECT_ID   : ${PROJECT_ID}"
 echo "  SERVICE_NAME : ${SERVICE_NAME}"
@@ -97,23 +96,28 @@ echo "  OK: Images pushed."
 # Production migration strategy = `prisma migrate deploy`:
 #   * forward-only; applies the committed migration files under prisma/migrations/
 #   * NEVER drops data (unlike `db push --accept-data-loss`)
-# Connects to Cloud SQL via DIRECT SOCKET (DATABASE_URL secret), NOT Accelerate —
-# Accelerate cannot execute DDL. The Job is (re)configured on every deploy so its
+# Connects to Neon via DIRECT_URL (unpooled) — prisma.config.ts prefers
+# DIRECT_URL over DATABASE_URL for the Prisma CLI, so `prisma migrate deploy`
+# never runs through the pooled connection. See
+# docs/knowledge/prisma-direct-vs-pooled-connection.md for why that matters
+# (a transaction-mode pooler does not guarantee migration lock/DDL statements
+# land on the same backend connection). DIRECT_URL MUST stay in this Job's
+# --set-secrets list — dropping it would silently put migrations back on the
+# pooled connection. The Job is (re)configured on every deploy so its
 # image/command stay in sync; `create` covers a first-ever deploy (was Gap 2 —
 # nothing previously created this Job, so `jobs update` failed with NOT_FOUND).
 echo ""
-echo "[Step 2] Ensuring app-migrate Job (prisma migrate deploy, direct socket)..."
+echo "[Step 2] Ensuring app-migrate Job (prisma migrate deploy, Neon direct connection)..."
 _MIGRATE_JOB_FLAGS=(
   --image="${MIGRATE_IMAGE_TAG}"
   --region="${REGION}"
   --service-account="${SA_EMAIL}"
-  --set-cloudsql-instances="${CLOUD_SQL_CONNECTION_NAME}"
   # SEED_ADMIN_EMAIL/PASSWORD are only read when this Job is temporarily
   # repointed at `npm run db:seed-baseline` by scripts/gcp-seed.sh — harmless
   # while the Job runs its normal `prisma migrate deploy` command. Attached
   # here (not in gcp-seed.sh) so the Job's env/secrets stay fully declared
   # by this one deploy step. See docs/knowledge/seed-baseline-credential-hardening.md.
-  --set-secrets="DATABASE_URL=app-database-url:latest,SEED_ADMIN_EMAIL=app-seed-admin-email:latest,SEED_ADMIN_PASSWORD=app-seed-admin-password:latest"
+  --set-secrets="DATABASE_URL=app-database-url:latest,DIRECT_URL=app-direct-database-url:latest,SEED_ADMIN_EMAIL=app-seed-admin-email:latest,SEED_ADMIN_PASSWORD=app-seed-admin-password:latest"
   --command="npx"
   --args="prisma,migrate,deploy"
 )
@@ -138,24 +142,23 @@ echo "  OK: app-migrate Job ready."
 # schema. Do destructive changes (drop column/table) in a LATER deploy, after the
 # revisions that depended on them have drained.
 echo ""
-echo "[Step 3] Running prisma migrate deploy against Cloud SQL..."
+echo "[Step 3] Running prisma migrate deploy against Neon..."
 run gcloud run jobs execute app-migrate --region="${REGION}" --wait
 echo "  OK: Migration complete."
 
-# ─── Step 4: Deploy Cloud Run service (direct Cloud SQL socket) ───────────────
+# ─── Step 4: Deploy Cloud Run service (Neon) ──────────────────────────────────
 echo ""
-echo "[Step 4] Deploying Cloud Run service (direct Cloud SQL socket)..."
+echo "[Step 4] Deploying Cloud Run service (Neon)..."
 echo "  NOTE: AUTH_URL is excluded (AUTH_TRUST_HOST=true is sufficient)"
 
-# The service connects via the mounted /cloudsql socket using DATABASE_URL.
-# lib/prisma.ts takes the socket (else) branch when PRISMA_DATABASE_URL is absent.
+# The service connects to Neon's pooled endpoint via DATABASE_URL.
+# lib/prisma.ts takes the pooled (else) branch when PRISMA_DATABASE_URL is absent.
 # To revive Accelerate, add PRISMA_DATABASE_URL=app-prisma-database-url:latest back
 # to the --set-secrets list below (and re-enable the guard + Step 0 above).
 run gcloud run deploy "${SERVICE_NAME}" \
   --image="${SERVICE_IMAGE_TAG}" \
   --region="${REGION}" \
   --service-account="${SA_EMAIL}" \
-  --add-cloudsql-instances="${PROJECT_ID}:${REGION}:${INSTANCE_NAME}" \
   --set-secrets=DATABASE_URL=app-database-url:latest,AUTH_SECRET=app-nextauth-secret:latest,GCS_BUCKET=app-gcs-bucket-name:latest,REDIS_URL=app-redis-url:latest \
   --set-env-vars=AUTH_TRUST_HOST=true,NODE_ENV=production \
   --no-invoker-iam-check \

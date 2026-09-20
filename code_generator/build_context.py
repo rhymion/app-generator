@@ -24,6 +24,7 @@ from helpers.schema_helpers import (
     get_direct_attachment_fk_props,
     get_write_only_field_names,
     is_write_only_prop,
+    child_has_own_write_capability,
 )
 from helpers.label_field import build_label_expression, render_prisma_include
 from helpers.bridge_direction import (
@@ -528,8 +529,21 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             and is_optional_fk_to_parent(child_def, model)
         )
         use_connect = is_many_to_many or child_name == model or is_optional_fk_list
-        # Independent child: has its own view definition with x-generate --
-        # managed on its own page(s); the parent form shows it read-only.
+        # Independent child: can create, edit, or delete its own rows
+        # through its own generated page(s)/route(s) -- the parent form
+        # shows it read-only, since only the child's own CRUD can write it.
+        #
+        # Corrected (cmd_1098): whether the parent may still add/edit/delete
+        # this child inline is decided by whether the CHILD can write itself
+        # (new/edit/delete), not by whether it merely has an x-generate block
+        # at all. A child whose x-generate declares list/view only (new,
+        # edit, delete all False -- e.g. receiving_receipt_line) has no write
+        # path of its own and must stay addable/editable from the parent;
+        # the earlier `bool(x-generate)` formula wrongly treated it as
+        # independent (read-only on the parent) merely because it has its
+        # own list/view page. See helpers.schema_helpers.
+        # child_has_own_write_capability's docstring for the exact rule and
+        # defaults.
         #
         # Not gated on output_type == 'list': before issue #520/PR#528, an
         # independent (own x-generate) child could only ever be output_type
@@ -543,10 +557,10 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
         # removed) silently fell through to is_independent=False, which
         # embedded_ch's own child_nested_create/child_nested_update
         # generation (below) then treated as writable via the parent's own
-        # service, producing a TS2322 (cmd_1047 "Otsu" ruling, subtask_1047g).
+        # service, producing a TS2322 (cmd_1047 ruling, subtask_1047g).
         is_independent = (
             not is_many_to_many
-            and bool(schema['definitions'].get(child_name, {}).get('x-generate'))
+            and child_has_own_write_capability(schema['definitions'].get(child_name, {}).get('x-generate'))
         )
         child_props_dict = child_def.get('properties', {})
 
@@ -651,6 +665,37 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
         approval_indexed = prop_name in _parent_approval_lines
         approval_array_var = f'_{child_var}ApprIds' if approval_indexed else ''
 
+        # Issue #604: an approval-lines / ledger_transaction-reservation-lines
+        # child (get_approval_lines_props) is, by the contract documented on
+        # _build_ledger_reservation_allocation_code and
+        # _build_approval_lines_pre_create_code, ALWAYS nested-created with the
+        # parent -- that pre-create/nested-create pairing is its only creation
+        # path. Such a child commonly also declares its own x-generate (list:
+        # true, view: true) so each line gets its own approve/reject page, but
+        # with new/edit/api left false (it has no write path of its own).
+        #
+        # Issue #609 (PR#606 regression, corrected here): #604's original fix
+        # forced is_independent itself to False for an approval-indexed
+        # child. But is_independent is not single-purpose -- generators.py's
+        # form-rendering code (indep_list_ch/readonly_indep_grid_ch) also
+        # keys off it to decide whether the PARENT's edit form renders this
+        # child as an interactive, writable field group (own "Add"/remove
+        # controls) versus a read-only view grid, per issue #520/PR#528/
+        # PR#530's ruling that an approval-lines child with its own list/view
+        # page stays read-only on the parent's page (only its own dedicated
+        # CRUD route may write it). Forcing is_independent to False silently
+        # un-hid that "Add" control for receiving_receipt.lines.
+        #
+        # nested_writable is the separate axis #604 actually needed: whether
+        # the parent's own generated service function must still perform a
+        # nested create/update for this child, regardless of whether it also
+        # has its own list/view page. embedded_ch/write_ch (below) key off
+        # THIS flag for write-path plumbing; is_independent itself is left
+        # untouched, so the form-rendering decision stays keyed off "does
+        # this child have its own dedicated CRUD page" alone, independent of
+        # whether the parent's service layer also needs to nested-create it.
+        nested_writable = (not is_independent) or approval_indexed
+
         # cmd_413: child rows carrying their own assignee_id (e.g.
         # receiving_receipt_line under receiving_receipt) never got a
         # Trigger #1 notify — the parent-level has_assignee_id gate only
@@ -672,6 +717,7 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             'is_many_to_many':  is_many_to_many,
             'use_connect':      use_connect,
             'is_independent':   is_independent,
+            'nested_writable':  nested_writable,
             'output_type':      output_type,
             'props_no_id':      props_no_id,
             'props_with_id':    props_with_id,
@@ -1752,7 +1798,24 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         for r in parent_rels_raw
     ]
 
-    has_org_rel          = any(r['target'] == 'organization' for r in parent_rels)
+    # issue #681: scanning `parent_rels` (OTO-excluded) instead of
+    # `_all_parent_rels_raw` (unfiltered) here missed an organization FK
+    # marked `x-relationship: {type: one-to-one}` entirely — has_org_rel came
+    # back False, silently turning off org-isolation (should_filter_by_org)
+    # for such an entity's generated route/service code, while
+    # generators_test.py's OWN has_org_rel (built from unfiltered
+    # get_parent_relationships(), generators_test.py:4492/4550) still saw the
+    # organization FK and kept generating the G3 cross-org-isolation Cypress
+    # spec expecting 404s — a real generated-test-vs-generated-runtime
+    # mismatch (spec asserts an isolation the route no longer enforces), not
+    # a fixture artifact. A one-to-one FK to organization is a *stricter*
+    # form of belonging to an organization than many-to-one, so it must
+    # count for org-scoping exactly like a many-to-one one does; scanning the
+    # unfiltered list (same source generators_test.py and generate.py's own
+    # search-context `has_organization_id` already use) makes all three
+    # agree. See TestOrgRelHonorsOneToOneSelector in
+    # code_generator/tests/test_build_context.py for the regression coverage.
+    has_org_rel          = any(r['target'] == 'organization' for r in _all_parent_rels_raw)
     should_filter_by_org = has_org_rel and model not in ('organization', 'user')
     # cmd_611/612: an org-scoped model whose organization relation is itself
     # OPTIONAL (organization_id nullable) needs its read-scope filter to admit
@@ -1762,7 +1825,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # required. Harmless no-op for a required-org model: organization_id is
     # never null there, so the extra OR branch never actually fires.
     org_relationship_optional = should_filter_by_org and not next(
-        (r['required'] for r in parent_rels if r['target'] == 'organization'), True
+        (r['required'] for r in _all_parent_rels_raw if r['target'] == 'organization'), True
     )
 
     # is_self_only / self_only_admin_bypass: entity-level access invariant
@@ -2507,7 +2570,11 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # client-writable there is no client-supplied value to validate, so the
     # guard is correctly omitted rather than patched to reference a
     # parameter that would have no legitimate value to receive.
-    _org_fk_prop = next((r['prop_name'] for r in parent_rels if r['target'] == 'organization'), None)
+    # issue #681: scan _all_parent_rels_raw (unfiltered), not parent_rels
+    # (OTO-excluded) — same has_org_rel fix above, applied here too so a
+    # client-writable organization_id FK marked one-to-one still gets its
+    # create/update-time foreign-org validation guard (G3.1/G3.4).
+    _org_fk_prop = next((r['prop_name'] for r in _all_parent_rels_raw if r['target'] == 'organization'), None)
     org_id_client_writable = bool(
         should_filter_by_org and _org_fk_prop and _org_fk_prop not in _ro_client_exclude
     )
@@ -2708,14 +2775,23 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # form_upsert_context) so the read-only grid columns hook and JSX still
     # get generated for it. It is exported as ctx['non_comment_ch'] below,
     # unchanged.
-    embedded_ch      = [c for c in non_comment_ch if c['use_connect'] or c.get('output_type') != 'list' or not c['is_independent']]
+    #
+    # Uses `nested_writable`, not `is_independent` directly (issue #609):
+    # an approval-lines child with its own list/view page is independent
+    # (own dedicated CRUD page, so generators.py's readonly_indep_grid_ch
+    # still renders it read-only on the parent form) but must still flow
+    # through here so its nested-create/update code gets generated below --
+    # nested_writable is True for exactly this shape even though
+    # is_independent is also True. See the nested_writable comment in
+    # _build_child_data above.
+    embedded_ch      = [c for c in non_comment_ch if c['use_connect'] or c.get('output_type') != 'list' or c['nested_writable']]
 
     # `write_ch` narrows `embedded_ch` further for every write-path plumbing
     # site below (service nested-create/update, route/action body fields,
     # add/update params, staleness snapshot): an independent child (own
     # x-generate permits new/edit) must be READ-ONLY from the parent
     # regardless of its output_type -- only the child's own CRUD route/
-    # actions may write it (cmd_1047 "Otsu" ruling, issue #520/PR#528
+    # actions may write it (cmd_1047 ruling, issue #520/PR#528
     # follow-up). PR#528 lifted the restriction on an independent child
     # rendering embedded with a non-'list' output_type, but left this
     # write-path plumbing still treating it as writable -- e.g.
@@ -2723,7 +2799,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # TS2322 in lib/goods_receipt/service.ts because its own
     # goods_receipt_lineCreateWithoutGoods_receiptInput requires fields
     # (item, approvable) this generic nested-create body never supplies.
-    write_ch = [c for c in embedded_ch if c['use_connect'] or not c['is_independent']]
+    # Uses `nested_writable`, not `is_independent` directly -- same #609
+    # reasoning as embedded_ch above.
+    write_ch = [c for c in embedded_ch if c['use_connect'] or c['nested_writable']]
 
     child_form_data_extractions = _build_child_form_data_extractions(write_ch)
 

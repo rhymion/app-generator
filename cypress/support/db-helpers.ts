@@ -22,25 +22,29 @@ export async function resetTestDatabase() {
   // Delete all records in correct order to respect foreign key constraints
   // Delete child tables first, then parent tables
 
-  // Level 1: audit_log, mfa_recovery_code
+  // Level 1: account, session, approval_history, audit_log, mfa_recovery_code
+  await prisma.account.deleteMany();
+  await prisma.session.deleteMany();
+  await prisma.approval_history.deleteMany();
   await prisma.audit_log.deleteMany();
   await prisma.mfa_recovery_code.deleteMany();
 
-  // Level 2: approval_request, attachment, dashboard_widget, notification, organization, permission, reaction
+  // Level 2: app_setting, approval_request, attachment, dashboard_widget, notification, permission, reaction
+  await prisma.app_setting.deleteMany();
   await prisma.approval_request.deleteMany();
   await prisma.attachment.deleteMany();
   await prisma.dashboard_widget.deleteMany();
   await prisma.notification.deleteMany();
-  await prisma.organization.deleteMany();
   await prisma.permission.deleteMany();
   await prisma.reaction.deleteMany();
 
-  // Level 3: approvable, approval_flow, attachable, comment, dashboard
+  // Level 3: approvable, approval_flow, attachable, comment, dashboard, organization
   await prisma.approvable.deleteMany();
   await prisma.approval_flow.deleteMany();
   await prisma.attachable.deleteMany();
   await prisma.comment.deleteMany();
   await prisma.dashboard.deleteMany();
+  await prisma.organization.deleteMany();
 
   // Level 4: commentable, role
   await prisma.commentable.deleteMany();
@@ -104,6 +108,7 @@ export async function seedTestDatabase() {
 }
 
 export const ALL_ENTITIES = [
+  'app_setting',
   'approval_flow',
   'dashboard',
   'organization',
@@ -401,13 +406,16 @@ export async function createCrossOrgScenario(
 // round-trip probe below (cmd_941 gate 2) never drifts from the model list
 // as the schema grows.
 export const ALL_PRISMA_MODELS = [
+  'account',
+  'session',
+  'approval_history',
   'audit_log',
   'mfa_recovery_code',
+  'app_setting',
   'approval_request',
   'attachment',
   'dashboard_widget',
   'notification',
-  'organization',
   'permission',
   'reaction',
   'approvable',
@@ -415,6 +423,7 @@ export const ALL_PRISMA_MODELS = [
   'attachable',
   'comment',
   'dashboard',
+  'organization',
   'commentable',
   'role',
   'user',

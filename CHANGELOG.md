@@ -3,6 +3,152 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
+## [4.1.0] - 2026-09-19
+### Added
+- **Added a business-date container (`app_setting`) with list/view/new/edit
+  screens and a REST API** (PR #611), built on top of the existing hand-written
+  `business_date`/`is_pinned`/`timezone`/`organization_id` Prisma model.
+  `organization_id` is optional and left out of `required`, so the existing
+  org-relationship-optional machinery makes each row visible both to its
+  own organization and to every tenant — a query returns the actor's own
+  organization row when one exists, plus the tenant-wide default
+  (`organization_id: null`). Delete is disabled
+  (`x-generate.delete: false`): the sole default row must not be removable
+  through the standard entity delete action. `scripts/seed-baseline.ts`
+  seeds the tenant-wide default row.
+
+### Changed
+- **Upgraded PostgreSQL from 16 to 18** across all three compose files
+  (dev/test/prod) and `docker/Dockerfile.postgres` (issue #610).
+  PostgreSQL 18's official image requires a single mount at
+  `/var/lib/postgresql` rather than a direct mount at
+  `/var/lib/postgresql/data` — its entrypoint refuses to start otherwise —
+  so the compose volume mount lines were updated accordingly for all three
+  files. GCP deployment script version pins were intentionally left
+  untouched in this change; that migration was tracked separately (see the
+  Cloud Run/Neon entry below).
+
+### Fixed
+- **`docker compose up` silently accepted a named Postgres volume left over
+  from before the PostgreSQL 16→18 upgrade (issue #610), which then made
+  every downstream step fail with an unrelated-looking "Can't reach
+  database server"** (issue #643) — postgres:18's entrypoint
+  (docker-library/postgres#1259) refuses to start against a volume whose
+  root still holds a flat, pre-18 cluster, but `up -d` returns as soon as
+  the container is created, not once postgres is actually accepting
+  connections, so the failure was invisible until `db:push`/seed/Cypress
+  hit it several steps later. `scripts/docker-compose-env.js` now runs a
+  read-only pre-check before any `up` command: if a postgres service's
+  resolved named volume already exists and its root holds a `PG_VERSION`
+  file that doesn't match the image's major version, it refuses to run
+  `docker compose` at all and names the volume plus the fix (discard and
+  recreate it). A volume that doesn't exist yet, or is already correctly
+  laid out, passes through unchanged.
+
+- **`resetTestDatabase()` did not delete `app_setting` rows before `user`,
+  breaking every API Cypress spec's `before each` hook** (issue #614) — the
+  generated deletion order (`db_helpers_context()` in
+  `code_generator/generators_test.py`) was derived purely from
+  `json_schema.yaml`-declared entities, so a hand-written base Prisma model
+  with no `json_schema.yaml` entry (`app_setting`, added by the
+  business-date-container feature) was invisible to it. Once
+  `scripts/seed-baseline.ts` started writing a real `app_setting` row, any
+  consumer with at least one `user` hit `app_setting_creator_id_fkey` on
+  the very first test reset, 100% of the time. Generalized the previous
+  two-name hardcoded exception list (`audit_log`, `mfa_recovery_code`) into
+  auto-detection: any hand-written model referencing `user` or a
+  schema-declared entity, with no inbound reference of its own, is now
+  scheduled for cleanup automatically — no per-model code change needed for
+  `app_setting` or any future addition of the same shape.
+
+- **Generated old-form 14.4 resubmit-after-withdraw API test always failed
+  with 400 for an `x-approval` entity with a non-terminal `on_rejected` but
+  no `on_withdrawn` declared** (issue #607) — a later server-side rule
+  rejects any withdrawal for such an entity outright, but the generated
+  test still unconditionally asserted the withdraw call itself succeeded
+  with 200. `test_api_spec.cy.ts.jinja2`'s old-form 14.4 branch is now
+  gated on `has_on_withdrawn`; when absent, a separate variant is generated
+  instead, asserting the withdraw call is rejected with 400 and the
+  approval_request is left untouched (mirroring the existing 14.2M/14.3M
+  multistage withdraw-lockout pattern).
+
+- **Post-approval edit/delete lockdown's generic fixture had no escape
+  hatch when the schema's own default for the lockdown field was itself a
+  frozen value** (issue #608) — for an entity with a terminal `on_rejected`,
+  no `on_withdrawn`, and a default equal to `submit_on`'s own target value,
+  the 3-tier fallback in `generators_test.py`'s lockdown-override
+  computation gave up entirely, leaving the generic `populate{Pascal}Data()`
+  fixture at the raw (locked) DB default — which 403'd every generic CRUD
+  test built on it (4.1/4.2/9.1/9.2/10.1/10.2), even though none of them
+  exercise approval flow. Added a 4th fallback tier: scan the field's own
+  enum for a value outside the frozen-values set.
+
+- **Generated `service.ts` failed to build (`TS2304: Cannot find name`) for an
+  `x-approval-lines` / `x-reservation` (`ledger_transaction`) lines entity that
+  also declares its own `x-generate` (list/view pages, e.g. for a per-line
+  approve/reject UI) with no write path of its own (`new`/`edit`/`api: false`)**
+  — such an entity was misclassified as independent (its own `x-generate`
+  existing was read as "has a write path elsewhere"), which silently dropped
+  its nested-create from the parent's `add`/`update` function while the
+  approval-lines pre-create code still referenced the now-undeclared array
+  parameter (issue #604). See `code_generator/build_context.py`'s
+  `_build_child_data`.
+
+- **`is_independent`'s root computation treated ANY `x-generate` block —
+  even a list/view-only one — as proof a child manages its own
+  create/edit/delete, wrongly hiding the parent form's "Add"/edit/delete
+  controls for a child that cannot actually write itself** (e.g.
+  `receiving_receipt_line`, whose `x-generate` sets `new`/`edit`/`delete`
+  all `False`). The line for whether a parent may still add/edit/delete a
+  child is whether the CHILD can write itself, not whether it merely has a
+  page. `build_context.py`'s `_build_child_data` now computes
+  `is_independent` from `new`/`edit`/`delete` (see the new
+  `helpers.schema_helpers.child_has_own_write_capability`), not bare
+  `x-generate` presence; the `nested_writable` flag from the #604 fix above
+  is unchanged. Also corrected the two other places that mirrored the old
+  (wrong) computation: `generate.py`'s `_entity_is_write_reachable` (the
+  equivalent check for `x-approval`'s write-reachability axis) and
+  `generators_test.py`'s `get_child_render_type` (the generated test
+  suite's own expected-render-type mirror). Issue #609, which had reported
+  this same child's "Add" control reappearing as a regression, was itself
+  filed on the wrong premise — that reappearance was the correct behavior
+  its schema calls for, once measured against the actual generated code
+  rather than the (also incorrect) `receiving_receipt.lines`-has-its-own-
+  new/edit-pages assumption its reproduction steps carried.
+
+- **`app_setting`'s `organization` relation was declared one-to-many
+  (`app_settings app_setting[]`) while `@@unique([organization_id])`
+  constrains it to one-to-one** (issue #681) — `organization.app_setting`
+  is now a singular, optional relation field (`app_setting?`), and
+  `code_generator/json_schema.yaml`'s `organization_id` FK now declares
+  `x-relationship: {type: one-to-one, target: organization}`, which also
+  makes the New/Edit page's organization picker exclude organizations that
+  already have an `app_setting` row. Fixing this surfaced a related
+  generator bug: `build_context.py`'s `has_org_rel`/`org_id_client_writable`
+  scanned a relationship list that excludes one-to-one FKs, so marking the
+  organization FK as one-to-one silently turned off org-isolation
+  (`should_filter_by_org`) for `app_setting` while the Cypress
+  test-generation path kept generating cross-org-isolation tests expecting
+  it enforced — both now scan the same unfiltered relationship list. No
+  migration/DDL impact (no migration for `app_setting` has been cut in this
+  repo yet; the fix is Prisma relation metadata only).
+
+- **The GCP Cloud Run deployment path still provisioned and connected to a
+  Cloud SQL instance** (PR #617) — `scripts/gcp-setup.sh`/
+  `scripts/gcp-deploy.sh` now retire Cloud SQL provisioning entirely;
+  `DATABASE_URL` (pooled) and a new `DIRECT_URL` (unpooled) are supplied via
+  `.env.production.local` instead of being derived from a Cloud SQL
+  instance, and the `app-migrate` Cloud Run Job now carries `DIRECT_URL` so
+  `prisma migrate deploy` runs against Neon's unpooled endpoint, never the
+  pooled one (see `docs/knowledge/prisma-direct-vs-pooled-connection.md`
+  for why a transaction-mode pooler must not run migrations).
+  `docs/knowledge/gcp-automation-design.md` is substantially rewritten for
+  the Neon-based flow. **Note**: TLS/network reachability from Cloud Run to
+  Neon was not empirically verified as part of this change — there was no
+  live GCP deployment of this app to test against at the time; that
+  verification is deferred to the next actual GCP deployment.
+
+
 ## [4.0.0] - 2026-09-17
 ### Security
 - **Closed a bypass letting an ordinary user set an `x-approval` field to a value reserved for

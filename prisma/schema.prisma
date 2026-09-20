@@ -161,7 +161,12 @@ model organization {
   updater_id  String
   updater     user       @relation("OrganizationUpdater", fields: [updater_id], references: [id])
   users       user[]     @relation("UserOrganizations")
-  app_settings app_setting[]
+  // Reverse side of app_setting's `@@unique([organization_id])` FK (issue #681):
+  // singular/optional, not an array -- the unique constraint caps this at
+  // 0-or-1 rows per organization, and Prisma's own 1:1 relation syntax
+  // requires the non-FK side to be `Model?`, not `Model[]`, for the client
+  // type to reflect that real cardinality instead of a misleading array.
+  app_setting app_setting?
   @@index([creator_id])
   @@index([updater_id])
 }
@@ -177,7 +182,7 @@ model organization {
 //
 // "At most one default row" (organization_id IS NULL) is a SEPARATE
 // invariant that cannot be expressed in this schema file at all, in two
-// stages that were each verified empirically against a real Postgres 16
+// stages that were each verified empirically against a real Postgres 18
 // test database rather than assumed:
 //   1. Prisma 7.10's `partialIndexes` preview feature does add a `where:`
 //      argument to `@@unique`/`@@index` (undocumented as of this writing --
@@ -201,7 +206,7 @@ model organization {
 //      expressions), so it must be raw SQL:
 //        CREATE UNIQUE INDEX app_setting_default_row_unique
 //          ON app_setting ((true)) WHERE organization_id IS NULL;
-//      Verified against a real Postgres 16 container: a first
+//      Verified against a real Postgres 18 container: a first
 //      organization_id-IS-NULL insert succeeds, a second is rejected with
 //      "duplicate key value violates unique constraint ... Key
 //      ((true))=(t) already exists"; a plain `db push` re-run afterwards

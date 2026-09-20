@@ -494,3 +494,55 @@ definitions:
         items:
           $ref: "#/definitions/dashboard_widget"
 
+  app_setting:
+    # Business-date container (docs/knowledge/appendix/business-date-container.md):
+    # organization_id nullable — a NULL row is the tenant-wide default, a
+    # non-NULL row is a per-organization override. Both `organization_id`
+    # unique constraints (non-null via @@unique, NULL-row-singleton via the
+    # hand-written partial index) already exist in prisma/schema.prisma and
+    # are managed outside this generator (§ design doc "When to apply").
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: false
+      invalidate: false
+      api: true
+      test: true
+      search: false
+    x-display:
+      table:
+        - business_date:
+            primary: true
+            width: 150
+        - organization:
+            width: 200
+        - is_pinned:
+            width: 100
+        - timezone:
+            width: 150
+    fields:
+      business_date: {}
+      is_pinned:
+        default: false
+      timezone:
+        default: "UTC"
+      # issue #681: organization_id carries prisma/schema.prisma's
+      # `@@unique([organization_id])` -- at most one app_setting row per
+      # organization. Declaring the FK as a one-to-one selector (matching
+      # `code_generator/tests/fixtures/oto_mandatory/`'s recipe) makes the
+      # New/Edit page's organization picker list only organizations that
+      # don't already have an app_setting row (getAvailableOrganizationsFor
+      # AppSetting in getters.ts, generated from selector_oto_rels --
+      # code_generator/build_context.py:1646-1648), instead of the plain
+      # many-to-one default that a bare `properties.organization: {$ref}`
+      # (nothing here before this fix) implies.
+      organization_id:
+        x-relationship:
+          type: one-to-one
+          target: organization
+    properties:
+      organization:
+        $ref: "#/definitions/organization"
+

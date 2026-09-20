@@ -40,10 +40,10 @@ npx prisma migrate deploy
 ## Update: migration logic moved from gcp-setup.sh to gcp-deploy.sh, no db-push fallback
 
 `gcp-setup.sh` no longer contains any migration logic at all — it is now pure
-one-time infra provisioning (APIs, Artifact Registry, Cloud SQL, service account,
+one-time infra provisioning (APIs, Artifact Registry, service account,
 Upstash, Secret Manager, GCS bucket). The `prisma migrate deploy` step lives
 entirely in `scripts/gcp-deploy.sh` (Steps 2-3: a dedicated `app-migrate` Job runs
-`prisma migrate deploy` against Cloud SQL, on every deploy, before the new
+`prisma migrate deploy` against Neon (via `DIRECT_URL`), on every deploy, before the new
 revision rolls out). There is no `db push --accept-data-loss` fallback left
 anywhere in the deploy scripts — `gcp-deploy.sh`'s own comments describe the
 migrate-deploy path as forward-only and explicitly contrast it with `db push

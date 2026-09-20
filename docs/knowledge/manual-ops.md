@@ -2,22 +2,21 @@
 
 ## Operations That Cannot Be Automated
 
-### 1. Obtain Prisma Accelerate URL (disabled by default — direct socket is the production DB path)
+### 1. Obtain Prisma Accelerate URL (disabled by default — the direct Neon connection is the production DB path)
 
-> **Decision (2026-07-04, rca_267a §6): direct Cloud SQL socket (`DATABASE_URL`) is
-> the default production DB path, not Accelerate.** Accelerate has never
-> successfully reached this environment's Cloud SQL instance (P1001,
-> `GOOGLE_MANAGED_INTERNAL_CA` TLS verification failure — see
-> `rca_266a_accelerate_cloudsql.md` / `rca_267a_db_path_decision.md`). The maintainer is
-> pursuing this with Prisma support separately. **Do not follow this procedure for
-> normal setup/deploy** — it is kept only for re-testing Accelerate once that
-> support thread resolves.
+> Accelerate is off by default (`PRISMA_DATABASE_URL` unset) — see the
+> comment in `lib/prisma.ts`. This section is kept because `lib/prisma.ts`'s
+> `PRISMA_DATABASE_URL` format guard and `docs/knowledge/DATABASE_TESTING.md`
+> both cite it by number (`manual-ops.md §1`) — do not delete or renumber
+> this section without updating those two references too.
 
-Revival procedure (once Accelerate is confirmed reachable again):
-1. Run gcp-setup.sh first and note the `DATABASE_URL_PUBLIC` displayed at the end.
+Revival procedure:
+1. Obtain the DB connection string to register — this is now the Neon
+   `DATABASE_URL` from `.env.production.local` (see `scripts/gcp-env.sh`),
+   not a Cloud SQL public IP.
 2. Go to https://console.prisma.io
 3. Create a project (or select existing one)
-4. Enable Accelerate → enter `DATABASE_URL_PUBLIC` as the connection string
+4. Enable Accelerate → enter the Neon `DATABASE_URL` as the connection string
 5. Obtain the issued `prisma+postgres://...` URL
 6. Set it as `PRISMA_DATABASE_URL` in `.env.production.local`
    ```bash
@@ -34,7 +33,7 @@ Revival procedure (once Accelerate is confirmed reachable again):
 9. Run `bash scripts/gcp-deploy.sh`.
 
 Without these steps, `PRISMA_DATABASE_URL` stays unset and `gcp-deploy.sh` /
-`lib/prisma.ts` use the direct socket path (current default).
+`lib/prisma.ts` use the direct Neon connection path (current default).
 
 ### 2. Link GCP Billing Account
 

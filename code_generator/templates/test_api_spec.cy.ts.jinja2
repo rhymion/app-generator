@@ -1507,7 +1507,7 @@ describe('API: {{ title }}', () => {
         });
       });
     });
-{% elif resubmit_unsubmitted_value_literal %}
+{% elif resubmit_unsubmitted_value_literal and has_on_withdrawn %}
     it('14.4 withdrawing a pending request then editing {{ resubmit_target_field }} away and back to its open value creates a new pending approval_request', () => {
       cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
         cy.task<any>('db:populate{{ pascal }}WithApproval', {
@@ -1563,6 +1563,44 @@ describe('API: {{ title }}', () => {
                   });
               });
             });
+          });
+        });
+      });
+    });
+{% elif resubmit_unsubmitted_value_literal %}
+    // cmd_1096 (issue #607): this entity has a non-terminal on_rejected and
+    // a reachable spare value for {{ resubmit_target_field }}, but does NOT
+    // declare x-approval.on_withdrawn -- so the withdraw call itself is
+    // rejected outright by the server-side withdraw lockout
+    // (on_withdrawn_dispatch.ts's ENTITIES_WITH_ON_WITHDRAWN, cmd_865/
+    // PR#450), before any "away and back" edit could ever run. The old
+    // form of this test (above) unconditionally asserted withdrawRes.status
+    // === 200, which is no longer true for this shape -- this variant
+    // mirrors the 14.2M/14.3M pattern (multistage withdraw-lockout tests)
+    // for the single-stage case instead: assert the withdraw is rejected
+    // and the pending approval_request is left untouched. Resubmission via
+    // a non-terminal rejection (not withdrawal) is already covered
+    // unconditionally by 14.1 above, regardless of on_withdrawn.
+    it('14.4 withdrawing a pending request is rejected because on_withdrawn is not declared', () => {
+      cy.task<any>('db:setup{{ pascal }}ApprovalFlow').then((setup) => {
+        cy.task<any>('db:populate{{ pascal }}WithApproval', {
+          creatorId: setup.requestorUser.id,
+          approvalFlowIds: [setup.flowWithRole.id],
+        }).then((data) => {
+          const arId = data.approvalRequests[0].id;
+          cy.request({
+            method: 'POST',
+            url: `/api/approval_request/${arId}/withdraw`,
+            headers: { 'X-API-Key': setup.requestorUser.api_key },
+            failOnStatusCode: false,
+          }).then((withdrawRes) => {
+            expect(withdrawRes.status).to.eq(400);
+            cy.request({ url: `{{ api_path }}/${data.record.id}`, headers: { 'X-API-Key': TEST_API_KEY } })
+              .then((getRes) => {
+                const requests = getRes.body.approvable.approval_requests;
+                expect(requests.length).to.eq(1);
+                expect(requests[0].status).to.eq('pending');
+              });
           });
         });
       });

@@ -417,6 +417,18 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
 
     # Names of children whose type will be declared LOCALLY in this file (mirrors
     # the is_independent check the children loop below applies per child_raw).
+    # This `is_independent`/`_is_indep` is a DIFFERENT axis from
+    # build_context.py's own `is_independent` (cmd_1098 correction, which is
+    # about whether a parent's form may add/edit/delete a child, gated on
+    # the child's own new/edit/delete): this one is about whether the child
+    # already has its own generated TYPE MODULE to import from, which is
+    # true whenever the child has ANY x-generate flag at all (even
+    # list/view-only) -- generate_types.py's extract_entities() only skips
+    # generating a type module when EVERY core flag is False. Deliberately
+    # left as bare `bool(x-generate)` (reviewed under cmd_1098, not
+    # changed): a list/view-only child still gets its own type module, so
+    # importing it (rather than redeclaring the shape inline) is still
+    # correct regardless of new/edit/delete.
     # A self-referencing child (x-splittable FK back to itself) has its own
     # target name equal to its own child_name, and that target can leak into
     # child_rels_early/import_targets below once the child is non-list — computed
@@ -471,7 +483,11 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
 
         # Independent entity: a list child (not m2m) that has its own view
         # definition with x-generate. Its type is declared in its own
-        # module — import it rather than redeclaring inline.
+        # module — import it rather than redeclaring inline. Different axis
+        # from build_context.py's own `is_independent` -- see the
+        # `_locally_declared_child_names` comment above for why this one is
+        # deliberately left as bare `bool(x-generate)` (reviewed, not
+        # changed, under cmd_1098).
         is_independent = (
             child_raw.get('output_type') == 'list'
             and (child_raw.get('relationship') or {}).get('type') != 'many-to-many'

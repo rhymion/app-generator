@@ -9,6 +9,16 @@
 > index that enforces "at most one tenant-wide default row." Re-verify the model still looks like
 > this before applying, since it may have changed since this doc was written.
 
+## Relationship cardinality
+
+`organization.app_setting` is a singular, optional relation field (`app_setting?`), not an array
+(`app_setting[]`) — matching `@@unique([organization_id])`'s real cardinality (at most one row per
+organization). `code_generator/json_schema.yaml`'s `app_setting.organization_id` carries
+`x-relationship: {type: one-to-one, target: organization}`, which also makes the New/Edit page's
+organization picker (`getAvailableOrganizationsForAppSetting` in `lib/app_setting/getters.ts`) list
+only organizations that don't already have an `app_setting` row, instead of the plain many-to-one
+default a bare `$ref` implies.
+
 ## Why this can't just be `@@unique([organization_id])`
 
 `organization_id` is nullable — a row with `organization_id = NULL` is the tenant-wide default, applied to any data
@@ -38,7 +48,7 @@ model app_setting {
 ```
 
 validates and lowers to `CREATE UNIQUE INDEX ... ON app_setting(organization_id) WHERE organization_id IS NULL`. This
-was applied to a real Postgres 16 test database and then disproved empirically: inserting a second
+was applied to a real Postgres 18 test database and then disproved empirically: inserting a second
 `organization_id IS NULL` row succeeded when it should have been rejected, because the index still compares
 NULL to NULL, which Postgres never treats as a conflict, partial or not. Prisma has no `nulls:
 NotDistinct` argument to opt into Postgres 15+'s `NULLS NOT DISTINCT` behavior (the validator
@@ -58,7 +68,7 @@ CREATE UNIQUE INDEX app_setting_default_row_unique
   WHERE organization_id IS NULL;
 ```
 
-### Empirical verification (2026-09-17, isolated worktree test database, Postgres 16)
+### Empirical verification (2026-09-17, isolated worktree test database, Postgres 18)
 
 With the index applied:
 
@@ -90,16 +100,22 @@ commit. Add it as part of whichever migration first creates the `app_setting` ta
 `CREATE TABLE`/`CREATE UNIQUE INDEX app_setting_organization_id_key`/FK statements `prisma migrate dev`
 generates automatically from the schema).
 
-## `resetTestDatabase()` does not know about this model
+## `resetTestDatabase()` and this model
 
 `cypress/support/db-helpers.ts`'s `resetTestDatabase()` deletion order is generated from
 `code_generator/json_schema.yaml` definitions (`generators_test.py`'s `db_helpers_context`), not
-from `prisma/schema.prisma` directly. `app_setting` is a hand-written base-schema model with no
-`json_schema.yaml` entry, so it is invisible to that ordering logic. Today this is harmless because
-nothing creates `app_setting` rows (no seed step, no read/write path exists yet), so
-`prisma.user.deleteMany()` never has a dependent row to conflict with. **Once a future task adds a
-real write path** (the read function, admin UI, or scheduled-task wiring this container
-deliberately excludes), `resetTestDatabase()`'s hardcoded list must add an
-`await prisma.app_setting.deleteMany();` step before the `user`-deletion level, or Cypress test
-resets will fail with `app_setting_creator_id_fkey`/`app_setting_updater_id_fkey` violations the
-moment a real `app_setting` row exists in a test run.
+from `prisma/schema.prisma` directly. `app_setting` has its own `json_schema.yaml` entry (full
+list/view/new/edit/api/test CRUD), so it goes through the same schema-driven ordering as any other
+generated entity — it deletes at the same wave as `approval_request`/`attachment`/
+`dashboard_widget`/`notification`/`permission`/`reaction`, ahead of `user`, since
+`scripts/seed-baseline.ts` writes a real `app_setting` row on every test run and
+`prisma.user.deleteMany()` needs that dependent row gone first. No per-model hardcoding is needed
+for `app_setting` specifically.
+
+(This model started life container-only — a hand-written `prisma/schema.prisma` addition with no
+`json_schema.yaml` entry at all, relying on `db_helpers_context()`'s auto-detection of hand-written
+base Prisma models for deletion ordering, the same mechanism that still covers `audit_log`/
+`mfa_recovery_code`. That auto-detection path no longer applies to `app_setting` once its
+`json_schema.yaml` entry and generated CRUD pages/API were added; see
+`code_generator/tests/test_db_helpers_system_table_autodetect.py` for the auto-detection mechanism
+itself, which still exists for genuinely `json_schema.yaml`-absent base models.)

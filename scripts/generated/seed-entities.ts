@@ -7,6 +7,7 @@
 // baseline.ts, which keeps its own fixed enumeration unchanged (see
 // docs/knowledge/seed-baseline-credential-hardening.md).
 export const SEED_ENTITIES: string[] = [
+  'app_setting',
   'approval_flow',
   'approval_request',
   'attachment',
@@ -34,6 +35,13 @@ export interface SeedEntityGrant {
 // cannot actually perform (e.g. `create` stays false when x-generate.new
 // is false, so no "+" button that would 404 appears once granted).
 export const SEED_ENTITY_GRANTS: Record<string, SeedEntityGrant> = {
+  'app_setting': {
+    create: true,
+    read: true,
+    update: true,
+    delete: false,
+    import: false,
+  },
   'approval_flow': {
     create: true,
     read: true,

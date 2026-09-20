@@ -75,20 +75,32 @@ function readEnvValue(filePath, key) {
   return value;
 }
 
-const hasExplicitProjectFlag = composeArgs.some(
-  (arg) => arg === '-p' || arg === '--project-name' || arg.startsWith('--project-name=')
-);
+function getExplicitProjectName(args) {
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '-p' || args[i] === '--project-name') return args[i + 1];
+    if (args[i].startsWith('--project-name=')) return args[i].slice('--project-name='.length);
+  }
+  return undefined;
+}
+
+const explicitProjectName = getExplicitProjectName(composeArgs);
+const hasExplicitProjectFlag = explicitProjectName !== undefined;
+
+// Resolved project name is also needed below (stale-volume guard) to
+// compute the real docker volume name, not just for the fail-closed check
+// here.
+let resolvedProjectName = explicitProjectName;
 
 if (!hasExplicitProjectFlag) {
   // Same precedence docker compose itself applies (verified, see
   // docs/knowledge/env-file-loading-and-local-overrides.md): shell env >
   // later --env-file (.local) > earlier --env-file (base).
-  const resolved =
+  resolvedProjectName =
     process.env.COMPOSE_PROJECT_NAME ||
     readEnvValue(localFile, 'COMPOSE_PROJECT_NAME') ||
     readEnvValue(baseFile, 'COMPOSE_PROJECT_NAME');
 
-  if (!resolved && process.env.CI !== 'true') {
+  if (!resolvedProjectName && process.env.CI !== 'true') {
     console.error(
       [
         '[docker-compose-env] Refusing to run: COMPOSE_PROJECT_NAME is not set',
@@ -103,6 +115,132 @@ if (!hasExplicitProjectFlag) {
     );
     process.exit(1);
   }
+}
+
+// Stale pre-major-upgrade Postgres volume guard:
+//
+// postgres:18+'s entrypoint (docker-library/postgres#1259) expects PGDATA
+// to live under a version-specific subdirectory it manages itself, and
+// refuses to start (exit 1) the moment it finds a flat, pre-18-style
+// cluster sitting directly at the mount root instead. This repo's compose
+// files already carry the corrected mount (`postgres-data:/var/lib/postgresql`,
+// the parent directory, not `.../data`), but that fix only prevents the
+// failure for a FRESH volume. A named volume created before the version
+// bump still has its old flat-layout cluster sitting at its root — the
+// volume's root content does not change just because a later compose file
+// mounts it at a different container path — and postgres:18 refuses it
+// exactly the same way.
+//
+// `up -d` returns as soon as the container is CREATED, not once postgres
+// is actually accepting connections, so this failure is invisible at the
+// `up` step itself. Everything downstream (db:push/seed/Cypress) then
+// fails against what looks like an unrelated spec with "Can't reach
+// database server" — an easy misdiagnosis pattern when the actual cause is
+// upstream and environmental. `--wait` surfaces it one step earlier
+// (compose itself fails when the container never reaches healthy) but the
+// container is still dead either way — this guard catches it a step
+// earlier still, before `docker compose up` ever runs, by reading
+// (read-only, via a disposable `alpine` container) whatever the target
+// named volume already holds. It must never be a substitute for
+// `--wait`/healthchecks — it only judges volumes that already exist; a
+// volume this guard passes can still fail to become healthy for unrelated
+// reasons, which `--wait` is what actually catches.
+function extractComposeFiles(args) {
+  const files = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '-f' || args[i] === '--file') {
+      if (args[i + 1]) files.push(args[i + 1]);
+    } else if (args[i].startsWith('--file=')) {
+      files.push(args[i].slice('--file='.length));
+    }
+  }
+  return files;
+}
+
+function checkStalePostgresVolumes(composeFiles, projectName) {
+  if (!projectName) return; // can't compute the real volume name without it -- nothing to check
+  let yaml;
+  try {
+    yaml = require('js-yaml');
+  } catch {
+    return; // dependency unavailable -- not this guard's job to enforce that
+  }
+
+  for (const file of composeFiles) {
+    if (!existsSync(file)) continue;
+    let doc;
+    try {
+      doc = yaml.load(readFileSync(file, 'utf8'));
+    } catch {
+      continue; // malformed compose YAML is docker compose's own job to reject, not ours
+    }
+    const services = (doc && doc.services) || {};
+    for (const svc of Object.values(services)) {
+      const image = svc && typeof svc.image === 'string' ? svc.image : undefined;
+      if (!image) continue;
+      const shortImage = image.split('/').pop(); // strip any registry/namespace prefix
+      const versionMatch = /^postgres:(\d+)/.exec(shortImage);
+      if (!versionMatch) continue; // not a postgres service, or an unresolvable tag (e.g. "postgres:latest") we can't compare against
+      const imageMajor = versionMatch[1];
+
+      const volumeEntries = Array.isArray(svc.volumes) ? svc.volumes : [];
+      for (const entry of volumeEntries) {
+        if (typeof entry !== 'string') continue; // only the short "name:/path[:mode]" string form is handled
+        const volumeKey = entry.split(':')[0];
+        if (!volumeKey || volumeKey.startsWith('.') || volumeKey.startsWith('/')) continue; // bind mount, not a named volume
+        const volumeDecl = (doc.volumes && doc.volumes[volumeKey]) || {};
+        if (volumeDecl && volumeDecl.external) continue; // externally-managed name, not this project's to guess/police
+        const dockerVolumeName =
+          volumeDecl && typeof volumeDecl.name === 'string' && volumeDecl.name
+            ? volumeDecl.name
+            : `${projectName}_${volumeKey}`;
+
+        const inspect = spawnSync('docker', ['volume', 'inspect', dockerVolumeName], {
+          encoding: 'utf8',
+        });
+        if (inspect.error || inspect.status !== 0) continue; // volume doesn't exist yet -- compose will create it fresh, nothing stale to find
+
+        // Read-only probe: does the volume's ROOT hold a flat-layout
+        // PG_VERSION file (the pre-18 convention)? A correctly-initialized
+        // 18+ volume never writes there -- its data lives under a
+        // versioned subdirectory (e.g. `18/docker/...`) -- so a root-level
+        // PG_VERSION is itself already the tell of a persisted-over
+        // volume, and its content pins which major version originally
+        // wrote it.
+        const probe = spawnSync(
+          'docker',
+          ['run', '--rm', '-v', `${dockerVolumeName}:/mnt:ro`, 'alpine', 'cat', '/mnt/PG_VERSION'],
+          { encoding: 'utf8' }
+        );
+        if (probe.error || probe.status !== 0) continue; // no root-level PG_VERSION -- empty volume, or already the correct versioned layout
+        const volumeMajor = probe.stdout.trim();
+        if (volumeMajor && volumeMajor !== imageMajor) {
+          console.error(
+            [
+              `[docker-compose-env] Refusing to start: named volume ${dockerVolumeName}`,
+              `  holds a pre-existing PostgreSQL ${volumeMajor} cluster at its root`,
+              `  (flat, pre-18 layout), but ${shortImage} needs a fresh or already-`,
+              `  versioned (${imageMajor}/) layout. The image's own entrypoint guard`,
+              '  (docker-library/postgres#1259) rejects this before postmaster ever',
+              '  runs, and `up -d` would otherwise return success while the container',
+              '  silently exits -- everything downstream (db:push/seed/Cypress) then',
+              '  fails with an unrelated-looking "Can\'t reach database server".',
+              '',
+              `  Fix: this volume was carried over from before the PostgreSQL ${imageMajor}`,
+              '  upgrade and cannot be reused as-is -- discard and recreate it:',
+              `    docker volume rm ${dockerVolumeName}`,
+              '  (then re-run this command; compose will create a fresh volume).',
+            ].join('\n')
+          );
+          process.exit(1);
+        }
+      }
+    }
+  }
+}
+
+if (composeArgs.includes('up')) {
+  checkStalePostgresVolumes(extractComposeFiles(composeArgs), resolvedProjectName);
 }
 
 const result = spawnSync('docker', ['compose', ...envFileArgs, ...composeArgs], {
