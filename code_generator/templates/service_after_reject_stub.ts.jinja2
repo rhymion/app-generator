@@ -2,7 +2,7 @@
 
 import type { PrismaClient } from '@/app/generated/prisma/client';
 
-type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+{% include "_partials/tx_type.ts.jinja2" %}
 
 /**
  * Called after {{ snake_name }} is rejected.

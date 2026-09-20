@@ -3,7 +3,7 @@
 
 import type { PrismaClient } from '@/app/generated/prisma/client';
 
-type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+{% include "_partials/tx_type.ts.jinja2" %}
 {% for entity in withdrawable_entities %}
 import { beforeWithdraw as {{ entity.pascal_name }}BeforeWithdraw } from '@/lib/{{ entity.snake_name }}/service_before_withdraw';
 {% endfor %}
