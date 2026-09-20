@@ -29,6 +29,31 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Cloud Run/Neon entry below).
 
 ### Fixed
+- **GCP (Cloud Run) deployment required manually pasting Neon connection
+  strings, had no committed env template, could silently pick up a stale
+  ambient `gcloud` project, and printed a deploy-complete URL that 404s**
+  (issues #685, #683, #686) — `scripts/gcp-env.sh` now falls back to the
+  `DATABASE_URL_PROD`/`DATABASE_URL_UNPOOLED_PROD` values `scripts/vercel-
+  setup.sh` already writes into the same `.env.production.local` (no manual
+  Neon console lookup needed when a Vercel deployment for the same app
+  already exists), warns loudly and names the resolved project when
+  `PROJECT_ID` falls back to the ambient `gcloud config` state instead of
+  silently reusing it, and a new `.env.gcp.production.local.example`
+  template is committed (renamed from the never-committed
+  `.env.production.local.example` both `gcp-env.sh` and `vercel-env.sh`
+  referenced in their error messages, which collided with the unrelated
+  `.env.vercel.production.local.example` when a consumer symlinked the
+  generic name). `scripts/gcp-deploy.sh`'s final "Deploy complete" message
+  now also prints a `/en/login` link, since the bare Cloud Run origin URL
+  404s without a locale prefix (the i18n middleware's root-path redirect
+  behavior is unchanged and correct — Vercel deployments hit the exact same
+  307 redirect — this is a printed-message fix only). All three traced to
+  root cause via direct commit inspection: the Neon-paste requirement was
+  introduced by PR#617 (2026-09-18, Cloud SQL→Neon reconnection) as an
+  explicit, acknowledged scope cut; the stale-project fallback and missing
+  template predate PR#617 (present since the first GCP automation commit,
+  2026-07-02).
+
 - **`docker compose up` silently accepted a named Postgres volume left over
   from before the PostgreSQL 16→18 upgrade (issue #610), which then made
   every downstream step fail with an unrelated-looking "Can't reach

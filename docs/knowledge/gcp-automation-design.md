@@ -50,14 +50,21 @@ exist in the tree beforehand. This step is a hard requirement of Step 3
 ### Step 1: Prepare .env.production.local
 
 ```bash
-cp .env.production.local.example .env.production.local
+cp .env.gcp.production.local.example .env.production.local
 # Fill in required values: PROJECT_ID / DATABASE_URL / DIRECT_URL / AUTH_SECRET /
 #   UPSTASH_EMAIL / UPSTASH_API_KEY / SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD
-# DATABASE_URL / DIRECT_URL are Neon connection strings obtained from the Neon
+# DATABASE_URL / DIRECT_URL are Neon connection strings. If a Vercel deployment
+#   for the same app was already set up (scripts/vercel-setup.sh), leave both
+#   blank instead: gcp-env.sh automatically reuses DATABASE_URL_PROD /
+#   DATABASE_URL_UNPOOLED_PROD already written into this same
+#   .env.production.local by that script. Otherwise obtain both from the Neon
 #   console (pooled endpoint / unpooled endpoint respectively — see
-#   docs/knowledge/prisma-direct-vs-pooled-connection.md). This script does not
-#   provision Neon itself; reuse the same Neon project as the Vercel deployment
-#   if there is one, or create a new Neon project first.
+#   docs/knowledge/prisma-direct-vs-pooled-connection.md), or run
+#   scripts/vercel-setup.sh first to get-or-create the Neon project
+#   automatically. This script still does not provision Neon itself.
+# PROJECT_ID: if left blank, gcp-env.sh falls back to the ambient `gcloud
+#   config get-value project` and prints a WARNING naming which project it
+#   picked — set it explicitly to avoid depending on local gcloud CLI state.
 # PRISMA_DATABASE_URL can be left blank at this point (obtain in the Accelerate
 #   revival procedure, docs/knowledge/manual-ops.md §1, if ever needed)
 # AUTH_SECRET is generate-once-persist: if left blank,
@@ -185,7 +192,7 @@ revival procedure in `docs/knowledge/manual-ops.md §1` was ever used.
 | `scripts/gcp-setup.sh` | Environment setup | DP-1=B, DP-2 |
 | `scripts/gcp-teardown.sh` | Environment teardown | DP-1=B |
 | `scripts/gcp-deploy.sh` | Redeploy (image build + deploy) | DP-1=B, DP-2 |
-| `.env.production.local.example` | Secrets template | DP-1=B |
+| `.env.gcp.production.local.example` | Secrets template | DP-1=B |
 | `docs/knowledge/migration-guide.md` | Migration baseline procedure | DP-3 |
 | (Upstash API section in gcp-setup.sh) | Auto-create Redis DB | DP-4=A |
 

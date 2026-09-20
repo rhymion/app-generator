@@ -65,7 +65,7 @@ if [[ -f "$_ENV_FILE" ]]; then
   set +a
 else
   echo "ERROR: .env.production.local not found at ${_ENV_FILE}" >&2
-  echo "  Copy .env.production.local.example to .env.production.local and fill in values." >&2
+  echo "  Copy .env.vercel.production.local.example to .env.production.local and fill in values." >&2
   exit 1
 fi
 
