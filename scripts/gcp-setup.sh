@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# GCP environment setup for the generated app (Cloud Run + Cloud SQL + Accelerate + Upstash).
-# Provisions GCP APIs, Artifact Registry, Cloud SQL, the service account,
-# Upstash Redis, Secret Manager, and the GCS bucket (Steps 1-6 below),
-# each step idempotent (safe to re-run after a partial failure).
+# GCP environment setup for the generated app (Cloud Run + Neon + Upstash).
+# Provisions GCP APIs, Artifact Registry, the service account, Upstash Redis,
+# Secret Manager, and the GCS bucket (Steps 1, 2, 4, 4.5, 5, 6 below; Step 3
+# — Cloud SQL provisioning — was retired when the DB moved to Neon, see
+# docs/knowledge/gcp-automation-design.md), each step idempotent (safe to
+# re-run after a partial failure). Neon itself is not provisioned by this
+# script — DATABASE_URL/DIRECT_URL are supplied via .env.production.local
+# (see scripts/gcp-env.sh).
 #
 # Usage:
 #   ./scripts/gcp-setup.sh             # live run
@@ -127,66 +131,10 @@ else
 fi
 run gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
-# ── Step 3: Cloud SQL (PostgreSQL 16) ────────────────────────────────────────
-echo ""
-echo "=== Step 3: Cloud SQL ==="
-if gcloud sql instances describe "$INSTANCE_NAME" --quiet 2>/dev/null; then
-  echo "[SKIP] Cloud SQL instance ${INSTANCE_NAME} already exists"
-  _INSTANCE_CREATED=false
-else
-  run gcloud sql instances create "$INSTANCE_NAME" \
-    --database-version=POSTGRES_16 \
-    --tier=db-f1-micro \
-    --edition=ENTERPRISE \
-    --region="$REGION" \
-    --storage-type=SSD \
-    --storage-size=10GB \
-    --no-backup
-  _INSTANCE_CREATED=true
-fi
-
-if gcloud sql databases describe "$DB_NAME" --instance="$INSTANCE_NAME" --quiet 2>/dev/null; then
-  echo "[SKIP] Database ${DB_NAME} already exists"
-else
-  run gcloud sql databases create "$DB_NAME" --instance="$INSTANCE_NAME"
-fi
-
-# Set the postgres password only when the instance was just created. Re-running
-# setup on an EXISTING instance must NOT reset the password — a silent reset
-# de-authorizes any live deployment / registered connection using the old password
-# (DB_PASSWORD is generate-once-persist in .env, so the value is already stable).
-# Escape hatch: FORCE_DB_PASSWORD_RESET=true forces a reset for recovery.
-if [[ "$_INSTANCE_CREATED" == "true" || "${FORCE_DB_PASSWORD_RESET:-false}" == "true" ]]; then
-  run gcloud sql users set-password postgres \
-    --instance="$INSTANCE_NAME" \
-    --password="$DB_PASSWORD"
-  echo "  postgres password set"
-else
-  echo "[SKIP] postgres password unchanged (instance pre-existing; set FORCE_DB_PASSWORD_RESET=true to force)"
-fi
-
-# Enable public IP + SSL so Prisma Accelerate can reach Cloud SQL externally (DP-2=A)
-# --quiet suppresses the interactive "authorized networks will be overwritten" prompt.
-# Note: --authorized-networks REPLACES the full list each run (it is not additive);
-# keep the complete intended CIDR set in SQL_AUTHORIZED_NETWORKS.
-run gcloud sql instances patch "$INSTANCE_NAME" \
-  --authorized-networks="${SQL_AUTHORIZED_NETWORKS}" \
-  --ssl-mode=ENCRYPTED_ONLY \
-  --quiet
-
-if [[ "$DRY_RUN" != "true" ]]; then
-  CLOUD_SQL_PUBLIC_IP=$(gcloud sql instances describe "$INSTANCE_NAME" \
-    --format="value(ipAddresses[0].ipAddress)")
-  echo "Cloud SQL Public IP: ${CLOUD_SQL_PUBLIC_IP}"
-  echo ""
-  echo "  ⚠ Optional manual step (Prisma Accelerate — skip if using the direct"
-  echo "    Cloud SQL socket path; see lib/prisma.ts for the toggle):"
-  echo "    Go to https://console.prisma.io → New project → Accelerate"
-  echo "    Connection string: postgresql://postgres:${DB_PASSWORD}@${CLOUD_SQL_PUBLIC_IP}:5432/${DB_NAME}?sslmode=require"
-  echo "    Copy the API key and set PRISMA_ACCELERATE_API_KEY in .env.production.local, then re-run."
-else
-  echo "[DRY-RUN] Would retrieve Cloud SQL public IP and prompt for Prisma Accelerate setup"
-fi
+# ── Step 3: [retired] Cloud SQL provisioning ─────────────────────────────────
+# The DB moved to Neon (DATABASE_URL/DIRECT_URL come from .env.production.local
+# via gcp-env.sh) — there is no GCP-side database instance left to provision.
+# See docs/knowledge/gcp-automation-design.md.
 
 # ── Step 4: Service Account + IAM ────────────────────────────────────────────
 echo ""
@@ -323,6 +271,7 @@ echo ""
 echo "=== Step 5: Secret Manager ==="
 
 upsert_secret "app-database-url"        "$DATABASE_URL"
+upsert_secret "app-direct-database-url" "$DIRECT_URL"
 upsert_secret "app-nextauth-secret"     "$AUTH_SECRET"
 upsert_secret "app-auth-secret"         "$AUTH_SECRET"
 upsert_secret "app-gcs-bucket-name"     "$GCS_BUCKET"
@@ -362,29 +311,11 @@ echo ""
 echo "=== Infrastructure setup complete ==="
 if [[ "$DRY_RUN" == "true" ]]; then
   echo "[DRY-RUN] Run without DRY_RUN=true to apply changes."
-fi
-
-# ── Next steps: manual Prisma Console break ──────────────────────────────────
-if [[ "$DRY_RUN" != "true" ]]; then
+else
   echo ""
   echo "====================================================================="
   echo "  GCP infrastructure setup complete"
   echo "====================================================================="
-  echo ""
-  echo "  Next steps (manual): Obtain Prisma Accelerate URL"
-  echo ""
-  echo "  1. Register the following DATABASE_URL_PUBLIC in Prisma Console:"
-  echo "     https://console.prisma.io"
-  echo ""
-  # Must match the connection string logged in Step 3 above (line 184):
-  # explicit :5432 and ?sslmode=require
-  # (Cloud SQL is --ssl-mode=ENCRYPTED_ONLY, so SSL is mandatory).
-  DATABASE_URL_PUBLIC="postgresql://postgres:${DB_PASSWORD}@${CLOUD_SQL_PUBLIC_IP}:5432/${DB_NAME}?sslmode=require"
-  echo "     DATABASE_URL_PUBLIC=${DATABASE_URL_PUBLIC}"
-  echo ""
-  echo "  2. Verify the connection in Prisma Console, then set the issued"
-  echo "     prisma+postgres://... URL as PRISMA_DATABASE_URL in .env.production.local"
-  echo ""
-  echo "  3. Run gcp-deploy.sh to deploy the application"
+  echo "  Next step: run gcp-deploy.sh to deploy the application."
   echo "====================================================================="
 fi
