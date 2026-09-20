@@ -5,9 +5,9 @@ definition's `x-approval` block special-cased the literal key name and its
 two default shapes (`None` vs `{}`) inline — validate.py, generate.py,
 generators.py, and helpers/schema_helpers.py each wrote their own
 `defn.get('x-approval')` (or `... or {}`) expression. That duplication is
-axis A from the generator scatter-consolidation measurement (cmd_1115/
-cmd_1116): `x-approval` was the highest-frequency multi-file scatter cause
-among custom schema keys.
+axis A from the generator code/template scatter consolidation design
+(app-generator Issue #693): `x-approval` was the highest-frequency
+multi-file scatter cause among custom schema keys.
 
 This module is the one place that knows the key's name and its two default
 shapes; the files above call into it instead of special-casing the key
