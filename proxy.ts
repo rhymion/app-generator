@@ -36,24 +36,34 @@ function clientIp(req: Request): string {
 }
 
 /**
+ * Strip a port from a Host-style string when the connection is HTTPS.
+ *
+ * Confirmed by curling a live Cloud Run deployment (cmd_1114): an
+ * unauthenticated `GET /` 307s to a Location carrying `:8080` — the
+ * container's internal listening port — even though the public connection
+ * terminated TLS on 443 with no port in the URL. Cloud Run's front end
+ * forwards that internal port in the Host header it hands to the container,
+ * and Next.js mirrors Host into x-forwarded-host when no upstream proxy sets
+ * x-forwarded-host itself, so both headers end up carrying it. An https
+ * external URL must never carry a port, so this strips whatever the proxy
+ * tacked on. http is left untouched — local dev relies on an explicit port
+ * (e.g. :3000), and there the forwarded host string is trustworthy as-is.
+ */
+function stripPortForHttps(host: string, proto: string): string {
+  return proto === 'https' ? host.replace(/:\d+$/, '') : host;
+}
+
+/**
  * Reconstruct an external URL using X-Forwarded-* headers when running behind
  * a reverse proxy (e.g. Cloud Run). Without this, req.nextUrl reflects the
  * internal :8080 address, leaking it into Location headers on redirect.
- *
- * Next.js sets x-forwarded-host on every request (mirroring the real Host
- * header), not just when a reverse proxy is actually present, so its mere
- * presence can't be used to decide whether to strip the port. The forwarded
- * host string already carries whatever port is correct for the connection
- * that was actually made (none for Cloud Run's public hostname, :3000 for a
- * direct local connection) — trust it via the URL host setter instead of
- * blanking the port unconditionally.
  */
 function buildExternalUrl(req: NextRequest, targetPath: string): URL {
   const proto = req.headers.get('x-forwarded-proto') ?? req.nextUrl.protocol.replace(':', '');
-  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? req.nextUrl.host;
+  const rawHost = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? req.nextUrl.host;
   const url = new URL(req.nextUrl.href);
   url.protocol = proto + ':';
-  url.host = host;
+  url.host = stripPortForHttps(rawHost, proto);
   url.pathname = targetPath;
   return url;
 }
@@ -61,10 +71,6 @@ function buildExternalUrl(req: NextRequest, targetPath: string): URL {
 /**
  * Normalize Location header in redirect responses from intlMiddleware when
  * the internal port (:8080) has leaked into the URL.
- *
- * As in buildExternalUrl above, x-forwarded-host is set by Next.js on every
- * request and already carries whatever port is correct for the connection
- * actually made — it must not be blanked unconditionally.
  */
 function normalizeIntlRedirect(req: NextRequest, response: NextResponse): NextResponse {
   const forwardedHost = req.headers.get('x-forwarded-host');
@@ -77,7 +83,7 @@ function normalizeIntlRedirect(req: NextRequest, response: NextResponse): NextRe
     const proto = req.headers.get('x-forwarded-proto') ?? req.nextUrl.protocol.replace(':', '');
     const loc = new URL(location);
     loc.protocol = proto + ':';
-    loc.host = forwardedHost;
+    loc.host = stripPortForHttps(forwardedHost, proto);
     return NextResponse.redirect(loc.toString(), { status });
   } catch {
     return response;
