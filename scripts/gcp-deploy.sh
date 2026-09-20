@@ -149,7 +149,11 @@ echo "  OK: Migration complete."
 # ─── Step 4: Deploy Cloud Run service (Neon) ──────────────────────────────────
 echo ""
 echo "[Step 4] Deploying Cloud Run service (Neon)..."
-echo "  NOTE: AUTH_URL is excluded (AUTH_TRUST_HOST=true is sufficient)"
+# NOTE: AUTH_URL can't be set here — the service's URL isn't known until
+# after this first deploy creates/updates it (Step 5 discovers it). Step 5.5
+# below sets AUTH_URL once SERVICE_URL is known. AUTH_TRUST_HOST=true alone
+# is NOT sufficient on Cloud Run (see Step 5.5's comment) — this used to say
+# it was; that was wrong (cmd_1114).
 
 # The service connects to Neon's pooled endpoint via DATABASE_URL.
 # lib/prisma.ts takes the pooled (else) branch when PRISMA_DATABASE_URL is absent.
@@ -184,4 +188,28 @@ echo "  SERVICE_URL:  ${SERVICE_URL}"
 # (verified: app-generator-sample.vercel.app/ -> 307 -> /en/login).
 echo "  Login page:   ${SERVICE_URL}/en/login  (or /ja/login for Japanese)"
 echo "================================================================="
+echo ""
+
+# ─── Step 5.5: Set AUTH_URL now that the service's stable URL is known ────────
+# Confirmed by curling a live Cloud Run deployment (cmd_1114): Cloud Run's
+# front end forwards the container's internal listening port (e.g. ":8080")
+# in the Host header even on the public HTTPS (443) connection. proxy.ts's
+# buildExternalUrl/normalizeIntlRedirect now correct for this on page-level
+# redirects, but Auth.js's own /api/auth/* redirects (sign-out, etc.) build
+# their URLs from AUTH_TRUST_HOST-driven header inference (x-forwarded-host
+# ?? host), which inherits the exact same leak — AUTH_TRUST_HOST=true alone
+# does not fix it. Setting AUTH_URL removes that header dependency entirely
+# for Auth.js's own redirects, since AUTH_URL takes precedence over header
+# inference in Auth.js core.
+#
+# The service's URL is stable across redeploys of the same service (it only
+# changes if the service itself is deleted and recreated), so this update is
+# idempotent and safe to run on every deploy — including right after Step 4
+# creates the service for the very first time, once SERVICE_URL becomes
+# knowable here in Step 5.
+echo "[Step 5.5] Setting AUTH_URL=${SERVICE_URL}..."
+run gcloud run services update "${SERVICE_NAME}" \
+  --region="${REGION}" \
+  --update-env-vars=AUTH_URL="${SERVICE_URL}"
+echo "  OK: AUTH_URL set."
 echo ""
