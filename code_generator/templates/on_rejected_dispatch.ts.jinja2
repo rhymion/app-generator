@@ -3,7 +3,7 @@
 
 import type { PrismaClient } from '@/app/generated/prisma/client';
 
-type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+{% include "_partials/tx_type.ts.jinja2" %}
 {% for entity in rejectable_entities %}
 {% if entity.emit_hook %}
 import { afterReject as {{ entity.pascal_name }}AfterReject } from '@/lib/{{ entity.snake_name }}/service_after_reject';
