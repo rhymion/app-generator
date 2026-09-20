@@ -177,6 +177,11 @@ SERVICE_URL=$(gcloud run services describe "${SERVICE_NAME}" \
 echo ""
 echo "================================================================="
 echo "  Deploy complete"
-echo "  SERVICE_URL: ${SERVICE_URL}"
+echo "  SERVICE_URL:  ${SERVICE_URL}"
+# The bare origin above 404s: i18n middleware requires a locale-prefixed
+# path (see proxy.ts) and there is no content at "/". Print a URL that
+# actually resolves, same as the Vercel path already redirects to
+# (verified: app-generator-sample.vercel.app/ -> 307 -> /en/login).
+echo "  Login page:   ${SERVICE_URL}/en/login  (or /ja/login for Japanese)"
 echo "================================================================="
 echo ""
