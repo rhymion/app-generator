@@ -4,6 +4,30 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [4.1.0] - 2026-09-19
+### Added
+- **Added a business-date container (`app_setting`) with list/view/new/edit
+  screens and a REST API** (PR #611), built on top of the existing hand-written
+  `business_date`/`is_pinned`/`timezone`/`organization_id` Prisma model.
+  `organization_id` is optional and left out of `required`, so the existing
+  org-relationship-optional machinery makes each row visible both to its
+  own organization and to every tenant — a query returns the actor's own
+  organization row when one exists, plus the tenant-wide default
+  (`organization_id: null`). Delete is disabled
+  (`x-generate.delete: false`): the sole default row must not be removable
+  through the standard entity delete action. `scripts/seed-baseline.ts`
+  seeds the tenant-wide default row.
+
+### Changed
+- **Upgraded PostgreSQL from 16 to 18** across all three compose files
+  (dev/test/prod) and `docker/Dockerfile.postgres` (issue #610).
+  PostgreSQL 18's official image requires a single mount at
+  `/var/lib/postgresql` rather than a direct mount at
+  `/var/lib/postgresql/data` — its entrypoint refuses to start otherwise —
+  so the compose volume mount lines were updated accordingly for all three
+  files. GCP deployment script version pins were intentionally left
+  untouched in this change; that migration was tracked separately (see the
+  Cloud Run/Neon entry below).
+
 ### Fixed
 - **GCP (Cloud Run) deployment required manually pasting Neon connection
   strings, had no committed env template, could silently pick up a stale
@@ -133,6 +157,21 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   it enforced — both now scan the same unfiltered relationship list. No
   migration/DDL impact (no migration for `app_setting` has been cut in this
   repo yet; the fix is Prisma relation metadata only).
+
+- **The GCP Cloud Run deployment path still provisioned and connected to a
+  Cloud SQL instance** (PR #617) — `scripts/gcp-setup.sh`/
+  `scripts/gcp-deploy.sh` now retire Cloud SQL provisioning entirely;
+  `DATABASE_URL` (pooled) and a new `DIRECT_URL` (unpooled) are supplied via
+  `.env.production.local` instead of being derived from a Cloud SQL
+  instance, and the `app-migrate` Cloud Run Job now carries `DIRECT_URL` so
+  `prisma migrate deploy` runs against Neon's unpooled endpoint, never the
+  pooled one (see `docs/knowledge/prisma-direct-vs-pooled-connection.md`
+  for why a transaction-mode pooler must not run migrations).
+  `docs/knowledge/gcp-automation-design.md` is substantially rewritten for
+  the Neon-based flow. **Note**: TLS/network reachability from Cloud Run to
+  Neon was not empirically verified as part of this change — there was no
+  live GCP deployment of this app to test against at the time; that
+  verification is deferred to the next actual GCP deployment.
 
 
 ## [4.0.0] - 2026-09-17
