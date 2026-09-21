@@ -14,15 +14,13 @@ import re
 from pathlib import Path
 
 from build_context import _raw_def
-from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import resolve_label_paths
 from helpers.naming import to_pascal_case
 from helpers.schema_helpers import (
     get_parent_relationships, get_internal_bridge_fk_prop_names,
     get_entity_properties, get_entity_required, get_self_only_flags,
     get_direct_attachment_fk_props, schema_has_direct_attachment_fk,
-    is_write_only_prop, get_approval_lines_props, is_optional_fk_to_parent,
-    child_has_own_write_capability, _get_actual_type,
+    is_write_only_prop, _get_actual_type,
 )
 from keys import x_approval as approval_key
 from manifest import sha256_file
@@ -645,90 +643,6 @@ def _compute_export_visibility(def_key: str, defn: dict, defs: dict) -> tuple[se
         if isinstance(r['label_field'], str)
     }
     return export_scalar_fields, fk_display_cols
-
-
-def _entity_has_writable_embedded_child(model: str, model_def: dict, schema: dict) -> bool:
-    """Schema-level mirror of write_ch's non-emptiness (build_context.py's
-    embedded_ch ~line 2787 / write_ch ~line 2804, narrowing children_raw
-    ~line 1426 via `_build_child_data()`'s per-child use_connect/
-    nested_writable derivation ~lines 521-720) — kept in sync by hand, same
-    convention as `_compute_export_visibility` above (cmd_394 §8). Used only
-    by Case E (see `validate_schema()` §16 below).
-
-    validate_schema() runs before extract_entities()/build_context() in
-    generate.py's pipeline (generate.py lines 924/935/1040), so neither
-    entity['children'] nor build_context()'s per-child flags exist yet here.
-    This reproduces the same (name, property_name, output_type,
-    relationship) walk generate_types.py's `_extract_children()` performs —
-    importing that function here would be circular (generate_types.py
-    imports SchemaValidationError from this module) — using the SAME
-    schema-level helper functions build_context.py itself calls for the
-    downstream per-child flags (`is_optional_fk_to_parent`,
-    `child_has_own_write_capability`, `get_approval_lines_props`), not a
-    re-derivation of their internals.
-
-    Property source: `get_entity_properties(model, schema)` — the same
-    allOf-merge helper cross-file callers use elsewhere in this file for the
-    identical raw/view divergence (see the §2 / §15.9 comments above) —
-    rather than `model_def.get('properties')` alone. A Stage-4 raw/view-split
-    entity declares an embedded child's array property (`lines` etc.) only
-    on the VIEW half's `allOf` extension, never on the raw entity `model_def`
-    itself resolves to; reading `model_def.get('properties')` directly missed
-    every such child (confirmed against `goods_receipt` in a real schema —
-    `lines` lives on the view's `allOf[1].properties`, not on `__goods_receipt`).
-    `x-relationships` and `x-approval-lines` (via `get_approval_lines_props`)
-    still read off `model_def` (raw) — `x-approval-lines` is a Category C,
-    entity-level key that always lives there. `x-relationships` is itself a
-    Category D / view-level key like `properties`/`required`, so the same
-    divergence can in principle apply to it too; this remains unresolved here
-    (no named PR1 opt-in target's embedded child currently declares an
-    `x-relationships` entry, so it does not change this function's answer for
-    any of them today) and is a known remaining simplification, not a silent
-    one.
-
-    Conservative on purpose: a false positive here (reporting a writable
-    child build_context.py would not actually treat as such) only makes
-    Case E MORE strict, matching this file's fail-closed default. A false
-    negative — missing a real writable child — is the direction that would
-    actually matter, and every branch below reuses build_context.py's own
-    formula pieces exactly rather than approximating them.
-    """
-    props = get_entity_properties(model, schema)
-    x_relationships = model_def.get('x-relationships') or {}
-    approval_lines_props = set(get_approval_lines_props(model_def, model, schema))
-    defs = schema.get('definitions', {})
-
-    for prop_name, prop_def in props.items():
-        if not isinstance(prop_def, dict) or prop_def.get('type') != 'array':
-            continue
-        ref = (prop_def.get('items') or {}).get('$ref')
-        if not ref:
-            continue
-        child_name = ref.split('/')[-1]
-        child_def = defs.get(child_name)
-        if not isinstance(child_def, dict):
-            continue
-
-        output_type = prop_def.get('x-outputType') or prop_def.get('outputType')
-        if output_type == 'comments':
-            continue  # excluded by non_comment_ch (build_context.py ~line 2730)
-
-        rel_info = x_relationships.get(prop_name) or {}
-        is_many_to_many = rel_info.get('type') == 'many-to-many'
-        is_optional_fk_list = (
-            output_type == 'list' and not is_many_to_many
-            and is_optional_fk_to_parent(child_def, model)
-        )
-        use_connect = is_many_to_many or child_name == model or is_optional_fk_list
-        is_independent = (
-            not is_many_to_many
-            and child_has_own_write_capability(child_def.get('x-generate'))
-        )
-        nested_writable = (not is_independent) or (prop_name in approval_lines_props)
-
-        if use_connect or nested_writable:
-            return True
-    return False
 
 
 def validate_schema(schema: dict) -> None:
@@ -2375,12 +2289,16 @@ def validate_schema(schema: dict) -> None:
     # -----------------------------------------------------------------------
     # 16. x-state-machines precondition guard (Issue #696, state-transition
     #     Stage 1 PR1; see state-transition-generator-design.md's input-
-    #     placement, existing-mechanism-boundary, and diagram-validation
-    #     sections). No-op when the top-level pointer map is absent (the
-    #     design's opt-in guarantee) — PR1 implements only the 3 cases that
-    #     don't require reading a pointed-to .mmd file's own contents
-    #     (states/edges); the Mermaid parser and the remaining 5 diagram-
-    #     content validation cases are PR2's scope.
+    #     placement and diagram-validation sections). No-op when the
+    #     top-level pointer map is absent (the design's opt-in guarantee).
+    #     Checks field existence/type and pointer-entry ambiguity, neither
+    #     of which requires reading a pointed-to .mmd file's own contents
+    #     (states/edges) — the Mermaid parser and the remaining diagram-
+    #     content validation cases are PR2's scope. A third, entity-level
+    #     check ("Case E") used to live here too, rejecting a pointer entry
+    #     outright whenever the entity's import route could not converge
+    #     through service.ts; it has been removed in favor of a field-level
+    #     fix in build_context.py (see the comment further below).
     # -----------------------------------------------------------------------
     _state_machine_pointers = schema.get('x-state-machines')
     if _state_machine_pointers:
@@ -2423,7 +2341,7 @@ def validate_schema(schema: dict) -> None:
                     f"one pointer entry."
                 )
 
-        # (i) field existence/type, and Case E, per declared pointer entry.
+        # (i) field existence/type, per declared pointer entry.
         for _sm_key, _sm_path in _state_machine_pointers.items():
             if not isinstance(_sm_key, str) or '.' not in _sm_key:
                 continue  # already reported above
@@ -2463,72 +2381,21 @@ def validate_schema(schema: dict) -> None:
                         f"nowhere to map onto otherwise."
                     )
 
-            # Case E ("Import and scheduled execution" in the design doc's
-            # existing-mechanism-boundary section) — entity-level,
-            # independent of whether the field itself validated above.
-            # Mirrors import_service_call_feasible's exact formula
-            # (build_context.py ~line 2064 `import_eligible` / ~line 1666
-            # `bridge_child_params_str` / ~line 2804 `write_ch` / ~line 3842
-            # `import_service_call_feasible` itself).
-            _sm_gen_cfg = _sm_model_def.get('x-generate') or {}
-            _sm_has_import_key = bool(_sm_model_def.get('x-import-key') or [])
-            _sm_import_flag = _sm_gen_cfg.get('import', True) is not False
-            _sm_can_create = _sm_gen_cfg.get('new', True) is not False
-            _sm_can_update = _sm_gen_cfg.get('edit', True) is not False
-            _sm_import_eligible = (
-                _sm_has_import_key and _sm_import_flag
-                and (_sm_can_create or _sm_can_update)
-            )
-            _sm_has_bridge = bool(get_new_form_bridge(_sm_model_def))
-            _sm_has_writable_child = _entity_has_writable_embedded_child(
-                _sm_model, _sm_model_def, schema
-            )
-            # An entity that is not import-eligible at all has no import
-            # route (generate.py only writes app/api/<entity>/import/route.ts
-            # when import_eligible is true) — with no import route, there is
-            # no unconverged raw-transaction branch for Case E to guard
-            # against, so import-ineligibility alone is never a rejection
-            # reason. Only reject when import IS possible and it would also
-            # have to carry a bridge or an embedded child through that route.
-            #
-            # `import_service_call_feasible` originates from the CSV import ->
-            # service.ts convergence fix (Issue #93; see build_context.py's own
-            # computation of this flag for the full derivation). Its own framing
-            # there is a capability question ("can the generated import route call
-            # add/update{Parent} instead of a raw tx.model.create/update?"), never
-            # a danger flag — and the flag is only ever consulted inside the
-            # generated import route itself, which generate.py only writes when
-            # import_eligible is already true (see the `if ctx.get('import_eligible')`
-            # gate). So within that template, `import_eligible` is always true and
-            # contributes nothing to the flag's own value — it is Case E's own
-            # predicate, not the flag's own designed meaning, that must isolate the
-            # real risk (an unconverged raw-tx branch existing at all) from mere
-            # import-ineligibility (no import route exists, nothing to converge).
-            _sm_import_service_call_feasible = not (
-                _sm_import_eligible and (_sm_has_bridge or _sm_has_writable_child)
-            )
-
-            if not _sm_import_service_call_feasible:
-                _sm_reasons = []
-                if _sm_has_bridge:
-                    _sm_reasons.append(
-                        'has a new-form x-bridge parent-selection field'
-                    )
-                if _sm_has_writable_child:
-                    _sm_reasons.append(
-                        'has an embedded child the parent must '
-                        'nested-create/update'
-                    )
-                errors.append(
-                    f"x-state-machines['{_sm_key}'] (Case E): model "
-                    f"'{_sm_model}' carries a state-transition pointer "
-                    f"entry but its import_service_call_feasible is False "
-                    f"({'; '.join(_sm_reasons)}) — a state-transition-"
-                    f"governed entity must never combine with the import "
-                    f"route's unconverged raw-transaction fallback branch "
-                    f"(state-transition-generator-design.md's 'Import and "
-                    f"scheduled execution' section, Case E)."
-                )
+            # An entity-level "Case E" ban used to live here: any model
+            # carrying a state-transition pointer entry whose import route
+            # could not converge through service.ts (a bridge or an
+            # unconverged embedded child) was rejected outright. Removed:
+            # whether an entity's import route converges through service.ts
+            # and whether one of its fields can be governed by a
+            # state-transition diagram are independent questions — an
+            # entity needing a child on import does not mean its own status
+            # field cannot be governed. The real, narrower concern (an
+            # unconverged import route bypassing validateOnAdd/Update for a
+            # governed field) is closed at the field level instead, in
+            # build_context.py's import_state_machine_locked_fields — the
+            # governed CSV column is excluded from that route's writable
+            # set rather than banning the whole entity from carrying a
+            # pointer at all.
 
     # -----------------------------------------------------------------------
     # Report

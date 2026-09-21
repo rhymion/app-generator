@@ -1,18 +1,29 @@
 """Issue #696, state-transition Stage 1 PR1:
 `validate_state_machine_diagram`-equivalent checks inside `validate_schema()`
-for the 3 `x-state-machines` precondition cases that do not require reading a
+for the `x-state-machines` precondition cases that do not require reading a
 pointed-to `.mmd` file's own contents (states/edges) — see
 state-transition-generator-design.md's diagram-validation table:
 
   (i)   pointer entry names a field that does not exist on the model, or is
         not an enum-compatible type
   (ii)  two pointer entries name the same (model, field) pair (ambiguous)
-  (iii) Case E — entity carries a pointer entry AND
-        import_service_call_feasible is False ("Import and scheduled
-        execution" in the design doc's existing-mechanism-boundary section)
 
 Plus: the pointer map's own absence is a no-op (the design's opt-in
 guarantee).
+
+An entity-level "Case E" check used to live here too, rejecting a pointer
+entry outright whenever its entity's import route could not converge
+through service.ts (a bridge or an unconverged embedded child). It was
+removed: whether an entity's import route converges and whether one of its
+fields can be governed by a state-transition diagram are independent
+questions. The narrower real concern — an unconverged import route
+bypassing validateOnAdd/Update for a governed field — is closed at the
+field level in build_context.py instead (import_state_machine_locked_fields
+excludes the governed CSV column from that route's writable set); that
+mechanism is exercised in generators_test.py, not here, since it lives in
+build_context.py's per-model context, not validate_schema(). Former Case E
+tests below have been converted to "must not raise" — the exact shapes that
+used to be entity-level rejections.
 
 Fixtures use a single, non-split `widget` definitions entry unless a test's
 own docstring says otherwise (the (ii) alias test needs a genuine raw/view
@@ -161,26 +172,21 @@ class TestCaseII_AmbiguousPointerEntries:
         validate_schema(schema)  # must not raise
 
 
-class TestCaseIII_ImportServiceCallFeasibility:
-    """Case E: entity carries a pointer entry, import IS possible for it, and
-    that import path would also have to carry a bridge or an embedded child
-    it can't converge through the service layer.
-
-    Correction (this entity's own doubt, raised and confirmed against the
-    real generator's output): import-ineligibility alone is no longer a
-    rejection reason. `generate.py` only writes
-    `app/api/<entity>/import/route.ts` when `import_eligible` is true — an
-    entity with no import route has no unconverged raw-transaction branch
-    for Case E to guard against in the first place, so rejecting it bought
-    nothing. This was checked by generating a real target entity's actual
-    output directory and confirming no `import/` route exists there when
-    `import_eligible` is false; the earlier test below asserted the
-    opposite (reject) purely from the formula's shape, never against a
-    real generated tree."""
+class TestFormerCaseIII_ImportConvergenceNoLongerGatesStateMachines:
+    """These shapes used to trip the entity-level "Case E" rejection: import
+    IS possible for the entity, and that import path would also have to
+    carry a bridge or an embedded child it can't converge through the
+    service layer. Removed: import convergence and state-machine
+    governability are independent (see the module docstring and
+    validate.py's own comment at the removal site) — every shape below must
+    now pass validate_schema() cleanly. The underlying concern (an
+    unconverged import route writing a governed field without going through
+    validateOnAdd/Update) is closed separately, at the field level, in
+    build_context.py."""
 
     def test_not_import_eligible_passes(self):
         """No x-import-key at all -- import_eligible is false, so there is no
-        import route and nothing for Case E to guard against."""
+        import route at all."""
         schema = {
             'definitions': {
                 'widget': _widget(status_field=_ENUM_STATUS, with_import=False),
@@ -189,16 +195,14 @@ class TestCaseIII_ImportServiceCallFeasibility:
         }
         validate_schema(schema)  # must not raise
 
-    def test_new_and_edit_both_false_caught_by_import_key_eligibility_not_case_e(self):
+    def test_new_and_edit_both_false_caught_by_import_key_eligibility(self):
         """x-import-key present but both new and edit disabled: import_eligible
-        is false here too (no create/update route to receive imported rows),
-        so Case E itself does not fire -- but this exact shape is already
-        rejected by a separate, pre-existing, more specific check
-        (E_IMPORT_KEY_NOT_ELIGIBLE, in validate_import_eligibility) that
-        fires on the same underlying fact (x-import-key declared with no
-        route able to use it). Confirmed by running this fixture and reading
-        the actual error raised, not assumed from the E_IMPORT_KEY_NOT_ELIGIBLE
-        name alone."""
+        is false here too (no create/update route to receive imported rows).
+        This exact shape is rejected by a separate, pre-existing, more
+        specific check (E_IMPORT_KEY_NOT_ELIGIBLE, in
+        validate_import_eligibility) that fires on the same underlying fact
+        (x-import-key declared with no route able to use it) -- unrelated to
+        the former Case E check, and unaffected by its removal."""
         schema = {
             'definitions': {
                 'widget': _widget(
@@ -208,28 +212,50 @@ class TestCaseIII_ImportServiceCallFeasibility:
             },
             'x-state-machines': {'widget.status': 'sm/x.mmd'},
         }
-        with pytest.raises(SchemaValidationError, match='E_IMPORT_KEY_NOT_ELIGIBLE') as excinfo:
+        with pytest.raises(SchemaValidationError, match='E_IMPORT_KEY_NOT_ELIGIBLE'):
             validate_schema(schema)
-        assert 'Case E' not in str(excinfo.value)
 
-    def test_new_form_bridge_errors(self):
+    def test_new_form_bridge_no_longer_errors(self):
+        """A structurally valid new-form x-bridge (name/child/parents, per
+        validate.py's own object-form requirements — unrelated to state
+        machines) used to still trip Case E purely because
+        get_new_form_bridge() returned truthy. It no longer does."""
         schema = {
             'definitions': {
                 'widget': _widget(
                     status_field=_ENUM_STATUS,
-                    extra={'x-bridge': {'name': 'widgetable', 'child': 'widget_child'}},
+                    extra={'x-bridge': {
+                        'name': 'widgetable',
+                        'child': 'widget',
+                        'parentCardinality': 'exactlyOne',
+                        'parents': [{'role': 'owner_hub', 'target': 'owner', 'labelField': 'name'}],
+                    }},
                 ),
+                'widgetable': {
+                    'type': 'object',
+                    'required': ['id'],
+                    'properties': {'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'}},
+                },
+                'owner': {
+                    'type': 'object',
+                    'required': ['id', 'name'],
+                    'properties': {
+                        'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'},
+                        'name': {'type': 'string'},
+                    },
+                    'x-generate': {'list': True, 'view': True, 'new': True, 'edit': True, 'delete': True, 'api': True},
+                },
             },
             'x-state-machines': {'widget.status': 'sm/x.mmd'},
         }
-        with pytest.raises(SchemaValidationError, match='new-form x-bridge'):
-            validate_schema(schema)
+        validate_schema(schema)  # must not raise
 
-    def test_writable_embedded_child_errors(self):
+    def test_writable_embedded_child_no_longer_errors(self):
         """widget.lines embeds widget_line, which has no x-generate of its
         own (no independent write path) — the parent's own service function
         must nested-create/update it, tripping child_params_for_add/update
-        non-emptiness (build_context.py write_ch)."""
+        non-emptiness (build_context.py write_ch). This no longer blocks
+        widget.status from carrying a state-transition pointer."""
         widget = _widget(status_field=_ENUM_STATUS)
         widget['properties']['lines'] = {
             'type': 'array',
@@ -249,15 +275,11 @@ class TestCaseIII_ImportServiceCallFeasibility:
             },
             'x-state-machines': {'widget.status': 'sm/x.mmd'},
         }
-        with pytest.raises(SchemaValidationError, match='embedded child'):
-            validate_schema(schema)
+        validate_schema(schema)  # must not raise
 
-    def test_independent_child_does_not_trip_case_e(self):
-        """widget_line has its OWN x-generate (new/edit/delete all true) —
-        child_has_own_write_capability() is True, so is_independent=True,
-        nested_writable=False, and (not m2m, not self-ref, not an optional
-        FK list) use_connect=False too -- this child must NOT count as a
-        write-path child for Case E."""
+    def test_independent_child_still_passes(self):
+        """widget_line has its OWN x-generate (new/edit/delete all true) --
+        never blocked either way, before or after the removal."""
         widget = _widget(status_field=_ENUM_STATUS)
         widget['properties']['lines'] = {
             'type': 'array',
@@ -306,14 +328,19 @@ class TestRealSchemaShapes:
     values) -- the raw/view split shape, key placement, and every field
     Case E actually reads are kept faithful to the real schemas."""
 
-    def test_goods_receipt_rejected_import_eligible_with_writable_child(self):
+    def test_goods_receipt_import_eligible_with_writable_child_passes(self):
         """goods_receipt (app-template develop): x-import-key present (new/
         edit both true) -- import-eligible -- AND embeds `lines`
         (goods_receipt_line, x-generate.new/edit/delete all false -- no
-        write path of its own) only on the VIEW's allOf extension. Before
-        the properties-merge fix, `lines` was invisible (read off the raw
-        entity alone) and this entity wrongly passed Case E -- reproduced
-        directly here against the real schema shape."""
+        write path of its own) only on the VIEW's allOf extension. This
+        used to trip the entity-level Case E rejection (a properties-merge
+        fix was needed just to see `lines` and reject correctly); now that
+        Case E is removed, this exact shape must pass -- goods_receipt.status
+        can carry a state-transition pointer regardless of the embedded
+        child. The narrower concern this used to guard (the import route's
+        unconverged raw-tx fallback writing `status` without going through
+        validateOnAdd/Update) is closed separately at the field level in
+        build_context.py, not here."""
         schema = {
             'definitions': {
                 '__goods_receipt': {
@@ -356,9 +383,7 @@ class TestRealSchemaShapes:
             },
             'x-state-machines': {'goods_receipt.status': 'sm/goods_receipt_status.mmd'},
         }
-        with pytest.raises(SchemaValidationError, match='Case E') as excinfo:
-            validate_schema(schema)
-        assert 'embedded child' in str(excinfo.value)
+        validate_schema(schema)  # must not raise
 
     def test_goods_receipt_line_passes_not_import_eligible(self):
         """goods_receipt_line (app-template develop): no x-import-key of its

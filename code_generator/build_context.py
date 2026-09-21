@@ -3861,6 +3861,40 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         and not child_params_for_add
         and not child_params_for_update
     )
+
+    # Whether an entity's import route converges through service.ts (above)
+    # and whether a field is governed by x-state-machines are independent
+    # axes -- a governed field must stay governable even when the entity's
+    # import stays on the unconverged raw-tx fallback. That fallback
+    # bypasses validateOnAdd/Update entirely, so a governed column written
+    # through it would silently skip whatever gate a future state-machine
+    # PR2 attaches there. Closed at the field level, not by an entity-wide
+    # ban: a governed column is excluded from this route's writable set the
+    # same way an UNIMPORTABLE_COLUMNS entry already is -- present in the
+    # header, silently ignored on write, reported back via skippedColumns --
+    # while staying in export_scalar_fields so CSV export/download still
+    # shows the current value. Import-key columns are excluded from this
+    # treatment: a key column's value drives row matching/creation
+    # independently of FIELD_SPECS (see keyWhere in
+    # api_import_route.ts.jinja2), so blocking it here would not actually
+    # stop the write and would only break matching -- no named
+    # x-state-machines target today uses its governed field as an import
+    # key, so this is a defensive carve-out, not an observed case.
+    import_state_machine_locked_fields = (
+        sorted(state_machine_fields & set(export_scalar_fields) - set(import_key_fields))
+        if not import_service_call_feasible else []
+    )
+    if import_state_machine_locked_fields:
+        import_field_specs = [
+            spec for spec in import_field_specs
+            if spec['name'] not in import_state_machine_locked_fields
+        ]
+        import_update_fields = [
+            f for f in import_update_fields
+            if f not in import_state_machine_locked_fields
+        ]
+        import_unimportable_columns = import_unimportable_columns + import_state_machine_locked_fields
+
     # One expression per add{{parent_pascal}}/update{{parent_pascal}} parent
     # parameter, in client_prop_infos order -- the SAME list and order
     # parent_params_with_types (the signature itself, above) is built from.
