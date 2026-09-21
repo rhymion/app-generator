@@ -2490,6 +2490,20 @@ def validate_schema(schema: dict) -> None:
             # against, so import-ineligibility alone is never a rejection
             # reason. Only reject when import IS possible and it would also
             # have to carry a bridge or an embedded child through that route.
+            #
+            # `import_service_call_feasible` originates from the CSV import ->
+            # service.ts convergence fix (Issue #93; see build_context.py's own
+            # computation of this flag for the full derivation). Its own framing
+            # there is a capability question ("can the generated import route call
+            # add/update{Parent} instead of a raw tx.model.create/update?"), never
+            # a danger flag — and the flag is only ever consulted inside the
+            # generated import route itself, which generate.py only writes when
+            # import_eligible is already true (see the `if ctx.get('import_eligible')`
+            # gate). So within that template, `import_eligible` is always true and
+            # contributes nothing to the flag's own value — it is Case E's own
+            # predicate, not the flag's own designed meaning, that must isolate the
+            # real risk (an unconverged raw-tx branch existing at all) from mere
+            # import-ineligibility (no import route exists, nothing to converge).
             _sm_import_service_call_feasible = not (
                 _sm_import_eligible and (_sm_has_bridge or _sm_has_writable_child)
             )
