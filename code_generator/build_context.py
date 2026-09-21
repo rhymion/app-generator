@@ -3838,29 +3838,47 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         f", {child_service_args}" if child_service_args else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
 
-    # CSV import -> service.ts convergence (cmd_996, Issue #93): the
+    # CSV import -> service.ts convergence (cmd_996, Issue #93; widened by
+    # cmd_1124 to also cover embedded DataGrid children -- a JSON Schema
+    # `required` relation array does not mean the child list must be
+    # non-empty, and Prisma accepts an empty array there too, so nothing
+    # actually stops an embedded-child entity's import from calling
+    # add{{parent_pascal}}/update{{parent_pascal}} with an empty child
+    # array/id-list, same as a childless entity always could): the
     # generated import route calls add{{parent_pascal}}/update{{parent_pascal}}
     # -- the same functions REST route.ts / Server Action actions.ts call --
     # instead of writing via a raw tx.model.create/update, so any guard
     # inside validateOnAdd/validateOnUpdate (x-write-locked-values,
     # x-approval, and every hand-written service_validation_custom.ts rule)
-    # now applies to CSV import too.
+    # now applies to CSV import too. A CSV row still cannot express nested
+    # child rows, so every write_ch child is passed an empty array/id-list
+    # literal on both create and update (import_service_child_args below,
+    # consumed by api_import_route.ts.jinja2) -- "import creates/updates
+    # the parent row only" is unchanged, only the path it takes changed.
     #
-    # Not feasible when add/update's signature carries a param a flat CSV
-    # row structurally cannot supply: embedded DataGrid children
-    # (child_params_for_add/_for_update -- one CSV cell cannot express an
-    # array of child objects) or a bridge-child parent selection
-    # (bridge_child_params_str). flatten-relation params are NOT a blocker:
-    # route.ts's own service_args_for_create/_for_update already pass a
-    # hardcoded `null` for every one of them ("API routes don't edit
-    # flatten rels inline") -- import does exactly the same via
-    # flatten_null_args below.
+    # Still not feasible for a bridge-child parent selection
+    # (bridge_child_params_str) -- a flat CSV row has no column that could
+    # supply `selectedParentType`/`selectedParentId`, and converging that
+    # case is a separate, later task's scope. flatten-relation params are
+    # NOT a blocker either way: route.ts's own
+    # service_args_for_create/_for_update already pass a hardcoded `null`
+    # for every one of them ("API routes don't edit flatten rels inline")
+    # -- import does exactly the same via flatten_null_args below.
     import_service_call_feasible = (
         import_eligible
         and not bridge_child_params_str
-        and not child_params_for_add
-        and not child_params_for_update
     )
+
+    # Empty array/id-list literal per write_ch child, in the same order
+    # child_params_for_add/_for_update declare them (write_ch itself) --
+    # `[]` type-checks against either shape (`{childVar}Ids: string[]` or
+    # `{childVar}Items: {field_type}[]`) via TypeScript's own contextual
+    # typing of a call argument, so no per-child type distinction is needed
+    # here the way child_service_args (REST route.ts's own call site) needs
+    # one. Empty on both add{{parent_pascal}} and update{{parent_pascal}} --
+    # a CSV row updating an existing parent still cannot express "these are
+    # now this row's children" any more than a create row can.
+    import_service_child_args = ', '.join('[]' for _ in write_ch)
 
     # Whether an entity's import route converges through service.ts (above)
     # and whether a field is governed by x-state-machines are independent
@@ -4067,9 +4085,10 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         all_body_fields_create=all_body_fields_create,
         service_args_for_create=service_args_for_create,
         service_args_for_update=service_args_for_update,
-        # CSV import -> service.ts convergence (cmd_996, Issue #93)
+        # CSV import -> service.ts convergence (cmd_996, Issue #93; cmd_1124)
         import_service_call_feasible=import_service_call_feasible,
         import_service_parent_args=import_service_parent_args,
+        import_service_child_args=import_service_child_args,
         flatten_null_args=flatten_null_args,
         # Field categories (FormUpsert / FormView)
         field_categories=field_categories,
