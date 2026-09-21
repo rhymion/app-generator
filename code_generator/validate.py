@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 
 from build_context import _raw_def
+from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import resolve_label_paths
 from helpers.naming import to_pascal_case
 from helpers.schema_helpers import (
@@ -1790,7 +1791,9 @@ def validate_schema(schema: dict) -> None:
             if _gen_cfg:
                 _primary_gen_cfgs.append(_gen_cfg)
 
-        _eligible = any(
+        _is_bridge_child = bool(get_new_form_bridge(_model_defn))
+
+        _eligible = (not _is_bridge_child) and any(
             (cfg.get('import', True) is not False)
             and (cfg.get('new', True) is not False or cfg.get('edit', True) is not False)
             for cfg in _primary_gen_cfgs
@@ -1803,7 +1806,15 @@ def validate_schema(schema: dict) -> None:
         if _import_explicitly_off:
             continue  # sanctioned export/dotted-FK-target-only opt-out
 
-        if not _primary_gen_cfgs:
+        if _is_bridge_child:
+            _reason = (
+                f"'{_model_key}' declares a new-form x-bridge (its parent is "
+                f"selected at create time via selectedParentType/"
+                f"selectedParentId, not a physical FK column) — CSV export "
+                f"never emits a column identifying the parent, so there is no "
+                f"way for an imported CSV row to supply it"
+            )
+        elif not _primary_gen_cfgs:
             _reason = (
                 f"'{_model_key}' is never generated as a primary entity of its "
                 f"own model (no '{_model_key}' or '{_model_key}_detail' "
@@ -1816,16 +1827,29 @@ def validate_schema(schema: dict) -> None:
                 f"'new' and 'edit' disabled — there is no create or edit route "
                 f"to receive imported rows"
             )
+        if _is_bridge_child:
+            _fix = (
+                f"Fix by either (a) removing '{_model_key}'s x-bridge "
+                f"declaration if it should be a regular importable entity "
+                f"with a real parent FK column, or (b) if x-import-key is "
+                f"only needed for CSV export / as a dotted-FK natural-key "
+                f"target for other entities, set x-generate.import: false on "
+                f"'{_model_key}' to make the opt-out explicit."
+            )
+        else:
+            _fix = (
+                f"Fix by either (a) making '{_model_key}' a primary "
+                f"create-or-edit-able entity (add/adjust a "
+                f"'{_model_key}_detail' x-generate block with new: true or "
+                f"edit: true), or (b) if x-import-key is only needed for CSV "
+                f"export / as a dotted-FK natural-key target for other "
+                f"entities, set x-generate.import: false on '{_model_key}' to "
+                f"make the opt-out explicit."
+            )
         errors.append(
             f"Definition '{_model_key}' (E_IMPORT_KEY_NOT_ELIGIBLE): declares "
             f"x-import-key {_ik_raw!r} with import left enabled (x-generate."
-            f"import is not false), but {_reason}. Fix by either (a) making "
-            f"'{_model_key}' a primary create-or-edit-able entity (add/adjust "
-            f"a '{_model_key}_detail' x-generate block with new: true or "
-            f"edit: true), or (b) if x-import-key is only needed for CSV "
-            f"export / as a dotted-FK natural-key target for other entities, "
-            f"set x-generate.import: false on '{_model_key}' to make the "
-            f"opt-out explicit."
+            f"import is not false), but {_reason}. {_fix}"
         )
 
     # -----------------------------------------------------------------------

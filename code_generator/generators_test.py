@@ -4556,8 +4556,9 @@ def api_spec_context(
     # cmd_421 N11-N13: import eligibility gate for the CSV import round-trip
     # tests. Mirrors build_context.py's "single place" gate (cmd_328 design decision)
     # exactly — is_primary_entity AND has_import_key AND import:true AND
-    # (new:true OR edit:true) — since this test context is built by a
-    # separate function and must re-derive the flag rather than reuse it.
+    # (new:true OR edit:true) AND not a new-form x-bridge child — since this
+    # test context is built by a separate function and must re-derive the
+    # flag rather than reuse it.
     # import_can_update alone (not import_eligible) gates N11-N13 because the
     # round-trip technique (export an existing row, re-import it) always
     # re-matches that row by its natural key and so always exercises the
@@ -4571,6 +4572,7 @@ def api_spec_context(
     import_eligible = (
         _api_is_primary_entity and has_import_key and _api_import_flag
         and (_api_can_create or _api_can_update)
+        and not get_new_form_bridge(model_def)
     )
     import_can_update = import_eligible and _api_can_update
 
