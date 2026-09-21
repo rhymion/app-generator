@@ -1439,15 +1439,15 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         schema.get('definitions', {}),
     )
     # x-state-machines (Issue #696, Stage 1 PR1): a top-level pointer map,
-    # `{model}.{field}: path/to.mmd` (state-transition-generator-design.md
-    # 乙, finalized Option B). PR1 only needs to know WHICH (model, field)
-    # pairs are governed -- reading a pointed-to .mmd file's own contents
-    # (states, edges) is PR2's scope, once the Mermaid parser exists.
-    # Exposed here as a plain field-name set so downstream code/templates
-    # can later query "is this field governed by a state machine" without
-    # re-parsing the pointer map themselves. Nothing consumes this key yet
-    # in PR1 -- an unused context key does not change any template output
-    # (opt-in guarantee, 庚).
+    # `{model}.{field}: path/to.mmd` (state-transition-generator-design.md's
+    # input-placement section, finalized Option B). PR1 only needs to know
+    # WHICH (model, field) pairs are governed -- reading a pointed-to .mmd
+    # file's own contents (states, edges) is PR2's scope, once the Mermaid
+    # parser exists. Exposed here as a plain field-name set so downstream
+    # code/templates can later query "is this field governed by a state
+    # machine" without re-parsing the pointer map themselves. Nothing
+    # consumes this key yet in PR1 -- an unused context key does not change
+    # any template output (the design's opt-in guarantee).
     state_machine_fields = {
         _key.split('.', 1)[1]
         for _key in (schema.get('x-state-machines') or {})

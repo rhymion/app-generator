@@ -1,17 +1,18 @@
-"""Issue #696, state-transition Stage 1 PR1 (cmd_1121):
+"""Issue #696, state-transition Stage 1 PR1:
 `validate_state_machine_diagram`-equivalent checks inside `validate_schema()`
 for the 3 `x-state-machines` precondition cases that do not require reading a
 pointed-to `.mmd` file's own contents (states/edges) — see
-state-transition-generator-design.md 己's table:
+state-transition-generator-design.md's diagram-validation table:
 
   (i)   pointer entry names a field that does not exist on the model, or is
         not an enum-compatible type
   (ii)  two pointer entries name the same (model, field) pair (ambiguous)
   (iii) Case E — entity carries a pointer entry AND
-        import_service_call_feasible is False (丙 "Import and scheduled
-        execution")
+        import_service_call_feasible is False ("Import and scheduled
+        execution" in the design doc's existing-mechanism-boundary section)
 
-Plus: the pointer map's own absence is a no-op (opt-in guarantee, 庚).
+Plus: the pointer map's own absence is a no-op (the design's opt-in
+guarantee).
 
 Fixtures use a single, non-split `widget` definitions entry unless a test's
 own docstring says otherwise (the (ii) alias test needs a genuine raw/view
@@ -44,8 +45,9 @@ _ENUM_STATUS = {'type': 'string', 'enum': ['draft', 'submitted', 'approved']}
 
 
 class TestNoOpWhenAbsent:
-    """Zero entities carry x-state-machines yet, anywhere (庚's opt-in
-    guarantee) — the pointer map's own absence must never be flagged."""
+    """Zero entities carry x-state-machines yet, anywhere (the design's
+    opt-in guarantee) — the pointer map's own absence must never be
+    flagged."""
 
     def test_no_pointer_map_at_all_passes(self):
         schema = {'definitions': {'widget': _widget(status_field=_ENUM_STATUS)}}

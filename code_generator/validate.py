@@ -2365,11 +2365,13 @@ def validate_schema(schema: dict) -> None:
 
     # -----------------------------------------------------------------------
     # 16. x-state-machines precondition guard (Issue #696, state-transition
-    #     Stage 1 PR1, cmd_1121; state-transition-generator-design.md
-    #     乙/丙/己). No-op when the top-level pointer map is absent (opt-in
-    #     guarantee, 庚) — PR1 implements only the 3 cases that don't require
-    #     reading a pointed-to .mmd file's own contents (states/edges); the
-    #     Mermaid parser and the remaining 5 己 cases are PR2's scope.
+    #     Stage 1 PR1; see state-transition-generator-design.md's input-
+    #     placement, existing-mechanism-boundary, and diagram-validation
+    #     sections). No-op when the top-level pointer map is absent (the
+    #     design's opt-in guarantee) — PR1 implements only the 3 cases that
+    #     don't require reading a pointed-to .mmd file's own contents
+    #     (states/edges); the Mermaid parser and the remaining 5 diagram-
+    #     content validation cases are PR2's scope.
     # -----------------------------------------------------------------------
     _state_machine_pointers = schema.get('x-state-machines')
     if _state_machine_pointers:
@@ -2395,7 +2397,7 @@ def validate_schema(schema: dict) -> None:
                 errors.append(
                     f"x-state-machines key {_sm_key!r} must be of the form "
                     f"'{{model}}.{{field}}' (state-transition-generator-"
-                    f"design.md 乙)."
+                    f"design.md's input-placement section)."
                 )
                 continue
             _sm_model, _sm_field = _sm_key.rsplit('.', 1)
@@ -2452,7 +2454,8 @@ def validate_schema(schema: dict) -> None:
                         f"nowhere to map onto otherwise."
                     )
 
-            # Case E (丙 "Import and scheduled execution") — entity-level,
+            # Case E ("Import and scheduled execution" in the design doc's
+            # existing-mechanism-boundary section) — entity-level,
             # independent of whether the field itself validated above.
             # Mirrors import_service_call_feasible's exact formula
             # (build_context.py ~line 2064 `import_eligible` / ~line 1666
@@ -2499,8 +2502,8 @@ def validate_schema(schema: dict) -> None:
                     f"({'; '.join(_sm_reasons)}) — a state-transition-"
                     f"governed entity must never combine with the import "
                     f"route's unconverged raw-transaction fallback branch "
-                    f"(state-transition-generator-design.md 丙 'Import and "
-                    f"scheduled execution', Case E)."
+                    f"(state-transition-generator-design.md's 'Import and "
+                    f"scheduled execution' section, Case E)."
                 )
 
     # -----------------------------------------------------------------------
