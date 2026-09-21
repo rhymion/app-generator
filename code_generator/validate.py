@@ -667,15 +667,24 @@ def _entity_has_writable_embedded_child(model: str, model_def: dict, schema: dic
     `child_has_own_write_capability`, `get_approval_lines_props`), not a
     re-derivation of their internals.
 
-    Known simplification: uses `model_def` (the raw, `_raw_def()`-resolved
-    entity) as the source of both `properties` and `x-relationships` /
-    `x-approval-lines`. This is exact for the common (non-split) entity
-    shape every named PR1 opt-in target uses (`shipment_line`,
-    `goods_receipt`, `goods_receipt_line`) — a single definitions entry, no
-    raw/view split. For a Stage-4 raw/view-split entity, `_extract_children`
-    walks the VIEW entity's own properties, which can differ from the raw
-    entity's; that divergence is not resolved here and is a known PR1 gap,
-    not a silent one.
+    Property source: `get_entity_properties(model, schema)` — the same
+    allOf-merge helper cross-file callers use elsewhere in this file for the
+    identical raw/view divergence (see the §2 / §15.9 comments above) —
+    rather than `model_def.get('properties')` alone. A Stage-4 raw/view-split
+    entity declares an embedded child's array property (`lines` etc.) only
+    on the VIEW half's `allOf` extension, never on the raw entity `model_def`
+    itself resolves to; reading `model_def.get('properties')` directly missed
+    every such child (confirmed against `goods_receipt` in a real schema —
+    `lines` lives on the view's `allOf[1].properties`, not on `__goods_receipt`).
+    `x-relationships` and `x-approval-lines` (via `get_approval_lines_props`)
+    still read off `model_def` (raw) — `x-approval-lines` is a Category C,
+    entity-level key that always lives there. `x-relationships` is itself a
+    Category D / view-level key like `properties`/`required`, so the same
+    divergence can in principle apply to it too; this remains unresolved here
+    (no named PR1 opt-in target's embedded child currently declares an
+    `x-relationships` entry, so it does not change this function's answer for
+    any of them today) and is a known remaining simplification, not a silent
+    one.
 
     Conservative on purpose: a false positive here (reporting a writable
     child build_context.py would not actually treat as such) only makes
@@ -684,7 +693,7 @@ def _entity_has_writable_embedded_child(model: str, model_def: dict, schema: dic
     actually matter, and every branch below reuses build_context.py's own
     formula pieces exactly rather than approximating them.
     """
-    props = model_def.get('properties') or {}
+    props = get_entity_properties(model, schema)
     x_relationships = model_def.get('x-relationships') or {}
     approval_lines_props = set(get_approval_lines_props(model_def, model, schema))
     defs = schema.get('definitions', {})
@@ -2474,18 +2483,19 @@ def validate_schema(schema: dict) -> None:
             _sm_has_writable_child = _entity_has_writable_embedded_child(
                 _sm_model, _sm_model_def, schema
             )
-            _sm_import_service_call_feasible = (
-                _sm_import_eligible and not _sm_has_bridge
-                and not _sm_has_writable_child
+            # An entity that is not import-eligible at all has no import
+            # route (generate.py only writes app/api/<entity>/import/route.ts
+            # when import_eligible is true) — with no import route, there is
+            # no unconverged raw-transaction branch for Case E to guard
+            # against, so import-ineligibility alone is never a rejection
+            # reason. Only reject when import IS possible and it would also
+            # have to carry a bridge or an embedded child through that route.
+            _sm_import_service_call_feasible = not (
+                _sm_import_eligible and (_sm_has_bridge or _sm_has_writable_child)
             )
 
             if not _sm_import_service_call_feasible:
                 _sm_reasons = []
-                if not _sm_import_eligible:
-                    _sm_reasons.append(
-                        'is not import-eligible (no x-import-key, import '
-                        'disabled, or neither new nor edit)'
-                    )
                 if _sm_has_bridge:
                     _sm_reasons.append(
                         'has a new-form x-bridge parent-selection field'

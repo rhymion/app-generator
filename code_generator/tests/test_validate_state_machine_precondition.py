@@ -16,9 +16,16 @@ guarantee).
 
 Fixtures use a single, non-split `widget` definitions entry unless a test's
 own docstring says otherwise (the (ii) alias test needs a genuine raw/view
-split to exercise the '__' collision) — matching the shape every named PR1
-opt-in target uses (shipment_line, goods_receipt, goods_receipt_line): a
-single definitions entry, no Stage-4 raw/view split.
+split to exercise the '__' collision). Every named PR1 opt-in target
+(shipment_line, goods_receipt, goods_receipt_line) is in fact a Stage-4
+raw/view-split entity in its real schema (app-template/inventory-app
+develop, confirmed by generating each one's actual intermediate schema) —
+an earlier version of this comment claimed the opposite ("a single
+definitions entry, no split"), which was never checked against the real
+schemas and was wrong. `TestRealSchemaShapes` below uses trimmed but
+structurally faithful (real raw/view split, real key placement) fixtures
+for exactly these three entities so the split shape is exercised directly,
+not just abstractly via `widget`.
 """
 import pytest
 from validate import validate_schema, SchemaValidationError
@@ -155,20 +162,43 @@ class TestCaseII_AmbiguousPointerEntries:
 
 
 class TestCaseIII_ImportServiceCallFeasibility:
-    """Case E: entity carries a pointer entry AND import_service_call_feasible
-    is False."""
+    """Case E: entity carries a pointer entry, import IS possible for it, and
+    that import path would also have to carry a bridge or an embedded child
+    it can't converge through the service layer.
 
-    def test_not_import_eligible_errors(self):
+    Correction (this entity's own doubt, raised and confirmed against the
+    real generator's output): import-ineligibility alone is no longer a
+    rejection reason. `generate.py` only writes
+    `app/api/<entity>/import/route.ts` when `import_eligible` is true — an
+    entity with no import route has no unconverged raw-transaction branch
+    for Case E to guard against in the first place, so rejecting it bought
+    nothing. This was checked by generating a real target entity's actual
+    output directory and confirming no `import/` route exists there when
+    `import_eligible` is false; the earlier test below asserted the
+    opposite (reject) purely from the formula's shape, never against a
+    real generated tree."""
+
+    def test_not_import_eligible_passes(self):
+        """No x-import-key at all -- import_eligible is false, so there is no
+        import route and nothing for Case E to guard against."""
         schema = {
             'definitions': {
                 'widget': _widget(status_field=_ENUM_STATUS, with_import=False),
             },
             'x-state-machines': {'widget.status': 'sm/x.mmd'},
         }
-        with pytest.raises(SchemaValidationError, match='Case E'):
-            validate_schema(schema)
+        validate_schema(schema)  # must not raise
 
-    def test_new_and_edit_both_false_errors(self):
+    def test_new_and_edit_both_false_caught_by_import_key_eligibility_not_case_e(self):
+        """x-import-key present but both new and edit disabled: import_eligible
+        is false here too (no create/update route to receive imported rows),
+        so Case E itself does not fire -- but this exact shape is already
+        rejected by a separate, pre-existing, more specific check
+        (E_IMPORT_KEY_NOT_ELIGIBLE, in validate_import_eligibility) that
+        fires on the same underlying fact (x-import-key declared with no
+        route able to use it). Confirmed by running this fixture and reading
+        the actual error raised, not assumed from the E_IMPORT_KEY_NOT_ELIGIBLE
+        name alone."""
         schema = {
             'definitions': {
                 'widget': _widget(
@@ -178,8 +208,9 @@ class TestCaseIII_ImportServiceCallFeasibility:
             },
             'x-state-machines': {'widget.status': 'sm/x.mmd'},
         }
-        with pytest.raises(SchemaValidationError, match='Case E'):
+        with pytest.raises(SchemaValidationError, match='E_IMPORT_KEY_NOT_ELIGIBLE') as excinfo:
             validate_schema(schema)
+        assert 'Case E' not in str(excinfo.value)
 
     def test_new_form_bridge_errors(self):
         schema = {
@@ -253,5 +284,200 @@ class TestCaseIII_ImportServiceCallFeasibility:
         schema = {
             'definitions': {'widget': _widget(status_field=_ENUM_STATUS)},
             'x-state-machines': {'widget.status': 'sm/x.mmd'},
+        }
+        validate_schema(schema)  # must not raise
+
+
+class TestRealSchemaShapes:
+    """The three named PR1 opt-in targets (shipment_line, goods_receipt,
+    goods_receipt_line), as trimmed-but-structurally-faithful copies of
+    their REAL intermediate schema shape — generated with this repo's own
+    `build_user_schema.py` against app-template's and inventory-app's real
+    develop-branch `json_schema.yaml`/`schema.prisma` and inspected directly
+    (not reconstructed from memory or from the design doc's prose). Every
+    fixture here is a genuine Stage-4 raw/view split: scalar/FK properties
+    and Category C keys (x-import-key, x-approval-lines) on the '__'-raw
+    entity, x-generate/x-relationships and any embedded-child array
+    property on the bare view entity's own allOf extension -- exactly the
+    shape the properties-merge fix above exists to handle correctly.
+
+    Trimmed fields (removed only where irrelevant to Case E's own
+    computation: unrelated FK columns, x-display/x-nav, non-status enum
+    values) -- the raw/view split shape, key placement, and every field
+    Case E actually reads are kept faithful to the real schemas."""
+
+    def test_goods_receipt_rejected_import_eligible_with_writable_child(self):
+        """goods_receipt (app-template develop): x-import-key present (new/
+        edit both true) -- import-eligible -- AND embeds `lines`
+        (goods_receipt_line, x-generate.new/edit/delete all false -- no
+        write path of its own) only on the VIEW's allOf extension. Before
+        the properties-merge fix, `lines` was invisible (read off the raw
+        entity alone) and this entity wrongly passed Case E -- reproduced
+        directly here against the real schema shape."""
+        schema = {
+            'definitions': {
+                '__goods_receipt': {
+                    'type': 'object',
+                    'required': ['id', 'receipt_no'],
+                    'properties': {
+                        'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'},
+                        'receipt_no': {'type': 'string'},
+                        'status': {'type': 'string', 'enum': ['draft', 'confirmed', 'cancelled']},
+                    },
+                    'x-import-key': ['receipt_no'],
+                    'x-approval-lines': ['lines'],
+                },
+                'goods_receipt': {
+                    'allOf': [
+                        {'$ref': '#/definitions/__goods_receipt'},
+                        {
+                            'type': 'object',
+                            'required': ['lines'],
+                            'properties': {
+                                'lines': {'type': 'array', 'items': {'$ref': '#/definitions/goods_receipt_line'}},
+                            },
+                        },
+                    ],
+                    'x-generate': {'list': True, 'view': True, 'new': True, 'edit': True, 'delete': True, 'api': True, 'invalidate': False, 'test': True},
+                },
+                '__goods_receipt_line': {
+                    'type': 'object',
+                    'required': ['id', 'goods_receipt_id'],
+                    'properties': {
+                        'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'},
+                        'goods_receipt_id': {'type': 'string'},
+                        'status': {'type': 'string', 'enum': ['pending', 'split', 'rejected']},
+                    },
+                },
+                'goods_receipt_line': {
+                    'allOf': [{'$ref': '#/definitions/__goods_receipt_line'}],
+                    'x-generate': {'list': True, 'view': True, 'new': False, 'edit': False, 'delete': False, 'api': False, 'invalidate': False, 'test': True},
+                },
+            },
+            'x-state-machines': {'goods_receipt.status': 'sm/goods_receipt_status.mmd'},
+        }
+        with pytest.raises(SchemaValidationError, match='Case E') as excinfo:
+            validate_schema(schema)
+        assert 'embedded child' in str(excinfo.value)
+
+    def test_goods_receipt_line_passes_not_import_eligible(self):
+        """goods_receipt_line (app-template develop): no x-import-key of its
+        own -- import_eligible is false -- so it must pass regardless of the
+        embedded-child fix above. goods_receipt_line's real generated output
+        has no import/ route at all (confirmed by running generate.py
+        against the real schema), reproduced here as a schema-level
+        fixture."""
+        schema = {
+            'definitions': {
+                '__goods_receipt': {
+                    'type': 'object',
+                    'required': ['id', 'receipt_no'],
+                    'properties': {
+                        'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'},
+                        'receipt_no': {'type': 'string'},
+                        'status': {'type': 'string', 'enum': ['draft', 'confirmed', 'cancelled']},
+                    },
+                    'x-import-key': ['receipt_no'],
+                    'x-approval-lines': ['lines'],
+                },
+                'goods_receipt': {
+                    'allOf': [
+                        {'$ref': '#/definitions/__goods_receipt'},
+                        {
+                            'type': 'object',
+                            'required': ['lines'],
+                            'properties': {
+                                'lines': {'type': 'array', 'items': {'$ref': '#/definitions/goods_receipt_line'}},
+                            },
+                        },
+                    ],
+                    'x-generate': {'list': True, 'view': True, 'new': True, 'edit': True, 'delete': True, 'api': True, 'invalidate': False, 'test': True},
+                },
+                '__goods_receipt_line': {
+                    'type': 'object',
+                    'required': ['id', 'goods_receipt_id'],
+                    'properties': {
+                        'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'},
+                        'goods_receipt_id': {'type': 'string'},
+                        'status': {'type': 'string', 'enum': ['pending', 'split', 'rejected']},
+                    },
+                    # no x-import-key -- goods_receipt_line has no import route at all
+                },
+                'goods_receipt_line': {
+                    'allOf': [
+                        {'$ref': '#/definitions/__goods_receipt_line'},
+                        {'type': 'object', 'properties': {
+                            'goods_receipt': {'$ref': '#/definitions/goods_receipt'},
+                        }},
+                    ],
+                    'x-generate': {'list': True, 'view': True, 'new': False, 'edit': False, 'delete': False, 'api': False, 'invalidate': False, 'test': True},
+                },
+            },
+            'x-state-machines': {'goods_receipt_line.status': 'sm/goods_receipt_line_status.mmd'},
+        }
+        validate_schema(schema)  # must not raise
+
+    def test_shipment_line_passes_import_eligible_no_writable_child(self):
+        """shipment_line (inventory-app develop): x-import-key present (new/
+        edit both true) -- import-eligible -- but has no embedded child of
+        its own (only scalar/FK fields plus FK label $refs on the view
+        extension, no array property). Exercises the properties-merge fix
+        on a real split entity that must still pass -- confirms the fix is
+        not overly broad."""
+        schema = {
+            'definitions': {
+                'item': {
+                    'type': 'object',
+                    'required': ['id', 'sku'],
+                    'properties': {
+                        'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'},
+                        'sku': {'type': 'string'},
+                    },
+                    'x-generate': {'list': True, 'view': True, 'new': True, 'edit': True, 'delete': True, 'api': True, 'invalidate': False, 'test': True},
+                },
+                '__shipment': {
+                    'type': 'object',
+                    'required': ['id', 'shipment_number'],
+                    'properties': {
+                        'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'},
+                        'shipment_number': {'type': 'string'},
+                        'status': {'type': 'string', 'enum': ['pending', 'shipped', 'delivered', 'cancelled']},
+                    },
+                    'x-import-key': ['shipment_number'],
+                },
+                'shipment': {
+                    'allOf': [
+                        {'$ref': '#/definitions/__shipment'},
+                        {'type': 'object', 'required': ['shipment_lines'], 'properties': {
+                            'shipment_lines': {'type': 'array', 'items': {'$ref': '#/definitions/shipment_line'}},
+                        }},
+                    ],
+                    'x-generate': {'list': True, 'view': True, 'new': True, 'edit': True, 'delete': True, 'api': True, 'invalidate': False, 'search': True, 'test': True},
+                    'x-relationships': {'shipment_lines': {'type': 'one-to-many', 'target': 'shipment_line', 'labelField': 'item.sku'}},
+                },
+                '__shipment_line': {
+                    'type': 'object',
+                    'required': ['id', 'shipment_id', 'item_id', 'quantity_shipped'],
+                    'properties': {
+                        'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'},
+                        'shipment_id': {'type': 'string', 'x-relationship': {'type': 'many-to-one', 'target': 'shipment', 'labelField': 'shipment_number'}},
+                        'item_id': {'type': 'string', 'x-relationship': {'type': 'many-to-one', 'target': 'item', 'labelField': 'sku'}},
+                        'quantity_shipped': {'type': 'integer'},
+                        'status': {'type': 'string', '_prisma_native_enum_type': 'ShipmentLineStatus', 'enum': ['picked', 'packed']},
+                    },
+                    'x-import-key': ['item.sku', 'shipment.shipment_number'],
+                },
+                'shipment_line': {
+                    'allOf': [
+                        {'$ref': '#/definitions/__shipment_line'},
+                        {'type': 'object', 'properties': {
+                            'shipment': {'$ref': '#/definitions/shipment'},
+                            'item': {'$ref': '#/definitions/item'},
+                        }},
+                    ],
+                    'x-generate': {'list': True, 'view': True, 'new': True, 'edit': True, 'delete': True, 'api': True, 'invalidate': False, 'search': False, 'test': False},
+                },
+            },
+            'x-state-machines': {'shipment_line.status': 'sm/shipment_line_status.mmd'},
         }
         validate_schema(schema)  # must not raise
