@@ -1438,6 +1438,22 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         schema['definitions'].get(f'__{model}', {}) or schema['definitions'].get(model, {}),
         schema.get('definitions', {}),
     )
+    # x-state-machines (Issue #696, Stage 1 PR1): a top-level pointer map,
+    # `{model}.{field}: path/to.mmd` (state-transition-generator-design.md's
+    # input-placement section, finalized Option B). PR1 only needs to know
+    # WHICH (model, field) pairs are governed -- reading a pointed-to .mmd
+    # file's own contents (states, edges) is PR2's scope, once the Mermaid
+    # parser exists. Exposed here as a plain field-name set so downstream
+    # code/templates can later query "is this field governed by a state
+    # machine" without re-parsing the pointer map themselves. Nothing
+    # consumes this key yet in PR1 -- an unused context key does not change
+    # any template output (the design's opt-in guarantee).
+    state_machine_fields = {
+        _key.split('.', 1)[1]
+        for _key in (schema.get('x-state-machines') or {})
+        if '.' in _key and _key.split('.', 1)[0] == model
+    }
+
     # Inject parent-side bridge FK props synthesized from new-form x-bridge declarations
     # on child entities that list this model as a parent. These FKs look like
     # one-to-one_bridge relations so the existing OTO machinery handles auto-create/include.
@@ -4091,4 +4107,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         # GDPR mode: model-level and field-level x-gdpr-mode annotations.
         model_gdpr_mode=model_gdpr_mode,
         gdpr_mode_fields=gdpr_mode_fields,
+        # x-state-machines (Issue #696, Stage 1 PR1): field names on this
+        # model governed by a state-transition pointer entry. Unused by any
+        # template in PR1 -- see the state_machine_fields comment above.
+        state_machine_fields=state_machine_fields,
     )

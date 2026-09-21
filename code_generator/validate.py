@@ -13,13 +13,16 @@ can catch it and print a clean message without a traceback.
 import re
 from pathlib import Path
 
+from build_context import _raw_def
+from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import resolve_label_paths
 from helpers.naming import to_pascal_case
 from helpers.schema_helpers import (
     get_parent_relationships, get_internal_bridge_fk_prop_names,
     get_entity_properties, get_entity_required, get_self_only_flags,
     get_direct_attachment_fk_props, schema_has_direct_attachment_fk,
-    is_write_only_prop,
+    is_write_only_prop, get_approval_lines_props, is_optional_fk_to_parent,
+    child_has_own_write_capability, _get_actual_type,
 )
 from keys import x_approval as approval_key
 from manifest import sha256_file
@@ -642,6 +645,81 @@ def _compute_export_visibility(def_key: str, defn: dict, defs: dict) -> tuple[se
         if isinstance(r['label_field'], str)
     }
     return export_scalar_fields, fk_display_cols
+
+
+def _entity_has_writable_embedded_child(model: str, model_def: dict, schema: dict) -> bool:
+    """Schema-level mirror of write_ch's non-emptiness (build_context.py's
+    embedded_ch ~line 2787 / write_ch ~line 2804, narrowing children_raw
+    ~line 1426 via `_build_child_data()`'s per-child use_connect/
+    nested_writable derivation ~lines 521-720) — kept in sync by hand, same
+    convention as `_compute_export_visibility` above (cmd_394 §8). Used only
+    by Case E (see `validate_schema()` §16 below).
+
+    validate_schema() runs before extract_entities()/build_context() in
+    generate.py's pipeline (generate.py lines 924/935/1040), so neither
+    entity['children'] nor build_context()'s per-child flags exist yet here.
+    This reproduces the same (name, property_name, output_type,
+    relationship) walk generate_types.py's `_extract_children()` performs —
+    importing that function here would be circular (generate_types.py
+    imports SchemaValidationError from this module) — using the SAME
+    schema-level helper functions build_context.py itself calls for the
+    downstream per-child flags (`is_optional_fk_to_parent`,
+    `child_has_own_write_capability`, `get_approval_lines_props`), not a
+    re-derivation of their internals.
+
+    Known simplification: uses `model_def` (the raw, `_raw_def()`-resolved
+    entity) as the source of both `properties` and `x-relationships` /
+    `x-approval-lines`. This is exact for the common (non-split) entity
+    shape every named PR1 opt-in target uses (`shipment_line`,
+    `goods_receipt`, `goods_receipt_line`) — a single definitions entry, no
+    raw/view split. For a Stage-4 raw/view-split entity, `_extract_children`
+    walks the VIEW entity's own properties, which can differ from the raw
+    entity's; that divergence is not resolved here and is a known PR1 gap,
+    not a silent one.
+
+    Conservative on purpose: a false positive here (reporting a writable
+    child build_context.py would not actually treat as such) only makes
+    Case E MORE strict, matching this file's fail-closed default. A false
+    negative — missing a real writable child — is the direction that would
+    actually matter, and every branch below reuses build_context.py's own
+    formula pieces exactly rather than approximating them.
+    """
+    props = model_def.get('properties') or {}
+    x_relationships = model_def.get('x-relationships') or {}
+    approval_lines_props = set(get_approval_lines_props(model_def, model, schema))
+    defs = schema.get('definitions', {})
+
+    for prop_name, prop_def in props.items():
+        if not isinstance(prop_def, dict) or prop_def.get('type') != 'array':
+            continue
+        ref = (prop_def.get('items') or {}).get('$ref')
+        if not ref:
+            continue
+        child_name = ref.split('/')[-1]
+        child_def = defs.get(child_name)
+        if not isinstance(child_def, dict):
+            continue
+
+        output_type = prop_def.get('x-outputType') or prop_def.get('outputType')
+        if output_type == 'comments':
+            continue  # excluded by non_comment_ch (build_context.py ~line 2730)
+
+        rel_info = x_relationships.get(prop_name) or {}
+        is_many_to_many = rel_info.get('type') == 'many-to-many'
+        is_optional_fk_list = (
+            output_type == 'list' and not is_many_to_many
+            and is_optional_fk_to_parent(child_def, model)
+        )
+        use_connect = is_many_to_many or child_name == model or is_optional_fk_list
+        is_independent = (
+            not is_many_to_many
+            and child_has_own_write_capability(child_def.get('x-generate'))
+        )
+        nested_writable = (not is_independent) or (prop_name in approval_lines_props)
+
+        if use_connect or nested_writable:
+            return True
+    return False
 
 
 def validate_schema(schema: dict) -> None:
@@ -2284,6 +2362,149 @@ def validate_schema(schema: dict) -> None:
             f"docs/knowledge/scheduled-task-operations.md). Reduce the number of "
             f"distinct task_ids, or dispatch multiple filters from within one handler."
         )
+
+    # -----------------------------------------------------------------------
+    # 16. x-state-machines precondition guard (Issue #696, state-transition
+    #     Stage 1 PR1; see state-transition-generator-design.md's input-
+    #     placement, existing-mechanism-boundary, and diagram-validation
+    #     sections). No-op when the top-level pointer map is absent (the
+    #     design's opt-in guarantee) — PR1 implements only the 3 cases that
+    #     don't require reading a pointed-to .mmd file's own contents
+    #     (states/edges); the Mermaid parser and the remaining 5 diagram-
+    #     content validation cases are PR2's scope.
+    # -----------------------------------------------------------------------
+    _state_machine_pointers = schema.get('x-state-machines')
+    if _state_machine_pointers:
+        if not isinstance(_state_machine_pointers, dict):
+            errors.append(
+                f"x-state-machines must be a mapping of '{{model}}.{{field}}: "
+                f"path/to.mmd' entries, got "
+                f"{type(_state_machine_pointers).__name__}."
+            )
+            _state_machine_pointers = {}
+
+        # (ii) ambiguity — two entries naming the same (model, field) pair.
+        # A literal duplicate YAML key can't survive yaml.safe_load (the
+        # later occurrence silently wins, so by the time this dict exists
+        # there is only one) — the real way two distinct keys collide is the
+        # raw/view '__' split alias (e.g. 'goods_receipt.status' and
+        # '__goods_receipt.status' naming the identical underlying model +
+        # field). Strip a leading '__' from the model segment before
+        # comparing.
+        _sm_resolved_pairs: dict[tuple[str, str], list[str]] = {}
+        for _sm_key in _state_machine_pointers:
+            if not isinstance(_sm_key, str) or '.' not in _sm_key:
+                errors.append(
+                    f"x-state-machines key {_sm_key!r} must be of the form "
+                    f"'{{model}}.{{field}}' (state-transition-generator-"
+                    f"design.md's input-placement section)."
+                )
+                continue
+            _sm_model, _sm_field = _sm_key.rsplit('.', 1)
+            _sm_model_resolved = _sm_model[2:] if _sm_model.startswith('__') else _sm_model
+            _sm_resolved_pairs.setdefault((_sm_model_resolved, _sm_field), []).append(_sm_key)
+
+        for (_pair_model, _pair_field), _owning_keys in _sm_resolved_pairs.items():
+            if len(_owning_keys) > 1:
+                errors.append(
+                    f"x-state-machines: {sorted(_owning_keys)!r} all name the "
+                    f"same (model, field) pair ({_pair_model!r}, "
+                    f"{_pair_field!r}) — ambiguous, which diagram governs? "
+                    f"Each governed (model, field) pair must have exactly "
+                    f"one pointer entry."
+                )
+
+        # (i) field existence/type, and Case E, per declared pointer entry.
+        for _sm_key, _sm_path in _state_machine_pointers.items():
+            if not isinstance(_sm_key, str) or '.' not in _sm_key:
+                continue  # already reported above
+            _sm_model, _sm_field = _sm_key.rsplit('.', 1)
+            _sm_model_def = _raw_def(_sm_model, schema)
+            _sm_model_props = _sm_model_def.get('properties') or {}
+
+            if 'id' not in _sm_model_props:
+                errors.append(
+                    f"x-state-machines['{_sm_key}']: model '{_sm_model}' "
+                    f"does not exist in this schema."
+                )
+                continue
+
+            _sm_field_def = _sm_model_props.get(_sm_field)
+            if _sm_field_def is None:
+                errors.append(
+                    f"x-state-machines['{_sm_key}']: model '{_sm_model}' has "
+                    f"no field '{_sm_field}'."
+                )
+            else:
+                _sm_is_enum_like = (
+                    bool(_sm_field_def.get('_prisma_native_enum_type'))
+                    or (
+                        isinstance(_sm_field_def.get('enum'), list)
+                        and bool(_sm_field_def.get('enum'))
+                    )
+                )
+                if not _sm_is_enum_like:
+                    errors.append(
+                        f"x-state-machines['{_sm_key}']: field '{_sm_field}' "
+                        f"on model '{_sm_model}' is type "
+                        f"{_get_actual_type(_sm_field_def)!r} with no "
+                        f"declared enum values — a state-transition-"
+                        f"governed field must be an enum (nativeEnum or a "
+                        f"plain 'enum:' list); a diagram's state names have "
+                        f"nowhere to map onto otherwise."
+                    )
+
+            # Case E ("Import and scheduled execution" in the design doc's
+            # existing-mechanism-boundary section) — entity-level,
+            # independent of whether the field itself validated above.
+            # Mirrors import_service_call_feasible's exact formula
+            # (build_context.py ~line 2064 `import_eligible` / ~line 1666
+            # `bridge_child_params_str` / ~line 2804 `write_ch` / ~line 3842
+            # `import_service_call_feasible` itself).
+            _sm_gen_cfg = _sm_model_def.get('x-generate') or {}
+            _sm_has_import_key = bool(_sm_model_def.get('x-import-key') or [])
+            _sm_import_flag = _sm_gen_cfg.get('import', True) is not False
+            _sm_can_create = _sm_gen_cfg.get('new', True) is not False
+            _sm_can_update = _sm_gen_cfg.get('edit', True) is not False
+            _sm_import_eligible = (
+                _sm_has_import_key and _sm_import_flag
+                and (_sm_can_create or _sm_can_update)
+            )
+            _sm_has_bridge = bool(get_new_form_bridge(_sm_model_def))
+            _sm_has_writable_child = _entity_has_writable_embedded_child(
+                _sm_model, _sm_model_def, schema
+            )
+            _sm_import_service_call_feasible = (
+                _sm_import_eligible and not _sm_has_bridge
+                and not _sm_has_writable_child
+            )
+
+            if not _sm_import_service_call_feasible:
+                _sm_reasons = []
+                if not _sm_import_eligible:
+                    _sm_reasons.append(
+                        'is not import-eligible (no x-import-key, import '
+                        'disabled, or neither new nor edit)'
+                    )
+                if _sm_has_bridge:
+                    _sm_reasons.append(
+                        'has a new-form x-bridge parent-selection field'
+                    )
+                if _sm_has_writable_child:
+                    _sm_reasons.append(
+                        'has an embedded child the parent must '
+                        'nested-create/update'
+                    )
+                errors.append(
+                    f"x-state-machines['{_sm_key}'] (Case E): model "
+                    f"'{_sm_model}' carries a state-transition pointer "
+                    f"entry but its import_service_call_feasible is False "
+                    f"({'; '.join(_sm_reasons)}) — a state-transition-"
+                    f"governed entity must never combine with the import "
+                    f"route's unconverged raw-transaction fallback branch "
+                    f"(state-transition-generator-design.md's 'Import and "
+                    f"scheduled execution' section, Case E)."
+                )
 
     # -----------------------------------------------------------------------
     # Report
