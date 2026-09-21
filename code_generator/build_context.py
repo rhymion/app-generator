@@ -2067,17 +2067,35 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
 
     # ────────────────────────────────────────────────────────────────
     # Import eligibility — SINGLE PLACE (deliberately left open in cmd_328; cmd_330 adds import: flag).
-    # Rule: primary entity AND x-import-key AND import:true AND (new:true OR edit:true).
+    # Rule: primary entity AND x-import-key AND import:true AND (new:true OR edit:true)
+    # AND not a new-form x-bridge child.
     # import:false suppresses (a) own import route/UI/test only.
     # (b) dotted-FK lookups by other entities are unaffected —
     #     import_key_specs is built unconditionally below regardless of this flag.
+    #
+    # New-form x-bridge child exclusion: a bridge child's parent is selected
+    # via selectedParentType/selectedParentId at create time (see
+    # bridge_child_ir above), never through a physical FK column on the
+    # child itself. CSV export therefore never emits a column identifying
+    # the parent (_compute_export_visibility in validate.py excludes every
+    # FK prop, and this bridge selection isn't a real FK column on the child
+    # anyway) — so there is no information a CSV row could carry to satisfy
+    # the parent selection on import. Adding synthetic
+    # selectedParentType/selectedParentId import columns was considered and
+    # rejected: export never emits them, so doing so would make import
+    # require a column export can't produce, breaking the round trip.
+    # Excluding the entity from import_eligible entirely is the only option
+    # that doesn't build a broken import path.
     # ────────────────────────────────────────────────────────────────
     # Import eligibility requires the entity to be a primary entity (not an alias/view).
     # e.g., 'setting' (parent) maps to 'user' (model) — only 'user' should be import-eligible.
     # This satisfies the cmd_328 guidance: "having x-import-key must not be hardcoded to imply import-eligible".
     _is_primary_entity = (parent == model)
     _import_flag       = gen_cfg.get('import', True)          # x-generate.import (cmd_330)
-    import_eligible    = _is_primary_entity and has_import_key and _import_flag and (can_create or can_update)
+    import_eligible    = (
+        _is_primary_entity and has_import_key and _import_flag and (can_create or can_update)
+        and not bridge_child_ir
+    )
     import_can_create  = import_eligible and can_create   # Tier1: x-generate.new
     import_can_update  = import_eligible and can_update   # Tier1: x-generate.edit
 
@@ -3856,18 +3874,14 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # consumed by api_import_route.ts.jinja2) -- "import creates/updates
     # the parent row only" is unchanged, only the path it takes changed.
     #
-    # Still not feasible for a bridge-child parent selection
-    # (bridge_child_params_str) -- a flat CSV row has no column that could
-    # supply `selectedParentType`/`selectedParentId`, and converging that
-    # case is a separate, later task's scope. flatten-relation params are
-    # NOT a blocker either way: route.ts's own
-    # service_args_for_create/_for_update already pass a hardcoded `null`
-    # for every one of them ("API routes don't edit flatten rels inline")
-    # -- import does exactly the same via flatten_null_args below.
-    import_service_call_feasible = (
-        import_eligible
-        and not bridge_child_params_str
-    )
+    # A bridge-child parent selection (bridge_child_params_str) is no
+    # longer a partial exception here: such an entity is excluded from
+    # import_eligible entirely (see the "Import eligibility" block above),
+    # so it never reaches this point with import_eligible true. Every
+    # entity that reaches here (import_eligible true) always converges
+    # through add/update{{parent_pascal}} -- there is no remaining
+    # unconverged fallback case, so no separate "is the service call
+    # feasible" flag is needed; import_eligible alone answers it.
 
     # Empty array/id-list literal per write_ch child, in the same order
     # child_params_for_add/_for_update declare them (write_ch itself) --
@@ -3879,39 +3893,6 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # a CSV row updating an existing parent still cannot express "these are
     # now this row's children" any more than a create row can.
     import_service_child_args = ', '.join('[]' for _ in write_ch)
-
-    # Whether an entity's import route converges through service.ts (above)
-    # and whether a field is governed by x-state-machines are independent
-    # axes -- a governed field must stay governable even when the entity's
-    # import stays on the unconverged raw-tx fallback. That fallback
-    # bypasses validateOnAdd/Update entirely, so a governed column written
-    # through it would silently skip whatever gate a future state-machine
-    # PR2 attaches there. Closed at the field level, not by an entity-wide
-    # ban: a governed column is excluded from this route's writable set the
-    # same way an UNIMPORTABLE_COLUMNS entry already is -- present in the
-    # header, silently ignored on write, reported back via skippedColumns --
-    # while staying in export_scalar_fields so CSV export/download still
-    # shows the current value. Import-key columns are excluded from this
-    # treatment: a key column's value drives row matching/creation
-    # independently of FIELD_SPECS (see keyWhere in
-    # api_import_route.ts.jinja2), so blocking it here would not actually
-    # stop the write and would only break matching -- no named
-    # x-state-machines target today uses its governed field as an import
-    # key, so this is a defensive carve-out, not an observed case.
-    import_state_machine_locked_fields = (
-        sorted(state_machine_fields & set(export_scalar_fields) - set(import_key_fields))
-        if not import_service_call_feasible else []
-    )
-    if import_state_machine_locked_fields:
-        import_field_specs = [
-            spec for spec in import_field_specs
-            if spec['name'] not in import_state_machine_locked_fields
-        ]
-        import_update_fields = [
-            f for f in import_update_fields
-            if f not in import_state_machine_locked_fields
-        ]
-        import_unimportable_columns = import_unimportable_columns + import_state_machine_locked_fields
 
     # One expression per add{{parent_pascal}}/update{{parent_pascal}} parent
     # parameter, in client_prop_infos order -- the SAME list and order
@@ -4086,7 +4067,6 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         service_args_for_create=service_args_for_create,
         service_args_for_update=service_args_for_update,
         # CSV import -> service.ts convergence (cmd_996, Issue #93; cmd_1124)
-        import_service_call_feasible=import_service_call_feasible,
         import_service_parent_args=import_service_parent_args,
         import_service_child_args=import_service_child_args,
         flatten_null_args=flatten_null_args,

@@ -26,6 +26,7 @@ from helpers.schema_helpers import (
 )
 from keys import x_approval as approval_key
 from build_context import get_uri_kind
+from helpers.bridge_direction import get_new_form_bridge
 
 
 def _raw_def(entity_name: str, schema: dict) -> dict:
@@ -7074,7 +7075,8 @@ def _seed_entity_grant_flags(bare_key: str, defs: dict, is_primary: bool) -> dic
                                      build_context.py ~line 1966-1977:
                                      primary entity AND x-import-key AND
                                      x-generate.import AND (can_create OR
-                                     can_update); `is_primary` is this
+                                     can_update) AND not a new-form
+                                     x-bridge child; `is_primary` is this
                                      candidate's own has_direct_id/
                                      is_proxy_view classification from the
                                      caller, the same distinction that
@@ -7093,8 +7095,16 @@ def _seed_entity_grant_flags(bare_key: str, defs: dict, is_primary: bool) -> dic
         defs.get(bare_key, {}).get('x-import-key')
         or defs.get(f'__{bare_key}', {}).get('x-import-key')
     )
+    # New-form x-bridge child: excluded from import eligibility the same way
+    # build_context.py's own "single place" formula is (see its comment) --
+    # export never emits a column identifying the bridge parent, so there is
+    # nothing a CSV row could supply to satisfy it.
+    _is_bridge_child = bool(get_new_form_bridge(
+        defs.get(f'__{bare_key}', {}) or defs.get(bare_key, {})
+    ))
     import_eligible = (
         is_primary and has_import_key and import_flag and (can_create or can_update)
+        and not _is_bridge_child
     )
 
     return {

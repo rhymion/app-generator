@@ -12,7 +12,7 @@ import { formatLabelValue } from '@/lib/_format';
 {% if should_filter_by_org or any_dotted_fk_needs_org_filter %}
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 {% endif %}
-{% if import_service_call_feasible and (import_can_create or import_can_update) %}
+{% if import_can_create or import_can_update %}
 // cmd_996 (Issue #93): import writes through the same service.ts convergence
 // point REST route.ts / Server Action actions.ts use, instead of a raw
 // tx.model.create/update — see the commit loop below.
@@ -63,21 +63,6 @@ const KEY_COLUMNS: string[] = {{ import_key_specs | map(attribute='csv_col') | l
 // labelField, or read-only on screen) — presence in the CSV header is rejected
 // rather than silently accepted and discarded.
 const UNIMPORTABLE_COLUMNS: string[] = {{ import_unimportable_columns | tojson }};
-{% if write_locked_fields and not import_service_call_feasible %}
-// Write-locked values (see service_validation.ts's identical concept):
-// values a field may only receive through the system. CSV import writes
-// directly via a transaction call and never runs through
-// service_validation.ts, so the same check is duplicated here.
-type WriteLockedField = { key: string; values: unknown[] };
-const WRITE_LOCKED_FIELDS: WriteLockedField[] = [
-{% for field in write_locked_fields %}
-  { key: '{{ field }}', values: {{ write_locked_values[field] | tojson }} },
-{% endfor %}
-] ;
-function findLockedViolation(data: Record<string, unknown>): WriteLockedField | undefined {
-  return WRITE_LOCKED_FIELDS.find((f) => f.key in data && f.values.includes(data[f.key]));
-}
-{% endif %}
 
 type PendingAction =
   | { op: 'create'; row: number; data: Record<string, unknown> }
@@ -417,20 +402,6 @@ export async function POST(request: NextRequest) {
           errors.push({ row: rowNum, code: 'ACCESS_DENIED', message: 'Not permitted to create this entity' });
           continue;
         }
-{% if write_locked_fields and not import_service_call_feasible %}
-        {
-          // A newly-created row has no persisted value to fall back to, so
-          // any locked value on CREATE is unconditionally rejected.
-          const _lockedViolation = findLockedViolation(data);
-          if (_lockedViolation) {
-            errors.push({
-              row: rowNum, code: 'APPROVAL_LOCKED_VALUE',
-              message: `Row ${rowNum}, column '${_lockedViolation.key}': '${data[_lockedViolation.key]}' can only be set by the system`,
-            });
-            continue;
-          }
-        }
-{% endif %}
         // keyWhere and fkData are merged in so resolved dotted-FK columns (e.g. role_id,
         // not part of FIELD_SPECS since FK columns are excluded from export_scalar_fields)
         // are actually written on create; direct key fields duplicate an already-identical
@@ -457,27 +428,6 @@ export async function POST(request: NextRequest) {
         errors.push({ row: rowNum, code: 'ACCESS_DENIED', message: 'Not permitted to update this row' });
         continue;
       }
-{% if write_locked_fields and not import_service_call_feasible %}
-      {
-        const _lockedViolation = findLockedViolation(data);
-        if (_lockedViolation) {
-          // A resubmission of the value the row already holds is not a
-          // lockdown violation -- it was already written by a prior
-          // operation.
-          const _lockedCurrent = (await prisma.{{ model }}.findUnique({
-            where: { id: existing.id },
-            select: {{ write_locked_values_select }},
-          })) as Record<string, unknown> | null;
-          if (!_lockedCurrent || _lockedCurrent[_lockedViolation.key] !== data[_lockedViolation.key]) {
-            errors.push({
-              row: rowNum, code: 'APPROVAL_LOCKED_VALUE',
-              message: `Row ${rowNum}, column '${_lockedViolation.key}': '${data[_lockedViolation.key]}' can only be set by the system`,
-            });
-            continue;
-          }
-        }
-      }
-{% endif %}
       const updateData: Record<string, unknown> = { updater_id: actorId };
 {% for f in import_update_fields %}
       updateData.{{ f }} = data.{{ f }};
@@ -489,22 +439,15 @@ export async function POST(request: NextRequest) {
 {% for spec in import_fk_specs %}
       updateData.{{ spec.result_col }} = _{{ spec.result_col }};
 {% endfor %}
-{% if import_service_call_feasible %}
       // cmd_996: update{{ parent_pascal }}'s positional signature needs a
       // value for every parent field, including key/unchanged ones
-      // updateData deliberately omits (a raw tx.update() with an absent key
-      // leaves it untouched -- fine for the raw-tx path, but
-      // validateOnUpdate's REQUIRED_FIELDS check rejects `undefined` for a
-      // still-required field like the natural key). `data` already carries
-      // every export_scalar_field's CSV value (including key columns --
-      // FIELD_SPECS is built from export_scalar_fields, not filtered by
-      // import_key_fields), so merging it under updateData (which adds
-      // updater_id and the resolved FK columns) supplies the same "resubmit
-      // the whole record" shape a REST PUT body already has.
+      // updateData deliberately omits. `data` already carries every
+      // export_scalar_field's CSV value (including key columns -- FIELD_SPECS
+      // is built from export_scalar_fields, not filtered by import_key_fields),
+      // so merging it under updateData (which adds updater_id and the
+      // resolved FK columns) supplies the same "resubmit the whole record"
+      // shape a REST PUT body already has.
       actions.push({ op: 'update', row: rowNum, id: existing.id, data: { ...data, ...updateData } });
-{% else %}
-      actions.push({ op: 'update', row: rowNum, id: existing.id, data: updateData });
-{% endif %}
 {% else %}
       errors.push({ row: rowNum, code: 'ENTITY_IMPORT_UPDATE_NOT_SUPPORTED', message: 'This entity does not support CSV-import row updates' });
 {% endif %}
@@ -543,7 +486,6 @@ export async function POST(request: NextRequest) {
 
     const commitErrors: ImportRowError[] = [];
     let succeeded = 0;
-{% if import_service_call_feasible %}
     // cmd_996 (Issue #93): each row commits through add{{ parent_pascal }}/
     // update{{ parent_pascal }} -- the same service.ts convergence point
     // REST route.ts / Server Action actions.ts call -- instead of a raw
@@ -594,35 +536,6 @@ export async function POST(request: NextRequest) {
         }
       }
     }
-{% else %}
-    await prisma.$transaction(async (tx) => {
-      for (const action of actions) {
-        try {
-          if (action.op === 'create') {
-{% if one_to_one_pre_creates %}
-{{ one_to_one_pre_creates }}
-            await tx.{{ model }}.create({
-              data: {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                ...(action.data as any),
-{{ one_to_one_fk_data_lines }}
-              },
-            });
-{% else %}
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await tx.{{ model }}.create({ data: action.data as any });
-{% endif %}
-          } else {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await tx.{{ model }}.update({ where: { id: action.id }, data: action.data as any });
-          }
-          succeeded++;
-        } catch (err) {
-          commitErrors.push({ row: action.row, code: 'WRITE_FAILED', message: err instanceof Error ? err.message : String(err) });
-        }
-      }
-    });
-{% endif %}
 
     return NextResponse.json(
       {

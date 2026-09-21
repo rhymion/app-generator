@@ -219,11 +219,21 @@ class TestFormerCaseIII_ImportConvergenceNoLongerGatesStateMachines:
         """A structurally valid new-form x-bridge (name/child/parents, per
         validate.py's own object-form requirements — unrelated to state
         machines) used to still trip Case E purely because
-        get_new_form_bridge() returned truthy. It no longer does."""
+        get_new_form_bridge() returned truthy. It no longer does.
+
+        with_import=False here: a bridge child declaring x-import-key with
+        import left enabled is now its own, separate, correctly-firing
+        E_IMPORT_KEY_NOT_ELIGIBLE case (cmd_1127 — see
+        validate_import_eligibility's bridge-child branch) — orthogonal to
+        this test's actual concern (state-machine governability doesn't
+        care whether the entity is a bridge child), so it's kept out of
+        this fixture the same way test_not_import_eligible_passes above
+        keeps import out of its own orthogonal concern."""
         schema = {
             'definitions': {
                 'widget': _widget(
                     status_field=_ENUM_STATUS,
+                    with_import=False,
                     extra={'x-bridge': {
                         'name': 'widgetable',
                         'child': 'widget',
