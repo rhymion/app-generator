@@ -351,3 +351,157 @@ class TestBulkScheduledTasksTaskIdNamespaceSharedWithEntityLevel:
         with pytest.raises(SchemaValidationError) as exc_info:
             validate_schema(schema)
         assert 'shared_task' in str(exc_info.value)
+
+
+class TestDependsOn:
+    """cmd_1148 (batch-ordering-design.md 7/8): `depends_on` -- an
+    optional key on both entity-level x-scheduled-task and top-level (bulk)
+    x-scheduled-tasks entries, naming other task_ids that must complete
+    first. Fail-closed at generate-code time for shape errors, self-
+    dependency, dangling references, and cycles."""
+
+    @staticmethod
+    def _bulk(task_id: str, depends_on: list | None = None) -> dict:
+        item = dict(_VALID_BULK, task_id=task_id, handler=f'run_{task_id}')
+        if depends_on is not None:
+            item['depends_on'] = depends_on
+        return item
+
+    def test_absent_depends_on_passes(self):
+        schema = {'definitions': {}, 'x-scheduled-tasks': [dict(_VALID_BULK)]}
+        validate_schema(schema)  # must not raise
+
+    def test_valid_bulk_depends_on_passes(self):
+        schema = {
+            'definitions': {},
+            'x-scheduled-tasks': [
+                self._bulk('a'),
+                self._bulk('b', depends_on=['a']),
+            ],
+        }
+        validate_schema(schema)  # must not raise
+
+    def test_depends_on_forward_reference_passes(self):
+        """A task may name a depends_on task_id declared later in the
+        schema than itself -- declaration order must not matter."""
+        schema = {
+            'definitions': {},
+            'x-scheduled-tasks': [
+                self._bulk('a', depends_on=['b']),
+                self._bulk('b'),
+            ],
+        }
+        validate_schema(schema)  # must not raise
+
+    def test_valid_entity_level_depends_on_passes(self):
+        schema = _schema(
+            'widget', dict(_VALID_EXPIRES, depends_on=['other_task']),
+            extra_props={'expires_at': {'type': 'string'}},
+        )
+        schema['x-scheduled-tasks'] = [self._bulk('other_task')]
+        validate_schema(schema)  # must not raise
+
+    def test_chain_of_three_passes(self):
+        """A straight dependency chain (a -> b -> c) must validate cleanly
+        -- this is the acceptance check for the design decision that
+        strict one-at-a-time ordering needs no dedicated serialization
+        mechanism, only a chain through this same depends_on graph."""
+        schema = {
+            'definitions': {},
+            'x-scheduled-tasks': [
+                self._bulk('a'),
+                self._bulk('b', depends_on=['a']),
+                self._bulk('c', depends_on=['b']),
+            ],
+        }
+        validate_schema(schema)  # must not raise
+
+    def test_depends_on_not_a_list_rejected(self):
+        schema = {
+            'definitions': {},
+            'x-scheduled-tasks': [self._bulk('a'), self._bulk('b', depends_on='a')],
+        }
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        assert 'depends_on' in str(exc_info.value)
+
+    def test_depends_on_non_string_entry_rejected(self):
+        schema = {
+            'definitions': {},
+            'x-scheduled-tasks': [self._bulk('a'), self._bulk('b', depends_on=[123])],
+        }
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        assert 'depends_on' in str(exc_info.value)
+
+    def test_depends_on_empty_string_entry_rejected(self):
+        schema = {
+            'definitions': {},
+            'x-scheduled-tasks': [self._bulk('a'), self._bulk('b', depends_on=[''])],
+        }
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        assert 'depends_on' in str(exc_info.value)
+
+    def test_self_dependency_rejected(self):
+        schema = {
+            'definitions': {},
+            'x-scheduled-tasks': [self._bulk('a', depends_on=['a'])],
+        }
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        msg = str(exc_info.value)
+        assert 'a' in msg
+        assert 'itself' in msg
+
+    def test_dangling_reference_rejected(self):
+        schema = {
+            'definitions': {},
+            'x-scheduled-tasks': [self._bulk('a', depends_on=['no_such_task'])],
+        }
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        msg = str(exc_info.value)
+        assert 'no_such_task' in msg
+        assert 'not declared' in msg
+
+    def test_two_node_cycle_rejected(self):
+        schema = {
+            'definitions': {},
+            'x-scheduled-tasks': [
+                self._bulk('a', depends_on=['b']),
+                self._bulk('b', depends_on=['a']),
+            ],
+        }
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        msg = str(exc_info.value)
+        assert 'cycle' in msg
+        assert 'a' in msg and 'b' in msg
+
+    def test_three_node_cycle_rejected(self):
+        schema = {
+            'definitions': {},
+            'x-scheduled-tasks': [
+                self._bulk('a', depends_on=['b']),
+                self._bulk('b', depends_on=['c']),
+                self._bulk('c', depends_on=['a']),
+            ],
+        }
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        msg = str(exc_info.value)
+        assert 'cycle' in msg
+
+    def test_cycle_across_entity_and_bulk_rejected(self):
+        """The depends_on graph is one shared namespace across both
+        declaration sites -- a cycle spanning entity-level and bulk tasks
+        must be caught exactly like one confined to a single site."""
+        schema = _schema(
+            'widget', dict(_VALID_EXPIRES, task_id='entity_task', depends_on=['bulk_task']),
+            extra_props={'expires_at': {'type': 'string'}},
+        )
+        schema['x-scheduled-tasks'] = [self._bulk('bulk_task', depends_on=['entity_task'])]
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_schema(schema)
+        assert 'cycle' in str(exc_info.value)
