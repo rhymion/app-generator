@@ -221,51 +221,14 @@ class TestEmbeddedChildImportConverges:
         (validateOnAdd/Update) like any other field at the
         import_unimportable_columns / import_field_specs level -- those two
         mechanisms are unaffected by state-machine governance, and remain
-        exactly as they'd be for a plain (non-governed) status field. The
-        actual Case E field-level lockout is a separate, narrower mechanism
-        (import_state_machine_locked_fields, Issue #696 Stage 1 PR2a-3) --
-        see TestStateMachineFieldLevelLockout below, which supersedes this
-        test's former claim that "no field-level lockout mechanism applies
-        here" (that was true only until PR2a-3 built the mechanism this
-        docstring now describes)."""
+        exactly as they'd be for a plain (non-governed) status field. There
+        is no separate field-level import lockout: transition legality is
+        an ordinary write-path check like any other constraint, enforced by
+        the write path itself rather than by excluding the column from
+        import."""
         ctx = build_context(_goods_receipt_entity(), _goods_receipt_schema())
         assert 'status' not in ctx['import_unimportable_columns']
         assert any(spec['name'] == 'status' for spec in ctx['import_field_specs'])
-
-
-class TestStateMachineFieldLevelLockout:
-    """Issue #696 Stage 1 PR2a-3, "Case E" field-level lockout:
-    import_state_machine_locked_fields (build_context.py) excludes a
-    state-transition-governed field from the CSV import route's writable
-    set, even though the entity itself converges cleanly through
-    add/updateGoodsReceipt (Case E's former entity-level ban is gone --
-    see the module docstring and TestEmbeddedChildImportConverges above).
-    The field remains readable (export_scalar_fields / import_field_specs
-    both still carry it, per the test above) -- only the write path is
-    closed, at the template's per-row loop that builds `data`, so it can
-    never be applied on CREATE or UPDATE regardless of what a CSV cell
-    says."""
-
-    def test_locked_fields_populated_when_state_machine_present(self):
-        ctx = build_context(_goods_receipt_entity(), _goods_receipt_schema(with_state_machine=True))
-        assert ctx['import_state_machine_locked_fields'] == ['status']
-
-    def test_locked_fields_empty_when_no_state_machine_pointer(self):
-        """Opt-in guarantee: an identical entity/schema minus the
-        x-state-machines pointer must not have any field locked."""
-        ctx = build_context(_goods_receipt_entity(), _goods_receipt_schema(with_state_machine=False))
-        assert ctx['import_state_machine_locked_fields'] == []
-
-    def test_rendered_route_declares_locked_fields_const(self):
-        ctx = build_context(_goods_receipt_entity(), _goods_receipt_schema(with_state_machine=True))
-        rendered = _render_import_route(ctx)
-        assert 'const STATE_MACHINE_LOCKED_FIELDS: string[] = ["status"];' in rendered
-        assert 'if (STATE_MACHINE_LOCKED_FIELDS.includes(spec.name)) continue;' in rendered
-
-    def test_rendered_route_locked_fields_const_empty_without_state_machine(self):
-        ctx = build_context(_goods_receipt_entity(), _goods_receipt_schema(with_state_machine=False))
-        rendered = _render_import_route(ctx)
-        assert 'const STATE_MACHINE_LOCKED_FIELDS: string[] = [];' in rendered
 
 
 class TestBridgeChildNeverImportEligible:

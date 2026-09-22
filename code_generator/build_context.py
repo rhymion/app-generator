@@ -2392,29 +2392,6 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # On UPDATE: key columns identify the row; don't overwrite them.
     import_update_fields = [f for f in export_scalar_fields if f not in import_key_fields]
 
-    # import_state_machine_locked_fields (Issue #696, Stage 1 PR2a-3 — "Case
-    # E" field-level lockout; see validate.py's comment above the
-    # x-state-machines field-shape checks and
-    # test_validate_state_machine_precondition.py's module docstring, both
-    # of which already named this exact mechanism before it existed): a
-    # field governed by an x-state-machines pointer entry must never be
-    # settable through a raw CSV-import column write — it may only change
-    # through the transition mechanism itself (a later PR), not a column
-    # overwrite that bypasses it entirely, since import converges through
-    # add/update{{parent_pascal}} (cmd_996/Issue #93) but that convergence
-    # alone does not yet stop a plain (non-readonly) governed field from
-    # being written like any other column. Reuses state_machine_fields
-    # (computed once, above) rather than recomputing which (model, field)
-    # pairs are governed. Scoped to import_eligible entities (an entity
-    # with no CSV-import writable-column set has nothing to lock a field
-    # out of) and to fields that actually reach export_scalar_fields (a
-    # governed field excluded from CSV entirely, e.g. by
-    # x-generate.fields, has no import column to lock in the first place).
-    import_state_machine_locked_fields: list[str] = (
-        sorted(f for f in state_machine_fields if f in export_scalar_fields)
-        if import_eligible else []
-    )
-
     # import_field_specs: per-column type info for coercion in template.
     _TSTYPE_MAP = {'string': 'string', 'integer': 'number', 'number': 'number', 'boolean': 'boolean'}
     import_field_specs = []
@@ -4011,7 +3988,6 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         any_dotted_fk_needs_org_filter=any_dotted_fk_needs_org_filter,
         import_update_fields=import_update_fields,
         import_field_specs=import_field_specs,
-        import_state_machine_locked_fields=import_state_machine_locked_fields,
         has_assignee_id=has_assignee_id,
         is_audited=is_audited,
         item_context_select=item_context_select,

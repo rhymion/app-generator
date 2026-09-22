@@ -31,11 +31,6 @@ _BASE_CTX = {
     # tests in this file exercise only the plain key-column path.
     'import_fk_specs': [],
     'import_unimportable_columns': [],
-    # Issue #696 Stage 1 PR2a-3 (Case E field-level lockout): empty here so
-    # pre-existing tests in this file exercise only the pre-lockout path —
-    # see test_state_machine_locked_fields_branches.py for the lockout
-    # branch itself.
-    'import_state_machine_locked_fields': [],
     'item_context_select': '{ id: true, creator_id: true }',
     # cmd_621: whether any import_fk_specs entry's import_label_expr calls
     # formatLabelValue — build_context.py computes this as
@@ -205,10 +200,7 @@ def test_unimportable_column_present_in_header_ignored_not_rejected(env):
     # any more -- only a bare filter into `skippedColumns` that flows through
     # to the eventual success responses.
     assert "code: 'UNIMPORTABLE_COLUMN'" not in rendered
-    # Issue #696 Stage 1 PR2a-3: skippedColumns now also folds in
-    # STATE_MACHINE_LOCKED_FIELDS (empty in this test's context) — see
-    # test_state_machine_locked_fields_branches.py for that branch itself.
-    assert 'const skippedColumns = [...UNIMPORTABLE_COLUMNS, ...STATE_MACHINE_LOCKED_FIELDS].filter((c) => headerFields.includes(c));' in rendered
+    assert 'const skippedColumns = UNIMPORTABLE_COLUMNS.filter((c) => headerFields.includes(c));' in rendered
     assert 'skippedColumns' in rendered
 
 

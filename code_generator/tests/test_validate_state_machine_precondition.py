@@ -11,19 +11,16 @@ state-transition-generator-design.md's diagram-validation table:
 Plus: the pointer map's own absence is a no-op (the design's opt-in
 guarantee).
 
-An entity-level "Case E" check used to live here too, rejecting a pointer
-entry outright whenever its entity's import route could not converge
-through service.ts (a bridge or an unconverged embedded child). It was
+An entity-level "Case E" check, and later a field-level CSV import lockout
+that replaced it, both used to live here / in build_context.py. Both
 removed: whether an entity's import route converges and whether one of its
 fields can be governed by a state-transition diagram are independent
-questions. The narrower real concern — an unconverged import route
-bypassing validateOnAdd/Update for a governed field — is closed at the
-field level in build_context.py instead (import_state_machine_locked_fields
-excludes the governed CSV column from that route's writable set); that
-mechanism is exercised in generators_test.py, not here, since it lives in
-build_context.py's per-model context, not validate_schema(). Former Case E
-tests below have been converted to "must not raise" — the exact shapes that
-used to be entity-level rejections.
+questions, and transition legality is an ordinary write-path check like
+any other constraint — a governed field's CSV column is imported like any
+other column, and validateOnAdd/Update is responsible for rejecting a
+value that isn't a legal transition target. Former Case E tests below have
+been converted to "must not raise" — the exact shapes that used to be
+entity-level rejections.
 
 Fixtures use a single, non-split `widget` definitions entry unless a test's
 own docstring says otherwise (the (ii) alias test needs a genuine raw/view
