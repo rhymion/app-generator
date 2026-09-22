@@ -199,6 +199,49 @@ export async function validateOnAdd(tx: TransactionClient, data: Record<string, 
 export async function validateOnUpdate(tx: TransactionClient, id: string, data: Record<string, unknown>, prevRow: Record<string, unknown> | null, actorId: string): Promise<void> {
   await validateSchemaRules(tx, data, id, prevRow, actorId);
 }
+{% if state_machine_transitions and can_update %}
+
+// State-transition gatekeeper(s) (Issue #696 Stage 1 PR2b; see
+// state-transition-generator-design.md's "Gatekeeper model"). One
+// assertTransitionAllowed{Field}() per state-transition-governed field on
+// this model -- it only decides whether the caller's own specific
+// (fromState, toState) request may proceed right now; it never selects a
+// destination itself. Called from transition{Field}() in service.ts,
+// inside the same transaction that reads the row's current state and (if
+// permitted) writes the new one -- the single convergence point every
+// entry point (UI Server Action, REST route, import, scheduled job)
+// funnels through, the same discipline x-approval's own guard checks
+// already follow in this file.
+{% for t in state_machine_transitions %}
+
+// {{ t.field }}: diagram edges from x-state-machines['{{ model }}.{{ t.field }}'].
+const STATE_MACHINE_EDGES_{{ t.field_upper }}: [string, string][] = {{ t.edges_json }};
+{% if t.approval_edges_json %}
+// {{ t.field }} is ALSO governed by this entity's own x-approval submit_on --
+// AND composition (design doc 丙): a diagram edge is only permitted if
+// x-approval's own legal-transition set permits the SAME (from, to) pair
+// too. Neither mechanism's guard widens the other's.
+const STATE_MACHINE_APPROVAL_EDGES_{{ t.field_upper }}: [string, string][] = {{ t.approval_edges_json }};
+{% endif %}
+
+export function assertTransitionAllowed{{ t.field_pascal }}(fromState: string, toState: string): void {
+  const _diagramPermits = STATE_MACHINE_EDGES_{{ t.field_upper }}.some(
+    ([from, to]) => from === fromState && to === toState,
+  );
+  if (!_diagramPermits) {
+    throw new AppError('VALIDATION', 'no such transition', '{{ t.field }}', 'invalid');
+  }
+{% if t.approval_edges_json %}
+  const _approvalPermits = STATE_MACHINE_APPROVAL_EDGES_{{ t.field_upper }}.some(
+    ([from, to]) => from === fromState && to === toState,
+  );
+  if (!_approvalPermits) {
+    throw new AppError('VALIDATION', 'transition not permitted by x-approval', '{{ t.field }}', 'invalid');
+  }
+{% endif %}
+}
+{% endfor %}
+{% endif %}
 {% if reservation_config and reservation_config.mode == 'item' and reservation_config.dateRange %}
 
 // --- reservation overlap validation (generated, cmd_139 Phase 2) ---

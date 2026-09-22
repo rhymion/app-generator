@@ -304,6 +304,40 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
 {% endif %}
 }
 {% endif %}
+{% if state_machine_transitions and can_update %}
+{% for t in state_machine_transitions %}
+
+// transition{{ t.field_pascal }} (Issue #696 Stage 1 PR2b): the one and
+// only place {{ t.field }} may move between its diagram-governed states
+// (state-transition-generator-design.md's "Gatekeeper model") -- reads the
+// row's CURRENT state server-side, inside the same transaction as the
+// check-and-apply, rather than trusting a caller-supplied fromState (avoids
+// a check-then-act race under concurrent requests). Called by every entry
+// point (UI Server Action, REST route, import, scheduled job) -- none of
+// them may write {{ t.field }} through any other path (see
+// derive_write_locked_values()'s new x-state-machines source,
+// service_validation.ts).
+export async function transition{{ t.field_pascal }}(actorId: string, id: string, toState: string): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const _current = await tx.{{ model }}.findUniqueOrThrow({ where: { id } });
+    assertTransitionAllowed{{ t.field_pascal }}(String(_current.{{ t.field }}), toState);
+    await tx.{{ model }}.update({
+      where: { id },
+      data: { {{ t.field }}: toState },
+    });
+{% if is_audited %}
+    await recordAuditEvent({
+      action: '{{ parent }}:transition_{{ t.field }}',
+      actor_user_id: actorId,
+      target_table: '{{ model }}',
+      target_id: id,
+      tx,
+    });
+{% endif %}
+  });
+}
+{% endfor %}
+{% endif %}
 {% if can_delete %}
 {% if is_audited %}
 export async function delete{{ parent_pascal }}(actorId: string | null, ids: string[]): Promise<void> {

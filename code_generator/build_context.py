@@ -25,12 +25,16 @@ from helpers.schema_helpers import (
     get_write_only_field_names,
     is_write_only_prop,
     child_has_own_write_capability,
+    derive_approval_legal_transition_edges,
 )
 from helpers.label_field import build_label_expression, render_prisma_include
 from helpers.bridge_direction import (
     collect_parent_bridge_fk_props, get_new_form_bridge,
 )
+from helpers.state_machine_parser import parse_state_machine_diagram, ParseError
+from pathlib import Path
 import copy
+import json
 import warnings
 
 # ---------------------------------------------------------------------------
@@ -1440,19 +1444,99 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     )
     # x-state-machines (Issue #696, Stage 1 PR1): a top-level pointer map,
     # `{model}.{field}: path/to.mmd` (state-transition-generator-design.md's
-    # input-placement section, finalized Option B). PR1 only needs to know
-    # WHICH (model, field) pairs are governed -- reading a pointed-to .mmd
-    # file's own contents (states, edges) is PR2's scope, once the Mermaid
-    # parser exists. Exposed here as a plain field-name set so downstream
-    # code/templates can later query "is this field governed by a state
-    # machine" without re-parsing the pointer map themselves. Nothing
-    # consumes this key yet in PR1 -- an unused context key does not change
-    # any template output (the design's opt-in guarantee).
-    state_machine_fields = {
-        _key.split('.', 1)[1]
-        for _key in (schema.get('x-state-machines') or {})
+    # input-placement section, finalized Option B). Exposed here as a plain
+    # field-name set so downstream code/templates can query "is this field
+    # governed by a state machine" without re-parsing the pointer map
+    # themselves.
+    _state_machine_field_to_path: dict[str, str] = {
+        _key.split('.', 1)[1]: _path
+        for _key, _path in (schema.get('x-state-machines') or {}).items()
         if '.' in _key and _key.split('.', 1)[0] == model
     }
+    state_machine_fields = set(_state_machine_field_to_path)
+
+    # state_machine_diagrams / state_machine_field_list (Issue #696, Stage 1
+    # PR2b): the parsed contents (states/edges/initial/terminal) of each
+    # governed field's .mmd diagram, plain-dict-shaped for direct `| tojson`
+    # template consumption (service.ts.jinja2/service_validation.ts.jinja2's
+    # gatekeeper codegen) and for derive_write_locked_values()'s new Source 3
+    # (below). Re-parses rather than reusing validate.py's own parse pass --
+    # build_context() and validate_schema() are separate, non-communicating
+    # entry points in this generator's pipeline (see validate.py's own path-
+    # resolution comment on x-state-machines for the same cwd-relative
+    # convention followed here) -- but trusts the result is well-formed
+    # without re-running 己's reachability/dead-end/duplicate/stale-ref/
+    # Case-D checks: generate-code always runs validate_schema() before
+    # build_context() (see generate.py), so a ParseError reaching here means
+    # build_context() was invoked without that precondition (e.g. directly
+    # from a test) -- raised as a hard error rather than silently degrading,
+    # matching this module's existing "trust validated input" convention.
+    state_machine_diagrams: dict[str, dict] = {}
+    for _sm_field, _sm_path in _state_machine_field_to_path.items():
+        _sm_parsed = parse_state_machine_diagram(Path(_sm_path).read_text())
+        if isinstance(_sm_parsed, ParseError):
+            raise ValueError(
+                f"build_context: x-state-machines['{model}.{_sm_field}']: "
+                f"'{_sm_path}' failed to parse ({_sm_parsed.message}) -- "
+                f"validate_schema() should have caught this before "
+                f"generate-code reached build_context()."
+            )
+        state_machine_diagrams[_sm_field] = {
+            'states': sorted(_sm_parsed.states),
+            'edges': sorted(_sm_parsed.edges),
+            'initial_states': sorted(_sm_parsed.initial_states),
+            'terminal_states': sorted(_sm_parsed.terminal_states),
+        }
+    state_machine_field_list = sorted(state_machine_fields)
+
+    # state_machine_approval_edges (Issue #696, Stage 1 PR2b; design doc 丙's
+    # composition law): per governed field ALSO governed by this entity's own
+    # x-approval submit_on, the small fixed set of (fromState, toState) pairs
+    # x-approval itself considers legal -- see
+    # derive_approval_legal_transition_edges()'s docstring for why this is a
+    # pair-level set, not Case D's flat value-level set. A field absent from
+    # this dict is either not x-approval-governed at all, or is governed by
+    # a DIFFERENT field's x-approval submit_on -- either way, no AND-
+    # composition applies to it (assertTransitionAllowed{{Field}}() skips
+    # the x-approval check entirely when its own field key is absent here).
+    state_machine_approval_edges: dict[str, list] = {}
+    for _sm_field in state_machine_field_list:
+        _sm_appr_edges = derive_approval_legal_transition_edges(model_def, _sm_field)
+        if _sm_appr_edges is not None:
+            state_machine_approval_edges[_sm_field] = sorted(_sm_appr_edges)
+
+    # state_machine_transitions (Issue #696, Stage 1 PR2b): one entry per
+    # governed field, template-ready -- field/field_pascal/field_upper
+    # names and edges/approval_edges pre-serialized to JSON strings in
+    # Python, rather than applying `pascal_case`/`tojson` filters inside
+    # the template's own `{% for %}` loop. Deliberate: those are custom
+    # filters this generator registers on ITS OWN jinja2.Environment
+    # (generate.py's _make_env()), but several existing tests render these
+    # same two templates through a bare `jinja2.Environment()` of their
+    # own (no custom filters registered) -- Jinja2 validates a filter
+    # name's existence at template COMPILE time for any filter reference
+    # inside a `{% for %}` loop, even one that never executes at render
+    # time (confirmed directly: a bare `{% if %}`-guarded filter reference
+    # compiles fine against an empty list, but the identical filter
+    # reference inside a nested `{% for %}` loop raises
+    # TemplateAssertionError at compile time regardless of the loop
+    # iterating zero times) -- so those tests' compilation of service.ts.
+    # jinja2/service_validation.ts.jinja2 would break the moment either
+    # template used `| pascal_case` or `| tojson` inside this loop, even
+    # for a schema with zero state-transition-governed fields at all.
+    state_machine_transitions: list[dict] = [
+        {
+            'field': _sm_field,
+            'field_pascal': to_pascal_case(_sm_field),
+            'field_upper': _sm_field.upper(),
+            'edges_json': json.dumps([list(e) for e in state_machine_diagrams[_sm_field]['edges']]),
+            'approval_edges_json': (
+                json.dumps([list(e) for e in state_machine_approval_edges[_sm_field]])
+                if _sm_field in state_machine_approval_edges else None
+            ),
+        }
+        for _sm_field in state_machine_field_list
+    ]
 
     # Inject parent-side bridge FK props synthesized from new-form x-bridge declarations
     # on child entities that list this model as a parent. These FKs look like
@@ -1617,7 +1701,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # canonical-vs-proxy reasoning (identical raw/view resolution problem
     # as x-readonly-fields above, applied to this different key).
     write_locked_values: dict[str, list] = derive_write_locked_values_for_view(
-        model, model_def, _view_entry, schema,
+        model, model_def, _view_entry, schema, state_machine_diagrams,
     )
     write_locked_fields: list[str] = sorted(write_locked_values)
     # Select clause to fetch an existing row's current values for the
@@ -4164,8 +4248,17 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         # GDPR mode: model-level and field-level x-gdpr-mode annotations.
         model_gdpr_mode=model_gdpr_mode,
         gdpr_mode_fields=gdpr_mode_fields,
-        # x-state-machines (Issue #696, Stage 1 PR1): field names on this
-        # model governed by a state-transition pointer entry. Unused by any
-        # template in PR1 -- see the state_machine_fields comment above.
+        # x-state-machines (Issue #696, Stage 1 PR1/PR2b): field names on
+        # this model governed by a state-transition pointer entry, their
+        # parsed diagram contents, and (where applicable) the x-approval
+        # AND-composition edge set -- see the state_machine_fields/
+        # state_machine_diagrams/state_machine_approval_edges comments
+        # above. Consumed by service.ts.jinja2/service_validation.ts.jinja2
+        # (transition{{Field}}()/assertTransitionAllowed{{Field}}()
+        # codegen).
         state_machine_fields=state_machine_fields,
+        state_machine_field_list=state_machine_field_list,
+        state_machine_diagrams=state_machine_diagrams,
+        state_machine_approval_edges=state_machine_approval_edges,
+        state_machine_transitions=state_machine_transitions,
     )

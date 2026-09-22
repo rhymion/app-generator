@@ -28,7 +28,39 @@ the same schema test_validate_state_machine_precondition.py's
 TestRealSchemaShapes uses for Case E, reused here at the build_context()/
 template level.
 """
+import pytest
 from build_context import build_context
+
+
+# PR2b (Issue #696 Stage 1): build_context() now reads and parses each
+# x-state-machines pointer entry's .mmd file off disk (previously -- PR1 --
+# it only recorded which (model, field) pairs were governed, as a name set,
+# with no file I/O) -- see build_context.py's state_machine_diagrams
+# comment. Every fixture below whose schema carries an x-state-machines
+# pointer therefore needs a real, valid .mmd file backing it, matching that
+# fixture's own status enum; chdir-ing into tmp_path (same convention as
+# test_validate_state_machine_precondition.py) keeps these files from
+# leaking between tests.
+@pytest.fixture(autouse=True)
+def _sm_tmp_cwd(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    sm_dir = tmp_path / 'sm'
+    sm_dir.mkdir()
+    (sm_dir / 'goods_receipt_status.mmd').write_text(
+        'stateDiagram-v2\n'
+        '[*] --> draft\n'
+        'draft --> confirmed\n'
+        'draft --> cancelled\n'
+        'confirmed --> [*]\n'
+        'cancelled --> [*]\n'
+    )
+    (sm_dir / 'widget_status.mmd').write_text(
+        'stateDiagram-v2\n'
+        '[*] --> draft\n'
+        'draft --> submitted\n'
+        'submitted --> approved\n'
+        'approved --> [*]\n'
+    )
 
 
 def _goods_receipt_schema(with_state_machine: bool = True) -> dict:

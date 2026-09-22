@@ -22,6 +22,7 @@ from helpers.schema_helpers import (
     get_write_only_field_names,
     get_self_only_flags,
     resolve_set_fields,
+    resolve_approval_submit_on,
     derive_post_decision_freeze_values,
 )
 from keys import x_approval as approval_key
@@ -2776,31 +2777,6 @@ def _build_approval_lines_post_create_code(
     return '\n'.join(blocks)
 
 
-def resolve_approval_submit_on(raw_def: dict) -> tuple[str | None, object]:
-    """Resolve x-approval.submit_on to a single (field, value) pair.
-
-    cmd_818 (edge-trigger integration): the field that gates
-    approval_request creation, declared the same shape as
-    on_approved/on_rejected.set_fields (a {field: value} map) rather than a
-    bare scalar, so a legacy int-enum label resolves through the same
-    resolve_set_fields() path the dispatch side already uses. Exactly one
-    entry is expected -- the edge trigger only has meaning for a single
-    field's transition. Returns (None, None) when submit_on is absent.
-    """
-    x_approval = approval_key.get_or_empty(raw_def)
-    raw = x_approval.get('submit_on') or {}
-    if not raw:
-        return None, None
-    if len(raw) > 1:
-        raise ValueError(
-            f"x-approval.submit_on: expected exactly one field, got {list(raw)}"
-        )
-    entity_props = raw_def.get('properties', {})
-    resolved = resolve_set_fields(entity_props, raw)
-    field = next(iter(resolved))
-    return field, resolved[field]
-
-
 def approval_lockdown_context(ctx: dict, schema: dict | None) -> dict:
     """cmd_846(c): post-approval edit/delete/invalidate lockdown.
 
@@ -3645,6 +3621,20 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     _validation_extras = ''
     if has_item_daterange:
         _validation_extras = ', assertNoDuplicateReservation'
+    # x-state-machines (Issue #696 Stage 1 PR2b): transition{{Field}}() in
+    # service.ts calls assertTransitionAllowed{{Field}}() from
+    # service_validation.ts -- gated on can_update (state_machine_field_list
+    # and can_update) the same way service.ts.jinja2/service_validation.
+    # ts.jinja2 themselves gate transition{{Field}}()/assertTransitionAllowed
+    # {{Field}}() emission (see those templates' own state_machine_field_list
+    # conditionals), so this import line only ever names functions that
+    # actually exist in the rendered service_validation.ts.
+    state_machine_field_list = ctx.get('state_machine_field_list') or []
+    _state_machine_names = [
+        f'assertTransitionAllowed{to_pascal_case(f)}' for f in state_machine_field_list
+    ] if (state_machine_field_list and can_update) else []
+    if _state_machine_names:
+        _validation_extras += ', ' + ', '.join(_state_machine_names)
     _pool_entity_pick = (
         f" | '{reservation_config['pool']['entity']}'" if has_item_reservation and reservation_config else ''
     )

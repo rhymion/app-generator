@@ -41,13 +41,128 @@ def resolve_set_fields(entity_props: dict, raw: dict) -> dict:
     return resolved
 
 
-def derive_write_locked_values(model_def: dict) -> dict[str, list]:
+def resolve_approval_submit_on(raw_def: dict) -> tuple[str | None, object]:
+    """Resolve x-approval.submit_on to a single (field, value) pair.
+
+    cmd_818 (edge-trigger integration): the field that gates
+    approval_request creation, declared the same shape as
+    on_approved/on_rejected.set_fields (a {field: value} map) rather than a
+    bare scalar, so a legacy int-enum label resolves through the same
+    resolve_set_fields() path the dispatch side already uses. Exactly one
+    entry is expected -- the edge trigger only has meaning for a single
+    field's transition. Returns (None, None) when submit_on is absent.
+
+    Lives here (not generators.py, where it originated) since PR2b
+    (Issue #696 state-transition Stage 1) needs to call it from
+    build_context.py, which generators.py itself imports from -- keeping
+    it in generators.py would create a circular import. schema_helpers.py
+    has no dependency on either module, matching resolve_set_fields (which
+    this function already calls) already living here for the same reason.
+    generators.py/validate.py/generate.py keep working unchanged: they
+    already import this name from generators.py, which now re-exports it
+    via its own `from helpers.schema_helpers import (..., resolve_approval_
+    submit_on, ...)` rather than defining it.
+    """
+    x_approval = approval_key.get_or_empty(raw_def)
+    raw = x_approval.get('submit_on') or {}
+    if not raw:
+        return None, None
+    if len(raw) > 1:
+        raise ValueError(
+            f"x-approval.submit_on: expected exactly one field, got {list(raw)}"
+        )
+    entity_props = raw_def.get('properties', {})
+    resolved = resolve_set_fields(entity_props, raw)
+    field = next(iter(resolved))
+    return field, resolved[field]
+
+
+def derive_approval_legal_transition_edges(model_def: dict, field: str) -> set[tuple[str, str]] | None:
+    """State-transition/x-approval AND-composition support (Issue #696
+    Stage 1 PR2b; state-transition-generator-design.md 丙's composition
+    law and Case A/B/C). For `field`, when it is ALSO the field x-approval's
+    own `submit_on` governs on this same entity, returns the small fixed
+    set of (fromState, toState) pairs x-approval itself considers legal:
+    submission (the field's own JSON-Schema `default` -> submit_on's
+    value), approval (submit_on's value -> on_approved's value), rejection
+    (submit_on's value -> on_rejected's value), and — only when the
+    rejection is non-terminal — resubmission (on_rejected's value ->
+    submit_on's value again; 846b: "the ordinary edit path... must stay
+    open in that state").
+
+    Deliberately narrower than Case D's (validate.py) own legal-VALUES set
+    (a flat union of the values above): design doc 丙's Case A requires
+    rejecting a diagram edge whose two endpoints are EACH individually a
+    legal x-approval value but whose PAIR is not one x-approval itself
+    would ever produce (e.g. a diagram's direct draft->approved edge when
+    x-approval only ever moves draft->submitted->approved) — a values-only
+    membership check cannot distinguish that from a genuinely legal edge,
+    so this function reasons about pairs, reusing resolve_approval_
+    submit_on()/resolve_set_fields() (the same building blocks Case D
+    already uses) rather than re-deriving x-approval's own set_fields
+    resolution a third time.
+
+    Returns None when this entity has no x-approval submit_on at all, or
+    when its submit_on governs a DIFFERENT field than `field` — the design's
+    field-scoped independence requirement (an x-approval entity may govern
+    a field a diagram never touches, and vice versa); callers must treat
+    None as "no AND-composition applies here", not as "reject everything".
+    """
+    x_approval = approval_key.get_or_empty(model_def)
+    submit_field, submit_value = resolve_approval_submit_on(model_def)
+    if submit_field != field:
+        return None
+
+    entity_props = model_def.get('properties', {})
+    edges: set[tuple[str, str]] = set()
+
+    default_value = (entity_props.get(field) or {}).get('default')
+    if default_value is not None:
+        edges.add((str(default_value), str(submit_value)))
+
+    on_approved_resolved = resolve_set_fields(
+        entity_props, (x_approval.get('on_approved') or {}).get('set_fields') or {},
+    )
+    if field in on_approved_resolved:
+        edges.add((str(submit_value), str(on_approved_resolved[field])))
+
+    on_rejected_block = x_approval.get('on_rejected') or {}
+    on_rejected_resolved = resolve_set_fields(
+        entity_props, on_rejected_block.get('set_fields') or {},
+    )
+    if field in on_rejected_resolved:
+        rejected_value = str(on_rejected_resolved[field])
+        edges.add((str(submit_value), rejected_value))
+        if not on_rejected_block.get('terminal'):
+            edges.add((rejected_value, str(submit_value)))
+
+    return edges
+
+
+def derive_write_locked_values(
+    model_def: dict, state_machine_diagrams: dict[str, dict] | None = None,
+) -> dict[str, list]:
     """Per entity, the (field, value) pairs that only the system may
     write — union of:
       - x-approval.on_approved/on_rejected.set_fields values (unchanged
         behavior from the former derive_approval_locked_values)
       - x-write-locked-values explicit declarations (entity-level x-* key,
         {field_name: [value, ...]}) — works independently of x-approval.
+      - x-state-machines governed fields (Issue #696 Stage 1 PR2b): every
+        diagram state OTHER than that field's own initial state(s) —
+        design-doc 丙's "Audit and lock" section. Only the generated
+        transition{{Field}}() gatekeeper (a direct `tx` call, bypassing
+        this service layer entirely) may move the field into one of these
+        values; an ordinary create/update attempting to write one directly
+        is rejected here, the same "system-managed value" contract Source
+        1 already establishes for x-approval's own set_fields values.
+        `state_machine_diagrams` is `{field: {'states': [...],
+        'initial_states': [...], ...}}` — the same per-field parsed-diagram
+        shape build_context.py already assembles for template consumption
+        (see its `state_machine_diagrams` context key), passed in here
+        rather than re-parsed, since parsing needs the schema-level
+        x-state-machines pointer map and cwd-relative file I/O this
+        model_def-only function has no access to.
 
     Field-scoped, not entity-wide: locking a field's whole range would also
     block values an ordinary create needs (e.g. the initial pending
@@ -55,7 +170,7 @@ def derive_write_locked_values(model_def: dict) -> dict[str, list]:
     entities either — a value that is locked on one entity may be an
     ordinary user-writable value on another.
 
-    Returns {} when neither source declares anything. Callers must treat
+    Returns {} when no source declares anything. Callers must treat
     an empty result as "unprotected", not as "nothing to protect here".
     """
     locked: dict[str, list] = {}
@@ -74,6 +189,17 @@ def derive_write_locked_values(model_def: dict) -> dict[str, list]:
 
     # Source 2: x-write-locked-values (new, x-approval-independent)
     _merge_x_write_locked(locked, model_def)
+
+    # Source 3: x-state-machines (Issue #696 Stage 1 PR2b) — see docstring.
+    if state_machine_diagrams:
+        for field, diagram in state_machine_diagrams.items():
+            values = locked.setdefault(field, [])
+            initial = set(diagram.get('initial_states') or [])
+            for state in diagram.get('states') or []:
+                if state in initial:
+                    continue
+                if state not in values:
+                    values.append(state)
 
     return locked
 
@@ -109,11 +235,12 @@ def is_canonical_model_view(model: str, view_entry: dict, schema: dict) -> bool:
 
 def derive_write_locked_values_for_view(
     model: str, model_def: dict, view_entry: dict, schema: dict,
+    state_machine_diagrams: dict[str, dict] | None = None,
 ) -> dict[str, list]:
     """View-scoped variant of `derive_write_locked_values`.
 
     The entity's own canonical screen (see `is_canonical_model_view`) gets
-    the full union (both sources) exactly as `derive_write_locked_values
+    the full union (all sources) exactly as `derive_write_locked_values
     (model_def)` always has -- `model_def` already resolves to wherever
     that canonical screen's own x-write-locked-values declaration actually
     lives (a Category C key moves onto the raw twin when the entity is
@@ -129,14 +256,17 @@ def derive_write_locked_values_for_view(
     always read off model_def regardless of which view is being built.
     Unhooking Source 1 the same way needs a deeper change to
     derive_write_locked_values()'s raw-fixed read of x-approval and is
-    tracked separately; not implemented here.
+    tracked separately; not implemented here. Source 3
+    (state_machine_diagrams) is passed straight through to both branches
+    unchanged -- x-state-machines is keyed by (model, field), not by view,
+    so it has no proxy-vs-canonical distinction to make.
     """
     if is_canonical_model_view(model, view_entry, schema):
-        return derive_write_locked_values(model_def)
+        return derive_write_locked_values(model_def, state_machine_diagrams)
     return derive_write_locked_values({
         **model_def,
         'x-write-locked-values': view_entry.get('x-write-locked-values'),
-    })
+    }, state_machine_diagrams)
 
 
 def _merge_x_write_locked(locked: dict[str, list], model_def: dict) -> None:
