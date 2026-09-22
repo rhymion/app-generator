@@ -15,7 +15,6 @@ from collections import Counter
 from pathlib import Path
 
 from build_context import _raw_def
-from generators import resolve_approval_submit_on
 from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import resolve_label_paths
 from helpers.naming import to_pascal_case
@@ -2534,54 +2533,58 @@ def validate_schema(schema: dict) -> None:
                     f"reference undeclared state(s) {_sm_stale_refs!r}."
                 )
 
-            # Case D (x-approval structural conflict, static, finalized
-            # Issue #696): reuses resolve_approval_submit_on() and
-            # resolve_set_fields() rather than re-deriving submit_on/
+            # Case D (x-approval structural conflict, narrowed): the
+            # original difference-set check (every edge state must be in
+            # x-approval's legal value set) was far broader than intended
+            # and rejected real diagrams like goods_receipt_line's (an
+            # on_approved with no set_fields at all, plus a 'split' state
+            # an unrelated x-* mechanism writes that x-approval never
+            # touches). The only structurally impossible shape is a single
+            # edge direction: a rejected/withdrawn state transitioning
+            # straight to the approved state — that skips the approval
+            # decision itself. The reverse (approved -> rejected/withdrawn)
+            # is a legitimate revocation path and must never be flagged;
+            # reuses resolve_set_fields() rather than re-deriving
             # set_fields resolution independently.
             _sm_approval = approval_key.get(_sm_model_def)
             if _sm_field_def is not None and _sm_approval:
                 _sm_entity_props = _sm_model_def.get('properties', {})
-                _sm_legal_values = set()
 
-                _sm_submit_field, _sm_submit_value = resolve_approval_submit_on(_sm_model_def)
-                if _sm_submit_field == _sm_field:
-                    _sm_legal_values.add(_sm_submit_value)
+                _sm_on_approved_raw = (_sm_approval.get('on_approved') or {}).get('set_fields') or {}
+                _sm_on_approved_resolved = resolve_set_fields(_sm_entity_props, _sm_on_approved_raw)
+                _sm_on_approved_value = (
+                    str(_sm_on_approved_resolved[_sm_field])
+                    if _sm_field in _sm_on_approved_resolved else None
+                )
 
-                for _sm_stage in ('on_approved', 'on_rejected'):
-                    _sm_stage_raw = (_sm_approval.get(_sm_stage) or {}).get('set_fields') or {}
-                    _sm_stage_resolved = resolve_set_fields(_sm_entity_props, _sm_stage_raw)
-                    if _sm_field in _sm_stage_resolved:
-                        _sm_legal_values.add(_sm_stage_resolved[_sm_field])
+                # No on_approved.set_fields for this field (e.g.
+                # goods_receipt_line, whose on_approved only sets
+                # emit_hook) — the forbidden edge shape can't even be
+                # expressed, so no diagram content can trip this check.
+                if _sm_on_approved_value is not None:
+                    _sm_reject_withdraw_values = set()
+                    for _sm_stage in ('on_rejected', 'on_withdrawn'):
+                        _sm_stage_raw = (_sm_approval.get(_sm_stage) or {}).get('set_fields') or {}
+                        _sm_stage_resolved = resolve_set_fields(_sm_entity_props, _sm_stage_raw)
+                        if _sm_field in _sm_stage_resolved:
+                            _sm_reject_withdraw_values.add(str(_sm_stage_resolved[_sm_field]))
 
-                # The field's own JSON-Schema `default` (the pre-submission
-                # value x-approval itself never assigns via submit_on/
-                # on_approved/on_rejected, since it's whatever a plain
-                # create starts the row at) is added to the legal set too —
-                # not part of resolve_approval_submit_on()/set_fields
-                # resolution (no duplication of that logic), just a plain
-                # read of a pre-existing, unrelated schema keyword. Without
-                # this, Case D would reject every ordinary diagram's own
-                # pre-submission state (e.g. 'draft'), which is the
-                # overwhelmingly common real shape, not an edge case —
-                # flagged for review as a judgment call filling a gap the
-                # design brief's literal wording did not resolve.
-                _sm_default = _sm_field_def.get('default')
-                if _sm_default is not None:
-                    _sm_legal_values.add(_sm_default)
-
-                _sm_legal_values_str = {str(v) for v in _sm_legal_values}
-                _sm_edge_states = {s for edge in _sm_diagram.edges for s in edge}
-                _sm_case_d_states = sorted(_sm_edge_states - _sm_legal_values_str)
-                if _sm_case_d_states:
-                    errors.append(
-                        f"x-state-machines['{_sm_key}']: model '{_sm_model}' "
-                        f"also declares x-approval for field '{_sm_field}'; "
-                        f"diagram '{_sm_path}' edge(s) reference state(s) "
-                        f"{_sm_case_d_states!r} not in x-approval's legal "
-                        f"state set {sorted(_sm_legal_values_str)!r} — "
-                        f"structurally impossible under x-approval's own "
-                        f"declared stages (Case D)."
+                    _sm_case_d_edges = sorted(
+                        edge for edge in _sm_diagram.edges
+                        if edge[0] in _sm_reject_withdraw_values
+                        and edge[1] == _sm_on_approved_value
                     )
+                    if _sm_case_d_edges:
+                        errors.append(
+                            f"x-state-machines['{_sm_key}']: model '{_sm_model}' "
+                            f"also declares x-approval for field '{_sm_field}'; "
+                            f"diagram '{_sm_path}' edge(s) {_sm_case_d_edges!r} "
+                            f"transition directly from a rejected/withdrawn "
+                            f"state to the approved state "
+                            f"({_sm_on_approved_value!r}) — structurally "
+                            f"impossible, since only the approval decision "
+                            f"itself may set that value (Case D)."
+                        )
 
             # An entity-level "Case E" ban, and later a field-level CSV
             # import lockout that replaced it, both used to live here / in
