@@ -139,30 +139,27 @@ def derive_approval_legal_transition_edges(model_def: dict, field: str) -> set[t
     return edges
 
 
-def derive_write_locked_values(
-    model_def: dict, state_machine_diagrams: dict[str, dict] | None = None,
-) -> dict[str, list]:
+def derive_write_locked_values(model_def: dict) -> dict[str, list]:
     """Per entity, the (field, value) pairs that only the system may
     write — union of:
       - x-approval.on_approved/on_rejected.set_fields values (unchanged
         behavior from the former derive_approval_locked_values)
       - x-write-locked-values explicit declarations (entity-level x-* key,
         {field_name: [value, ...]}) — works independently of x-approval.
-      - x-state-machines governed fields (Issue #696 Stage 1 PR2b): every
-        diagram state OTHER than that field's own initial state(s) —
-        design-doc 丙's "Audit and lock" section. Only the generated
-        transition{{Field}}() gatekeeper (a direct `tx` call, bypassing
-        this service layer entirely) may move the field into one of these
-        values; an ordinary create/update attempting to write one directly
-        is rejected here, the same "system-managed value" contract Source
-        1 already establishes for x-approval's own set_fields values.
-        `state_machine_diagrams` is `{field: {'states': [...],
-        'initial_states': [...], ...}}` — the same per-field parsed-diagram
-        shape build_context.py already assembles for template consumption
-        (see its `state_machine_diagrams` context key), passed in here
-        rather than re-parsed, since parsing needs the schema-level
-        x-state-machines pointer map and cwd-relative file I/O this
-        model_def-only function has no access to.
+
+    x-state-machines governed fields (Issue #696) are deliberately NOT a
+    source here (a correction to this function's own earlier design): every
+    entry point that can write a row -- UI Server Action, REST route, CSV
+    import (cmd_996, Issue #93) -- funnels through add{{Parent}}/
+    update{{Parent}} (service.ts), the same convergence point x-approval's
+    own guard already relies on, so a governed field's legality is checked
+    there (validateOnUpdate calling lib/state_transitions.ts's
+    assertTransitionAllowed()) rather than by locking every non-initial
+    diagram state out of the ordinary write path. There is no longer a
+    direct-`tx`, service-layer-bypassing writer for these fields to guard
+    against -- the value-lockdown mechanism this function implements exists
+    for exactly that bypass scenario (Source 1/2 below), which state
+    machines no longer have.
 
     Field-scoped, not entity-wide: locking a field's whole range would also
     block values an ordinary create needs (e.g. the initial pending
@@ -189,17 +186,6 @@ def derive_write_locked_values(
 
     # Source 2: x-write-locked-values (new, x-approval-independent)
     _merge_x_write_locked(locked, model_def)
-
-    # Source 3: x-state-machines (Issue #696 Stage 1 PR2b) — see docstring.
-    if state_machine_diagrams:
-        for field, diagram in state_machine_diagrams.items():
-            values = locked.setdefault(field, [])
-            initial = set(diagram.get('initial_states') or [])
-            for state in diagram.get('states') or []:
-                if state in initial:
-                    continue
-                if state not in values:
-                    values.append(state)
 
     return locked
 
@@ -235,7 +221,6 @@ def is_canonical_model_view(model: str, view_entry: dict, schema: dict) -> bool:
 
 def derive_write_locked_values_for_view(
     model: str, model_def: dict, view_entry: dict, schema: dict,
-    state_machine_diagrams: dict[str, dict] | None = None,
 ) -> dict[str, list]:
     """View-scoped variant of `derive_write_locked_values`.
 
@@ -256,17 +241,14 @@ def derive_write_locked_values_for_view(
     always read off model_def regardless of which view is being built.
     Unhooking Source 1 the same way needs a deeper change to
     derive_write_locked_values()'s raw-fixed read of x-approval and is
-    tracked separately; not implemented here. Source 3
-    (state_machine_diagrams) is passed straight through to both branches
-    unchanged -- x-state-machines is keyed by (model, field), not by view,
-    so it has no proxy-vs-canonical distinction to make.
+    tracked separately; not implemented here.
     """
     if is_canonical_model_view(model, view_entry, schema):
-        return derive_write_locked_values(model_def, state_machine_diagrams)
+        return derive_write_locked_values(model_def)
     return derive_write_locked_values({
         **model_def,
         'x-write-locked-values': view_entry.get('x-write-locked-values'),
-    }, state_machine_diagrams)
+    })
 
 
 def _merge_x_write_locked(locked: dict[str, list], model_def: dict) -> None:

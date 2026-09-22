@@ -1000,6 +1000,17 @@ def generate(schema_path: str, output_dir: str) -> None:
     doc_dir = out / 'docs' / 'generated'
     entity_doc_summaries: list[dict] = []
     self_only_admin_bypass_entities: list[str] = []
+    # State-transition gatekeeper table (Issue #696, lib/state_transitions.ts)
+    # -- collected across every model in the per-entity loop below (each
+    # ctx['state_machine_transitions'] entry already carries the parsed
+    # diagram/approval edges build_context() assembles per entity) and
+    # rendered once, after the loop, into the single model-unit file --
+    # mirrors self_only_admin_bypass_entities just above, not
+    # dashboard_catalog (build_dashboard_catalog() re-derives from the raw
+    # schema independently; the transition edge derivation is expensive
+    # enough, and already done per entity by build_context(), that
+    # re-deriving it a second time outside the loop would be wasteful).
+    state_transition_entries: list[dict] = []
 
     for entity in entities:
         parent     = entity['parent']
@@ -1045,6 +1056,15 @@ def generate(schema_path: str, output_dir: str) -> None:
         ctx = {**ctx, **approval_lockdown_context(ctx, schema)}
         if ctx.get('is_self_only') and ctx.get('self_only_admin_bypass'):
             self_only_admin_bypass_entities.append(parent)
+        # State-transition entries: gated on can_update the same way
+        # service.ts.jinja2/service_validation.ts.jinja2 gate their own
+        # transition-check codegen -- a governed field on a can_update=false
+        # entity has no update{{Parent}}() to check it from, so there is
+        # nothing for lib/state_transitions.ts to guard for this model.
+        if ctx.get('state_machine_transitions') and ctx.get('can_update'):
+            state_transition_entries.extend(
+                {**t, 'model': model} for t in ctx['state_machine_transitions']
+            )
 
         # --- docs/{parent}.md + app/[locale]/docs/{parent}/page.mdx ---
         doc_ctx = build_doc_entity_context(ctx)
@@ -1810,6 +1830,22 @@ def generate(schema_path: str, output_dir: str) -> None:
         }),
     )
     print(f'  Self-only admin-bypass entities → lib/self_only_admin_bypass_entities.ts ({len(self_only_admin_bypass_entities)} entities)')
+
+    # --- State-transition gatekeeper table (lib/state_transitions.ts) ---
+    # state_transition_entries was collected across every model in the
+    # entity loop above -- see its declaration comment. Always written
+    # (even empty), same convention as self_only_admin_bypass_entities.ts
+    # just above: an entity's service_validation.ts imports
+    # assertTransitionAllowed from here whenever it has ANY governed field,
+    # so the import must never dangle regardless of whether any OTHER
+    # entity contributed entries.
+    _write(
+        out / 'lib' / 'state_transitions.ts',
+        _render(env, 'state_transitions.ts.jinja2', {
+            'entries': state_transition_entries,
+        }),
+    )
+    print(f'  State-transition gatekeeper table → lib/state_transitions.ts ({len(state_transition_entries)} governed field(s))')
 
     # --- anonymize_user.ts (lib/compliance/anonymize_user.ts) ---
     # Emitted when the user entity has at least one x-pii annotated field.

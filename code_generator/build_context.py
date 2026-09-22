@@ -1458,9 +1458,10 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # state_machine_diagrams / state_machine_field_list (Issue #696, Stage 1
     # PR2b): the parsed contents (states/edges/initial/terminal) of each
     # governed field's .mmd diagram, plain-dict-shaped for direct `| tojson`
-    # template consumption (service.ts.jinja2/service_validation.ts.jinja2's
-    # gatekeeper codegen) and for derive_write_locked_values()'s new Source 3
-    # (below). Re-parses rather than reusing validate.py's own parse pass --
+    # template consumption -- feeds state_machine_transitions below, which
+    # generate.py collects across every model into the single runtime
+    # gatekeeper table, lib/state_transitions.ts. Re-parses rather than
+    # reusing validate.py's own parse pass --
     # build_context() and validate_schema() are separate, non-communicating
     # entry points in this generator's pipeline (see validate.py's own path-
     # resolution comment on x-state-machines for the same cwd-relative
@@ -1701,7 +1702,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # canonical-vs-proxy reasoning (identical raw/view resolution problem
     # as x-readonly-fields above, applied to this different key).
     write_locked_values: dict[str, list] = derive_write_locked_values_for_view(
-        model, model_def, _view_entry, schema, state_machine_diagrams,
+        model, model_def, _view_entry, schema,
     )
     write_locked_fields: list[str] = sorted(write_locked_values)
     # Select clause to fetch an existing row's current values for the
