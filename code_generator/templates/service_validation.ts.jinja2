@@ -1,6 +1,9 @@
 import prisma from '@/lib/prisma';
 import { validateCustomRules } from '@/lib/{{ model }}/service_validation_custom';
 import { AppError } from '@/lib/_errors';
+{% if state_machine_transitions and can_update %}
+import { assertTransitionAllowed, assertInitialStateAllowed } from '@/lib/state_transitions';
+{% endif %}
 
 type TransactionClient = Pick<typeof prisma, '{{ model }}'{% for check in one_to_one_checks %} | '{{ check.target }}'{% endfor %}>;
 type RequiredField = { key: string; label: string };
@@ -165,6 +168,43 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
         'invalid',
       );
     }
+  }
+{% endif %}
+{% if state_machine_transitions and can_update %}
+
+  // State-transition gatekeeper(s) (Issue #696; cmd_1132/cmd_1133 design
+  // correction from an earlier dedicated-entry-point shape; cmd_1139
+  // extends coverage to the create path below). Checked here, at the
+  // update{{ parent_pascal }}/add{{ parent_pascal }} convergence point
+  // every entry point (UI Server Action, REST route, CSV import) funnels
+  // through -- the same discipline x-approval's own guard above follows,
+  // and the reason a state-transition field needs no write-lock of its
+  // own (see derive_write_locked_values()'s docstring).
+  //
+  // Update (currentId !== null): the transition itself (the prevRow value
+  // -> the submitted value) must be a legal diagram edge.
+  if (currentId !== null && prevRow) {
+{% for t in state_machine_transitions %}
+    if ('{{ t.field }}' in data && data.{{ t.field }} !== prevRow.{{ t.field }}) {
+      assertTransitionAllowed('{{ model }}', '{{ t.field }}', String(prevRow.{{ t.field }}), String(data.{{ t.field }}));
+    }
+{% endfor %}
+  }
+
+  // Create (currentId === null): there is no prevRow/fromState to
+  // evaluate an edge against, so the submitted value is checked against
+  // the diagram's own declared initial state(s) (a `[*] --> state` node)
+  // instead. A data migration/import that needs to land a new row
+  // directly in a later, non-initial diagram state resolves this by
+  // declaring that state as an additional initial state (another
+  // `[*] --> state` node) -- multiple initial-state declarations are
+  // valid, and no separate bypass mechanism exists or is needed.
+  if (currentId === null) {
+{% for t in state_machine_transitions %}
+    if ('{{ t.field }}' in data) {
+      assertInitialStateAllowed('{{ model }}', '{{ t.field }}', String(data.{{ t.field }}));
+    }
+{% endfor %}
   }
 {% endif %}
 

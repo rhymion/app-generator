@@ -1,0 +1,82 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+format-version: 3.0
+
+# Issue #696, cmd_1132/cmd_1133 design correction: proves the state-
+# transition check runs at the update{Parent}/add{Parent} convergence
+# point (lib/state_transitions.ts's assertTransitionAllowed(), called from
+# service_validation.ts) through the real build_user_schema.py ->
+# generate.py pipeline, not just at the Jinja-rendering/build_context()
+# level (test_state_transition_gatekeeper.py). state_transition_gate_widget
+# reuses the same Case A/B/C diagram/x-approval shape that file's own
+# _CASE_ABC_MMD fixture uses (deliberately -- already proven Case-D-legal
+# by that file's own design). state_transition_gate_readonly_widget (can_
+# update=false) proves generate.py's lib/state_transitions.ts collection
+# excludes a governed field with no update{Parent}() to check it from.
+x-state-machines:
+  state_transition_gate_widget.status: sm/widget_status.mmd
+  state_transition_gate_readonly_widget.stage: sm/readonly_widget_stage.mmd
+
+definitions:
+  user:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name: {}
+      email: {}
+
+  state_transition_gate_widget:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: false
+      invalidate: false
+      api: true
+      test: false
+    # cmd_865: submit_on is required whenever x-approval is declared on an
+    # editable entity -- see _validate_x_approval_combinations() in
+    # generate.py.
+    x-approval:
+      submit_on:
+        status: submitted
+      on_approved:
+        set_fields:
+          status: approved
+      on_rejected:
+        set_fields:
+          status: rejected
+    fields:
+      code: {}
+      status:
+        enum:
+          - draft
+          - submitted
+          - approved
+          - rejected
+        default: draft
+
+  state_transition_gate_readonly_widget:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      code: {}
+      stage:
+        enum:
+          - pending
+          - done
+        default: pending

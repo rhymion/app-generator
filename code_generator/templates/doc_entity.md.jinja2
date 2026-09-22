@@ -26,6 +26,40 @@
 
 > **Read-only** fields (`id`, `creator_id`, `created_at`, `updated_at`) are set automatically and cannot be written through the API or UI forms.
 
+{% if state_machine_fields %}
+## State Machine
+
+{% for sm in state_machine_fields %}
+### `{{ sm.field }}`
+{% if not can_update %}
+
+> Declared but **not enforced** — this entity has no update path (`Operations` above omits Update), so there is no convergence point for the checks below to run from.
+{% endif %}
+
+**States a new row may be created into** (`[*] --> state` in the diagram): every state a new `{{ parent }}` row can land in on creation, not only the state a UI "new" form defaults to — a side-effect hook, a batch/scheduled job, or a data-migration/import path that creates a row is equally legitimate, and each distinct state any of them can produce must be declared here.
+
+{% for s in sm.creation_states %}
+- `{{ s }}`
+{% endfor %}
+
+**Legal transitions** (checked on update — the value actually submitted must match the *from* state currently on the row):
+
+| From | To |
+|------|-----|
+{% for from, to in sm.edges %}
+| `{{ from }}` | `{{ to }}` |
+{% endfor %}
+
+{% if sm.terminal_states %}
+**Terminal states** (no outgoing transition; `state --> [*]` in the diagram) — a generate-time diagram-validity marker only ("this state's lack of outgoing edges is intentional"). It has no meaning at runtime and no relationship to delete permission:
+
+{% for s in sm.terminal_states %}
+- `{{ s }}`
+{% endfor %}
+{% endif %}
+
+{% endfor %}
+{% endif %}
 ## Relationships
 
 {% if relations %}

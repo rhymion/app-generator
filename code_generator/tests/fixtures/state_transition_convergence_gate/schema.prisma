@@ -1,0 +1,80 @@
+// Self-contained fixture Prisma schema for the state-transition
+// convergence-point gate (Issue #696, cmd_1132/cmd_1133 design correction:
+// the transition check now runs inside update{Parent}/add{Parent}, not a
+// dedicated transition{Field}() entry point). NOT the project's real
+// prisma/schema.prisma -- mirrors tests/fixtures/approval_lockdown_gate/
+// schema.prisma's structure.
+//
+// This repo's own json_schema.yaml declares no x-state-machines entity
+// (cmd_1121's ruling: the dogfood schema carries no example of this
+// opt-in feature), so test:e2e:build's own tsc pass never compiles
+// lib/state_transitions.ts or its call sites -- this fixture exists so a
+// future change to any of them can't silently regress unnoticed.
+
+generator client {
+  provider = "prisma-client"
+  output   = "./.generated-client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum StateTransitionGateWidgetStatus {
+  draft
+  submitted
+  approved
+  rejected
+}
+
+enum StateTransitionGateReadonlyWidgetStage {
+  pending
+  done
+}
+
+model user {
+  id      String @id @default(cuid())
+  name    String
+  email   String @unique
+  created_widgets state_transition_gate_widget[] @relation("StateTransitionGateWidgetCreator")
+  updated_widgets state_transition_gate_widget[] @relation("StateTransitionGateWidgetUpdater")
+  created_readonly_widgets state_transition_gate_readonly_widget[] @relation("StateTransitionGateReadonlyWidgetCreator")
+  updated_readonly_widgets state_transition_gate_readonly_widget[] @relation("StateTransitionGateReadonlyWidgetUpdater")
+}
+
+// can_update=true (x-generate.edit: true) -- the model this fixture
+// exists for: status is BOTH x-state-machines-governed AND x-approval-
+// governed (the Case A/B/C AND-composition), and update{Parent} is the
+// convergence point every entry point funnels through.
+model state_transition_gate_widget {
+  id         String                           @id @default(cuid())
+  code       String
+  status     StateTransitionGateWidgetStatus  @default(draft)
+  created_at DateTime                         @default(now()) @db.Timestamptz(0)
+  updated_at DateTime                         @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user                             @relation("StateTransitionGateWidgetCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user                             @relation("StateTransitionGateWidgetUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// can_update=false (x-generate.edit: false) -- proves generate.py's
+// lib/state_transitions.ts collection is gated on can_update the same way
+// service.ts.jinja2/service_validation.ts.jinja2 gate their own codegen:
+// a governed field here has no update{Parent}() to check it from, so it
+// must be ABSENT from lib/state_transitions.ts entirely (no dead entry).
+model state_transition_gate_readonly_widget {
+  id         String                                    @id @default(cuid())
+  code       String
+  stage      StateTransitionGateReadonlyWidgetStage     @default(pending)
+  created_at DateTime                                   @default(now()) @db.Timestamptz(0)
+  updated_at DateTime                                   @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user                                       @relation("StateTransitionGateReadonlyWidgetCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user                                       @relation("StateTransitionGateReadonlyWidgetUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
