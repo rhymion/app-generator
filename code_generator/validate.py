@@ -2582,21 +2582,18 @@ def validate_schema(schema: dict) -> None:
                         f"declared stages (Case D)."
                     )
 
-            # An entity-level "Case E" ban used to live here: any model
-            # carrying a state-transition pointer entry whose import route
-            # could not converge through service.ts (a bridge or an
-            # unconverged embedded child) was rejected outright. Removed:
-            # whether an entity's import route converges through service.ts
-            # and whether one of its fields can be governed by a
-            # state-transition diagram are independent questions — an
-            # entity needing a child on import does not mean its own status
-            # field cannot be governed. The real, narrower concern (an
-            # unconverged import route bypassing validateOnAdd/Update for a
-            # governed field) is closed at the field level instead, in
-            # build_context.py's import_state_machine_locked_fields — the
-            # governed CSV column is excluded from that route's writable
-            # set rather than banning the whole entity from carrying a
-            # pointer at all.
+            # An entity-level "Case E" ban, and later a field-level CSV
+            # import lockout that replaced it, both used to live here / in
+            # build_context.py. Both removed: whether an entity's import
+            # route converges through service.ts and whether one of its
+            # fields is governed by a state-transition diagram are
+            # independent questions, and transition legality is an
+            # ordinary write-path check like any other constraint — not
+            # something an entry point special-cases. A governed field's
+            # CSV column is imported like any other column; the write path
+            # (validateOnAdd/Update) is responsible for rejecting a value
+            # that isn't a legal transition target, exactly as it would
+            # reject any other invalid value.
 
     # -----------------------------------------------------------------------
     # Report
