@@ -11,9 +11,11 @@ Raises SchemaValidationError (a ValueError subclass) on failure so generate()
 can catch it and print a clean message without a traceback.
 """
 import re
+from collections import Counter
 from pathlib import Path
 
 from build_context import _raw_def
+from generators import resolve_approval_submit_on
 from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import resolve_label_paths
 from helpers.naming import to_pascal_case
@@ -21,8 +23,9 @@ from helpers.schema_helpers import (
     get_parent_relationships, get_internal_bridge_fk_prop_names,
     get_entity_properties, get_entity_required, get_self_only_flags,
     get_direct_attachment_fk_props, schema_has_direct_attachment_fk,
-    is_write_only_prop, _get_actual_type,
+    is_write_only_prop, _get_actual_type, resolve_set_fields,
 )
+from helpers.state_machine_parser import ParseError, parse_state_machine_diagram
 from keys import x_approval as approval_key
 from manifest import sha256_file
 from schema_deriver import parse_prisma_schema
@@ -644,6 +647,25 @@ def _compute_export_visibility(def_key: str, defn: dict, defs: dict) -> tuple[se
         if isinstance(r['label_field'], str)
     }
     return export_scalar_fields, fk_display_cols
+
+
+def _state_machine_reachable_states(
+    initial_states: set[str], edges: list[tuple[str, str]],
+) -> set[str]:
+    """States reachable from `initial_states` via zero or more `edges` hops
+    (Issue #696 state-transition Stage 1 PR2a-2's unreachable-state check)."""
+    adjacency: dict[str, list[str]] = {}
+    for from_state, to_state in edges:
+        adjacency.setdefault(from_state, []).append(to_state)
+    seen = set(initial_states)
+    stack = list(initial_states)
+    while stack:
+        current = stack.pop()
+        for nxt in adjacency.get(current, []):
+            if nxt not in seen:
+                seen.add(nxt)
+                stack.append(nxt)
+    return seen
 
 
 def validate_schema(schema: dict) -> None:
@@ -2403,6 +2425,161 @@ def validate_schema(schema: dict) -> None:
                         f"governed field must be an enum (nativeEnum or a "
                         f"plain 'enum:' list); a diagram's state names have "
                         f"nowhere to map onto otherwise."
+                    )
+
+            # -------------------------------------------------------------
+            # Diagram-content checks (Issue #696 state-transition Stage 1
+            # PR2a-2; state-transition-generator-design.md's 己 table rows
+            # that DO require reading the pointed-to .mmd file's own
+            # contents — unreachable/dead-end/duplicate/stale-ref, plus
+            # Case D). PR2a-1 (state_machine_parser.py) supplies the parser;
+            # this is its first real consumer.
+            #
+            # Path resolution: there is no pre-existing "resolve a schema-
+            # embedded relative file path" convention elsewhere in this file
+            # to reuse (validate_schema() itself takes no schema_path/
+            # base_dir argument, and the other Path-based checks here all
+            # resolve prisma_schema_path, a caller-supplied absolute path,
+            # never a path read out of the schema content itself). Resolved
+            # here relative to the current working directory instead,
+            # matching how the real npm scripts (package.json's
+            # generate-code/validate:schema) already invoke
+            # build_user_schema.py/generate.py/validate_schema_cli.py with
+            # cwd-relative arguments (`code_generator/json_schema.yaml`,
+            # `./`) from the project root — not a new convention invented
+            # from a blank slate, but also not a literal reuse of an
+            # existing resolver, since none existed. Flagged for review as
+            # a judgment call, not a verified pre-existing pattern.
+            # -------------------------------------------------------------
+            try:
+                _sm_mmd_text = Path(_sm_path).read_text()
+            except OSError:
+                errors.append(
+                    f"x-state-machines['{_sm_key}']: pointed-to file "
+                    f"'{_sm_path}' does not exist."
+                )
+                continue
+
+            _sm_diagram = parse_state_machine_diagram(_sm_mmd_text)
+            if isinstance(_sm_diagram, ParseError):
+                _sm_loc = (
+                    f" (line {_sm_diagram.line_number}: {_sm_diagram.line_text!r})"
+                    if _sm_diagram.line_number else ""
+                )
+                errors.append(
+                    f"x-state-machines['{_sm_key}']: '{_sm_path}': "
+                    f"{_sm_diagram.message}{_sm_loc}"
+                )
+                continue
+
+            _sm_reachable = _state_machine_reachable_states(
+                _sm_diagram.initial_states, _sm_diagram.edges,
+            )
+            _sm_unreachable = sorted(_sm_diagram.states - _sm_reachable)
+            if _sm_unreachable:
+                errors.append(
+                    f"x-state-machines['{_sm_key}']: '{_sm_path}': "
+                    f"unreachable state(s) {_sm_unreachable!r} — no path "
+                    f"from a declared initial state ('[*] --> state') "
+                    f"reaches them."
+                )
+
+            _sm_dead_ends = sorted(
+                s for s in _sm_diagram.states
+                if not any(frm == s for frm, _to in _sm_diagram.edges)
+                and s not in _sm_diagram.terminal_states
+            )
+            if _sm_dead_ends:
+                errors.append(
+                    f"x-state-machines['{_sm_key}']: '{_sm_path}': "
+                    f"dead-end state(s) {_sm_dead_ends!r} have no outgoing "
+                    f"edge and are not declared terminal "
+                    f"('state --> [*]')."
+                )
+
+            _sm_dupe_edges = sorted(
+                {edge for edge, n in Counter(_sm_diagram.edges).items() if n > 1}
+            )
+            if _sm_dupe_edges:
+                errors.append(
+                    f"x-state-machines['{_sm_key}']: '{_sm_path}': "
+                    f"duplicate edge(s) {_sm_dupe_edges!r} — two edges "
+                    f"declared between the same (fromState, toState) pair; "
+                    f"nothing can disambiguate which edge's condition/"
+                    f"effect should apply."
+                )
+
+            # Stale-ref (an edge referencing a state name never declared as
+            # a node): unreachable via THIS parser's own grammar as things
+            # stand — state_machine_parser.py adds both endpoints of every
+            # bare "state --> state" edge to StateMachineDiagram.states as a
+            # side effect of parsing it, so _sm_diagram.edges' endpoints are
+            # always a subset of _sm_diagram.states by construction; no real
+            # .mmd text can produce a StateMachineDiagram that fails this
+            # check. Kept anyway as a defensive/forward-compatible check
+            # (harmless today, would start mattering if a future parser
+            # revision ever adds a bare state-declaration construct
+            # decoupled from edges) — see
+            # test_stale_ref_state_via_monkeypatched_parser for how this is
+            # exercised without a real reachable .mmd input, and this PR's
+            # own report for this being flagged as a design note rather
+            # than swept under.
+            _sm_stale_refs = sorted(
+                {s for edge in _sm_diagram.edges for s in edge} - _sm_diagram.states
+            )
+            if _sm_stale_refs:
+                errors.append(
+                    f"x-state-machines['{_sm_key}']: '{_sm_path}': edge(s) "
+                    f"reference undeclared state(s) {_sm_stale_refs!r}."
+                )
+
+            # Case D (x-approval structural conflict, static, finalized
+            # cmd_1118): reuses resolve_approval_submit_on() and
+            # resolve_set_fields() rather than re-deriving submit_on/
+            # set_fields resolution independently.
+            _sm_approval = approval_key.get(_sm_model_def)
+            if _sm_field_def is not None and _sm_approval:
+                _sm_entity_props = _sm_model_def.get('properties', {})
+                _sm_legal_values = set()
+
+                _sm_submit_field, _sm_submit_value = resolve_approval_submit_on(_sm_model_def)
+                if _sm_submit_field == _sm_field:
+                    _sm_legal_values.add(_sm_submit_value)
+
+                for _sm_stage in ('on_approved', 'on_rejected'):
+                    _sm_stage_raw = (_sm_approval.get(_sm_stage) or {}).get('set_fields') or {}
+                    _sm_stage_resolved = resolve_set_fields(_sm_entity_props, _sm_stage_raw)
+                    if _sm_field in _sm_stage_resolved:
+                        _sm_legal_values.add(_sm_stage_resolved[_sm_field])
+
+                # The field's own JSON-Schema `default` (the pre-submission
+                # value x-approval itself never assigns via submit_on/
+                # on_approved/on_rejected, since it's whatever a plain
+                # create starts the row at) is added to the legal set too —
+                # not part of resolve_approval_submit_on()/set_fields
+                # resolution (no duplication of that logic), just a plain
+                # read of a pre-existing, unrelated schema keyword. Without
+                # this, Case D would reject every ordinary diagram's own
+                # pre-submission state (e.g. 'draft'), which is the
+                # overwhelmingly common real shape, not an edge case —
+                # flagged for review as a judgment call filling a gap the
+                # design brief's literal wording did not resolve.
+                _sm_default = _sm_field_def.get('default')
+                if _sm_default is not None:
+                    _sm_legal_values.add(_sm_default)
+
+                _sm_legal_values_str = {str(v) for v in _sm_legal_values}
+                _sm_edge_states = {s for edge in _sm_diagram.edges for s in edge}
+                _sm_case_d_states = sorted(_sm_edge_states - _sm_legal_values_str)
+                if _sm_case_d_states:
+                    errors.append(
+                        f"x-state-machines['{_sm_key}']: model '{_sm_model}' "
+                        f"also declares x-approval for field '{_sm_field}'; "
+                        f"diagram '{_sm_path}' edge(s) reference state(s) "
+                        f"{_sm_case_d_states!r} not in x-approval's legal "
+                        f"state set {sorted(_sm_legal_values_str)!r} — "
+                        f"structurally impossible under x-approval's own "
+                        f"declared stages (Case D)."
                     )
 
             # An entity-level "Case E" ban used to live here: any model
