@@ -182,11 +182,30 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
   // own (see derive_write_locked_values()'s docstring).
   //
   // Update (currentId !== null): the transition itself (the prevRow value
-  // -> the submitted value) must be a legal diagram edge.
+  // -> the toState below) must be a legal diagram edge.
+  //
+  // Issue #710/cmd_1145: an update is never required to touch a governed
+  // field -- when the client omits it, `data.<field>` is `undefined`
+  // (validation_data_obj/build_context.py always emits an explicit
+  // `<prop>: <var_name>,` entry for every client-writable prop, so the
+  // KEY is present even when the client never supplied a value; checking
+  // key presence alone, as this used to, misreads that omission as "the
+  // client explicitly set this field to undefined" and wrongly rejects
+  // the write). The fix is not a second "field omitted" branch: an
+  // omitted field means "leave it unchanged," which IS the current row
+  // value (prevRow.<field>) -- and assertTransitionAllowed's own
+  // fromState === toState rule (see state_transitions.ts.jinja2) always
+  // permits a same-state transition regardless of what the diagram
+  // declares. Falling back to prevRow.<field> below therefore makes an
+  // omitted field a no-op through the SAME call every explicit value goes
+  // through, with no default-value reference anywhere in this path
+  // (defaults are a create-time-only concept -- see the create guard
+  // below) and no separate branch to keep in sync.
   if (currentId !== null && prevRow) {
 {% for t in state_machine_transitions %}
-    if ('{{ t.field }}' in data && data.{{ t.field }} !== prevRow.{{ t.field }}) {
-      assertTransitionAllowed('{{ model }}', '{{ t.field }}', String(prevRow.{{ t.field }}), String(data.{{ t.field }}));
+    {
+      const {{ t.field }}ToState = data.{{ t.field }} !== undefined ? data.{{ t.field }} : prevRow.{{ t.field }};
+      assertTransitionAllowed('{{ model }}', '{{ t.field }}', String(prevRow.{{ t.field }}), String({{ t.field }}ToState));
     }
 {% endfor %}
   }
@@ -199,9 +218,16 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
   // declaring that state as an additional initial state (another
   // `[*] --> state` node) -- multiple initial-state declarations are
   // valid, and no separate bypass mechanism exists or is needed.
+  //
+  // Issue #710: same value-presence-not-key-presence reasoning as the
+  // update guard above -- a client that omits this field on create must
+  // fall through here and rely on the column's DB/Prisma default rather
+  // than being rejected for an implicit `String(undefined)`. Same
+  // dependency on validate.py's generation-time default-value guarantee
+  // described there.
   if (currentId === null) {
 {% for t in state_machine_transitions %}
-    if ('{{ t.field }}' in data) {
+    if (data.{{ t.field }} !== undefined) {
       assertInitialStateAllowed('{{ model }}', '{{ t.field }}', String(data.{{ t.field }}));
     }
 {% endfor %}

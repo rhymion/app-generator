@@ -607,6 +607,43 @@ class TestDiagramContentChecks:
         with pytest.raises(SchemaValidationError, match='dead-end'):
             validate_schema(schema)
 
+    def test_dead_end_via_self_edge_only_errors(self, tmp_path):
+        """cmd_1145: 'stuck' declares an outgoing edge, but it is a
+        self-edge ('stuck --> stuck') -- assertTransitionAllowed()'s own
+        fromState === toState rule (state_transitions.ts.jinja2) makes a
+        self-edge a permanent no-op at runtime, so a state whose ONLY way
+        out is a self-edge has no real exit, exactly like a state with zero
+        edges. Must still be flagged as a dead end."""
+        _write_mmd(tmp_path, 'sm/x.mmd', (
+            'stateDiagram-v2\n'
+            '[*] --> draft\n'
+            'draft --> stuck\n'
+            'stuck --> stuck\n'
+        ))
+        schema = {
+            'definitions': {'widget': _widget(status_field=_ENUM_STATUS)},
+            'x-state-machines': {'widget.status': 'sm/x.mmd'},
+        }
+        with pytest.raises(SchemaValidationError, match='dead-end'):
+            validate_schema(schema)
+
+    def test_self_edge_alongside_a_real_edge_is_not_a_dead_end(self, tmp_path):
+        """A self-edge coexisting with a genuine outgoing edge on the same
+        state must NOT be flagged -- only a state whose self-edge is its
+        SOLE way out is a dead end (the case above)."""
+        _write_mmd(tmp_path, 'sm/x.mmd', (
+            'stateDiagram-v2\n'
+            '[*] --> draft\n'
+            'draft --> draft\n'
+            'draft --> submitted\n'
+            'submitted --> [*]\n'
+        ))
+        schema = {
+            'definitions': {'widget': _widget(status_field=_ENUM_STATUS)},
+            'x-state-machines': {'widget.status': 'sm/x.mmd'},
+        }
+        validate_schema(schema)  # must not raise
+
     def test_duplicate_edge_errors(self, tmp_path):
         """Two edges declared between the exact same (fromState, toState)
         pair — nothing can disambiguate which one's condition/effect
@@ -681,6 +718,69 @@ class TestDiagramContentChecks:
             'on_approved': {'set_fields': {'status': 'approved'}},
             'on_rejected': {'set_fields': {'status': 'rejected'}},
         }
+        schema = {
+            'definitions': {'widget': widget},
+            'x-state-machines': {'widget.status': 'sm/x.mmd'},
+        }
+        validate_schema(schema)  # must not raise
+
+
+class TestDefaultMustBeInitialState:
+    """cmd_1144 (Issue #710 corollary): a governed field's JSON Schema
+    `default`, when declared, must be one of the diagram's own declared
+    initial state(s). This is the generation-time half of Issue #710's fix
+    -- it is what makes it safe for service_validation.ts.jinja2's create/
+    update guards to let a client-omitted field fall through unchecked,
+    relying on the column's DB/Prisma default to land the row in a legal
+    diagram state. See service_validation.ts.jinja2's own comment at the
+    matching guards for the runtime half of this same causal link."""
+
+    def test_default_matching_initial_state_passes(self, tmp_path):
+        _write_mmd(tmp_path, 'sm/x.mmd', (
+            'stateDiagram-v2\n'
+            '[*] --> draft\n'
+            'draft --> submitted\n'
+            'submitted --> [*]\n'
+        ))
+        widget = _widget(status_field={
+            'type': 'string', 'enum': ['draft', 'submitted'], 'default': 'draft',
+        })
+        schema = {
+            'definitions': {'widget': widget},
+            'x-state-machines': {'widget.status': 'sm/x.mmd'},
+        }
+        validate_schema(schema)  # must not raise
+
+    def test_default_not_matching_initial_state_errors(self, tmp_path):
+        _write_mmd(tmp_path, 'sm/x.mmd', (
+            'stateDiagram-v2\n'
+            '[*] --> draft\n'
+            'draft --> submitted\n'
+            'submitted --> [*]\n'
+        ))
+        widget = _widget(status_field={
+            'type': 'string', 'enum': ['draft', 'submitted'], 'default': 'submitted',
+        })
+        schema = {
+            'definitions': {'widget': widget},
+            'x-state-machines': {'widget.status': 'sm/x.mmd'},
+        }
+        with pytest.raises(SchemaValidationError, match='not one of the initial state'):
+            validate_schema(schema)
+
+    def test_no_default_declared_skips_this_check(self, tmp_path):
+        """A governed field with no `default:` at all is out of this
+        check's scope entirely (what actually happens at write time when
+        such a field is omitted was investigated separately, outside this
+        generation-time check, and is documented in this task's own
+        report)."""
+        _write_mmd(tmp_path, 'sm/x.mmd', (
+            'stateDiagram-v2\n'
+            '[*] --> draft\n'
+            'draft --> submitted\n'
+            'submitted --> [*]\n'
+        ))
+        widget = _widget(status_field={'type': 'string', 'enum': ['draft', 'submitted']})
         schema = {
             'definitions': {'widget': widget},
             'x-state-machines': {'widget.status': 'sm/x.mmd'},

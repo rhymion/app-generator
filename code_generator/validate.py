@@ -2484,9 +2484,18 @@ def validate_schema(schema: dict) -> None:
                     f"reaches them."
                 )
 
+            # cmd_1145: a self-edge ("X --> X") is never counted as a real
+            # way out here. assertTransitionAllowed()'s own fromState ===
+            # toState rule (state_transitions.ts.jinja2) already permits a
+            # same-state transition unconditionally, with or without a
+            # matching diagram edge -- so a state whose ONLY declared
+            # outgoing edge targets itself has no real exit at runtime any
+            # more than a state with zero declared edges does. Excluding
+            # self-edges from this "has an outgoing edge" test is what
+            # surfaces that case as the dead end it actually is.
             _sm_dead_ends = sorted(
                 s for s in _sm_diagram.states
-                if not any(frm == s for frm, _to in _sm_diagram.edges)
+                if not any(frm == s and to != s for frm, to in _sm_diagram.edges)
                 and s not in _sm_diagram.terminal_states
             )
             if _sm_dead_ends:
@@ -2532,6 +2541,38 @@ def validate_schema(schema: dict) -> None:
                     f"x-state-machines['{_sm_key}']: '{_sm_path}': edge(s) "
                     f"reference undeclared state(s) {_sm_stale_refs!r}."
                 )
+
+            # Default-value fail-closed check (Issue #710 corollary): a
+            # governed field's own JSON Schema `default`, when declared,
+            # must itself be one of this diagram's declared initial
+            # state(s) ('[*] --> state'). This is the counterpart that
+            # makes service_validation.ts.jinja2's create/update guards
+            # (Issue #710's own fix) safe to let a client-omitted field
+            # fall through unchecked: that write path relies on the
+            # column's DB/Prisma default landing the row in a legal
+            # diagram state without ever calling assertInitialStateAllowed
+            # at all. Without this generation-time guarantee, a future
+            # schema edit could point a governed field's default somewhere
+            # the diagram never declares as an initial state, and an
+            # omitted-field write would then silently create a row in a
+            # state the diagram doesn't consider reachable from creation —
+            # exactly the gap Issue #710 was filed over, reopened from the
+            # schema-authoring side instead of the write-path side. See
+            # service_validation.ts.jinja2's own comment at the matching
+            # guards for the other half of this same causal link.
+            if _sm_field_def is not None:
+                _sm_default = _sm_field_def.get('default')
+                if _sm_default is not None and str(_sm_default) not in _sm_diagram.initial_states:
+                    errors.append(
+                        f"x-state-machines['{_sm_key}']: model '{_sm_model}' "
+                        f"field '{_sm_field}' declares default {_sm_default!r}, "
+                        f"which is not one of the initial state(s) "
+                        f"{sorted(_sm_diagram.initial_states)!r} declared by "
+                        f"diagram '{_sm_path}' ('[*] --> state') — a write "
+                        f"that omits this field "
+                        f"would land in a state the diagram does not treat as "
+                        f"a legal starting point."
+                    )
 
             # Case D (x-approval structural conflict, narrowed): the
             # original difference-set check (every edge state must be in
