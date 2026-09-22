@@ -63,6 +63,13 @@ const KEY_COLUMNS: string[] = {{ import_key_specs | map(attribute='csv_col') | l
 // labelField, or read-only on screen) — presence in the CSV header is rejected
 // rather than silently accepted and discarded.
 const UNIMPORTABLE_COLUMNS: string[] = {{ import_unimportable_columns | tojson }};
+// Issue #696 Stage 1 PR2a-3 (Case E field-level lockout): a state-transition-governed
+// field's CSV column is present in FIELD_SPECS (still exported/readable), but its CSV
+// cell is never read on import — it may only change through the transition mechanism
+// itself, not a raw column overwrite via CSV import. Ignored the same way an
+// UNIMPORTABLE_COLUMNS entry is (no coercion, no write), just via a distinct list since
+// the reason is state-machine governance, not "no write path exists at all".
+const STATE_MACHINE_LOCKED_FIELDS: string[] = {{ import_state_machine_locked_fields | tojson }};
 
 type PendingAction =
   | { op: 'create'; row: number; data: Record<string, unknown> }
@@ -156,7 +163,11 @@ export async function POST(request: NextRequest) {
     // unimportable column in `raw` is simply never looked at again; nothing
     // else needs to change to make "ignore" mean "ignore". Still reported
     // back (skippedColumns) so ignoring it is visible, not silent.
-    const skippedColumns = UNIMPORTABLE_COLUMNS.filter((c) => headerFields.includes(c));
+    // Issue #696 Stage 1 PR2a-3: a STATE_MACHINE_LOCKED_FIELDS column is
+    // ignored for the same "visible, not silent" reason, even though its
+    // write path is skipped inside the FIELD_SPECS loop below rather than
+    // never having existed in FIELD_SPECS at all.
+    const skippedColumns = [...UNIMPORTABLE_COLUMNS, ...STATE_MACHINE_LOCKED_FIELDS].filter((c) => headerFields.includes(c));
 
     const errors: ImportRowError[] = [];
     const actions: PendingAction[] = [];
@@ -341,6 +352,7 @@ export async function POST(request: NextRequest) {
       let rowHasError = false;
       const data: Record<string, unknown> = {};
       for (const spec of FIELD_SPECS) {
+        if (STATE_MACHINE_LOCKED_FIELDS.includes(spec.name)) continue;
         const result = coerceValue(raw[spec.name], spec);
         if (!result.ok) {
           errors.push({ row: rowNum, code: 'INVALID_VALUE', message: `Invalid value for column '${spec.name}'` });
