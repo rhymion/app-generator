@@ -655,41 +655,13 @@ class TestDiagramContentChecks:
         with pytest.raises(SchemaValidationError, match='undeclared state'):
             validate.validate_schema(schema)
 
-    def test_case_d_state_not_in_approval_legal_set_errors(self, tmp_path):
-        """widget also declares x-approval (submit_on -> 'submitted',
-        on_approved.set_fields -> 'approved', on_rejected.set_fields ->
-        'rejected'); the diagram's own pre-submission default ('draft') is
-        legal too, but 'archived' is structurally impossible under
-        x-approval's own declared stages — Case D must reject it."""
-        _write_mmd(tmp_path, 'sm/x.mmd', (
-            'stateDiagram-v2\n'
-            '[*] --> draft\n'
-            'draft --> submitted\n'
-            'submitted --> approved\n'
-            'approved --> archived\n'
-            'archived --> [*]\n'
-        ))
-        widget = _widget(status_field={
-            'type': 'string',
-            'enum': ['draft', 'submitted', 'approved', 'rejected', 'archived'],
-            'default': 'draft',
-        })
-        widget['x-approval'] = {
-            'submit_on': {'status': 'submitted'},
-            'on_approved': {'set_fields': {'status': 'approved'}},
-            'on_rejected': {'set_fields': {'status': 'rejected'}},
-        }
-        schema = {
-            'definitions': {'widget': widget},
-            'x-state-machines': {'widget.status': 'sm/x.mmd'},
-        }
-        with pytest.raises(SchemaValidationError, match='Case D'):
-            validate_schema(schema)
-
     def test_case_d_legal_states_including_default_pass(self, tmp_path):
-        """Positive control for the above: a diagram using ONLY x-approval's
-        own legal state set (submit_on/on_approved/on_rejected values plus
-        the field's own pre-submission default) must not trip Case D."""
+        """Baseline: an ordinary submit/approve/reject diagram using only
+        x-approval's own declared values, none of them structurally
+        forbidden — must not trip Case D. (The former difference-set
+        version of this Case D check, and its accompanying rejection test,
+        were removed and replaced by the narrowed edge-direction check in
+        TestCaseDNarrowedEdgeDirectionCheck below — cmd_1136.)"""
         _write_mmd(tmp_path, 'sm/x.mmd', (
             'stateDiagram-v2\n'
             '[*] --> draft\n'
@@ -714,3 +686,251 @@ class TestDiagramContentChecks:
             'x-state-machines': {'widget.status': 'sm/x.mmd'},
         }
         validate_schema(schema)  # must not raise
+
+
+class TestCaseDNarrowedEdgeDirectionCheck:
+    """cmd_1136 (design-review ruling): Case D narrowed from a whole-state
+    difference-set check (every edge endpoint must be in x-approval's
+    legal value set) to a single forbidden edge shape — an edge FROM the
+    on_rejected/on_withdrawn value TO the on_approved value, which skips
+    the approval decision itself. The reverse direction (approved ->
+    rejected/withdrawn, a revocation) is a legitimate real-world path
+    (see app-template-5's service_request 'approved -> withdrawn' rule)
+    and must never be flagged. on_withdrawn (entirely unchecked by the old
+    logic) is now covered alongside on_rejected."""
+
+    def _approval_flow(self, on_rejected_terminal=True):
+        widget = _widget(status_field={
+            'type': 'string',
+            'enum': ['draft', 'submitted', 'approved', 'declined', 'withdrawn'],
+            'default': 'draft',
+        })
+        widget['x-approval'] = {
+            'submit_on': {'status': 'submitted'},
+            'on_approved': {'set_fields': {'status': 'approved'}},
+            'on_rejected': {'set_fields': {'status': 'declined'}, 'terminal': on_rejected_terminal},
+            'on_withdrawn': {'set_fields': {'status': 'withdrawn'}},
+        }
+        return widget
+
+    def test_rejected_to_approved_edge_errors(self, tmp_path):
+        """declined -> approved skips the approval decision entirely —
+        must be rejected."""
+        _write_mmd(tmp_path, 'sm/x.mmd', (
+            'stateDiagram-v2\n'
+            '[*] --> draft\n'
+            'draft --> submitted\n'
+            'submitted --> approved\n'
+            'submitted --> declined\n'
+            'declined --> approved\n'
+            'approved --> [*]\n'
+        ))
+        schema = {
+            'definitions': {'widget': self._approval_flow()},
+            'x-state-machines': {'widget.status': 'sm/x.mmd'},
+        }
+        with pytest.raises(SchemaValidationError, match='Case D'):
+            validate_schema(schema)
+
+    def test_withdrawn_to_approved_edge_errors(self, tmp_path):
+        """withdrawn -> approved: on_withdrawn was entirely unchecked before
+        this narrowing — must now be caught the same as on_rejected."""
+        _write_mmd(tmp_path, 'sm/x.mmd', (
+            'stateDiagram-v2\n'
+            '[*] --> draft\n'
+            'draft --> submitted\n'
+            'submitted --> approved\n'
+            'submitted --> withdrawn\n'
+            'withdrawn --> approved\n'
+            'approved --> [*]\n'
+        ))
+        schema = {
+            'definitions': {'widget': self._approval_flow()},
+            'x-state-machines': {'widget.status': 'sm/x.mmd'},
+        }
+        with pytest.raises(SchemaValidationError, match='Case D'):
+            validate_schema(schema)
+
+    def test_approved_to_withdrawn_revocation_edge_passes(self, tmp_path):
+        """approved -> withdrawn is a legitimate revocation path (the
+        app-template-5 service_request precedent) — must NEVER be
+        flagged, confirming the check is direction-sensitive rather than
+        a same-pair-either-direction ban."""
+        _write_mmd(tmp_path, 'sm/x.mmd', (
+            'stateDiagram-v2\n'
+            '[*] --> draft\n'
+            'draft --> submitted\n'
+            'submitted --> approved\n'
+            'submitted --> declined\n'
+            'submitted --> withdrawn\n'
+            'approved --> withdrawn\n'
+            'withdrawn --> submitted\n'
+            'declined --> [*]\n'
+            'withdrawn --> [*]\n'
+        ))
+        schema = {
+            'definitions': {'widget': self._approval_flow()},
+            'x-state-machines': {'widget.status': 'sm/x.mmd'},
+        }
+        validate_schema(schema)  # must not raise
+
+    def test_approved_to_rejected_revocation_edge_passes(self, tmp_path):
+        """approved -> declined (a non-terminal on_rejected, so a
+        resubmission-style revocation back through rejection is
+        reachable): the same revocation principle on the on_rejected
+        side, not just on_withdrawn."""
+        _write_mmd(tmp_path, 'sm/x.mmd', (
+            'stateDiagram-v2\n'
+            '[*] --> draft\n'
+            'draft --> submitted\n'
+            'submitted --> approved\n'
+            'approved --> declined\n'
+            'declined --> [*]\n'
+        ))
+        widget = self._approval_flow(on_rejected_terminal=False)
+        schema = {
+            'definitions': {'widget': widget},
+            'x-state-machines': {'widget.status': 'sm/x.mmd'},
+        }
+        validate_schema(schema)  # must not raise
+
+    def test_no_on_approved_set_fields_any_diagram_passes(self, tmp_path):
+        """goods_receipt_line shape (proj_c/app-template develop,
+        empirically confirmed against the real schema): on_approved
+        carries no set_fields at all (only emit_hook) — the forbidden
+        edge shape can't even be expressed, so Case D must never fire
+        regardless of diagram content, including a 'split' state that an
+        unrelated x-* mechanism writes and x-approval never touches at
+        all. This is the exact shape that used to block generate-code
+        against the real schema under the old difference-set check."""
+        _write_mmd(tmp_path, 'sm/x.mmd', (
+            'stateDiagram-v2\n'
+            '[*] --> pending\n'
+            'pending --> split\n'
+            'pending --> rejected\n'
+            'split --> [*]\n'
+            'rejected --> [*]\n'
+        ))
+        widget = _widget(status_field={
+            'type': 'string',
+            'enum': ['pending', 'split', 'rejected'],
+            'default': 'pending',
+        })
+        widget['x-approval'] = {
+            'on_approved': {'emit_hook': True},
+            'on_rejected': {'set_fields': {'status': 'rejected'}},
+        }
+        schema = {
+            'definitions': {'widget': widget},
+            'x-state-machines': {'widget.status': 'sm/x.mmd'},
+        }
+        validate_schema(schema)  # must not raise
+
+
+class TestCaseDProxyViewRegression:
+    """Issue #515 regression guard (proj_h/#515: a proxy view must not
+    silently inherit the base entity's write-locked-value declarations —
+    fixed by defaulting a proxy view to unlocked unless its own schema
+    declaration asks for one). Case D reads x-approval off the pointer
+    key's resolved model via _raw_def(), the same raw-fixed read every
+    other x-approval-driven derivation in this codebase (Source 1 in
+    derive_write_locked_values_for_view) intentionally uses for every
+    view including proxy views — this is NOT something #515's fix
+    changed, and Case D must not re-introduce the #515 bug by attributing
+    the WRONG entity's x-approval to a state-machine pointer that names a
+    proxy view."""
+
+    def test_proxy_view_pointer_uses_its_own_raw_entity_not_a_sibling_view(self, tmp_path):
+        """Two raw/view-split entities exist side by side
+        ('widget_a'/'__widget_a' and 'widget_b'/'__widget_b'); only
+        widget_a's raw entity declares x-approval with an on_approved
+        that would trip Case D against widget_b's diagram if the two were
+        ever confused. widget_b's own x-approval has no on_approved
+        set_fields at all (goods_receipt_line-shaped) so ITS diagram must
+        pass regardless of what widget_a declares — confirms _raw_def()
+        resolution stays scoped to the pointer's own (model, field), not
+        leaked across sibling raw/view-split entities."""
+        _write_mmd(tmp_path, 'sm/b.mmd', (
+            'stateDiagram-v2\n'
+            '[*] --> pending\n'
+            'pending --> split\n'
+            'pending --> rejected\n'
+            'split --> [*]\n'
+            'rejected --> [*]\n'
+        ))
+        schema = {
+            'definitions': {
+                '__widget_a': _widget(status_field={
+                    'type': 'string',
+                    'enum': ['draft', 'submitted', 'approved', 'declined'],
+                    'default': 'draft',
+                }, extra={
+                    'x-approval': {
+                        'submit_on': {'status': 'submitted'},
+                        'on_approved': {'set_fields': {'status': 'approved'}},
+                        'on_rejected': {'set_fields': {'status': 'declined'}},
+                    },
+                }),
+                'widget_a': {
+                    'allOf': [{'$ref': '#/definitions/__widget_a'}],
+                    'x-generate': {'list': True, 'view': True, 'new': True, 'edit': True, 'api': True},
+                },
+                '__widget_b': _widget(status_field={
+                    'type': 'string',
+                    'enum': ['pending', 'split', 'rejected'],
+                    'default': 'pending',
+                }, extra={
+                    'x-approval': {
+                        'on_approved': {'emit_hook': True},
+                        'on_rejected': {'set_fields': {'status': 'rejected'}},
+                    },
+                }),
+                'widget_b': {
+                    'allOf': [{'$ref': '#/definitions/__widget_b'}],
+                    'x-generate': {'list': True, 'view': True, 'new': True, 'edit': True, 'api': True},
+                },
+            },
+            'x-state-machines': {'widget_b.status': 'sm/b.mmd'},
+        }
+        validate_schema(schema)  # must not raise
+
+    def test_proxy_view_alias_pointer_still_reads_correct_raw_approval(self, tmp_path):
+        """Pointer keyed on the '__'-prefixed raw alias directly
+        ('__widget.status', the same alias form TestCaseII_
+        AmbiguousPointerEntries exercises for the collision check) must
+        resolve to the SAME x-approval as the bare view name would —
+        Case D's forbidden-edge check must still fire, confirming
+        _raw_def() strips/re-adds the '__' prefix consistently rather
+        than accidentally reading an unrelated (empty) definitions entry
+        for a proxy/raw naming variant."""
+        _write_mmd(tmp_path, 'sm/x.mmd', (
+            'stateDiagram-v2\n'
+            '[*] --> draft\n'
+            'draft --> submitted\n'
+            'submitted --> approved\n'
+            'submitted --> declined\n'
+            'declined --> approved\n'
+            'approved --> [*]\n'
+        ))
+        schema = {
+            'definitions': {
+                '__widget': _widget(status_field={
+                    'type': 'string',
+                    'enum': ['draft', 'submitted', 'approved', 'declined'],
+                    'default': 'draft',
+                }, extra={
+                    'x-approval': {
+                        'submit_on': {'status': 'submitted'},
+                        'on_approved': {'set_fields': {'status': 'approved'}},
+                        'on_rejected': {'set_fields': {'status': 'declined'}},
+                    },
+                }),
+                'widget': {
+                    'allOf': [{'$ref': '#/definitions/__widget'}],
+                    'x-generate': {'list': True, 'view': True, 'new': True, 'edit': True, 'api': True},
+                },
+            },
+            'x-state-machines': {'__widget.status': 'sm/x.mmd'},
+        }
+        with pytest.raises(SchemaValidationError, match='Case D'):
+            validate_schema(schema)
