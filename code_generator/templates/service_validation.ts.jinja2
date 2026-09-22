@@ -194,11 +194,11 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
   // Create (currentId === null): there is no prevRow/fromState to
   // evaluate an edge against, so the submitted value is checked against
   // the diagram's own declared initial state(s) (a `[*] --> state` node)
-  // instead. NOTE: this closes the route a data migration/import might
-  // rely on to land a new row directly in a later, non-initial diagram
-  // state (e.g. bringing in data already in its current real state from
-  // another system) -- no bypass for that case exists yet; open design
-  // question, not resolved by this check.
+  // instead. A data migration/import that needs to land a new row
+  // directly in a later, non-initial diagram state resolves this by
+  // declaring that state as an additional initial state (another
+  // `[*] --> state` node) -- multiple initial-state declarations are
+  // valid, and no separate bypass mechanism exists or is needed.
   if (currentId === null) {
 {% for t in state_machine_transitions %}
     if ('{{ t.field }}' in data) {
