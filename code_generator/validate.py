@@ -2429,11 +2429,12 @@ def validate_schema(schema: dict) -> None:
 
             # -------------------------------------------------------------
             # Diagram-content checks (Issue #696 state-transition Stage 1
-            # PR2a-2; state-transition-generator-design.md's 己 table rows
-            # that DO require reading the pointed-to .mmd file's own
-            # contents — unreachable/dead-end/duplicate/stale-ref, plus
-            # Case D). PR2a-1 (state_machine_parser.py) supplies the parser;
-            # this is its first real consumer.
+            # PR2a-2; state-transition-generator-design.md's Fail-Closed
+            # Diagram Validation table rows that DO require reading the
+            # pointed-to .mmd file's own contents — unreachable/dead-end/
+            # duplicate/stale-ref, plus Case D). PR2a-1
+            # (state_machine_parser.py) supplies the parser; this is its
+            # first real consumer.
             #
             # Path resolution: there is no pre-existing "resolve a schema-
             # embedded relative file path" convention elsewhere in this file
@@ -2534,7 +2535,7 @@ def validate_schema(schema: dict) -> None:
                 )
 
             # Case D (x-approval structural conflict, static, finalized
-            # cmd_1118): reuses resolve_approval_submit_on() and
+            # Issue #696): reuses resolve_approval_submit_on() and
             # resolve_set_fields() rather than re-deriving submit_on/
             # set_fields resolution independently.
             _sm_approval = approval_key.get(_sm_model_def)

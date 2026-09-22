@@ -553,14 +553,16 @@ class TestRealSchemaShapes:
 
 
 class TestDiagramContentChecks:
-    """PR2a-2: the five 己-table checks that require reading the pointed-to
-    .mmd file's own contents — unreachable state, dead-end state, duplicate
-    edge, stale-ref state, and Case D (x-approval structural conflict) —
-    plus the file-not-found precondition PR2a-2's own diagram-reading step
-    introduces (not one of the 己 table's 8 rows itself, but a necessary
-    precondition for reading any of them). Every case here must fail
-    generate-code (validate_schema() raising SchemaValidationError, the
-    same mechanism generate() uses to sys.exit(1) with no partial output)."""
+    """PR2a-2: the five Fail-Closed Diagram Validation table checks that
+    require reading the pointed-to .mmd file's own contents — unreachable
+    state, dead-end state, duplicate edge, stale-ref state, and Case D
+    (x-approval structural conflict) — plus the file-not-found
+    precondition PR2a-2's own diagram-reading step introduces (not one of
+    the Fail-Closed Diagram Validation table's 8 rows itself, but a
+    necessary precondition for reading any of them). Every case here must
+    fail generate-code (validate_schema() raising SchemaValidationError,
+    the same mechanism generate() uses to sys.exit(1) with no partial
+    output)."""
 
     def test_missing_mmd_file_errors(self):
         # Deliberately not written via _write_mmd — the whole point of this
