@@ -11,19 +11,16 @@ state-transition-generator-design.md's diagram-validation table:
 Plus: the pointer map's own absence is a no-op (the design's opt-in
 guarantee).
 
-An entity-level "Case E" check used to live here too, rejecting a pointer
-entry outright whenever its entity's import route could not converge
-through service.ts (a bridge or an unconverged embedded child). It was
+An entity-level "Case E" check, and later a field-level CSV import lockout
+that replaced it, both used to live here / in build_context.py. Both
 removed: whether an entity's import route converges and whether one of its
 fields can be governed by a state-transition diagram are independent
-questions. The narrower real concern — an unconverged import route
-bypassing validateOnAdd/Update for a governed field — is closed at the
-field level in build_context.py instead (import_state_machine_locked_fields
-excludes the governed CSV column from that route's writable set); that
-mechanism is exercised in generators_test.py, not here, since it lives in
-build_context.py's per-model context, not validate_schema(). Former Case E
-tests below have been converted to "must not raise" — the exact shapes that
-used to be entity-level rejections.
+questions, and transition legality is an ordinary write-path check like
+any other constraint — a governed field's CSV column is imported like any
+other column, and validateOnAdd/Update is responsible for rejecting a
+value that isn't a legal transition target. Former Case E tests below have
+been converted to "must not raise" — the exact shapes that used to be
+entity-level rejections.
 
 Fixtures use a single, non-split `widget` definitions entry unless a test's
 own docstring says otherwise (the (ii) alias test needs a genuine raw/view
@@ -40,6 +37,32 @@ not just abstractly via `widget`.
 """
 import pytest
 from validate import validate_schema, SchemaValidationError
+
+# PR2a-2: validate_schema() now reads each x-state-machines pointer entry's
+# .mmd file off disk (resolved relative to the current working directory —
+# see validate.py's own comment at the read site for why). Every fixture
+# below that expects validate_schema() to pass cleanly must therefore have
+# a real, valid .mmd file backing its pointer path; chdir-ing each test
+# into its own tmp_path keeps these fixture files from leaking between
+# tests or colliding with anything real. Tests that expect a
+# SchemaValidationError for a reason unrelated to the .mmd file (unknown
+# model/field, malformed key, ambiguous pointer) don't need a real file —
+# the pointed-to path is never even read for those (malformed-key cases)
+# or reading it merely adds a second, harmless error to the same raised
+# exception (unknown model/field cases) alongside the one the test's
+# `match=` already asserts on.
+_VALID_MMD = 'stateDiagram-v2\n[*] --> draft\ndraft --> [*]\n'
+
+
+@pytest.fixture(autouse=True)
+def _sm_tmp_cwd(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+
+def _write_mmd(tmp_path, rel_path, content=_VALID_MMD):
+    path = tmp_path / rel_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
 
 
 def _widget(status_field=None, extra=None, with_import=True, with_generate=True):
@@ -122,10 +145,11 @@ class TestCaseI_FieldExistenceAndType:
         with pytest.raises(SchemaValidationError, match='with no declared enum values'):
             validate_schema(schema)
 
-    def test_native_enum_type_accepted(self):
+    def test_native_enum_type_accepted(self, tmp_path):
         """_prisma_native_enum_type also counts as enum-compatible, not just
         a plain 'enum:' list — legacy int-backed nativeEnum fields must not
         be wrongly rejected here."""
+        _write_mmd(tmp_path, 'sm/x.mmd')
         schema = {
             'definitions': {
                 'widget': _widget(status_field={
@@ -159,7 +183,9 @@ class TestCaseII_AmbiguousPointerEntries:
         with pytest.raises(SchemaValidationError, match='all name the same \\(model, field\\) pair'):
             validate_schema(schema)
 
-    def test_distinct_fields_on_same_model_not_ambiguous(self):
+    def test_distinct_fields_on_same_model_not_ambiguous(self, tmp_path):
+        _write_mmd(tmp_path, 'sm/a.mmd')
+        _write_mmd(tmp_path, 'sm/b.mmd')
         widget = _widget(status_field=_ENUM_STATUS)
         widget['properties']['stage'] = dict(_ENUM_STATUS)
         schema = {
@@ -184,9 +210,10 @@ class TestFormerCaseIII_ImportConvergenceNoLongerGatesStateMachines:
     validateOnAdd/Update) is closed separately, at the field level, in
     build_context.py."""
 
-    def test_not_import_eligible_passes(self):
+    def test_not_import_eligible_passes(self, tmp_path):
         """No x-import-key at all -- import_eligible is false, so there is no
         import route at all."""
+        _write_mmd(tmp_path, 'sm/x.mmd')
         schema = {
             'definitions': {
                 'widget': _widget(status_field=_ENUM_STATUS, with_import=False),
@@ -215,7 +242,7 @@ class TestFormerCaseIII_ImportConvergenceNoLongerGatesStateMachines:
         with pytest.raises(SchemaValidationError, match='E_IMPORT_KEY_NOT_ELIGIBLE'):
             validate_schema(schema)
 
-    def test_new_form_bridge_no_longer_errors(self):
+    def test_new_form_bridge_no_longer_errors(self, tmp_path):
         """A structurally valid new-form x-bridge (name/child/parents, per
         validate.py's own object-form requirements — unrelated to state
         machines) used to still trip Case E purely because
@@ -229,6 +256,7 @@ class TestFormerCaseIII_ImportConvergenceNoLongerGatesStateMachines:
         care whether the entity is a bridge child), so it's kept out of
         this fixture the same way test_not_import_eligible_passes above
         keeps import out of its own orthogonal concern."""
+        _write_mmd(tmp_path, 'sm/x.mmd')
         schema = {
             'definitions': {
                 'widget': _widget(
@@ -260,12 +288,13 @@ class TestFormerCaseIII_ImportConvergenceNoLongerGatesStateMachines:
         }
         validate_schema(schema)  # must not raise
 
-    def test_writable_embedded_child_no_longer_errors(self):
+    def test_writable_embedded_child_no_longer_errors(self, tmp_path):
         """widget.lines embeds widget_line, which has no x-generate of its
         own (no independent write path) — the parent's own service function
         must nested-create/update it, tripping child_params_for_add/update
         non-emptiness (build_context.py write_ch). This no longer blocks
         widget.status from carrying a state-transition pointer."""
+        _write_mmd(tmp_path, 'sm/x.mmd')
         widget = _widget(status_field=_ENUM_STATUS)
         widget['properties']['lines'] = {
             'type': 'array',
@@ -287,9 +316,10 @@ class TestFormerCaseIII_ImportConvergenceNoLongerGatesStateMachines:
         }
         validate_schema(schema)  # must not raise
 
-    def test_independent_child_still_passes(self):
+    def test_independent_child_still_passes(self, tmp_path):
         """widget_line has its OWN x-generate (new/edit/delete all true) --
         never blocked either way, before or after the removal."""
+        _write_mmd(tmp_path, 'sm/x.mmd')
         widget = _widget(status_field=_ENUM_STATUS)
         widget['properties']['lines'] = {
             'type': 'array',
@@ -312,7 +342,8 @@ class TestFormerCaseIII_ImportConvergenceNoLongerGatesStateMachines:
         }
         validate_schema(schema)  # must not raise
 
-    def test_import_eligible_no_bridge_no_children_passes(self):
+    def test_import_eligible_no_bridge_no_children_passes(self, tmp_path):
+        _write_mmd(tmp_path, 'sm/x.mmd')
         schema = {
             'definitions': {'widget': _widget(status_field=_ENUM_STATUS)},
             'x-state-machines': {'widget.status': 'sm/x.mmd'},
@@ -338,7 +369,7 @@ class TestRealSchemaShapes:
     values) -- the raw/view split shape, key placement, and every field
     Case E actually reads are kept faithful to the real schemas."""
 
-    def test_goods_receipt_import_eligible_with_writable_child_passes(self):
+    def test_goods_receipt_import_eligible_with_writable_child_passes(self, tmp_path):
         """goods_receipt (app-template develop): x-import-key present (new/
         edit both true) -- import-eligible -- AND embeds `lines`
         (goods_receipt_line, x-generate.new/edit/delete all false -- no
@@ -351,6 +382,7 @@ class TestRealSchemaShapes:
         unconverged raw-tx fallback writing `status` without going through
         validateOnAdd/Update) is closed separately at the field level in
         build_context.py, not here."""
+        _write_mmd(tmp_path, 'sm/goods_receipt_status.mmd')
         schema = {
             'definitions': {
                 '__goods_receipt': {
@@ -395,13 +427,14 @@ class TestRealSchemaShapes:
         }
         validate_schema(schema)  # must not raise
 
-    def test_goods_receipt_line_passes_not_import_eligible(self):
+    def test_goods_receipt_line_passes_not_import_eligible(self, tmp_path):
         """goods_receipt_line (app-template develop): no x-import-key of its
         own -- import_eligible is false -- so it must pass regardless of the
         embedded-child fix above. goods_receipt_line's real generated output
         has no import/ route at all (confirmed by running generate.py
         against the real schema), reproduced here as a schema-level
         fixture."""
+        _write_mmd(tmp_path, 'sm/goods_receipt_line_status.mmd')
         schema = {
             'definitions': {
                 '__goods_receipt': {
@@ -452,13 +485,14 @@ class TestRealSchemaShapes:
         }
         validate_schema(schema)  # must not raise
 
-    def test_shipment_line_passes_import_eligible_no_writable_child(self):
+    def test_shipment_line_passes_import_eligible_no_writable_child(self, tmp_path):
         """shipment_line (inventory-app develop): x-import-key present (new/
         edit both true) -- import-eligible -- but has no embedded child of
         its own (only scalar/FK fields plus FK label $refs on the view
         extension, no array property). Exercises the properties-merge fix
         on a real split entity that must still pass -- confirms the fix is
         not overly broad."""
+        _write_mmd(tmp_path, 'sm/shipment_line_status.mmd')
         schema = {
             'definitions': {
                 'item': {
@@ -514,5 +548,169 @@ class TestRealSchemaShapes:
                 },
             },
             'x-state-machines': {'shipment_line.status': 'sm/shipment_line_status.mmd'},
+        }
+        validate_schema(schema)  # must not raise
+
+
+class TestDiagramContentChecks:
+    """PR2a-2: the five Fail-Closed Diagram Validation table checks that
+    require reading the pointed-to .mmd file's own contents — unreachable
+    state, dead-end state, duplicate edge, stale-ref state, and Case D
+    (x-approval structural conflict) — plus the file-not-found
+    precondition PR2a-2's own diagram-reading step introduces (not one of
+    the Fail-Closed Diagram Validation table's 8 rows itself, but a
+    necessary precondition for reading any of them). Every case here must
+    fail generate-code (validate_schema() raising SchemaValidationError,
+    the same mechanism generate() uses to sys.exit(1) with no partial
+    output)."""
+
+    def test_missing_mmd_file_errors(self):
+        # Deliberately not written via _write_mmd — the whole point of this
+        # test is that the file does not exist.
+        schema = {
+            'definitions': {'widget': _widget(status_field=_ENUM_STATUS)},
+            'x-state-machines': {'widget.status': 'sm/does_not_exist.mmd'},
+        }
+        with pytest.raises(SchemaValidationError, match='does not exist'):
+            validate_schema(schema)
+
+    def test_unreachable_state_errors(self, tmp_path):
+        """'orphan' has an outgoing edge but no incoming edge from any
+        initial state — unreachable no matter how the graph is walked."""
+        _write_mmd(tmp_path, 'sm/x.mmd', (
+            'stateDiagram-v2\n'
+            '[*] --> draft\n'
+            'draft --> submitted\n'
+            'submitted --> [*]\n'
+            'orphan --> submitted\n'
+        ))
+        schema = {
+            'definitions': {'widget': _widget(status_field=_ENUM_STATUS)},
+            'x-state-machines': {'widget.status': 'sm/x.mmd'},
+        }
+        with pytest.raises(SchemaValidationError, match='unreachable'):
+            validate_schema(schema)
+
+    def test_dead_end_without_terminal_errors(self, tmp_path):
+        """'submitted' has no outgoing edge and is never marked terminal
+        ('submitted --> [*]') — an accidentally forgotten transition, not
+        intentionally final."""
+        _write_mmd(tmp_path, 'sm/x.mmd', (
+            'stateDiagram-v2\n'
+            '[*] --> draft\n'
+            'draft --> submitted\n'
+        ))
+        schema = {
+            'definitions': {'widget': _widget(status_field=_ENUM_STATUS)},
+            'x-state-machines': {'widget.status': 'sm/x.mmd'},
+        }
+        with pytest.raises(SchemaValidationError, match='dead-end'):
+            validate_schema(schema)
+
+    def test_duplicate_edge_errors(self, tmp_path):
+        """Two edges declared between the exact same (fromState, toState)
+        pair — nothing can disambiguate which one's condition/effect
+        should apply."""
+        _write_mmd(tmp_path, 'sm/x.mmd', (
+            'stateDiagram-v2\n'
+            '[*] --> draft\n'
+            'draft --> submitted\n'
+            'draft --> submitted\n'
+            'submitted --> [*]\n'
+        ))
+        schema = {
+            'definitions': {'widget': _widget(status_field=_ENUM_STATUS)},
+            'x-state-machines': {'widget.status': 'sm/x.mmd'},
+        }
+        with pytest.raises(SchemaValidationError, match='duplicate edge'):
+            validate_schema(schema)
+
+    def test_stale_ref_state_via_monkeypatched_parser(self, tmp_path, monkeypatch):
+        """The real parser (state_machine_parser.py) can never itself
+        produce a StateMachineDiagram with an edge endpoint missing from
+        `states` — every bare edge's endpoints are added to `states` as a
+        side effect of parsing it, so no real .mmd text can exercise this
+        branch. Monkeypatches parse_state_machine_diagram to return a
+        hand-built, deliberately inconsistent StateMachineDiagram instead,
+        to exercise validate.py's own defensive check directly. See
+        validate.py's comment at the stale-ref check site for why this
+        check is kept despite being unreachable via the real parser today."""
+        import validate
+        from helpers.state_machine_parser import StateMachineDiagram
+
+        _write_mmd(tmp_path, 'sm/x.mmd')  # content irrelevant, parser is patched
+        monkeypatch.setattr(
+            validate, 'parse_state_machine_diagram',
+            lambda _text: StateMachineDiagram(
+                states={'draft', 'submitted'},
+                edges=[('draft', 'submitted'), ('submitted', 'ghost')],
+                initial_states={'draft'},
+                terminal_states={'submitted'},
+            ),
+        )
+        schema = {
+            'definitions': {'widget': _widget(status_field=_ENUM_STATUS)},
+            'x-state-machines': {'widget.status': 'sm/x.mmd'},
+        }
+        with pytest.raises(SchemaValidationError, match='undeclared state'):
+            validate.validate_schema(schema)
+
+    def test_case_d_state_not_in_approval_legal_set_errors(self, tmp_path):
+        """widget also declares x-approval (submit_on -> 'submitted',
+        on_approved.set_fields -> 'approved', on_rejected.set_fields ->
+        'rejected'); the diagram's own pre-submission default ('draft') is
+        legal too, but 'archived' is structurally impossible under
+        x-approval's own declared stages — Case D must reject it."""
+        _write_mmd(tmp_path, 'sm/x.mmd', (
+            'stateDiagram-v2\n'
+            '[*] --> draft\n'
+            'draft --> submitted\n'
+            'submitted --> approved\n'
+            'approved --> archived\n'
+            'archived --> [*]\n'
+        ))
+        widget = _widget(status_field={
+            'type': 'string',
+            'enum': ['draft', 'submitted', 'approved', 'rejected', 'archived'],
+            'default': 'draft',
+        })
+        widget['x-approval'] = {
+            'submit_on': {'status': 'submitted'},
+            'on_approved': {'set_fields': {'status': 'approved'}},
+            'on_rejected': {'set_fields': {'status': 'rejected'}},
+        }
+        schema = {
+            'definitions': {'widget': widget},
+            'x-state-machines': {'widget.status': 'sm/x.mmd'},
+        }
+        with pytest.raises(SchemaValidationError, match='Case D'):
+            validate_schema(schema)
+
+    def test_case_d_legal_states_including_default_pass(self, tmp_path):
+        """Positive control for the above: a diagram using ONLY x-approval's
+        own legal state set (submit_on/on_approved/on_rejected values plus
+        the field's own pre-submission default) must not trip Case D."""
+        _write_mmd(tmp_path, 'sm/x.mmd', (
+            'stateDiagram-v2\n'
+            '[*] --> draft\n'
+            'draft --> submitted\n'
+            'submitted --> approved\n'
+            'submitted --> rejected\n'
+            'approved --> [*]\n'
+            'rejected --> [*]\n'
+        ))
+        widget = _widget(status_field={
+            'type': 'string',
+            'enum': ['draft', 'submitted', 'approved', 'rejected'],
+            'default': 'draft',
+        })
+        widget['x-approval'] = {
+            'submit_on': {'status': 'submitted'},
+            'on_approved': {'set_fields': {'status': 'approved'}},
+            'on_rejected': {'set_fields': {'status': 'rejected'}},
+        }
+        schema = {
+            'definitions': {'widget': widget},
+            'x-state-machines': {'widget.status': 'sm/x.mmd'},
         }
         validate_schema(schema)  # must not raise

@@ -216,11 +216,16 @@ class TestEmbeddedChildImportConverges:
         assert 'await tx.goods_receipt.create(' not in rendered
         assert 'await tx.goods_receipt.update(' not in rendered
 
-    def test_governed_field_stays_writable_not_locked(self):
-        """`status` flows through add/updateGoodsReceipt (validateOnAdd/
-        Update) like any other field -- there is no remaining unconverged
-        fallback for an import_eligible entity, so no field-level lockout
-        mechanism applies here."""
+    def test_governed_field_not_flagged_unimportable_or_dropped_from_field_specs(self):
+        """`status` still flows through add/updateGoodsReceipt
+        (validateOnAdd/Update) like any other field at the
+        import_unimportable_columns / import_field_specs level -- those two
+        mechanisms are unaffected by state-machine governance, and remain
+        exactly as they'd be for a plain (non-governed) status field. There
+        is no separate field-level import lockout: transition legality is
+        an ordinary write-path check like any other constraint, enforced by
+        the write path itself rather than by excluding the column from
+        import."""
         ctx = build_context(_goods_receipt_entity(), _goods_receipt_schema())
         assert 'status' not in ctx['import_unimportable_columns']
         assert any(spec['name'] == 'status' for spec in ctx['import_field_specs'])
