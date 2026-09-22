@@ -1,0 +1,34 @@
+// Self-contained fixture Prisma schema for cmd_1139's opt-in byte-identity
+// regression test -- mirrors state_transition_convergence_gate/schema.prisma's
+// structure but declares no state-machine-governed field at all.
+
+generator client {
+  provider = "prisma-client"
+  output   = "./.generated-client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model user {
+  id      String @id @default(cuid())
+  name    String
+  email   String @unique
+  created_plain_widgets plain_widget[] @relation("PlainWidgetCreator")
+  updated_plain_widgets plain_widget[] @relation("PlainWidgetUpdater")
+}
+
+model plain_widget {
+  id         String   @id @default(cuid())
+  code       String
+  label      String
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("PlainWidgetCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("PlainWidgetUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}

@@ -1535,6 +1535,13 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 json.dumps([list(e) for e in state_machine_approval_edges[_sm_field]])
                 if _sm_field in state_machine_approval_edges else None
             ),
+            # initial_states_json (cmd_1139): the diagram's own
+            # `[*] --> state` declared initial state(s), for
+            # assertInitialStateAllowed()'s create-time check in
+            # lib/state_transitions.ts -- a sibling judgment to
+            # assertTransitionAllowed() that runs when currentId === null
+            # (no prevRow to read a fromState off of).
+            'initial_states_json': json.dumps(list(state_machine_diagrams[_sm_field]['initial_states'])),
         }
         for _sm_field in state_machine_field_list
     ]

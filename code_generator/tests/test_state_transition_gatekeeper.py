@@ -26,15 +26,23 @@ Covers:
   - service.ts.jinja2: no dedicated transition{Field}() entry point is ever
     emitted, regardless of can_update.
   - service_validation.ts.jinja2: the inline convergence-point check --
-    import of assertTransitionAllowed, gated on can_update; skipped
-    entirely on create (currentId === null); only fires when the incoming
-    value differs from the row's current value; field naming (a governed
-    field named something other than 'status' behaves identically).
+    import of assertTransitionAllowed/assertInitialStateAllowed, gated on
+    can_update; the edge check (assertTransitionAllowed) is skipped on
+    create (currentId === null, no prevRow to read a fromState off of) and
+    only fires when the incoming value differs from the row's current
+    value; the create path instead runs assertInitialStateAllowed against
+    the diagram's own declared initial state(s) (cmd_1139); field naming
+    (a governed field named something other than 'status') behaves
+    identically for both checks.
   - state_transitions.ts.jinja2 (the model-scoped file itself): Case A/B/C
     edge-table shape, keyed by '{model}.{field}', across multiple models in
-    one file.
-  - Full pipeline (build_user_schema -> generate.py): can_update gating of
-    which models' entries actually reach lib/state_transitions.ts.
+    one file; assertInitialStateAllowed()'s initialStates set per entry.
+  - generate.py: can_update gating of which models' entries actually reach
+    lib/state_transitions.ts; the file itself is skipped entirely (cmd_1139)
+    when a schema contributes zero entries, not emitted empty (opt-in byte
+    identity for a schema untouched by this feature).
+  - Full pipeline (build_user_schema -> generate.py): the above, exercised
+    through the real generator entry point.
 
 Case D (the generate-time static check rejecting a diagram edge whose
 state is structurally impossible under x-approval's own declared stages)
@@ -330,20 +338,42 @@ class TestServiceValidationInlineTransitionCheck:
         _write_mmd(tmp_path, 'sm/widget_status.mmd', _CASE_ABC_MMD)
         schema = _schema(x_approval=_case_abc_x_approval())
         rendered = self._render(schema)
-        assert "import { assertTransitionAllowed } from '@/lib/state_transitions';" in rendered
+        assert "import { assertTransitionAllowed, assertInitialStateAllowed } from '@/lib/state_transitions';" in rendered
         assert "assertTransitionAllowed('widget', 'status', String(prevRow.status), String(data.status))" in rendered
 
-    def test_skipped_entirely_on_create(self, tmp_path):
-        """Item 6: a new row may land in any diagram state (e.g. migrating
-        existing data from another system) -- the check must be gated on
-        currentId !== null, i.e. reachable only from validateOnUpdate, not
-        validateOnAdd."""
+    def test_transition_check_skipped_on_create(self, tmp_path):
+        """The edge check (fromState -> toState) has no fromState to read on
+        create -- a new row has no prevRow -- so assertTransitionAllowed
+        must be gated on currentId !== null, i.e. reachable only from
+        validateOnUpdate, never validateOnAdd."""
         _write_mmd(tmp_path, 'sm/widget_status.mmd', _CASE_ABC_MMD)
         schema = _schema(x_approval=_case_abc_x_approval())
         rendered = self._render(schema)
         assert 'if (currentId !== null && prevRow) {' in rendered
         guard_and_below = rendered.split('if (currentId !== null && prevRow) {')[1]
         assert "assertTransitionAllowed('widget', 'status'" in guard_and_below.split('}')[0]
+
+    def test_initial_state_check_fires_on_create(self, tmp_path):
+        """cmd_1139: a new row's submitted value must be one of the
+        diagram's own declared initial state(s) -- checked via
+        assertInitialStateAllowed(), gated on currentId === null (the
+        opposite guard from the edge check above)."""
+        _write_mmd(tmp_path, 'sm/widget_status.mmd', _CASE_ABC_MMD)
+        schema = _schema(x_approval=_case_abc_x_approval())
+        rendered = self._render(schema)
+        assert 'if (currentId === null) {' in rendered
+        guard_and_below = rendered.split('if (currentId === null) {')[1]
+        assert "assertInitialStateAllowed('widget', 'status', String(data.status))" in guard_and_below.split('}')[0]
+
+    def test_initial_state_check_not_gated_on_prevRow(self, tmp_path):
+        """The create guard must not also require `prevRow` (there is none
+        on create) -- distinguishes it from the update guard's
+        `currentId !== null && prevRow` shape."""
+        _write_mmd(tmp_path, 'sm/widget_status.mmd', _CASE_ABC_MMD)
+        schema = _schema(x_approval=_case_abc_x_approval())
+        rendered = self._render(schema)
+        assert 'if (currentId === null && prevRow)' not in rendered
+        assert 'if (currentId === null)' in rendered
 
     def test_only_fires_when_value_changes(self, tmp_path):
         _write_mmd(tmp_path, 'sm/widget_status.mmd', _CASE_ABC_MMD)
@@ -384,6 +414,7 @@ class TestServiceValidationInlineTransitionCheck:
         schema = {'definitions': {'widget': _widget()}}
         rendered = self._render(schema)
         assert 'assertTransitionAllowed' not in rendered
+        assert 'assertInitialStateAllowed' not in rendered
         assert 'state_transitions' not in rendered
 
     def test_gated_on_can_update_false(self, tmp_path):
@@ -391,6 +422,7 @@ class TestServiceValidationInlineTransitionCheck:
         schema = _schema(x_approval=_case_abc_x_approval())
         rendered = self._render(schema, edit=False)
         assert 'assertTransitionAllowed' not in rendered
+        assert 'assertInitialStateAllowed' not in rendered
         assert 'state_transitions' not in rendered
 
 
@@ -439,6 +471,14 @@ class TestStateTransitionsTsTemplate:
         block = rendered.split("'widget.status'")[1].split('},')[0]
         assert 'approvalEdges: null' in block
 
+    def test_initial_states_rendered_from_diagram(self, tmp_path):
+        """_CASE_ABC_MMD declares exactly one initial state ('[*] --> draft')
+        -- initialStates must carry it, regardless of x-approval."""
+        entry = self._widget_entry(tmp_path)
+        rendered = self._render([entry])
+        block = rendered.split("'widget.status'")[1].split('},')[0]
+        assert 'initialStates: ["draft"]' in block
+
     def test_multiple_models_keyed_separately(self, tmp_path):
         _write_mmd(tmp_path, 'sm/widget_status.mmd', _CASE_ABC_MMD)
         _write_mmd(tmp_path, 'sm/other_stage.mmd', 'stateDiagram-v2\n[*] --> a\na --> b\nb --> [*]\n')
@@ -460,6 +500,7 @@ class TestStateTransitionsTsTemplate:
     def test_no_dead_code_when_no_entries(self):
         rendered = self._render([])
         assert 'export function assertTransitionAllowed' in rendered
+        assert 'export function assertInitialStateAllowed' in rendered
         assert "':" not in rendered.split('TRANSITIONS')[1].split('};')[0]
 
 
@@ -505,8 +546,15 @@ class TestStateTransitionConvergencePipeline:
     def test_widget_service_validation_calls_shared_gatekeeper(self, tmp_path, monkeypatch):
         out = self._run_pipeline(tmp_path, monkeypatch)
         content = (out / 'lib' / 'state_transition_gate_widget' / 'service_validation.ts').read_text()
-        assert "import { assertTransitionAllowed } from '@/lib/state_transitions';" in content
+        assert "import { assertTransitionAllowed, assertInitialStateAllowed } from '@/lib/state_transitions';" in content
         assert "assertTransitionAllowed('state_transition_gate_widget', 'status'" in content
+        assert "assertInitialStateAllowed('state_transition_gate_widget', 'status'" in content
+
+    def test_widget_state_transitions_ts_carries_initial_states(self, tmp_path, monkeypatch):
+        out = self._run_pipeline(tmp_path, monkeypatch)
+        content = (out / 'lib' / 'state_transitions.ts').read_text()
+        block = content.split("'state_transition_gate_widget.status'")[1].split('},')[0]
+        assert 'initialStates: ["draft"]' in block
 
     def test_widget_service_has_no_dedicated_transition_entry_point(self, tmp_path, monkeypatch):
         out = self._run_pipeline(tmp_path, monkeypatch)
@@ -521,3 +569,131 @@ class TestStateTransitionConvergencePipeline:
             content = service_validation.read_text()
             assert 'assertTransitionAllowed' not in content
             assert 'state_transitions' not in content
+
+
+# ---------------------------------------------------------------------------
+# cmd_1139: opt-in byte identity -- a schema that never uses
+# x-state-machines at all must generate byte-identical output to before
+# this feature existed. self_only_admin_bypass_entities.ts (the sibling
+# "always written, even empty" file this design was originally modeled on)
+# cannot dangle an import the way that file must not -- see generate.py's
+# comment at the lib/state_transitions.ts _write() call.
+# ---------------------------------------------------------------------------
+
+class TestStateTransitionsFileSkippedWhenNoGovernedFields:
+    REPO_ROOT = Path(__file__).resolve().parents[2]
+    FIXTURE_DIR = REPO_ROOT / 'code_generator' / 'tests' / 'fixtures' / 'state_transition_no_governed_fields'
+
+    def _run_pipeline(self, tmp_path, monkeypatch):
+        from build_user_schema import build_user_schema
+        from generate import generate
+        monkeypatch.chdir(tmp_path)
+        prisma_dir = tmp_path / 'prisma'
+        prisma_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(self.FIXTURE_DIR / 'schema.prisma', prisma_dir / 'schema.prisma')
+        intermediate = tmp_path / 'generated_json_schema.yaml'
+        build_user_schema(self.FIXTURE_DIR / 'json_schema.yaml', self.FIXTURE_DIR / 'schema.prisma', intermediate)
+        generate(str(intermediate), str(tmp_path))
+        return tmp_path
+
+    def test_state_transitions_ts_not_written(self, tmp_path, monkeypatch):
+        out = self._run_pipeline(tmp_path, monkeypatch)
+        assert not (out / 'lib' / 'state_transitions.ts').exists()
+
+    def test_plain_widget_service_validation_has_no_gatekeeper_reference(self, tmp_path, monkeypatch):
+        out = self._run_pipeline(tmp_path, monkeypatch)
+        content = (out / 'lib' / 'plain_widget' / 'service_validation.ts').read_text()
+        assert 'assertTransitionAllowed' not in content
+        assert 'assertInitialStateAllowed' not in content
+        assert 'state_transitions' not in content
+
+
+# ---------------------------------------------------------------------------
+# cmd_1140: docs/generated/{parent}.md must document a governed field's
+# diagram (creation states / legal transitions / terminal states), and must
+# state the corrected semantics of a creation state -- "a state a new row
+# may land in" (any producer: UI, side-effect hook, batch job, import), not
+# "the state a row's life begins with."
+# ---------------------------------------------------------------------------
+
+class TestStateMachineGeneratedDoc:
+    REPO_ROOT = Path(__file__).resolve().parents[2]
+    FIXTURE_DIR = REPO_ROOT / 'code_generator' / 'tests' / 'fixtures' / 'state_transition_convergence_gate'
+
+    def _run_pipeline(self, tmp_path, monkeypatch):
+        from build_user_schema import build_user_schema
+        from generate import generate
+        monkeypatch.chdir(tmp_path)
+        shutil.copytree(self.FIXTURE_DIR / 'sm', tmp_path / 'sm')
+        prisma_dir = tmp_path / 'prisma'
+        prisma_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(self.FIXTURE_DIR / 'schema.prisma', prisma_dir / 'schema.prisma')
+        intermediate = tmp_path / 'generated_json_schema.yaml'
+        build_user_schema(self.FIXTURE_DIR / 'json_schema.yaml', self.FIXTURE_DIR / 'schema.prisma', intermediate)
+        generate(str(intermediate), str(tmp_path))
+        return tmp_path
+
+    def test_widget_doc_lists_creation_states_and_transitions(self, tmp_path, monkeypatch):
+        out = self._run_pipeline(tmp_path, monkeypatch)
+        content = (out / 'docs' / 'generated' / 'state_transition_gate_widget.md').read_text()
+        assert '## State Machine' in content
+        assert '### `status`' in content
+        assert '- `draft`' in content
+        assert '| `draft` | `approved` |' in content
+        assert '| `draft` | `submitted` |' in content
+        assert '| `submitted` | `rejected` |' in content
+
+    def test_widget_doc_creation_state_wording_not_lifecycle_start(self, tmp_path, monkeypatch):
+        """cmd_1140: must not describe a creation state as where a row's
+        life begins -- a row can be created into it via any producer."""
+        out = self._run_pipeline(tmp_path, monkeypatch)
+        content = (out / 'docs' / 'generated' / 'state_transition_gate_widget.md').read_text()
+        assert 'may be created into' in content
+        assert "life's beginning" not in content
+        assert 'side-effect hook' in content
+        assert 'batch' in content
+        assert 'import' in content
+
+    def test_widget_doc_terminal_state_has_no_runtime_meaning_note(self, tmp_path, monkeypatch):
+        out = self._run_pipeline(tmp_path, monkeypatch)
+        content = (out / 'docs' / 'generated' / 'state_transition_gate_widget.md').read_text()
+        assert 'Terminal states' in content
+        assert 'no meaning at runtime' in content
+        assert 'no relationship to delete permission' in content
+        assert '- `approved`' in content
+        assert '- `rejected`' in content
+
+    def test_readonly_widget_doc_notes_declared_but_unenforced(self, tmp_path, monkeypatch):
+        out = self._run_pipeline(tmp_path, monkeypatch)
+        content = (out / 'docs' / 'generated' / 'state_transition_gate_readonly_widget.md').read_text()
+        assert 'not enforced' in content
+        assert '### `stage`' in content
+
+    def test_no_state_machine_section_when_no_governed_fields(self):
+        from generate import _make_env
+        from build_context import build_context
+        from generators_doc import build_doc_entity_context
+        env = _make_env()
+        schema = {'definitions': {'widget': _widget()}}
+        ctx = build_context(_entity(), schema)
+        doc_ctx = build_doc_entity_context(ctx)
+        rendered = env.get_template('doc_entity.md.jinja2').render(**doc_ctx)
+        assert '## State Machine' not in rendered
+
+    def test_no_extra_blank_line_before_relationships_when_no_governed_fields(self):
+        """cmd_1139 byte-identity regression: the conditional `{% if
+        state_machine_fields %}...{% endif %}` block must not leave a
+        stray blank line behind when it renders nothing -- caught via a
+        full-pipeline byte comparison against proj_c/proj_h's own schemas
+        (neither declares x-state-machines), not by this unit test alone;
+        added here so the same regression fails fast next time."""
+        from generate import _make_env
+        from build_context import build_context
+        from generators_doc import build_doc_entity_context
+        env = _make_env()
+        schema = {'definitions': {'widget': _widget()}}
+        ctx = build_context(_entity(), schema)
+        doc_ctx = build_doc_entity_context(ctx)
+        rendered = env.get_template('doc_entity.md.jinja2').render(**doc_ctx)
+        assert '\n\n\n## Relationships' not in rendered
+        assert '\n\n## Relationships' in rendered

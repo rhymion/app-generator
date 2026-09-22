@@ -182,6 +182,32 @@ def build_doc_entity_context(ctx: dict) -> dict:
     can_delete  = ctx.get('can_delete', True)
     can_api     = gen_cfg.get('api', False)
 
+    # State machine fields (cmd_1139/cmd_1140): one entry per
+    # x-state-machines-governed field on this entity. `creation_states`
+    # intentionally documents the diagram's `[*] --> state` declarations as
+    # "states a new row may land in" (assertInitialStateAllowed() enforces
+    # exactly this at the create convergence point) -- never as "the state
+    # a row's life begins with." A row reaching one of these states via a
+    # side-effect hook, a batch/scheduled job, or a data-migration/import
+    # path is exactly as legitimate as one reached through a UI "new" form;
+    # every distinct landing state a schema author's own entity code can
+    # produce for a new row must appear here as its own `[*] --> state`
+    # declaration in the diagram, not only the state the "new" form itself
+    # defaults to. Not enforced at all when can_update is false (no
+    # update{Parent}() convergence point for assertTransitionAllowed()/
+    # assertInitialStateAllowed() to run from) -- documented as declared
+    # but unenforced in that case, not omitted.
+    _sm_diagrams = ctx.get('state_machine_diagrams', {})
+    state_machine_fields = [
+        {
+            'field':           _sm_field,
+            'creation_states': _sm_diagrams[_sm_field]['initial_states'],
+            'terminal_states': _sm_diagrams[_sm_field]['terminal_states'],
+            'edges':           _sm_diagrams[_sm_field]['edges'],
+        }
+        for _sm_field in ctx.get('state_machine_field_list', [])
+    ]
+
     required_fields = set(model_def.get('required') or [])
     all_props = model_def.get('properties', {})
 
@@ -279,6 +305,7 @@ def build_doc_entity_context(ctx: dict) -> dict:
         'relations':    relations,
         'request_body_json':  request_body_json,
         'response_item_json': response_item_json,
+        'state_machine_fields': state_machine_fields,
     }
 
 

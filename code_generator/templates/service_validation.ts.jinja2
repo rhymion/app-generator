@@ -2,7 +2,7 @@ import prisma from '@/lib/prisma';
 import { validateCustomRules } from '@/lib/{{ model }}/service_validation_custom';
 import { AppError } from '@/lib/_errors';
 {% if state_machine_transitions and can_update %}
-import { assertTransitionAllowed } from '@/lib/state_transitions';
+import { assertTransitionAllowed, assertInitialStateAllowed } from '@/lib/state_transitions';
 {% endif %}
 
 type TransactionClient = Pick<typeof prisma, '{{ model }}'{% for check in one_to_one_checks %} | '{{ check.target }}'{% endfor %}>;
@@ -173,19 +173,36 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
 {% if state_machine_transitions and can_update %}
 
   // State-transition gatekeeper(s) (Issue #696; cmd_1132/cmd_1133 design
-  // correction from an earlier dedicated-entry-point shape). Checked here,
-  // at the update{{ parent_pascal }}/add{{ parent_pascal }} convergence
-  // point every entry point (UI Server Action, REST route, CSV import)
-  // funnels through -- the same discipline x-approval's own guard above
-  // follows, and the reason a state-transition field needs no write-lock
-  // of its own (see derive_write_locked_values()'s docstring). Skipped
-  // entirely on create (currentId === null): a new row may land in any
-  // diagram state -- e.g. migrating existing data from another system in
-  // its current real state -- not only the diagram's own initial state(s).
+  // correction from an earlier dedicated-entry-point shape; cmd_1139
+  // extends coverage to the create path below). Checked here, at the
+  // update{{ parent_pascal }}/add{{ parent_pascal }} convergence point
+  // every entry point (UI Server Action, REST route, CSV import) funnels
+  // through -- the same discipline x-approval's own guard above follows,
+  // and the reason a state-transition field needs no write-lock of its
+  // own (see derive_write_locked_values()'s docstring).
+  //
+  // Update (currentId !== null): the transition itself (the prevRow value
+  // -> the submitted value) must be a legal diagram edge.
   if (currentId !== null && prevRow) {
 {% for t in state_machine_transitions %}
     if ('{{ t.field }}' in data && data.{{ t.field }} !== prevRow.{{ t.field }}) {
       assertTransitionAllowed('{{ model }}', '{{ t.field }}', String(prevRow.{{ t.field }}), String(data.{{ t.field }}));
+    }
+{% endfor %}
+  }
+
+  // Create (currentId === null): there is no prevRow/fromState to
+  // evaluate an edge against, so the submitted value is checked against
+  // the diagram's own declared initial state(s) (a `[*] --> state` node)
+  // instead. NOTE: this closes the route a data migration/import might
+  // rely on to land a new row directly in a later, non-initial diagram
+  // state (e.g. bringing in data already in its current real state from
+  // another system) -- no bypass for that case exists yet; open design
+  // question, not resolved by this check.
+  if (currentId === null) {
+{% for t in state_machine_transitions %}
+    if ('{{ t.field }}' in data) {
+      assertInitialStateAllowed('{{ model }}', '{{ t.field }}', String(data.{{ t.field }}));
     }
 {% endfor %}
   }

@@ -3,10 +3,10 @@
 // not per-entity -- one table and one judgment function for every
 // x-state-machines-governed field across the whole schema, mirroring
 // lib/dashboard/catalog.ts's shape. Each entity's own
-// service_validation.ts imports assertTransitionAllowed() from here and
-// calls it at the update{Entity}/add{Entity} convergence point (the same
-// place x-approval's own guard runs) -- never a dedicated per-field entry
-// point.
+// service_validation.ts imports assertTransitionAllowed()/
+// assertInitialStateAllowed() from here and calls them at the
+// update{Entity}/add{Entity} convergence point (the same place
+// x-approval's own guard runs) -- never a dedicated per-field entry point.
 import { AppError } from '@/lib/_errors';
 
 type TransitionEdge = [string, string];
@@ -14,6 +14,7 @@ type TransitionEdge = [string, string];
 type TransitionConfig = {
   edges: TransitionEdge[];
   approvalEdges: TransitionEdge[] | null;
+  initialStates: string[];
 };
 
 const TRANSITIONS: Record<string, TransitionConfig> = {
@@ -21,6 +22,7 @@ const TRANSITIONS: Record<string, TransitionConfig> = {
   '{{ e.model }}.{{ e.field }}': {
     edges: {{ e.edges_json }},
     approvalEdges: {{ e.approval_edges_json if e.approval_edges_json else 'null' }},
+    initialStates: {{ e.initial_states_json }},
   },
 {% endfor %}
 };
@@ -45,5 +47,20 @@ export function assertTransitionAllowed(model: string, field: string, fromState:
     if (!approvalPermits) {
       throw new AppError('VALIDATION', 'transition not permitted by x-approval', field, 'invalid');
     }
+  }
+}
+
+// Throws when `state` is not one of `model.field`'s declared diagram
+// initial states (a `[*] --> state` node). Sister check to
+// assertTransitionAllowed() for the create path: a new row has no
+// prevRow/fromState to evaluate an edge against, so this validates the
+// value against the diagram's initial-state set directly instead.
+export function assertInitialStateAllowed(model: string, field: string, state: string): void {
+  const config = TRANSITIONS[`${model}.${field}`];
+  if (!config) {
+    throw new AppError('VALIDATION', 'no such transition', field, 'invalid');
+  }
+  if (!config.initialStates.includes(state)) {
+    throw new AppError('VALIDATION', 'not a valid initial state', field, 'invalid');
   }
 }

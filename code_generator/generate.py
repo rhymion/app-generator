@@ -1833,19 +1833,27 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     # --- State-transition gatekeeper table (lib/state_transitions.ts) ---
     # state_transition_entries was collected across every model in the
-    # entity loop above -- see its declaration comment. Always written
-    # (even empty), same convention as self_only_admin_bypass_entities.ts
-    # just above: an entity's service_validation.ts imports
-    # assertTransitionAllowed from here whenever it has ANY governed field,
-    # so the import must never dangle regardless of whether any OTHER
-    # entity contributed entries.
-    _write(
-        out / 'lib' / 'state_transitions.ts',
-        _render(env, 'state_transitions.ts.jinja2', {
-            'entries': state_transition_entries,
-        }),
-    )
-    print(f'  State-transition gatekeeper table → lib/state_transitions.ts ({len(state_transition_entries)} governed field(s))')
+    # entity loop above -- see its declaration comment. Unlike
+    # self_only_admin_bypass_entities.ts, this file's import is itself
+    # conditional: service_validation.ts.jinja2 only imports
+    # assertTransitionAllowed/assertInitialStateAllowed from here inside
+    # `{% if state_machine_transitions and can_update %}` -- the exact same
+    # condition that gates whether an entity contributes to
+    # state_transition_entries above. So a schema with zero governed fields
+    # produces zero entries AND zero importers, and this file can be
+    # skipped entirely rather than always emitted empty -- a schema with no
+    # x-state-machines usage must generate byte-identical output to before
+    # this feature existed (Issue #696).
+    if state_transition_entries:
+        _write(
+            out / 'lib' / 'state_transitions.ts',
+            _render(env, 'state_transitions.ts.jinja2', {
+                'entries': state_transition_entries,
+            }),
+        )
+        print(f'  State-transition gatekeeper table → lib/state_transitions.ts ({len(state_transition_entries)} governed field(s))')
+    else:
+        print('  State-transition gatekeeper table → skipped (no state-transition-governed fields in this schema)')
 
     # --- anonymize_user.ts (lib/compliance/anonymize_user.ts) ---
     # Emitted when the user entity has at least one x-pii annotated field.
