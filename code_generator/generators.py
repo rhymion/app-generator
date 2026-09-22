@@ -3621,20 +3621,21 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     _validation_extras = ''
     if has_item_daterange:
         _validation_extras = ', assertNoDuplicateReservation'
-    # x-state-machines (Issue #696 Stage 1 PR2b): transition{{Field}}() in
-    # service.ts calls assertTransitionAllowed{{Field}}() from
-    # service_validation.ts -- gated on can_update (state_machine_field_list
-    # and can_update) the same way service.ts.jinja2/service_validation.
-    # ts.jinja2 themselves gate transition{{Field}}()/assertTransitionAllowed
-    # {{Field}}() emission (see those templates' own state_machine_field_list
-    # conditionals), so this import line only ever names functions that
-    # actually exist in the rendered service_validation.ts.
-    state_machine_field_list = ctx.get('state_machine_field_list') or []
-    _state_machine_names = [
-        f'assertTransitionAllowed{to_pascal_case(f)}' for f in state_machine_field_list
-    ] if (state_machine_field_list and can_update) else []
-    if _state_machine_names:
-        _validation_extras += ', ' + ', '.join(_state_machine_names)
+    # x-state-machines (Issue #696 Stage 1 PR2b/PR2c correction, cmd_1132c):
+    # the gatekeeper check moved to service_validation.ts's own inline
+    # convergence-point check (assertTransitionAllowed imported there from
+    # lib/state_transitions.ts) -- service.ts itself no longer calls any
+    # transition-related function, so it has nothing to import from
+    # service_validation.ts for state machines. This used to add a
+    # per-field `assertTransitionAllowed{Field}` name (the old dedicated
+    # transition{Field}() entry-point design service.ts.jinja2/
+    # service_validation.ts.jinja2 themselves already stopped emitting in
+    # the same correction) -- left behind here as dead code that broke the
+    # TypeScript build for any can_update entity with a governed field
+    # (TS2305, no such export), caught empirically because the dogfood
+    # schema this generator tests itself against declares no
+    # x-state-machines fields (cmd_1121's ruling) so this path was never
+    # exercised by `npm run generate-code` against it.
     _pool_entity_pick = (
         f" | '{reservation_config['pool']['entity']}'" if has_item_reservation and reservation_config else ''
     )
