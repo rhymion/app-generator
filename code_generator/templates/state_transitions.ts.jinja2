@@ -33,11 +33,23 @@ const TRANSITIONS: Record<string, TransitionConfig> = {
 // field they already know is governed (state_machine_transitions is
 // non-empty), so that case is unreachable in generated code, not silently
 // permitted.
+//
+// cmd_1145: a same-state "transition" (fromState === toState) is always
+// permitted unconditionally, ahead of the diagram edge / x-approval checks
+// below. Treated as an obvious baseline a diagram is not required to spell
+// out with an explicit self-edge ("X --> X"). One consequence: an explicit
+// self-edge in a diagram is always redundant -- this rule already permits
+// it regardless of whether the diagram declares it -- so it is accepted
+// as harmless dead content rather than rejected as an error, EXCEPT when
+// it is the only outgoing edge a given state has; validate.py does not
+// count a self-edge as a real way out, so that state still surfaces as a
+// dead end.
 export function assertTransitionAllowed(model: string, field: string, fromState: string, toState: string): void {
   const config = TRANSITIONS[`${model}.${field}`];
   if (!config) {
     throw new AppError('VALIDATION', 'no such transition', field, 'invalid');
   }
+  if (fromState === toState) return;
   const diagramPermits = config.edges.some(([from, to]) => from === fromState && to === toState);
   if (!diagramPermits) {
     throw new AppError('VALIDATION', 'no such transition', field, 'invalid');

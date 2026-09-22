@@ -28,12 +28,21 @@ Covers:
   - service_validation.ts.jinja2: the inline convergence-point check --
     import of assertTransitionAllowed/assertInitialStateAllowed, gated on
     can_update; the edge check (assertTransitionAllowed) is skipped on
-    create (currentId === null, no prevRow to read a fromState off of) and
-    only fires when the incoming value differs from the row's current
-    value; the create path instead runs assertInitialStateAllowed against
-    the diagram's own declared initial state(s) (cmd_1139); field naming
-    (a governed field named something other than 'status') behaves
-    identically for both checks.
+    create (currentId === null, no prevRow to read a fromState off of); the
+    create path instead runs assertInitialStateAllowed against the
+    diagram's own declared initial state(s) (cmd_1139); field naming (a
+    governed field named something other than 'status') behaves
+    identically for both checks. Issue #710/cmd_1144/cmd_1145: both checks
+    read a field's VALUE presence (`data.<field> !== undefined`), never its
+    KEY presence -- a client-writable prop's key is always present in
+    `data` regardless of whether the client supplied it (validation_data_obj
+    always emits the key). On update, an omitted field falls back to
+    prevRow's own current value (never to the schema default -- defaults
+    are create-time-only) and is fed through the SAME
+    assertTransitionAllowed() call every explicit value goes through, no
+    separate branch; that call's own fromState === toState rule makes the
+    omitted-field case (and any other same-value resubmission) an
+    unconditional no-op.
   - state_transitions.ts.jinja2 (the model-scoped file itself): Case A/B/C
     edge-table shape, keyed by '{model}.{field}', across multiple models in
     one file; assertInitialStateAllowed()'s initialStates set per entry.
@@ -339,7 +348,7 @@ class TestServiceValidationInlineTransitionCheck:
         schema = _schema(x_approval=_case_abc_x_approval())
         rendered = self._render(schema)
         assert "import { assertTransitionAllowed, assertInitialStateAllowed } from '@/lib/state_transitions';" in rendered
-        assert "assertTransitionAllowed('widget', 'status', String(prevRow.status), String(data.status))" in rendered
+        assert "assertTransitionAllowed('widget', 'status', String(prevRow.status), String(statusToState))" in rendered
 
     def test_transition_check_skipped_on_create(self, tmp_path):
         """The edge check (fromState -> toState) has no fromState to read on
@@ -375,11 +384,23 @@ class TestServiceValidationInlineTransitionCheck:
         assert 'if (currentId === null && prevRow)' not in rendered
         assert 'if (currentId === null)' in rendered
 
-    def test_only_fires_when_value_changes(self, tmp_path):
+    def test_update_falls_back_to_current_value_not_a_default(self, tmp_path):
+        """Issue #710/cmd_1145: an omitted field on update is treated as
+        "leave it unchanged" -- toState falls back to prevRow's own current
+        value, never to the field's schema default (defaults are a
+        create-time-only concept, see the create guard below). No separate
+        "field omitted" branch exists -- the fallback feeds the SAME
+        assertTransitionAllowed() call every explicit value goes through,
+        relying on its own fromState === toState rule to make the omitted
+        case a no-op."""
         _write_mmd(tmp_path, 'sm/widget_status.mmd', _CASE_ABC_MMD)
         schema = _schema(x_approval=_case_abc_x_approval())
         rendered = self._render(schema)
-        assert "if ('status' in data && data.status !== prevRow.status) {" in rendered
+        assert 'const statusToState = data.status !== undefined ? data.status : prevRow.status;' in rendered
+        assert "assertTransitionAllowed('widget', 'status', String(prevRow.status), String(statusToState));" in rendered
+        # No former key-presence / value-diff branch left in the update path.
+        assert "'status' in data" not in rendered
+        assert 'data.status !== prevRow.status' not in rendered
 
     def test_field_naming_non_status_field_works(self, tmp_path):
         """A governed field named something other than 'status' (the
@@ -397,8 +418,14 @@ class TestServiceValidationInlineTransitionCheck:
             mmd_path='sm/widget_verification_status.mmd',
         )
         rendered = self._render(schema)
-        assert "if ('verification_status' in data && data.verification_status !== prevRow.verification_status) {" in rendered
-        assert "assertTransitionAllowed('widget', 'verification_status', String(prevRow.verification_status), String(data.verification_status))" in rendered
+        assert (
+            'const verification_statusToState = data.verification_status !== undefined '
+            '? data.verification_status : prevRow.verification_status;'
+        ) in rendered
+        assert (
+            "assertTransitionAllowed('widget', 'verification_status', "
+            "String(prevRow.verification_status), String(verification_statusToState));"
+        ) in rendered
 
     def test_no_approval_composition_argument_when_not_approval_governed(self, tmp_path):
         """Whether the field is ALSO x-approval-governed is entirely a
@@ -502,6 +529,16 @@ class TestStateTransitionsTsTemplate:
         assert 'export function assertTransitionAllowed' in rendered
         assert 'export function assertInitialStateAllowed' in rendered
         assert "':" not in rendered.split('TRANSITIONS')[1].split('};')[0]
+
+    def test_same_state_transition_always_permitted_ahead_of_edge_check(self):
+        """cmd_1145: a same-state 'transition' (fromState === toState) must
+        be permitted unconditionally, before the diagram edge / x-approval
+        checks -- not merely one more legal edge among others."""
+        rendered = self._render([])
+        fn_body = rendered.split('export function assertTransitionAllowed')[1].split('\n}')[0]
+        assert 'if (fromState === toState) return;' in fn_body
+        # Must come before the edge-list check, not after it.
+        assert fn_body.index('if (fromState === toState) return;') < fn_body.index('diagramPermits')
 
 
 # ---------------------------------------------------------------------------
