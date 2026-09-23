@@ -45,8 +45,16 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
   const associatedOrgIds = associatedOrgs.map((o) => o.id);
 {% endif %}
 
+  const [
 {% for entity in search_entities %}
-  const {{ entity.perms_ts_var }} = await getModelPermissions('{{ entity.entity_type }}', userId);
+    {{ entity.perms_ts_var }},
+{% endfor %}
+  ] = await Promise.all([
+{% for entity in search_entities %}
+    getModelPermissions('{{ entity.entity_type }}', userId),
+{% endfor %}
+  ]);
+{% for entity in search_entities %}
   const {{ entity.general_read_ts_var }} = {{ entity.perms_ts_var }}.permissions.general.read === true;
 {% endfor %}
 

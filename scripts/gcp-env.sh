@@ -18,6 +18,9 @@ else
 fi
 
 # Defaults for optional config (override in .env.production.local if needed)
+# REGION should match the region of the Neon project DATABASE_URL/DIRECT_URL
+# point at (and code_generator/json_schema.yaml's x-cloud.region) — see
+# docs/knowledge/gcp-region-alignment.md. Not automatically cross-checked.
 REGION="${REGION:-asia-northeast1}"
 SERVICE_NAME="${SERVICE_NAME:-app}"
 SA_NAME="${SA_NAME:-app-cloud-run-sa}"

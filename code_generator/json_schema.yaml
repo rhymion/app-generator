@@ -2,6 +2,8 @@ $schema: "http://json-schema.org/draft-07/schema#"
 format-version: 4.0
 
 # x-cloud: GCP Cloud Run opt-in (uncomment to use)
+# region should match the Neon project's region (and scripts/gcp-env.sh's
+# REGION) — see docs/knowledge/gcp-region-alignment.md. Not auto-checked.
 # x-cloud:
 #   enabled: true
 #   provider: gcp

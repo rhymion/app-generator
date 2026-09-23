@@ -3,6 +3,7 @@ import { withAccelerate } from '@prisma/extension-accelerate';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaNeon } from '@prisma/adapter-neon';
 import { pinSslModeVerifyFull } from './db-url';
+import { resolvePrismaPoolMax } from './prisma-pool';
 
 const globalForPrisma = global as unknown as { prisma: PrismaClient };
 
@@ -23,6 +24,17 @@ const slowQueryLogEnabled =
   process.env.PRISMA_SLOW_QUERY_LOG === 'true' ||
   (process.env.NODE_ENV !== 'production' && process.env.PRISMA_SLOW_QUERY_LOG !== 'false');
 const slowQueryThresholdMs = Number(process.env.PRISMA_SLOW_QUERY_THRESHOLD_MS ?? 50);
+
+// Per-adapter connection pool cap, overridable via PRISMA_POOL_MAX. Default
+// (2) is unchanged from before this override existed, so an environment that
+// never sets the var keeps its existing behavior byte-for-byte — see the
+// `max: 2` rationale comment at each adapter construction site below for why
+// 2 is the right default there. Only raise this for a deployment that fronts
+// Postgres with a connection pooler (PgBouncer, Neon's pooled endpoint, etc.)
+// that itself multiplexes down to a bounded number of real backend
+// connections — see docs/knowledge/prisma-pool-max-tuning.md for the
+// reasoning and how to size it against your pooler's own connection limit.
+const prismaPoolMax = resolvePrismaPoolMax(process.env.PRISMA_POOL_MAX);
 
 function attachSlowQueryListener(client: PrismaClient<'query'>): void {
   if (!Number.isFinite(slowQueryThresholdMs)) return;
@@ -115,7 +127,7 @@ const createPrismaClient = () => {
     // @prisma/adapter-neon — not installed directly, per Neon's own
     // guidance) falls back to automatically when no constructor is set.
     const adapter = new PrismaNeon(
-      { connectionString, max: 2 },
+      { connectionString, max: prismaPoolMax },
       schemaName ? { schema: schemaName } : undefined,
     );
     if (slowQueryLogEnabled) {
@@ -173,8 +185,11 @@ const createPrismaClient = () => {
     // max_connections=25, leaving headroom for admin/migration connections.
     // `max` is a pg.PoolConfig field on the adapter's first constructor arg
     // (Prisma 7 PrismaPg API — https://www.prisma.io/docs/orm/prisma-client/setup-and-configuration/databases-connections/connection-pool).
+    // Override via PRISMA_POOL_MAX (see the constant's own comment above) for
+    // a deployment that fronts this URL with a pooler instead of connecting
+    // straight to a fixed-max_connections instance.
     const adapter = new PrismaPg(
-      { connectionString, max: 2 },
+      { connectionString, max: prismaPoolMax },
       schemaName ? { schema: schemaName } : undefined,
     );
     if (slowQueryLogEnabled) {
