@@ -33,7 +33,13 @@ export class ApiError extends Error {
 const API_KEY_TTL_MS = 5 * 60 * 1000;
 const API_KEY_MAX_ENTRIES = 1000;
 const apiKeyCacheEnabled = process.env.NODE_ENV === 'production';
-const apiKeyCache = new TtlLruCache<string, string | null>(API_KEY_MAX_ENTRIES, API_KEY_TTL_MS);
+
+// Caching the expiry alongside the userId (rather than just the userId)
+// means a key that expires mid-TTL is still caught: expiry is compared
+// against the current time on every lookup, not just when the entry was
+// cached.
+type ApiKeyCacheEntry = { userId: string; expiresAt: Date | null } | null;
+const apiKeyCache = new TtlLruCache<string, ApiKeyCacheEntry>(API_KEY_MAX_ENTRIES, API_KEY_TTL_MS);
 
 export function invalidateApiKeyCache(apiKey: string | null | undefined): void {
   if (apiKey) apiKeyCache.delete(apiKey);
@@ -62,21 +68,28 @@ export async function authenticateApiKey(request: NextRequest): Promise<{ userId
     const cached = apiKeyCache.get(apiKey);
     if (cached !== undefined) {
       if (cached === null) throw new ApiError(401, 'Invalid API key.');
-      return { userId: cached };
+      if (cached.expiresAt && cached.expiresAt <= new Date()) {
+        throw new ApiError(401, 'API key expired.');
+      }
+      return { userId: cached.userId };
     }
   }
 
   const user = await prisma.user.findFirst({
     where: { api_key: apiKey },
-    select: { id: true },
+    select: { id: true, api_key_expires_at: true },
   });
 
   if (apiKeyCacheEnabled) {
-    apiKeyCache.set(apiKey, user?.id ?? null);
+    apiKeyCache.set(apiKey, user ? { userId: user.id, expiresAt: user.api_key_expires_at } : null);
   }
 
   if (!user) {
     throw new ApiError(401, 'Invalid API key.');
+  }
+
+  if (user.api_key_expires_at && user.api_key_expires_at <= new Date()) {
+    throw new ApiError(401, 'API key expired.');
   }
 
   return { userId: user.id };

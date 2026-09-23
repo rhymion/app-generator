@@ -5,6 +5,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [4.1.0] - 2026-09-19
 ### Added
+- **Added optional expiry for API keys** (issue #717, fourth stage of
+  AI-agent-facing API improvements — Stage 2 of
+  `ai-agent-integration-design.md`). A new nullable `user.api_key_expires_at`
+  column (`null` = never expires, matching every existing key's current
+  behavior unchanged) is checked in the single shared
+  `authenticateApiKey()` (`lib/api-auth.ts`); a request made with an
+  expired key is rejected with `401 API key expired.`. No new principal
+  type — an agent is an ordinary `user` account, human or agent alike. See
+  `docs/knowledge/api-key-expiry.md`.
 - **Added `Idempotency-Key` support on single-record API create endpoints
   and per-API-key `api:read`/`api:write` rate-limit buckets** (issue #707,
   third stage of AI-agent-facing API improvements — the "Idempotency keys

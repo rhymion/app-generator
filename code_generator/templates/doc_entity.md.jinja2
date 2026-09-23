@@ -138,7 +138,9 @@ All endpoints require one of:
 | `X-API-Key` | `<key>` | `X-API-Key: mk_abc123...` |
 | `Authorization` | `Bearer <key>` | `Authorization: Bearer mk_abc123...` |
 
-API keys are stored in `user.api_key` and start with the `mk_` prefix.
+API keys are stored in `user.api_key` and start with the `mk_` prefix. A key
+may optionally expire (`user.api_key_expires_at`); a request made with an
+expired key is rejected with `401 API key expired.`
 
 ---
 

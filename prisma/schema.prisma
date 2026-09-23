@@ -53,6 +53,14 @@ model user {
   email                     String              @unique
   password                  String?
   api_key                   String?
+  // Stage 2 of the AI-agent-integration design (app-generator-project-docs
+  // planning/ai-agent-integration-design.md): optional expiry for any
+  // account's API key, human or agent -- no separate agent principal type.
+  // null preserves today's never-expires behavior for every existing key.
+  // Checked in lib/api-auth.ts's authenticateApiKey(); not yet exposed via
+  // any UI/API setter (out of this stage's scope -- see that design doc's
+  // Stage 2 section).
+  api_key_expires_at        DateTime?
   // Opt-in master switch for email notifications -- container only for
   // now, no sending mechanism exists yet. Defaults to false: an unrelated
   // user must actively opt in, never be opted in by default. A future
