@@ -20,6 +20,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - **CRUD ページ一式** — エンティティごとに一覧、詳細、作成、編集、削除ページを生成
 - **ガントチャートビュー** — エンティティ単位でオプトインできるガントチャートページ
 - **REST API** — エンティティごとに API キー認証付き JSON エンドポイントを生成
+- **生成ドキュメント + OpenAPI 3.1 仕様** — エンティティごとの人間可読ドキュメント（`docs/generated/{entity}.md`、`/en/docs` 配下にも反映）。承認フロー・書き込みロックを持つエンティティには「Constraints」節を含む。加えて機械可読な統合仕様 `docs/generated/openapi.json` をビルド成果物として生成（配備アプリからは既定で配らない）— 詳細は [`docs/knowledge/generated-documentation-and-openapi-spec.md`](docs/knowledge/generated-documentation-and-openapi-spec.md) を参照
 - **Cypress テスト生成** — アプリケーションコードと並行して UI および API テストスイートを生成
 - **ダッシュボードチャート** (`x-display.dashboard: true`) — カラム・バー・ライン・パイチャートのレンダリングを生成；スタッキングモード・タイムスタンプバケット・型付きフィルター・CSV/Excel エクスポート・REST アグリゲートエンドポイント（`/api/{entity}/aggregate`）をエンティティごとに生成
 - **インベントリ予約** (`x-reservation`) — 容量・在庫管理のためのスキーマレベルのオプトイン；`count` モードは数値カウンターカラムを条件付き UPDATE で予約し、`item` モードは `inventory_allocation` ブリッジテーブルで行ロックを実施
@@ -535,6 +536,7 @@ app-generator/
 | [gcp-automation-design.md](docs/knowledge/gcp-automation-design.md) | GCP Cloud Run デプロイ: `x-cloud` オプトイン、Dockerfile、GCS アップロード、環境自動化スクリプト |
 | [claude-code-settings-consumer-side.md](docs/knowledge/claude-code-settings-consumer-side.md) | `.claude/settings.json` の読み込みルール、OS非依存な権限記法、複合コマンドのマッチングの罠、設定ファイルが実際に読み込まれたかの確認方法 — 本リポジトリまたは `app-template` の `.claude/settings.json` を編集する前に読むこと |
 | [legal-documents.md](docs/knowledge/legal-documents.md) | 利用規約・プライバシーポリシー画面: 文書の言語がサイトUIの言語一覧から独立している理由、Markdown採用（JSON/MDX不採用）の理由、文書の言語追加手順 |
+| [generated-documentation-and-openapi-spec.md](docs/knowledge/generated-documentation-and-openapi-spec.md) | 生成される各エンティティのドキュメントの「Constraints」節（承認フロー・書き込みロック）と `docs/generated/openapi.json`（OpenAPI 3.1 ビルド成果物） |
 
 ---
 

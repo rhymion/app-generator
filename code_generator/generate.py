@@ -77,6 +77,7 @@ from validate import (
     SchemaValidationError,
 )
 from generators_doc import build_doc_entity_context, build_doc_index_context, convert_md_to_mdx
+from generators_openapi import build_entity_openapi, assemble_openapi_document
 from generators_test import (
     helper_context,
     spec_context,
@@ -999,6 +1000,13 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     doc_dir = out / 'docs' / 'generated'
     entity_doc_summaries: list[dict] = []
+    # OpenAPI 3.1 build artifact (cmd_1154, ai-agent-integration-design.md
+    # §7 Stage 1(a)): one entry per entity, collected in the same
+    # per-entity loop below (each build_entity_openapi(ctx) call reuses
+    # that entity's already-built build_context() data, same convention
+    # as entity_doc_summaries just above) and merged into a single
+    # docs/generated/openapi.json after the loop finishes.
+    openapi_entity_specs: list[dict] = []
     self_only_admin_bypass_entities: list[str] = []
     # State-transition gatekeeper table (Issue #696, lib/state_transitions.ts)
     # -- collected across every model in the per-entity loop below (each
@@ -1081,6 +1089,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'can_api':    doc_ctx['can_api'],
             'has_chart':  doc_ctx['has_chart'],
         })
+        openapi_entity_specs.append(build_entity_openapi(ctx))
 
         # --- getters.ts ---
         getters_ctx = {**ctx, 'named_constants': named_constants}
@@ -2692,6 +2701,18 @@ def generate(schema_path: str, output_dir: str) -> None:
     _write(
         out / 'app' / '[locale]' / 'docs' / 'page.mdx',
         convert_md_to_mdx(index_md, link_prefix='docs/'),
+    )
+
+    # --- docs/generated/openapi.json (cmd_1154, ai-agent-integration-
+    # design.md §7 Stage 1(a)): build artifact only -- see
+    # generators_openapi.py's own header for why this is never served by
+    # a deployed app by default. Written via the same _write() helper (and
+    # therefore tracked in the same generate-code manifest) as every other
+    # generated file, not a bespoke file-write path.
+    openapi_document = assemble_openapi_document(openapi_entity_specs)
+    _write(
+        doc_dir / 'openapi.json',
+        json.dumps(openapi_document, indent=2, sort_keys=True) + '\n',
     )
 
     # --- Cypress test generation ---

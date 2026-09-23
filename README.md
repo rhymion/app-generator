@@ -16,6 +16,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - **Full CRUD pages** — list, view, create, edit, and delete pages generated per entity
 - **Gantt chart views** — entity-level opt-in Gantt chart pages
 - **REST API** — JSON endpoints with API key authentication generated per entity
+- **Generated documentation + OpenAPI 3.1 spec** — per-entity human-readable docs (`docs/generated/{entity}.md`, mirrored under `/en/docs`) including a "Constraints" section for approval-flow/write-lock entities, plus a combined machine-readable `docs/generated/openapi.json` build artifact (not served by a deployed app by default) — see [`docs/knowledge/generated-documentation-and-openapi-spec.md`](docs/knowledge/generated-documentation-and-openapi-spec.md)
 - **Generated Cypress tests** — UI and API test suites generated alongside application code
 - **Dashboard charts** (`x-display.dashboard: true`) — column, bar, line, and pie chart rendering with stacking modes, timestamp bucketing, typed multi-condition filters, CSV/Excel export, and a REST aggregate endpoint (`/api/{entity}/aggregate`) generated per entity
 - **Inventory reservation** (`x-reservation`) — opt-in capacity/inventory reservation; `count` mode reserves a numeric counter column, `item` mode locks rows via an `inventory_allocation` bridge table
@@ -553,6 +554,7 @@ All architectural documentation lives in `docs/knowledge/`:
 | [gcp-automation-design.md](docs/knowledge/gcp-automation-design.md) | GCP Cloud Run deployment: `x-cloud` opt-in, Dockerfile, GCS uploads, environment automation scripts |
 | [claude-code-settings-consumer-side.md](docs/knowledge/claude-code-settings-consumer-side.md) | `.claude/settings.json` discovery rules, OS-independent permission syntax, the compound-command matching trap, and how to verify a settings file actually loaded — read this before editing `.claude/settings.json` here or in `app-template` |
 | [legal-documents.md](docs/knowledge/legal-documents.md) | Terms of Service / Privacy Policy pages: why document locale is decoupled from the site UI locale, Markdown-over-JSON/MDX rationale, and how to add a document language |
+| [generated-documentation-and-openapi-spec.md](docs/knowledge/generated-documentation-and-openapi-spec.md) | Generated per-entity docs' "Constraints" section (approval flow, write-locked fields) and the `docs/generated/openapi.json` OpenAPI 3.1 build artifact |
 
 ---
 

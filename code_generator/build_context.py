@@ -26,7 +26,10 @@ from helpers.schema_helpers import (
     is_write_only_prop,
     child_has_own_write_capability,
     derive_approval_legal_transition_edges,
+    resolve_approval_submit_on,
+    resolve_set_fields,
 )
+from keys import x_approval as approval_key
 from helpers.label_field import build_label_expression, render_prisma_include
 from helpers.bridge_direction import (
     collect_parent_bridge_fk_props, get_new_form_bridge,
@@ -1545,6 +1548,44 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         }
         for _sm_field in state_machine_field_list
     ]
+
+    # is_approvable / approval_config (cmd_1154, ai-agent-integration-
+    # design.md §2/§3): whether this entity declares x-approval at all,
+    # and -- when it does -- the static shape of its submit/approve/
+    # reject/withdraw flow (which field/value each stage writes, whether
+    # rejection is terminal). Every other x-approval-derived value
+    # already computed in this function answers a narrower question
+    # (write_locked_values: "which VALUES are locked";
+    # state_machine_approval_edges: "which state-machine EDGES does
+    # x-approval additionally permit") -- none of them expose the plain
+    # fact "is this entity approval-governed at all", independent of
+    # whether it also happens to have an x-state-machines diagram. Feeds
+    # doc_entity.md.jinja2's Constraints section. Row-level truth ("is
+    # THIS row submittable right now") is deliberately NOT here -- that
+    # is a runtime capabilities endpoint's job, not a static spec's.
+    _x_approval_raw = approval_key.get(model_def)
+    is_approvable = bool(_x_approval_raw)
+    approval_config: dict | None = None
+    if _x_approval_raw:
+        _appr_entity_props = model_def.get('properties', {})
+        _appr_submit_field, _appr_submit_value = resolve_approval_submit_on(model_def)
+        _appr_on_approved = _x_approval_raw.get('on_approved') or {}
+        _appr_on_rejected = _x_approval_raw.get('on_rejected') or {}
+        _appr_on_withdrawn = _x_approval_raw.get('on_withdrawn') or {}
+        approval_config = {
+            'submit_field': _appr_submit_field,
+            'submit_value': _appr_submit_value,
+            'on_approved_set_fields': resolve_set_fields(
+                _appr_entity_props, _appr_on_approved.get('set_fields') or {},
+            ),
+            'on_rejected_set_fields': resolve_set_fields(
+                _appr_entity_props, _appr_on_rejected.get('set_fields') or {},
+            ),
+            'on_rejected_terminal': bool(_appr_on_rejected.get('terminal')),
+            'on_withdrawn_set_fields': resolve_set_fields(
+                _appr_entity_props, _appr_on_withdrawn.get('set_fields') or {},
+            ),
+        }
 
     # Inject parent-side bridge FK props synthesized from new-form x-bridge declarations
     # on child entities that list this model as a parent. These FKs look like
@@ -4245,4 +4286,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         state_machine_diagrams=state_machine_diagrams,
         state_machine_approval_edges=state_machine_approval_edges,
         state_machine_transitions=state_machine_transitions,
+        # is_approvable / approval_config (cmd_1154): see the derivation
+        # comment above -- entity-level, static fact of whether x-approval
+        # governs this entity, and the flow's static shape.
+        is_approvable=is_approvable,
+        approval_config=approval_config,
     )

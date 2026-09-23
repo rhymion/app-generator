@@ -5,6 +5,24 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [4.1.0] - 2026-09-19
 ### Added
+- **Added an entity-level "Constraints" section to generated docs
+  (`doc_entity.md.jinja2`) and a new `docs/generated/openapi.json` OpenAPI
+  3.1 build artifact** (issue #707), the first stage of AI-agent-facing
+  API improvements. The Constraints section documents, for an entity that
+  declares `x-approval` and/or a write-locked field, the approval flow's
+  static shape (which stage writes which field/value, whether a rejection
+  is terminal) and which (field, value) pairs are system-only — entity-
+  level facts true for every row, never row-level truth about a specific
+  record's current state. `docs/generated/openapi.json` reuses the same
+  static data (field type/required/enum, relationship shape, approval
+  flow, write-lock capability, as `x-relationships`/`x-approval`/
+  `x-write-locked-values` vendor extensions) to describe every `api: true`
+  entity's REST + bulk surface — a build artifact only, never served by a
+  deployed app by default. This repo's own `json_schema.yaml` declares no
+  `x-approval`/`x-write-locked-values` entity, so the Constraints section
+  is exercised only by `test:approval-lockdown-gate`'s fixture. See
+  `docs/knowledge/generated-documentation-and-openapi-spec.md` and
+  `app-generator-project-docs/planning/ai-agent-integration-design.md`.
 - **Added an optional `depends_on: [task_id, ...]` ordering key to
   `x-scheduled-task` (entity-level) and `x-scheduled-tasks` (top-level)
   declarations** (issue #713), naming other `task_id`s (from either

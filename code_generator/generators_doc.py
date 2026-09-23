@@ -198,14 +198,75 @@ def build_doc_entity_context(ctx: dict) -> dict:
     # assertInitialStateAllowed() to run from) -- documented as declared
     # but unenforced in that case, not omitted.
     _sm_diagrams = ctx.get('state_machine_diagrams', {})
+    _sm_approval_edges = ctx.get('state_machine_approval_edges', {})
     state_machine_fields = [
         {
             'field':           _sm_field,
             'creation_states': _sm_diagrams[_sm_field]['initial_states'],
             'terminal_states': _sm_diagrams[_sm_field]['terminal_states'],
             'edges':           _sm_diagrams[_sm_field]['edges'],
+            # approval_edges (cmd_1154): when this field is ALSO
+            # the field this entity's own x-approval submit_on governs,
+            # the small fixed (fromState, toState) pair set x-approval
+            # itself considers legal -- the AND-composition half of "which
+            # edges are live right now" (design doc §3's state-transition
+            # row) that state_machine_approval_edges already computed but
+            # no template consumed until now. None when this field has no
+            # x-approval AND-composition applying to it at all.
+            'approval_edges':  _sm_approval_edges.get(_sm_field),
         }
         for _sm_field in ctx.get('state_machine_field_list', [])
+    ]
+
+    # Constraints section (cmd_1154, ai-agent-integration-design.md
+    # §2/§3): approval flow (entity-level, static -- "is this
+    # entity approval-governed and what does each stage write") and
+    # write-locked fields (which fields/values are currently system-
+    # managed, regardless of mechanism). Row-level truth (is *this* row
+    # submittable/locked right now) is deliberately not here -- that's the
+    # capabilities endpoint's job, not a doc that describes every row of
+    # the entity identically.
+    is_approvable = ctx.get('is_approvable', False)
+    _approval_config = ctx.get('approval_config')
+    def _sets_display(set_fields: dict) -> str:
+        return ', '.join(f'{field} = {value}' for field, value in set_fields.items())
+
+    approval_flow = []
+    if _approval_config:
+        if _approval_config.get('submit_field'):
+            _submit_sf = {_approval_config['submit_field']: _approval_config['submit_value']}
+            approval_flow.append({
+                'stage': 'Submit',
+                'sets_display': _sets_display(_submit_sf),
+                'terminal': False,
+            })
+        if _approval_config.get('on_approved_set_fields'):
+            approval_flow.append({
+                'stage': 'Approve',
+                'sets_display': _sets_display(_approval_config['on_approved_set_fields']),
+                'terminal': False,
+            })
+        if _approval_config.get('on_rejected_set_fields'):
+            approval_flow.append({
+                'stage': 'Reject',
+                'sets_display': _sets_display(_approval_config['on_rejected_set_fields']),
+                'terminal': _approval_config.get('on_rejected_terminal', False),
+            })
+        if _approval_config.get('on_withdrawn_set_fields'):
+            approval_flow.append({
+                'stage': 'Withdraw',
+                'sets_display': _sets_display(_approval_config['on_withdrawn_set_fields']),
+                'terminal': False,
+            })
+
+    # locked_values (not `values`): Jinja2 attribute lookup tries
+    # getattr() before item lookup, and dict.values is a builtin method --
+    # `lock.values` would silently resolve to that bound method instead of
+    # this list, so the key must not collide with a dict method name.
+    write_locked_values = ctx.get('write_locked_values', {})
+    write_locks = [
+        {'field': _field, 'locked_values': _values}
+        for _field, _values in sorted(write_locked_values.items())
     ]
 
     required_fields = set(model_def.get('required') or [])
@@ -306,6 +367,9 @@ def build_doc_entity_context(ctx: dict) -> dict:
         'request_body_json':  request_body_json,
         'response_item_json': response_item_json,
         'state_machine_fields': state_machine_fields,
+        'is_approvable': is_approvable,
+        'approval_flow': approval_flow,
+        'write_locks': write_locks,
     }
 
 
