@@ -92,6 +92,14 @@ fi
 # otherwise covers.
 PRISMA_ACCELERATE_API_KEY="${PRISMA_ACCELERATE_API_KEY:-}"
 
+# Optional: PRISMA_POOL_MAX override, forwarded to the deployed Cloud Run
+# service by gcp-deploy.sh's Step 4 when set. Leave blank for this script's
+# default target (Neon's pooled endpoint) — lib/prisma-pool.ts's own default
+# (5) is already sized for that. Set explicitly (to 2) only if DATABASE_URL
+# above points at a direct/unpooled connection (e.g. a self-managed Cloud
+# SQL instance) instead of Neon — see docs/knowledge/prisma-pool-max-tuning.md.
+PRISMA_POOL_MAX="${PRISMA_POOL_MAX:-}"
+
 # Upstash global DB primary region (Step 4.5). AWS-style region name; the DB is
 # created as global tier. ap-northeast-1 (Tokyo) is closest to GCP asia-northeast1.
 UPSTASH_PRIMARY_REGION="${UPSTASH_PRIMARY_REGION:-ap-northeast-1}"
@@ -109,5 +117,6 @@ export PROJECT_ID REGION SERVICE_NAME
 export SA_NAME SA_EMAIL REPO_NAME GCS_BUCKET
 export IMAGE MIGRATE_IMAGE DATABASE_URL DIRECT_URL REDIS_URL
 export AUTH_SECRET UPSTASH_EMAIL UPSTASH_API_KEY PRISMA_ACCELERATE_API_KEY
+export PRISMA_POOL_MAX
 export SEED_ADMIN_EMAIL SEED_ADMIN_PASSWORD
 export UPSTASH_PRIMARY_REGION

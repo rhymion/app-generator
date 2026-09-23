@@ -9,14 +9,18 @@
  * `generate-code` in the Completion gate order).
  *
  * Unset, malformed, non-positive, or non-finite input all fall back to the
- * pre-existing hardcoded default (2) — see the `max: 2` rationale comments
- * at each adapter construction site in `lib/prisma.ts` for why 2 is correct
- * there, and `docs/knowledge/prisma-pool-max-tuning.md` for when/how to
- * raise it via this env var.
+ * default (5), sized for the common case: a pooled endpoint (Neon's
+ * `-pooler` connection string, Prisma Postgres, PgBouncer, RDS Proxy) in
+ * front of Postgres, not a direct/unpooled instance. **A direct connection
+ * (e.g. Cloud SQL) must set `PRISMA_POOL_MAX=2` explicitly** — see the
+ * `max: 2` exception-case rationale comment beside the `PrismaPg`
+ * direct-connection adapter construction site in `lib/prisma.ts`, and
+ * `docs/knowledge/prisma-pool-max-tuning.md` for the full derivation of
+ * both the pooled default and the direct-connection exception.
  */
 export function resolvePrismaPoolMax(
   rawValue: string | undefined,
-  defaultValue: number = 2,
+  defaultValue: number = 5,
 ): number {
   const parsed = parseInt(rawValue ?? '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultValue;

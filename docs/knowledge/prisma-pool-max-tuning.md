@@ -4,21 +4,13 @@
 
 `lib/prisma.ts` constructs its `PrismaPg`/`PrismaNeon` adapter with a `max`
 option (the underlying `pg.Pool`'s connection cap for *this one process*).
-Before this env var existed, `max` was hardcoded to `2` at both adapter
-construction sites, sized for one specific deployment shape: Cloud Run
-talking to a Postgres instance directly (no pooler in front of it), where
-every one of `max-instances` Cloud Run instances holds its own real backend
-connection open — see the `rca_267a §6, Option A` comment beside the
-`PrismaPg` adapter for the calculation that produced `2`.
-
 `PRISMA_POOL_MAX` lets a deployment override that cap without a code change.
-**Unset, the default stays `2`** — behavior for the direct-connection
-deployment shape this default was calibrated for does not change.
 
-## When to raise it, and by how much
+## Default (5): sized for a pooled endpoint
 
-Only raise this when the URL `lib/prisma.ts` connects to is a **pooler**
-(PgBouncer, Neon's pooled `-pooler` endpoint, RDS Proxy, etc.), not a raw
+**Unset, the default is `5`.** This assumes the common deployment shape:
+the URL `lib/prisma.ts` connects to is a **pooler** (Neon's pooled
+`-pooler` endpoint, Prisma Postgres, PgBouncer, RDS Proxy, etc.), not a raw
 instance. A pooler multiplexes many client-side connections (from this
 process's `pg.Pool`) down to a smaller, bounded number of real backend
 connections to Postgres itself — so this process can safely hold more
@@ -26,29 +18,78 @@ client-side connections open than the database's own `max_connections`
 would otherwise allow, *up to the pooler's own configured or plan-based
 backend connection limit*.
 
-**The rule, mirroring the existing Cloud SQL calculation this file's `max: 2`
-comment already uses**:
+**The derivation for `5`**:
 
 ```
 (Cloud Run max-instances) × PRISMA_POOL_MAX  <  pooler's backend connection limit
+
+10 × 5 = 50  <  ~93
 ```
 
-leaving headroom for admin/migration connections (`DIRECT_URL`'s own
-connection, `prisma migrate deploy`, etc.), exactly as the existing Cloud SQL
-comment already does for its own `20 < 25` case.
+- `10`: this project's own Cloud Run `max-instances` setting (same value
+  the direct-connection exception's calculation below uses).
+- `~93`: Neon's pooler backend connection limit (`default_pool_size`) on
+  its smallest paid compute tier (0.25 CU) — `0.9 × max_connections`, and
+  a 0.25 CU compute's `max_connections` is 104, so `0.9 × 104 ≈ 93`. This
+  is the *smallest* realistic pooled tier a generated app is likely to run
+  on; a larger compute (Neon scales `max_connections`, and therefore
+  `default_pool_size`, up with compute size) only widens the margin.
 
-**This repo cannot hardcode a single recommended number for the pooled
-case**, because a pooler's real backend connection limit is a property of
-*your* Neon project (its compute size/plan — this scales with compute, and
-differs across Neon's plan tiers) or *your* PgBouncer's own `pool_size`/
-`max_client_conn` configuration, not a constant this codebase controls.
-Check that limit for your own provisioned pooler before picking a value, and
-apply the inequality above. **Recommendation, not a rule: "raise it because
-the pooler makes it safe" is not itself the justification — write down the
-actual instance-count × PRISMA_POOL_MAX arithmetic against the pooler's real
-limit**, the same way the existing Cloud SQL comment does, so a later reader
-(or a later Cloud Run `max-instances` change) can re-check the inequality
-still holds.
+50 leaves comfortable headroom under 93 (well under half the limit) for
+admin/migration connections (`DIRECT_URL`'s own connection, `prisma
+migrate deploy`, etc.) and for a smaller-than-0.25-CU or differently
+configured pooler (e.g. a hand-tuned PgBouncer `default_pool_size`) than
+the baseline this derivation assumes.
+
+**This repo cannot hardcode a single number that is provably correct for
+every deployment**, because a pooler's real backend connection limit is a
+property of *your* Neon project (compute size/plan) or *your* PgBouncer's
+own `pool_size`/`max_client_conn` configuration, not a constant this
+codebase controls. Re-check the inequality above against your own
+provisioned pooler's real limit before relying on the default, or before
+changing this project's own Cloud Run `max-instances` — the same way the
+direct-connection exception's comment below documents its own arithmetic
+so a later reader can re-check it.
+
+## Exception: a direct/unpooled connection must set `PRISMA_POOL_MAX=2`
+
+If the URL `lib/prisma.ts` connects to is **not** behind a pooler — a raw
+Postgres instance reached directly, with no PgBouncer/Neon-pooler/RDS Proxy
+in front of it — every one of Cloud Run's `max-instances` instances holds
+its own real backend connection open, so the pooled default above is
+**unsafe** and must not be used.
+
+**Set `PRISMA_POOL_MAX=2` explicitly** for this shape. This project's own
+production deployment no longer uses this shape (Cloud SQL has been
+retired in favor of Neon), but a consumer repo generated by this generator
+may still run its own Cloud SQL, or another self-hosted, non-pooled
+Postgres instance — this env var override exists so that shape keeps
+working without a code change.
+
+The original calculation for `2`, kept for reference (mirrored in the
+`max: 2` comment beside the `PrismaPg` direct-connection adapter
+construction site in `lib/prisma.ts`):
+
+```
+(Cloud Run max-instances) × PRISMA_POOL_MAX  <  instance's max_connections
+
+10 × 2 = 20  <  25   (Cloud SQL db-f1-micro's max_connections)
+```
+
+leaving headroom for admin/migration connections, exactly as the pooled
+case's derivation above does.
+
+## Does not apply to Prisma Postgres / Accelerate (`prisma+postgres://`)
+
+`PRISMA_POOL_MAX` has **no effect** when `lib/prisma.ts` takes its
+`PRISMA_DATABASE_URL` (Accelerate) branch. That branch constructs the
+client as `new PrismaClient({ accelerateUrl }).$extends(withAccelerate())`
+— it never constructs a `PrismaPg`/`PrismaNeon` adapter and never reads
+`prismaPoolMax` at all, so there is no `pg.Pool` `max` option in this
+process for the env var to override. Connection pooling for that path is
+Accelerate's own concern, handled entirely on Prisma's managed
+infrastructure side, not by this process's own `pg.Pool`. Confirmed by
+reading the Accelerate branch itself (`lib/prisma.ts`), not assumed.
 
 ## Where this is set
 
@@ -56,3 +97,10 @@ still holds.
 `docs/knowledge/gcp-automation-design.md`). Not required for local dev/CI,
 which run a single Next.js process against a local Postgres container with
 no instance fan-out to size for.
+
+For a GCP Cloud Run deployment via `scripts/gcp-deploy.sh`, set
+`PRISMA_POOL_MAX` in `.env.production.local` (see
+`.env.gcp.production.local.example`) — `gcp-deploy.sh` forwards it to the
+deployed service's `--set-env-vars` only when it is non-blank, so leaving
+it blank (the default, correct for Neon's pooled endpoint) forwards
+nothing and the code-level default above applies.

@@ -26,14 +26,17 @@ const slowQueryLogEnabled =
 const slowQueryThresholdMs = Number(process.env.PRISMA_SLOW_QUERY_THRESHOLD_MS ?? 50);
 
 // Per-adapter connection pool cap, overridable via PRISMA_POOL_MAX. Default
-// (2) is unchanged from before this override existed, so an environment that
-// never sets the var keeps its existing behavior byte-for-byte — see the
-// `max: 2` rationale comment at each adapter construction site below for why
-// 2 is the right default there. Only raise this for a deployment that fronts
-// Postgres with a connection pooler (PgBouncer, Neon's pooled endpoint, etc.)
+// (5) assumes the common case: this URL is a pooled endpoint (Neon's
+// `-pooler` connection string, Prisma Postgres, PgBouncer, RDS Proxy, etc.)
 // that itself multiplexes down to a bounded number of real backend
-// connections — see docs/knowledge/prisma-pool-max-tuning.md for the
-// reasoning and how to size it against your pooler's own connection limit.
+// connections — Cloud Run max-instances=10 × pool max=5 = 50 connections,
+// comfortably under a Neon 0.25 CU compute's pooler backend limit (~93 —
+// 0.9 × its 104 max_connections; see docs/knowledge/prisma-pool-max-tuning.md
+// for the full derivation and how to re-check this against your own
+// provisioned pooler). **A direct/unpooled connection (e.g. Cloud SQL) must
+// set PRISMA_POOL_MAX=2 explicitly** — see the `max: 2` exception-case
+// rationale comment at the PrismaPg direct-connection adapter construction
+// site below.
 const prismaPoolMax = resolvePrismaPoolMax(process.env.PRISMA_POOL_MAX);
 
 function attachSlowQueryListener(client: PrismaClient<'query'>): void {
@@ -180,14 +183,17 @@ const createPrismaClient = () => {
     // rejects top-level await outright. cypress/support/db-helpers.ts
     // already imports PrismaPg statically with no bundling issues, so
     // this mirrors an established, safe pattern (cmd_538).
-    // Pool cap for the socket path (rca_267a §6, Option A): Cloud Run
-    // max-instances=10 × pool max=2 = 20 connections < Cloud SQL db-f1-micro
-    // max_connections=25, leaving headroom for admin/migration connections.
     // `max` is a pg.PoolConfig field on the adapter's first constructor arg
     // (Prisma 7 PrismaPg API — https://www.prisma.io/docs/orm/prisma-client/setup-and-configuration/databases-connections/connection-pool).
-    // Override via PRISMA_POOL_MAX (see the constant's own comment above) for
-    // a deployment that fronts this URL with a pooler instead of connecting
-    // straight to a fixed-max_connections instance.
+    // The prismaPoolMax default (see the constant's own comment above)
+    // assumes this URL is a pooled endpoint. **Exception**: a direct,
+    // unpooled connection to a fixed-max_connections instance (e.g. Cloud
+    // SQL, now retired from this project's own deployment but still a shape
+    // a consumer repo may run) must set PRISMA_POOL_MAX=2 explicitly — this
+    // is the original rca_267a §6, Option A calculation: Cloud Run
+    // max-instances=10 × pool max=2 = 20 connections < Cloud SQL
+    // db-f1-micro max_connections=25, leaving headroom for admin/migration
+    // connections. See docs/knowledge/prisma-pool-max-tuning.md.
     const adapter = new PrismaPg(
       { connectionString, max: prismaPoolMax },
       schemaName ? { schema: schemaName } : undefined,
