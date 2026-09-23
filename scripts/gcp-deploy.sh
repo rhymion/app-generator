@@ -159,12 +159,27 @@ echo "[Step 4] Deploying Cloud Run service (Neon)..."
 # lib/prisma.ts takes the pooled (else) branch when PRISMA_DATABASE_URL is absent.
 # To revive Accelerate, add PRISMA_DATABASE_URL=app-prisma-database-url:latest back
 # to the --set-secrets list below (and re-enable the guard + Step 0 above).
+
+# PRISMA_POOL_MAX forwarding: unset by default, which is correct for this
+# script's own target (Neon's pooled endpoint) — lib/prisma-pool.ts's own
+# default (5) is already sized for that shape, and forwarding nothing here
+# leaves that default in effect. Only set PRISMA_POOL_MAX in
+# .env.production.local (see gcp-env.sh) if DATABASE_URL above has been
+# pointed at a direct/unpooled connection instead (e.g. a self-managed Cloud
+# SQL instance) — without this forwarding, that env var would be set locally
+# but silently never reach the deployed container, risking exceeding that
+# instance's own max_connections. See docs/knowledge/prisma-pool-max-tuning.md.
+_DEPLOY_ENV_VARS="AUTH_TRUST_HOST=true,NODE_ENV=production"
+if [[ -n "${PRISMA_POOL_MAX:-}" ]]; then
+  _DEPLOY_ENV_VARS="${_DEPLOY_ENV_VARS},PRISMA_POOL_MAX=${PRISMA_POOL_MAX}"
+fi
+
 run gcloud run deploy "${SERVICE_NAME}" \
   --image="${SERVICE_IMAGE_TAG}" \
   --region="${REGION}" \
   --service-account="${SA_EMAIL}" \
   --set-secrets=DATABASE_URL=app-database-url:latest,AUTH_SECRET=app-nextauth-secret:latest,GCS_BUCKET=app-gcs-bucket-name:latest,REDIS_URL=app-redis-url:latest \
-  --set-env-vars=AUTH_TRUST_HOST=true,NODE_ENV=production \
+  --set-env-vars="${_DEPLOY_ENV_VARS}" \
   --no-invoker-iam-check \
   --min-instances=0 \
   --max-instances=10

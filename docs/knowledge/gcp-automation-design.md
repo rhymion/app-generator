@@ -141,18 +141,31 @@ Operations performed (default = Neon pooled/direct connection):
 - Run seed
 - Cloud Run Service deploy:
   - `--set-secrets`: DATABASE_URL / AUTH_SECRET / GCS_BUCKET / REDIS_URL
-  - `--set-env-vars`: AUTH_TRUST_HOST=true / NODE_ENV=production
+  - `--set-env-vars`: AUTH_TRUST_HOST=true / NODE_ENV=production, plus
+    PRISMA_POOL_MAX=<value> when that var is set in `.env.production.local`
+    (blank by default — see below)
   - `--max-instances=10` — this instance cap and the `lib/prisma.ts`
-    PrismaPg pool cap (`max: 2`) were previously sized against the
-    db-f1-micro Cloud SQL tier's `max_connections=25` ceiling. That specific
-    arithmetic constraint is retired along with Cloud SQL: Neon's pooled
-    endpoint (PgBouncer) is designed for exactly this many-short-lived-
-    connections-over-few-backend-connections fan-out, and the connection
-    ceiling is now a property of the Neon plan/compute size instead of a
-    fixed Cloud SQL tier. `--max-instances=10` itself is left unchanged
-    here (no evidence-based replacement number to put in its place) — if it
-    needs to be raised, check the Neon project's own connection limits
-    first, not this script's Cloud-SQL-era comment.
+    PrismaPg/PrismaNeon pool cap (`lib/prisma-pool.ts`'s `resolvePrismaPoolMax`
+    default, now `5`) were previously sized against the db-f1-micro Cloud SQL
+    tier's `max_connections=25` ceiling (`max: 2`). That specific arithmetic
+    constraint is retired along with Cloud SQL: Neon's pooled endpoint
+    (PgBouncer) is designed for exactly this many-short-lived-connections-
+    over-few-backend-connections fan-out, and the connection ceiling is now a
+    property of the Neon plan/compute size instead of a fixed Cloud SQL tier
+    — see `docs/knowledge/prisma-pool-max-tuning.md` for the current default's
+    derivation. `--max-instances=10` itself is left unchanged here (no
+    evidence-based replacement number to put in its place) — if it needs to
+    be raised, check the Neon project's own connection limits first, not this
+    script's Cloud-SQL-era comment.
+  - PRISMA_POOL_MAX pass-through: blank by default, which is correct for
+    this script's own Neon-pooled target (the code-level default of `5`
+    already fits). Set `PRISMA_POOL_MAX=2` in `.env.production.local` only
+    if DATABASE_URL is pointed at a direct/unpooled connection instead (e.g.
+    a self-managed Cloud SQL instance) — `gcp-deploy.sh` forwards it to the
+    deployed service's `--set-env-vars` only when non-blank; leaving it unset
+    while pointing at a direct connection would silently keep the pooled
+    default (`5`) in effect against an instance sized for far fewer
+    connections.
   - Output Service URL (`gcloud run services describe --format='value(status.url)'`)
 
 The Accelerate wiring (Step 0 secret registration + `PRISMA_DATABASE_URL`
