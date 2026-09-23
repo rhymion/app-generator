@@ -19,7 +19,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - **スキーマ駆動生成** — YAML スキーマ (`code_generator/json_schema.yaml`) + Prisma スキーマ → Python パイプラインによる TypeScript、React、Cypress ファイルの生成
 - **CRUD ページ一式** — エンティティごとに一覧、詳細、作成、編集、削除ページを生成
 - **ガントチャートビュー** — エンティティ単位でオプトインできるガントチャートページ
-- **REST API** — エンティティごとに API キー認証付き JSON エンドポイントを生成
+- **REST API** — エンティティごとに API キー認証付き JSON エンドポイントを生成。加えて、その行について現在許される操作・書き込み・遷移を返す行単位の `GET /api/{entity}/[id]/capabilities` エンドポイントを生成
 - **生成ドキュメント + OpenAPI 3.1 仕様** — エンティティごとの人間可読ドキュメント（`docs/generated/{entity}.md`、`/en/docs` 配下にも反映）。承認フロー・書き込みロックを持つエンティティには「Constraints」節を含む。加えて機械可読な統合仕様 `docs/generated/openapi.json` をビルド成果物として生成（配備アプリからは既定で配らない）— 詳細は [`docs/knowledge/generated-documentation-and-openapi-spec.md`](docs/knowledge/generated-documentation-and-openapi-spec.md) を参照
 - **Cypress テスト生成** — アプリケーションコードと並行して UI および API テストスイートを生成
 - **ダッシュボードチャート** (`x-display.dashboard: true`) — カラム・バー・ライン・パイチャートのレンダリングを生成；スタッキングモード・タイムスタンプバケット・型付きフィルター・CSV/Excel エクスポート・REST アグリゲートエンドポイント（`/api/{entity}/aggregate`）をエンティティごとに生成

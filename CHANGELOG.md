@@ -23,6 +23,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   is exercised only by `test:approval-lockdown-gate`'s fixture. See
   `docs/knowledge/generated-documentation-and-openapi-spec.md` and
   `app-generator-project-docs/planning/ai-agent-integration-design.md`.
+- **Added a row-level `GET /api/{entity}/[id]/capabilities` endpoint**
+  (issue #707, second stage of AI-agent-facing API improvements),
+  generated per `can_view` entity alongside the existing detail route.
+  Answers, for one specific row, which operations/writes/transitions are
+  legal right now given this row's current data and this caller's
+  permissions -- the row-level half the OpenAPI spec above deliberately
+  leaves out. Every judgment reuses an already-generated function
+  (`canAccess()`, `assertEditAllowed()`/`assertDeleteAllowed()`,
+  `assertTransitionAllowed()`, `canSubmitForApproval()`/
+  `canWithdrawApproval()`, `assertApprovalOrder()`) rather than a second,
+  divergent derivation. See
+  `docs/knowledge/generated-documentation-and-openapi-spec.md`'s "The
+  row-level capabilities endpoint" section, including a disclosed
+  coverage gap on the approvable-bridge branch.
 - **Added an optional `depends_on: [task_id, ...]` ordering key to
   `x-scheduled-task` (entity-level) and `x-scheduled-tasks` (top-level)
   declarations** (issue #713), naming other `task_id`s (from either

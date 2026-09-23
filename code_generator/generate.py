@@ -59,6 +59,7 @@ from generators import (
     resolve_approval_submit_on,
     seed_entities_context,
     approval_lockdown_context,
+    capabilities_context,
 )
 from generators_i18n import (
     update_i18n_and_config,
@@ -1062,6 +1063,14 @@ def generate(schema_path: str, output_dir: str) -> None:
         # of which downstream block (service.ts vs. the invalidate-only
         # write below) needs it.
         ctx = {**ctx, **approval_lockdown_context(ctx, schema)}
+        # Row-level capability endpoint (GET .../capabilities): merged the
+        # same way and at the same point as approval_lockdown_context above
+        # -- it depends on the same one_to_one_rels list build_context()
+        # already resolved, and api_capabilities_route.ts.jinja2 (written
+        # further below, alongside api_detail_route.ts.jinja2) needs
+        # has_edit_guard/has_delete_guard/lockdown_field from the merge
+        # just above as well.
+        ctx = {**ctx, **capabilities_context(ctx)}
         if ctx.get('is_self_only') and ctx.get('self_only_admin_bypass'):
             self_only_admin_bypass_entities.append(parent)
         # State-transition entries: gated on can_update the same way
@@ -1344,6 +1353,17 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _write(api_dir / 'route.ts', _render(env, 'api_route.ts.jinja2', ctx))
             if can_view or can_edit or can_delete:
                 _write(api_dir / '[id]' / 'route.ts', _render(env, 'api_detail_route.ts.jinja2', ctx))
+            # --- capabilities route (row-level "what can I do to this
+            # row right now", AI-agent-integration design doc Stage 1
+            # scope item (b)) --- gated on can_view alone: it answers a
+            # read-time question and reuses get{Parent}Detail (the same
+            # org-scoped/self-only-scoped getter the GET detail handler
+            # above already calls) as its own fetch, so it needs nothing
+            # can_edit/can_delete wouldn't already gate inside the
+            # response body itself.
+            if can_view:
+                _write(api_dir / '[id]' / 'capabilities' / 'route.ts',
+                       _render(env, 'api_capabilities_route.ts.jinja2', ctx))
             if can_new or can_edit or can_delete:
                 _write(api_dir / 'bulk' / 'route.ts', _render(env, 'api_bulk_route.ts.jinja2', ctx))
             print(f'  API routes → app/api/{parent}/')

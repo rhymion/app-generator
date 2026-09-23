@@ -1,4 +1,5 @@
-# Generated documentation and the OpenAPI build artifact
+# Generated documentation, the OpenAPI build artifact, and the row-level
+# capabilities endpoint
 
 ## What this is
 
@@ -8,7 +9,11 @@ via `generators_doc.py`'s `build_doc_entity_context()` +
 `doc_entity.md.jinja2`), plus one combined machine-readable spec
 (`docs/generated/openapi.json`, via `generators_openapi.py`). Both are pure
 build artifacts, produced from the same underlying `build_context()` data —
-neither is served by a deployed app by default.
+neither is served by a deployed app by default. A third piece, generated per
+entity rather than as a single build artifact, is a real runtime endpoint —
+`GET /api/{entity}/[id]/capabilities` — that answers the row-level question
+the other two deliberately leave out (see "The row-level capabilities
+endpoint" below).
 
 ## The Constraints section (human docs)
 
@@ -81,6 +86,82 @@ expose it wires up their own route; this generator does not add one, and
 no new schema key controls this (matching the same treatment
 `app/[locale]/docs` already gets — not every deployment wants its full
 schema disclosed).
+
+## The row-level capabilities endpoint
+
+`GET /api/{entity}/[id]/capabilities` (name is provisional per the design
+doc; kept as-is here -- no better alternative surfaced, and it matches
+the existing `[id]/approve`, `[id]/reject`, `[id]/withdraw` sub-resource
+convention on `approval_request`) answers, for one specific row, exactly
+the row-level half the OpenAPI spec and human docs above deliberately
+leave out: which operations/writes/transitions are legal right now,
+given this row's own current data and this caller's own permissions.
+Written by `generate.py` alongside `api_detail_route.ts.jinja2` (gated on
+`can_view` alone -- it answers a read-time question, reusing
+`get{Parent}Detail`, the same org-scoped/self-only-scoped getter the GET
+detail route itself calls), from `api_capabilities_route.ts.jinja2`.
+
+Every judgment in the response reuses an already-generated function --
+never a second, divergent derivation (the design doc's anti-pattern
+against a parallel agent API recreating a second, divergent code path):
+
+- `operations.update`/`operations.delete` -- `canAccess()`
+  (`lib/authz.ts`), the same non-throwing permission check every read
+  path already uses; an `x-self-only` entity checks
+  `creator_id === actorId` instead, matching the write path's own "no
+  admin bypass on write" rule exactly (the same ownership check
+  `api_detail_route.ts.jinja2`'s PUT/DELETE handlers use).
+- `write_locks.edit_locked`/`write_locks.delete_locked` --
+  `assertEditAllowed()`/`assertDeleteAllowed()`
+  (`lib/{entity}/edit_guard.ts`/`delete_guard.ts`, the post-approval
+  lockdown mechanism), wrapped in try/catch rather than a
+  boolean-returning sibling function. `null` (not `false`) when the
+  entity has no such guard at all -- the approvable-bridge relationship
+  discussed below is what wires these in.
+- `transitions.{field}` -- `assertTransitionAllowed()`
+  (`lib/state_transitions.ts`), called once per candidate state drawn
+  from that field's own diagram state list
+  (`state_machine_diagrams[field].states`, already resolved by
+  `build_context()`) rather than re-deriving the edge set.
+- `approval` -- only non-null when the entity declares the "approvable"
+  one-to-one bridge relationship (`x-relationship: {type:
+  one-to-one_bridge, target: approvable}`) -- see `capabilities_context()`
+  in `generators.py` for why plain `x-approval` alone (no bridge) is
+  insufficient: without the bridge, `generate.py` never wires a submit/
+  approve/reject/withdraw action for the entity at all (its on_approved/
+  on_rejected values are simply unreachable via the ordinary write path),
+  so there is no live round machinery to report on. When present,
+  `can_submit`/`can_withdraw` reuse `canSubmitForApproval()`/
+  `canWithdrawApproval()` (`lib/approval_request/submit_predicate.ts`),
+  `can_approve`/`can_reject` reuse the same `assertApprovalOrder()` plus
+  approver-role check every real approve/reject route already performs,
+  and `can_withdraw` is further gated on `hasOnWithdrawn()`
+  (`lib/approval_request/on_withdrawn_dispatch.ts`) plus the same
+  requestor-only (`approvable.creator_id === actorId`) check the real
+  withdraw route enforces -- all reused, none re-implemented.
+
+Known coverage gap, disclosed rather than papered over: this repo's own
+`json_schema.yaml` declares no entity with the approvable bridge
+relationship at all, and no fixture gate (`test:approval-lockdown-gate`
+included) exercises one either -- the entire approvable-bridge machinery
+this endpoint's `approval` section depends on (`edit_guard.ts`/
+`delete_guard.ts`/`submit_predicate.ts`/`order-check.ts`/
+`on_withdrawn_dispatch.ts`) has never been compiled through the real
+`generate.py` -> `tsc` pipeline by any of the 20 completion-gate steps,
+before or after this change. `code_generator/tests/
+test_capabilities_endpoint.py` covers this branch at the Python
+context-computation and template-rendering level (a real render against
+a synthetic approvable-bridge schema, asserting the expected imports and
+calls appear), but that proves the generated source has the right shape,
+not that it type-checks. The non-bridge branch (operations, write_locks,
+transitions, `approval: null`) is genuinely `tsc`-compiled today, both
+via `test:approval-lockdown-gate`'s existing entities (plain
+`x-approval`, no bridge) and via `test:e2e:build`'s real dogfood build
+(every `can_view`+`api: true` dogfood entity, none of which have the
+bridge either). Building a dedicated fixture for the bridge branch (new
+fixture models plus shims for the three approval_request-side modules
+above) is its own undertaking, out of this change's scope -- worth a
+dedicated follow-up.
 
 See `app-generator-project-docs/planning/ai-agent-integration-design.md`
 for the full design rationale (why a static/runtime split, why OpenAPI 3.1

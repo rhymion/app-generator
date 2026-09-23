@@ -2823,6 +2823,46 @@ def approval_lockdown_context(ctx: dict, schema: dict | None) -> dict:
     }
 
 
+def capabilities_context(ctx: dict) -> dict:
+    """Row-level capability endpoint
+    (GET /api/{entity}/[id]/capabilities, see the AI-agent-integration
+    design doc's Stage 1 scope item (b)). Resolves the one piece of
+    relationship metadata the template itself cannot derive -- the
+    approvable bridge's own FK prop name -- so
+    api_capabilities_route.ts.jinja2 can call the SAME already-generated
+    judgment functions every other entry point already calls
+    (assertEditAllowed/assertDeleteAllowed from edit_guard.ts/
+    delete_guard.ts, assertTransitionAllowed from state_transitions.ts,
+    canSubmitForApproval/canWithdrawApproval from submit_predicate.ts,
+    assertApprovalOrder from order-check.ts, hasOnWithdrawn from
+    on_withdrawn_dispatch.ts) rather than re-deriving any of their
+    judgments. No new judgment logic lives here or in the template --
+    only wiring to reach the existing convergence points, per the design
+    doc's anti-pattern warning against a parallel, divergent "agent API"
+    code path.
+
+    Mirrors approval_lockdown_context()'s own approvable-bridge lookup
+    immediately above (same ctx['one_to_one_rels'] scan, same target
+    'approvable' match) rather than depending on that function's return
+    value -- capabilities_context() must also work standalone for a
+    can_view entity that has neither has_edit_guard nor has_delete_guard
+    (i.e. can_update/can_delete both false), a case
+    approval_lockdown_context() itself would still resolve the bridge
+    for, but whose has_edit_guard/has_delete_guard come out False for an
+    unrelated reason (no update/delete route at all) -- the two
+    functions answer different questions from the same relationship fact
+    and must not be collapsed into one call.
+    """
+    approvable_rel = next(
+        (r for r in ctx.get('one_to_one_rels', []) if r.get('target') == 'approvable'),
+        None,
+    )
+    return {
+        'has_approvable_bridge': approvable_rel is not None,
+        'approvable_fk': approvable_rel['prop_name'] if approvable_rel else None,
+    }
+
+
 def _ts_literal(value: object) -> str:
     if isinstance(value, bool):
         return 'true' if value else 'false'
