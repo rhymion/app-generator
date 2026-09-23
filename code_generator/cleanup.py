@@ -591,6 +591,7 @@ def _clean_schema_driven(out: Path, entities: list, test_entities: list,
     # -------------------------------------------------------------------------
     print('\nCleaning once-only files...')
     _delete(out / 'docs' / 'generated' / 'index.md')
+    _delete(out / 'docs' / 'generated' / 'openapi.json')
     _delete(out / 'app' / '[locale]' / 'docs' / 'page.mdx')
     if test_entities:
         _delete(out / 'cypress' / 'support' / 'generated-tasks.ts')

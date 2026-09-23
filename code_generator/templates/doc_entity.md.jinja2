@@ -26,6 +26,38 @@
 
 > **Read-only** fields (`id`, `creator_id`, `created_at`, `updated_at`) are set automatically and cannot be written through the API or UI forms.
 
+{% if is_approvable or write_locks %}
+## Constraints
+
+These constraints are entity-level facts, true for every row of this entity regardless of its current data — whether a *specific* row is submittable/locked/transitionable right now depends on that row's own current state and is not shown here.
+
+{% if is_approvable %}
+### Approval Flow
+
+This entity is approval-governed (`x-approval`). Every caller — human via the UI, another service via the REST API — goes through the same flow:
+
+| Stage | Sets | Terminal |
+|-------|------|:--------:|
+{% for step in approval_flow %}
+| {{ step.stage }} | {{ step.sets_display }} | {{ '✓' if step.terminal else '' }} |
+{% endfor %}
+
+A **terminal** rejection has no resubmission path back to the submit state; a non-terminal one does.
+
+{% endif %}
+{% if write_locks %}
+### Write-Locked Fields
+
+The listed values may only be written by the system (via the approval decision above, or an explicit `x-write-locked-values` declaration) — an ordinary create/update payload that attempts to set one of these values directly is rejected:
+
+| Field | Locked Values |
+|-------|---------------|
+{% for lock in write_locks %}
+| `{{ lock.field }}` | {{ lock.locked_values | join(', ') }} |
+{% endfor %}
+
+{% endif %}
+{% endif %}
 {% if state_machine_fields %}
 ## State Machine
 
@@ -55,6 +87,16 @@
 
 {% for s in sm.terminal_states %}
 - `{{ s }}`
+{% endfor %}
+{% endif %}
+
+{% if sm.approval_edges %}
+**Further restricted by this entity's Approval Flow (see Constraints above)**: this field is also `x-approval`'s own `submit_on` field, so a transition must be legal in *both* the diagram above *and* the approval flow to actually be permitted right now — the diagram alone is not sufficient:
+
+| From | To |
+|------|-----|
+{% for from, to in sm.approval_edges %}
+| `{{ from }}` | `{{ to }}` |
 {% endfor %}
 {% endif %}
 
@@ -96,7 +138,9 @@ All endpoints require one of:
 | `X-API-Key` | `<key>` | `X-API-Key: mk_abc123...` |
 | `Authorization` | `Bearer <key>` | `Authorization: Bearer mk_abc123...` |
 
-API keys are stored in `user.api_key` and start with the `mk_` prefix.
+API keys are stored in `user.api_key` and start with the `mk_` prefix. A key
+may optionally expire (`user.api_key_expires_at`); a request made with an
+expired key is rejected with `401 API key expired.`
 
 ---
 

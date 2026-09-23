@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
+import { getRateLimiter } from '@/lib/rate-limit';
 {% if (can_view and comment_has_mention) or can_update or can_delete %}import prisma from '@/lib/prisma';
 {% endif %}{% if can_view %}
 import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
@@ -21,6 +22,13 @@ export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId: actorId } = await authenticateApiKey(request);
+    const _rl = await getRateLimiter().check('api:read', actorId);
+    if (!_rl.allowed) {
+      return NextResponse.json(
+        { error: 'rate_limited', retryAfter: _rl.retryAfterSeconds },
+        { status: 429, headers: { 'Retry-After': String(_rl.retryAfterSeconds), 'X-RateLimit-Bucket': 'api:read' } },
+      );
+    }
     const item = await get{{ parent_pascal }}Detail(id{% if should_filter_by_org or is_self_only %}, actorId{% endif %});
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -80,6 +88,13 @@ export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId: actorId } = await authenticateApiKey(request);
+    const _rl = await getRateLimiter().check('api:write', actorId);
+    if (!_rl.allowed) {
+      return NextResponse.json(
+        { error: 'rate_limited', retryAfter: _rl.retryAfterSeconds },
+        { status: 429, headers: { 'Retry-After': String(_rl.retryAfterSeconds), 'X-RateLimit-Bucket': 'api:write' } },
+      );
+    }
 {% if should_filter_by_org %}
     const _assocOrgs = await getAssociatedOrganizations(actorId);
     const _assocOrgIds = _assocOrgs.map((o) => o.id);
@@ -145,6 +160,13 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId: actorId } = await authenticateApiKey(request);
+    const _rl = await getRateLimiter().check('api:write', actorId);
+    if (!_rl.allowed) {
+      return NextResponse.json(
+        { error: 'rate_limited', retryAfter: _rl.retryAfterSeconds },
+        { status: 429, headers: { 'Retry-After': String(_rl.retryAfterSeconds), 'X-RateLimit-Bucket': 'api:write' } },
+      );
+    }
 {% if should_filter_by_org %}
     const _assocOrgs = await getAssociatedOrganizations(actorId);
     const _assocOrgIds = _assocOrgs.map((o) => o.id);

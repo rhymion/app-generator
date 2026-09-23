@@ -16,6 +16,7 @@
  *   - `auth:signin:credentials` — credential sign-in attempts
  *   - `auth:signin:provider`    — OAuth sign-in starts (button click)
  *   - `auth:callback`           — OAuth callback handling
+ *   - `api:read` / `api:write`  — per-API-key REST call ceilings (see below)
  *
  * The key inside each bucket is whatever uniquely identifies the abuser —
  * for the three buckets above, the caller's IP. `auth:mfa:challenge`
@@ -85,6 +86,18 @@ const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
   // spraying candidates against the 10^6 TOTP space or the recovery-code
   // list is not.
   'auth:mfa:challenge':      { limit: 10, windowMs: 5 * 60_000 },
+  // Per-API-key REST ceilings (ai-agent-integration-design.md "Idempotency
+  // keys and rate limiting — resolved design"). Keyed by the caller's
+  // resolved user id, not IP: an API caller (agent or otherwise) can share
+  // or rotate its IP, but its account is its real identity — the same
+  // reasoning as `auth:mfa:challenge` above. 300/min read is set above a
+  // realistic multi-page paging walk at `MAX_PAGE_SIZE` (lib/_pagination.ts);
+  // 60/min write mirrors the existing `auth:callback` ceiling as a
+  // reasonable starting point with no closer existing precedent. Both are
+  // starting values (ruling), overridable below the same way
+  // `auth:signin:credentials` already is.
+  'api:read':                { limit: 300, windowMs: 60_000 },
+  'api:write':               { limit: 60, windowMs: 60_000 },
 };
 
 // The Cypress UI suite intentionally logs in fresh for every `it()` (each
@@ -107,11 +120,26 @@ const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
 // distinctly-named var has no such special-casing and is read dynamically
 // at runtime as expected.
 const credentialsLimitOverride = Number(process.env.RATE_LIMIT_AUTH_CREDENTIALS_LIMIT);
+// Same override mechanism and rationale as RATE_LIMIT_AUTH_CREDENTIALS_LIMIT
+// above, extended to the two new API-key buckets: a real need for
+// environment-specific overrides (design ruling's own proposed names), not
+// speculative flexibility. A wrong initial pick is a config change, not a
+// code change.
+const apiReadLimitOverride = Number(process.env.RATE_LIMIT_API_READ_LIMIT);
+const apiWriteLimitOverride = Number(process.env.RATE_LIMIT_API_WRITE_LIMIT);
 
-export const DEFAULT_BUCKETS: Record<string, RateLimitBucketConfig> =
-  Number.isFinite(credentialsLimitOverride) && credentialsLimitOverride > 0
-    ? { ...PRODUCTION_BUCKETS, 'auth:signin:credentials': { limit: credentialsLimitOverride, windowMs: 60_000 } }
-    : PRODUCTION_BUCKETS;
+export const DEFAULT_BUCKETS: Record<string, RateLimitBucketConfig> = {
+  ...PRODUCTION_BUCKETS,
+  ...(Number.isFinite(credentialsLimitOverride) && credentialsLimitOverride > 0
+    ? { 'auth:signin:credentials': { limit: credentialsLimitOverride, windowMs: 60_000 } }
+    : {}),
+  ...(Number.isFinite(apiReadLimitOverride) && apiReadLimitOverride > 0
+    ? { 'api:read': { limit: apiReadLimitOverride, windowMs: 60_000 } }
+    : {}),
+  ...(Number.isFinite(apiWriteLimitOverride) && apiWriteLimitOverride > 0
+    ? { 'api:write': { limit: apiWriteLimitOverride, windowMs: 60_000 } }
+    : {}),
+};
 
 let _instance: RateLimiter | null = null;
 

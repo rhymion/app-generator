@@ -53,6 +53,14 @@ model user {
   email                     String              @unique
   password                  String?
   api_key                   String?
+  // Stage 2 of the AI-agent-integration design (app-generator-project-docs
+  // planning/ai-agent-integration-design.md): optional expiry for any
+  // account's API key, human or agent -- no separate agent principal type.
+  // null preserves today's never-expires behavior for every existing key.
+  // Checked in lib/api-auth.ts's authenticateApiKey(); not yet exposed via
+  // any UI/API setter (out of this stage's scope -- see that design doc's
+  // Stage 2 section).
+  api_key_expires_at        DateTime?
   // Opt-in master switch for email notifications -- container only for
   // now, no sending mechanism exists yet. Defaults to false: an unrelated
   // user must actively opt in, never be opted in by default. A future
@@ -119,6 +127,7 @@ model user {
   created_tenants           tenant[]            @relation("TenantCreator")
   updated_tenants           tenant[]            @relation("TenantUpdater")
   audit_logs                audit_log[]
+  idempotency_keys          idempotency_key[]
   notifications             notification[]      @relation("NotificationUser")
   created_app_settings      app_setting[]       @relation("AppSettingCreator")
   updated_app_settings      app_setting[]       @relation("AppSettingUpdater")
@@ -537,6 +546,44 @@ model audit_log {
 
   @@index([actor_user_id])
   @@index([target_table, target_id])
+  @@index([created_at])
+}
+
+// One-day idempotency-key cache for external API create calls
+// (ai-agent-integration-design.md "Idempotency keys and rate limiting —
+// resolved design"). A row is written in the SAME transaction as the
+// record it guards -- unlike Redis, Postgres can commit or roll back both
+// together, so a crash mid-write can never leave the key and the record
+// out of sync (the structural reason this is a table, not a cache — see
+// the design doc's "why the table wins"). Scope: single-record create
+// endpoints only -- update/delete already converge to the same end state
+// on retry, and CSV import already has its own key-column dedup.
+//
+// Retention is enforced logically (a row older than one day is treated as
+// expired at lookup time, in lib/idempotency.ts), not by a scheduled
+// deletion job -- the design ruling deliberately does not add a new
+// scheduling mechanism for a housekeeping delete. A stale row is simply
+// overwritten the next time its (key, actor, entity) tuple is reused.
+model idempotency_key {
+  id              String   @id @default(cuid())
+  key             String
+  actor_user_id   String
+  actor_user      user     @relation(fields: [actor_user_id], references: [id], onDelete: Cascade)
+  // The entity name the key was scoped to (route template's `parent`
+  // identifier, e.g. 'invoice') -- the same caller may reuse one key value
+  // across different endpoints without collision.
+  target_entity   String
+  // SHA-256 hex of the request body actually submitted. A retry with the
+  // same key but a different body is a client bug, not a legitimate
+  // replay -- rejected as a conflict rather than silently served the first
+  // request's stale result (see lib/idempotency.ts).
+  request_hash    String
+  response_status Int
+  response_body   Json
+  created_at      DateTime @default(now()) @db.Timestamptz(0)
+
+  @@unique([key, actor_user_id, target_entity], name: "idempotency_key_actor_target")
+  @@index([actor_user_id])
   @@index([created_at])
 }
 

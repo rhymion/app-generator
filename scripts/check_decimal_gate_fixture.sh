@@ -59,6 +59,7 @@ npx prisma generate --schema="$OUT_DIR/prisma/schema.prisma" >/tmp/decimal_gate_
 cp "$FIXTURE_DIR/shims/prisma.ts" "$OUT_DIR/lib/prisma.ts"
 cp "$FIXTURE_DIR/shims/authz.ts" "$OUT_DIR/lib/authz.ts"
 cp "$FIXTURE_DIR/shims/api-auth.ts" "$OUT_DIR/lib/api-auth.ts"
+cp "$FIXTURE_DIR/shims/idempotency.ts" "$OUT_DIR/lib/idempotency.ts"
 cp "$FIXTURE_DIR/tsconfig.json" "$OUT_DIR/tsconfig.json"
 
 echo "-- tsc --noEmit (getters.ts + FormUpsert.tsx + validation + import route) --"

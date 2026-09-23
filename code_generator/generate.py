@@ -59,6 +59,7 @@ from generators import (
     resolve_approval_submit_on,
     seed_entities_context,
     approval_lockdown_context,
+    capabilities_context,
 )
 from generators_i18n import (
     update_i18n_and_config,
@@ -77,6 +78,7 @@ from validate import (
     SchemaValidationError,
 )
 from generators_doc import build_doc_entity_context, build_doc_index_context, convert_md_to_mdx
+from generators_openapi import build_entity_openapi, assemble_openapi_document
 from generators_test import (
     helper_context,
     spec_context,
@@ -999,6 +1001,13 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     doc_dir = out / 'docs' / 'generated'
     entity_doc_summaries: list[dict] = []
+    # OpenAPI 3.1 build artifact (cmd_1154, ai-agent-integration-design.md
+    # §7 Stage 1(a)): one entry per entity, collected in the same
+    # per-entity loop below (each build_entity_openapi(ctx) call reuses
+    # that entity's already-built build_context() data, same convention
+    # as entity_doc_summaries just above) and merged into a single
+    # docs/generated/openapi.json after the loop finishes.
+    openapi_entity_specs: list[dict] = []
     self_only_admin_bypass_entities: list[str] = []
     # State-transition gatekeeper table (Issue #696, lib/state_transitions.ts)
     # -- collected across every model in the per-entity loop below (each
@@ -1054,6 +1063,14 @@ def generate(schema_path: str, output_dir: str) -> None:
         # of which downstream block (service.ts vs. the invalidate-only
         # write below) needs it.
         ctx = {**ctx, **approval_lockdown_context(ctx, schema)}
+        # Row-level capability endpoint (GET .../capabilities): merged the
+        # same way and at the same point as approval_lockdown_context above
+        # -- it depends on the same one_to_one_rels list build_context()
+        # already resolved, and api_capabilities_route.ts.jinja2 (written
+        # further below, alongside api_detail_route.ts.jinja2) needs
+        # has_edit_guard/has_delete_guard/lockdown_field from the merge
+        # just above as well.
+        ctx = {**ctx, **capabilities_context(ctx)}
         if ctx.get('is_self_only') and ctx.get('self_only_admin_bypass'):
             self_only_admin_bypass_entities.append(parent)
         # State-transition entries: gated on can_update the same way
@@ -1081,6 +1098,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'can_api':    doc_ctx['can_api'],
             'has_chart':  doc_ctx['has_chart'],
         })
+        openapi_entity_specs.append(build_entity_openapi(ctx))
 
         # --- getters.ts ---
         getters_ctx = {**ctx, 'named_constants': named_constants}
@@ -1335,6 +1353,17 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _write(api_dir / 'route.ts', _render(env, 'api_route.ts.jinja2', ctx))
             if can_view or can_edit or can_delete:
                 _write(api_dir / '[id]' / 'route.ts', _render(env, 'api_detail_route.ts.jinja2', ctx))
+            # --- capabilities route (row-level "what can I do to this
+            # row right now", AI-agent-integration design doc Stage 1
+            # scope item (b)) --- gated on can_view alone: it answers a
+            # read-time question and reuses get{Parent}Detail (the same
+            # org-scoped/self-only-scoped getter the GET detail handler
+            # above already calls) as its own fetch, so it needs nothing
+            # can_edit/can_delete wouldn't already gate inside the
+            # response body itself.
+            if can_view:
+                _write(api_dir / '[id]' / 'capabilities' / 'route.ts',
+                       _render(env, 'api_capabilities_route.ts.jinja2', ctx))
             if can_new or can_edit or can_delete:
                 _write(api_dir / 'bulk' / 'route.ts', _render(env, 'api_bulk_route.ts.jinja2', ctx))
             print(f'  API routes → app/api/{parent}/')
@@ -2692,6 +2721,18 @@ def generate(schema_path: str, output_dir: str) -> None:
     _write(
         out / 'app' / '[locale]' / 'docs' / 'page.mdx',
         convert_md_to_mdx(index_md, link_prefix='docs/'),
+    )
+
+    # --- docs/generated/openapi.json (cmd_1154, ai-agent-integration-
+    # design.md §7 Stage 1(a)): build artifact only -- see
+    # generators_openapi.py's own header for why this is never served by
+    # a deployed app by default. Written via the same _write() helper (and
+    # therefore tracked in the same generate-code manifest) as every other
+    # generated file, not a bespoke file-write path.
+    openapi_document = assemble_openapi_document(openapi_entity_specs)
+    _write(
+        doc_dir / 'openapi.json',
+        json.dumps(openapi_document, indent=2, sort_keys=True) + '\n',
     )
 
     # --- Cypress test generation ---

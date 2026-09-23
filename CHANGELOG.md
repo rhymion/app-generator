@@ -5,6 +5,65 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [4.1.0] - 2026-09-19
 ### Added
+- **Added optional expiry for API keys** (issue #717, fourth stage of
+  AI-agent-facing API improvements — Stage 2 of
+  `ai-agent-integration-design.md`). A new nullable `user.api_key_expires_at`
+  column (`null` = never expires, matching every existing key's current
+  behavior unchanged) is checked in the single shared
+  `authenticateApiKey()` (`lib/api-auth.ts`); a request made with an
+  expired key is rejected with `401 API key expired.`. No new principal
+  type — an agent is an ordinary `user` account, human or agent alike. See
+  `docs/knowledge/api-key-expiry.md`.
+- **Added `Idempotency-Key` support on single-record API create endpoints
+  and per-API-key `api:read`/`api:write` rate-limit buckets** (issue #707,
+  third stage of AI-agent-facing API improvements — the "Idempotency keys
+  and rate limiting — resolved design" section of
+  `ai-agent-integration-design.md`). A client-supplied `Idempotency-Key`
+  header on a create `POST` is checked and recorded in a new
+  `idempotency_key` table (one-day retention, enforced logically at lookup
+  time), written in the *same* transaction as the record it guards — a
+  retry with the same key and body replays the original result without
+  re-running any create side effects; the same key with a different body
+  is rejected as a 409 conflict. Every REST route that authenticates
+  exclusively via `authenticateApiKey()` (`api_route.ts.jinja2`,
+  `api_detail_route.ts.jinja2`, `api_bulk_route.ts.jinja2`) now also
+  enforces a per-caller rate-limit ceiling on the existing
+  `lib/rate-limit/` mechanism — 300/min read, 60/min write, both
+  env-overridable (`RATE_LIMIT_API_READ_LIMIT`/
+  `RATE_LIMIT_API_WRITE_LIMIT`) — keyed by the caller's resolved user id,
+  not IP. See `docs/knowledge/api-idempotency-and-rate-limiting.md`.
+- **Added an entity-level "Constraints" section to generated docs
+  (`doc_entity.md.jinja2`) and a new `docs/generated/openapi.json` OpenAPI
+  3.1 build artifact** (issue #707), the first stage of AI-agent-facing
+  API improvements. The Constraints section documents, for an entity that
+  declares `x-approval` and/or a write-locked field, the approval flow's
+  static shape (which stage writes which field/value, whether a rejection
+  is terminal) and which (field, value) pairs are system-only — entity-
+  level facts true for every row, never row-level truth about a specific
+  record's current state. `docs/generated/openapi.json` reuses the same
+  static data (field type/required/enum, relationship shape, approval
+  flow, write-lock capability, as `x-relationships`/`x-approval`/
+  `x-write-locked-values` vendor extensions) to describe every `api: true`
+  entity's REST + bulk surface — a build artifact only, never served by a
+  deployed app by default. This repo's own `json_schema.yaml` declares no
+  `x-approval`/`x-write-locked-values` entity, so the Constraints section
+  is exercised only by `test:approval-lockdown-gate`'s fixture. See
+  `docs/knowledge/generated-documentation-and-openapi-spec.md` and
+  `app-generator-project-docs/planning/ai-agent-integration-design.md`.
+- **Added a row-level `GET /api/{entity}/[id]/capabilities` endpoint**
+  (issue #707, second stage of AI-agent-facing API improvements),
+  generated per `can_view` entity alongside the existing detail route.
+  Answers, for one specific row, which operations/writes/transitions are
+  legal right now given this row's current data and this caller's
+  permissions -- the row-level half the OpenAPI spec above deliberately
+  leaves out. Every judgment reuses an already-generated function
+  (`canAccess()`, `assertEditAllowed()`/`assertDeleteAllowed()`,
+  `assertTransitionAllowed()`, `canSubmitForApproval()`/
+  `canWithdrawApproval()`, `assertApprovalOrder()`) rather than a second,
+  divergent derivation. See
+  `docs/knowledge/generated-documentation-and-openapi-spec.md`'s "The
+  row-level capabilities endpoint" section, including a disclosed
+  coverage gap on the approvable-bridge branch.
 - **Added an optional `depends_on: [task_id, ...]` ordering key to
   `x-scheduled-task` (entity-level) and `x-scheduled-tasks` (top-level)
   declarations** (issue #713), naming other `task_id`s (from either

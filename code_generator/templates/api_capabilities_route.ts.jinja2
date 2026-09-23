@@ -1,0 +1,148 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
+import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
+{% set needs_can_access = (can_update or can_delete) and not is_self_only %}
+{% if needs_can_access or has_approvable_bridge %}
+import { {% if needs_can_access %}canAccess{% endif %}{% if needs_can_access and has_approvable_bridge %}, {% endif %}{% if has_approvable_bridge %}getUserRoleIds{% endif %} } from '@/lib/authz';
+{% endif %}
+{% if has_edit_guard %}
+import { assertEditAllowed } from '@/lib/{{ parent }}/edit_guard';
+{% endif %}
+{% if has_delete_guard %}
+import { assertDeleteAllowed } from '@/lib/{{ parent }}/delete_guard';
+{% endif %}
+{% if state_machine_transitions and can_update %}
+import { assertTransitionAllowed } from '@/lib/state_transitions';
+{% endif %}
+{% if has_approvable_bridge %}
+import prisma from '@/lib/prisma';
+import { canSubmitForApproval, canWithdrawApproval } from '@/lib/approval_request/submit_predicate';
+import { assertApprovalOrder } from '@/lib/approval_request/order-check';
+import { hasOnWithdrawn } from '@/lib/approval_request/on_withdrawn_dispatch';
+{% endif %}
+
+// AI-agent-integration design doc, Stage 1 scope item (b): a row-level
+// "what can I do to THIS row right now" answer, reusing every judgment
+// this generator already computes for the ordinary write path -- never a
+// second, divergent implementation of any of it (see
+// capabilities_context() in generators.py for the full rationale).
+// Entity-name/schema-shape facts (field types, role-level operation
+// ceilings, the diagram's static edge set, ...) belong in the OpenAPI
+// build artifact instead -- this endpoint answers only what depends on
+// this row's own current data.
+
+type Params = { params: Promise<{ id: string }> };
+
+export async function GET(request: NextRequest, { params }: Params) {
+  try {
+    const { id } = await params;
+    const { userId: actorId } = await authenticateApiKey(request);
+    const item = await get{{ parent_pascal }}Detail(id{% if should_filter_by_org or is_self_only %}, actorId{% endif %});
+    if (!item) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    await requireApiPermission(actorId, '{{ parent }}', 'read', item);
+    const _item = item as Record<string, unknown>;
+
+    const operations = {
+      read: true,
+      update: {% if not can_update %}false{% elif is_self_only %}_item.creator_id === actorId{% else %}await canAccess('{{ parent }}', 'update', actorId, item){% endif %},
+      delete: {% if not can_delete %}false{% elif is_self_only %}_item.creator_id === actorId{% else %}await canAccess('{{ parent }}', 'delete', actorId, item){% endif %},
+    };
+
+    const write_locks = {
+      edit_locked: {% if has_edit_guard %}((): boolean => { try { assertEditAllowed(item as { {{ lockdown_field }}?: unknown }); return false; } catch { return true; } })(){% else %}null{% endif %},
+      delete_locked: {% if has_delete_guard %}((): boolean => { try { assertDeleteAllowed(item as { {{ lockdown_field }}?: unknown }); return false; } catch { return true; } })(){% else %}null{% endif %},
+      locked_fields: {{ write_locked_fields | tojson }} as string[],
+    };
+
+    const transitions: Record<string, { current_state: string; legal_next_states: string[] }> = {};
+{% if state_machine_transitions and can_update %}
+{% for t in state_machine_transitions %}
+    {
+      const _current = String(_item.{{ t.field }});
+      const _candidates = {{ state_machine_diagrams[t.field].states | tojson }} as string[];
+      const _legal = _candidates.filter((s) => {
+        try {
+          assertTransitionAllowed('{{ model }}', '{{ t.field }}', _current, s);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+      transitions.{{ t.field }} = { current_state: _current, legal_next_states: _legal };
+    }
+{% endfor %}
+{% endif %}
+
+{% if has_approvable_bridge %}
+    let approval: {
+      can_submit: boolean;
+      can_withdraw: boolean;
+      can_approve: boolean;
+      can_reject: boolean;
+      round_status: string[];
+    } | null = null;
+    const _approvableId = _item.{{ approvable_fk }} as string | null | undefined;
+    if (_approvableId) {
+      const _latestRoundRow = await prisma.approval_request.findFirst({
+        where: { approvable_id: _approvableId },
+        orderBy: { created_at: 'desc' },
+        select: { round_id: true },
+      });
+      const _latestRoundRequests = _latestRoundRow
+        ? await prisma.approval_request.findMany({
+            where: { approvable_id: _approvableId, round_id: _latestRoundRow.round_id },
+            select: { id: true, status: true, approval_flow: { select: { approver_role_id: true } } },
+          })
+        : [];
+      const _roleIds = await getUserRoleIds(actorId);
+      let _canApprove = false;
+      let _canReject = false;
+      for (const _req of _latestRoundRequests) {
+        if (_req.status !== 'pending') continue;
+        if (!_req.approval_flow || !_roleIds.includes(_req.approval_flow.approver_role_id)) continue;
+        try {
+          // Same ordering contract every approve/reject route already
+          // enforces -- a pending row whose preceding stage(s) are not
+          // yet approved is not actionable by anyone yet.
+          await assertApprovalOrder(_req.id);
+          _canApprove = true;
+          _canReject = true;
+        } catch {
+          // not yet this caller's turn
+        }
+      }
+      const _approvable = await prisma.approvable.findUnique({
+        where: { id: _approvableId },
+        select: { creator_id: true },
+      });
+      const _canWithdraw =
+        hasOnWithdrawn('{{ model }}') &&
+        !!_approvable &&
+        _approvable.creator_id === actorId &&
+        canWithdrawApproval(_latestRoundRequests);
+      approval = {
+        can_submit: canSubmitForApproval(_latestRoundRequests),
+        can_withdraw: _canWithdraw,
+        can_approve: _canApprove,
+        can_reject: _canReject,
+        round_status: _latestRoundRequests.map((r) => r.status),
+      };
+    }
+{% endif %}
+
+    return NextResponse.json({
+      operations,
+      write_locks,
+      transitions,
+{% if has_approvable_bridge %}
+      approval,
+{% else %}
+      approval: null,
+{% endif %}
+    });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

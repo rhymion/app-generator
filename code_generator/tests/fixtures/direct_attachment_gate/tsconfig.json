@@ -18,6 +18,7 @@
       "@/lib/attachment/direct_actions": ["./lib/attachment/direct_actions.ts"],
       "@/lib/prisma": ["./lib/prisma.ts"],
       "@/lib/authz": ["./lib/authz.ts"],
+      "@/lib/idempotency": ["./lib/idempotency.ts"],
       "@/app/generated/prisma/client": ["./prisma/.generated-client/client"],
       "@/*": ["../*"]
     }
