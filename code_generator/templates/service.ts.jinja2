@@ -1,6 +1,6 @@
 {{ utility_code }}
 {% if can_create %}
-export async function add{{ parent_pascal }}(actorId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if bridge_child_params_str %}, {{ bridge_child_params_str }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}): Promise<{ id: string{% if has_assignee_id %}; assignee_id: string | null{% endif %}{% if server_value_override_fields %}; _server_value_overrides?: Record<string, string>{% endif %} }> {
+export async function add{{ parent_pascal }}(actorId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if bridge_child_params_str %}, {{ bridge_child_params_str }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}, idempotency?: { key: string; bodyHash: string }): Promise<{ id: string{% if has_assignee_id %}; assignee_id: string | null{% endif %}{% if server_value_override_fields %}; _server_value_overrides?: Record<string, string>{% endif %} }> {
 {% if org_id_client_writable %}
   if (organizationId) {
     const _createOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
@@ -10,8 +10,21 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
   }
 {% endif %}
   let result;
+  let _idempotentReplay = false;
   try {
   result = await prisma.$transaction(async (tx) => {
+    if (idempotency) {
+      const _cached = await checkIdempotencyKey(tx, {
+        key: idempotency.key,
+        actorId,
+        targetEntity: '{{ parent }}',
+        bodyHash: idempotency.bodyHash,
+      });
+      if (_cached) {
+        _idempotentReplay = true;
+        return _cached as { id: string{% if has_assignee_id %}; assignee_id: string | null{% endif %}{% if server_value_override_fields %}; _server_value_overrides?: Record<string, string>{% endif %} };
+      }
+    }
     await validateOnAdd(tx, {
 {{ validation_data_obj }}
     }, actorId);
@@ -73,10 +86,20 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
     await afterCreate(tx, created.id);
 {% if server_value_overrides_build_code %}
 {{ server_value_overrides_build_code }}
-    return { id: created.id{% if has_assignee_id %}, assignee_id: created.assignee_id{% endif %}, ...(Object.keys(_serverValueOverrides).length ? { _server_value_overrides: _serverValueOverrides } : {}) };
+    const _result = { id: created.id{% if has_assignee_id %}, assignee_id: created.assignee_id{% endif %}, ...(Object.keys(_serverValueOverrides).length ? { _server_value_overrides: _serverValueOverrides } : {}) };
 {% else %}
-    return { id: created.id{% if has_assignee_id %}, assignee_id: created.assignee_id{% endif %} };
+    const _result = { id: created.id{% if has_assignee_id %}, assignee_id: created.assignee_id{% endif %} };
 {% endif %}
+    if (idempotency) {
+      await recordIdempotencyKey(tx, {
+        key: idempotency.key,
+        actorId,
+        targetEntity: '{{ parent }}',
+        bodyHash: idempotency.bodyHash,
+        body: _result,
+      });
+    }
+    return _result;
 {% if item_reservation_create_code %}
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 {% else %}
@@ -102,6 +125,11 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
     }
     throw e;
   }
+{% if has_assignee_id or child_assignee_notify_create_code %}
+  // Idempotent replay (see the check at the top of the transaction above)
+  // means these notifications already fired on the original request --
+  // firing them again here would re-notify on every retry.
+  if (!_idempotentReplay) {
 {% if has_assignee_id %}
   // Trigger #1 (notification design 2026-05-11): the new assignee learns
   // they were assigned. Skipped when self-assigned. Read off the persisted
@@ -121,6 +149,8 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% if child_assignee_notify_create_code %}
   // Trigger #1 (cmd_413 fix): child rows with their own assignee_id.
 {{ child_assignee_notify_create_code }}
+{% endif %}
+  }
 {% endif %}
   return result;
 }

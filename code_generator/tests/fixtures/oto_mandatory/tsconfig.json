@@ -19,6 +19,7 @@
       "@/components/oto_gate_target/*": ["./components/oto_gate_target/*"],
       "@/lib/prisma": ["./lib/prisma.ts"],
       "@/lib/authz": ["./lib/authz.ts"],
+      "@/lib/idempotency": ["./lib/idempotency.ts"],
       "@/app/generated/prisma/client": ["./prisma/.generated-client/client"],
       "@/*": ["../*"]
     }

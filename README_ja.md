@@ -20,6 +20,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - **CRUD ページ一式** — エンティティごとに一覧、詳細、作成、編集、削除ページを生成
 - **ガントチャートビュー** — エンティティ単位でオプトインできるガントチャートページ
 - **REST API** — エンティティごとに API キー認証付き JSON エンドポイントを生成。加えて、その行について現在許される操作・書き込み・遷移を返す行単位の `GET /api/{entity}/[id]/capabilities` エンドポイントを生成
+- **API 冪等性キー + API キー単位の流量制限** — 単一レコード作成エンドポイントで任意の `Idempotency-Key` ヘッダーを送ると、`POST` の再送が安全になる（同じキー＋同じ本文なら元の結果を再送、同じキー＋異なる本文なら競合として拒否）。保持期間1日のDBテーブルに、対象レコードと同一トランザクションで書き込む。加えて `authenticateApiKey()` のみで認証する REST route はすべて、呼び出し元ごとの `api:read`/`api:write` 流量制限（いずれも環境変数で上書き可）を強制する — 詳細は [`docs/knowledge/api-idempotency-and-rate-limiting.md`](docs/knowledge/api-idempotency-and-rate-limiting.md) を参照
 - **生成ドキュメント + OpenAPI 3.1 仕様** — エンティティごとの人間可読ドキュメント（`docs/generated/{entity}.md`、`/en/docs` 配下にも反映）。承認フロー・書き込みロックを持つエンティティには「Constraints」節を含む。加えて機械可読な統合仕様 `docs/generated/openapi.json` をビルド成果物として生成（配備アプリからは既定で配らない）— 詳細は [`docs/knowledge/generated-documentation-and-openapi-spec.md`](docs/knowledge/generated-documentation-and-openapi-spec.md) を参照
 - **Cypress テスト生成** — アプリケーションコードと並行して UI および API テストスイートを生成
 - **ダッシュボードチャート** (`x-display.dashboard: true`) — カラム・バー・ライン・パイチャートのレンダリングを生成；スタッキングモード・タイムスタンプバケット・型付きフィルター・CSV/Excel エクスポート・REST アグリゲートエンドポイント（`/api/{entity}/aggregate`）をエンティティごとに生成
@@ -537,6 +538,7 @@ app-generator/
 | [claude-code-settings-consumer-side.md](docs/knowledge/claude-code-settings-consumer-side.md) | `.claude/settings.json` の読み込みルール、OS非依存な権限記法、複合コマンドのマッチングの罠、設定ファイルが実際に読み込まれたかの確認方法 — 本リポジトリまたは `app-template` の `.claude/settings.json` を編集する前に読むこと |
 | [legal-documents.md](docs/knowledge/legal-documents.md) | 利用規約・プライバシーポリシー画面: 文書の言語がサイトUIの言語一覧から独立している理由、Markdown採用（JSON/MDX不採用）の理由、文書の言語追加手順 |
 | [generated-documentation-and-openapi-spec.md](docs/knowledge/generated-documentation-and-openapi-spec.md) | 生成される各エンティティのドキュメントの「Constraints」節（承認フロー・書き込みロック）と `docs/generated/openapi.json`（OpenAPI 3.1 ビルド成果物） |
+| [api-idempotency-and-rate-limiting.md](docs/knowledge/api-idempotency-and-rate-limiting.md) | 単一レコード作成エンドポイントの `Idempotency-Key` 対応（対象レコードと同一トランザクションのDBテーブル・保持期間1日）と `api:read`/`api:write` の API キー単位流量制限 |
 
 ---
 

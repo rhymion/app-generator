@@ -3725,6 +3725,11 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         # add{{ parent_pascal }}() must import the model's stub instead, same
         # as service_validation.ts's validateCustomRules import above.
         + (f"\nimport {{ afterCreate }} from '@/lib/{model}/service_after_create';" if can_create else '')
+        # Idempotency-key support (ai-agent-integration-design.md) -- every
+        # create-capable entity's add{{Entity}}() can be called with an
+        # idempotency key from the route template; the check/record calls
+        # only execute inside the transaction when a caller supplies one.
+        + (f"\nimport {{ checkIdempotencyKey, recordIdempotencyKey }} from '@/lib/idempotency';" if can_create else '')
         # cmd_923b: post-update/post-delete/pre-delete hooks, same in-tx
         # convention and absolute-path reasoning as afterCreate above.
         + (f"\nimport {{ afterUpdate }} from '@/lib/{model}/service_after_update';" if can_update else '')

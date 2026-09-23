@@ -5,6 +5,24 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [4.1.0] - 2026-09-19
 ### Added
+- **Added `Idempotency-Key` support on single-record API create endpoints
+  and per-API-key `api:read`/`api:write` rate-limit buckets** (issue #707,
+  third stage of AI-agent-facing API improvements — the "Idempotency keys
+  and rate limiting — resolved design" section of
+  `ai-agent-integration-design.md`). A client-supplied `Idempotency-Key`
+  header on a create `POST` is checked and recorded in a new
+  `idempotency_key` table (one-day retention, enforced logically at lookup
+  time), written in the *same* transaction as the record it guards — a
+  retry with the same key and body replays the original result without
+  re-running any create side effects; the same key with a different body
+  is rejected as a 409 conflict. Every REST route that authenticates
+  exclusively via `authenticateApiKey()` (`api_route.ts.jinja2`,
+  `api_detail_route.ts.jinja2`, `api_bulk_route.ts.jinja2`) now also
+  enforces a per-caller rate-limit ceiling on the existing
+  `lib/rate-limit/` mechanism — 300/min read, 60/min write, both
+  env-overridable (`RATE_LIMIT_API_READ_LIMIT`/
+  `RATE_LIMIT_API_WRITE_LIMIT`) — keyed by the caller's resolved user id,
+  not IP. See `docs/knowledge/api-idempotency-and-rate-limiting.md`.
 - **Added an entity-level "Constraints" section to generated docs
   (`doc_entity.md.jinja2`) and a new `docs/generated/openapi.json` OpenAPI
   3.1 build artifact** (issue #707), the first stage of AI-agent-facing
