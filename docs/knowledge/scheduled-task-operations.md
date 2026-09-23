@@ -102,6 +102,49 @@ be unique across both mechanisms (one registry key, one URL segment); the
 Vercel 100-cron-jobs-per-project limit below counts entity-level and
 top-level tasks together, not as two separate budgets.
 
+## Declaring ordering between tasks (`depends_on`)
+
+`depends_on: [task_id, ...]` is an optional key on both entity-level
+`x-scheduled-task` and top-level `x-scheduled-tasks` entries, naming other
+`task_id`s (from either mechanism — they share one namespace) that this
+task is declared to run after:
+
+```yaml
+x-scheduled-tasks:
+  - task_id: payment_allocation
+    handler: allocatePayments
+    interval: "15 17 * * *"
+  - task_id: dunning_and_grace
+    handler: runDunning
+    interval: "30 17 * * *"
+    depends_on: [payment_allocation]
+```
+
+**This key is schema-authoring documentation plus generate-time validation
+— it does not yet change anything generated at runtime.** No template
+reads `depends_on`, no generated handler waits on a predecessor, and no
+completion-record table exists yet to check against. Declaring it records
+the intended order and gets it checked for consistency; making a task
+actually wait on its predecessor's completion is a separate, not-yet-built
+mechanism (see `planning/batch-ordering-design.md` in
+app-generator-project-docs for the full design, including why this is
+deliberately staged rather than built as one change).
+
+`generate-code` validates the `depends_on` graph and fails closed —
+loudly, at generation time, never silently — on:
+
+- **Self-dependency**: a `task_id` naming itself.
+- **Dangling reference**: naming a `task_id` not declared anywhere in
+  `x-scheduled-tasks`/`x-scheduled-task` (a typo, or a stale reference to a
+  removed/renamed task).
+- **Cycle**: any `task_id` reachable from itself by following `depends_on`
+  edges, however many hops long.
+
+A straight chain (`a` depends on nothing, `b` depends on `a`, `c` depends
+on `b`, ...) is a valid, ordinary use of this key — it is how strict
+one-at-a-time ordering across a set of tasks is expressed, with no separate
+"serialize these" mechanism needed.
+
 ## Nothing calls this unless something outside the repo calls it
 
 The generated route is a passive HTTP endpoint. No generated artifact

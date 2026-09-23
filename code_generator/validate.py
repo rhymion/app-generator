@@ -2138,6 +2138,13 @@ def validate_schema(schema: dict) -> None:
     # 15. x-scheduled-task entity-level validation (cmd_750 / subtask_741a)
     # -----------------------------------------------------------------------
     _scheduled_task_ids = {}
+    # task_id -> (depends_on list, location string for error messages).
+    # Populated by both the entity-level loop below and the bulk loop
+    # (15.5); the graph itself (dangling reference / self-dependency /
+    # cycle) is validated in 15.6, only after both loops have finished and
+    # every task_id is known -- a `depends_on` may name a task declared
+    # later in the schema than the one declaring it (cmd_1148).
+    _scheduled_task_depends_on = {}
     for def_key, defn in defs.items():
         if not _SNAKE_CASE.match(def_key):
             continue
@@ -2184,6 +2191,20 @@ def validate_schema(schema: dict) -> None:
                 f"accepts (cmd_781) — generate.py writes it verbatim into vercel.json's `crons` "
                 f"array for this task's /api/scheduled-tasks/{{task_id}} path."
             )
+
+        depends_on = xsched.get('depends_on')
+        if depends_on is not None:
+            if not isinstance(depends_on, list) or not all(
+                isinstance(d, str) and d for d in depends_on
+            ):
+                errors.append(
+                    f"Definition '{def_key}': x-scheduled-task.depends_on must be a "
+                    f"list of non-empty task_id strings, got {depends_on!r}."
+                )
+            elif isinstance(task_id, str) and task_id:
+                _scheduled_task_depends_on[task_id] = (
+                    depends_on, f"Definition '{def_key}'"
+                )
 
         xfilter = xsched.get('filter')
         if not isinstance(xfilter, dict) or not xfilter:
@@ -2251,7 +2272,7 @@ def validate_schema(schema: dict) -> None:
             )
             _bulk_scheduled_tasks = []
 
-        _ALLOWED_BULK_SCHEDULED_TASK_KEYS = {'task_id', 'handler', 'interval'}
+        _ALLOWED_BULK_SCHEDULED_TASK_KEYS = {'task_id', 'handler', 'interval', 'depends_on'}
         for i, item in enumerate(_bulk_scheduled_tasks):
             loc = f"x-scheduled-tasks[{i}]"
             if not isinstance(item, dict):
@@ -2307,6 +2328,93 @@ def validate_schema(schema: dict) -> None:
                     f"vercel.json's `crons` array for this task's "
                     f"/api/scheduled-tasks/{{task_id}} path."
                 )
+
+            depends_on = item.get('depends_on')
+            if depends_on is not None:
+                if not isinstance(depends_on, list) or not all(
+                    isinstance(d, str) and d for d in depends_on
+                ):
+                    errors.append(
+                        f"{loc}.depends_on must be a list of non-empty task_id "
+                        f"strings, got {depends_on!r}."
+                    )
+                elif isinstance(task_id, str) and task_id:
+                    _scheduled_task_depends_on[task_id] = (depends_on, loc)
+
+    # -----------------------------------------------------------------------
+    # 15.6. depends_on: graph validation -- self-dependency, dangling
+    #       reference, cycle detection (cmd_1148). Generation-time,
+    #       fail-closed, same discipline this project already applies to
+    #       x-state-machines diagrams (16, below) -- a schema-authoring
+    #       error here must be rejected loudly at `generate-code` time, not
+    #       discovered at runtime as a job that waits forever on a
+    #       predecessor that can never complete (dangling) or on itself
+    #       (cycle). Runs after both the entity-level (15) and bulk (15.5)
+    #       loops so every task_id is known regardless of declaration
+    #       order -- a `depends_on` may name a task declared later in the
+    #       schema than the one declaring it.
+    # -----------------------------------------------------------------------
+    _depends_on_graph = {}
+    for _dep_task_id, (_deps, _loc) in _scheduled_task_depends_on.items():
+        for _dep in _deps:
+            if _dep == _dep_task_id:
+                errors.append(
+                    f"{_loc}: depends_on names {_dep_task_id!r} itself -- a task "
+                    f"cannot depend on its own completion."
+                )
+            elif _dep not in _scheduled_task_ids:
+                errors.append(
+                    f"{_loc}: depends_on names {_dep!r}, which is not declared "
+                    f"anywhere in x-scheduled-tasks/x-scheduled-task -- a typo, "
+                    f"or a task since renamed/removed with a stale dependency "
+                    f"left behind."
+                )
+        # The cycle-detection graph below deliberately excludes self-edges
+        # and dangling references -- both are already reported above with
+        # their own clearer message, and letting them into the graph would
+        # only produce a confusing second error naming the same edge.
+        _depends_on_graph[_dep_task_id] = [
+            _d for _d in _deps if _d != _dep_task_id and _d in _scheduled_task_ids
+        ]
+
+    _WHITE, _GRAY, _BLACK = 0, 1, 2
+    _dfs_color = {tid: _WHITE for tid in _depends_on_graph}
+    _reported_cycles = set()
+
+    def _walk_depends_on_cycle(start):
+        stack = [(start, iter(_depends_on_graph.get(start, [])))]
+        path = [start]
+        _dfs_color[start] = _GRAY
+        while stack:
+            node, edges_iter = stack[-1]
+            advanced = False
+            for dep in edges_iter:
+                if _dfs_color.get(dep, _WHITE) == _GRAY:
+                    cycle_start = path.index(dep)
+                    cycle = path[cycle_start:] + [dep]
+                    key = tuple(sorted(set(cycle)))
+                    if key not in _reported_cycles:
+                        _reported_cycles.add(key)
+                        errors.append(
+                            "depends_on cycle detected: "
+                            + " -> ".join(cycle)
+                            + " -- a task can never depend, even indirectly, on "
+                              "its own future completion."
+                        )
+                elif _dfs_color.get(dep, _WHITE) == _WHITE:
+                    _dfs_color[dep] = _GRAY
+                    path.append(dep)
+                    stack.append((dep, iter(_depends_on_graph.get(dep, []))))
+                    advanced = True
+                    break
+            if not advanced:
+                _dfs_color[node] = _BLACK
+                stack.pop()
+                path.pop()
+
+    for _task_id in _depends_on_graph:
+        if _dfs_color[_task_id] == _WHITE:
+            _walk_depends_on_cycle(_task_id)
 
     # Vercel's per-project cron-job limit is 100, unchanged across Hobby/Pro/
     # Enterprise (last confirmed 2026-07-15 —

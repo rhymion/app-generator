@@ -5,6 +5,24 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [4.1.0] - 2026-09-19
 ### Added
+- **Added an optional `depends_on: [task_id, ...]` ordering key to
+  `x-scheduled-task` (entity-level) and `x-scheduled-tasks` (top-level)
+  declarations** (issue #713), naming other `task_id`s (from either
+  mechanism — one shared namespace) that a task is declared to run after.
+  `generate-code` validates the resulting dependency graph and fails
+  closed on self-dependency, a dangling reference to an undeclared
+  `task_id`, and any cycle (however many hops long) — the same
+  generation-time fail-closed discipline `x-state-machines` already
+  applies to its own diagrams. A straight chain through this key is how
+  strict one-at-a-time ordering across a set of tasks is expressed, with
+  no separate "serialize these tasks" mechanism needed. This change is
+  schema validation only: no generated handler reads or waits on
+  `depends_on` yet, and no completion-record mechanism exists yet to check
+  a predecessor's actual runtime completion — see
+  `docs/knowledge/scheduled-task-operations.md`'s new "Declaring ordering
+  between tasks" section and `planning/batch-ordering-design.md`
+  (app-generator-project-docs) for the full design and the staged
+  follow-up work.
 - **Added a business-date container (`app_setting`) with list/view/new/edit
   screens and a REST API** (PR #611), built on top of the existing hand-written
   `business_date`/`is_pinned`/`timezone`/`organization_id` Prisma model.
