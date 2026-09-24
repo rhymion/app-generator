@@ -386,7 +386,7 @@ export async function get{{ parent_pascal }}Page(
   // also competing for connections) that can exceed Prisma's default 2000ms
   // maxWait for a batch transaction, producing P2028 ("Unable to start a
   // transaction in the given time") even though each query alone would have
-  // completed fine (Issue #NNN, PRISMA_POOL_MAX=5 load test, 2026-09-24).
+  // completed fine (PRISMA_POOL_MAX=5 load test, 2026-09-24).
   // Dropping the wrapper lets each query independently acquire whichever
   // pooled connection frees up first, instead of both needing to be grabbed
   // atomically before either can start.
