@@ -472,7 +472,7 @@ _manifest = ManifestRecorder()
 # override. This value (0.3) matches PostgreSQL's own out-of-the-box default
 # for the GUC (confirmed via `SHOW pg_trgm.similarity_threshold;`), which is
 # why buildSearchQuery does not need to SET it explicitly — see the fix (b)
-# regression note in search_helpers.ts.jinja2 (Issue #NNN hotfix, P2028).
+# regression note in search_helpers.ts.jinja2 (Issue #728 hotfix, P2028).
 _SEARCH_SIMILARITY_THRESHOLD = 0.3
 
 
