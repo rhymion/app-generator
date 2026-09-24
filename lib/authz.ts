@@ -135,8 +135,79 @@ const permissionCacheEnabled = process.env.NODE_ENV === 'production';
 type PermissionEntry = { permissions: RichPermissions; userId: string };
 const permissionCache = new TtlLruCache<string, PermissionEntry>(PERMISSION_MAX_ENTRIES, PERMISSION_TTL_MS);
 
+type PermissionRow = {
+  name: string;
+  create: boolean;
+  read: boolean;
+  update: boolean;
+  delete: boolean;
+  import: boolean;
+  role: { name: string } | null;
+};
+
+/**
+ * Per-process cache of userId → every permission row relevant to that user,
+ * across ALL models (not just one). Backs `getPermissionRowsForUser` below.
+ * Same TTL/size bounds as `permissionCache`; both are cleared together by
+ * `invalidatePermissionCache()`.
+ */
+const permissionRowsCache = new TtlLruCache<string, PermissionRow[]>(PERMISSION_MAX_ENTRIES, PERMISSION_TTL_MS);
+
+/**
+ * Fetch every permission row relevant to a user in a single query, instead of
+ * one `findMany` per model. `getModelPermissions` used to filter by
+ * `name: model` in the query itself, so a caller that asks about N models
+ * (e.g. a 25-entity cross-entity search) issued N separate queries. Dropping
+ * the `name` filter here and having callers group/filter the single result
+ * set by `row.name` collapses that fan-out to one query per (request, user)
+ * — the existing 3-branch OR (global / role-membership / special-role) is
+ * unchanged, so which rows come back for a given model is identical to
+ * before.
+ *
+ * Layered caching, same shape as `getModelPermissions`: per-request React
+ * `cache()` (dedups every model a request asks about into the same call),
+ * then per-process TTL LRU (`permissionRowsCache`, deduplicates across
+ * requests until expiry).
+ */
+const getPermissionRowsForUser = cache(async (resolvedUserId: string): Promise<PermissionRow[]> => {
+  if (permissionCacheEnabled) {
+    const cached = permissionRowsCache.get(resolvedUserId);
+    if (cached) return cached;
+  }
+
+  const rows = await prisma.permission.findMany({
+    where: {
+      OR: [
+        { role_id: null }, // Global permissions (no role)
+        // Regular roles the user belongs to, excluding special roles
+        {
+          role: {
+            users: { some: { id: resolvedUserId } },
+            name: { notIn: [...SPECIAL_ROLE_NAMES] },
+          },
+        },
+        // Always fetch all special role definitions for deferred item-level resolution
+        { role: { name: { in: [...SPECIAL_ROLE_NAMES] } } },
+      ],
+    },
+    select: {
+      name: true,
+      create: true,
+      read: true,
+      update: true,
+      delete: true,
+      import: true,
+      role: { select: { name: true } },
+    },
+  });
+
+  if (permissionCacheEnabled) permissionRowsCache.set(resolvedUserId, rows);
+  return rows;
+});
+
 export async function invalidatePermissionCache(): Promise<void> {
   permissionCache.clear();
+  permissionRowsCache.clear();
 }
 
 /**
@@ -146,7 +217,8 @@ export async function invalidatePermissionCache(): Promise<void> {
  *
  * Layered caching: per-request React `cache()` (dedups concurrent calls within
  * one render), then per-process TTL LRU (`permissionCache`, deduplicates across
- * requests until expiry).
+ * requests until expiry). The underlying row fetch is itself batched across
+ * every model a request asks about — see `getPermissionRowsForUser`.
  */
 export const getModelPermissions = cache(async (
   model: ModelName,
@@ -179,31 +251,8 @@ export const getModelPermissions = cache(async (
     }
   }
 
-  const rows = await prisma.permission.findMany({
-    where: {
-      name: model,
-      OR: [
-        { role_id: null }, // Global permissions (no role)
-        // Regular roles the user belongs to, excluding special roles
-        {
-          role: {
-            users: { some: { id: resolvedUserId } },
-            name: { notIn: [...SPECIAL_ROLE_NAMES] },
-          },
-        },
-        // Always fetch all special role definitions for deferred item-level resolution
-        { role: { name: { in: [...SPECIAL_ROLE_NAMES] } } },
-      ],
-    },
-    select: {
-      create: true,
-      read: true,
-      update: true,
-      delete: true,
-      import: true,
-      role: { select: { name: true } },
-    },
-  });
+  const allRows = await getPermissionRowsForUser(resolvedUserId);
+  const rows = allRows.filter((row) => row.name === model);
 
   if (rows.length === 0) {
     // x-self-only entities with admin_bypass:true (cmd_536, e.g. `setting`) are
