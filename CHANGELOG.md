@@ -125,6 +125,30 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   same data scale, since the GIN index is now actually used) with zero
   P2028s across 5 repeated runs post-fix. See `docs/knowledge/search.md`.
 
+- **List-page pagination (`get{Parent}Page()`) could fail with `P2028`
+  (transaction timeout) under concurrent load at real data scale**, a
+  separate failure mode from the search fix above with the same root
+  shape: `findMany`+`count` were bundled into `prisma.$transaction([...])`
+  (the batch/array form), which needs to acquire connections for both
+  member queries atomically before either can start — Prisma's default
+  `maxWait` for that acquisition step is 2000ms (confirmed via
+  `@prisma/client/runtime/client.d.ts`'s `PrismaClientBaseOptions
+  .transactionOptions` doc comment: `"maxWait ?= 2000"`). Under
+  `PRISMA_POOL_MAX=5` with concurrent search load also competing for
+  pooled connections, the batch transaction could not always acquire both
+  connections within 2000ms — reproduced at N=30,000 scale: `GET
+  /api/policy` 21.55% error rate, `GET /api/service_request` 22.10%,
+  `DELETE /api/provider/:id` 20.59%, while list/detail endpoints without
+  this transaction wrapper stayed at 0% error under the identical load.
+  Removed the transaction wrapper; `findMany` and `count` now run as two
+  independent queries via `Promise.all` (each its own pooled connection,
+  acquired independently instead of atomically) — confirmed zero P2028s
+  across the full API and UI Cypress suites post-fix. This trades exact
+  `findMany`/`count` snapshot consistency (already an accepted trade for
+  every non-transactional list/detail read path) for eliminating the
+  `maxWait` bottleneck. See
+  `docs/knowledge/performance-improvements.md` §5.
+
 - **GCP (Cloud Run) deployment required manually pasting Neon connection
   strings, had no committed env template, could silently pick up a stale
   ambient `gcloud` project, and printed a deploy-complete URL that 404s**
