@@ -113,15 +113,16 @@ describe('grant: user with explicit full permissions is allowed', () => {
 });
 
 /**
- * subtask_1168 (cmd_1168): getModelPermissions used to filter by `name: model`
- * in the query itself, so a caller asking about N models issued N queries. It
- * now fetches every relevant row for the user in one query and groups by
- * `row.name` in-process. These tests pin the equivalence claim: a single
- * batched result spanning multiple models must still resolve each model's
+ * From a request-scoped permission-check performance investigation:
+ * getModelPermissions used to filter by `name: model` in the query itself,
+ * so a caller asking about N models issued N queries. It now fetches every
+ * relevant row for the user in one query and groups by `row.name`
+ * in-process. These tests pin the equivalence claim: a single batched
+ * result spanning multiple models must still resolve each model's
  * permissions exactly as if that model had been queried alone — no
  * cross-model leakage, no shape change to the query beyond dropping `name`.
  */
-describe('batched multi-model query: per-model grouping is equivalent to a per-model query (subtask_1168)', () => {
+describe('batched multi-model query: per-model grouping is equivalent to a per-model query', () => {
   const multiModelRows = [
     { name: 'role', create: true, read: true, update: true, delete: true, import: true, role: { name: 'Administrator' } },
     { name: 'organization', create: false, read: false, update: false, delete: false, import: false, role: { name: 'DenyRole' } },
