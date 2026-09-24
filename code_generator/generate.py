@@ -466,10 +466,13 @@ _manifest = ManifestRecorder()
 
 # Cross-entity search similarity threshold (Issue #725 fix, part (b)): shared
 # by the generated `%` operator predicate (pg_trgm.similarity_threshold reads
-# this from a session/transaction GUC, not a query argument — see
-# search_helpers.ts.jinja2's buildSearchQuery) and the rank scoring
-# expression's GREATEST(similarity(...)). A single constant keeps both in
-# sync; there is currently no per-schema override.
+# this from a session GUC, not a query argument — see search_helpers.ts.jinja2's
+# buildSearchQuery) and the rank scoring expression's GREATEST(similarity(...)).
+# A single constant keeps both in sync; there is currently no per-schema
+# override. This value (0.3) matches PostgreSQL's own out-of-the-box default
+# for the GUC (confirmed via `SHOW pg_trgm.similarity_threshold;`), which is
+# why buildSearchQuery does not need to SET it explicitly — see the fix (b)
+# regression note in search_helpers.ts.jinja2 (Issue #NNN hotfix, P2028).
 _SEARCH_SIMILARITY_THRESHOLD = 0.3
 
 
@@ -658,8 +661,10 @@ def _append_no_page_child(
     # threshold` function-call form) is the only form pg_trgm's planner
     # recognizes as trgm-GIN-index-optimizable — confirmed via EXPLAIN
     # ANALYZE (cmd_1162 Phase 2). The threshold itself comes from the
-    # `pg_trgm.similarity_threshold` session GUC, set per-transaction in
-    # search_helpers.ts.jinja2's buildSearchQuery to _SEARCH_SIMILARITY_THRESHOLD.
+    # `pg_trgm.similarity_threshold` session GUC, which already defaults (at
+    # the PostgreSQL level) to _SEARCH_SIMILARITY_THRESHOLD — see
+    # search_helpers.ts.jinja2's buildSearchQuery for why no explicit SET is
+    # needed.
     sim_where = ' OR '.join(
         f"COALESCE(child.{f}, '') % ${{q}}" for f in text_fields
     )
@@ -2517,8 +2522,9 @@ def generate(schema_path: str, output_dir: str) -> None:
         # never uses the trgm GIN index, regardless of whether it exists
         # (confirmed via EXPLAIN ANALYZE, cmd_1162 Phase 2 / Issue #725 fix
         # (b)). `%` reads its threshold from the `pg_trgm.similarity_threshold`
-        # session GUC, which buildSearchQuery sets per-transaction to
-        # _SEARCH_SIMILARITY_THRESHOLD (search_helpers.ts.jinja2).
+        # session GUC, which already defaults (at the PostgreSQL level) to
+        # _SEARCH_SIMILARITY_THRESHOLD — see search_helpers.ts.jinja2's
+        # buildSearchQuery for why no explicit SET is needed.
         sim_where_single = ' OR '.join(
             f"COALESCE({f}, '') % ${{q}}" for f in text_fields
         )
