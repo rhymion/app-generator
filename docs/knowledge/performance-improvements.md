@@ -327,6 +327,76 @@ cosmetic cleanup.
 
 ---
 
+## 5. List Pagination: `findMany` + `count` Run Independently (Not `$transaction`)
+
+### Problem
+
+`get{Parent}Page()` (`getters.ts.jinja2`) originally bundled its `findMany` and `count`
+calls into a single batch transaction:
+
+```ts
+const [rowsRaw, total] = await prisma.$transaction([
+  prisma.{{ model }}.findMany({ where, orderBy, skip, take, ... }),
+  prisma.{{ model }}.count({ where }),
+]);
+```
+
+A `prisma.$transaction([...])` (the batch/array form) needs to acquire connections for
+*every* member query up front, atomically, before either query can start — and Prisma's
+default `maxWait` for this acquisition step is 2000ms (confirmed via
+`@prisma/client/runtime/client.d.ts`'s `PrismaClientBaseOptions.transactionOptions` doc
+comment: `"maxWait ?= 2000"`; distinct from the batch form's `timeout`, default 5000ms,
+which bounds the queries' own execution once started — the two are separate
+`BatchTransactionOptions` fields, easy to conflate).
+
+Under concurrent load (`PRISMA_POOL_MAX=5`, with the cross-entity search endpoint's own
+parallel queries — see `search.md`'s Issue #725/#727/P2028-hotfix history — also competing
+for pooled connections), the batch transaction could not always acquire both member
+queries' connections within 2000ms. This produced `P2028` ("Unable to start a transaction
+in the given time") on every list endpoint using this pattern, reproduced at real data
+scale (N=30,000) with `PRISMA_POOL_MAX=5` under concurrent search load: `GET /api/policy`
+21.55% error rate, `GET /api/service_request` 22.10%, `DELETE /api/provider/:id` 20.59% —
+while list/detail endpoints without this transaction wrapper stayed at 0% error under the
+identical load, isolating the transaction wrapper (not general pool pressure) as the cause.
+
+### Fix
+
+Run `findMany` and `count` as two independent queries via `Promise.all` instead:
+
+```ts
+const [rowsRaw, total] = await Promise.all([
+  prisma.{{ model }}.findMany({ where, orderBy, skip, take, ... }),
+  prisma.{{ model }}.count({ where }),
+]);
+```
+
+Each query now independently acquires whichever pooled connection frees up first, instead
+of both needing to be grabbed atomically before either can start — eliminating the
+`maxWait` bottleneck entirely. This mirrors the fix already applied to `buildSearchQuery()`
+(`search_helpers.ts.jinja2`) for the analogous P2028-under-`$transaction` failure mode.
+
+### Trade-off: no longer atomic
+
+`findMany` and `count` can now see different snapshots if a write lands between them (e.g.
+a row inserted or deleted mid-page-load could make `total` off by one relative to
+`rowsRaw`). This is accepted, not overlooked: every list/detail read path that never wrapped
+its query in a transaction at all already makes this same trade (a plain `findMany` reads a
+snapshot that can be stale by the time it reaches the client), and real-scale load testing
+found those non-transactional endpoints error-free while this transactional pair alone
+produced `P2028`. If a future requirement needs `findMany`/`count` to be read from a single
+consistent snapshot, that requirement must come with an explicit review of both `maxWait`
+and `timeout` against measured query time under real load — re-adding `$transaction`
+without that review reintroduces this exact regression.
+
+### Regression coverage
+
+`code_generator/tests/test_list_pagination_no_transaction_wrapper.py` renders the fixture
+schema through the real `build_user_schema.py` → `generate.py` pipeline and asserts no
+generated `getters.ts` wraps `findMany`+`count` in `prisma.$transaction([...])` — confirmed
+to fail against the pre-fix template (2 assertions, both catch the regression independently).
+
+---
+
 ## Summary Table
 
 | Technique | Where applied | Effect |
@@ -337,3 +407,4 @@ cosmetic cleanup.
 | `getModelPermissions` returns `userId` | `lib/authz.ts` | Eliminates separate `getSessionUserId` call |
 | Remove `revalidatePath` from upsert (kept on delete — same-route redirect) | `actions.ts` | Eliminates double `getAllEntities` on save |
 | Remove `router.refresh()` from `handleBack` | `FormUpsert.tsx` | Eliminates extra `getDetail` on back navigation |
+| `findMany`+`count` via `Promise.all` (not `$transaction`) | `getters.ts` (list pagination) | Avoids batch-transaction `maxWait` P2028 under concurrent load |
