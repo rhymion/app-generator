@@ -106,6 +106,25 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Cloud Run/Neon entry below).
 
 ### Fixed
+- **`prj:sync` could silently drop a generator-side Prisma model/field
+  when a consumer's `prj/prisma/schema.prisma` predated it** (issue
+  #646). `prj:sync` copies `prisma/schema.prisma` from a consumer's
+  `../prj` verbatim over this generator's own file; when this generator
+  adds a new `model` or field (e.g. the `idempotency_key` model and
+  `user.api_key_expires_at` field added at commit `f06d2a0b`), a
+  consumer whose `prj/prisma/schema.prisma` was captured before that
+  addition would have it silently reverted away on the next sync, with
+  no warning — confirmed to have happened identically across
+  app-template, insurance-app, and inventory-app. `scripts/prj_sync.py`
+  now diffs the destination's current model/field set against the
+  incoming consumer file before overwriting `prisma/schema.prisma`;
+  when the incoming file is missing generator-side content, the copy
+  for that file is skipped (destination left untouched) and the run
+  exits non-zero naming exactly what would have been dropped, rather
+  than proceeding silently. Content present only in the consumer's file
+  (its own models/fields) is never flagged. See
+  `docs/knowledge/prj-sync-schema-drop-guard.md`.
+
 - **Cross-entity search could fail with `P2028` (transaction timeout) at
   real data scale**, a regression from the issue #725/#727 GIN-index fix
   above: `buildSearchQuery()` wrapped its count/facet/main-select queries
