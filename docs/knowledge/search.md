@@ -185,13 +185,31 @@ pg_trgm/ILIKE-based, not pg_bigm.
     function as trigram-indexable — `similarity(...)` is an opaque scalar function call in a
     filter, and Postgres never uses a trigram GIN index for it, confirmed via `EXPLAIN ANALYZE`
     (app-generator Issue #725). `%`'s threshold comes from the `pg_trgm.similarity_threshold`
-    session GUC, which `buildSearchQuery()` (`search_helpers.ts.jinja2`) sets via `SET LOCAL`
-    inside an explicit `prisma.$transaction(...)` wrapping all three of its `$queryRaw` calls —
-    `SET LOCAL` rather than a bare `SET`, and a transaction rather than separate top-level calls,
-    because a pooled connection (see `PRISMA_POOL_MAX`) can otherwise carry a `SET`'s session
-    state into an unrelated later request. `similarity(...)` itself remains in the rank-scoring
-    expression (`GREATEST(similarity(...))`, ordering only, not filtering) where index usage
-    doesn't apply.
+    session GUC. `buildSearchQuery()` (`search_helpers.ts.jinja2`) does **not** set this GUC
+    explicitly: PostgreSQL's own out-of-the-box default for it is 0.3 (confirmed against a live
+    instance — `SHOW pg_trgm.similarity_threshold;` and `pg_settings.source = 'default'` with no
+    `ALTER SYSTEM`/`ALTER DATABASE`/`ALTER ROLE` override), identical to the generator's
+    `_SEARCH_SIMILARITY_THRESHOLD` constant (`code_generator/generate.py`), and nothing else this
+    generator ever emits touches this GUC — so every connection already carries the right
+    threshold with no explicit `SET` needed. `_SEARCH_SIMILARITY_THRESHOLD` has no per-schema
+    override today, so this holds unconditionally. `similarity(...)` itself remains in the
+    rank-scoring expression (`GREATEST(similarity(...))`, ordering only, not filtering) where
+    index usage doesn't apply.
+  - **Count, facet, and main-select run as three independent queries via `Promise.all`** (each
+    its own pooled connection), not serialized through a single `prisma.$transaction(...)`. An
+    earlier version of this fix (merged as part of Issue #725/#727) *did* wrap all three in
+    `prisma.$transaction(async (tx) => {...})` with `SET LOCAL pg_trgm.similarity_threshold`,
+    defensively guarding against a pooled connection carrying a stale threshold into an unrelated
+    later request — a case that cannot happen today, since no code path sets this GUC to anything
+    but its own default (see above). That transaction wrapper had no explicit `timeout`, so
+    Prisma's 5000ms interactive-transaction default applied; at real data scale (N=30,000) the
+    full search UNION (up to 25 entities' count+facet+main, serialized onto one connection) could
+    exceed 5000ms, producing `P2028` on the search endpoint (reproduced 3/3 times against a clean
+    test database with no other load). Removing the transaction eliminates this timeout exposure
+    entirely and restores full parallelism. **If a per-schema `similarity_threshold` override is
+    ever introduced**, this design must be revisited: reintroduce an explicit, connection-safe
+    `SET` (transaction-wrapped, with a `timeout` sized to real measured query time, not Prisma's
+    default) for schemas whose threshold differs from PostgreSQL's own default.
   - The historical note that "the pg_bigm `=%` operator was evaluated and rejected" is no longer
     relevant to the current mechanism — pg_bigm itself was replaced, not just its `=%` operator.
 

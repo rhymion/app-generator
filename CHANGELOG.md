@@ -106,6 +106,25 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Cloud Run/Neon entry below).
 
 ### Fixed
+- **Cross-entity search could fail with `P2028` (transaction timeout) at
+  real data scale**, a regression from the issue #725/#727 GIN-index fix
+  above: `buildSearchQuery()` wrapped its count/facet/main-select queries
+  in `prisma.$transaction(...)` with no explicit `timeout`, so Prisma's
+  5000ms default applied — at N=30,000 scale the full 25-entity search
+  UNION could exceed 5000ms end-to-end (reproduced 3/3 times against a
+  clean test database with no other load). Checked directly against a live
+  Postgres instance (`SHOW pg_trgm.similarity_threshold;` /
+  `pg_settings.source`): the GUC the `%` operator reads its threshold from
+  already defaults to 0.3 — identical to the generator's own constant, with
+  no per-schema override that could ever set it differently — so the
+  `SET LOCAL`/transaction wrapper was defensive scaffolding for a case that
+  cannot occur today. Removed the transaction entirely; count, facet, and
+  main select now run as three independent queries via `Promise.all`
+  (each its own pooled connection), restoring and improving on the
+  pre-#727 parallel behavior (measured ~35-55% faster than pre-#727 at the
+  same data scale, since the GIN index is now actually used) with zero
+  P2028s across 5 repeated runs post-fix. See `docs/knowledge/search.md`.
+
 - **GCP (Cloud Run) deployment required manually pasting Neon connection
   strings, had no committed env template, could silently pick up a stale
   ambient `gcloud` project, and printed a deploy-complete URL that 404s**
