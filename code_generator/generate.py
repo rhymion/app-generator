@@ -2510,6 +2510,20 @@ def generate(schema_path: str, output_dir: str) -> None:
         # bigm_fields: fields for Japanese 2-gram search (default: same as text_fields)
         bigm_fields   = xsearch.get('bigm_fields', text_fields)
 
+        # trgm_index_fields: Issue #725 fix (d) — single shared derivation for
+        # BOTH GIN-index-provisioning templates (create_gin_indexes.sql.jinja2
+        # and db_init.ts.jinja2), which previously indexed two independently
+        # named/scoped field sets (text_fields vs. bigm_fields respectively —
+        # a drift unrelated to the COALESCE bug those templates share, found
+        # while designing this fix). The union of text_fields and bigm_fields
+        # guarantees every field either predicate (`%` over text_fields,
+        # `ILIKE` over bigm_fields) can reference is covered by an index,
+        # regardless of whether an entity overrides `x-search.bigm_fields`
+        # narrower OR wider than its `text_fields`. dict.fromkeys(...) dedupes
+        # while preserving first-seen order (bigm_fields defaults to the same
+        # list object as text_fields, so the common case adds nothing).
+        trgm_index_fields = list(dict.fromkeys(text_fields + bigm_fields))
+
         # Build SQL fragments used inside the Jinja2 template
         # ts_vector_fields_sql: concat of all text fields, COALESCE-wrapped
         ts_parts = " || ' ' || ".join(f"COALESCE({f}, '')" for f in text_fields)
@@ -2679,6 +2693,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'parent_access_where_ts_var':   f'{parent}ParentAccessWhere',
             'parent_or_clauses_ts_var':     f'{parent}ParentOrClauses',
             'bigm_fields':               bigm_fields,
+            'trgm_index_fields':         trgm_index_fields,
         })
 
     if search_entities:

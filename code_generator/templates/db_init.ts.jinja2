@@ -14,9 +14,25 @@ import prisma from '@/lib/prisma';
  */
 export async function ensureSearchIndexes(): Promise<void> {
   await prisma.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS pg_trgm');
-{% for entity in search_entities %}{% for field in entity.bigm_fields %}
+{% for entity in search_entities %}{% for field in entity.text_fields %}
   await prisma.$executeRawUnsafe(
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_{{ entity.model }}_{{ field }}_trgm" ON "{{ entity.model }}" USING GIN ("{{ field }}" gin_trgm_ops)'
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_{{ entity.model }}_{{ field }}_gin_trgm" ON "{{ entity.model }}" USING GIN ("{{ field }}" gin_trgm_ops)'
+  );
+{% endfor %}{% endfor %}
+{# Issue #725 fix (d): expression index matching the runtime query's
+   COALESCE wrapper verbatim -- see create_gin_indexes.sql.jinja2's header
+   comment for the full explanation. The bare-column loop above previously
+   iterated entity.bigm_fields under the name "..._trgm" here, vs.
+   entity.text_fields under "..._gin_trgm" in create_gin_indexes.sql.jinja2
+   -- an independent pre-existing drift between the two templates, unified
+   here to match that other template (name and field set both). `_v2`
+   suffix + trgm_index_fields (shared derivation, generate.py) lets this new,
+   actually usable index coexist with the old, now-dead bare-column index
+   above without a blocking DROP; removing the old index is a separate,
+   non-urgent follow-up. #}
+{% for entity in search_entities %}{% for field in entity.trgm_index_fields %}
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_{{ entity.model }}_{{ field }}_gin_trgm_v2" ON "{{ entity.model }}" USING GIN ((COALESCE("{{ field }}", '')) gin_trgm_ops)`
   );
 {% endfor %}{% endfor %}
 {% for entity in search_entities %}

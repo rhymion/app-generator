@@ -9,10 +9,26 @@
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
+{# Issue #725 fix (d): expression index matching the runtime query's COALESCE
+   wrapper verbatim -- generate.py's sim_where_single/bigm_where_single wrap
+   every field in COALESCE(field, '') before applying `%`/ILIKE, so a
+   bare-column index (the pre-fix (d) form below, left commented for
+   reference) can never be used by the planner: a GIN index only matches a
+   query expression that is syntactically identical to the one it was built
+   on. `_v2` suffix + trgm_index_fields (union of text_fields/bigm_fields,
+   shared with db_init.ts.jinja2 -- previously these two templates diverged
+   independently on both index name and field set) lets this new, actually
+   usable index coexist with the old, now-dead bare-column index below
+   without a blocking DROP; removing the old index is a separate, non-urgent
+   follow-up. #}
 {% for entity in search_entities %}
 {% for field in entity.text_fields %}
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_{{ entity.model }}_{{ field }}_gin_trgm"
   ON "{{ entity.model }}" USING GIN ("{{ field }}" gin_trgm_ops);
+{% endfor %}
+{% for field in entity.trgm_index_fields %}
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_{{ entity.model }}_{{ field }}_gin_trgm_v2"
+  ON "{{ entity.model }}" USING GIN ((COALESCE("{{ field }}", '')) gin_trgm_ops);
 {% endfor %}
 {% endfor %}
 

@@ -15,19 +15,34 @@ import prisma from '@/lib/prisma';
 export async function ensureSearchIndexes(): Promise<void> {
   await prisma.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS pg_trgm');
   await prisma.$executeRawUnsafe(
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_role_name_trgm" ON "role" USING GIN ("name" gin_trgm_ops)'
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_role_name_gin_trgm" ON "role" USING GIN ("name" gin_trgm_ops)'
   );
   await prisma.$executeRawUnsafe(
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_role_description_trgm" ON "role" USING GIN ("description" gin_trgm_ops)'
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_role_description_gin_trgm" ON "role" USING GIN ("description" gin_trgm_ops)'
   );
   await prisma.$executeRawUnsafe(
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_organization_name_trgm" ON "organization" USING GIN ("name" gin_trgm_ops)'
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_organization_name_gin_trgm" ON "organization" USING GIN ("name" gin_trgm_ops)'
   );
   await prisma.$executeRawUnsafe(
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_organization_description_trgm" ON "organization" USING GIN ("description" gin_trgm_ops)'
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_organization_description_gin_trgm" ON "organization" USING GIN ("description" gin_trgm_ops)'
   );
   await prisma.$executeRawUnsafe(
-    'CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_dashboard_name_trgm" ON "dashboard" USING GIN ("name" gin_trgm_ops)'
+    'CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_dashboard_name_gin_trgm" ON "dashboard" USING GIN ("name" gin_trgm_ops)'
+  );
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_role_name_gin_trgm_v2" ON "role" USING GIN ((COALESCE("name", '')) gin_trgm_ops)`
+  );
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_role_description_gin_trgm_v2" ON "role" USING GIN ((COALESCE("description", '')) gin_trgm_ops)`
+  );
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_organization_name_gin_trgm_v2" ON "organization" USING GIN ((COALESCE("name", '')) gin_trgm_ops)`
+  );
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_organization_description_gin_trgm_v2" ON "organization" USING GIN ((COALESCE("description", '')) gin_trgm_ops)`
+  );
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_dashboard_name_gin_trgm_v2" ON "dashboard" USING GIN ((COALESCE("name", '')) gin_trgm_ops)`
   );
   // Issue #725 fix (c): a separate GIN index on the to_tsvector(...)
   // expression itself — the trigram indexes above only ever back the
