@@ -260,46 +260,56 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
 
   const unionSql = Prisma.join(subQueries, ' UNION ALL ');
 
-  let total = -1;
-  const facets: Record<string, number> = {};
-  if (shouldCount) {
-    const countRows = await prisma.$queryRaw<[{ count: bigint }]>`
-      SELECT COUNT(*)::bigint AS count FROM (
-        SELECT DISTINCT ON (entity_type, id) entity_type, id
-        FROM (${ unionSql }) _search_union_raw
-        ORDER BY entity_type, id, rank DESC
-      ) _deduped
-    `;
-    total = Number(countRows[0]?.count ?? 0);
-
-    const facetRows = await prisma.$queryRaw<Array<{ entity_type: string; count: bigint }>>`
-      SELECT entity_type, COUNT(*)::bigint AS count
-      FROM (
-        SELECT DISTINCT ON (entity_type, id) entity_type, id
-        FROM (${ unionSql }) _search_union_raw
-        ORDER BY entity_type, id, rank DESC
-      ) _deduped
-      GROUP BY entity_type
-    `;
-    for (const row of facetRows) {
-      facets[row.entity_type] = Number(row.count);
-    }
-  }
-
   const clampedPage = Math.max(0, Math.floor(page));
   const clampedSize = Math.min(Math.max(1, Math.floor(pageSize)), 100);
   const offset = clampedPage * clampedSize;
 
-  const rows = await prisma.$queryRaw<SearchResult[]>`
-    SELECT entity_type, id, snippet, rank
-    FROM (
-      SELECT DISTINCT ON (entity_type, id) entity_type, id, snippet, rank
-      FROM (${ unionSql }) _search_union_raw
-      ORDER BY entity_type, id, rank DESC
-    ) _deduped
-    ORDER BY rank DESC
-    LIMIT ${ clampedSize } OFFSET ${ offset }
-  `;
+  let total = -1;
+  const facets: Record<string, number> = {};
+
+  // Issue #725 fix (b): the `%` operator used in the subqueries above reads
+  // its threshold from the `pg_trgm.similarity_threshold` session GUC, not
+  // from a query argument — SET LOCAL scopes it to this transaction so a
+  // pooled connection never leaks a stale threshold into an unrelated later
+  // request (PRISMA_POOL_MAX may reuse physical connections across calls).
+  const rows = await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe('SET LOCAL pg_trgm.similarity_threshold = {{ similarity_threshold | default(0.3) }}');
+
+    if (shouldCount) {
+      const countRows = await tx.$queryRaw<[{ count: bigint }]>`
+        SELECT COUNT(*)::bigint AS count FROM (
+          SELECT DISTINCT ON (entity_type, id) entity_type, id
+          FROM (${ unionSql }) _search_union_raw
+          ORDER BY entity_type, id, rank DESC
+        ) _deduped
+      `;
+      total = Number(countRows[0]?.count ?? 0);
+
+      const facetRows = await tx.$queryRaw<Array<{ entity_type: string; count: bigint }>>`
+        SELECT entity_type, COUNT(*)::bigint AS count
+        FROM (
+          SELECT DISTINCT ON (entity_type, id) entity_type, id
+          FROM (${ unionSql }) _search_union_raw
+          ORDER BY entity_type, id, rank DESC
+        ) _deduped
+        GROUP BY entity_type
+      `;
+      for (const row of facetRows) {
+        facets[row.entity_type] = Number(row.count);
+      }
+    }
+
+    return tx.$queryRaw<SearchResult[]>`
+      SELECT entity_type, id, snippet, rank
+      FROM (
+        SELECT DISTINCT ON (entity_type, id) entity_type, id, snippet, rank
+        FROM (${ unionSql }) _search_union_raw
+        ORDER BY entity_type, id, rank DESC
+      ) _deduped
+      ORDER BY rank DESC
+      LIMIT ${ clampedSize } OFFSET ${ offset }
+    `;
+  });
 
   return { results: rows, total, page: clampedPage, pageSize: clampedSize, facets };
 }

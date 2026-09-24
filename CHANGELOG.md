@@ -250,6 +250,35 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   live GCP deployment of this app to test against at the time; that
   verification is deferred to the next actual GCP deployment.
 
+- **Cross-entity search's GIN/trigram indexes were never actually created,
+  and the generated query would not have used them even if they were**
+  (issue #725, found via load testing at N=30,000-row realistic scale —
+  every entity in the search UNION ran a full table scan, 130-250ms
+  per-entity). Three parts, all required together (confirmed empirically —
+  any one alone leaves search performance unchanged):
+  1. A new generated `instrumentation.ts` calls `lib/db-init.ts`'s
+     `ensureSearchIndexes()` from Next.js's `register()` hook on every
+     server cold start (Vercel and GCP/Cloud Run both reach it, since both
+     dispatch through this same Next.js mechanism) — previously this
+     function had no call site anywhere in the generated output.
+     `scripts/create-gin-indexes.sql` (manual `psql` application) remains
+     as a fallback.
+  2. The generated search predicate's fuzzy-match half changed from
+     `similarity(field, query) > threshold` to the `field % query` operator
+     form, with `SET LOCAL pg_trgm.similarity_threshold` scoping the
+     threshold to the enclosing `prisma.$transaction(...)` — the
+     function-call form is opaque to the Postgres planner and never uses a
+     trigram GIN index, regardless of whether the index exists; only `%` is
+     recognized as trigram-indexable.
+  3. `create_gin_indexes.sql.jinja2` and `db_init.ts.jinja2` now also
+     create a GIN index on the `to_tsvector(...)` expression itself (not
+     only the trigram index) — the FTS half of the search predicate had no
+     backing index of any kind before this. Both mechanisms use `CREATE
+     INDEX CONCURRENTLY IF NOT EXISTS` throughout (non-blocking, cheap
+     no-op once the index exists).
+
+  See `docs/knowledge/search.md`.
+
 
 ## [4.0.0] - 2026-09-17
 ### Security

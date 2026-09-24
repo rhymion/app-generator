@@ -105,6 +105,7 @@ HANDWRITTEN_ALLOWLIST: frozenset[str] = frozenset([
     # full-text search GIN index support (conditional on search: true fields)
     "lib/db-init.ts",
     "scripts/create-gin-indexes.sql",
+    "instrumentation.ts",
     # @mention support (conditional on x-mention: true fields existing)
     "lib/mention/parser.ts",
     "lib/mention/search.ts",

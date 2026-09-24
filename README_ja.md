@@ -330,7 +330,7 @@ write-once スタブファイルが書き込まれます(`lib/<parent>/invalidat
 - **並列フェッチ**: データと権限チェックを `Promise.all` で並列フェッチし、サーバーへのラウンドトリップを最小化します。
 - **クエリタイムアウト**（`lib/prisma.ts`）: 直結接続（PrismaPg）パスにはデフォルト30秒の `statement_timeout` が適用されます。`STATEMENT_TIMEOUT_MS` で設定変更可能（`0` で無効化）。この直結パスが全環境のデフォルトです — Accelerate（`PRISMA_DATABASE_URL`）はオプトインでデフォルト無効、有効化した場合は `statement_timeout` を転送しないため対象外です。
 - **FK インデックス網羅**: `scripts/add_required_indexes.py` が `@relation` の FK カラムを自動検出し `@@index` を追加します（ジェネレーターのデモスキーマは18本から36本へ増加）。
-- **検索用 pg_trgm GIN インデックス**: `generate-code` が `scripts/create-gin-indexes.sql` を生成し、`psql` で手動適用します — `gin_trgm_ops` による `prisma migrate dev` のドリフトループを避けるため `prisma/schema.prisma` の外に置いています。
+- **検索用 pg_trgm + tsvector GIN インデックス**: `generate-code` が `instrumentation.ts` を生成し、サーバーのcold start毎（Vercel・GCP/Cloud Run いずれも）に `lib/db-init.ts` の `ensureSearchIndexes()` を呼んで自動作成します。`scripts/create-gin-indexes.sql` は手動/migration時のfallbackです — `gin_trgm_ops` による `prisma migrate dev` のドリフトループを避けるため `prisma/schema.prisma` の外に置いています。
 - **検索の `COUNT(*)` オプトアウト**: `SearchOpts.count: false` でエンティティ横断検索の2本の `COUNT(*)` クエリをスキップできます（`total: -1` を返却）。
 
 [docs/knowledge/performance-improvements.md](docs/knowledge/performance-improvements.md) を参照してください。

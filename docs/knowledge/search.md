@@ -12,7 +12,8 @@ one UNION ALL query, with per-entity tenant and permission filters applied.
 | Schema opt-in | `x-generate.search: true` on each entity definition |
 | Generated API | `app/api/search/route.ts` |
 | Generated UI | `app/[locale]/search/page.tsx` |
-| Search engine | PostgreSQL FTS (`tsvector` / `ts_headline`) + pg_trgm (`similarity()` + `ILIKE`, GIN-accelerated) |
+| Search engine | PostgreSQL FTS (`tsvector` / `ts_headline`) + pg_trgm (`%` operator + `ILIKE`, both GIN-accelerated) |
+| Index provisioning | `instrumentation.ts` → `lib/db-init.ts`'s `ensureSearchIndexes()`, on every server cold start |
 | Header entry point | Search icon in `app/[locale]/@header/page.tsx` (authenticated users only) |
 
 ---
@@ -152,28 +153,47 @@ pg_trgm/ILIKE-based, not pg_bigm.
 
 ### How it works
 
-- `CREATE EXTENSION IF NOT EXISTS pg_trgm;` plus one `GIN ... USING GIN (<field> gin_trgm_ops)`
-  index per searchable text field are written to `scripts/create-gin-indexes.sql`
-  (`code_generator/templates/create_gin_indexes.sql.jinja2`), **not** created in a Prisma
-  migration — the template's own header comment explains why: Prisma 7's
-  `ops: raw("gin_trgm_ops")` syntax works, but `prisma migrate dev` enters an infinite
-  drop/recreate drift loop on it (Prisma issue #16275, unresolved), so the index-creation SQL is
-  kept out of `prisma/schema.prisma` entirely and applied manually:
-  `psql "$DATABASE_URL" -f scripts/create-gin-indexes.sql` (idempotent, safe to re-run).
-- Every query always evaluates three signals together, OR'd in the `WHERE` clause (not a
-  language-based fallthrough): standard FTS (`to_tsvector('simple', ...) @@ plainto_tsquery(...)`),
-  pg_trgm fuzzy `similarity(...) > 0.3`, and `ILIKE '%'||q||'%'` containment (GIN-accelerated by
-  the same `gin_trgm_ops` index) — the last of these is what actually carries Japanese mid-string
-  matching, since `to_tsvector('simple', ...)` does no CJK segmentation.
-- `lib/db-init.ts` (`code_generator/templates/db_init.ts.jinja2`) is also generated whenever any
-  entity has `search: true` — it independently creates the `pg_trgm` extension plus five
-  hardcoded indexes (`role`.name/description, `organization`.name/description,
-  `dashboard`.name). Its exported `ensureSearchIndexes()` has no call site anywhere in the repo
-  (grep confirmed, 2026-09-12) — apparently dead code, separate from and redundant with
-  `scripts/create-gin-indexes.sql` above. Not otherwise documented here since it appears unused;
-  flagged for whoever next touches the search generator.
-- The historical note that "the pg_bigm `=%` operator was evaluated and rejected" is no longer
-  relevant to the current mechanism — pg_bigm itself was replaced, not just its `=%` operator.
+- Two index-provisioning mechanisms exist, generated together whenever any entity has
+  `search: true`:
+  - `instrumentation.ts` (`code_generator/templates/instrumentation.ts.jinja2`) — Next.js's own
+    `register()` hook, called once per server instance bootstrap on both Vercel and GCP/Cloud
+    Run (one wiring point reaches both deployment targets). It imports and awaits
+    `lib/db-init.ts`'s `ensureSearchIndexes()` — the automatic, always-on path.
+  - `scripts/create-gin-indexes.sql` (`code_generator/templates/create_gin_indexes.sql.jinja2`)
+    — the same indexes as plain SQL, kept as a manual/migration-time fallback:
+    `psql "$DATABASE_URL" -f scripts/create-gin-indexes.sql`.
+  - Neither creates indexes via a Prisma migration — the SQL template's own header comment
+    explains why: Prisma 7's `ops: raw("gin_trgm_ops")` syntax works, but `prisma migrate dev`
+    enters an infinite drop/recreate drift loop on it (Prisma issue #16275, unresolved), so
+    index-creation SQL is kept out of `prisma/schema.prisma` entirely.
+  - Each searchable entity gets: `CREATE EXTENSION IF NOT EXISTS pg_trgm;`, one
+    `GIN ... USING GIN (<field> gin_trgm_ops)` trigram index per searchable text field, and one
+    `GIN ... USING GIN (to_tsvector('simple', COALESCE(<fields concatenated>, '')))` expression
+    index (the tsvector index's expression must match the `WHERE` clause below verbatim for the
+    planner to use it). Both mechanisms use `CREATE INDEX CONCURRENTLY IF NOT EXISTS` —
+    non-blocking (no table lock held for the build) and, once an index already exists, a fast
+    existence check rather than a rebuild, so `ensureSearchIndexes()` running on every cold
+    start is cheap after the first successful run.
+  - Every query always evaluates three signals together, OR'd in the `WHERE` clause (not a
+    language-based fallthrough): standard FTS (`to_tsvector('simple', ...) @@
+    plainto_tsquery(...)`, backed by the tsvector expression index above), pg_trgm fuzzy
+    matching via the `%` operator (backed by the trigram index), and `ILIKE '%'||q||'%'`
+    containment (also backed by the trigram index) — the last of these is what actually carries
+    Japanese mid-string matching, since `to_tsvector('simple', ...)` does no CJK segmentation.
+  - The `%` operator, not `similarity(a, b) > threshold`, is what makes the fuzzy-match half of
+    the `WHERE` clause index-optimizable: only `%` is recognized by the pg_trgm planner support
+    function as trigram-indexable — `similarity(...)` is an opaque scalar function call in a
+    filter, and Postgres never uses a trigram GIN index for it, confirmed via `EXPLAIN ANALYZE`
+    (app-generator Issue #725). `%`'s threshold comes from the `pg_trgm.similarity_threshold`
+    session GUC, which `buildSearchQuery()` (`search_helpers.ts.jinja2`) sets via `SET LOCAL`
+    inside an explicit `prisma.$transaction(...)` wrapping all three of its `$queryRaw` calls —
+    `SET LOCAL` rather than a bare `SET`, and a transaction rather than separate top-level calls,
+    because a pooled connection (see `PRISMA_POOL_MAX`) can otherwise carry a `SET`'s session
+    state into an unrelated later request. `similarity(...)` itself remains in the rank-scoring
+    expression (`GREATEST(similarity(...))`, ordering only, not filtering) where index usage
+    doesn't apply.
+  - The historical note that "the pg_bigm `=%` operator was evaluated and rejected" is no longer
+    relevant to the current mechanism — pg_bigm itself was replaced, not just its `=%` operator.
 
 ---
 
@@ -203,10 +223,12 @@ deleted automatically:
 - `app/[locale]/search/page.tsx`
 - `app/[locale]/search/actions.ts`
 - `scripts/create-gin-indexes.sql`
+- `instrumentation.ts`
 
-(`code_generator/generate.py`'s `_stale_search_files` list — confirmed against the source, which
-lists these same five paths. `lib/db-init.ts` is not in this cleanup list, so it is not deleted
-when search entities go to zero — see the "dead code" note in the Japanese Search section above.)
+(`code_generator/generate.py`'s `_stale_search_files` list — confirmed against the source.
+`lib/db-init.ts` is not in this cleanup list, so it is not deleted when search entities go to
+zero — harmless, since `instrumentation.ts` (its only caller) is deleted, so no import breaks;
+it just lingers as an unused file. Pre-existing gap, not introduced by the Issue #725 fix.)
 
 This keeps the project free of dead code when search is disabled.
 

@@ -15,3 +15,13 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_{{ entity.model }}_{{ field }}_gin_
   ON "{{ entity.model }}" USING GIN ("{{ field }}" gin_trgm_ops);
 {% endfor %}
 {% endfor %}
+
+-- Issue #725 fix (c): GIN index on the to_tsvector(...) expression itself —
+-- the trigram indexes above only back the similarity()/% and ILIKE halves
+-- of the search predicate, not the to_tsvector(...) @@ plainto_tsquery(...)
+-- half. Expression must match search_helpers.ts.jinja2's WHERE clause
+-- verbatim (same COALESCE/concat shape) for the planner to recognize it.
+{% for entity in search_entities %}
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_{{ entity.model }}_tsv_gin"
+  ON "{{ entity.model }}" USING GIN (to_tsvector('simple', COALESCE({{ entity.ts_vector_fields_sql }}, '')));
+{% endfor %}

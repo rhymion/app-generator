@@ -19,3 +19,15 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_organization_description_gin_trgm"
   ON "organization" USING GIN ("description" gin_trgm_ops);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_dashboard_name_gin_trgm"
   ON "dashboard" USING GIN ("name" gin_trgm_ops);
+
+-- Issue #725 fix (c): GIN index on the to_tsvector(...) expression itself —
+-- the trigram indexes above only back the similarity()/% and ILIKE halves
+-- of the search predicate, not the to_tsvector(...) @@ plainto_tsquery(...)
+-- half. Expression must match search_helpers.ts.jinja2's WHERE clause
+-- verbatim (same COALESCE/concat shape) for the planner to recognize it.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_role_tsv_gin"
+  ON "role" USING GIN (to_tsvector('simple', COALESCE(COALESCE(name, '') || ' ' || COALESCE(description, ''), '')));
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_organization_tsv_gin"
+  ON "organization" USING GIN (to_tsvector('simple', COALESCE(COALESCE(name, '') || ' ' || COALESCE(description, ''), '')));
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_dashboard_tsv_gin"
+  ON "dashboard" USING GIN (to_tsvector('simple', COALESCE(COALESCE(name, ''), '')));

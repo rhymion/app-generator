@@ -349,7 +349,7 @@ Session `mode: payment`); subscriptions are left for a consumer to add. See
 - **Parallel fetching**: data and permission checks are fetched in parallel using `Promise.all`, minimizing server round-trips.
 - **Query timeout** (`lib/prisma.ts`): the direct-connection (PrismaPg) path applies a default 30-second `statement_timeout`, configurable via `STATEMENT_TIMEOUT_MS` (`0` disables it). This is the default path in every environment — Accelerate (`PRISMA_DATABASE_URL`) is opt-in and off by default; if enabled, `statement_timeout` is not forwarded and has no effect.
 - **FK index coverage**: `scripts/add_required_indexes.py` auto-detects `@relation` FK columns and adds `@@index` for them (the generator's demo schema grew from 18 to 36 indexes).
-- **pg_trgm GIN indexes for search**: `generate-code` emits `scripts/create-gin-indexes.sql`, applied manually with `psql` — kept outside `prisma/schema.prisma` to avoid a `prisma migrate dev` drift loop on `gin_trgm_ops`.
+- **pg_trgm + tsvector GIN indexes for search**: `generate-code` emits `instrumentation.ts`, which calls `lib/db-init.ts`'s `ensureSearchIndexes()` on every server cold start (Vercel and GCP/Cloud Run alike) to create them automatically; `scripts/create-gin-indexes.sql` is a manual/migration-time fallback — kept outside `prisma/schema.prisma` to avoid a `prisma migrate dev` drift loop on `gin_trgm_ops`.
 - **Search `COUNT(*)` opt-out**: `SearchOpts.count: false` skips both `COUNT(*)` queries in cross-entity search (returns `total: -1`).
 
 See [docs/knowledge/performance-improvements.md](docs/knowledge/performance-improvements.md).
