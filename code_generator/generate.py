@@ -464,6 +464,14 @@ def _prefix_unused_then_callback_params(content: str) -> str:
 # Records every generated file for this run; reset at the top of generate().
 _manifest = ManifestRecorder()
 
+# Cross-entity search similarity threshold (Issue #725 fix, part (b)): shared
+# by the generated `%` operator predicate (pg_trgm.similarity_threshold reads
+# this from a session/transaction GUC, not a query argument — see
+# search_helpers.ts.jinja2's buildSearchQuery) and the rank scoring
+# expression's GREATEST(similarity(...)). A single constant keeps both in
+# sync; there is currently no per-schema override.
+_SEARCH_SIMILARITY_THRESHOLD = 0.3
+
 
 def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -646,8 +654,14 @@ def _append_no_page_child(
     """
     ts_parts = " || ' ' || ".join(f"COALESCE(child.{f}, '')" for f in text_fields)
     sim_exprs = ', '.join(f"similarity(COALESCE(child.{f}, ''), ${{q}})" for f in text_fields)
+    # Issue #725 fix (b): the `%` operator (not the `similarity(a, b) >
+    # threshold` function-call form) is the only form pg_trgm's planner
+    # recognizes as trgm-GIN-index-optimizable — confirmed via EXPLAIN
+    # ANALYZE (cmd_1162 Phase 2). The threshold itself comes from the
+    # `pg_trgm.similarity_threshold` session GUC, set per-transaction in
+    # search_helpers.ts.jinja2's buildSearchQuery to _SEARCH_SIMILARITY_THRESHOLD.
     sim_where = ' OR '.join(
-        f"similarity(COALESCE(child.{f}, ''), ${{q}}) > 0.3" for f in text_fields
+        f"COALESCE(child.{f}, '') % ${{q}}" for f in text_fields
     )
     bigm_fields = text_fields  # default: same as text_fields
     bigm_where = ' OR '.join(
@@ -2498,10 +2512,15 @@ def generate(schema_path: str, output_dir: str) -> None:
         # similarity_fields_sql: GREATEST(similarity(f1, q), similarity(f2, q), ...)
         sim_exprs = ', '.join(f"similarity(COALESCE({f}, ''), ${{q}})" for f in text_fields)
 
-        # similarity_where_sql: each field comparison with > 0.3 threshold
-        # Used in WHERE: (sim_f1 > 0.3 OR sim_f2 > 0.3)
+        # similarity_where_sql: the `%` operator form, not `similarity(a, b) >
+        # threshold` — the function-call form is opaque to the planner and
+        # never uses the trgm GIN index, regardless of whether it exists
+        # (confirmed via EXPLAIN ANALYZE, cmd_1162 Phase 2 / Issue #725 fix
+        # (b)). `%` reads its threshold from the `pg_trgm.similarity_threshold`
+        # session GUC, which buildSearchQuery sets per-transaction to
+        # _SEARCH_SIMILARITY_THRESHOLD (search_helpers.ts.jinja2).
         sim_where_single = ' OR '.join(
-            f"similarity(COALESCE({f}, ''), ${{q}}) > 0.3" for f in text_fields
+            f"COALESCE({f}, '') % ${{q}}" for f in text_fields
         )
 
         # bigm_where_sql: ILIKE containment check (gin_trgm_ops accelerates ILIKE '%q%').
@@ -2668,6 +2687,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         search_ctx = {
             'search_entities': search_entities,
             'has_org_filtered_search_entity': has_org_filtered_search_entity,
+            'similarity_threshold': _SEARCH_SIMILARITY_THRESHOLD,
         }
         _write(
             out / 'lib' / 'search' / 'helpers.ts',
@@ -2698,6 +2718,20 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'db_init.ts.jinja2', search_ctx),
         )
         print(f'  DB init → lib/db-init.ts (GIN indexes for gin_trgm_ops)')
+        # Issue #725 fix (a): wire ensureSearchIndexes() into Next.js's own
+        # instrumentation hook. Vercel and GCP/Cloud Run both bootstrap
+        # through this same Next.js mechanism, so one template reaches both
+        # deployment targets (unlike a provisioning-script hook, which GCP's
+        # gcp-seed.sh would need duplicating for Vercel). CREATE INDEX
+        # CONCURRENTLY IF NOT EXISTS makes ensureSearchIndexes() non-blocking
+        # and a fast no-op after the first successful cold start.
+        # scripts/create-gin-indexes.sql remains as a manual/migration-time
+        # fallback.
+        _write(
+            out / 'instrumentation.ts',
+            _render(env, 'instrumentation.ts.jinja2', search_ctx),
+        )
+        print(f'  Instrumentation hook → instrumentation.ts (calls ensureSearchIndexes() on cold start)')
     else:
         # DP-2: no searchable entities — delete stale search files to prevent broken imports
         print('  Search: no searchable entities — skipping search route generation')
@@ -2707,6 +2741,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             out / 'app' / '[locale]' / 'search' / 'page.tsx',
             out / 'app' / '[locale]' / 'search' / 'actions.ts',
             out / 'scripts' / 'create-gin-indexes.sql',
+            out / 'instrumentation.ts',
         ]
         for _stale in _stale_search_files:
             if _stale.exists():
