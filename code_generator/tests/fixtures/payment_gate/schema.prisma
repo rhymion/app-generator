@@ -11,6 +11,7 @@
 
 generator client {
   provider = "prisma-client"
+  previewFeatures = ["relationJoins"]
   output   = "./.generated-client"
 }
 

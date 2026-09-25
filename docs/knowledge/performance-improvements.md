@@ -468,6 +468,66 @@ issued per `getModelPermissions` invocation, with no `name` key in the query's `
 
 ---
 
+## 7. Folding Relation Loads Into the Main Query (`relationLoadStrategy: 'join'`)
+
+### Problem
+
+Every generated detail/list getter that embeds a relation (`get{Parent}Detail`'s
+`include_props_detail`, `get{Parent}Page`'s `include_props_list`, plus the analogous search
+list and CSV export getters) leaves Prisma's relation-load strategy at its default. For a
+relational connector via a driver adapter (this project's PrismaPg/PrismaNeon), that default
+issues one SEPARATE query per relation — each grabbing its own pooled connection — instead
+of a single query. `getDashboardDetail` (embeds `widgets`, `creator`, `updater`) issued 5
+queries; `getOrganizationDetail` (embeds `users`, `creator`, `updater`) issued 4.
+
+### Fix
+
+Added `previewFeatures = ["relationJoins"]` to `prisma/schema.prisma`'s `generator client`
+block (and to every gate fixture's own `schema.prisma`, since each fixture generates its own
+isolated Prisma client — omitting it there makes `relationLoadStrategy` type as `never`,
+a `tsc` error rather than a runtime one), then added `relationLoadStrategy: 'join'` to every
+`include:`-bearing query in `getters.ts.jinja2` (detail getter, main list getter, search list
+getter, one-to-one selector's "available options" getter, CSV export chunk getter). Prisma
+folds each relation into the main query via a `LEFT JOIN LATERAL` instead of issuing it
+separately.
+
+### Measurement (subtask_1176c, isolated worktree, PrismaPg driver adapter, Postgres 18)
+
+DB statement-log method (`ALTER SYSTEM SET log_statement = 'all'` + `docker logs` line count,
+per subtask_1171b's precedent — immune to the app-level in-memory counter's per-route module
+duplication problem under `next dev`):
+
+| Getter | Before (default strategy) | After (`relationLoadStrategy: 'join'`) |
+|---|---|---|
+| `getDashboardDetail` | 5 queries | 1 query |
+| `getOrganizationDetail` | 4 queries | 1 query |
+
+Both entities' generated SQL confirmed as a single `SELECT ... LEFT JOIN LATERAL (...) ON
+true ...` per call, not a client-side merge of separate result sets.
+
+### Why this needed a live-DB smoke test first, not just a schema-level check
+
+Driver-adapter compatibility issues with this preview feature were historically reported
+against some Prisma versions; a clean `prisma generate` alone does not prove a query with
+`relationLoadStrategy: 'join'` actually executes correctly against this project's specific
+driver adapter. Before implementing, subtask_1176c ran an isolated live-DB smoke test
+(`findUnique`/`findMany` with `include` + `relationLoadStrategy: 'join'` against a real
+Postgres 18 test container via `PrismaPg`) and confirmed it executes cleanly at Prisma
+7.10.0 before touching the template.
+
+### Regression coverage
+
+`code_generator/tests/test_relation_joins_load_strategy.py` — asserts (1) `prisma/schema.prisma`
+declares the preview feature, (2) a detail getter with an embedded relation
+(`decimal_gate_wrapper` fixture) emits `relationLoadStrategy: 'join'` alongside its
+`include:`, (3) a list getter with an embedded many-to-one FK (this repo's own dogfood
+`permission` entity, `include: { role: true }`) does too, and (4) a list getter with no
+relation to embed (dogfood `organization`, which only embeds creator/updater in its detail
+getter, never its list getter) emits neither `include:` nor `relationLoadStrategy` — the
+option must never appear without a relation to fold.
+
+---
+
 ## Summary Table
 
 | Technique | Where applied | Effect |
@@ -477,6 +537,7 @@ issued per `getModelPermissions` invocation, with no `name` key in the query's `
 | Parallel permissions + data | `getters.ts` (list + detail) | Saves one sequential DB round-trip |
 | `getModelPermissions` returns `userId` | `lib/authz.ts` | Eliminates separate `getSessionUserId` call |
 | Batch permission rows across models per (request, user) | `lib/authz.ts` (`getPermissionRowsForUser`) | 25-entity search: 25 `permission.findMany` calls → 1 |
+| `relationLoadStrategy: 'join'` on every relation-embedding getter | `getters.ts.jinja2` | `getDashboardDetail` 5→1 queries, `getOrganizationDetail` 4→1 |
 | Remove `revalidatePath` from upsert (kept on delete — same-route redirect) | `actions.ts` | Eliminates double `getAllEntities` on save |
 | Remove `router.refresh()` from `handleBack` | `FormUpsert.tsx` | Eliminates extra `getDetail` on back navigation |
 | `findMany`+`count` via `Promise.all` (not `$transaction`) | `getters.ts` (list pagination) | Avoids batch-transaction `maxWait` P2028 under concurrent load |

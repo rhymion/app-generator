@@ -130,6 +130,12 @@ export async function get{{ parent_pascal }}Detail(id: string{% if should_filter
     include: {
       {{ include_props_detail }}
     },
+    // Folds each relation's separate round trip into the main query via a
+    // database-level JOIN instead of Prisma's default per-relation query
+    // strategy (requires previewFeatures = ["relationJoins"] in
+    // schema.prisma's generator block). Smoke-tested against this project's
+    // PrismaPg/PrismaNeon driver adapters (subtask_1176c) before rollout.
+    relationLoadStrategy: 'join',
 {% endif %}
   });
 
@@ -409,6 +415,8 @@ export async function get{{ parent_pascal }}Page(
       take,
 {% if include_props_list %}
       include: { {{ include_props_list }} },
+      // See the detail getter's relationLoadStrategy comment above.
+      relationLoadStrategy: 'join',
 {% endif %}
     }),
     prisma.{{ model }}.count({ where }),
@@ -554,8 +562,10 @@ export async function search{{ parent_pascal }}Options(
     take: safeLimit + includeIds.length,
 {% if search_include_props_list %}
     include: { {{ search_include_props_list }} },
+    relationLoadStrategy: 'join',
 {% elif include_props_list %}
     include: { {{ include_props_list }} },
+    relationLoadStrategy: 'join',
 {% endif %}
   });
 {% if non_creator_virtual_columns %}
@@ -625,6 +635,7 @@ export async function getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pa
     // Mirror the labelField path so the form's initial-options data carries
     // every relation the autocomplete label expression dereferences.
     include: { {{ oto.available_include }} },
+    relationLoadStrategy: 'join',
 {% endif %}
   });
 {% if oto.available_needs_decimal %}
@@ -677,6 +688,7 @@ export async function get{{ parent_pascal }}ChunkForExport(
     take: EXPORT_CHUNK_SIZE,
 {% if include_props_list %}
     include: { {{ include_props_list }} },
+    relationLoadStrategy: 'join',
 {% endif %}
   });
   return rows.map((row) => {

@@ -119,6 +119,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   untouched in this change; that migration was tracked separately (see the
   Cloud Run/Neon entry below).
 
+- **Every generated detail/list getter that embeds a relation now opts
+  into Prisma's `relationLoadStrategy: 'join'`**, folding what used to be
+  one separate query per embedded relation into the main query via a
+  database-level JOIN (`previewFeatures = ["relationJoins"]` added to
+  `prisma/schema.prisma`'s `generator client` block, and to every gate
+  fixture's own schema). Live-DB measurement: `getDashboardDetail`
+  dropped from 5 queries to 1, `getOrganizationDetail` from 4 to 1. See
+  `docs/knowledge/performance-improvements.md` §7.
+
 ### Fixed
 - **Search/DB-bootstrap code used `$executeRawUnsafe` for statements that
   never needed it, and the generator's own raw-SQL guard couldn't have
