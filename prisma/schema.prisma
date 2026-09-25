@@ -4,8 +4,9 @@
 // Corresponding JSON schema version: 4.0
 
 generator client {
-  provider = "prisma-client"
-  output   = "../app/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../app/generated/prisma"
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {
