@@ -2,7 +2,7 @@
 import { Prisma } from '@/app/generated/prisma/client';
 import prisma from '@/lib/prisma';
 {% if has_org_filtered_search_entity %}import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
-{% endif %}import { getModelPermissions } from '@/lib/authz';
+{% endif %}import { getPermissionRowsForUser, deriveRichPermissionsFromRows } from '@/lib/authz';
 
 export interface SearchResult {
   entity_type: string;
@@ -45,15 +45,19 @@ export async function buildSearchQuery(opts: SearchOpts): Promise<SearchPage> {
   const associatedOrgIds = associatedOrgs.map((o) => o.id);
 {% endif %}
 
-  const [
+  // Fetch every permission row relevant to this user with a single query,
+  // then derive each entity's permissions synchronously below. An earlier
+  // version of this code issued one permission-fetch call per entity inside
+  // a Promise.all, relying on React's per-render cache() to collapse the
+  // concurrent identical-argument calls into one underlying query. Measured
+  // behavior showed that collapse does not happen (neither in a Route
+  // Handler nor a Server Action, in dev or a fresh production process), so
+  // this fetch is issued explicitly, exactly once, ahead of any per-entity
+  // work — independent of cache() dedup behavior.
+  const searchPermissionRows = await getPermissionRowsForUser(userId);
 {% for entity in search_entities %}
-    {{ entity.perms_ts_var }},
+  const {{ entity.perms_ts_var }} = { permissions: await deriveRichPermissionsFromRows(searchPermissionRows.filter((row) => row.name === '{{ entity.entity_type }}')) };
 {% endfor %}
-  ] = await Promise.all([
-{% for entity in search_entities %}
-    getModelPermissions('{{ entity.entity_type }}', userId),
-{% endfor %}
-  ]);
 {% for entity in search_entities %}
   const {{ entity.general_read_ts_var }} = {{ entity.perms_ts_var }}.permissions.general.read === true;
 {% endfor %}

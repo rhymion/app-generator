@@ -166,14 +166,25 @@ pg_trgm/ILIKE-based, not pg_bigm.
     explains why: Prisma 7's `ops: raw("gin_trgm_ops")` syntax works, but `prisma migrate dev`
     enters an infinite drop/recreate drift loop on it (Prisma issue #16275, unresolved), so
     index-creation SQL is kept out of `prisma/schema.prisma` entirely.
-  - Each searchable entity gets: `CREATE EXTENSION IF NOT EXISTS pg_trgm;`, one
-    `GIN ... USING GIN (<field> gin_trgm_ops)` trigram index per searchable text field, and one
-    `GIN ... USING GIN (to_tsvector('simple', COALESCE(<fields concatenated>, '')))` expression
-    index (the tsvector index's expression must match the `WHERE` clause below verbatim for the
-    planner to use it). Both mechanisms use `CREATE INDEX CONCURRENTLY IF NOT EXISTS` —
-    non-blocking (no table lock held for the build) and, once an index already exists, a fast
-    existence check rather than a rebuild, so `ensureSearchIndexes()` running on every cold
-    start is cheap after the first successful run.
+  - Each searchable entity gets three kinds of index, all via `CREATE INDEX CONCURRENTLY IF NOT
+    EXISTS` (non-blocking, and once an index already exists a fast existence check rather than a
+    rebuild, so `ensureSearchIndexes()` running on every cold start is cheap after the first
+    successful run):
+    - `idx_<model>_<field>_gin_trgm`: a bare-column `GIN ... USING GIN (<field> gin_trgm_ops)`
+      trigram index per searchable text field. **Dead weight** — no query ever matches this
+      expression verbatim (see the Issue #725 fix (d) entry below) — kept only because dropping
+      it is a separate, non-urgent follow-up, not because anything still uses it.
+    - `idx_<model>_<field>_gin_trgm_v2`: an **expression** index,
+      `GIN ... USING GIN ((COALESCE(<field>, '')) gin_trgm_ops)` — matches the `%`/`ILIKE` halves
+      of the `WHERE` clause below verbatim (see Issue #725 fix (d)). This is the index actually
+      used at runtime; the field set is the union of `text_fields` and `bigm_fields` (shared
+      between `create_gin_indexes.sql.jinja2` and `db_init.ts.jinja2` via `generate.py`'s
+      `trgm_index_fields`), so it's complete regardless of whether an entity narrows
+      `x-search.bigm_fields`.
+    - `idx_<model>_tsv_gin`: one `GIN ... USING GIN (to_tsvector('simple', COALESCE(<fields
+      concatenated>, '')))` expression index per entity — must match the `WHERE` clause below
+      verbatim for the planner to use it (unaffected by the fix (d) bug, since this expression
+      already matched from the start).
   - Every query always evaluates three signals together, OR'd in the `WHERE` clause (not a
     language-based fallthrough): standard FTS (`to_tsvector('simple', ...) @@
     plainto_tsquery(...)`, backed by the tsvector expression index above), pg_trgm fuzzy
@@ -195,6 +206,26 @@ pg_trgm/ILIKE-based, not pg_bigm.
     override today, so this holds unconditionally. `similarity(...)` itself remains in the
     rank-scoring expression (`GREATEST(similarity(...))`, ordering only, not filtering) where
     index usage doesn't apply.
+  - **Issue #725 fix (d)**: even with `%` (not `similarity(...)`) in the `WHERE` clause, the
+    trigram index still went unused, because `generate.py`'s `sim_where_single`/
+    `bigm_where_single` wrap every field in `COALESCE(field, '')` before applying `%`/`ILIKE`,
+    while the trigram index (fix (b)/(c)'s `idx_<model>_<field>_gin_trgm`) was built on the bare
+    column — a GIN index only matches a query expression that is syntactically identical to the
+    one it was built on. Confirmed via `EXPLAIN ANALYZE` on a 60,000-row table: the real generated
+    predicate (`COALESCE(name, '') % $q OR ...`, combined with the tsvector and `ILIKE` disjuncts
+    via `BitmapOr`) forced a full-table (parallel) `Seq Scan` (`Disabled: true` even with
+    `enable_seqscan = off` — no alternate plan existed, not merely a cost-based choice), 582ms for
+    a single-row-match query — vs. 0.4ms once fixed. Fixed by adding a **second**, `_v2`-suffixed
+    expression index per field matching the query's `COALESCE(field, '')` form verbatim (query
+    side, `generate.py`, is untouched — zero risk of a search-result behavior change). The old
+    bare-column index is left in place (dead weight, harmless) rather than dropped, to avoid a
+    blocking `DROP INDEX`; removing it is a separate, non-urgent follow-up. While implementing
+    this, also found and fixed an unrelated pre-existing drift between
+    `create_gin_indexes.sql.jinja2` and `db_init.ts.jinja2`: the two templates independently named
+    the bare-column index differently (`_gin_trgm` vs. `_trgm`) and iterated a different field set
+    (`text_fields` vs. `bigm_fields`) for what was meant to be the same index — both templates now
+    share a single derivation (`generate.py`'s `trgm_index_fields`, the union of `text_fields` and
+    `bigm_fields`) for both the bare-column and `_v2` loops.
   - **Count, facet, and main-select run as three independent queries via `Promise.all`** (each
     its own pooled connection), not serialized through a single `prisma.$transaction(...)`. An
     earlier version of this fix (merged as part of Issue #725/#727) *did* wrap all three in

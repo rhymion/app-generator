@@ -1,20 +1,25 @@
 """
-Regression test (cmd_1157): cross-entity search (`buildSearchQuery()` in
-search_helpers.ts.jinja2) must fetch each entity's model permissions
-concurrently, not one at a time.
+Regression test (cmd_1157, superseded by cmd_1171): cross-entity search
+(`buildSearchQuery()` in search_helpers.ts.jinja2) must fetch permission
+data for all N search entities with exactly one DB query, not N.
 
-Before this fix, the entity loop rendered a sequential
-`const {{ perms }} = await getModelPermissions(...)` line per entity — with
-N search entities, each search request paid N round trips to
-`getModelPermissions()` back-to-back (its own `permission.findMany()` DB
-query on a cache miss) before any SQL subquery was even built. proj_h wires
-roughly 25 searchable entities, so a single search request could pay up to
-25 sequential permission-fetch round trips.
-
-The fix batches every entity's `getModelPermissions()` call into one
-`Promise.all([...])` and destructures the results back into the same
-per-entity variable names the rest of the template already relies on
-(`{{ entity.perms_ts_var }}`) — no downstream template code changes.
+History:
+- cmd_1157 batched N sequential `getModelPermissions()` calls into one
+  `Promise.all([...])`, relying on React `cache()`'s concurrent-call dedup
+  to collapse the underlying `getPermissionRowsForUser(userId)` fetch (each
+  `getModelPermissions()` call shares that same-argument inner call) down to
+  one query.
+- cmd_1170 measured this empirically (both Route Handler and Server Action
+  paths, dev/test and fresh-production-process conditions) and found the
+  dedup does NOT happen: N=3 search entities issued 3 separate
+  `permission.findMany` queries, identical to the pre-cmd_1157 baseline.
+- cmd_1171 removes the dependency on that dedup entirely: `buildSearchQuery`
+  now calls `getPermissionRowsForUser(userId)` explicitly, exactly once,
+  before any per-entity work, then derives each entity's RichPermissions
+  synchronously from the already-resolved row array via
+  `deriveRichPermissionsFromRows()` (shared with `getModelPermissions` in
+  lib/authz.ts) — no `Promise.all`, no per-entity `getModelPermissions()`
+  call, and no dependence on `cache()` behavior at all.
 
 Run:
     cd code_generator && python3 -m pytest tests/test_search_permissions_parallel_fetch.py -v
@@ -70,58 +75,64 @@ def _render(entity_names: list[str]) -> str:
     return _env().get_template('search_helpers.ts.jinja2').render(**ctx)
 
 
-def test_multi_entity_permission_fetch_is_batched_via_promise_all():
+def test_permission_rows_fetched_exactly_once_regardless_of_entity_count():
     rendered = _render(['widget', 'gadget', 'sprocket'])
 
+    assert rendered.count('await getPermissionRowsForUser(userId);') == 1, (
+        'getPermissionRowsForUser(userId) must be awaited exactly once no '
+        'matter how many search entities exist — this is what guarantees '
+        'exactly 1 permission query, not N.\n' + rendered
+    )
+    assert 'const searchPermissionRows = await getPermissionRowsForUser(userId);' in rendered
+
+
+def test_no_per_entity_getmodelpermissions_call():
+    """The pre-cmd_1171 shape (cmd_1157's fix) called getModelPermissions()
+    once per entity, batched via Promise.all. Confirm that call is gone
+    entirely — the new shape derives permissions synchronously from the
+    single fetched row array instead."""
+    rendered = _render(['widget', 'gadget', 'sprocket'])
+
+    assert "getModelPermissions('" not in rendered, (
+        'A per-entity getModelPermissions() call is still being rendered — '
+        'the single-query consolidation fix was not actually applied.\n' + rendered
+    )
     assert (
-        '] = await Promise.all([\n'
-        "    getModelPermissions('widget', userId),\n"
-        "    getModelPermissions('gadget', userId),\n"
-        "    getModelPermissions('sprocket', userId),\n"
-        '  ]);'
+        "import { getPermissionRowsForUser, deriveRichPermissionsFromRows } from '@/lib/authz';"
         in rendered
-    ), rendered
+    ), 'getModelPermissions must no longer be imported by the search template.\n' + rendered
+    assert 'Promise.all([\n    getPermissionRowsForUser' not in rendered
+
+
+def test_each_entity_derives_permissions_from_the_shared_row_array():
+    rendered = _render(['widget', 'gadget', 'sprocket'])
+
+    for name in ('widget', 'gadget', 'sprocket'):
+        assert (
+            f"const {name}Perms = {{ permissions: await deriveRichPermissionsFromRows("
+            f"searchPermissionRows.filter((row) => row.name === '{name}')) }};"
+            in rendered
+        ), rendered
+        assert f'const {name}GeneralRead = {name}Perms.permissions.general.read === true;' in rendered
+
+
+def test_single_entity_still_uses_the_shared_fetch():
+    """N=1 search app must use the same shape as N>1 — no special-casing
+    that reverts to a per-entity call for the trivial case."""
+    rendered = _render(['widget'])
+
+    assert rendered.count('await getPermissionRowsForUser(userId);') == 1
     assert (
-        '  const [\n'
-        '    widgetPerms,\n'
-        '    gadgetPerms,\n'
-        '    sprocketPerms,\n'
-        '  ] = await Promise.all(['
+        "const widgetPerms = { permissions: await deriveRichPermissionsFromRows("
+        "searchPermissionRows.filter((row) => row.name === 'widget')) };"
         in rendered
-    ), rendered
-
-    # Each entity still gets its own general-read boolean, derived after the
-    # batched fetch resolves, with no change to that downstream shape.
-    assert 'const widgetGeneralRead = widgetPerms.permissions.general.read === true;' in rendered
-    assert 'const gadgetGeneralRead = gadgetPerms.permissions.general.read === true;' in rendered
-    assert 'const sprocketGeneralRead = sprocketPerms.permissions.general.read === true;' in rendered
-
-
-def test_sequential_await_per_entity_shape_is_gone():
-    """Deviation injection: the pre-fix shape awaited each entity's
-    permissions one at a time, inline with its own `const {{ perms }} =`
-    declaration. Confirm that shape is gone, not just that Promise.all
-    appears somewhere in the file."""
-    rendered = _render(['widget', 'gadget'])
-
-    pre_fix_shape = "const widgetPerms = await getModelPermissions('widget', userId);"
-    assert pre_fix_shape not in rendered, (
-        'Pre-fix sequential per-entity await shape is still being rendered — '
-        'the parallelization fix was not actually applied.'
     )
 
 
-def test_single_entity_still_batches_through_promise_all():
-    """A single-entity search app (N=1) should still route through
-    Promise.all rather than reverting to a bare await for the N=1 case —
-    keeps the generator's output shape uniform regardless of entity count."""
+def test_imports_deriverichpermissionsfromrows_and_getpermissionrowsforuser():
     rendered = _render(['widget'])
 
     assert (
-        '  const [\n'
-        '    widgetPerms,\n'
-        '  ] = await Promise.all([\n'
-        "    getModelPermissions('widget', userId),\n"
-        '  ]);'
+        "import { getPermissionRowsForUser, deriveRichPermissionsFromRows } from '@/lib/authz';"
         in rendered
     ), rendered
