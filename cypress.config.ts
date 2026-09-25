@@ -35,8 +35,10 @@ export default defineConfig({
         async 'db:reset'() {
           const { resetTestDatabase, prisma } = require('./cypress/support/db-helpers');
           await resetTestDatabase();
-          // Ensure search extensions exist after reset
-          await prisma.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+          // Ensure search extensions exist after reset. Tagged `$executeRaw`
+          // (not `$executeRawUnsafe`): the statement is a fixed literal with
+          // no runtime-supplied value at all (issue #737 raw SQL audit).
+          await prisma.$executeRaw`CREATE EXTENSION IF NOT EXISTS pg_trgm`;
           // Phase 1.2: re-seat the bootstrap tenant after the wipe so the
           // NOT NULL user.tenant_id constraint is satisfiable in subsequent
           // seeding. Removed when ticket 3.5 folds this into the generated

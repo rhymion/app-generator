@@ -106,6 +106,28 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Cloud Run/Neon entry below).
 
 ### Fixed
+- **Search/DB-bootstrap code used `$executeRawUnsafe` for statements that
+  never needed it, and the generator's own raw-SQL guard couldn't have
+  caught a repeat** (issue #737). PR #727 had briefly introduced a
+  `tx.$executeRawUnsafe('SET LOCAL pg_trgm.similarity_threshold = ...')`
+  call (removed by PR #729 for an unrelated reason); the interpolated value
+  was a generate-time constant, never reachable from a runtime request, so
+  the call carried no actual injection risk — but `check_generated.py`
+  never flagged it, for two independent reasons: its regex required a
+  literal `prisma.` receiver (missing a `$transaction` callback param like
+  `tx`), and its file-enumeration walk never visited schema-wide generated
+  files (`lib/db-init.ts`, `lib/search/helpers.ts`) at all, only per-entity
+  ones. Both are fixed, with regression tests. Every remaining
+  `$executeRawUnsafe` call with no runtime-supplied value (`lib/db-init.ts`,
+  `cypress.config.ts`, `scripts/seed-baseline.ts`) is now the tagged
+  `$executeRaw` form instead — empirically confirmed `CREATE INDEX
+  CONCURRENTLY` still works correctly (including re-run idempotency)
+  through that form. The two pre-existing, legitimate tagged-template raw
+  queries this broadened scan now sees (`lib/search/helpers.ts`'s
+  cross-entity search UNION, `lib/<entity>/service.ts`'s scheduled-task
+  advisory lock) are unchanged and now carry an explicit
+  `check_generated_allowlist.yaml` entry. See
+  `docs/knowledge/raw-sql-policy.md`.
 - **`prj:sync` could silently drop a generator-side Prisma model/field
   when a consumer's `prj/prisma/schema.prisma` predated it** (issue
   #646). `prj:sync` copies `prisma/schema.prisma` from a consumer's

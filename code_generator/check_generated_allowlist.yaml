@@ -1,7 +1,7 @@
 # check_generated_allowlist.yaml — exemptions for code_generator/check_generated.py
 #
-# Each exemption lifts a single (path, rule, substring) tuple. The path is
-# the file's POSIX-style location relative to the project root. `rule` is
+# Each exemption lifts a single (path, pattern, substring) tuple. The path is
+# the file's POSIX-style location relative to the project root. `pattern` is
 # one of:
 #
 #   raw:queryRaw / raw:executeRaw / raw:queryRawUnsafe / raw:executeRawUnsafe
@@ -16,4 +16,46 @@
 # from drifting into bypassing the service layer; every exemption should
 # correspond to a documented, reviewed deviation.
 
-exemptions: []
+exemptions:
+  # issue #737 (raw SQL / unsafe-API audit): lib/db-init.ts's ensureSearchIndexes()
+  # bootstraps the pg_trgm extension and GIN indexes on every server cold
+  # start. Every statement is tagged $executeRaw (not $executeRawUnsafe),
+  # and every identifier substituted into the SQL text (entity/field names)
+  # is resolved once at generate-code time from the project's own
+  # schema.yaml -- never a runtime-supplied value. CREATE EXTENSION/CREATE
+  # INDEX target names are SQL identifiers, which Prisma cannot bind as
+  # query parameters at all, so this is not a case of "should have used a
+  # bind parameter and didn't" -- there is no runtime input in these
+  # statements to begin with. See code_generator/templates/db_init.ts.jinja2
+  # header comment for the full explanation.
+  - path: lib/db-init.ts
+    pattern: raw:executeRaw
+    substring: "CREATE EXTENSION IF NOT EXISTS pg_trgm"
+    reason: >-
+      Fixed literal, zero runtime interpolation (issue #737). See
+      code_generator/templates/db_init.ts.jinja2 header comment.
+  - path: lib/db-init.ts
+    pattern: raw:executeRaw
+    substring: "CREATE INDEX CONCURRENTLY IF NOT EXISTS \"idx_"
+    reason: >-
+      Entity/field identifiers are baked in from the project's own
+      schema.yaml at generate-code time, not runtime input; CREATE INDEX
+      target names can't be bind parameters regardless (issue #737). See
+      code_generator/templates/db_init.ts.jinja2 header comment.
+  # issue #737: lib/search/helpers.ts's cross-entity search UNION query (count,
+  # facet, and main page queries) cannot be expressed through Prisma's query
+  # builder -- it unions N heterogeneous entity tables under one
+  # permission-filtered, paginated query. All user-supplied values (search
+  # text, userId, org IDs) are bound via Prisma.sql/${} parameters, never
+  # concatenated into the SQL text -- see
+  # code_generator/templates/search_helpers.ts.jinja2's own header comment.
+  # Not `Unsafe`-named; this is the safe tagged-template form used because
+  # the query builder has no equivalent, not a shortcut around it.
+  - path: lib/search/helpers.ts
+    pattern: raw:queryRaw
+    substring: "prisma.$queryRaw<"
+    reason: >-
+      Cross-entity search UNION query, unreachable via Prisma's query
+      builder; every user-supplied value is bound via Prisma.sql/${}
+      parameters (issue #737). See
+      code_generator/templates/search_helpers.ts.jinja2 header comment.

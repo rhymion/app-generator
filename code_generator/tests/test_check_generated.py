@@ -109,6 +109,73 @@ def test_raw_in_api_route_is_flagged(tmp_path: Path) -> None:
     assert any(v.rule == 'raw:queryRawUnsafe' for v in vs)
 
 
+def test_executeraw_unsafe_via_transaction_callback_receiver_is_flagged(tmp_path: Path) -> None:
+    """Regression test for issue #737: PR #727's
+    `tx.$executeRawUnsafe('SET LOCAL ...')`, called on the callback param of
+    `prisma.$transaction(async (tx) => ...)`, went undetected by a prior
+    version of this rule that only matched a literal `prisma.` receiver. The
+    receiver identifier must not matter — only the method name does."""
+    schema = _make_tree(tmp_path)
+    (tmp_path / 'lib/widget/service.ts').write_text(
+        "import prisma from '@/lib/prisma';\n"
+        "export async function bad() {\n"
+        "  return await prisma.$transaction(async (tx) => {\n"
+        "    await tx.$executeRawUnsafe('SET LOCAL pg_trgm.similarity_threshold = 0.3');\n"
+        "    return tx.$queryRaw`SELECT 1`;\n"
+        "  });\n"
+        "}\n"
+    )
+    vs = check(schema, tmp_path, _empty_allowlist(tmp_path))
+    rules = {v.rule for v in vs}
+    assert rules == {'raw:executeRawUnsafe', 'raw:queryRaw'}
+
+
+# ---------------------------------------------------------------------------
+# Schema-wide generated files (not scoped under a single entity's directory)
+# ---------------------------------------------------------------------------
+
+def test_db_init_ts_is_scanned(tmp_path: Path) -> None:
+    """Regression test for issue #737: lib/db-init.ts and lib/search/helpers.ts
+    are schema-wide generated files (generate.py's DP-3 search block), not
+    scoped under any single entity's own directory — a prior version of this
+    script's file enumeration only ever walked per-entity paths and never
+    visited them at all, regardless of what pattern they contained. This is
+    exactly how PR #727's `tx.$executeRawUnsafe(...)` inside
+    search_helpers.ts.jinja2's rendered output went unscanned."""
+    schema = _make_tree(tmp_path)
+    (tmp_path / 'lib/db-init.ts').write_text(
+        "import prisma from '@/lib/prisma';\n"
+        "export async function ensureSearchIndexes() {\n"
+        "  await prisma.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS pg_trgm');\n"
+        "}\n"
+    )
+    vs = check(schema, tmp_path, _empty_allowlist(tmp_path))
+    assert any(v.rule == 'raw:executeRawUnsafe' and v.path == 'lib/db-init.ts' for v in vs)
+
+
+def test_search_helpers_ts_is_scanned(tmp_path: Path) -> None:
+    schema = _make_tree(tmp_path)
+    (tmp_path / 'lib/search').mkdir(parents=True, exist_ok=True)
+    (tmp_path / 'lib/search/helpers.ts').write_text(
+        "import prisma from '@/lib/prisma';\n"
+        "export async function buildSearchQuery() {\n"
+        "  return prisma.$queryRaw`SELECT 1`;\n"
+        "}\n"
+    )
+    vs = check(schema, tmp_path, _empty_allowlist(tmp_path))
+    assert any(v.rule == 'raw:queryRaw' and v.path == 'lib/search/helpers.ts' for v in vs)
+
+
+def test_db_init_ts_absent_is_not_an_error(tmp_path: Path) -> None:
+    """No lib/db-init.ts (e.g. a schema with no searchable entities, DP-3) —
+    the scan must skip it silently rather than erroring, mirroring how the
+    per-entity and bespoke-reaction file lists already handle a file that
+    generate-code would not have written for this schema."""
+    schema = _make_tree(tmp_path)
+    vs = check(schema, tmp_path, _empty_allowlist(tmp_path))
+    assert vs == []
+
+
 # ---------------------------------------------------------------------------
 # Direct-write rule
 # ---------------------------------------------------------------------------
