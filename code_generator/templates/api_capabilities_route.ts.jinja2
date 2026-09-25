@@ -44,10 +44,19 @@ export async function GET(request: NextRequest, { params }: Params) {
     await requireApiPermission(actorId, '{{ parent }}', 'read', item);
     const _item = item as Record<string, unknown>;
 
+{% set both_need_can_access = can_update and can_delete and not is_self_only %}
+{% if both_need_can_access %}
+    // update/delete are independent checks (no data dependency) -- run them
+    // concurrently instead of two sequential awaits.
+    const [_canUpdate, _canDelete] = await Promise.all([
+      canAccess('{{ parent }}', 'update', actorId, item),
+      canAccess('{{ parent }}', 'delete', actorId, item),
+    ]);
+{% endif %}
     const operations = {
       read: true,
-      update: {% if not can_update %}false{% elif is_self_only %}_item.creator_id === actorId{% else %}await canAccess('{{ parent }}', 'update', actorId, item){% endif %},
-      delete: {% if not can_delete %}false{% elif is_self_only %}_item.creator_id === actorId{% else %}await canAccess('{{ parent }}', 'delete', actorId, item){% endif %},
+      update: {% if not can_update %}false{% elif is_self_only %}_item.creator_id === actorId{% elif both_need_can_access %}_canUpdate{% else %}await canAccess('{{ parent }}', 'update', actorId, item){% endif %},
+      delete: {% if not can_delete %}false{% elif is_self_only %}_item.creator_id === actorId{% elif both_need_can_access %}_canDelete{% else %}await canAccess('{{ parent }}', 'delete', actorId, item){% endif %},
     };
 
     const write_locks = {
@@ -85,18 +94,25 @@ export async function GET(request: NextRequest, { params }: Params) {
     } | null = null;
     const _approvableId = _item.{{ approvable_fk }} as string | null | undefined;
     if (_approvableId) {
-      const _latestRoundRow = await prisma.approval_request.findFirst({
-        where: { approvable_id: _approvableId },
-        orderBy: { created_at: 'desc' },
-        select: { round_id: true },
-      });
-      const _latestRoundRequests = _latestRoundRow
-        ? await prisma.approval_request.findMany({
-            where: { approvable_id: _approvableId, round_id: _latestRoundRow.round_id },
-            select: { id: true, status: true, approval_flow: { select: { approver_role_id: true } } },
-          })
-        : [];
-      const _roleIds = await getUserRoleIds(actorId);
+      // _roleIds has no data dependency on the round lookup -- run it
+      // concurrently instead of after the (necessarily sequential,
+      // findMany depends on findFirst's round_id) round-lookup pair.
+      const [_latestRoundRequests, _roleIds] = await Promise.all([
+        (async () => {
+          const _latestRoundRow = await prisma.approval_request.findFirst({
+            where: { approvable_id: _approvableId },
+            orderBy: { created_at: 'desc' },
+            select: { round_id: true },
+          });
+          return _latestRoundRow
+            ? await prisma.approval_request.findMany({
+                where: { approvable_id: _approvableId, round_id: _latestRoundRow.round_id },
+                select: { id: true, status: true, approval_flow: { select: { approver_role_id: true } } },
+              })
+            : [];
+        })(),
+        getUserRoleIds(actorId),
+      ]);
       let _canApprove = false;
       let _canReject = false;
       for (const _req of _latestRoundRequests) {

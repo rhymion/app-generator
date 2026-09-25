@@ -198,6 +198,34 @@ class TestCapabilitiesRouteRendering:
         assert "canAccess('gadget', 'update'" in rendered
         assert "canAccess('gadget', 'delete'" in rendered
 
+    def test_update_and_delete_canaccess_run_concurrently(self):
+        # When both update and delete resolve through canAccess() (no data
+        # dependency between them), they must run via Promise.all instead of
+        # two sequential awaits inside the operations object literal
+        # (subtask_1176n).
+        rendered = _rendered(_entity('gadget', 'gadget'), _plain_schema())
+        assert (
+            "const [_canUpdate, _canDelete] = await Promise.all([\n"
+            "      canAccess('gadget', 'update', actorId, item),\n"
+            "      canAccess('gadget', 'delete', actorId, item),\n"
+            "    ]);"
+        ) in rendered
+        assert 'update: _canUpdate,' in rendered
+        assert 'delete: _canDelete,' in rendered
+        # the object literal itself must no longer contain a second,
+        # sequential await of either check
+        assert "update: await canAccess" not in rendered
+        assert "delete: await canAccess" not in rendered
+
+    def test_single_canaccess_check_stays_a_plain_inline_await(self):
+        # Only one of update/delete resolves through canAccess() here (the
+        # other is hardcoded false) -- there is nothing to parallelize, so
+        # the Promise.all wrapper must not appear at all.
+        rendered = _rendered(_entity('gadget', 'gadget', delete=False), _plain_schema())
+        assert 'Promise.all' not in rendered
+        assert "update: await canAccess('gadget', 'update', actorId, item)," in rendered
+        assert 'delete: false,' in rendered
+
     def test_bridge_entity_gets_approval_section_and_imports(self):
         rendered = _rendered(_entity('widget', 'widget'), _bridge_schema())
         assert "from '@/lib/approval_request/submit_predicate'" in rendered
@@ -209,6 +237,21 @@ class TestCapabilitiesRouteRendering:
         assert '_item.approvable_id' in rendered
         assert 'approval,' in rendered
         assert 'approval: null,' not in rendered
+
+    def test_bridge_entity_role_ids_fetched_concurrently_with_round_lookup(self):
+        # getUserRoleIds(actorId) has no data dependency on the
+        # findFirst/findMany round-lookup pair (which IS a real sequential
+        # dependency: findMany's round_id comes from findFirst's result) --
+        # it must run concurrently with that pair via Promise.all, not
+        # after it (subtask_1176n).
+        rendered = _rendered(_entity('widget', 'widget'), _bridge_schema())
+        assert 'const [_latestRoundRequests, _roleIds] = await Promise.all([' in rendered
+        assert 'getUserRoleIds(actorId),\n      ]);' in rendered
+        # the round lookup's own two queries remain sequential (findMany
+        # depends on findFirst's round_id) inside the IIFE
+        assert 'await prisma.approval_request.findFirst(' in rendered
+        assert 'await prisma.approval_request.findMany(' in rendered
+        assert 'const _roleIds = await getUserRoleIds(actorId);' not in rendered
 
     def test_bridge_entity_reuses_edit_delete_guards(self):
         rendered = _rendered(_entity('widget', 'widget'), _bridge_schema())

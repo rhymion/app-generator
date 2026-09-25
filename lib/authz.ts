@@ -112,7 +112,13 @@ export async function resolvePermissions(
  * Per-process cache of (userId, model) → permission result (Phase 2 #3 from
  * performance-plan-session.md). The original implementation ran a 3-branch OR
  * permission query (`permission.findMany`) on every server-rendered page and
- * every API call, gated only by the per-request React `cache()` wrapper.
+ * every API call, gated only by the per-request React `cache()` wrapper --
+ * which only dedups within a Server Component/Action render tree. A Next.js
+ * Route Handler (`app/api/.../route.ts`) invocation is not part of a React
+ * render, so every API call's own repeat lookups (e.g. the capabilities
+ * route's `requireApiPermission` + 2x `canAccess`) got no dedup benefit from
+ * `cache()` at all before this per-process cache existed (measured:
+ * subtask_1176l).
  *
  * Trade-off: a user's role/permission change takes effect within one TTL
  * window. We don't track a roles_version, so changes don't invalidate
@@ -164,10 +170,16 @@ const permissionRowsCache = new TtlLruCache<string, PermissionRow[]>(PERMISSION_
  * unchanged, so which rows come back for a given model is identical to
  * before.
  *
- * Layered caching, same shape as `getModelPermissions`: per-request React
- * `cache()` (dedups every model a request asks about into the same call),
- * then per-process TTL LRU (`permissionRowsCache`, deduplicates across
- * requests until expiry).
+ * Layered caching, same shape as `getModelPermissions`: React `cache()`
+ * (dedups every model a request asks about into the same call -- but ONLY
+ * inside a Server Component/Action render tree; a Next.js Route Handler
+ * (`app/api/.../route.ts`) invocation is not part of a React render, so
+ * `cache()` provides no request-scoped dedup there -- repeat calls with the
+ * same userId within one Route Handler invocation each execute this
+ * function body in full, confirmed empirically via byte-identical repeated
+ * queries: subtask_1176l), then per-process TTL LRU (`permissionRowsCache`,
+ * deduplicates across requests until expiry -- this is what actually
+ * covers the Route Handler path in production).
  */
 export const getPermissionRowsForUser = cache(async (resolvedUserId: string): Promise<PermissionRow[]> => {
   if (permissionCacheEnabled) {
@@ -276,10 +288,14 @@ export async function deriveRichPermissionsFromRows(rows: PermissionRow[]): Prom
  * Returning userId avoids a separate getSessionUserId() call in callers and
  * enables fully parallel fetching alongside entity data.
  *
- * Layered caching: per-request React `cache()` (dedups concurrent calls within
- * one render), then per-process TTL LRU (`permissionCache`, deduplicates across
- * requests until expiry). The underlying row fetch is itself batched across
- * every model a request asks about — see `getPermissionRowsForUser`.
+ * Layered caching: React `cache()` (dedups concurrent calls within one
+ * render -- a Next.js Route Handler invocation is NOT a React render, so
+ * this provides no dedup there; see `getPermissionRowsForUser`'s own doc
+ * comment for the measured Route Handler behavior), then per-process TTL
+ * LRU (`permissionCache`, deduplicates across requests until expiry -- this
+ * is what actually covers the Route Handler path in production). The
+ * underlying row fetch is itself batched across every model a request asks
+ * about — see `getPermissionRowsForUser`.
  */
 export const getModelPermissions = cache(async (
   model: ModelName,
