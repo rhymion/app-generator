@@ -4,8 +4,9 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaNeon } from '@prisma/adapter-neon';
 import { pinSslModeVerifyFull } from './db-url';
 import { resolvePrismaPoolMax } from './prisma-pool';
+import { cacheOnGlobal } from './global-singleton';
 
-const globalForPrisma = global as unknown as { prisma: PrismaClient };
+const globalForPrisma = global as unknown as Record<string, unknown>;
 
 // Production logs only warnings/errors. Per-query logging in prod was a hot
 // per-request stderr write (one log line per Prisma call); see #5 in
@@ -214,8 +215,18 @@ const createPrismaClient = () => {
   }
 };
 
-const prisma = globalForPrisma.prisma || createPrismaClient();
-
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+// Cache unconditionally, in every environment (see lib/global-singleton.ts
+// for why). This used to skip the cache outside dev
+// (`if (process.env.NODE_ENV !== "production") globalForPrisma.prisma =
+// prisma;`), which assumed each production request runs in a fresh process
+// (classic serverless) -- an assumption that breaks under an execution
+// model that evaluates this module's bundle more than once within one
+// long-lived process (e.g. a platform that keeps a warm instance handling
+// multiple concurrent invocations, each with its own bundle-scoped copy of
+// this module): skipping the cache there silently multiplied real
+// connection pools within a single process, each opening its own set of
+// backend connections independent of PRISMA_POOL_MAX's intended
+// per-process ceiling.
+const prisma = cacheOnGlobal(globalForPrisma, 'prisma', createPrismaClient) as PrismaClient;
 
 export default prisma;

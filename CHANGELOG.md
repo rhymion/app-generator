@@ -120,6 +120,27 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Cloud Run/Neon entry below).
 
 ### Fixed
+- **`lib/prisma.ts` created a new, independent Prisma Client (and its own
+  connection pool) on every module evaluation in production, instead of
+  reusing one cached instance per process.** The dev-only `globalThis`
+  caching guard (`if (process.env.NODE_ENV !== "production") ...`) assumed
+  every production request runs in a fresh process — an assumption that
+  breaks under an execution model that evaluates this module's bundle more
+  than once within one long-lived process (a warm instance handling
+  multiple concurrent invocations, each with its own bundle-scoped copy of
+  the module). Empirically confirmed: one process evaluated the module 4
+  times across a single login + search flow (route handler, Server Action,
+  client-page render, and `instrumentation.ts`'s cold-start hook each
+  getting their own bundle-scoped copy), and — before this fix — 3 of those
+  4 evaluations held simultaneous, distinct live backend connections,
+  multiplying the real per-process connection ceiling by up to 4x beyond
+  what `PRISMA_POOL_MAX` alone implies. The cache now applies
+  unconditionally in every environment (extracted into a small,
+  dependency-free `lib/global-singleton.ts` helper, unit-tested
+  independently of the generated Prisma client). Re-measured the identical
+  flow after the fix, in the same environment: still 4 module evaluations,
+  but exactly 1 real connection pool created and 1 live connection group
+  observed throughout.
 - **Search/DB-bootstrap code used `$executeRawUnsafe` for statements that
   never needed it, and the generator's own raw-SQL guard couldn't have
   caught a repeat** (issue #737). PR #727 had briefly introduced a
