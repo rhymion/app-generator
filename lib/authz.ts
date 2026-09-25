@@ -169,7 +169,7 @@ const permissionRowsCache = new TtlLruCache<string, PermissionRow[]>(PERMISSION_
  * then per-process TTL LRU (`permissionRowsCache`, deduplicates across
  * requests until expiry).
  */
-const getPermissionRowsForUser = cache(async (resolvedUserId: string): Promise<PermissionRow[]> => {
+export const getPermissionRowsForUser = cache(async (resolvedUserId: string): Promise<PermissionRow[]> => {
   if (permissionCacheEnabled) {
     const cached = permissionRowsCache.get(resolvedUserId);
     if (cached) return cached;
@@ -208,6 +208,67 @@ const getPermissionRowsForUser = cache(async (resolvedUserId: string): Promise<P
 export async function invalidatePermissionCache(): Promise<void> {
   permissionCache.clear();
   permissionRowsCache.clear();
+}
+
+/**
+ * Pure (no DB access) grouping of a set of permission rows (already filtered
+ * to one model, e.g. via
+ * `getPermissionRowsForUser(userId).filter(row => row.name === model)`) into
+ * the general/creator/assignee RichPermissions shape. `async` only because
+ * this file is a `'use server'` module, where every exported function is a
+ * Server Action and Server Actions must be async — there is no actual
+ * asynchronous work inside.
+ *
+ * Shared by `getModelPermissions` below and by `buildSearchQuery`
+ * (search_helpers.ts.jinja2) so the merge rule (general OR creator OR
+ * assignee for read/update/delete; general-only for create/import) is
+ * defined in exactly one place. Does not itself query the DB or apply the
+ * `audit_log` / SELF_ONLY_ADMIN_BYPASS_ENTITIES fallbacks below — those are
+ * single-model, DB-querying special cases that cross-entity search never
+ * needs (search already applies its own x-self-only handling directly in
+ * the template, with no admin-bypass path).
+ */
+export async function deriveRichPermissionsFromRows(rows: PermissionRow[]): Promise<RichPermissions> {
+  if (rows.length === 0) {
+    return { ...EMPTY_FLAGS, general: { ...EMPTY_FLAGS }, creator: null, assignee: null };
+  }
+
+  let general = { ...EMPTY_FLAGS };
+  let creatorFlags: OperationFlags | null = null;
+  let assigneeFlags: OperationFlags | null = null;
+
+  for (const row of rows) {
+    const flags: OperationFlags = {
+      create: row.create,
+      read: row.read,
+      update: row.update,
+      delete: row.delete,
+      import: row.import,
+    };
+    const roleName = row.role?.name;
+    if (roleName === 'Creator') {
+      creatorFlags = creatorFlags ? mergeFlags(creatorFlags, flags) : { ...flags };
+    } else if (roleName === 'Assignee') {
+      assigneeFlags = assigneeFlags ? mergeFlags(assigneeFlags, flags) : { ...flags };
+    } else {
+      general = mergeFlags(general, flags);
+    }
+  }
+
+  // Top-level flags: broadest possible without item context.
+  // create/import are general-only (special roles are item-scoped, not meaningful
+  // for new items or bulk import). read/update/delete include special roles so
+  // assertPermission passes for Creator/Assignee-only users on list pages.
+  return {
+    create: general.create,
+    read: general.read || (creatorFlags?.read ?? false) || (assigneeFlags?.read ?? false),
+    update: general.update || (creatorFlags?.update ?? false) || (assigneeFlags?.update ?? false),
+    delete: general.delete || (creatorFlags?.delete ?? false) || (assigneeFlags?.delete ?? false),
+    import: general.import,
+    general,
+    creator: creatorFlags,
+    assignee: assigneeFlags,
+  };
 }
 
 /**
@@ -279,48 +340,13 @@ export const getModelPermissions = cache(async (
       }
     }
     // Default: deny all if no explicit permissions
-    const full = { ...EMPTY_FLAGS, general: { ...EMPTY_FLAGS }, creator: null, assignee: null };
+    const full = await deriveRichPermissionsFromRows([]);
     const result = { permissions: full, userId: resolvedUserId };
     if (permissionCacheEnabled) permissionCache.set(cacheKey, result);
     return result;
   }
 
-  let general = { ...EMPTY_FLAGS };
-  let creatorFlags: OperationFlags | null = null;
-  let assigneeFlags: OperationFlags | null = null;
-
-  for (const row of rows) {
-    const flags: OperationFlags = {
-      create: row.create,
-      read: row.read,
-      update: row.update,
-      delete: row.delete,
-      import: row.import,
-    };
-    const roleName = row.role?.name;
-    if (roleName === 'Creator') {
-      creatorFlags = creatorFlags ? mergeFlags(creatorFlags, flags) : { ...flags };
-    } else if (roleName === 'Assignee') {
-      assigneeFlags = assigneeFlags ? mergeFlags(assigneeFlags, flags) : { ...flags };
-    } else {
-      general = mergeFlags(general, flags);
-    }
-  }
-
-  // Top-level flags: broadest possible without item context.
-  // create/import are general-only (special roles are item-scoped, not meaningful
-  // for new items or bulk import). read/update/delete include special roles so
-  // assertPermission passes for Creator/Assignee-only users on list pages.
-  const permissions: RichPermissions = {
-    create: general.create,
-    read: general.read || (creatorFlags?.read ?? false) || (assigneeFlags?.read ?? false),
-    update: general.update || (creatorFlags?.update ?? false) || (assigneeFlags?.update ?? false),
-    delete: general.delete || (creatorFlags?.delete ?? false) || (assigneeFlags?.delete ?? false),
-    import: general.import,
-    general,
-    creator: creatorFlags,
-    assignee: assigneeFlags,
-  };
+  const permissions = await deriveRichPermissionsFromRows(rows);
   const result = { permissions, userId: resolvedUserId };
   if (permissionCacheEnabled) permissionCache.set(cacheKey, result);
   return result;
