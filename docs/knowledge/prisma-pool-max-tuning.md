@@ -79,6 +79,32 @@ construction site in `lib/prisma.ts`):
 leaving headroom for admin/migration connections, exactly as the pooled
 case's derivation above does.
 
+## The `× PRISMA_POOL_MAX` term assumes exactly one pool per process
+
+Every derivation above multiplies `(Cloud Run max-instances) × PRISMA_POOL_MAX`
+on the assumption that each running instance holds exactly **one**
+`pg.Pool` (one `createPrismaClient()` call, cached and reused for the rest
+of that process's life). That assumption is enforced by `lib/prisma.ts`'s
+`globalThis`-based caching (`lib/global-singleton.ts`), which now applies
+**unconditionally, in every environment**.
+
+Before this was fixed, the cache was skipped outside development
+(`if (process.env.NODE_ENV !== "production") ...`), on the assumption that
+each production request runs in a fresh process. Under an execution model
+that evaluates this module's bundle more than once within one long-lived
+process (a warm instance handling multiple concurrent invocations, each
+with its own bundle-scoped copy of the module), that assumption silently
+broke: each such evaluation constructed and cached its own independent
+pool, uncoordinated with the others. Empirically confirmed (same
+login+search flow, `application_name`-tagged `pg.Pool` + live
+`pg_stat_activity` cross-reference): one process evaluated the module 4
+times, and 3 of those 4 held simultaneous, live backend connections — the
+real per-process ceiling was up to 4× `PRISMA_POOL_MAX`, not 1×, silently
+invalidating every derivation on this page. Re-measured after the fix in
+the same environment: still 4 module evaluations, but exactly 1 pool
+created and 1 live connection group — the `× PRISMA_POOL_MAX` term is now
+actually true, not just assumed.
+
 ## Does not apply to Prisma Postgres / Accelerate (`prisma+postgres://`)
 
 `PRISMA_POOL_MAX` has **no effect** when `lib/prisma.ts` takes its
