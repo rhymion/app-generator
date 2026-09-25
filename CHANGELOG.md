@@ -120,6 +120,28 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Cloud Run/Neon entry below).
 
 ### Fixed
+- **Cross-entity search's trigram/bigm indexes were never used at runtime**
+  (issue #725 fix (d)). `generate.py`'s `sim_where_single`/
+  `bigm_where_single` wrap every searchable field in `COALESCE(field, '')`
+  before applying the `%`/`ILIKE` operators, but `create_gin_indexes.sql.
+  jinja2`/`db_init.ts.jinja2` built the trigram GIN index on the bare
+  column — a GIN index only matches a query expression syntactically
+  identical to the one it was built on, so the index was permanently
+  unusable regardless of cold-start state or data volume. Confirmed via
+  `EXPLAIN ANALYZE` on a 60,000-row table: the real generated predicate
+  forced a full-table `Seq Scan` (`Disabled: true` even with
+  `enable_seqscan = off`), 582ms for a single-row-match query, vs. 0.4ms
+  (`BitmapOr` over `Bitmap Index Scan`s) once fixed. Fixed by adding a
+  second, `_v2`-suffixed expression index per field matching the query's
+  `COALESCE(field, '')` form verbatim — query-side (`generate.py`) is
+  untouched, so no search-result behavior changes for any entity. The old
+  bare-column index is left in place (dead weight, harmless) to avoid a
+  blocking `DROP INDEX`; removing it is a separate, non-urgent follow-up.
+  Also reconciled an unrelated pre-existing drift between the two index
+  templates (different index name and field set for what was meant to be
+  the same index) found while implementing this fix. See
+  `docs/knowledge/search.md`.
+
 - **`prj:sync` could silently drop a generator-side Prisma model/field
   when a consumer's `prj/prisma/schema.prisma` predated it** (issue
   #646). `prj:sync` copies `prisma/schema.prisma` from a consumer's
