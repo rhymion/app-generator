@@ -375,6 +375,12 @@ of both needing to be grabbed atomically before either can start — eliminating
 `maxWait` bottleneck entirely. This mirrors the fix already applied to `buildSearchQuery()`
 (`search_helpers.ts.jinja2`) for the analogous P2028-under-`$transaction` failure mode.
 
+This section eliminates P2028 on the read side by removing an unnecessary transaction.
+`addEntity`/`updateEntity`'s write-side `$transaction` cannot be removed the same way (a
+multi-model write genuinely needs atomicity) — see
+`docs/knowledge/p2028-capacity-misclassification-fix.md` for how P2028 is instead handled
+correctly there when it does occur under contention.
+
 ### Trade-off: no longer atomic
 
 `findMany` and `count` can now see different snapshots if a write lands between them (e.g.
