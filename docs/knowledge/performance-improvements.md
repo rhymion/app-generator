@@ -397,6 +397,77 @@ to fail against the pre-fix template (2 assertions, both catch the regression in
 
 ---
 
+## 6. Batching Permission Queries Across Models (`getModelPermissions`)
+
+### Problem
+
+`getModelPermissions(model, userId)` (`lib/authz.ts`) is called once per model — every
+generated entity's own `requirePermission`/`canAccess` calls, plus the cross-entity search
+path (`search_helpers.ts.jinja2`, one call per entity in `ALL_ENTITIES`). Its underlying
+query filtered by `name: model`:
+
+```ts
+const rows = await prisma.permission.findMany({
+  where: { name: model, OR: [ /* 3-branch role/global OR */ ] },
+  select: { create: true, read: true, update: true, delete: true, import: true, role: { select: { name: true } } },
+});
+```
+
+The per-request React `cache()` wrapper on `getModelPermissions` only dedups repeat calls
+for the *same* `(model, userId)` pair. A cross-entity search touching N entities in one
+request still issued N separate `permission.findMany` queries — one per model, all for the
+same user, all satisfying the identical role-membership OR clause — because each call's
+cache key includes `model`.
+
+### Fix
+
+Dropped the `name: model` filter from the query and added `select: { name: true, ... }` so
+the result carries which model each row belongs to. The fetch itself moved into a new
+function, `getPermissionRowsForUser(userId)` — cached by `userId` alone (both the
+per-request React `cache()` layer and the per-process TTL LRU layer) — so every model a
+request asks about converges on the same cached row set instead of triggering its own
+query:
+
+```ts
+const getPermissionRowsForUser = cache(async (userId: string) => {
+  // ... same 3-branch OR, no name filter, select adds `name: true` ...
+});
+
+// inside getModelPermissions(model, userId):
+const allRows = await getPermissionRowsForUser(resolvedUserId);
+const rows = allRows.filter((row) => row.name === model);
+```
+
+`getModelPermissions` itself is unchanged apart from this substitution — the audit_log
+special case, the `SELF_ONLY_ADMIN_BYPASS_ENTITIES` no-rows fallback, and the
+Creator/Assignee aggregation loop all still operate on `rows` (now the per-model slice of
+the batched result) exactly as before. A 25-entity cross-entity search collapses from 25
+`permission.findMany` calls to 1 per (request, user); a single-model call (an ordinary list
+or detail page) is unaffected in query count, only in query shape (no `name` filter).
+
+### Why this doesn't change what any model's permissions resolve to
+
+The 3-branch OR clause (global `role_id: null` rows, the user's non-special roles, and the
+always-fetched Creator/Assignee role definitions) is unchanged — removing the `name`
+filter only widens which models' rows come back in one call, not which rows match the OR
+for a given model. `role`/`permission` records carry no `organization_id` (RBAC is
+tenant-global), so batching across models does not cross any org-isolation boundary.
+`lib/authz.test.ts`'s "batched multi-model query" test group pins this: given one batched
+result spanning multiple models, filtering to any single model reproduces exactly the same
+permissions a model-only query would have returned, with no cross-model leakage.
+
+### Regression coverage
+
+`lib/authz.test.ts` — the "batched multi-model query: per-model grouping is equivalent to
+a per-model query" describe block asserts, against a single mocked result set spanning
+three different models: (1) the requested model's permissions are correct even when other
+models are present in the same batch, (2) a model with no rows in the batch is still
+denied (no accidental grant from another model's rows), (3) a global `role_id: null` row
+resolves correctly when mixed with other models, and (4) exactly one `findMany` call is
+issued per `getModelPermissions` invocation, with no `name` key in the query's `where`.
+
+---
+
 ## Summary Table
 
 | Technique | Where applied | Effect |
@@ -405,6 +476,7 @@ to fail against the pre-fix template (2 assertions, both catch the regression in
 | Skeleton screens | All generated pages | Visual placeholder instead of blank/spinner |
 | Parallel permissions + data | `getters.ts` (list + detail) | Saves one sequential DB round-trip |
 | `getModelPermissions` returns `userId` | `lib/authz.ts` | Eliminates separate `getSessionUserId` call |
+| Batch permission rows across models per (request, user) | `lib/authz.ts` (`getPermissionRowsForUser`) | 25-entity search: 25 `permission.findMany` calls → 1 |
 | Remove `revalidatePath` from upsert (kept on delete — same-route redirect) | `actions.ts` | Eliminates double `getAllEntities` on save |
 | Remove `router.refresh()` from `handleBack` | `FormUpsert.tsx` | Eliminates extra `getDetail` on back navigation |
 | `findMany`+`count` via `Promise.all` (not `$transaction`) | `getters.ts` (list pagination) | Avoids batch-transaction `maxWait` P2028 under concurrent load |

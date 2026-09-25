@@ -95,6 +95,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   seeds the tenant-wide default row.
 
 ### Changed
+- **`getModelPermissions` (`lib/authz.ts`) now issues one `permission.findMany`
+  query per (request, user) instead of one per model queried**, from a
+  request-scoped permission-check performance investigation. A cross-entity
+  search touching N entities used to fire N separate permission queries for
+  the same user; the `name: model` filter is now dropped from the query (a
+  new `getPermissionRowsForUser(userId)`, cached by `userId` alone, fetches
+  every relevant row across all models in one call) and each caller filters
+  the batched result to its own model client-side. Existing 3-branch
+  role/global OR clause, and every existing special case (audit_log admin
+  bypass, `SELF_ONLY_ADMIN_BYPASS_ENTITIES` no-rows fallback,
+  Creator/Assignee aggregation), is unchanged — only how the underlying
+  rows are fetched changed, not which rows apply to a given model. See
+  `docs/knowledge/performance-improvements.md` §6.
+
 - **Upgraded PostgreSQL from 16 to 18** across all three compose files
   (dev/test/prod) and `docker/Dockerfile.postgres` (issue #610).
   PostgreSQL 18's official image requires a single mount at
