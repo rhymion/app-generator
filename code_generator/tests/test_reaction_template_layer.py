@@ -241,6 +241,56 @@ class TestCommentReactionsApiRouteTemplate:
 # 4. B1/B2/B3 regression tests
 # ---------------------------------------------------------------------------
 
+class TestToggleReactionPermissionOrder:
+    """Issue #750: toggleXxxCommentReaction must run a coarse,
+    item-independent permission check BEFORE fetching the comment/parent
+    rows, then reuse the resulting RichPermissions for the item-level
+    (Creator/Assignee) resolution rather than fetching it a second time —
+    otherwise a caller with zero possible read grant learns whether a given
+    commentId/parent exists at all via which error is thrown."""
+
+    def _render_actions(self, schema: dict, entity_name: str) -> str:
+        from generators import actions_context
+        ctx = _build_ctx(schema, entity_name)
+        act_ctx = {**ctx, **actions_context(ctx)}
+        env = _make_jinja_env()
+        tmpl = env.get_template("actions.ts.jinja2")
+        return tmpl.render(**act_ctx)
+
+    def test_coarse_check_precedes_comment_and_parent_row_fetch(self):
+        schema = _commentable_schema()
+        rendered = self._render_actions(schema, "task")
+        # Scope to the toggle function's own body -- add/update/delete
+        # {Parent}Comment (a separate, unrelated code path built by
+        # _build_comment_actions) also fetches a `comment` row by a
+        # different ownership rule and would otherwise collide with a
+        # bare rendered.index() search.
+        toggle_fn = rendered[rendered.index('export async function toggleTaskCommentReaction'):]
+        coarse_check = "const basePerms = await requirePermission('task', 'read', undefined, userId);"
+        comment_fetch = 'const comment = await prisma.comment.findUnique({'
+        parent_fetch = 'const parentRow = await prisma.task.findFirst({'
+        resolve_call = 'const resolved = parentRow ? await resolvePermissions(basePerms, parentRow, userId) : basePerms;'
+        assert coarse_check in toggle_fn
+        assert comment_fetch in toggle_fn
+        assert parent_fetch in toggle_fn
+        assert resolve_call in toggle_fn
+        assert toggle_fn.index(coarse_check) < toggle_fn.index(comment_fetch)
+        assert toggle_fn.index(comment_fetch) < toggle_fn.index(parent_fetch)
+        assert toggle_fn.index(parent_fetch) < toggle_fn.index(resolve_call)
+        # No second requirePermission(model, 'read', item)-backed call for
+        # this model -- the item-level check reuses basePerms.
+        assert "await requirePermission('task', 'read', parentRow ?? undefined);" not in toggle_fn
+
+    def test_denied_read_throws_after_resolve(self):
+        schema = _commentable_schema()
+        rendered = self._render_actions(schema, "task")
+        assert (
+            "if (!resolved.read) {\n"
+            "    throw new AppError('PERMISSION_DENIED', `Access denied: task.read`);\n"
+            "  }" in rendered
+        )
+
+
 class TestGenerateRoutePathB1:
     """B1: generate.py must emit route at reactions/toggle/route.ts (D3=A)."""
 

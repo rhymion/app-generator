@@ -121,22 +121,27 @@ export async function GET(request: NextRequest, { params }: Params) {
         })(),
         getUserRoleIds(actorId),
       ]);
-      let _canApprove = false;
-      let _canReject = false;
-      for (const _req of _latestRoundRequests) {
-        if (_req.status !== 'pending') continue;
-        if (!_req.approval_flow || !_roleIds.includes(_req.approval_flow.approver_role_id)) continue;
-        try {
-          // Same ordering contract every approve/reject route already
-          // enforces -- a pending row whose preceding stage(s) are not
-          // yet approved is not actionable by anyone yet.
-          await assertApprovalOrder(_req.id);
-          _canApprove = true;
-          _canReject = true;
-        } catch {
-          // not yet this caller's turn
-        }
-      }
+      // Issue #745: each pending sibling's assertApprovalOrder check is
+      // independent (no data dependency between siblings) -- Promise
+      // .allSettled runs them concurrently instead of the previous
+      // sequential for-loop. The ordering-check logic itself (which
+      // sibling this caller can act on) is unchanged: canApprove/
+      // canReject are true iff at least one actionable pending sibling
+      // passes the same ordering contract every approve/reject route
+      // already enforces (a pending row whose preceding stage(s) are not
+      // yet approved is not actionable by anyone yet) -- identical to the
+      // OR-across-siblings result the sequential loop computed.
+      const _actionableRequests = _latestRoundRequests.filter(
+        (_req) =>
+          _req.status === 'pending' &&
+          _req.approval_flow &&
+          _roleIds.includes(_req.approval_flow.approver_role_id),
+      );
+      const _orderResults = await Promise.allSettled(
+        _actionableRequests.map((_req) => assertApprovalOrder(_req.id)),
+      );
+      const _canApprove = _orderResults.some((r) => r.status === 'fulfilled');
+      const _canReject = _canApprove;
       const _approvable = await prisma.approvable.findUnique({
         where: { id: _approvableId },
         select: { creator_id: true },

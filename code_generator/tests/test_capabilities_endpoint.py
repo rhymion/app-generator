@@ -250,6 +250,36 @@ class TestCapabilitiesRouteRendering:
         assert 'getUserRoleIds(actorId),' in rendered
         assert 'const _roleIds = await getUserRoleIds(actorId);' not in rendered
 
+    def test_bridge_entity_parallelizes_per_sibling_order_check(self):
+        # Issue #745: the per-pending-sibling assertApprovalOrder loop is
+        # a sequential for-loop with no data dependency between
+        # iterations -- must be wrapped in Promise.allSettled, with
+        # canApprove/canReject computed as "at least one actionable
+        # sibling's order-check fulfilled", the same OR-across-siblings
+        # result the sequential loop produced (each iteration only ever
+        # set the flags to true, never cleared them).
+        rendered = _rendered(_entity('widget', 'widget'), _bridge_schema())
+        filter_call = (
+            "const _actionableRequests = _latestRoundRequests.filter(\n"
+            "        (_req) =>\n"
+            "          _req.status === 'pending' &&\n"
+            "          _req.approval_flow &&\n"
+            "          _roleIds.includes(_req.approval_flow.approver_role_id),\n"
+            "      );"
+        )
+        allsettled_call = (
+            "const _orderResults = await Promise.allSettled(\n"
+            "        _actionableRequests.map((_req) => assertApprovalOrder(_req.id)),\n"
+            "      );"
+        )
+        assert filter_call in rendered
+        assert allsettled_call in rendered
+        assert "const _canApprove = _orderResults.some((r) => r.status === 'fulfilled');" in rendered
+        assert "const _canReject = _canApprove;" in rendered
+        assert rendered.index(filter_call) < rendered.index(allsettled_call)
+        # No sequential for-loop left over.
+        assert 'for (const _req of _latestRoundRequests)' not in rendered
+
     def test_bridge_entity_reuses_edit_delete_guards(self):
         rendered = _rendered(_entity('widget', 'widget'), _bridge_schema())
         assert "from '@/lib/widget/edit_guard'" in rendered
