@@ -51,7 +51,7 @@ def main(argv: list[str]) -> int:
     prisma_schema_path = output_dir / 'prisma' / 'schema.prisma'
     try:
         validate_schema(schema)
-        validate_prisma_indexes(prisma_schema_path)
+        validate_prisma_indexes(prisma_schema_path, schema)
         validate_self_only_creator_id_columns(schema, prisma_schema_path)
         validate_defaults_cross_schema(schema, prisma_schema_path)
         validate_submit_on_default_matches_prisma(schema, prisma_schema_path)

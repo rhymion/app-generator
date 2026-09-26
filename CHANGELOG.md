@@ -128,6 +128,26 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   dropped from 5 queries to 1, `getOrganizationDetail` from 4 to 1. See
   `docs/knowledge/performance-improvements.md` §7.
 
+- **A column exposed for filtering/sorting in generated UI now gets an
+  automatic `@@index`** (issue #726) — any column that appears in an
+  entity's `x-display.table` (the generated list page's columns), or is
+  referenced by a view's `x-filter-values`, joins the existing
+  `creator_id`/`assignee_id`/`organization_id`/FK-column index
+  requirement enforced by `validate_prisma_indexes()`. Derived
+  mechanically from the schema by a new `derive_ui_exposed_index_columns()`
+  (`code_generator/validate.py`) — no hand-maintained column-name list.
+  `scripts/add_required_indexes.py` patches `prisma/schema.prisma`
+  accordingly; this repo's own dogfood schema needed 8 new indexes across
+  6 models (`user.name`, `permission.name`, `dashboard.name`,
+  `approval_flow.entity_name`, `approval_request.status`,
+  `app_setting.business_date`/`is_pinned`/`timezone`). Distinct from
+  issue #742 (ad hoc composite indexes for specific filtered/sorted
+  business queries, still deferred pending load-test evidence) — see
+  `docs/knowledge/prisma-schema-conventions.md` §5 for how the two
+  relate. No consumer-repo migration is included in this change; per the
+  standing migration-cadence policy, the actual `@@index` DDL reaches
+  each downstream consumer repo only at that repo's own next deploy.
+
 ### Fixed
 - **Generated `addEntity`/`updateEntity` service functions
   (`service.ts.jinja2`) misclassified Prisma's `P2028` error ("Unable to

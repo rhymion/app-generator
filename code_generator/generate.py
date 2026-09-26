@@ -943,7 +943,7 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     try:
         validate_schema(schema)
-        validate_prisma_indexes(Path(output_dir) / 'prisma' / 'schema.prisma')
+        validate_prisma_indexes(Path(output_dir) / 'prisma' / 'schema.prisma', schema)
         validate_self_only_creator_id_columns(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_defaults_cross_schema(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_submit_on_default_matches_prisma(schema, Path(output_dir) / 'prisma' / 'schema.prisma')

@@ -126,12 +126,97 @@ def _unique_scalar_columns(body: str) -> set[str]:
     return set(_UNIQUE_SCALAR.findall(body))
 
 
-def validate_prisma_indexes(schema_path: str | Path) -> None:
+def _x_display_table_items(entry: dict) -> list:
+    """Normalize an entity's `x-display.table` declaration to a list of
+    single-key dicts (or [] if absent). Mirrors context.py's own parsing:
+    `x-display` may be a bare list (older shorthand) or a dict with a
+    `table` key."""
+    xdisplay = entry.get('x-display')
+    if isinstance(xdisplay, list):
+        return xdisplay
+    if isinstance(xdisplay, dict) and isinstance(xdisplay.get('table'), list):
+        return xdisplay['table']
+    return []
+
+
+def derive_ui_exposed_index_columns(schema: dict) -> dict[str, set[str]]:
+    """Per-Prisma-model set of scalar columns exposed for filtering/sorting
+    in generated UI — Issue #726's decided indexing policy: a column gets an
+    automatic index when it appears in a generated list view
+    (`x-display.table`), or is referenced by `x-filter-values`.
+
+    Expects the EXPANDED intermediate schema (`code_generator/.generated/
+    json_schema.yaml`, the same input generate.py itself consumes) — not the
+    hand-authored `code_generator/json_schema.yaml` source. The hand-authored
+    form declares a many-to-one relationship as a bare property (e.g.
+    `role: {$ref: '#/definitions/role'}`); build_user_schema.py expands that
+    into the real FK scalar column (`role_id`, carrying `x-relationship`)
+    that this function's relation exclusion below depends on. Feeding the
+    hand-authored form here would misidentify every such relation-display
+    column (`role`, `organization`, ...) as a plain scalar column, and a
+    consumer that then wrote `@@index([role])` would target a Prisma
+    relation FIELD rather than its scalar FK column — not a valid index.
+
+    Excludes relationship display columns: an `x-display.table` entry naming
+    a relation (e.g. `resource`, backed by the real column `resource_id`)
+    rather than a scalar property is skipped here — the FK column itself is
+    already covered by `_relation_fk_columns()`/`_REQUIRED_INDEX_COLUMNS`.
+    Also excludes virtual columns with no backing DB column at all (neither
+    a scalar property nor a `{name}_id` relation) — there is nothing to
+    index.
+
+    Every raw (`__x`) and view (`x`) definition is scanned independently —
+    `x-display` is normally declared on the raw entity, `x-filter-values`
+    only ever on a view (see build_context.py) — and each definition key is
+    resolved to its backing Prisma model via `_resolve_backing_model_name()`,
+    so a column declared through a proxy view (e.g. `setting` -> `user`)
+    attributes its index requirement to the real model.
+    """
+    defs = schema.get('definitions', {}) or {}
+    out: dict[str, set[str]] = {}
+
+    for def_key, entry in defs.items():
+        if not isinstance(entry, dict):
+            continue
+
+        table = _x_display_table_items(entry)
+        filter_values = entry.get('x-filter-values') or {}
+        if not table and not filter_values:
+            continue
+
+        props = get_entity_properties(def_key, schema)
+        model_name = _resolve_backing_model_name(def_key, defs)
+        candidates = out.setdefault(model_name, set())
+
+        for item in table:
+            if not isinstance(item, dict) or not item:
+                continue
+            field_name = next(iter(item))
+            is_scalar_prop = field_name in props
+            is_relation = f'{field_name}_id' in props
+            if is_scalar_prop and not is_relation:
+                candidates.add(field_name)
+
+        candidates.update(filter_values)
+
+    return {model: cols for model, cols in out.items() if cols}
+
+
+def validate_prisma_indexes(schema_path: str | Path, schema: dict | None = None) -> None:
     """Verify every model has @@index for required hot columns.
 
     A column counts as indexed when it appears as the leftmost column of some
     @@index([...]) declaration on the same model — that's what the Postgres
     planner can use for filtering on that single column.
+
+    `schema` (the parsed, EXPANDED intermediate schema — see
+    `derive_ui_exposed_index_columns()`'s docstring) is optional so this
+    stays callable against a bare `.prisma` file with no JSON-schema context
+    (as the existing unit tests do). When given, it additionally enforces
+    Issue #726's UI-exposed indexing policy. Every real caller in this
+    codebase (generate.py, validate_schema_cli.py) has the expanded schema in
+    hand and passes it, so this half of the check is fail-closed in
+    practice, not opt-in.
 
     Raises SchemaValidationError listing every missing index so the author
     fixes them in one pass.
@@ -143,11 +228,13 @@ def validate_prisma_indexes(schema_path: str | Path) -> None:
         )
     text = path.read_text()
 
+    ui_derived = derive_ui_exposed_index_columns(schema) if schema is not None else {}
+
     errors: list[str] = []
     for name, body in _iter_model_blocks(text):
         indexed = _leftmost_indexed_columns(body) | _unique_scalar_columns(body)
-        required_cols = set(_REQUIRED_INDEX_COLUMNS) | _relation_fk_columns(body)
-        for col in sorted(required_cols):
+        hot_cols = set(_REQUIRED_INDEX_COLUMNS) | _relation_fk_columns(body)
+        for col in sorted(hot_cols):
             if _model_has_column(body, col) and col not in indexed:
                 errors.append(
                     f"model '{name}': missing required @@index([{col}]).  "
@@ -155,6 +242,18 @@ def validate_prisma_indexes(schema_path: str | Path) -> None:
                     f"on it (FK/bridge lookups, Creator/Assignee scoping, org "
                     f"filtering) will fall back to a full table scan.  Run "
                     f"`python3 scripts/add_required_indexes.py` to add it, or write "
+                    f"`@@index([{col}])` (or a composite starting with this column) "
+                    f"by hand."
+                )
+        for col in sorted(ui_derived.get(name, set()) - hot_cols):
+            if _model_has_column(body, col) and col not in indexed:
+                errors.append(
+                    f"model '{name}': missing required @@index([{col}]).  "
+                    f"'{col}' is exposed for filtering/sorting in a generated list "
+                    f"view (x-display.table) or x-filter-values (Issue #726); "
+                    f"without an index, that query falls back to a full table scan "
+                    f"as the dataset grows.  Run `python3 scripts/"
+                    f"add_required_indexes.py` to add it, or write "
                     f"`@@index([{col}])` (or a composite starting with this column) "
                     f"by hand."
                 )

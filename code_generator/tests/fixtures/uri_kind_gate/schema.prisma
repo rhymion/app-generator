@@ -71,4 +71,8 @@ model uri_kind_gate_wrapper {
   updater    user     @relation("UriKindGateWrapperUpdater", fields: [updater_id], references: [id])
   @@index([creator_id])
   @@index([updater_id])
+  // name/link_field: both are listed in x-display.table above, so Issue
+  // #726's UI-exposed indexing policy requires an index on each.
+  @@index([name])
+  @@index([link_field])
 }

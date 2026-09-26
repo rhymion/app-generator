@@ -139,6 +139,7 @@ model user {
   @@index([creator_id])
   @@index([tenant_id])
   @@index([updater_id])
+  @@index([name])
 }
 
 model role {
@@ -257,6 +258,9 @@ model app_setting {
   @@index([organization_id])
   @@index([creator_id])
   @@index([updater_id])
+  @@index([business_date])
+  @@index([is_pinned])
+  @@index([timezone])
 }
 
 model permission {
@@ -280,6 +284,7 @@ model permission {
   @@index([creator_id])
   @@index([role_id])
   @@index([updater_id])
+  @@index([name])
 }
 
 model approvable {
@@ -314,6 +319,7 @@ model approval_flow {
   @@index([approver_role_id])
   @@index([requestor_role_id])
   @@index([updater_id])
+  @@index([entity_name])
 }
 
 enum ApprovalRequestStatus {
@@ -352,6 +358,7 @@ model approval_request {
   @@index([approvable_id])
   @@index([approval_flow_id])
   @@index([round_id])
+  @@index([status])
 }
 
 model approval_history {
@@ -467,6 +474,7 @@ model dashboard {
 
   @@index([creator_id])
   @@index([updater_id])
+  @@index([name])
 }
 
 enum DashboardWidgetChartType {
