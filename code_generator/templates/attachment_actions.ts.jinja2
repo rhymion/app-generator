@@ -6,7 +6,8 @@
 
 {% if owners %}import { revalidatePath } from 'next/cache';
 {% endif %}import prisma from '@/lib/prisma';
-{% if owners %}import { requirePermission } from '@/lib/authz';
+{% if owners %}import { getSessionUserIdOrThrow, getModelPermissions, resolvePermissions, type RichPermissions } from '@/lib/authz';
+import { AppError } from '@/lib/_errors';
 {% endif %}
 import { encryptFileName } from '@/lib/compliance/attachment_name_crypto';
 
@@ -27,6 +28,25 @@ export type AttachmentItemInput = {
  * 'update'.
  */
 async function assertCanEditBridge(attachable_id: string): Promise<void> {
+{% if owners %}
+  const userId = await getSessionUserIdOrThrow();
+  // Issue #750: coarse, item-independent gate BEFORE the owner row fetch
+  // below -- a caller with no possible update grant (general permission, or
+  // Creator/Assignee role membership) on ANY candidate owner model is
+  // rejected before this function ever queries the attachable/owner tables.
+  // Which owner model actually applies isn't known until the row below is
+  // fetched (this bridge is polymorphic across `owners`), so the coarse
+  // check spans every candidate model rather than one specific model --
+  // the per-owner RichPermissions fetched here are reused (not re-fetched)
+  // for the item-level resolution once the matching owner is found.
+  const basePermsByOwner: Record<string, RichPermissions> = {};
+{% for owner in owners %}
+  basePermsByOwner['{{ owner.name }}'] = (await getModelPermissions('{{ owner.name }}', userId)).permissions;
+{% endfor %}
+  if (!Object.values(basePermsByOwner).some((p) => p.update)) {
+    throw new AppError('PERMISSION_DENIED', 'Access denied: update');
+  }
+{% endif %}
   const owner = await prisma.attachable.findUnique({
     where: { id: attachable_id },
     select: {
@@ -38,7 +58,10 @@ async function assertCanEditBridge(attachable_id: string): Promise<void> {
   if (!owner) throw new Error('Attachable not found');
 {% for owner in owners %}
   if (owner.{{ owner.name }}) {
-    await requirePermission('{{ owner.name }}', 'update', owner.{{ owner.name }});
+    const resolved = await resolvePermissions(basePermsByOwner['{{ owner.name }}'], owner.{{ owner.name }}, userId);
+    if (!resolved.update) {
+      throw new AppError('PERMISSION_DENIED', 'Access denied: {{ owner.name }}.update');
+    }
     return;
   }
 {% endfor %}

@@ -2,9 +2,10 @@
 
 import { redirect } from 'next/navigation';
 {% if comment_actions_code or (can_list and can_delete) or can_invalidate %}import { revalidatePath } from 'next/cache';
-{% endif %}{% if can_create or can_update or can_invalidate or has_commentable or can_delete %}import { {% if can_create or can_update or can_invalidate or has_commentable %}getSessionUserIdOrThrow, requirePermission{% if can_delete %}, {% endif %}{% endif %}{% if can_delete %}getModelPermissions{% endif %} } from '@/lib/authz';
+{% endif %}{% if can_create or can_update or can_invalidate or has_commentable or can_delete %}import { {% if can_create or can_update or can_invalidate or has_commentable %}getSessionUserIdOrThrow, requirePermission{% if has_commentable %}, resolvePermissions{% endif %}{% if can_delete %}, {% endif %}{% endif %}{% if can_delete %}getModelPermissions{% endif %} } from '@/lib/authz';
 {% endif %}
 {% if can_create or can_update or can_delete %}import { AppError, type ActionFailure } from '@/lib/_errors';
+{% elif has_commentable %}import { AppError } from '@/lib/_errors';
 {% endif %}
 {% if can_invalidate %}
 {% if invalidate_module %}
@@ -137,7 +138,16 @@ export async function toggle{{ parent_pascal }}CommentReaction(
   if (!validTypes.includes(type)) {
     throw new Error(`Invalid reaction type: ${type}`);
   }
-  // D7=B: require read permission on the parent entity that owns the comment
+  // D7=B: require read permission on the parent entity that owns the comment.
+  // Issue #750: coarse, item-independent gate BEFORE the comment/parent row
+  // fetch below -- a caller with no possible access path at all (no general
+  // grant, no Creator/Assignee role) is rejected before this action ever
+  // queries the comment/parent tables. `basePerms` is reused (not
+  // re-fetched) for the item-level resolution once parentRow is fetched --
+  // same two-stage pattern PR #749 applied to the REST routes, closing the
+  // Server-Action-specific leak shape here (which error is thrown, not a
+  // 404-vs-403 status code).
+  const basePerms = await requirePermission('{{ parent }}', 'read', undefined, userId);
   const comment = await prisma.comment.findUnique({
     where: { id: commentId },
     select: { commentable_id: true },
@@ -147,7 +157,10 @@ export async function toggle{{ parent_pascal }}CommentReaction(
     where: { commentable_id: comment.commentable_id },
     select: { id: true, creator_id: true{% if has_assignee_id %}, assignee_id: true{% endif %} },
   });
-  await requirePermission('{{ parent }}', 'read', parentRow ?? undefined);
+  const resolved = parentRow ? await resolvePermissions(basePerms, parentRow, userId) : basePerms;
+  if (!resolved.read) {
+    throw new AppError('PERMISSION_DENIED', `Access denied: {{ parent }}.read`);
+  }
 
   const existing = await prisma.reaction.findUnique({
     where: { comment_id_user_id_type: { comment_id: commentId, user_id: userId, type } },
