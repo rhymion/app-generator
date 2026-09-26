@@ -3597,7 +3597,14 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             if narrowed:
                 child_include_entries.append(narrowed)
                 continue
-            child_rels = get_parent_relationships(cdef)
+            child_rels_raw = get_parent_relationships(cdef)
+            # Exclude the child's own back-reference to the parent entity
+            # currently being built (e.g. policy_party.policy_id -> policy,
+            # while building policy's own detail getter) -- the caller
+            # already has that row in scope, so re-including it is a pure
+            # wasted join/round-trip. Mirrors the existing "Exclude back-ref
+            # to the one-to-one parent" guard for auto_create_oto_rels below.
+            child_rels = [r for r in child_rels_raw if r['target'] != model]
             if not child_rels:
                 child_include_entries.append(f"{prop}: true")
             else:
