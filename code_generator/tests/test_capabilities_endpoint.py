@@ -195,8 +195,34 @@ class TestCapabilitiesRouteRendering:
         assert 'approval: null,' in rendered
         assert 'approval_request' not in rendered
         assert 'canSubmitForApproval' not in rendered
-        assert "canAccess('gadget', 'update'" in rendered
-        assert "canAccess('gadget', 'delete'" in rendered
+        # cmd_1180: update/delete reuse the RichPermissions already
+        # resolved for the 'read' check -- no separate canAccess() call
+        # (and therefore no second getModelPermissions() fetch) per
+        # operation.
+        assert 'update: resolved.update,' in rendered
+        assert 'delete: resolved.delete,' in rendered
+        assert 'canAccess' not in rendered
+
+    def test_permission_check_precedes_item_fetch(self):
+        # cmd_1180 design constraint (1): the coarse, item-independent
+        # permission check must run BEFORE this route ever queries the
+        # item table, so a caller with no possible access path at all
+        # never learns whether the row exists (no 404-vs-403 leak). The
+        # item-level (Creator/Assignee) resolution then reuses that same
+        # RichPermissions object -- see test_plain_entity_no_approval_section.
+        rendered = _rendered(_entity('gadget', 'gadget'), _plain_schema())
+        coarse_check = "const basePerms = await requireApiPermission(actorId, 'gadget', 'read');"
+        item_fetch = 'const item = await getGadgetDetail(id);'
+        assert coarse_check in rendered
+        assert item_fetch in rendered
+        assert rendered.index(coarse_check) < rendered.index(item_fetch)
+        # The item-level re-check happens strictly after the item is
+        # fetched (resolvePermissions needs the item's creator_id/
+        # assignee_id) -- proving this isn't just a coincidental ordering
+        # of two independent statements.
+        resolve_call = 'const resolved = await resolvePermissions(basePerms, item, actorId);'
+        assert resolve_call in rendered
+        assert rendered.index(item_fetch) < rendered.index(resolve_call)
 
     def test_bridge_entity_gets_approval_section_and_imports(self):
         rendered = _rendered(_entity('widget', 'widget'), _bridge_schema())

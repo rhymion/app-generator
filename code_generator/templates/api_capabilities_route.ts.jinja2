@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
+import { authenticateApiKey, requireApiPermission, handleApiError, ApiError } from '@/lib/api-auth';
 import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
-{% set needs_can_access = (can_update or can_delete) and not is_self_only %}
-{% if needs_can_access or has_approvable_bridge %}
-import { {% if needs_can_access %}canAccess{% endif %}{% if needs_can_access and has_approvable_bridge %}, {% endif %}{% if has_approvable_bridge %}getUserRoleIds{% endif %} } from '@/lib/authz';
-{% endif %}
+import { resolvePermissions{% if has_approvable_bridge %}, getUserRoleIds{% endif %} } from '@/lib/authz';
 {% if has_edit_guard %}
 import { assertEditAllowed } from '@/lib/{{ parent }}/edit_guard';
 {% endif %}
@@ -37,17 +34,36 @@ export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     const { userId: actorId } = await authenticateApiKey(request);
+    // Coarse, item-independent gate FIRST, before this route ever queries
+    // the item table (cmd_1180): a caller with no possible access path at
+    // all -- no general grant, and not a member of any role that could
+    // grant item-level (Creator/Assignee) access -- is rejected right
+    // here, so record existence is never revealed via a 404-vs-403
+    // distinction to someone who could never have read ANY row of this
+    // model. `basePerms` (the unresolved RichPermissions) is reused below
+    // for the item-level resolution AND for update/delete -- this is the
+    // ONE and only getModelPermissions()-backed permission fetch this
+    // request makes for '{{ parent }}'.
+    const basePerms = await requireApiPermission(actorId, '{{ parent }}', 'read');
     const item = await get{{ parent_pascal }}Detail(id{% if should_filter_by_org or is_self_only %}, actorId{% endif %});
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
-    await requireApiPermission(actorId, '{{ parent }}', 'read', item);
+    // Now that the item is available, resolve item-level (Creator/
+    // Assignee) permission against it and re-check 'read' -- a caller who
+    // passed the coarse gate above via role membership alone (not a
+    // general grant) may still turn out not to own/be assigned to THIS
+    // specific item.
+    const resolved = await resolvePermissions(basePerms, item, actorId);
+    if (!resolved.read) {
+      throw new ApiError(403, `Access denied: {{ parent }}.read`);
+    }
     const _item = item as Record<string, unknown>;
 
     const operations = {
       read: true,
-      update: {% if not can_update %}false{% elif is_self_only %}_item.creator_id === actorId{% else %}await canAccess('{{ parent }}', 'update', actorId, item){% endif %},
-      delete: {% if not can_delete %}false{% elif is_self_only %}_item.creator_id === actorId{% else %}await canAccess('{{ parent }}', 'delete', actorId, item){% endif %},
+      update: {% if not can_update %}false{% elif is_self_only %}_item.creator_id === actorId{% else %}resolved.update{% endif %},
+      delete: {% if not can_delete %}false{% elif is_self_only %}_item.creator_id === actorId{% else %}resolved.delete{% endif %},
     };
 
     const write_locks = {

@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Papa from 'papaparse';
 import prisma from '@/lib/prisma';
-import { getModelPermissions, assertPermission{% if import_can_update and not is_self_only %}, canAccess{% endif %} } from '@/lib/authz';
+import { getModelPermissions, assertPermission{% if import_can_update and not is_self_only %}, resolvePermissions{% endif %} } from '@/lib/authz';
 import { handleApiError, resolveActorId } from '@/lib/api-auth';
 import { unescapeImportValue } from '@/lib/_csv';
 import { generateImportToken, verifyImportToken } from '@/lib/_import';
@@ -422,7 +422,12 @@ export async function POST(request: NextRequest) {
       // rather than relying on the query, per the "no escape" invariant.
       const canUpdate = existing.creator_id === actorId;
 {% else %}
-      const canUpdate = await canAccess('{{ parent }}', 'update', actorId, existing);
+      // cmd_1180: reuse `permissions` (already fetched once, above, for
+      // the top-of-request 'import' check) instead of canAccess(), which
+      // would call getModelPermissions() again for the SAME (model,
+      // actorId) on every row -- a CSV import can be hundreds/thousands
+      // of rows, so this was a real per-row DB round trip, not a one-off.
+      const canUpdate = (await resolvePermissions(permissions, existing, actorId)).update;
 {% endif %}
       if (!canUpdate) {
         errors.push({ row: rowNum, code: 'ACCESS_DENIED', message: 'Not permitted to update this row' });
