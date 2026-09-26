@@ -236,6 +236,20 @@ class TestCapabilitiesRouteRendering:
         assert 'approval,' in rendered
         assert 'approval: null,' not in rendered
 
+    def test_bridge_entity_approval_round_lookup_parallelizes_role_ids(self):
+        # subtask_1180d (re-landing subtask_1176n item 3, dropped when PR#748
+        # was closed as superseded during the PR#749 conflict resolution):
+        # getUserRoleIds(actorId) has no data dependency on the
+        # findFirst -> findMany pair (findMany's round_id argument comes from
+        # findFirst's own result, a real sequential dependency), so it must
+        # run concurrently via Promise.all rather than after the pair.
+        rendered = _rendered(_entity('widget', 'widget'), _bridge_schema())
+        assert (
+            'const [_latestRoundRequests, _roleIds] = await Promise.all([' in rendered
+        )
+        assert 'getUserRoleIds(actorId),' in rendered
+        assert 'const _roleIds = await getUserRoleIds(actorId);' not in rendered
+
     def test_bridge_entity_reuses_edit_delete_guards(self):
         rendered = _rendered(_entity('widget', 'widget'), _bridge_schema())
         assert "from '@/lib/widget/edit_guard'" in rendered

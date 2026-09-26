@@ -101,18 +101,26 @@ export async function GET(request: NextRequest, { params }: Params) {
     } | null = null;
     const _approvableId = _item.{{ approvable_fk }} as string | null | undefined;
     if (_approvableId) {
-      const _latestRoundRow = await prisma.approval_request.findFirst({
-        where: { approvable_id: _approvableId },
-        orderBy: { created_at: 'desc' },
-        select: { round_id: true },
-      });
-      const _latestRoundRequests = _latestRoundRow
-        ? await prisma.approval_request.findMany({
-            where: { approvable_id: _approvableId, round_id: _latestRoundRow.round_id },
-            select: { id: true, status: true, approval_flow: { select: { approver_role_id: true } } },
-          })
-        : [];
-      const _roleIds = await getUserRoleIds(actorId);
+      // findFirst -> findMany is a real sequential dependency (findMany's
+      // round_id comes from findFirst's result); getUserRoleIds(actorId) has
+      // no data dependency on either, so it runs concurrently alongside the
+      // pair via Promise.all rather than after them.
+      const [_latestRoundRequests, _roleIds] = await Promise.all([
+        (async () => {
+          const _latestRoundRow = await prisma.approval_request.findFirst({
+            where: { approvable_id: _approvableId },
+            orderBy: { created_at: 'desc' },
+            select: { round_id: true },
+          });
+          return _latestRoundRow
+            ? await prisma.approval_request.findMany({
+                where: { approvable_id: _approvableId, round_id: _latestRoundRow.round_id },
+                select: { id: true, status: true, approval_flow: { select: { approver_role_id: true } } },
+              })
+            : [];
+        })(),
+        getUserRoleIds(actorId),
+      ]);
       let _canApprove = false;
       let _canReject = false;
       for (const _req of _latestRoundRequests) {
