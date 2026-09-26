@@ -4,6 +4,7 @@ import { requirePermission, getSessionUserId, type RichPermissions, type Operati
 import { TtlLruCache } from '@/lib/_ttl_lru';
 import { AppError, type ErrorCode } from '@/lib/_errors';
 import { SCHEDULED_TASK_ROLE_NAME } from '@/lib/scheduled-tasks/system-actor';
+import { enterRequestScope } from '@/lib/_request_scope';
 
 export class ApiError extends Error {
   constructor(
@@ -56,6 +57,7 @@ export function clearApiKeyCache(): void {
 }
 
 export async function authenticateApiKey(request: NextRequest): Promise<{ userId: string }> {
+  enterRequestScope();
   const apiKey =
     request.headers.get('X-API-Key') ||
     request.headers.get('Authorization')?.replace('Bearer ', '');

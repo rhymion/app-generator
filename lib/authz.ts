@@ -6,8 +6,10 @@ import { cache } from 'react';
 import { TtlLruCache } from '@/lib/_ttl_lru';
 import { SELF_ONLY_ADMIN_BYPASS_ENTITIES } from '@/lib/self_only_admin_bypass_entities';
 import { AppError } from '@/lib/_errors';
+import { enterRequestScope, memoizeInRequestScope } from '@/lib/_request_scope';
 
 export const getSessionUserId = cache(async function getSessionUserId(): Promise<string | null> {
+  enterRequestScope();
   const session = await auth();
   return session?.user?.id ?? null;
 });
@@ -112,7 +114,13 @@ export async function resolvePermissions(
  * Per-process cache of (userId, model) → permission result (Phase 2 #3 from
  * performance-plan-session.md). The original implementation ran a 3-branch OR
  * permission query (`permission.findMany`) on every server-rendered page and
- * every API call, gated only by the per-request React `cache()` wrapper.
+ * every API call, gated only by the per-request React `cache()` wrapper —
+ * which does not dedupe inside a Next.js Route Handler (see
+ * `getModelPermissions`'s own doc comment below); this per-process cache is
+ * what actually bounds the Route Handler cost across requests. Within one
+ * request, `lib/_request_scope.ts`'s `memoizeInRequestScope` now provides
+ * the real one-call guarantee `cache()`'s comment used to (incorrectly)
+ * claim on its own.
  *
  * Trade-off: a user's role/permission change takes effect within one TTL
  * window. We don't track a roles_version, so changes don't invalidate
@@ -164,45 +172,49 @@ const permissionRowsCache = new TtlLruCache<string, PermissionRow[]>(PERMISSION_
  * unchanged, so which rows come back for a given model is identical to
  * before.
  *
- * Layered caching, same shape as `getModelPermissions`: per-request React
- * `cache()` (dedups every model a request asks about into the same call),
- * then per-process TTL LRU (`permissionRowsCache`, deduplicates across
- * requests until expiry).
+ * Layered caching, same shape as `getModelPermissions`: request-scope
+ * memoization (`memoizeInRequestScope`, dedups every model a request asks
+ * about into the same call — works in Route Handlers as well as Server
+ * Components/Actions, unlike the React `cache()` wrapper this function also
+ * carries, which only dedupes inside a React render tree), then per-process
+ * TTL LRU (`permissionRowsCache`, deduplicates across requests until expiry).
  */
-export const getPermissionRowsForUser = cache(async (resolvedUserId: string): Promise<PermissionRow[]> => {
-  if (permissionCacheEnabled) {
-    const cached = permissionRowsCache.get(resolvedUserId);
-    if (cached) return cached;
-  }
+export const getPermissionRowsForUser = cache((resolvedUserId: string): Promise<PermissionRow[]> => {
+  return memoizeInRequestScope(`permRows|${resolvedUserId}`, async () => {
+    if (permissionCacheEnabled) {
+      const cached = permissionRowsCache.get(resolvedUserId);
+      if (cached) return cached;
+    }
 
-  const rows = await prisma.permission.findMany({
-    where: {
-      OR: [
-        { role_id: null }, // Global permissions (no role)
-        // Regular roles the user belongs to, excluding special roles
-        {
-          role: {
-            users: { some: { id: resolvedUserId } },
-            name: { notIn: [...SPECIAL_ROLE_NAMES] },
+    const rows = await prisma.permission.findMany({
+      where: {
+        OR: [
+          { role_id: null }, // Global permissions (no role)
+          // Regular roles the user belongs to, excluding special roles
+          {
+            role: {
+              users: { some: { id: resolvedUserId } },
+              name: { notIn: [...SPECIAL_ROLE_NAMES] },
+            },
           },
-        },
-        // Always fetch all special role definitions for deferred item-level resolution
-        { role: { name: { in: [...SPECIAL_ROLE_NAMES] } } },
-      ],
-    },
-    select: {
-      name: true,
-      create: true,
-      read: true,
-      update: true,
-      delete: true,
-      import: true,
-      role: { select: { name: true } },
-    },
-  });
+          // Always fetch all special role definitions for deferred item-level resolution
+          { role: { name: { in: [...SPECIAL_ROLE_NAMES] } } },
+        ],
+      },
+      select: {
+        name: true,
+        create: true,
+        read: true,
+        update: true,
+        delete: true,
+        import: true,
+        role: { select: { name: true } },
+      },
+    });
 
-  if (permissionCacheEnabled) permissionRowsCache.set(resolvedUserId, rows);
-  return rows;
+    if (permissionCacheEnabled) permissionRowsCache.set(resolvedUserId, rows);
+    return rows;
+  });
 });
 
 export async function invalidatePermissionCache(): Promise<void> {
@@ -276,10 +288,25 @@ export async function deriveRichPermissionsFromRows(rows: PermissionRow[]): Prom
  * Returning userId avoids a separate getSessionUserId() call in callers and
  * enables fully parallel fetching alongside entity data.
  *
- * Layered caching: per-request React `cache()` (dedups concurrent calls within
- * one render), then per-process TTL LRU (`permissionCache`, deduplicates across
- * requests until expiry). The underlying row fetch is itself batched across
- * every model a request asks about — see `getPermissionRowsForUser`.
+ * Layered caching: request-scope memoization (`memoizeInRequestScope`,
+ * dedups concurrent AND sequential calls within one request — Route
+ * Handler, Server Action, or Server Component render alike), then
+ * per-process TTL LRU (`permissionCache`, deduplicates across requests
+ * until expiry). The underlying row fetch is itself batched across every
+ * model a request asks about — see `getPermissionRowsForUser`.
+ *
+ * This is the ONLY place in the generated app that queries the DB for a
+ * user's permissions — `requireApiPermission`/`requirePermission`/
+ * `canAccess` all resolve through this one function (see their own doc
+ * comments), so a request that asks about the same (model, userId) more
+ * than once (e.g. a capabilities endpoint checking read, then update, then
+ * delete on one item) issues at most one `permission.findMany` for it,
+ * not one per call.
+ *
+ * Still wrapped in React `cache()` too: harmless where it already worked
+ * (Server Component render trees dedupe there before this function's body
+ * even runs), and a no-op fallback path when `memoizeInRequestScope` finds
+ * no active request scope (see that module's own doc comment).
  */
 export const getModelPermissions = cache(async (
   model: ModelName,
@@ -291,44 +318,17 @@ export const getModelPermissions = cache(async (
     return { permissions: empty, userId: null };
   }
 
-  const cacheKey = `${resolvedUserId}|${model}`;
-  if (permissionCacheEnabled) {
-    const cached = permissionCache.get(cacheKey);
-    if (cached) return cached;
-  }
-
-  // audit_log is a system-admin capability. Users holding the 'Administrator' role
-  // get full CRUD access without an explicit permission record, so audit_log does
-  // not appear in the user-facing permission list (permission.cy.ts count stays at 6).
-  if (model === 'audit_log') {
-    const adminRoleCount = await prisma.role.count({
-      where: { name: 'Administrator', users: { some: { id: resolvedUserId } } },
-    });
-    if (adminRoleCount > 0) {
-      const adminPerms: RichPermissions = { ...READ_ONLY_FLAGS, general: READ_ONLY_FLAGS, creator: null, assignee: null };
-      const result = { permissions: adminPerms, userId: resolvedUserId };
-      if (permissionCacheEnabled) permissionCache.set(cacheKey, result);
-      return result;
+  return memoizeInRequestScope(`modelPerms|${resolvedUserId}|${model}`, async () => {
+    const cacheKey = `${resolvedUserId}|${model}`;
+    if (permissionCacheEnabled) {
+      const cached = permissionCache.get(cacheKey);
+      if (cached) return cached;
     }
-  }
 
-  const allRows = await getPermissionRowsForUser(resolvedUserId);
-  const rows = allRows.filter((row) => row.name === model);
-
-  if (rows.length === 0) {
-    // x-self-only entities with admin_bypass:true (cmd_536, e.g. `setting`) are
-    // deliberately excluded from ALL_ENTITIES-driven permission grants — there is
-    // nothing to "grant" for a self-service, per-user entity — so they never have
-    // an explicit permission row for anyone. Without this fallback, the
-    // privileged role's item-level bypass — trySelfOnlyAdminBypass(), which
-    // independently re-checks role membership and writes the audit row inside
-    // each entity's own getters — would never even be reached: this coarse
-    // operation-level check would deny first. Only a READ shortcut is granted
-    // (mirroring audit_log above) — there is no admin bypass on write for these
-    // entities. Checked only in the no-rows branch so it can never shadow a real
-    // grant (e.g. `dashboard`, an ordinary entity that IS in ALL_ENTITIES and can
-    // have full CRUD granted through the ordinary path above).
-    if (SELF_ONLY_ADMIN_BYPASS_ENTITIES.has(model)) {
+    // audit_log is a system-admin capability. Users holding the 'Administrator' role
+    // get full CRUD access without an explicit permission record, so audit_log does
+    // not appear in the user-facing permission list (permission.cy.ts count stays at 6).
+    if (model === 'audit_log') {
       const adminRoleCount = await prisma.role.count({
         where: { name: 'Administrator', users: { some: { id: resolvedUserId } } },
       });
@@ -339,17 +339,46 @@ export const getModelPermissions = cache(async (
         return result;
       }
     }
-    // Default: deny all if no explicit permissions
-    const full = await deriveRichPermissionsFromRows([]);
-    const result = { permissions: full, userId: resolvedUserId };
+
+    const allRows = await getPermissionRowsForUser(resolvedUserId);
+    const rows = allRows.filter((row) => row.name === model);
+
+    if (rows.length === 0) {
+      // x-self-only entities with admin_bypass:true (cmd_536, e.g. `setting`) are
+      // deliberately excluded from ALL_ENTITIES-driven permission grants — there is
+      // nothing to "grant" for a self-service, per-user entity — so they never have
+      // an explicit permission row for anyone. Without this fallback, the
+      // privileged role's item-level bypass — trySelfOnlyAdminBypass(), which
+      // independently re-checks role membership and writes the audit row inside
+      // each entity's own getters — would never even be reached: this coarse
+      // operation-level check would deny first. Only a READ shortcut is granted
+      // (mirroring audit_log above) — there is no admin bypass on write for these
+      // entities. Checked only in the no-rows branch so it can never shadow a real
+      // grant (e.g. `dashboard`, an ordinary entity that IS in ALL_ENTITIES and can
+      // have full CRUD granted through the ordinary path above).
+      if (SELF_ONLY_ADMIN_BYPASS_ENTITIES.has(model)) {
+        const adminRoleCount = await prisma.role.count({
+          where: { name: 'Administrator', users: { some: { id: resolvedUserId } } },
+        });
+        if (adminRoleCount > 0) {
+          const adminPerms: RichPermissions = { ...READ_ONLY_FLAGS, general: READ_ONLY_FLAGS, creator: null, assignee: null };
+          const result = { permissions: adminPerms, userId: resolvedUserId };
+          if (permissionCacheEnabled) permissionCache.set(cacheKey, result);
+          return result;
+        }
+      }
+      // Default: deny all if no explicit permissions
+      const full = await deriveRichPermissionsFromRows([]);
+      const result = { permissions: full, userId: resolvedUserId };
+      if (permissionCacheEnabled) permissionCache.set(cacheKey, result);
+      return result;
+    }
+
+    const permissions = await deriveRichPermissionsFromRows(rows);
+    const result = { permissions, userId: resolvedUserId };
     if (permissionCacheEnabled) permissionCache.set(cacheKey, result);
     return result;
-  }
-
-  const permissions = await deriveRichPermissionsFromRows(rows);
-  const result = { permissions, userId: resolvedUserId };
-  if (permissionCacheEnabled) permissionCache.set(cacheKey, result);
-  return result;
+  });
 });
 
 export async function canAccess(
@@ -390,13 +419,18 @@ export async function assertPermission(permissions: OperationFlags, operation: O
   }
 }
 
-/** Returns the IDs of all roles the current user (or given userId) belongs to. */
-export const getUserRoleIds = cache(async (userId?: string | null): Promise<string[]> => {
-  const resolvedUserId = userId ?? await getSessionUserId();
-  if (!resolvedUserId) return [];
-  const user = await prisma.user.findUnique({
-    where: { id: resolvedUserId },
-    select: { roles: { select: { id: true } } },
+/** Returns the IDs of all roles the current user (or given userId) belongs to.
+ * Request-scope memoized (see `getModelPermissions`'s doc comment) so a
+ * request that asks more than once (e.g. once per pending approval sibling
+ * in a capabilities check) issues at most one `user.findUnique` for it. */
+export const getUserRoleIds = cache((userId?: string | null): Promise<string[]> => {
+  return memoizeInRequestScope(`userRoleIds|${userId ?? '(session)'}`, async () => {
+    const resolvedUserId = userId ?? await getSessionUserId();
+    if (!resolvedUserId) return [];
+    const user = await prisma.user.findUnique({
+      where: { id: resolvedUserId },
+      select: { roles: { select: { id: true } } },
+    });
+    return user?.roles.map(r => r.id) ?? [];
   });
-  return user?.roles.map(r => r.id) ?? [];
 });

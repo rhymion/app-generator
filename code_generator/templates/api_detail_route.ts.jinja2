@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
+{% set needs_resolve = can_view or (can_update and not is_self_only) or (can_delete and not is_self_only) %}
+import { authenticateApiKey, requireApiPermission, handleApiError{% if needs_resolve %}, ApiError{% endif %} } from '@/lib/api-auth';
 import { getRateLimiter } from '@/lib/rate-limit';
+{% if needs_resolve %}
+import { resolvePermissions } from '@/lib/authz';
+{% endif %}
 {% if (can_view and comment_has_mention) or can_update or can_delete %}import prisma from '@/lib/prisma';
 {% endif %}{% if can_view %}
 import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
@@ -29,11 +33,21 @@ export async function GET(request: NextRequest, { params }: Params) {
         { status: 429, headers: { 'Retry-After': String(_rl.retryAfterSeconds), 'X-RateLimit-Bucket': 'api:read' } },
       );
     }
+    // cmd_1180: coarse, item-independent gate BEFORE the item fetch below
+    // -- a caller with no possible access path at all (no general grant,
+    // no Creator/Assignee role) is rejected before this route ever
+    // queries the item table, so record existence is never revealed to
+    // them via a 404-vs-403 distinction. `basePerms` is reused (not
+    // re-fetched) for the item-level resolution just below.
+    const basePerms = await requireApiPermission(actorId, '{{ parent }}', 'read');
     const item = await get{{ parent_pascal }}Detail(id{% if should_filter_by_org or is_self_only %}, actorId{% endif %});
     if (!item) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
-    await requireApiPermission(actorId, '{{ parent }}', 'read', item);
+    const resolved = await resolvePermissions(basePerms, item, actorId);
+    if (!resolved.read) {
+      throw new ApiError(403, `Access denied: {{ parent }}.read`);
+    }
 {% if comment_has_mention %}
     // Mention decode (cmd_522c): get{{ parent_pascal }}Detail() returns RAW
     // @[user_id:<id>] markers (needed by the page/FormView path's
@@ -95,6 +109,15 @@ export async function PUT(request: NextRequest, { params }: Params) {
         { status: 429, headers: { 'Retry-After': String(_rl.retryAfterSeconds), 'X-RateLimit-Bucket': 'api:write' } },
       );
     }
+{% if not is_self_only %}
+    // cmd_1180: coarse, item-independent gate BEFORE the item fetch below
+    // -- a caller with no possible access path at all (no general grant,
+    // no Creator/Assignee role) is rejected before this route ever
+    // queries the item table, so record existence is never revealed to
+    // them via a 404-vs-403 distinction. `basePerms` is reused (not
+    // re-fetched) for the item-level resolution further down.
+    const basePerms = await requireApiPermission(actorId, '{{ parent }}', 'update');
+{% endif %}
 {% if should_filter_by_org %}
     const _assocOrgs = await getAssociatedOrganizations(actorId);
     const _assocOrgIds = _assocOrgs.map((o) => o.id);
@@ -128,7 +151,10 @@ export async function PUT(request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 {% else %}
-    await requireApiPermission(actorId, '{{ parent }}', 'update', existing);
+    const resolved = await resolvePermissions(basePerms, existing, actorId);
+    if (!resolved.update) {
+      throw new ApiError(403, `Access denied: {{ parent }}.update`);
+    }
 {% endif %}
     const body = await request.json();
     const { {{ all_body_fields_create }} } = body;
@@ -167,6 +193,15 @@ export async function DELETE(request: NextRequest, { params }: Params) {
         { status: 429, headers: { 'Retry-After': String(_rl.retryAfterSeconds), 'X-RateLimit-Bucket': 'api:write' } },
       );
     }
+{% if not is_self_only %}
+    // cmd_1180: coarse, item-independent gate BEFORE the item fetch below
+    // -- a caller with no possible access path at all (no general grant,
+    // no Creator/Assignee role) is rejected before this route ever
+    // queries the item table, so record existence is never revealed to
+    // them via a 404-vs-403 distinction. `basePerms` is reused (not
+    // re-fetched) for the item-level resolution further down.
+    const basePerms = await requireApiPermission(actorId, '{{ parent }}', 'delete');
+{% endif %}
 {% if should_filter_by_org %}
     const _assocOrgs = await getAssociatedOrganizations(actorId);
     const _assocOrgIds = _assocOrgs.map((o) => o.id);
@@ -196,7 +231,10 @@ export async function DELETE(request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 {% else %}
-    await requireApiPermission(actorId, '{{ parent }}', 'delete', existing);
+    const resolved = await resolvePermissions(basePerms, existing, actorId);
+    if (!resolved.delete) {
+      throw new ApiError(403, `Access denied: {{ parent }}.delete`);
+    }
 {% endif %}
     await delete{{ parent_pascal }}({% if is_audited %}actorId, {% endif %}[id]);
     return new NextResponse(null, { status: 204 });
