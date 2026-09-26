@@ -3597,7 +3597,10 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             if narrowed:
                 child_include_entries.append(narrowed)
                 continue
-            child_rels = get_parent_relationships(cdef)
+            child_rels_raw = get_parent_relationships(cdef)
+            # Exclude back-ref to the current parent model (avoid circular
+            # include) -- mirrors the one_to_one_include_entries guard below.
+            child_rels = [r for r in child_rels_raw if r['target'] != model]
             if not child_rels:
                 child_include_entries.append(f"{prop}: true")
             else:

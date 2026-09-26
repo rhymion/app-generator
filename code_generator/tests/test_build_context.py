@@ -719,11 +719,12 @@ class TestChildIncludeDeepLabelFieldMerge:
         return next((e for e in ctx["include_entries_detail"] if e.startswith("items:")), None)
 
     def test_no_label_field_uses_basic_child_includes(self):
-        """Without label_field, child include uses only the child's own FK relations."""
+        """Without label_field, child include uses only the child's own FK relations,
+        excluding the back-ref to the parent (avoid circular include)."""
         ctx = build_context(self._entity(), self.SCHEMA)
         entry = self._items_entry(ctx)
         assert entry is not None
-        assert "main: true" in entry
+        assert "main: true" not in entry  # back-ref to parent excluded
         assert "buyer: true" in entry
         assert "buyer: { include:" not in entry  # no deep merge
 
@@ -741,7 +742,7 @@ class TestChildIncludeDeepLabelFieldMerge:
         entry = self._items_entry(ctx)
         assert entry is not None
         assert "buyer: { include: { user: true } }" in entry
-        assert "main: true" in entry  # child's other FK unaffected
+        assert "main: true" not in entry  # back-ref to parent excluded
 
     def test_existing_true_promoted_to_include_dict(self):
         """When child FK and label_field share the same root relation (buyer), the
@@ -760,7 +761,7 @@ class TestChildIncludeDeepLabelFieldMerge:
         )
         entry = self._items_entry(ctx)
         assert entry is not None
-        assert "main: true" in entry
+        assert "main: true" not in entry  # back-ref to parent excluded
         assert "buyer: true" in entry
         assert "buyer: { include:" not in entry
 
@@ -772,6 +773,35 @@ class TestChildIncludeDeepLabelFieldMerge:
         )
         entry = self._items_entry(ctx)
         assert "buyer: { include: { user: true } }" in entry
+
+    def test_child_with_only_parent_back_ref_falls_back_to_flat_true(self):
+        """A child whose ONLY FK relation is the back-ref to its parent (e.g.
+        dashboard_widget.dashboard_id on dashboard.widgets) must fall back to a
+        flat `{prop}: true` include, not a redundant `{prop}: { include: {} } }`
+        wrapper -- filtering the back-ref out of child_rels can empty it entirely."""
+        schema = {
+            "definitions": {
+                "Main": {
+                    "type": "object",
+                    "required": ["id"],
+                    "properties": {"id": {"type": "string"}, "name": {"type": "string"}},
+                },
+                "Item": {
+                    "type": "object",
+                    "required": ["id", "main_id"],
+                    "properties": {
+                        "id": {"type": "string"},
+                        "main_id": {
+                            "type": "string",
+                            "x-relationship": {"type": "many-to-one", "target": "Main"},
+                        },
+                    },
+                },
+            }
+        }
+        ctx = build_context(self._entity(), schema)
+        entry = self._items_entry(ctx)
+        assert entry == "items: true"
 
 
 def test_merge_into_child_inner_dict_merge():
