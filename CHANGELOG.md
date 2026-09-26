@@ -149,6 +149,35 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   each downstream consumer repo only at that repo's own next deploy.
 
 ### Fixed
+- **Generated list page sort/filter was not column-type-aware** (issue
+  #753): an FK/relation display column (e.g. `policy`, `assignee`) was
+  silently dropped from every filter/sort request (no error, just a
+  no-op), and a native enum, `DateTime`, or `Decimal` column crashed the
+  whole page with `PrismaClientValidationError: Unknown argument
+  \`contains\`` the moment a user opened its column filter — `buildFilter`
+  (`lib/_pagination.ts`) always emitted a generic string `contains` clause
+  regardless of the target column's real type, and the flat
+  `FILTERABLE_FIELDS`/`SORTABLE_FIELDS` allow-list had no way to represent
+  "filter by a relation's labelField" at all. Fixed with a runtime,
+  per-column clause-shape dispatch: `buildFilter`/`buildOrderBy` now take a
+  `kinds` map (`'string' | 'enum' | 'boolean' | 'number' | 'decimal' |
+  'date'`, computed at generate time in `build_context.py` from the same
+  `_prisma_native_enum_type`/`_prisma_decimal_type`/`format: date-time`
+  markers schema_deriver.py already derives) and a `relations` map (FK
+  display columns in `x-display.table` with a simple, single-column
+  labelField — composite/dotted labelFields are out of scope) that routes
+  a filter/sort through the relation's target column via a nested Prisma
+  clause. Every existing plain-string column's behavior is unchanged
+  (`kinds[field]` defaults to `'string'`), and the 8 hand-maintained
+  built-in-entity `getters.ts` files (dashboard/permission/user/role/
+  setting/organization/audit_log/approval_flow) call the old 2-argument
+  form unmodified thanks to default parameters. Deliberately scoped to the
+  crash/no-op fix only — the MUI filter panel's `operator`
+  (contains/equals/after/before/...) is still ignored server-side, so an
+  enum/date/number/decimal column always applies one fixed exact-match
+  clause per kind regardless of which operator the user picks in the UI; a
+  later pass can wire `GridColDef.type` + the real operator through. See
+  `docs/knowledge/list-filter-sort-column-type-dispatch.md`.
 - **Generated `addEntity`/`updateEntity` service functions
   (`service.ts.jinja2`) misclassified Prisma's `P2028` error ("Unable to
   start a transaction in the given time" — a transaction/connection-pool

@@ -296,6 +296,26 @@ def _is_date_field(defn: dict) -> bool:
     return _get_actual_type(defn) == 'string' and defn.get('format') in ('date', 'date-time', 'time')
 
 
+def _column_filter_kind(prop: dict) -> str:
+    """Prisma clause-shape kind for buildFilter/buildOrderBy's runtime dispatch
+    (app-generator#753): a plain 'contains' filter crashes against a native
+    enum/DateTime/Decimal column, so the runtime needs to know which clause
+    shape each column requires.
+    """
+    if prop.get('_prisma_native_enum_type'):
+        return 'enum'
+    if prop.get('_prisma_decimal_type'):
+        return 'decimal'
+    if prop.get('format') == 'date-time':
+        return 'date'
+    actual = _get_actual_type(prop)
+    if actual == 'boolean':
+        return 'boolean'
+    if actual in ('integer', 'number'):
+        return 'number'
+    return 'string'
+
+
 def _dedupe_ordered(items):
     seen = set()
     result = []
@@ -2594,6 +2614,18 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     sortable_fields_quoted = ', '.join(f"'{c}'" for c in _scalar_props)
     filterable_fields_quoted = sortable_fields_quoted
 
+    # Per-column clause-shape kind for buildFilter/buildOrderBy (app-generator#753).
+    # id/created_at/updated_at/creator_id/assignee_id may be injected into
+    # _scalar_props above without a filtered_props entry -- .get({}) falls
+    # through to 'string', which happens to be correct for id/creator_id/
+    # assignee_id (string UUIDs) but wrong for created_at/updated_at
+    # (DateTime), so those two are defaulted explicitly below.
+    _field_kinds = {c: _column_filter_kind(filtered_props.get(c, {})) for c in _scalar_props}
+    for _dc in ('created_at', 'updated_at'):
+        if _dc in _field_kinds:
+            _field_kinds[_dc] = 'date'
+    field_kinds_quoted = ', '.join(f"'{c}': '{k}'" for c, k in _field_kinds.items())
+
     # Text fields used by searchXxxOptions for substring matching. Auto-derived
     # human-readable string columns (shared with the pg_trgm full-text search
     # rule in generate.py:_derive_text_fields) so callers don't accidentally
@@ -3351,6 +3383,37 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                     'field_pascal': to_pascal_case(_vfn),
                     'field_key': to_camel_case(_vfn),
                 })
+
+    # relation_filter_fields (app-generator#753): FK display columns with a
+    # simple (single-column) labelField get a nested Prisma where/orderBy
+    # clause in buildFilter/buildOrderBy instead of being silently dropped
+    # by the flat FILTERABLE_FIELDS/SORTABLE_FIELDS allow-list (the client
+    # already sends the relation name as `field` verbatim -- see
+    # DataGridClient.tsx's reload(), unchanged by this fix). Scoped to (a)
+    # FK columns actually shown in x-display.table (the existing UI-exposure
+    # gate -- no new x-display flag needed) and (b) a plain single-column
+    # labelField, same "simple labelField" guard used above for
+    # searchable-relation-fields (composite/dotted labelFields stay out of
+    # scope). Computed here (not in generators.py's page_list_context, which
+    # this entity's getters.ts context snapshot is built before generate.py
+    # ever calls) so getters.ts.jinja2 -- rendered from build_context()'s own
+    # return dict -- actually receives it.
+    _relation_filter_fields: list[tuple[str, str]] = []
+    if xdisplay_table_raw:
+        _rel_label_map_for_filter: dict[str, str] = {}
+        for _r in list(parent_rels_raw) + list(selector_oto_rels):
+            _rprop = _r['prop_name']
+            if _rprop.endswith('_id'):
+                _rlf = _r.get('label_field')
+                if isinstance(_rlf, str) and '.' not in _rlf:
+                    _rel_label_map_for_filter[_rprop[:-3]] = _rlf
+        for _vitem in xdisplay_table_raw:
+            _rfn = list(_vitem.keys())[0]
+            if _rfn in _rel_label_map_for_filter:
+                _relation_filter_fields.append((_rfn, _rel_label_map_for_filter[_rfn]))
+    relation_filter_fields_quoted = ', '.join(
+        f"'{_rel}': {{ field: '{_lf}' }}" for _rel, _lf in _relation_filter_fields
+    )
 
     # Detail def for custom components (entity-level: list of components, plural key).
     # Each item: {name, path?, target?}. Default target is ['list'] (backward compat).
@@ -4129,6 +4192,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         item_context_select=item_context_select,
         sortable_fields_quoted=sortable_fields_quoted,
         filterable_fields_quoted=filterable_fields_quoted,
+        field_kinds_quoted=field_kinds_quoted,
+        relation_filter_fields_quoted=relation_filter_fields_quoted,
         searchable_text_fields=searchable_text_fields,
         searchable_relation_fields=searchable_relation_fields,
         searchable_fields_display=searchable_fields_display,
