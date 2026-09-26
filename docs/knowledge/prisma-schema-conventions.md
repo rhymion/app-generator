@@ -197,8 +197,10 @@ Every model that has any of the following columns **must** declare a matching `@
 | `creator_id` | Filters on this column scope rows for users with Creator-only permissions; without an index, every list query falls back to a full table scan as the dataset grows. |
 | `assignee_id` | Same reasoning, for the Assignee role. |
 | `organization_id` | Filters on this column scope rows to organizations the user belongs to. |
+| every FK column (auto-detected from `@relation(..., fields: [col], ...)`) | Every foreign key is essentially always a join/filter target — bridge/relation columns are covered automatically, not just the three hardcoded hot columns above. |
+| every column exposed for filtering/sorting in generated UI (`x-display.table`, or `x-filter-values`) | Issue #726: a `WHERE`/`ORDER BY` on a column shown in a generated list view, or referenced by an `x-filter-values` row restriction, has the same full-table-scan risk as an unindexed FK. See below. |
 
-Postgres does not auto-index foreign-key columns. The code generator runs `validate_prisma_indexes()` before generation and will refuse to proceed if any required index is missing — this fails fast rather than silently shipping a slow query.
+Postgres does not auto-index foreign-key columns, and it never auto-indexes a plain scalar/enum column regardless of how the application queries it. The code generator runs `validate_prisma_indexes()` before generation and will refuse to proceed if any required index is missing — this fails fast rather than silently shipping a slow query.
 
 To add the indexes idempotently:
 
@@ -206,9 +208,24 @@ To add the indexes idempotently:
 python3 scripts/add_required_indexes.py
 ```
 
-The script emits `@@index([creator_id])`, `@@index([assignee_id])`, and `@@index([organization_id])` for every model that needs them, and exits cleanly when nothing is missing.
+The script emits `@@index([col])` for every hot/FK/UI-exposed column every model needs, and exits cleanly when nothing is missing.
 
 A composite index counts only when the required column is its first entry. `@@index([creator_id, name])` satisfies the rule for `creator_id`; `@@index([name, creator_id])` does not.
+
+### UI-exposed indexing (Issue #726)
+
+A column gets an automatic `@@index` when it is exposed for filtering or sorting in generated UI — concretely: any column that appears in an entity's `x-display.table` (the generated list page's columns), or that is referenced by a view's `x-filter-values`. This is derived mechanically from the schema by `derive_ui_exposed_index_columns()` (`code_generator/validate.py`) — there is no hand-maintained column-name list to keep in sync, the way `_REQUIRED_INDEX_COLUMNS` works for the three hardcoded hot columns.
+
+Two exclusions, both automatic:
+
+- **Relationship display columns.** An `x-display.table` entry naming a relation (e.g. `resource`, rendered as `resource.name`) is not itself a column — its real FK column (`resource_id`) is already covered by the FK auto-detection above, so it is skipped here rather than double-indexed under the wrong name.
+- **Virtual columns.** An `x-display.table` entry backed by neither a scalar property nor a `{name}_id` relation (a computed/resolver-backed display column, see `docs/knowledge/virtual-resolver-guide.md`) has no underlying DB column at all — there is nothing to index.
+
+`derive_ui_exposed_index_columns()` (and, by extension, `validate_prisma_indexes()`'s UI-derived half and `add_required_indexes.py`'s UI-derived additions) requires the **expanded intermediate schema** (`code_generator/.generated/json_schema.yaml`, the same input `generate.py` itself consumes), not the hand-authored `code_generator/json_schema.yaml` source directly. The hand-authored form declares a many-to-one relationship as a bare property (e.g. `role: {$ref: '#/definitions/role'}`); `build_user_schema.py` expands that into the real FK scalar column (`role_id`) the relation-exclusion logic above depends on. Feeding the hand-authored form in would misidentify a relation-display column as a plain scalar column and try to index a Prisma relation *field* — not a valid index.
+
+### Relationship to Issue #742 (composite indexes)
+
+Issue #742 considered ad hoc **composite** indexes for specific filtered/sorted business query shapes (e.g. "my organization's policies, sorted by expiry date"), based on `pg_stat_statements` evidence from load testing. It is a distinct root cause and fix shape from #726: #742 is deferred — no missing composite index has been confirmed by load-test data yet, and any future fix is a hand-designed composite index for a specific query shape, not something a general schema-driven rule could safely infer (which column pairs belong together, and in which order, is a query-shape question, not a "does this column appear in a generated view" question). The two issues do not fold into one design: #726's single-column, schema-derived rule implemented here does not generalize to #742's multi-column, evidence-driven ad hoc indexes, and #742 remains open as follow-up work pending a stress-test round that actually exercises those query shapes.
 
 ---
 
