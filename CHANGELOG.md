@@ -129,6 +129,26 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/performance-improvements.md` §7.
 
 ### Fixed
+- **Generated `addEntity`/`updateEntity` service functions
+  (`service.ts.jinja2`) misclassified Prisma's `P2028` error ("Unable to
+  start a transaction in the given time" — a transaction/connection-pool
+  timeout) as a client-input validation error, returning `422 VALIDATION`
+  instead of the existing `409 CAPACITY` error code.** The catch block
+  special-cased only `P2002` (unique constraint) before falling through
+  every other `PrismaClientKnownRequestError` — P2028 included — into a
+  generic `AppError('VALIDATION', 'One or more fields have an invalid
+  value')`. `CAPACITY` (409) already existed in `lib/_errors.ts` and was
+  already mapped in `lib/api-auth.ts`'s `APP_ERROR_STATUS_MAP`, but
+  nothing in the generated service layer ever threw it. Found while
+  investigating elevated 422 rates in load testing under high
+  concurrency: response bodies for these 422s carried no `field`/`reason`
+  key (unlike a real validation failure), and Prisma's own raw error log
+  in the same run window showed every one of them was `P2028`. Fixed by
+  adding a dedicated `e.code === 'P2028'` branch, mirroring the existing
+  `P2002` special case, in both `addEntity` and `updateEntity`. A
+  follow-up issue tracks three other codes reaching the same catch-all
+  that look similarly misclassified (`P2025`, `P2034`, `P2037`) but were
+  kept out of this fix to stay narrowly scoped.
 - **`lib/prisma.ts` created a new, independent Prisma Client (and its own
   connection pool) on every module evaluation in production, instead of
   reusing one cached instance per process.** The dev-only `globalThis`

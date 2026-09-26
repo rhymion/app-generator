@@ -109,6 +109,20 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
       throw new AppError('CONFLICT', 'Unique constraint violation', p2002Field(e.meta));
     }
+    // P2028 ("Unable to start a transaction in the given time.") is a
+    // transaction/connection-pool timeout, not a bad-input shape -- the
+    // request itself may be entirely valid, it just couldn't acquire a
+    // pool slot in time under contention. Routing it into the generic
+    // VALIDATION catch-all below silently mislabeled it as a client-side
+    // input error (422, no field/reason) instead of the server-capacity
+    // condition it actually is. CAPACITY (409) already exists in
+    // lib/_errors.ts for exactly this ("pool / inventory exhausted") but
+    // was never wired to P2028 detection (cmd_1176k, following the
+    // subtask_1176i investigation that traced Round4/Round6 load-test
+    // 422s to this exact misclassification).
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2028') {
+      throw new AppError('CAPACITY', 'Unable to start a transaction in the given time');
+    }
     // Child-row (DataGrid nested create/update) fields carry no
     // validateOnAdd/validateOnUpdate coverage of their own --
     // an invalid or missing required value there (e.g. a cleared required
@@ -117,7 +131,7 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
     // this is an uncaught exception, not a graceful "<field> is required"
     // rejection. Same treatment for the parent-field edge this generator
     // cannot fully prevent client-side either (a malformed value slipping
-    // past the browser). P2002 is handled above; every other
+    // past the browser). P2002 and P2028 are handled above; every other
     // PrismaClientKnownRequestError code below is likewise a bad-input
     // shape (FK/type/constraint), not a server bug.
     if (e instanceof Prisma.PrismaClientValidationError || e instanceof Prisma.PrismaClientKnownRequestError) {
@@ -302,6 +316,20 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
       throw new AppError('CONFLICT', 'Unique constraint violation', p2002Field(e.meta));
     }
+    // P2028 ("Unable to start a transaction in the given time.") is a
+    // transaction/connection-pool timeout, not a bad-input shape -- the
+    // request itself may be entirely valid, it just couldn't acquire a
+    // pool slot in time under contention. Routing it into the generic
+    // VALIDATION catch-all below silently mislabeled it as a client-side
+    // input error (422, no field/reason) instead of the server-capacity
+    // condition it actually is. CAPACITY (409) already exists in
+    // lib/_errors.ts for exactly this ("pool / inventory exhausted") but
+    // was never wired to P2028 detection (cmd_1176k, following the
+    // subtask_1176i investigation that traced Round4/Round6 load-test
+    // 422s to this exact misclassification).
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2028') {
+      throw new AppError('CAPACITY', 'Unable to start a transaction in the given time');
+    }
     // Child-row (DataGrid nested create/update) fields carry no
     // validateOnAdd/validateOnUpdate coverage of their own --
     // an invalid or missing required value there (e.g. a cleared required
@@ -310,7 +338,7 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
     // this is an uncaught exception, not a graceful "<field> is required"
     // rejection. Same treatment for the parent-field edge this generator
     // cannot fully prevent client-side either (a malformed value slipping
-    // past the browser). P2002 is handled above; every other
+    // past the browser). P2002 and P2028 are handled above; every other
     // PrismaClientKnownRequestError code below is likewise a bad-input
     // shape (FK/type/constraint), not a server bug.
     if (e instanceof Prisma.PrismaClientValidationError || e instanceof Prisma.PrismaClientKnownRequestError) {
