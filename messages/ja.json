@@ -47,7 +47,6 @@
     "appSetting": "業務日付設定",
     "auditLog": "監査ログ",
     "dashboard": "ダッシュボード",
-    "listFilterGate": "一覧フィルタ検証",
     "organization": "組織",
     "permission": "権限",
     "role": "ロール",
@@ -84,9 +83,7 @@
     "image": "画像",
     "images": "画像",
     "import": "インポート",
-    "isEnabled": "有効",
     "isPinned": "固定",
-    "label": "ラベル",
     "message": "メッセージ",
     "metadata": "メタデータ",
     "mfaEnabled": "MFA有効",
@@ -96,7 +93,6 @@
     "password": "パスワード",
     "pastSubmissions": "過去の申請",
     "precededBy": "先行",
-    "priority": "優先度",
     "read": "読取",
     "reject": "却下",
     "requestorRole": "申請者ロール",
@@ -105,9 +101,7 @@
     "roles": "ロール",
     "seriesField": "系列項目",
     "stackMode": "積み上げモード",
-    "startedAt": "開始日時",
     "status": "ステータス",
-    "statusType": "状態区分",
     "submit": "申請",
     "targetId": "Target Id",
     "targetTable": "Target Table",
@@ -115,8 +109,6 @@
     "title": "タイトル",
     "update": "更新",
     "users": "ユーザ",
-    "validFrom": "適用開始日",
-    "weight": "重み",
     "widgets": "ウィジェット",
     "withdraw": "取り下げ"
   },
@@ -156,7 +148,6 @@
     "auditLog": "監査ログ",
     "dashboard": "ダッシュボード",
     "home": "ホーム",
-    "listFilterGate": "一覧フィルタ検証",
     "organization": "組織",
     "permission": "権限",
     "role": "ロール",
@@ -286,10 +277,5 @@
     "quarter": "四半期",
     "week": "週",
     "year": "年"
-  },
-  "ListFilterGateStatus": {
-    "done": "完了",
-    "queued": "待機中",
-    "running": "実行中"
   }
 }

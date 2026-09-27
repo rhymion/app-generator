@@ -774,7 +774,23 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                         grid_type_attr = ", type: 'number'"
                     elif prop.get('format') == 'date':
                         grid_type_attr = ", type: 'date'"
-                    elif prop.get('format') == 'date-time':
+                    elif prop.get('format') in ('date-time', 'time'):
+                        # 'time' has no dedicated MUI GridColDef type (same
+                        # constraint already documented at this file's other
+                        # date/time column-type site, ~L4023) -- reuse
+                        # 'dateTime' rather than leaving it untyped (untyped
+                        # would default to a text 'contains' filter against
+                        # a native Prisma DateTime/@db.Timetz column, the
+                        # exact class of crash app-generator#756 fixed for
+                        # date/date-time). The date component the picker
+                        # attaches is a non-issue: buildFilter's 'date' kind
+                        # (build_context.py's _column_filter_kind, which
+                        # 'time' now shares) hands the value straight to
+                        # Prisma, and Postgres casts any timestamp-shaped
+                        # comparison value to `timetz` before comparing --
+                        # empirically confirmed (cmd_1195/subtask_1195b) to
+                        # discard the date part regardless of what the
+                        # picker's date happens to be.
                         grid_type_attr = ", type: 'dateTime'"
 
             if config.get('primary'):

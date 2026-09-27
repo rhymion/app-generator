@@ -132,8 +132,6 @@ model user {
   notifications             notification[]      @relation("NotificationUser")
   created_app_settings      app_setting[]       @relation("AppSettingCreator")
   updated_app_settings      app_setting[]       @relation("AppSettingUpdater")
-  created_list_filter_gates list_filter_gate[]  @relation("ListFilterGateCreator")
-  updated_list_filter_gates list_filter_gate[]  @relation("ListFilterGateUpdater")
   anonymized_at             DateTime?            // Timestamp when PII was scrubbed (GDPR anonymization)
   invalidated_at            DateTime?            // Generic invalidate mechanism (cmd_564); set alongside anonymized_at by anonymizeUser()
 
@@ -322,47 +320,6 @@ model approval_flow {
   @@index([requestor_role_id])
   @@index([updater_id])
   @@index([entity_name])
-}
-
-// app-generator#756: a dedicated dogfood entity carrying one column per
-// list-page filter/sort clause-shape kind (native enum, boolean,
-// date-only, date-time, plain number, Decimal) that this repo's own real
-// product entities have zero examples of anywhere in x-display.table
-// (confirmed by a full schema walk, subtask_1193a) -- without this, a
-// permanent per-type Cypress spec has no live UI to exercise for those
-// kinds. Deliberately standalone (no FK from/to any existing
-// entity) so it carries zero risk to any pre-existing spec's DOM/selectors.
-enum ListFilterGateStatus {
-  queued
-  running
-  done
-}
-
-model list_filter_gate {
-  id           String                @id @default(cuid())
-  label        String
-  status_type  ListFilterGateStatus?
-  is_enabled   Boolean?
-  valid_from   DateTime?             @db.Date
-  started_at   DateTime?
-  priority     Int?
-  weight       Decimal?              @db.Decimal(10, 2)
-  created_at   DateTime              @default(now()) @db.Timestamptz(0)
-  updated_at   DateTime              @updatedAt @db.Timestamptz(0)
-  creator_id   String
-  creator      user                  @relation("ListFilterGateCreator", fields: [creator_id], references: [id])
-  updater_id   String
-  updater      user                  @relation("ListFilterGateUpdater", fields: [updater_id], references: [id])
-
-  @@index([creator_id])
-  @@index([updater_id])
-  @@index([is_enabled])
-  @@index([label])
-  @@index([priority])
-  @@index([status_type])
-  @@index([valid_from])
-  @@index([weight])
-  @@index([started_at])
 }
 
 enum ApprovalRequestStatus {

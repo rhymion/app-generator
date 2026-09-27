@@ -86,7 +86,6 @@ export const siteConfig = {
     { label: "Organization", href: "/organization" },
     { label: "Permission", href: "/permission" },
     { label: "Approval Flow", href: "/approval_flow" },
-    { label: "List Filter Gate", href: "/list_filter_gate" },
     { label: "Dashboard", href: "/dashboard" },
     { label: "App Setting", href: "/app_setting" },
   ] satisfies NavLink[],

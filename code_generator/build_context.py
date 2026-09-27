@@ -306,7 +306,16 @@ def _column_filter_kind(prop: dict) -> str:
         return 'enum'
     if prop.get('_prisma_decimal_type'):
         return 'decimal'
-    if prop.get('format') in ('date-time', 'date'):
+    if prop.get('format') in ('date-time', 'date', 'time'):
+        # 'time' (Prisma DateTime @db.Timetz) reuses the 'date' clause shape
+        # unchanged (app-generator#756/cmd_1195): empirically verified via
+        # $queryRaw against a real @db.Timetz column (subtask_1195b) that
+        # Postgres casts ANY timestamp-shaped comparison value to `timetz`
+        # before comparing, silently discarding its date part -- a filter
+        # value built from a full-date-and-time MUI picker (whatever date
+        # happens to be selected) still compares correctly against the
+        # stored time-of-day. No separate clause shape or date-part
+        # normalization is needed.
         return 'date'
     actual = _get_actual_type(prop)
     if actual == 'boolean':

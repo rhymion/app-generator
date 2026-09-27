@@ -24,7 +24,13 @@ displayed column, whichever of these fits the column's real kind:
   displayed label, since both read the same source.
 - Boolean: `type: 'boolean'`.
 - Date-only (`format: date`): `type: 'date'`. Date-time
-  (`format: date-time`): `type: 'dateTime'`.
+  (`format: date-time`) and time-only (`format: time`, Prisma `DateTime
+  @db.Timetz`): `type: 'dateTime'` — MUI's DataGrid has no dedicated
+  time-only `GridColDef` type, so a time column reuses `dateTime` (the
+  same fallback already used elsewhere in this generator for the
+  independent/embedded DataGrid-child context). The date component the
+  picker attaches is a non-issue at the server side: see the operator
+  table below.
 - Number/Decimal: `type: 'number'`.
 - FK relation display column (simple labelField): left unset, deliberately
   out of scope — a relation's value space is the target table's rows, a
@@ -81,7 +87,7 @@ new crash source):
 |---|---|---|
 | enum | `is` (default) / `not` / `isAnyOf` | `equals` / `not:{equals}` / `in:[...]`, value(s) validated against `ENUM_MEMBERS` first |
 | boolean | `is` (default; the only one MUI's boolean filter offers) | coerced `equals` |
-| date | `is` (default) / `not` / `after` / `onOrAfter` / `before` / `onOrBefore` | `equals` / `not:{equals}` / `gt` / `gte` / `lt` / `lte`, Invalid-Date-guarded |
+| date / date-time / time | `is` (default) / `not` / `after` / `onOrAfter` / `before` / `onOrBefore` | `equals` / `not:{equals}` / `gt` / `gte` / `lt` / `lte`, Invalid-Date-guarded |
 | number | `=` (default) / `!=` / `>` / `>=` / `<` / `<=` | same shapes, NaN-guarded |
 | decimal | `=` (default) / `!=` / `>` / `>=` / `<` / `<=` | same shapes; a JS-number-typed value is re-quantized via `DECIMAL_SCALES` first (see below) |
 | string | `contains` (default) / `equals` / `startsWith` / `endsWith` / `isAnyOf` | direct mapping, case-insensitive |
@@ -126,37 +132,63 @@ native number input) is left untouched — round-tripping an
 already-precise string through `Number()` would reintroduce the exact
 loss this exists to avoid.
 
-## `list_filter_gate`: the dogfood coverage vehicle
+## `format: time`'s date-part is discarded server-side, not normalized
 
-This repo's own `json_schema.yaml` had zero enum/boolean/date-only/
-date-time/decimal columns anywhere in any `can_list` entity's
-`x-display.table` (confirmed by a full schema walk) — no real entity's
-list page could exercise any of the above through a live Cypress UI
-interaction. `list_filter_gate` is a small, deliberately standalone
-entity (no relation to/from any other entity) added purely to carry one
-column per kind (`status_type`: native enum; `is_enabled`: boolean;
-`valid_from`: date-only; `started_at`: date-time; `priority`: plain
-number; `weight`: Decimal), backing the permanent Cypress coverage in
-`cypress/e2e/list_filter_sort_typed_columns.cy.ts`.
+A `type: 'dateTime'` filter's picker lets the user choose both a date and
+a time-of-day, but a time-only column has no meaningful date to associate
+with the value the user actually cares about. This turned out not to need
+any special-casing: empirically verified via a direct query against a
+real `@db.Timetz` column, Postgres casts *any* timestamp-shaped comparison
+value to `timetz` before comparing — the date component is discarded on
+both sides of the comparison regardless of what arbitrary date happens to
+be attached to it (the picker's default, or the `1970-01-01` epoch date
+the Postgres driver itself assigns when reading a stored `timetz` value
+back into a JS `Date`). `buildFilter`'s `'date'` clause shape — which
+`format: time` columns dispatch through unchanged, see the kind table
+above — therefore needs no time-specific branch, no date-part
+normalization, and no new clause shape: the exact same `equals`/`gt`/
+`gte`/`lt`/`lte` construction used for `date`/`date-time` columns is
+already correct for `time` columns as-is.
 
-It carries `x-generate.test: false` (self-seeded through its still-
-generated `/api/list_filter_gate` endpoint via
-`cypress/support/list_filter_gate_seed.ts`, mirroring `approval_flow`'s
-own established pattern) rather than opting into a full generated CRUD
-Cypress spec set. One consequence: `grantAllEntityPermissions()`
-(`cypress/support/db-helpers.ts`)'s own `ALL_ENTITIES` array is
-template-rendered from `db_helpers_context()`'s `test_entity_names` —
-only entities with `x-generate.test: true`, or reached via another
-entity's `x-relationship` labelField hop, are ever in it (this is *not* a
-hand-preserved section across regeneration, despite the file's own
-top-of-file comment implying otherwise for `grantAllEntityPermissions` —
-the whole function, `ALL_ENTITIES` included, is fully re-rendered from
-the `test_db_helpers.ts.jinja2` template every `generate-code` run). A
-standalone `test: false` entity like `list_filter_gate` therefore falls
-outside it. The fix is a new `db:grantEntityPermission` Cypress task
-(`cypress.config.ts`, itself never regenerated) that grants one
-additional entity's permission to the already-created Administrator
-role — called after `db:grantAllPermissions` in this spec's `beforeEach`.
+## No dogfood fixture entity for this feature's live-UI coverage
+
+This repo's own `json_schema.yaml` must never declare a test-only fixture
+entity of its own (see `test_no_test_only_entities_in_own_schema.py`) — a
+visible test-fixture entity belongs in a consumer repo's own schema (e.g.
+app-template's testbed), never here. An earlier version of this feature's
+rollout added a standalone `list_filter_gate` entity directly to this
+repo's schema for exactly this purpose; it was removed once that
+placement was identified as inconsistent with the guard above.
+
+Two layers now provide durable coverage instead, neither requiring any
+schema entity in this repo:
+
+- **Template-level regression tests** (`code_generator/tests/
+  test_list_filter_typed_columns.py`): assert `_column_filter_kind`'s
+  clause-shape dispatch and `page_list_context()`'s emitted
+  `GridColDef.type`/`format`/`valueOptions` strings directly, for every
+  column kind including `time`, entirely through synthetic schema
+  fragments — no live entity, database, or browser involved. This is
+  permanent, runs on every `npm run test:pytest` invocation, and is what
+  actually caught a real regression class in the past (the enum/boolean/
+  date crashes this whole feature exists to fix were all reproducible as
+  generated-code-string assertions once the bug was known).
+- **One-off real-UI verification against an existing consumer entity in a
+  throwaway isolated worktree** for the class of bug template-level
+  assertions cannot reach (a real browser's own value coercion — the
+  decimal `IEEE-754` round-trip bug above is the standing example; it
+  was caught only through actual Cypress interaction, not design review
+  or a unit assertion). This repeats the same precedent already
+  documented for the post-approval lockdown feature (see
+  `docs/knowledge/appendix/approval-flow.md`'s Naming note): verify
+  against a real entity a consumer repo already has, in a scratch
+  worktree that is never committed, rather than adding a permanent
+  fixture anywhere. `format: time` itself was verified this way against
+  app-template's existing `shift_template` entity (`start_time`/
+  `end_time` columns, already real production fields), which also
+  incidentally carries an `enum` column (`day_of_week`) in the same list
+  view — covering both kinds' live-UI behavior without adding anything
+  to any schema.
 
 ## What is explicitly out of scope
 

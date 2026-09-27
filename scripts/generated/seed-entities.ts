@@ -14,7 +14,6 @@ export const SEED_ENTITIES: string[] = [
   'comment',
   'dashboard',
   'dashboard_widget',
-  'list_filter_gate',
   'organization',
   'permission',
   'reaction',
@@ -79,13 +78,6 @@ export const SEED_ENTITY_GRANTS: Record<string, SeedEntityGrant> = {
     import: false,
   },
   'dashboard_widget': {
-    create: true,
-    read: true,
-    update: true,
-    delete: true,
-    import: false,
-  },
-  'list_filter_gate': {
     create: true,
     read: true,
     update: true,

@@ -227,23 +227,27 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   filtering against a column whose stored value is exact — a new
   generate-time `DECIMAL_SCALES` const lets `buildFilter` re-quantize a
   JS-number-typed decimal value back to the column's real scale before it
-  reaches Prisma. This repo's own dogfood schema had zero enum/boolean/
-  date-only/date-time/decimal columns anywhere in `x-display.table` to
-  exercise any of this through a real list page, so a new standalone
-  `list_filter_gate` entity (no relation to any other entity,
-  `x-generate.test: false` and self-seeded through its still-generated
-  `/api/list_filter_gate` endpoint, mirroring `approval_flow`'s own
-  established pattern rather than opting into a full generated CRUD
-  Cypress spec set) was added carrying one column per kind, with
-  permanent Cypress coverage
-  (`cypress/e2e/list_filter_sort_typed_columns.cy.ts`) for all three
-  original crashes plus the translated-label/isAnyOf/operator paths. A
-  `test: false` entity with no relation to anything else falls outside
-  `grantAllEntityPermissions()`'s own `ALL_ENTITIES` (template-derived
-  from entities with `x-generate.test: true`, or reached via another
-  entity's labelField hop) — a new `db:grantEntityPermission` Cypress
-  task (`cypress.config.ts`) grants one additional entity's permission
-  explicitly for cases like this one. See
+  reaches Prisma. Also extends the same fix to `format: time`
+  (Prisma `DateTime @db.Timetz`, previously left untyped and falling
+  through to the crash-prone `'string'`/`contains` default like the other
+  gaps above): `_column_filter_kind` now dispatches `time` through the
+  identical `'date'` clause shape used for `date`/`date-time` unchanged —
+  empirically verified that Postgres casts any timestamp-shaped
+  comparison value to `timetz` before comparing, discarding its date part
+  regardless of what date a full date+time picker attaches, so no
+  separate clause shape or date-part normalization is needed —
+  and `page_list_context()` wires `type: 'dateTime'` for it (MUI has no
+  dedicated time-only `GridColDef` type). This repo's own dogfood schema
+  had, and still has, zero enum/boolean/date-only/date-time/decimal/time
+  columns anywhere in `x-display.table` to exercise any of this through a
+  real list page — rather than adding a fixture entity to this repo's own
+  schema for that purpose (an earlier iteration of this change did add
+  one, `list_filter_gate`; removed as inconsistent with this repo's own
+  fail-closed guard against dogfood test-only entities), coverage is
+  template-level regression tests
+  (`code_generator/tests/test_list_filter_typed_columns.py`, entity-free)
+  plus one-off real-UI verification against an already-real consumer
+  entity in a throwaway isolated worktree. See
   `docs/knowledge/list-filter-sort-typed-columns.md`.
 - **Generated `addEntity`/`updateEntity` service functions
   (`service.ts.jinja2`) misclassified Prisma's `P2028` error ("Unable to
