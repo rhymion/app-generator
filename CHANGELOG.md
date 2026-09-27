@@ -148,6 +148,16 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   standing migration-cadence policy, the actual `@@index` DDL reaches
   each downstream consumer repo only at that repo's own next deploy.
 
+- **Issue #726's UI-exposed indexing requirement no longer applies to
+  enum- or boolean-typed columns** — `derive_ui_exposed_index_columns()`
+  (`code_generator/validate.py`) excludes a column whose Prisma type is a
+  native enum or `Boolean` from the required-index set it derives, since
+  too few distinct values exist for a b-tree index to meaningfully narrow
+  a scan. Declaring `@@index` on such a column is still permitted, only
+  no longer required; existing indexes on enum/boolean columns (e.g.
+  `approval_request.status`, `app_setting.is_pinned`) are unaffected. See
+  `docs/knowledge/prisma-schema-conventions.md` §5.
+
 ### Fixed
 - **Generated list page sort/filter was not column-type-aware** (issue
   #753): an FK/relation display column (e.g. `policy`, `assignee`) was

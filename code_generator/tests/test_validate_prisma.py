@@ -275,6 +275,76 @@ def test_derive_ui_columns_ignores_entities_with_neither_source():
     assert derive_ui_exposed_index_columns(schema) == {}
 
 
+def test_derive_ui_columns_excludes_boolean_display_column():
+    # Issue #726: boolean columns are UI-filterable/sortable but too
+    # low-cardinality for an index to help -- excluded from the derived set.
+    schema = {
+        'definitions': {
+            '__widget': {'properties': {'is_active': {'type': 'boolean'}}},
+            'widget': {
+                'allOf': [{'$ref': '#/definitions/__widget'}],
+                'x-display': {'table': [{'is_active': {}}]},
+            },
+        },
+    }
+    assert derive_ui_exposed_index_columns(schema) == {}
+
+
+def test_derive_ui_columns_excludes_native_enum_display_column():
+    schema = {
+        'definitions': {
+            '__widget': {
+                'properties': {
+                    'status': {'type': 'string', '_prisma_native_enum_type': 'WidgetStatus'},
+                },
+            },
+            'widget': {
+                'allOf': [{'$ref': '#/definitions/__widget'}],
+                'x-display': {'table': [{'status': {}}]},
+            },
+        },
+    }
+    assert derive_ui_exposed_index_columns(schema) == {}
+
+
+def test_derive_ui_columns_excludes_enum_and_boolean_from_filter_values():
+    schema = {
+        'definitions': {
+            '__gadget': {
+                'properties': {
+                    'kind': {'type': 'string', '_prisma_native_enum_type': 'GadgetKind'},
+                    'enabled': {'type': 'boolean'},
+                },
+            },
+            'gadget': {'allOf': [{'$ref': '#/definitions/__gadget'}]},
+            'gadget_view': {
+                'allOf': [{'$ref': '#/definitions/__gadget'}],
+                'x-filter-values': {'kind': ['a'], 'enabled': [True]},
+            },
+        },
+    }
+    assert derive_ui_exposed_index_columns(schema) == {}
+
+
+def test_derive_ui_columns_mixed_exempt_and_required_columns():
+    # 'kind' (enum) is exempt; 'name' (plain string) still requires an index.
+    schema = {
+        'definitions': {
+            '__gadget': {
+                'properties': {
+                    'kind': {'type': 'string', '_prisma_native_enum_type': 'GadgetKind'},
+                    'name': {'type': 'string'},
+                },
+            },
+            'gadget': {
+                'allOf': [{'$ref': '#/definitions/__gadget'}],
+                'x-display': {'table': [{'kind': {}}, {'name': {}}]},
+            },
+        },
+    }
+    assert derive_ui_exposed_index_columns(schema) == {'gadget': {'name'}}
+
+
 # ---------------------------------------------------------------------------
 # validate_prisma_indexes — Issue #726 UI-derived enforcement (schema arg)
 # ---------------------------------------------------------------------------
@@ -329,3 +399,68 @@ model widget {
 """
     path = _write(tmp_path, text)
     validate_prisma_indexes(path)  # no schema arg -> must not raise
+
+
+# ---------------------------------------------------------------------------
+# validate_prisma_indexes — Issue #726 enum/boolean relaxation
+# ---------------------------------------------------------------------------
+
+_UI_SCHEMA_BOOLEAN = {
+    'definitions': {
+        '__widget': {'properties': {'is_active': {'type': 'boolean'}}},
+        'widget': {
+            'allOf': [{'$ref': '#/definitions/__widget'}],
+            'x-display': {'table': [{'is_active': {}}]},
+        },
+    },
+}
+
+_UI_SCHEMA_ENUM = {
+    'definitions': {
+        '__widget': {
+            'properties': {
+                'status': {'type': 'string', '_prisma_native_enum_type': 'WidgetStatus'},
+            },
+        },
+        'widget': {
+            'allOf': [{'$ref': '#/definitions/__widget'}],
+            'x-display': {'table': [{'status': {}}]},
+        },
+    },
+}
+
+
+def test_validate_passes_when_boolean_column_has_no_index(tmp_path):
+    text = """
+model widget {
+  id        String @id
+  is_active Boolean
+}
+"""
+    path = _write(tmp_path, text)
+    validate_prisma_indexes(path, _UI_SCHEMA_BOOLEAN)  # must not raise -- Issue #726
+
+
+def test_validate_passes_when_enum_column_has_no_index(tmp_path):
+    text = """
+model widget {
+  id     String @id
+  status WidgetStatus
+}
+"""
+    path = _write(tmp_path, text)
+    validate_prisma_indexes(path, _UI_SCHEMA_ENUM)  # must not raise -- Issue #726
+
+
+def test_validate_still_passes_when_enum_column_has_index_anyway(tmp_path):
+    # Declaring the index is still permitted -- only the requirement is
+    # relaxed, not forbidden.
+    text = """
+model widget {
+  id     String @id
+  status WidgetStatus
+  @@index([status])
+}
+"""
+    path = _write(tmp_path, text)
+    validate_prisma_indexes(path, _UI_SCHEMA_ENUM)  # must not raise

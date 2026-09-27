@@ -139,11 +139,23 @@ def _x_display_table_items(entry: dict) -> list:
     return []
 
 
+def _index_exempt_column(prop_def: dict) -> bool:
+    """Issue #726: enum and boolean columns are excluded from
+    derive_ui_exposed_index_columns()'s required-index set. Both have too
+    few distinct values for a b-tree index to meaningfully narrow a scan, so
+    validate_prisma_indexes() does not fail a model for lacking one — a
+    consumer that wants one anyway (e.g. as the leftmost column of a
+    composite index) may still declare it; this only relaxes the
+    requirement, it does not forbid the column from being indexed."""
+    return bool(prop_def.get('_prisma_native_enum_type')) or _get_actual_type(prop_def) == 'boolean'
+
+
 def derive_ui_exposed_index_columns(schema: dict) -> dict[str, set[str]]:
     """Per-Prisma-model set of scalar columns exposed for filtering/sorting
     in generated UI — Issue #726's decided indexing policy: a column gets an
     automatic index when it appears in a generated list view
-    (`x-display.table`), or is referenced by `x-filter-values`.
+    (`x-display.table`), or is referenced by `x-filter-values`, UNLESS the
+    column is enum- or boolean-typed (see `_index_exempt_column()`).
 
     Expects the EXPANDED intermediate schema (`code_generator/.generated/
     json_schema.yaml`, the same input generate.py itself consumes) — not the
@@ -194,10 +206,14 @@ def derive_ui_exposed_index_columns(schema: dict) -> dict[str, set[str]]:
             field_name = next(iter(item))
             is_scalar_prop = field_name in props
             is_relation = f'{field_name}_id' in props
-            if is_scalar_prop and not is_relation:
+            if is_scalar_prop and not is_relation and not _index_exempt_column(props[field_name]):
                 candidates.add(field_name)
 
-        candidates.update(filter_values)
+        for field_name in filter_values:
+            prop_def = props.get(field_name)
+            if prop_def is not None and _index_exempt_column(prop_def):
+                continue
+            candidates.add(field_name)
 
     return {model: cols for model, cols in out.items() if cols}
 
