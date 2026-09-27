@@ -141,9 +141,13 @@ def _x_display_table_items(entry: dict) -> list:
 
 def _index_exempt_column(prop_def: dict) -> bool:
     """Issue #726: enum and boolean columns are excluded from
-    derive_ui_exposed_index_columns()'s required-index set. Both have too
-    few distinct values for a b-tree index to meaningfully narrow a scan, so
-    validate_prisma_indexes() does not fail a model for lacking one — a
+    derive_ui_exposed_index_columns()'s required-index set, so
+    validate_prisma_indexes() does not fail a model for lacking one. This is
+    a demo-simplicity decision, not a claim that these columns never benefit
+    from an index — load-test measurement (cmd_1192, subtask_1192c) found
+    that actual selectivity of the filtered value, not the column's type,
+    determines whether an index helps, and that an enum or boolean column
+    can still see a substantial win (e.g. filtering a minority value). A
     consumer that wants one anyway (e.g. as the leftmost column of a
     composite index) may still declare it; this only relaxes the
     requirement, it does not forbid the column from being indexed."""

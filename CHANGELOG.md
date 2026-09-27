@@ -151,11 +151,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **Issue #726's UI-exposed indexing requirement no longer applies to
   enum- or boolean-typed columns** — `derive_ui_exposed_index_columns()`
   (`code_generator/validate.py`) excludes a column whose Prisma type is a
-  native enum or `Boolean` from the required-index set it derives, since
-  too few distinct values exist for a b-tree index to meaningfully narrow
-  a scan. Declaring `@@index` on such a column is still permitted, only
-  no longer required; existing indexes on enum/boolean columns (e.g.
-  `approval_request.status`, `app_setting.is_pinned`) are unaffected. See
+  native enum or `Boolean` from the required-index set it derives. This is
+  a demo-simplicity decision, not a technical claim that these columns
+  never benefit from an index — load-test measurement found that actual
+  selectivity of the filtered value, not the column's type, determines
+  whether an index helps, and that an enum or boolean column can still see
+  a substantial win (e.g. filtering a minority value). Declaring `@@index`
+  on such a column is still permitted, only no longer required; existing
+  indexes on enum/boolean columns (e.g. `approval_request.status`,
+  `app_setting.is_pinned`) are unaffected. See
   `docs/knowledge/prisma-schema-conventions.md` §5.
 
 ### Fixed
