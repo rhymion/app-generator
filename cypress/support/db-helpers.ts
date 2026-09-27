@@ -30,11 +30,12 @@ export async function resetTestDatabase() {
   await prisma.idempotency_key.deleteMany();
   await prisma.mfa_recovery_code.deleteMany();
 
-  // Level 2: app_setting, approval_request, attachment, dashboard_widget, notification, permission, reaction
+  // Level 2: app_setting, approval_request, attachment, dashboard_widget, list_filter_gate, notification, permission, reaction
   await prisma.app_setting.deleteMany();
   await prisma.approval_request.deleteMany();
   await prisma.attachment.deleteMany();
   await prisma.dashboard_widget.deleteMany();
+  await prisma.list_filter_gate.deleteMany();
   await prisma.notification.deleteMany();
   await prisma.permission.deleteMany();
   await prisma.reaction.deleteMany();
@@ -417,6 +418,7 @@ export const ALL_PRISMA_MODELS = [
   'approval_request',
   'attachment',
   'dashboard_widget',
+  'list_filter_gate',
   'notification',
   'permission',
   'reaction',

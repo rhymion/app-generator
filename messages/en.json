@@ -47,6 +47,7 @@
     "appSetting": "App Setting",
     "auditLog": "Audit Log",
     "dashboard": "Dashboard",
+    "listFilterGate": "List Filter Gate",
     "organization": "Organization",
     "permission": "Permission",
     "role": "Role",
@@ -83,7 +84,9 @@
     "image": "Image",
     "images": "Images",
     "import": "Import",
+    "isEnabled": "Is Enabled",
     "isPinned": "Is Pinned",
+    "label": "Label",
     "message": "Message",
     "metadata": "Metadata",
     "mfaEnabled": "Mfa Enabled",
@@ -93,6 +96,7 @@
     "password": "Password",
     "pastSubmissions": "Past Submissions",
     "precededBy": "Preceded By",
+    "priority": "Priority",
     "read": "Read",
     "reject": "Reject",
     "requestorRole": "Requestor Role",
@@ -101,7 +105,9 @@
     "roles": "Roles",
     "seriesField": "Series Field",
     "stackMode": "Stack Mode",
+    "startedAt": "Started At",
     "status": "Status",
+    "statusType": "Status Type",
     "submit": "Submit",
     "targetId": "Target Id",
     "targetTable": "Target Table",
@@ -109,6 +115,8 @@
     "title": "Title",
     "update": "Update",
     "users": "Users",
+    "validFrom": "Valid From",
+    "weight": "Weight",
     "widgets": "Widgets",
     "withdraw": "Withdraw"
   },
@@ -148,6 +156,7 @@
     "auditLog": "Audit Log",
     "dashboard": "Dashboard",
     "home": "Home",
+    "listFilterGate": "List Filter Gate",
     "organization": "Organization",
     "permission": "Permission",
     "role": "Role",
@@ -277,5 +286,10 @@
     "quarter": "Quarter",
     "week": "Week",
     "year": "Year"
+  },
+  "ListFilterGateStatus": {
+    "done": "Done",
+    "queued": "Queued",
+    "running": "Running"
   }
 }

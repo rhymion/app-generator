@@ -178,6 +178,73 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   clause per kind regardless of which operator the user picks in the UI; a
   later pass can wire `GridColDef.type` + the real operator through. See
   `docs/knowledge/list-filter-sort-column-type-dispatch.md`.
+- **Column-type-aware list filter still crashed for date-only, boolean, and
+  invalid-enum-literal values, and never presented the real per-type filter
+  control the MUI operator UX implies** (issue #756, follow-on gap in
+  #753/#755): (1) `_column_filter_kind()` only recognized `format:
+  date-time`, so a plain `format: date` column (`@db.Date`, e.g.
+  `effective_date`) fell through to the `'string'` kind and crashed with
+  the same `Unknown argument \`contains\`` #753 already fixed for
+  date-time; (2) `buildFilter`'s `'boolean'` branch had no value coercion,
+  so a real user's only input surface (a plain text box, since no
+  `GridColDef.type: 'boolean'` was wired) sent the raw string `"true"` and
+  crashed against Prisma's `BoolFilter`; (3) the `'enum'` branch passed an
+  unvalidated string straight to Prisma, crashing on any value that wasn't
+  independently known to be a valid raw enum literal — including a
+  column's own *translated display label* (e.g. `"In Force"` for
+  `in_force`), which is what a real user actually sees and types. Fixed
+  by extending the scope #753 left explicit ("full `GridColDef.type`/
+  operator wiring... for later"): `page_list_context()`
+  (`generators.py`) now emits `type`/`valueOptions` per column kind
+  (`singleSelect` for enum, reusing the same i18n label source as the
+  cell's own display so the two can never drift; `boolean`; `date`/
+  `dateTime`; `number` for number/decimal), giving every list page's
+  filter panel the real per-type control (a value dropdown, a date
+  picker, a checkbox) instead of a plain text box for every column.
+  `DataGridClient.tsx`'s `reload()` now forwards the MUI filter panel's
+  actual `operator` (previously discarded) to the server; `buildFilter`
+  dispatches on it per kind (enum: `is`/`not`/`isAnyOf`, validated
+  against a new generate-time `ENUM_MEMBERS` const so an invalid value —
+  translated label included — drops the clause instead of crashing;
+  boolean: coerced `is`; date: `is`/`not`/`after`/`onOrAfter`/`before`/
+  `onOrBefore`; number/decimal: `=`/`!=`/`>`/`>=`/`<`/`<=`; string:
+  `contains`/`equals`/`startsWith`/`endsWith`/`isAnyOf`) — an
+  unrecognized operator still falls back to that kind's existing default
+  clause, never a new crash source. `FilterMap`'s value type widens to
+  `FilterValue | { operator, value }`, kept backward compatible:
+  `parsePageOpts()` (REST) still emits bare scalars, and the 4 remaining
+  hand-maintained built-in-entity `getters.ts` files (dashboard/
+  permission/user/role/setting/organization/approval_flow are in fact
+  template-generated and already receive the new `kinds` argument like
+  any other entity — `audit_log` is the one that still calls the old
+  2-argument form, correcting #753's own "8 hand-maintained" count)
+  degrade to the pre-existing default clause with no code change. Also
+  fixes a real precision bug found only through actual Cypress UI
+  interaction, not caught by design review: a `GridColDef.type: 'number'`
+  filter's native `<input type="number">` round-trips a typed Decimal
+  value through the browser's own IEEE-754 double (`'99.99'` arrives at
+  the server as `99.98999999999999488...`), silently breaking exact-match
+  filtering against a column whose stored value is exact — a new
+  generate-time `DECIMAL_SCALES` const lets `buildFilter` re-quantize a
+  JS-number-typed decimal value back to the column's real scale before it
+  reaches Prisma. This repo's own dogfood schema had zero enum/boolean/
+  date-only/date-time/decimal columns anywhere in `x-display.table` to
+  exercise any of this through a real list page, so a new standalone
+  `list_filter_gate` entity (no relation to any other entity,
+  `x-generate.test: false` and self-seeded through its still-generated
+  `/api/list_filter_gate` endpoint, mirroring `approval_flow`'s own
+  established pattern rather than opting into a full generated CRUD
+  Cypress spec set) was added carrying one column per kind, with
+  permanent Cypress coverage
+  (`cypress/e2e/list_filter_sort_typed_columns.cy.ts`) for all three
+  original crashes plus the translated-label/isAnyOf/operator paths. A
+  `test: false` entity with no relation to anything else falls outside
+  `grantAllEntityPermissions()`'s own `ALL_ENTITIES` (template-derived
+  from entities with `x-generate.test: true`, or reached via another
+  entity's labelField hop) — a new `db:grantEntityPermission` Cypress
+  task (`cypress.config.ts`) grants one additional entity's permission
+  explicitly for cases like this one. See
+  `docs/knowledge/list-filter-sort-typed-columns.md`.
 - **Generated `addEntity`/`updateEntity` service functions
   (`service.ts.jinja2`) misclassified Prisma's `P2028` error ("Unable to
   start a transaction in the given time" — a transaction/connection-pool

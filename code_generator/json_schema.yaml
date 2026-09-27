@@ -361,6 +361,53 @@ definitions:
         items:
           $ref: "#/definitions/approval_flow"
 
+  list_filter_gate:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+      search: false
+    x-display:
+      table:
+        - label:
+            primary: true
+            width: 200
+        - status_type:
+            width: 140
+        - is_enabled:
+            width: 120
+        - valid_from:
+            width: 140
+        - started_at:
+            width: 180
+        - priority:
+            width: 100
+        - weight:
+            width: 120
+    fields:
+      label: {}
+      status_type:
+        enum:
+          - queued
+          - running
+          - done
+        # keep in sync with prisma/schema.prisma's ListFilterGateStatus enum
+        # (mirrors approval_request.status's cmd_963 convention).
+      is_enabled: {}
+      valid_from:
+        # Prisma DateTime always derives format: date-time (schema_deriver.py
+        # has no @db.Date-vs-DateTime distinction) -- override to date-only
+        # to match the Prisma column's actual @db.Date native type.
+        format: date
+      started_at: {}
+      priority: {}
+      weight: {}
+
   approval_request:
     x-display:
       table:

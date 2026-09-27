@@ -16,6 +16,7 @@ const navTranslationKeys: Record<string, string> = {
   "/organization": "organization",
   "/permission": "permission",
   "/approval_flow": "approvalFlow",
+  "/list_filter_gate": "listFilterGate",
   "/dashboard": "dashboard",
   "/app_setting": "appSetting",
 };

@@ -57,6 +57,37 @@ export default defineConfig({
           await grantAllEntityPermissions();
           return null;
         },
+        // app-generator#756/subtask_1193a: grants full CRUD on one additional
+        // entity to the test user's Administrator role, for an entity outside
+        // grantAllEntityPermissions()'s own ALL_ENTITIES (that array is
+        // template-rendered from db_helpers_context()'s test_entity_names --
+        // only entities with x-generate.test: true, or reached via another
+        // entity's x-relationship labelField hop, are ever in it; a
+        // deliberately standalone x-generate.test: false entity like
+        // list_filter_gate is neither). Call after db:grantAllPermissions so
+        // the Administrator role already exists.
+        async 'db:grantEntityPermission'(entityName: string) {
+          const { prisma } = require('./cypress/support/db-helpers');
+          const { TEST_CREDENTIALS } = require('./cypress/support/test-credentials');
+          const testUser = await prisma.user.findUnique({ where: { email: TEST_CREDENTIALS.email } });
+          if (!testUser) throw new Error('db:grantEntityPermission: test user not found. Run db:seed first.');
+          const adminRole = await prisma.role.findFirst({ where: { name: 'Administrator', users: { some: { id: testUser.id } } } });
+          if (!adminRole) throw new Error('db:grantEntityPermission: Administrator role not found. Run db:grantAllPermissions first.');
+          await prisma.permission.create({
+            data: {
+              name: entityName,
+              role_id: adminRole.id,
+              create: true,
+              read: true,
+              update: true,
+              delete: true,
+              import: true,
+              creator_id: testUser.id,
+              updater_id: testUser.id,
+            },
+          });
+          return null;
+        },
         async 'db:createLimitedApiUser'(modelName: string) {
           const { createLimitedApiUser } = require('./cypress/support/db-helpers');
           return await createLimitedApiUser(modelName);
