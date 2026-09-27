@@ -5,7 +5,7 @@ import type { {{ parent_pascal }}, {{ parent_pascal }}Detail } from '@/lib/{{ pa
 import { assertPermission, getModelPermissions, resolvePermissions, toPermissions{% if should_filter_by_org or is_self_only %}, getSessionUserIdOrThrow{% endif %} } from '@/lib/authz';
 import type { Operation, RichPermissions } from '@/lib/authz';
 import {
-  type PageOpts, type PageResult,
+  type PageOpts, type PageResult, type ColumnFilterKind, type RelationFilterMap,
   DEFAULT_PAGE_SIZE, clampPage, buildOrderBy, buildFilter,
 } from '@/lib/_pagination';
 {% if should_filter_by_org %}
@@ -36,6 +36,11 @@ import { deepStringifyDecimals{% if selector_oto_rels | selectattr('available_ne
 // request time so external input cannot pick arbitrary columns.
 const SORTABLE_FIELDS = new Set<string>([{{ sortable_fields_quoted }}]);
 const FILTERABLE_FIELDS = new Set<string>([{{ filterable_fields_quoted }}]);
+// Per-column clause-shape kind + FK-relation labelField map (app-generator#753)
+// -- lets buildFilter/buildOrderBy pick the correct Prisma clause shape per
+// column instead of always emitting a string `contains`.
+const FIELD_KINDS: Record<string, ColumnFilterKind> = { {{ field_kinds_quoted }} };
+const RELATION_FILTER_FIELDS: RelationFilterMap = { {{ relation_filter_fields_quoted }} };
 
 /** Build the where clauses that enforce read scope (org + Creator/Assignee{% if is_self_only %} / self-only{% endif %}). */
 async function build{{ parent_pascal }}AccessWhere(
@@ -373,7 +378,7 @@ export async function get{{ parent_pascal }}Page(
   const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
 {% endif %}
   const accessAnd = await build{{ parent_pascal }}AccessWhere(perms, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
-  const filterAnd = buildFilter(opts.filter, FILTERABLE_FIELDS);
+  const filterAnd = buildFilter(opts.filter, FILTERABLE_FIELDS, FIELD_KINDS, RELATION_FILTER_FIELDS);
   const customWhere = filterListQuery(opts.filter ?? {});
   const where = {
     AND: [
@@ -382,7 +387,7 @@ export async function get{{ parent_pascal }}Page(
       ...(customWhere && Object.keys(customWhere).length > 0 ? [customWhere] : []),
     ],
   };
-  const orderBy = buildOrderBy(opts.sort, SORTABLE_FIELDS);
+  const orderBy = buildOrderBy(opts.sort, SORTABLE_FIELDS, RELATION_FILTER_FIELDS);
 
   // findMany and count run as two independent queries (Promise.all), NOT
   // bundled into a single prisma.$transaction([...]). A batch $transaction
