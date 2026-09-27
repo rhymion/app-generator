@@ -81,6 +81,94 @@ Scope, matching what is schema-level (true for every row) vs. row-level
 - **Not decided in this pass**: the RFC 9457 error-shape migration (every
   route still returns `{"error": "<message>"}`, unchanged).
 
+### List query parameters, `readOnly`, bulk requestBody, 4xx, import/export
+
+(#762) `GET /api/{parent}` declares `page`/`pageSize`/`sort`/`f.<field>`
+query parameters (`_list_query_parameters()`), built from the exact same
+sort/filter allow-list and per-column kind map `getters.ts.jinja2`'s
+generated `SORTABLE_FIELDS`/`FILTERABLE_FIELDS`/`FIELD_KINDS` render from
+(`ctx['sort_filter_fields']`/`ctx['sort_filter_field_kinds']`/
+`ctx['sort_filter_relation_fields']`, `build_context.py`) — never a
+second, independently-derived guess. Each `f.<field>` parameter's schema
+reuses the field's own cleaned record-schema type, so it can't drift from
+what the field actually is; its description states whether the match is
+a case-insensitive substring (`string` kind) or an exact match (every
+other kind) — `buildFilter`'s (`lib/_pagination.ts`) actual default-clause
+behavior today. It deliberately does not describe per-kind operator
+selection (`is`/`not`/`isAnyOf`/`after`/...) — that is app-generator#756's
+DataGridClient-only Server Action path, which `parsePageOpts()` (the REST
+query-string path these parameters document) never receives even once
+#756 merges (`FilterMap`'s bare-scalar REST shape is unchanged by that
+change).
+
+A system/server-managed field (the baseline `id`/`created_at`/
+`updated_at`/`creator_id` set, plus anything in `ctx['readonly_fields']` —
+`x-readonly`/`x-readonly-fields`/`x-server-value`) is marked `readOnly:
+true` on the full-record schema (`_record_properties()`), JSON Schema
+2020-12's own standard keyword for "present on read, never sent on
+write" — so a consumer reading only the record schema (not
+cross-referencing the separate create-request schema) still gets the
+signal. Never leaked into a query-parameter schema (`readOnly` is a
+response-body concept; stripped there it would be meaningless).
+
+Bulk `PUT`/`DELETE` at `/api/{parent}/bulk` now declare a `requestBody`:
+`PUT`'s items are the create-request shape plus a required `id`
+(`{Parent}BulkUpdateItem`, mirroring `api_bulk_route.ts.jinja2`'s
+`{ id, ...create-fields }` destructure); `DELETE`'s items are bare `{id}`
+objects. Every operation's non-2xx/non-207 responses (`_std_responses()`)
+are traced to a real template line, not assumed from the status code's
+generic meaning: `400`/`401`/`403`/`429` (list `GET`, the pageSize check
+is unconditional); `401`/`403`/`409`/`422`/`429` always plus a
+conditional `400` (create/update — `409`/`422` come from
+`service.ts.jinja2`'s unconditional `P2002`/`VALIDATION` catch in both
+`add{Parent}` and `update{Parent}`, the `400` only when this entity has a
+plain-readonly field to reject); `401`/`403`/`404`/`429` plus a
+conditional `409` for count-mode reservation entities (delete). A bulk
+operation's own top-level surface is narrower than its singular
+counterpart — every per-item outcome (not-found/access-denied/write
+failure) is caught row-by-row and reported inside the `207` body's
+`results[]`, never re-thrown as a top-level error — so bulk only ever
+declares `401`/`403`/`429` beyond its `207`. A 403 response's description
+names which permission operation is being checked (`read`/`create`/
+`update`/`delete`/`import`) — plain text, not a vendor extension; the
+DB-driven role/permission grant itself (which roles actually hold that
+permission) is runtime state this static generator cannot read, and was
+left undocumented rather than expressed via a new, unreviewed `x-*` key.
+
+CSV export/import get their own paths, mirroring `generate.py`'s own
+gating exactly: `GET /api/{parent}/export` when `can_list and
+can_export`, `POST /api/{parent}/import` when `import_eligible`. Neither
+route calls `getRateLimiter()` (confirmed absent from
+`api_export_route.ts.jinja2`/`api_import_route.ts.jinja2`, unlike every
+other route), so neither declares `429`; both use `resolveActorId`'s
+dual-auth (API key OR session), so their `401` text differs from the
+API-key-only routes above. Import's shared `ImportResult` schema mirrors
+`api_import_route.ts.jinja2`'s own `ImportResult` TS type exactly
+(`summary`/`errors`/`confirmToken`/`skippedColumns`); a structural
+failure (oversized file, too many rows, a missing key column, an
+expired/invalid `confirmToken`) is `400` with the same `ImportResult`
+body shape, while a per-row failure is `200` with `errors[]` populated —
+HTTP status alone never tells a caller whether any row failed.
+
+**External validator re-run** (same method as the prior investigation's
+own run, done here for the larger entity/path coverage this change adds
+— 35 paths vs. 23, 27 schemas vs. 18): Spectral (`spectral:oas`) reports
+**0 errors, 132 warnings** (`oas3-api-servers`×1, `info-contact`×1,
+`operation-description`×65, `operation-operationId`×65 — the two
+operation-level counts grew from 53 to 65, exactly the +12 new operations
+this change adds; no new warning *class* appeared). Redocly reports
+**1 error** (`no-empty-servers`, pre-existing, unrelated — the same
+missing top-level `servers` array Spectral flags as a warning) and
+**74 warnings** (`info-license`×1, `operation-operationId`×65,
+`tag-description`×8). Redocly's `operation-4xx-response` warning — 26
+occurrences before this change — is now **zero**: every operation this
+generator emits now declares at least one 4xx response.
+
+**Not covered by either linter's default ruleset**, and unaffected by
+this change: per-operation role/permission detail (gap 6 above) and the
+`x-relationship(s)` `$ref`-modeling question remain open, tracked as a
+follow-up rather than decided here.
+
 **Never served by a deployed app by default** — a customer wanting to
 expose it wires up their own route; this generator does not add one, and
 no new schema key controls this (matching the same treatment

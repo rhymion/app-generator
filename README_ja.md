@@ -538,7 +538,7 @@ app-generator/
 | [gcp-automation-design.md](docs/knowledge/gcp-automation-design.md) | GCP Cloud Run デプロイ: `x-cloud` オプトイン、Dockerfile、GCS アップロード、環境自動化スクリプト |
 | [claude-code-settings-consumer-side.md](docs/knowledge/claude-code-settings-consumer-side.md) | `.claude/settings.json` の読み込みルール、OS非依存な権限記法、複合コマンドのマッチングの罠、設定ファイルが実際に読み込まれたかの確認方法 — 本リポジトリまたは `app-template` の `.claude/settings.json` を編集する前に読むこと |
 | [legal-documents.md](docs/knowledge/legal-documents.md) | 利用規約・プライバシーポリシー画面: 文書の言語がサイトUIの言語一覧から独立している理由、Markdown採用（JSON/MDX不採用）の理由、文書の言語追加手順 |
-| [generated-documentation-and-openapi-spec.md](docs/knowledge/generated-documentation-and-openapi-spec.md) | 生成される各エンティティのドキュメントの「Constraints」節（承認フロー・書き込みロック）と `docs/generated/openapi.json`（OpenAPI 3.1 ビルド成果物） |
+| [generated-documentation-and-openapi-spec.md](docs/knowledge/generated-documentation-and-openapi-spec.md) | 生成される各エンティティのドキュメントの「Constraints」節（承認フロー・書き込みロック）と `docs/generated/openapi.json`（OpenAPI 3.1 ビルド成果物）— 一覧クエリパラメータ、`readOnly`、bulkのrequestBody、操作別4xx応答、import/exportパス |
 | [api-idempotency-and-rate-limiting.md](docs/knowledge/api-idempotency-and-rate-limiting.md) | 単一レコード作成エンドポイントの `Idempotency-Key` 対応（対象レコードと同一トランザクションのDBテーブル・保持期間1日）と `api:read`/`api:write` の API キー単位流量制限 |
 | [api-key-expiry.md](docs/knowledge/api-key-expiry.md) | `authenticateApiKey()` でチェックする任意設定の `user.api_key_expires_at`。`null` は無期限、期限切れは `401 API key expired.` で拒否 |
 

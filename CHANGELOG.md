@@ -93,6 +93,23 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   (`x-generate.delete: false`): the sole default row must not be removable
   through the standard entity delete action. `scripts/seed-baseline.ts`
   seeds the tenant-wide default row.
+- **Closed five gaps in the generated OpenAPI 3.1 build artifact** (issue
+  #762, follow-up to #707): `GET /api/{parent}` now declares `page`/
+  `pageSize`/`sort`/`f.<field>` query parameters; the record schema marks
+  system/server-managed fields `readOnly: true`; bulk `PUT`/`DELETE` at
+  `/api/{parent}/bulk` declare a `requestBody`; every operation declares
+  the real `400`/`401`/`403`/`404`/`409`/`422`/`429` responses its own
+  route/service code can actually return (traced to specific template
+  lines, not assumed from the status code alone); and `/api/{parent}/
+  export`/`/api/{parent}/import` now have their own `paths` entries. A
+  sixth gap (per-operation role/permission detail) is deliberately left
+  open — the role/permission mapping is runtime database state a static
+  generator cannot read, and expressing more than "a 403 is possible"
+  would need a new vendor-extension key, left as a separate decision. A
+  Spectral/Redocly re-run confirms 0 structural/schema errors and that
+  Redocly's `operation-4xx-response` warning (26 occurrences before this
+  change) is now zero. See
+  `docs/knowledge/generated-documentation-and-openapi-spec.md`.
 
 ### Changed
 - **`getModelPermissions` (`lib/authz.ts`) now issues one `permission.findMany`
