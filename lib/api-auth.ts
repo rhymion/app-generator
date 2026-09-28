@@ -175,6 +175,14 @@ export function handleApiError(error: unknown): NextResponse {
     return NextResponse.json({ error: error.message }, { status: error.statusCode });
   }
   if (error instanceof AppError) {
+    // Load-test diagnostics only (cmd_1193): CONFLICT here always carries
+    // either a p2002Field()-derived column/index label or a relation key
+    // (see _errors.ts's CONFLICT throw sites) -- never the colliding row's
+    // actual data -- so logging `field` alone cannot leak values. Default
+    // off; set only on a load-test deployment, never in normal operation.
+    if (error.code === 'CONFLICT' && process.env.LOAD_TEST_LOG_CONFLICTS === 'true') {
+      console.error('CONFLICT (load-test diagnostics):', { field: error.field });
+    }
     return NextResponse.json(
       {
         error: error.message,

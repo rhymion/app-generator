@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 const { userFindFirst, roleCount, getSessionUserId } = vi.hoisted(() => ({
   userFindFirst: vi.fn(),
@@ -15,8 +15,9 @@ vi.mock('@/lib/authz', () => ({
   getSessionUserId,
 }));
 
-import { ApiError, authenticateApiKey, requireScheduledTaskRole } from './api-auth';
+import { ApiError, authenticateApiKey, handleApiError, requireScheduledTaskRole } from './api-auth';
 import { SCHEDULED_TASK_ROLE_NAME } from './scheduled-tasks/system-actor';
+import { AppError, p2002Field } from './_errors';
 
 function makeRequest(headers: Record<string, string> = {}) {
   return { headers: { get: (name: string) => headers[name] ?? null } } as unknown as Parameters<typeof requireScheduledTaskRole>[0];
@@ -124,5 +125,88 @@ describe('authenticateApiKey', () => {
       statusCode: 401,
     } satisfies Partial<ApiError>);
     expect(userFindFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe('handleApiError CONFLICT diagnostics (cmd_1193)', () => {
+  const ORIGINAL_ENV = process.env.LOAD_TEST_LOG_CONFLICTS;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleErrorSpy.mockRestore();
+    if (ORIGINAL_ENV === undefined) delete process.env.LOAD_TEST_LOG_CONFLICTS;
+    else process.env.LOAD_TEST_LOG_CONFLICTS = ORIGINAL_ENV;
+  });
+
+  it('does not log when LOAD_TEST_LOG_CONFLICTS is unset (default/normal operation)', async () => {
+    delete process.env.LOAD_TEST_LOG_CONFLICTS;
+
+    const err = new AppError('CONFLICT', 'Unique constraint violation', 'provider_code');
+    const res = handleApiError(err);
+
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({
+      error: 'Unique constraint violation',
+      code: 'CONFLICT',
+      field: 'provider_code',
+    });
+  });
+
+  it('logs only the column/index label, never the colliding value, when explicitly enabled', async () => {
+    process.env.LOAD_TEST_LOG_CONFLICTS = 'true';
+
+    const err = new AppError('CONFLICT', 'Unique constraint violation', 'provider_code');
+    const res = handleApiError(err);
+
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+    expect(consoleErrorSpy).toHaveBeenCalledWith('CONFLICT (load-test diagnostics):', { field: 'provider_code' });
+    // The logged payload is exactly { field }, with no room for a value key.
+    const loggedPayload = consoleErrorSpy.mock.calls[0][1] as Record<string, unknown>;
+    expect(Object.keys(loggedPayload)).toEqual(['field']);
+    expect(res.status).toBe(409);
+  });
+
+  it('does not log a fieldless CONFLICT (e.g. assertNotStale) even when enabled', async () => {
+    process.env.LOAD_TEST_LOG_CONFLICTS = 'true';
+
+    const err = new AppError('CONFLICT', 'Invalid snapshot data. Please reload and try again.');
+    handleApiError(err);
+
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+    expect(consoleErrorSpy).toHaveBeenCalledWith('CONFLICT (load-test diagnostics):', { field: undefined });
+  });
+
+  it('end-to-end with a real P2002 error meta shape: colliding value never reaches the log', async () => {
+    process.env.LOAD_TEST_LOG_CONFLICTS = 'true';
+
+    // Mirrors the exact meta shape service.ts's P2002 catch sites receive
+    // from Prisma (see p2002Field()'s doc comment in _errors.ts) for a
+    // real duplicate-provider_code collision. Prisma's own P2002 meta never
+    // carries the colliding row's data (Postgres SQLSTATE 23505 only ever
+    // reports a constraint identifier on the wire, per that same comment) --
+    // this fixture stands in for the real driver response, not a stub that
+    // conveniently omits the value.
+    const realisticP2002Meta = {
+      modelName: 'provider',
+      driverAdapterError: {
+        cause: { constraint: { index: 'provider_provider_code_key' } },
+      },
+    };
+    const derivedField = p2002Field(realisticP2002Meta);
+    expect(derivedField).toBe('provider_code');
+
+    const err = new AppError('CONFLICT', 'Unique constraint violation', derivedField);
+    handleApiError(err);
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith('CONFLICT (load-test diagnostics):', { field: 'provider_code' });
+    const [, loggedPayload] = consoleErrorSpy.mock.calls[consoleErrorSpy.mock.calls.length - 1];
+    // No key on the logged object could ever hold a data value -- 'field'
+    // is the only key, and its value is a column/index label, not row data.
+    expect(Object.keys(loggedPayload as object)).toEqual(['field']);
   });
 });
