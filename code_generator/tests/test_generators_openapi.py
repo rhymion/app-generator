@@ -336,3 +336,16 @@ def test_assemble_document_merges_import_result_schema_once():
 def test_assemble_document_skips_empty_specs():
     doc = assemble_openapi_document([{}, build_entity_openapi(_base_ctx())])
     assert '/api/widget' in doc['paths']
+
+
+# ---------------------------------------------------------------------------
+# assemble_openapi_document(): info.description (Issue #769) says the
+# document IS served, points at the route, and cross-references capabilities
+# ---------------------------------------------------------------------------
+
+def test_info_description_says_served_not_unserved():
+    doc = assemble_openapi_document([build_entity_openapi(_base_ctx())])
+    description = doc['info']['description']
+    assert 'not served' not in description
+    assert '/api/openapi.json' in description
+    assert 'capabilities' in description

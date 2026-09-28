@@ -19,12 +19,16 @@ at the top of json_schema.yaml says so), and OpenAPI 3.1's schema object
 IS JSON Schema 2020-12 by definition (design doc §6) — no dialect
 translation is needed for the field-level keywords this module keeps.
 
-Build artifact only (design doc §3's exposure note): generate.py just
-writes this to docs/generated/openapi.json alongside the human-readable
-doc_entity.md/page.mdx outputs — the same "build-time output, not a
-runtime route" treatment those already get. This module adds no API
-route and no new schema key; a deployed app does not serve this file
-unless a customer wires up their own route to do so.
+Build artifact (design doc §3's exposure note): generate.py writes this
+to docs/generated/openapi.json alongside the human-readable
+doc_entity.md/page.mdx outputs. This module adds no API route and no new
+schema key itself — but as of Issue #769, every generated app ships a
+fixed (non-templated) route, `GET /api/openapi.json`
+(app/api/openapi.json/route.ts in this repo), that serves this exact
+file — API key or session required, in every environment including
+production. See lib/openapi/document.ts and Issue #768 (the
+development/staging-only Swagger UI page at /swagger, which reads its
+spec from this same route rather than a second copy).
 
 Scope, per the design doc's own static/runtime split (§3's table): field
 type/required/enum, relationship shape (target + cardinality), and
@@ -696,9 +700,14 @@ def assemble_openapi_document(entity_specs: list[dict]) -> dict:
             'version': '1.0.0',
             'description': (
                 "Machine-readable spec of this application's REST API, "
-                'generated from json_schema.yaml. Build artifact only — '
-                'not served by the deployed app by default; a deployment '
-                'that wants to expose it wires up its own route.'
+                'generated from json_schema.yaml. Served at GET '
+                '/api/openapi.json (API key or session required) in every '
+                'environment, including production. This document '
+                "describes which endpoints exist and their request/response "
+                "shapes; it does not describe what a caller can do to a "
+                "specific record right now (write locks, state transitions, "
+                'approval actions) — see GET '
+                "/api/{entity}/{id}/capabilities for that."
             ),
         },
         'tags': [{'name': t} for t in tags],

@@ -5,6 +5,30 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Served the generated OpenAPI document at an authenticated route, and
+  added a development/staging-only Swagger UI page** (issues #768/#769,
+  fifth stage of AI-agent-facing API improvements). `GET
+  /api/openapi.json` returns the exact `docs/generated/openapi.json` the
+  generator already writes — no second copy — reading it at request time
+  via `lib/openapi/document.ts` (`fs.readFileSync` with a runtime-built
+  path, listed in `next.config.ts`'s `outputFileTracingIncludes` so it
+  survives Vercel's build-output pruning). Authentication is
+  `requireDualAuth` (API key or session); no further permission check,
+  since the document only reveals schema shape, never row data. Runs in
+  every environment, including production. `GET /swagger`
+  (`app/[locale]/swagger`) is a separate, `swagger-ui-dist`-based
+  interactive explorer that reads its spec from this same route
+  (same-origin, no CORS) and lets a developer exercise the API through its
+  Authorize dialog. Gated on `SWAGGER_UI_ENABLED === 'true'` (never
+  `NODE_ENV`): unset makes the page 404, the same fail-closed treatment
+  `TEST_RESET_TOKEN` gives `app/api/test-utils/reset-caches`. Not wired
+  into `vercel-setup.sh`/`vercel-env.sh` — enabling it on a Preview
+  deployment is a manual, one-off step, and it must never be set on
+  Production (every "Try it out" call runs with the caller's own role
+  permissions, unrestricted). `openapi.json`'s `info.description` no
+  longer says the document goes unserved. See
+  `docs/knowledge/generated-documentation-and-openapi-spec.md`.
+
 - **Added durable, schema-independent regression coverage for the list-page
   filter/sort feature (issues #753/#755/#756), plus a wiring-check layer
   that runs against each consumer repo's own real data**: a new

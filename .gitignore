@@ -198,6 +198,7 @@ lib/dashboard/types.ts
 !lib/compliance/**
 !lib/mention/**
 !lib/legal/**
+!lib/openapi/**
 !lib/scheduled-tasks/system-actor.ts
 
 # ── app/[locale]/ ──
@@ -230,6 +231,8 @@ app/\[locale\]/docs/page.mdx
 app/\[locale\]/docs/*/
 !app/\[locale\]/legal/
 !app/\[locale\]/legal/**
+!app/\[locale\]/swagger/
+!app/\[locale\]/swagger/**
 
 # ── app/api/ ──
 app/api/*/
@@ -252,6 +255,8 @@ app/api/approval_request/\[id\]/route.ts
 app/api/approval_request/bulk/route.ts
 !app/api/audit_log/
 !app/api/audit_log/**
+!app/api/openapi.json/
+!app/api/openapi.json/**
 
 # ── components/ ──
 components/*/*
@@ -298,6 +303,7 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/multi_stage_approval_order_reached.cy.ts
 !cypress/e2e/api/self_only_access_control.cy.ts
 !cypress/e2e/api/self_only_setting_access_control.cy.ts
+!cypress/e2e/api/openapi_document.cy.ts
 !cypress/e2e/api/approval_request_resubmit_notification.cy.ts
 !cypress/e2e/api/write_once_side_effect_roundtrip_probe.cy.ts
 
