@@ -16,29 +16,47 @@ display column's relation labelField, not just the FK id column itself.
 Every scalar column in `FILTERABLE_FIELDS`/`SORTABLE_FIELDS` also has an
 entry in a generated `FIELD_KINDS` map (`getters.ts.jinja2`), one of:
 
-- `'string'` — the default. Unchanged behavior: a string filter value
-  becomes `{ contains: value, mode: 'insensitive' }`; a non-string value
-  becomes an equality match.
-- `'enum'` / `'boolean'` / `'decimal'` — exact match (`{ [field]: value }`).
-  Prisma's native enum, Boolean, and Decimal filters don't accept
-  `contains`; Decimal is never coerced through `Number()` to avoid
-  precision loss on money-scale values.
+- `'string'` — the default. A `contains`/`equals`/`startsWith`/`endsWith`/
+  `isAnyOf` clause depending on the operator the user picked (unrecognized
+  operator falls back to `contains`).
+- `'enum'` — validated against the column's known raw-literal member list
+  (`ENUM_MEMBERS`, generate-time) before building `equals`/`not`/`in`; an
+  invalid value (including the column's own translated display label, not
+  just a bare typo) drops the clause instead of reaching Prisma.
+- `'boolean'` — coerced to a real boolean (`v === true || v === 'true'`)
+  before an `equals` clause.
+- `'decimal'` — exact/comparison match. Never coerced through `Number()`
+  when the incoming value is already a string (precision loss risk on
+  money-scale values); when it arrived as a JS number (the `type: 'number'`
+  filter's native `<input type="number">`), re-quantized via `toFixed()`
+  against a generate-time `DECIMAL_SCALES` map first — a browser number
+  input round-trips a typed value through an imprecise IEEE-754 double
+  before this function ever sees it.
 - `'number'` — parsed with `Number(value)`; the clause is dropped
   (not applied) if the result is `NaN`, rather than sending a bad value to
   Prisma.
 - `'date'` — parsed with `new Date(value)`; the clause is dropped if the
-  result is an Invalid Date.
+  result is an Invalid Date. Covers both `format: date-time` and
+  `format: date` (date-only, `@db.Date`) columns.
+
+Every kind above except `'string'`'s fallback also honors the specific
+comparison operator the user picked in the UI (`not`/`after`/`>`/`isAnyOf`/
+etc) — see `docs/knowledge/list-filter-sort-typed-columns.md` for the full
+per-kind operator table and the client-side `GridColDef.type`/
+`valueOptions` wiring that gives each kind its real filter control (a
+value dropdown, a date picker, a checkbox) instead of a plain text box.
 
 `FIELD_KINDS` is derived once per entity, at generate time, in
 `build_context.py`'s `_column_filter_kind()`: it reads the same
 `_prisma_native_enum_type` / `_prisma_decimal_type` / `format: date-time`
-markers `schema_deriver.py` already attaches to a property definition — no
-new schema authoring is required for this to work on an existing column.
+/ `format: date` markers `schema_deriver.py` already attaches to a
+property definition — no new schema authoring is required for this to
+work on an existing column.
 
-Dropping an unparseable `'number'`/`'date'` filter value is deliberate
-fail-closed behavior: the request does not crash, but it also does not
-silently apply a wrong filter — the column's clause is simply absent from
-that request's `AND` list, so the other clauses (if any) still apply.
+Dropping an unparseable/invalid filter value is deliberate fail-closed
+behavior: the request does not crash, but it also does not silently apply
+a wrong filter — the column's clause is simply absent from that request's
+`AND` list, so the other clauses (if any) still apply.
 
 ### 2. Relation display column filter/sort (via labelField)
 
@@ -76,16 +94,6 @@ given entity; a value added there would never reach `getters.ts`.
 
 ## What is explicitly out of scope
 
-- The MUI DataGrid filter panel's `operator` (contains/equals/is/after/
-  before/...) is not forwarded to the server at all — `DataGridClient.tsx`
-  only ever sends `{ field, value }`. The server always applies one fixed
-  clause shape per column kind, regardless of which operator the user
-  picked in the UI. Concretely: typing a partial value into an enum/date/
-  number/decimal column's filter now returns zero rows instead of
-  crashing — correct-but-surprising UX, not a functional defect. Wiring
-  `GridColDef.type` (`singleSelect`/`date`/`number`) and the real operator
-  through is a separate, larger change (new client-side column
-  metadata plus a per-operator server translation) left for a later pass.
 - A relation column's labelField index: today, the relation *target's*
   labelField column (e.g. `approval_flow.entity_name`) is indexed only if
   it happens to also be independently UI-exposed on the target's own list

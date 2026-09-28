@@ -306,7 +306,16 @@ def _column_filter_kind(prop: dict) -> str:
         return 'enum'
     if prop.get('_prisma_decimal_type'):
         return 'decimal'
-    if prop.get('format') == 'date-time':
+    if prop.get('format') in ('date-time', 'date', 'time'):
+        # 'time' (Prisma DateTime @db.Timetz) reuses the 'date' clause shape
+        # unchanged (app-generator#756/cmd_1195): empirically verified via
+        # $queryRaw against a real @db.Timetz column (subtask_1195b) that
+        # Postgres casts ANY timestamp-shaped comparison value to `timetz`
+        # before comparing, silently discarding its date part -- a filter
+        # value built from a full-date-and-time MUI picker (whatever date
+        # happens to be selected) still compares correctly against the
+        # stored time-of-day. No separate clause shape or date-part
+        # normalization is needed.
         return 'date'
     actual = _get_actual_type(prop)
     if actual == 'boolean':
@@ -2626,6 +2635,45 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             _field_kinds[_dc] = 'date'
     field_kinds_quoted = ', '.join(f"'{c}': '{k}'" for c, k in _field_kinds.items())
 
+    # Valid raw enum literal list per 'enum'-kind column (app-generator#756
+    # Finding 3): buildFilter validates an incoming is/isAnyOf filter value
+    # against this before building the Prisma clause, since a value that
+    # isn't a real member of the enum type crashes rather than returning
+    # zero rows. Same source list _column_filter_kind's caller already reads
+    # for `entries` (generators.py's page_list_context) -- not re-derived,
+    # just also exposed here since getters_ctx (this function's return dict)
+    # is snapshotted before page_list_context ever runs (see build_context.py
+    # relation_filter_fields_quoted's comment above for why this can't live
+    # in generators.py instead).
+    _enum_members = {
+        c: filtered_props[c]['enum']
+        for c in _scalar_props
+        if _field_kinds.get(c) == 'enum' and isinstance(filtered_props.get(c, {}).get('enum'), list)
+    }
+    enum_members_quoted = ', '.join(
+        f"'{c}': [{', '.join(chr(39) + str(v) + chr(39) for v in vals)}]"
+        for c, vals in _enum_members.items()
+    )
+
+    # Decimal scale per 'decimal'-kind column (app-generator#756): the
+    # GridColDef.type: 'number' filter control's native <input type="number">
+    # round-trips a typed value through the browser's own IEEE-754 double
+    # (e.g. '99.99' -> 99.98999999999999488...) before it ever reaches
+    # buildFilter -- confirmed empirically via real Cypress UI interaction
+    # (subtask_1193a), not a theoretical concern: this breaks exact-match
+    # (and boundary comparison) filtering against a column whose stored
+    # value is exact. buildFilter re-quantizes a JS-number-typed decimal
+    # filter value with this scale (toFixed) before building the Prisma
+    # clause, recovering the precision the browser's number input lost.
+    # A REST caller's plain string value (parsePageOpts) is untouched --
+    # only ever a problem for a value that arrived as a JS number.
+    _decimal_scales = {
+        c: filtered_props[c]['x-decimal-scale']
+        for c in _scalar_props
+        if _field_kinds.get(c) == 'decimal' and filtered_props.get(c, {}).get('x-decimal-scale') is not None
+    }
+    decimal_scales_quoted = ', '.join(f"'{c}': {s}" for c, s in _decimal_scales.items())
+
     # Text fields used by searchXxxOptions for substring matching. Auto-derived
     # human-readable string columns (shared with the pg_trgm full-text search
     # rule in generate.py:_derive_text_fields) so callers don't accidentally
@@ -4194,6 +4242,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         filterable_fields_quoted=filterable_fields_quoted,
         field_kinds_quoted=field_kinds_quoted,
         relation_filter_fields_quoted=relation_filter_fields_quoted,
+        enum_members_quoted=enum_members_quoted,
+        decimal_scales_quoted=decimal_scales_quoted,
         searchable_text_fields=searchable_text_fields,
         searchable_relation_fields=searchable_relation_fields,
         searchable_fields_display=searchable_fields_display,

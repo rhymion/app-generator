@@ -5,7 +5,7 @@ import type { {{ parent_pascal }}, {{ parent_pascal }}Detail } from '@/lib/{{ pa
 import { assertPermission, getModelPermissions, resolvePermissions, toPermissions{% if should_filter_by_org or is_self_only %}, getSessionUserIdOrThrow{% endif %} } from '@/lib/authz';
 import type { Operation, RichPermissions } from '@/lib/authz';
 import {
-  type PageOpts, type PageResult, type ColumnFilterKind, type RelationFilterMap,
+  type PageOpts, type PageResult, type ColumnFilterKind, type RelationFilterMap, type EnumMembersMap, type DecimalScalesMap,
   DEFAULT_PAGE_SIZE, clampPage, buildOrderBy, buildFilter,
 } from '@/lib/_pagination';
 {% if should_filter_by_org %}
@@ -41,6 +41,16 @@ const FILTERABLE_FIELDS = new Set<string>([{{ filterable_fields_quoted }}]);
 // column instead of always emitting a string `contains`.
 const FIELD_KINDS: Record<string, ColumnFilterKind> = { {{ field_kinds_quoted }} };
 const RELATION_FILTER_FIELDS: RelationFilterMap = { {{ relation_filter_fields_quoted }} };
+// Valid raw enum literal list per enum-kind column (app-generator#756 Finding
+// 3) -- buildFilter validates is/isAnyOf filter values against this before
+// building the Prisma clause, so a value that isn't a real enum member drops
+// the clause instead of crashing.
+const ENUM_MEMBERS: EnumMembersMap = { {{ enum_members_quoted }} };
+// Decimal scale per decimal-kind column (app-generator#756) -- lets
+// buildFilter re-quantize a JS-number-typed filter value (the browser's
+// native number input round-trips through an imprecise double) back to
+// the column's real precision before it reaches Prisma.
+const DECIMAL_SCALES: DecimalScalesMap = { {{ decimal_scales_quoted }} };
 
 /** Build the where clauses that enforce read scope (org + Creator/Assignee{% if is_self_only %} / self-only{% endif %}). */
 async function build{{ parent_pascal }}AccessWhere(
@@ -378,7 +388,7 @@ export async function get{{ parent_pascal }}Page(
   const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
 {% endif %}
   const accessAnd = await build{{ parent_pascal }}AccessWhere(perms, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
-  const filterAnd = buildFilter(opts.filter, FILTERABLE_FIELDS, FIELD_KINDS, RELATION_FILTER_FIELDS);
+  const filterAnd = buildFilter(opts.filter, FILTERABLE_FIELDS, FIELD_KINDS, RELATION_FILTER_FIELDS, ENUM_MEMBERS, DECIMAL_SCALES);
   const customWhere = filterListQuery(opts.filter ?? {});
   const where = {
     AND: [

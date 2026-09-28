@@ -45,6 +45,16 @@ interface DisplayFieldConfig<T> {
   showSeconds?: boolean;
   enumLabels?: Record<number, string>;
   uriKind?: 'image' | 'link';
+  /** MUI GridColDef.type -- the real filter control for this column (a
+   * value dropdown for enum, a date/datetime picker, a checkbox for
+   * boolean, a number box for number/decimal). Unset (plain text filter)
+   * for string columns and for FK relation display columns
+   * (app-generator#756). */
+  type?: 'singleSelect' | 'boolean' | 'date' | 'dateTime' | 'number';
+  /** Options for a 'singleSelect' column's filter dropdown -- built
+   * server-side from the same i18n label source as the cell's own
+   * displayed value, so the two can never drift apart. */
+  valueOptions?: { value: string | number; label: string }[];
 }
 
 interface DataGridClientProps<T extends BaseEntity> {
@@ -133,7 +143,7 @@ export default function DataGridClient<T extends BaseEntity>({
         filter: Object.fromEntries(
           f.items
             .filter(i => i.value !== undefined && i.value !== null && i.value !== '')
-            .map(i => [i.field, i.value as string | number | boolean]),
+            .map(i => [i.field, { operator: i.operator, value: i.value }]),
         ),
       });
       setItems(result.rows as T[]);
@@ -192,12 +202,29 @@ export default function DataGridClient<T extends BaseEntity>({
   ];
 
   const dataColumns: GridColDef<T>[] = defaultDisplayFields.map(fieldConfig => {
+    // MUI's own type-specific default valueFormatter is unsafe for the raw
+    // value shape our cells actually carry: 'date'/'dateTime' throws unless
+    // the resolved value is a real Date instance (ours is already a
+    // pre-formatted display string -- ISSUE#756), and 'singleSelect' tries
+    // to map the resolved value back to one of `valueOptions`' raw values
+    // to find its label -- but our resolved value IS already the label
+    // (formatting_entries replaces the row's raw enum value with its
+    // translated label server-side, before this component ever sees it),
+    // so that lookup always misses and silently renders blank text. An
+    // identity valueFormatter sidesteps both: it keeps exactly what our own
+    // valueGetter/pre-formatting already computed, safe and unchanged.
+    const needsIdentityValueFormatter = fieldConfig.type === 'singleSelect' || fieldConfig.type === 'date' || fieldConfig.type === 'dateTime';
+    const identityValueFormatter = (value: unknown) => (value ?? '') as string;
+
     // Special handling for primary field to include link to view page
     if (fieldConfig.field === primaryField) {
       return {
         field: fieldConfig.field as string,
         headerName: fieldConfig.headerName,
         width: fieldConfig.width || 150,
+        type: fieldConfig.type,
+        valueOptions: fieldConfig.valueOptions,
+        ...(needsIdentityValueFormatter ? { valueFormatter: identityValueFormatter } : {}),
         renderCell: (params) => {
           const fieldValue = params.row[fieldConfig.field];
           // The link must stay within the cell's width. Without these styles
@@ -229,6 +256,9 @@ export default function DataGridClient<T extends BaseEntity>({
         field: fieldConfig.field as string,
         headerName: fieldConfig.headerName,
         width: fieldConfig.width || 200,
+        type: fieldConfig.type,
+        valueOptions: fieldConfig.valueOptions,
+        ...(needsIdentityValueFormatter ? { valueFormatter: identityValueFormatter } : {}),
         renderCell: (params) => {
           const href = params.row[fieldConfig.field] as string | null | undefined;
           if (!href) return null;
@@ -245,8 +275,17 @@ export default function DataGridClient<T extends BaseEntity>({
       field: fieldConfig.field as string,
       headerName: fieldConfig.headerName,
       width: fieldConfig.width || 200,
+      type: fieldConfig.type,
+      valueOptions: fieldConfig.valueOptions,
+      ...(needsIdentityValueFormatter ? { valueFormatter: identityValueFormatter } : {}),
       valueGetter: (value, row) => {
         const fieldValue = row[fieldConfig.field];
+        // 'boolean' must pass the raw boolean through unchanged -- MUI's
+        // boolean cell icon reads params.value directly (not
+        // formattedValue), so stringifying it here (as the generic
+        // fallback below does) would make every row's icon render "true"
+        // (a non-empty string is truthy) regardless of the real value.
+        if (fieldConfig.type === 'boolean') return fieldValue as boolean | null | undefined;
         if (fieldValue === null || fieldValue === undefined) return '';
         if (fieldConfig.format) return formatLabelValue(fieldValue, fieldConfig.format, fieldConfig.showSeconds);
         if (fieldConfig.enumLabels && typeof fieldValue === 'number') return fieldConfig.enumLabels[fieldValue] ?? String(fieldValue);
