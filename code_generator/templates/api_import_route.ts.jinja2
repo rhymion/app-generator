@@ -512,9 +512,12 @@ export async function POST(request: NextRequest) {
 {% else %}
           // Unreachable: import_can_create is false for this entity, so no
           // 'create' action is ever queued above -- kept only so this
-          // branch stays syntactically valid.
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await prisma.{{ model }}.create({ data: action.data as any });
+          // branch stays syntactically valid. Throws instead of writing
+          // directly to the {{ model }} table: this code can never actually
+          // run, but a direct write call here would be indistinguishable
+          // from a live one to the static self-reference scanner in
+          // lib/auth/creator-id-self-reference-guard.test.ts (Issue #722).
+          throw new Error('unreachable: CSV import creation is not supported for this entity');
 {% endif %}
         } else {
 {% if import_can_update %}
