@@ -132,6 +132,15 @@ native number input) is left untouched — round-tripping an
 already-precise string through `Number()` would reintroduce the exact
 loss this exists to avoid.
 
+A malformed value (neither a JS number nor a numeric string — e.g. a
+garbage REST query param) is guarded separately: `buildFilter`'s
+`'decimal'` branch drops the clause (`Number.isNaN(Number(v))`) rather
+than handing an unparseable string to Prisma's Decimal filter, which
+throws. Found via the generated filter/sort wiring-check spec (see below)
+run against a real consumer schema (`purchase_order_line.unit_price`) —
+every other kind (`number`/`date`/`enum`) already guarded this way,
+`decimal` alone didn't. See issue #766.
+
 ## `format: time`'s date-part is discarded server-side, not normalized
 
 A `type: 'dateTime'` filter's picker lets the user choose both a date and

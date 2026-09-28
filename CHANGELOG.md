@@ -182,6 +182,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/prisma-schema-conventions.md` §5.
 
 ### Fixed
+- **A decimal-kind column's filter crashed on a non-numeric value instead
+  of returning zero rows** (found via a real consumer schema): unlike the
+  `number`/`date`/`enum` kinds, `buildFilter`'s `'decimal'` branch never
+  validated a value before handing it to Prisma's Decimal filter, so a
+  malformed query param (e.g. a garbage `f.<field>=` value) crashed with a
+  500 instead of dropping the clause. Fixed with the same
+  `Number.isNaN(Number(v))` guard every other kind already had. See
+  `docs/knowledge/list-filter-sort-typed-columns.md`.
+
 - **Generated list page sort/filter was not column-type-aware** (issue
   #753): an FK/relation display column (e.g. `policy`, `assignee`) was
   silently dropped from every filter/sort request (no error, just a
