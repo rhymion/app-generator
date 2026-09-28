@@ -21,6 +21,12 @@ interface DisplayFieldConfig<T> {
   showSeconds?: boolean;
   enumLabels?: Record<number, string>;
   uriKind?: 'image' | 'link';
+  /** MUI GridColDef.type -- forwarded to DataGridClient (the real filter
+   * control per column type, app-generator#756). Ignored by CardListClient
+   * (no filter panel there), declared here only so this pass-through prop's
+   * object literal type-checks regardless of which child renders it. */
+  type?: 'singleSelect' | 'boolean' | 'date' | 'dateTime' | 'number';
+  valueOptions?: { value: string | number; label: string }[];
 }
 
 interface ResponsiveListClientProps<T extends BaseEntity> {

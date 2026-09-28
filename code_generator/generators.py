@@ -719,6 +719,18 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
             width      = config.get('width', 200)
 
             prop = model_props.get(field_name)
+            # GridColDef.type/valueOptions for the column's real MUI filter
+            # control (app-generator#756 scope B): a value dropdown for
+            # enum, a date/datetime picker, a checkbox for boolean, a number
+            # box for number/decimal. Left unset for FK relation display
+            # columns (field_name in rel_label_map) -- unlike enum's small
+            # fixed member set, a relation's value space is the target
+            # table's rows, a materially different (async-autocomplete)
+            # feature, not a natural extension of this fix.
+            is_relation_col = field_name in rel_label_map
+            grid_type_attr = ''
+            value_options_attr = ''
+
             if prop:
                 actual   = _get_actual_type(prop)
                 enum_vals = prop.get('enum')
@@ -731,6 +743,10 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                     if not any(e['var_name'] == var_name for e in enum_ns_list):
                         enum_ns_list.append({'var_name': var_name, 'ns': native_ns, 'entries': entries, 'is_native_enum': True})
                     add_formatting(field_name, f"{var_name}[item.{field_name} as string] ?? item.{field_name}")
+                    if not is_relation_col:
+                        grid_type_attr = ", type: 'singleSelect'"
+                        options = ', '.join(f"{{ value: '{v}', label: {var_name}['{v}'] }}" for v, _k in entries)
+                        value_options_attr = f", valueOptions: [{options}]"
                 elif actual in ('integer', 'number') and isinstance(enum_vals, list) and _has_string_labels(enum_vals):
                     var_name = f'{to_camel_case(field_name)}Labels'
                     ns_to_use = enum_ns or 'Fields'
@@ -744,8 +760,38 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                     if not any(e['var_name'] == var_name for e in enum_ns_list):
                         enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries, 'is_native_enum': False})
                     add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
+                    if not is_relation_col:
+                        grid_type_attr = ", type: 'singleSelect'"
+                        options = ', '.join(f"{{ value: {i}, label: {var_name}[{i}] }}" for i, _k in entries)
+                        value_options_attr = f", valueOptions: [{options}]"
                 elif actual == 'string' and prop.get('x-decimal-scale') is not None:
                     add_formatting(field_name, _decimal_expr_for(field_name, prop['x-decimal-scale']))
+
+                if not grid_type_attr and not is_relation_col:
+                    if actual == 'boolean':
+                        grid_type_attr = ", type: 'boolean'"
+                    elif actual in ('integer', 'number') or prop.get('_prisma_decimal_type'):
+                        grid_type_attr = ", type: 'number'"
+                    elif prop.get('format') == 'date':
+                        grid_type_attr = ", type: 'date'"
+                    elif prop.get('format') in ('date-time', 'time'):
+                        # 'time' has no dedicated MUI GridColDef type (same
+                        # constraint already documented at this file's other
+                        # date/time column-type site, ~L4023) -- reuse
+                        # 'dateTime' rather than leaving it untyped (untyped
+                        # would default to a text 'contains' filter against
+                        # a native Prisma DateTime/@db.Timetz column, the
+                        # exact class of crash app-generator#756 fixed for
+                        # date/date-time). The date component the picker
+                        # attaches is a non-issue: buildFilter's 'date' kind
+                        # (build_context.py's _column_filter_kind, which
+                        # 'time' now shares) hands the value straight to
+                        # Prisma, and Postgres casts any timestamp-shaped
+                        # comparison value to `timetz` before comparing --
+                        # empirically confirmed (cmd_1195/subtask_1195b) to
+                        # discard the date part regardless of what the
+                        # picker's date happens to be.
+                        grid_type_attr = ", type: 'dateTime'"
 
             if config.get('primary'):
                 primary_field = field_name
@@ -763,7 +809,7 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
             # uri fields are deliberately left as plain text here — this repo
             # draws uri images nowhere inside a grid cell (cmd_792 ruling).
             uri_kind_attr = ", uriKind: 'link'" if get_uri_kind(model_props.get(field_name, {})) == 'link' else ''
-            fields_code_parts.append(f"          {{ field: '{field_name}', headerName: tf('{field_key}'), width: {width}{format_attr}{uri_kind_attr} }}")
+            fields_code_parts.append(f"          {{ field: '{field_name}', headerName: tf('{field_key}'), width: {width}{format_attr}{uri_kind_attr}{grid_type_attr}{value_options_attr} }}")
 
         display_fields_code = ',\n'.join(fields_code_parts)
 

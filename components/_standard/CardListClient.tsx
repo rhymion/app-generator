@@ -40,6 +40,12 @@ interface DisplayFieldConfig<T> {
   format?: 'date-time' | 'date' | 'time';
   showSeconds?: boolean;
   uriKind?: 'image' | 'link';
+  /** Not used by the card layout (no MUI DataGrid filter panel here) --
+   * declared only so the shared displayFields object literal generators.py
+   * emits (page_list.tsx.jinja2, app-generator#756) type-checks regardless
+   * of which list_component the entity is configured to use. */
+  type?: 'singleSelect' | 'boolean' | 'date' | 'dateTime' | 'number';
+  valueOptions?: { value: string | number; label: string }[];
 }
 
 interface CardListClientProps<T extends BaseEntity> {
