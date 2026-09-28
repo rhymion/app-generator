@@ -4242,6 +4242,15 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         filterable_fields_quoted=filterable_fields_quoted,
         field_kinds_quoted=field_kinds_quoted,
         relation_filter_fields_quoted=relation_filter_fields_quoted,
+        # cmd_1198: the same already-computed sort/filter allow-list and
+        # per-column kind map, exposed as structured data (not a pre-joined
+        # JS-literal string) so generators_openapi.py can build accurate
+        # `page`/`pageSize`/`sort`/`f.*` OpenAPI query parameters from the
+        # SAME source getters.ts.jinja2 renders from, instead of a second,
+        # independently-derived guess that could drift out of sync with it.
+        sort_filter_fields=_scalar_props,
+        sort_filter_field_kinds=_field_kinds,
+        sort_filter_relation_fields=_relation_filter_fields,
         enum_members_quoted=enum_members_quoted,
         decimal_scales_quoted=decimal_scales_quoted,
         searchable_text_fields=searchable_text_fields,
