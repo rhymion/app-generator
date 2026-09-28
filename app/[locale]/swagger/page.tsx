@@ -20,6 +20,12 @@ export const dynamic = 'force-dynamic';
  * vercel-env.sh) — see docs/knowledge/generated-documentation-and-openapi-spec.md
  * for the manual Preview-only enablement steps.
  *
+ * proxy.ts is the authoritative gate: it returns a real 404 before this page
+ * ever renders (a page-level `notFound()` call here, alone, serves 200 —
+ * app/[locale]/loading.tsx's Suspense boundary already commits the status
+ * line to 200 by the time this component runs). The check below is kept
+ * only as a defense-in-depth backstop.
+ *
  * Login is enforced by proxy.ts, which requires a session for every path not
  * listed in its PUBLIC_PATHS — this page is deliberately not added there, so
  * an unauthenticated visitor is redirected to /login before ever reaching

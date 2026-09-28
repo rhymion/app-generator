@@ -143,6 +143,26 @@ export const proxy = auth(async (req) => {
     ? pathname.slice(`/${localePrefix}`.length) || '/'
     : pathname;
 
+  // Swagger UI (Issue #768) 404s here in middleware, before Next.js's page
+  // router ever matches app/[locale]/swagger/page.tsx, rather than in that
+  // page component via next/navigation's notFound(). app/[locale]/loading.tsx
+  // gives every [locale] segment a Suspense boundary that starts streaming a
+  // 200 response as soon as it's ready — by the time the page component
+  // itself runs and calls notFound(), the status line is already committed,
+  // so the response body reads "not found" but the actual HTTP status stays
+  // 200 (confirmed live: a page-level notFound() here served 200, while a
+  // path matching no route at all correctly 404s, because that case is
+  // resolved during routing itself, before any rendering starts). Deciding
+  // this in middleware puts SWAGGER_UI_ENABLED on the same footing as "no
+  // route matched" — a real 404 regardless of auth state, matching
+  // TEST_RESET_TOKEN's fail-closed treatment of app/api/test-utils/reset-caches.
+  if (
+    (pathnameWithoutLocale === '/swagger' || pathnameWithoutLocale.startsWith('/swagger/')) &&
+    process.env.SWAGGER_UI_ENABLED !== 'true'
+  ) {
+    return new NextResponse('Not Found', { status: 404 });
+  }
+
   const isPublicPath = PUBLIC_PATHS.some(
     (p) => pathnameWithoutLocale === p || pathnameWithoutLocale.startsWith(`${p}/`)
   );

@@ -98,6 +98,11 @@ const eslintConfig = defineConfig([
     ".generated-payment-gate/**",
     ".generated-direct-attachment-gate/**",
     ".generated-uri-kind-gate/**",
+    // Same as the fixture-gate ignores above — missing here meant a stray
+    // .generated-filter-sort-gate/ scratch dir (left over from a prior
+    // `npm run test:filter-sort-gate` run in the same checkout) made `npm
+    // run lint` fail on generated code the shipped product never contains.
+    ".generated-filter-sort-gate/**",
     // Local Python virtualenv (code_generator/tests pytest deps) — never
     // part of the shipped product, and not every contributor even has one.
     ".venv/**",
