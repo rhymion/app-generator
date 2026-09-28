@@ -159,6 +159,19 @@ describe('buildFilter', () => {
         [],
       );
     });
+
+    it('drops the clause for a non-numeric string rather than crashing (found via cmd_1200(b) against a real consumer schema)', () => {
+      expect(
+        buildFilter(
+          { unit_price: 'not-a-decimal' },
+          new Set(['unit_price']),
+          kinds,
+          {},
+          {},
+          decimalScales,
+        ),
+      ).toEqual([]);
+    });
   });
 
   describe('date kind (covers format: date / date-time / time -- all three dispatch through this same clause shape)', () => {

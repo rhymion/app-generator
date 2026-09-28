@@ -164,6 +164,15 @@ function buildClauseForKind(
       if (typeof v === 'number' && decimalScale !== undefined) {
         v = v.toFixed(decimalScale);
       }
+      // A value that is neither a JS number (handled above) nor a numeric
+      // string (a REST caller via parsePageOpts, or a value already
+      // requantized above) can't be a valid Decimal literal -- e.g. a
+      // malformed/garbage query param. Prisma's Decimal filter throws on a
+      // non-numeric string rather than returning zero rows (app-generator
+      // cmd_1200(b), found via the generated filter/sort wiring-check spec
+      // against a real consumer schema) -- drop the clause instead of
+      // crashing, matching every other kind's fail-open convention here.
+      if (typeof v !== 'number' && Number.isNaN(Number(v))) return undefined;
       switch (operator) {
         case '!=': return { not: { equals: v } };
         case '>': return { gt: v };
