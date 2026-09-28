@@ -169,11 +169,48 @@ this change: per-operation role/permission detail (gap 6 above) and the
 `x-relationship(s)` `$ref`-modeling question remain open, tracked as a
 follow-up rather than decided here.
 
-**Never served by a deployed app by default** — a customer wanting to
-expose it wires up their own route; this generator does not add one, and
-no new schema key controls this (matching the same treatment
-`app/[locale]/docs` already gets — not every deployment wants its full
-schema disclosed).
+### Serving the document: `GET /api/openapi.json`, and the `/swagger` UI
+
+(Issue #769) The document above is served by a fixed, non-templated route,
+`app/api/openapi.json/route.ts`, in every environment including
+production — reading `docs/generated/openapi.json` at request time via
+`lib/openapi/document.ts` (a runtime-built `fs.readFileSync` path, listed in
+`next.config.ts`'s `outputFileTracingIncludes` so Vercel's build-time output
+tracer ships it with the serverless function; the same treatment
+`content/legal/*.md` already gets, for the same reason: a computed path
+can't be traced statically). It is never rebuilt or copied a second time —
+the route reads the exact file the generator writes. Authentication is
+`requireDualAuth` (API key or session, `lib/api-auth.ts`) — no further
+permission check, since the document only reveals the schema shape, never
+row data. `info.description` states this plainly and points at both this
+route and the row-level capabilities endpoint below, instead of the old
+"not served" wording, which stopped being true once this route shipped.
+
+(Issue #768) `GET /swagger` (`app/[locale]/swagger/`) is a separate,
+development/staging-only page: an interactive `swagger-ui-dist` explorer
+(chosen over `swagger-ui-react` for its React-version independence —
+`swagger-ui-react` spent 2025-02 through 2026-07 chasing React 19 support,
+`swagger-api/swagger-ui#10243`; and over `redoc`, whose open-source build
+lacks a "Try it out"/Authorize feature at all, and `@scalar/api-reference-react`,
+whose React wrapper pulls in a ~45MB Vue 3 runtime) that reads its spec
+from the same `/api/openapi.json` route above — same-origin, so the
+session cookie already on the page covers the spec fetch, and each
+"Try it out" call the Authorize dialog's API key covers. Gated on
+`SWAGGER_UI_ENABLED === 'true'` (never `NODE_ENV`, which `next build`
+always bakes to `production` regardless of the real deployment target):
+unset makes the page 404, the same fail-closed treatment
+`app/api/test-utils/reset-caches` gives `TEST_RESET_TOKEN`. Login is
+required via `proxy.ts` (the page is not in its `PUBLIC_PATHS`), and the
+page is not under the public `app/[locale]/docs` path. **This flag must
+never be injected into Vercel's Production environment** — every "Try it
+out" call runs with the caller's own role permissions, with no additional
+scope restriction, so enabling it against a production database lets
+Swagger UI write or delete real data. `vercel-setup.sh`/`vercel-env.sh`
+deliberately do not reference this variable at all; enabling it on a
+Preview deployment for a specific need is a manual, one-off
+`vercel env add SWAGGER_UI_ENABLED true preview` — not automated by any
+script here, and not something CI or a deploy pipeline should do on its
+own.
 
 ## The row-level capabilities endpoint
 

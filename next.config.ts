@@ -14,8 +14,14 @@ const nextConfig: NextConfig = {
   // content/legal/<doc>.<locale>.md file works locally (full source tree
   // present) but silently 404s once deployed, because the tracer omits the
   // untraceable file from the serverless function bundle.
+  //
+  // GET /api/openapi.json (Issue #769, lib/openapi/document.ts) reads
+  // docs/generated/openapi.json the same way — a gitignored build artifact
+  // written by `generate-code`, read via a runtime-built path rather than a
+  // static import (so a pre-generate-code checkout still type-checks). Same
+  // tracer blind spot, same fix.
   outputFileTracingIncludes: {
-    '/**': ['./content/legal/**/*'],
+    '/**': ['./content/legal/**/*', './docs/generated/openapi.json'],
   },
   // Phase 4 #10 from performance-plan-session.md.
   //  - `formats`: serve AVIF/WEBP when the browser accepts it; saves ~30-50%
