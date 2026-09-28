@@ -3,7 +3,7 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
-## [4.1.0] - 2026-09-19
+## [Unreleased]
 ### Added
 - **Added optional expiry for API keys** (issue #717, fourth stage of
   AI-agent-facing API improvements — Stage 2 of
@@ -14,6 +14,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   expired key is rejected with `401 API key expired.`. No new principal
   type — an agent is an ordinary `user` account, human or agent alike. See
   `docs/knowledge/api-key-expiry.md`.
+
 - **Added `Idempotency-Key` support on single-record API create endpoints
   and per-API-key `api:read`/`api:write` rate-limit buckets** (issue #707,
   third stage of AI-agent-facing API improvements — the "Idempotency keys
@@ -32,6 +33,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   env-overridable (`RATE_LIMIT_API_READ_LIMIT`/
   `RATE_LIMIT_API_WRITE_LIMIT`) — keyed by the caller's resolved user id,
   not IP. See `docs/knowledge/api-idempotency-and-rate-limiting.md`.
+
 - **Added an entity-level "Constraints" section to generated docs
   (`doc_entity.md.jinja2`) and a new `docs/generated/openapi.json` OpenAPI
   3.1 build artifact** (issue #707), the first stage of AI-agent-facing
@@ -50,6 +52,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   is exercised only by `test:approval-lockdown-gate`'s fixture. See
   `docs/knowledge/generated-documentation-and-openapi-spec.md` and
   `app-generator-project-docs/planning/ai-agent-integration-design.md`.
+
 - **Added a row-level `GET /api/{entity}/[id]/capabilities` endpoint**
   (issue #707, second stage of AI-agent-facing API improvements),
   generated per `can_view` entity alongside the existing detail route.
@@ -64,6 +67,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/generated-documentation-and-openapi-spec.md`'s "The
   row-level capabilities endpoint" section, including a disclosed
   coverage gap on the approvable-bridge branch.
+
 - **Added an optional `depends_on: [task_id, ...]` ordering key to
   `x-scheduled-task` (entity-level) and `x-scheduled-tasks` (top-level)
   declarations** (issue #713), naming other `task_id`s (from either
@@ -82,17 +86,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   between tasks" section and `planning/batch-ordering-design.md`
   (app-generator-project-docs) for the full design and the staged
   follow-up work.
-- **Added a business-date container (`app_setting`) with list/view/new/edit
-  screens and a REST API** (PR #611), built on top of the existing hand-written
-  `business_date`/`is_pinned`/`timezone`/`organization_id` Prisma model.
-  `organization_id` is optional and left out of `required`, so the existing
-  org-relationship-optional machinery makes each row visible both to its
-  own organization and to every tenant — a query returns the actor's own
-  organization row when one exists, plus the tenant-wide default
-  (`organization_id: null`). Delete is disabled
-  (`x-generate.delete: false`): the sole default row must not be removable
-  through the standard entity delete action. `scripts/seed-baseline.ts`
-  seeds the tenant-wide default row.
+
 - **Closed five gaps in the generated OpenAPI 3.1 build artifact** (issue
   #762, follow-up to #707): `GET /api/{parent}` now declares `page`/
   `pageSize`/`sort`/`f.<field>` query parameters; the record schema marks
@@ -125,16 +119,6 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Creator/Assignee aggregation), is unchanged — only how the underlying
   rows are fetched changed, not which rows apply to a given model. See
   `docs/knowledge/performance-improvements.md` §6.
-
-- **Upgraded PostgreSQL from 16 to 18** across all three compose files
-  (dev/test/prod) and `docker/Dockerfile.postgres` (issue #610).
-  PostgreSQL 18's official image requires a single mount at
-  `/var/lib/postgresql` rather than a direct mount at
-  `/var/lib/postgresql/data` — its entrypoint refuses to start otherwise —
-  so the compose volume mount lines were updated accordingly for all three
-  files. GCP deployment script version pins were intentionally left
-  untouched in this change; that migration was tracked separately (see the
-  Cloud Run/Neon entry below).
 
 - **Every generated detail/list getter that embeds a relation now opts
   into Prisma's `relationLoadStrategy: 'join'`**, folding what used to be
@@ -209,6 +193,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   clause per kind regardless of which operator the user picks in the UI; a
   later pass can wire `GridColDef.type` + the real operator through. See
   `docs/knowledge/list-filter-sort-column-type-dispatch.md`.
+
 - **Column-type-aware list filter still crashed for date-only, boolean, and
   invalid-enum-literal values, and never presented the real per-type filter
   control the MUI operator UX implies** (issue #756, follow-on gap in
@@ -300,6 +285,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   follow-up issue tracks three other codes reaching the same catch-all
   that look similarly misclassified (`P2025`, `P2034`, `P2037`) but were
   kept out of this fix to stay narrowly scoped.
+
 - **`lib/prisma.ts` created a new, independent Prisma Client (and its own
   connection pool) on every module evaluation in production, instead of
   reusing one cached instance per process.** The dev-only `globalThis`
@@ -343,6 +329,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   advisory lock) are unchanged and now carry an explicit
   `check_generated_allowlist.yaml` entry. See
   `docs/knowledge/raw-sql-policy.md`.
+
 - **Cross-entity search's trigram/bigm indexes were never used at runtime**
   (issue #725 fix (d)). `generate.py`'s `sim_where_single`/
   `bigm_where_single` wrap every searchable field in `COALESCE(field, '')`
@@ -452,6 +439,61 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   template predate PR#617 (present since the first GCP automation commit,
   2026-07-02).
 
+- **Cross-entity search's GIN/trigram indexes were never actually created,
+  and the generated query would not have used them even if they were**
+  (issue #725, found via load testing at N=30,000-row realistic scale —
+  every entity in the search UNION ran a full table scan, 130-250ms
+  per-entity). Three parts, all required together (confirmed empirically —
+  any one alone leaves search performance unchanged):
+  1. A new generated `instrumentation.ts` calls `lib/db-init.ts`'s
+     `ensureSearchIndexes()` from Next.js's `register()` hook on every
+     server cold start (Vercel and GCP/Cloud Run both reach it, since both
+     dispatch through this same Next.js mechanism) — previously this
+     function had no call site anywhere in the generated output.
+     `scripts/create-gin-indexes.sql` (manual `psql` application) remains
+     as a fallback.
+  2. The generated search predicate's fuzzy-match half changed from
+     `similarity(field, query) > threshold` to the `field % query` operator
+     form, with `SET LOCAL pg_trgm.similarity_threshold` scoping the
+     threshold to the enclosing `prisma.$transaction(...)` — the
+     function-call form is opaque to the Postgres planner and never uses a
+     trigram GIN index, regardless of whether the index exists; only `%` is
+     recognized as trigram-indexable.
+  3. `create_gin_indexes.sql.jinja2` and `db_init.ts.jinja2` now also
+     create a GIN index on the `to_tsvector(...)` expression itself (not
+     only the trigram index) — the FTS half of the search predicate had no
+     backing index of any kind before this. Both mechanisms use `CREATE
+     INDEX CONCURRENTLY IF NOT EXISTS` throughout (non-blocking, cheap
+     no-op once the index exists).
+
+  See `docs/knowledge/search.md`.
+
+## [4.1.0] - 2026-09-19
+### Added
+- **Added a business-date container (`app_setting`) with list/view/new/edit
+  screens and a REST API** (PR #611), built on top of the existing hand-written
+  `business_date`/`is_pinned`/`timezone`/`organization_id` Prisma model.
+  `organization_id` is optional and left out of `required`, so the existing
+  org-relationship-optional machinery makes each row visible both to its
+  own organization and to every tenant — a query returns the actor's own
+  organization row when one exists, plus the tenant-wide default
+  (`organization_id: null`). Delete is disabled
+  (`x-generate.delete: false`): the sole default row must not be removable
+  through the standard entity delete action. `scripts/seed-baseline.ts`
+  seeds the tenant-wide default row.
+
+### Changed
+- **Upgraded PostgreSQL from 16 to 18** across all three compose files
+  (dev/test/prod) and `docker/Dockerfile.postgres` (issue #610).
+  PostgreSQL 18's official image requires a single mount at
+  `/var/lib/postgresql` rather than a direct mount at
+  `/var/lib/postgresql/data` — its entrypoint refuses to start otherwise —
+  so the compose volume mount lines were updated accordingly for all three
+  files. GCP deployment script version pins were intentionally left
+  untouched in this change; that migration was tracked separately (see the
+  Cloud Run/Neon entry below).
+
+### Fixed
 - **`docker compose up` silently accepted a named Postgres volume left over
   from before the PostgreSQL 16→18 upgrade (issue #610), which then made
   every downstream step fail with an unrelated-looking "Can't reach
@@ -570,36 +612,6 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Neon was not empirically verified as part of this change — there was no
   live GCP deployment of this app to test against at the time; that
   verification is deferred to the next actual GCP deployment.
-
-- **Cross-entity search's GIN/trigram indexes were never actually created,
-  and the generated query would not have used them even if they were**
-  (issue #725, found via load testing at N=30,000-row realistic scale —
-  every entity in the search UNION ran a full table scan, 130-250ms
-  per-entity). Three parts, all required together (confirmed empirically —
-  any one alone leaves search performance unchanged):
-  1. A new generated `instrumentation.ts` calls `lib/db-init.ts`'s
-     `ensureSearchIndexes()` from Next.js's `register()` hook on every
-     server cold start (Vercel and GCP/Cloud Run both reach it, since both
-     dispatch through this same Next.js mechanism) — previously this
-     function had no call site anywhere in the generated output.
-     `scripts/create-gin-indexes.sql` (manual `psql` application) remains
-     as a fallback.
-  2. The generated search predicate's fuzzy-match half changed from
-     `similarity(field, query) > threshold` to the `field % query` operator
-     form, with `SET LOCAL pg_trgm.similarity_threshold` scoping the
-     threshold to the enclosing `prisma.$transaction(...)` — the
-     function-call form is opaque to the Postgres planner and never uses a
-     trigram GIN index, regardless of whether the index exists; only `%` is
-     recognized as trigram-indexable.
-  3. `create_gin_indexes.sql.jinja2` and `db_init.ts.jinja2` now also
-     create a GIN index on the `to_tsvector(...)` expression itself (not
-     only the trigram index) — the FTS half of the search predicate had no
-     backing index of any kind before this. Both mechanisms use `CREATE
-     INDEX CONCURRENTLY IF NOT EXISTS` throughout (non-blocking, cheap
-     no-op once the index exists).
-
-  See `docs/knowledge/search.md`.
-
 
 ## [4.0.0] - 2026-09-17
 ### Security
