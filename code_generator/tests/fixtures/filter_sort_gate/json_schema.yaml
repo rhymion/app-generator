@@ -1,0 +1,69 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+format-version: 3.0
+
+# Fixture design note (app-generator cmd_1200(c)): a NEW fixture, tsc-only,
+# no Cypress (test:false throughout, same discipline as decimal_gate/
+# mention_gate) -- distinct in kind from cmd_1200(b)'s
+# _filter_sort_matrix_gen.cy.ts (which needs test:true+api:true+list:true
+# entities and a real DB, generated per-consumer-schema, not from a fixture
+# here). This fixture exists purely to give this repo's own
+# test:e2e:build/tsc pass one entity carrying every ColumnFilterKind
+# lib/_pagination.ts dispatches on at once (enum/boolean/number/decimal/
+# date/date-time/time/string) -- this repo's own json_schema.yaml has none
+# of enum/boolean/decimal/date-kind columns among its own entities
+# (confirmed empirically, cmd_1200(b)'s own generated coverage-comment
+# header), so those branches of getters.ts.jinja2 (FIELD_KINDS/
+# ENUM_MEMBERS/DECIMAL_SCALES const declarations) and page_list.tsx.jinja2
+# (per-kind GridColDef type/format/valueOptions wiring) never compile
+# together on one entity otherwise -- a regression from all of them
+# coexisting (e.g. an object-literal generation collision) would only ever
+# surface in a downstream consumer schema, late.
+
+definitions:
+  user:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name: {}
+      email: {}
+
+  # The one entity this fixture exists to exercise: every ColumnFilterKind
+  # on a single entity at once.
+  filter_sort_gate_item:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: false
+      invalidate: false
+      api: true
+      test: false
+    fields:
+      name: {}
+      status:
+        enum: ["open", "closed"]
+      is_active: {}
+      priority: {}
+      amount: {}
+      valid_on:
+        format: date
+      started_at:
+        format: date-time
+      daily_time:
+        format: time
+    required:
+      - status
+      - is_active
+      - priority
+      - amount
+      - valid_on
+      - started_at
+      - daily_time

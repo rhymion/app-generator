@@ -1,0 +1,63 @@
+// Self-contained fixture Prisma schema for the filter-sort-gate check
+// (app-generator cmd_1200(c)). NOT the project's real prisma/schema.prisma
+// -- this file exists only to give the fixture json_schema.yaml enough real
+// Prisma models to run through the actual build_user_schema.py ->
+// generate.py -> tsc pipeline in isolation. Mirrors the structure of
+// tests/fixtures/decimal_gate/schema.prisma.
+//
+// This repo's own json_schema.yaml has zero enum/boolean/decimal/date-kind
+// columns among its (api:true, test:true, list:true) entities (confirmed
+// empirically, cmd_1200(b)'s own generated coverage-comment header) -- so
+// test:e2e:build's own tsc pass never compiles the per-kind FIELD_KINDS/
+// ENUM_MEMBERS/DECIMAL_SCALES const declarations (getters.ts.jinja2) or the
+// per-kind GridColDef type/valueOptions wiring (page_list.tsx.jinja2) for
+// every kind coexisting on one entity at once. This fixture exists so a
+// regression in any of those (e.g. an object-literal generation collision
+// once every kind is emitted together, not just one at a time) can't
+// silently go unnoticed until it reaches a downstream consumer schema.
+
+generator client {
+  provider = "prisma-client"
+  previewFeatures = ["relationJoins"]
+  output   = "./.generated-client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum FilterSortGateStatus {
+  open
+  closed
+}
+
+model user {
+  id       String @id @default(cuid())
+  name     String
+  email    String @unique
+  created_items filter_sort_gate_item[] @relation("FilterSortGateItemCreator")
+  updated_items filter_sort_gate_item[] @relation("FilterSortGateItemUpdater")
+}
+
+// The one entity this fixture exists for: every ColumnFilterKind
+// lib/_pagination.ts dispatches on (enum/boolean/number/decimal/date/
+// date-time/time/string), on a single entity.
+model filter_sort_gate_item {
+  id         String               @id @default(cuid())
+  name       String
+  status     FilterSortGateStatus
+  is_active  Boolean
+  priority   Int
+  amount     Decimal              @db.Decimal(10, 2)
+  valid_on   DateTime
+  started_at DateTime
+  daily_time DateTime
+  created_at DateTime             @default(now()) @db.Timestamptz(0)
+  updated_at DateTime             @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user                 @relation("FilterSortGateItemCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user                 @relation("FilterSortGateItemUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}

@@ -42,10 +42,11 @@ jobs:
         # audit-full-scope/pytest/mention-gate-fixture/
         # mention-gate-plain-image-fixture/decimal-gate-fixture/
         # oto-mandatory-gate-fixture/approval-lockdown-gate-fixture/
-        # payment-gate-fixture/uri-kind-gate-fixture keep running
+        # payment-gate-fixture/uri-kind-gate-fixture/
+        # filter-sort-gate-fixture keep running
         # unconditionally — e2e-tests is
-        # the dominant cost (~57-60 min per cmd_719) and the other ten stay
-        # as a safety net against a path-judgment mistake here). Not a
+        # the dominant cost (~57-60 min per cmd_719) and the other eleven
+        # stay as a safety net against a path-judgment mistake here). Not a
         # top-level `paths-ignore:` trigger filter — that would make the
         # workflow (and its checks) not run at all for a docs-only push/PR,
         # indistinguishable in the PR Checks list from the check never
@@ -629,3 +630,32 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - run: npm run test:uri-kind-gate
+
+  filter-sort-gate-fixture:
+    name: Filter Sort Gate Fixture Check
+    runs-on: ubuntu-latest
+    # cmd_1200(c): a single fixture entity carrying every ColumnFilterKind
+    # lib/_pagination.ts dispatches on at once (enum/boolean/number/decimal/
+    # date/date-time/time/string) run through the real generate-code -> tsc
+    # pipeline, catching regressions in getters.ts.jinja2's FIELD_KINDS/
+    # ENUM_MEMBERS/DECIMAL_SCALES const declarations and FormUpsert.tsx/
+    # form_validation.ts/service_validation.ts once every kind coexists on
+    # one entity. A branch this repo's own generate-code/build (the
+    # e2e-tests job) never compiles, because this repo's own
+    # json_schema.yaml has zero enum/boolean/decimal/date-kind columns among
+    # its own (api:true, test:true, list:true) entities. No path filter,
+    # same as unit-tests/pytest/mention-gate-fixture/decimal-gate-fixture/
+    # uri-kind-gate-fixture above, per docs/knowledge/gate-exemption-must-
+    # be-machine-checkable.md. See scripts/check_filter_sort_gate_fixture.sh.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:filter-sort-gate

@@ -5,6 +5,24 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Added durable, schema-independent regression coverage for the list-page
+  filter/sort feature (issues #753/#755/#756), plus a wiring-check layer
+  that runs against each consumer repo's own real data**: a new
+  `lib/_pagination.test.ts` vitest unit-test file exercises
+  `buildFilter`/`buildOrderBy` against every `ColumnFilterKind` × its real
+  operator table directly (schema-independent, runs in every consumer
+  repo's own `test:vitest`); a new generated, single, cross-entity Cypress
+  spec (`cypress/e2e/api/_filter_sort_matrix_gen.cy.ts`) auto-selects one
+  representative entity/column per `ColumnFilterKind` found in a schema's
+  own (`api`+`test`+`list`) entities and exercises the real REST `GET`
+  wiring against that data — no new `x-*` key, and a kind absent from a
+  given schema is stated explicitly in the file's own header rather than
+  silently skipped; and a new `filter_sort_gate` fixture
+  (`test:filter-sort-gate`, `tsc`-only, ~6-7s) closes this repo's own
+  generate-code/build blind spot for a single entity carrying every kind
+  at once (this repo's own schema has zero enum/boolean/decimal/date-kind
+  columns). See `docs/knowledge/list-filter-sort-typed-columns.md`.
+
 - **Added optional expiry for API keys** (issue #717, fourth stage of
   AI-agent-facing API improvements — Stage 2 of
   `ai-agent-integration-design.md`). A new nullable `user.api_key_expires_at`
@@ -164,6 +182,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/prisma-schema-conventions.md` §5.
 
 ### Fixed
+- **A decimal-kind column's filter crashed on a non-numeric value instead
+  of returning zero rows** (found via a real consumer schema): unlike the
+  `number`/`date`/`enum` kinds, `buildFilter`'s `'decimal'` branch never
+  validated a value before handing it to Prisma's Decimal filter, so a
+  malformed query param (e.g. a garbage `f.<field>=` value) crashed with a
+  500 instead of dropping the clause. Fixed with the same
+  `Number.isNaN(Number(v))` guard every other kind already had. See
+  `docs/knowledge/list-filter-sort-typed-columns.md`.
+
 - **Generated list page sort/filter was not column-type-aware** (issue
   #753): an FK/relation display column (e.g. `policy`, `assignee`) was
   silently dropped from every filter/sort request (no error, just a

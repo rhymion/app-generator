@@ -132,6 +132,15 @@ native number input) is left untouched — round-tripping an
 already-precise string through `Number()` would reintroduce the exact
 loss this exists to avoid.
 
+A malformed value (neither a JS number nor a numeric string — e.g. a
+garbage REST query param) is guarded separately: `buildFilter`'s
+`'decimal'` branch drops the clause (`Number.isNaN(Number(v))`) rather
+than handing an unparseable string to Prisma's Decimal filter, which
+throws. Found via the generated filter/sort wiring-check spec (see below)
+run against a real consumer schema (`purchase_order_line.unit_price`) —
+every other kind (`number`/`date`/`enum`) already guarded this way,
+`decimal` alone didn't. See issue #766.
+
 ## `format: time`'s date-part is discarded server-side, not normalized
 
 A `type: 'dateTime'` filter's picker lets the user choose both a date and
@@ -160,8 +169,9 @@ rollout added a standalone `list_filter_gate` entity directly to this
 repo's schema for exactly this purpose; it was removed once that
 placement was identified as inconsistent with the guard above.
 
-Two layers now provide durable coverage instead, neither requiring any
-schema entity in this repo:
+Four layers now provide durable coverage, none requiring a permanent
+schema entity anywhere except the last (a `tsc`-only fixture, never a live
+schema entity — see below):
 
 - **Template-level regression tests** (`code_generator/tests/
   test_list_filter_typed_columns.py`): assert `_column_filter_kind`'s
@@ -173,22 +183,64 @@ schema entity in this repo:
   actually caught a real regression class in the past (the enum/boolean/
   date crashes this whole feature exists to fix were all reproducible as
   generated-code-string assertions once the bug was known).
-- **One-off real-UI verification against an existing consumer entity in a
-  throwaway isolated worktree** for the class of bug template-level
-  assertions cannot reach (a real browser's own value coercion — the
-  decimal `IEEE-754` round-trip bug above is the standing example; it
-  was caught only through actual Cypress interaction, not design review
-  or a unit assertion). This repeats the same precedent already
-  documented for the post-approval lockdown feature (see
-  `docs/knowledge/appendix/approval-flow.md`'s Naming note): verify
-  against a real entity a consumer repo already has, in a scratch
-  worktree that is never committed, rather than adding a permanent
-  fixture anywhere. `format: time` itself was verified this way against
-  app-template's existing `shift_template` entity (`start_time`/
-  `end_time` columns, already real production fields), which also
-  incidentally carries an `enum` column (`day_of_week`) in the same list
-  view — covering both kinds' live-UI behavior without adding anything
-  to any schema.
+- **`buildFilter`/`buildOrderBy` unit tests** (`lib/_pagination.test.ts`,
+  `npm run test:vitest`): exercise every `ColumnFilterKind` × its real
+  operator table (see the table above) directly against the shared,
+  schema-independent runtime functions — no entity, schema, or database
+  involved. `#753`/`#755`/`#756`'s crashes and the decimal precision fix
+  were all reproducible by reverting the relevant branch and re-running
+  this file (18/47 assertions fail, restoring the fix makes all 47 pass
+  again) — this is what a schema-level fixture cannot reach, since
+  `buildFilter`/`buildOrderBy` are hand-maintained shared `lib/` code, not
+  generator output. Runs on every consumer repo's own
+  `npm --prefix app-generator run test:vitest` too, since the file lives
+  in the shared submodule.
+- **Generated filter/sort wiring-check spec**
+  (`cypress/e2e/api/_filter_sort_matrix_gen.cy.ts`, one file, not
+  per-entity): for each `ColumnFilterKind` present among a schema's own
+  (`api: true`, `test: true`, `list: true`) entities, one representative
+  entity/column is auto-selected (first found in schema/entity iteration
+  order — see `select_filter_sort_representatives()`,
+  `code_generator/build_context.py`) and exercised via a plain REST `GET`
+  query against that consumer repo's own real data (`npm run
+  test:e2e:cy:api`). This can only ever reach each kind's *default*
+  clause — a REST caller via `parsePageOpts()` never sends a MUI filter
+  operator (see `FilterEntry`'s doc comment above) — so it proves
+  `FIELD_KINDS` → `buildFilter`/`buildOrderBy`'s dispatch is wired
+  end-to-end for that kind using each repo's own real entities, not the
+  operator matrix (the vitest layer's job). A kind absent from a given
+  schema is stated explicitly in the generated file's own header comment
+  ("NOT COVERED"), never silently omitted.
+- **`filter_sort_gate` fixture** (`test:filter-sort-gate`, `tsc`-only, no
+  Cypress, same discipline as `mention_gate`/`decimal_gate`): a single
+  fixture entity carrying every `ColumnFilterKind` at once, type-checking
+  `getters.ts`'s `FIELD_KINDS`/`ENUM_MEMBERS`/`DECIMAL_SCALES` const
+  declarations (and `FormUpsert.tsx`/`form_validation.ts`/
+  `service_validation.ts`) with every kind coexisting on one entity — the
+  one shape this repo's own `test:e2e:build` never compiles (this repo's
+  own schema has zero enum/boolean/decimal/date-kind columns among its
+  own `api`+`test`+`list` entities), and that no other layer above checks
+  (they each cover one kind in isolation, or use a synthetic in-memory
+  context rather than the real generation pipeline).
+
+A real browser's own value coercion (the decimal `IEEE-754` round-trip bug
+below is the standing example) is reachable by none of the four layers
+above — none of them drives an actual `<input>` through a real browser.
+That gap is closed by **one-off real-UI verification against an existing
+consumer entity in a throwaway isolated worktree**, the same precedent
+already documented for the post-approval lockdown feature (see
+`docs/knowledge/appendix/approval-flow.md`'s Naming note): verify against
+a real entity a consumer repo already has, in a scratch worktree that is
+never committed, rather than adding a permanent fixture anywhere.
+`format: time` itself was verified this way against app-template's
+existing `shift_template` entity (`start_time`/`end_time` columns,
+already real production fields), which also incidentally carries an
+`enum` column (`day_of_week`) in the same list view — covering both
+kinds' live-UI behavior without adding anything to any schema. A
+permanent, hand-written Cypress UI spec for this same class of bug
+(`boolean`/`Decimal` filtering through a real browser input, against a
+minimal testbed-only fixture entity in a consumer repo's own schema) is
+tracked separately, not by this document's own coverage above.
 
 ## What is explicitly out of scope
 
