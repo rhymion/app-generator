@@ -5,6 +5,24 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Added durable, schema-independent regression coverage for the list-page
+  filter/sort feature (issues #753/#755/#756), plus a wiring-check layer
+  that runs against each consumer repo's own real data**: a new
+  `lib/_pagination.test.ts` vitest unit-test file exercises
+  `buildFilter`/`buildOrderBy` against every `ColumnFilterKind` × its real
+  operator table directly (schema-independent, runs in every consumer
+  repo's own `test:vitest`); a new generated, single, cross-entity Cypress
+  spec (`cypress/e2e/api/_filter_sort_matrix_gen.cy.ts`) auto-selects one
+  representative entity/column per `ColumnFilterKind` found in a schema's
+  own (`api`+`test`+`list`) entities and exercises the real REST `GET`
+  wiring against that data — no new `x-*` key, and a kind absent from a
+  given schema is stated explicitly in the file's own header rather than
+  silently skipped; and a new `filter_sort_gate` fixture
+  (`test:filter-sort-gate`, `tsc`-only, ~6-7s) closes this repo's own
+  generate-code/build blind spot for a single entity carrying every kind
+  at once (this repo's own schema has zero enum/boolean/decimal/date-kind
+  columns). See `docs/knowledge/list-filter-sort-typed-columns.md`.
+
 - **Added optional expiry for API keys** (issue #717, fourth stage of
   AI-agent-facing API improvements — Stage 2 of
   `ai-agent-integration-design.md`). A new nullable `user.api_key_expires_at`

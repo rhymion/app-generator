@@ -155,6 +155,11 @@ code_generator/.generated/
 # update-generator gate for the user.image direct-FK migration.)
 .generated-direct-attachment-gate/
 
+# filter-sort-gate fixture check (cmd_1200(c)) scratch output —
+# scripts/check_filter_sort_gate_fixture.sh regenerates this from
+# code_generator/tests/fixtures/filter_sort_gate/ on every run.
+.generated-filter-sort-gate/
+
 # sample data
 custom/
 memory/

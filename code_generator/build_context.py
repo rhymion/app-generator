@@ -325,6 +325,78 @@ def _column_filter_kind(prop: dict) -> str:
     return 'string'
 
 
+# Fixed iteration/report order for the filter/sort wiring-check spec
+# (app-generator cmd_1200(b)) -- every ColumnFilterKind lib/_pagination.ts
+# dispatches on, kept in sync with lib/_pagination.ts's ColumnFilterKind type.
+FILTER_SORT_KIND_ORDER = ['string', 'enum', 'boolean', 'number', 'decimal', 'date']
+
+# Cross-cutting audit/base columns are excluded from representative selection
+# even where a schema happens to declare one of these names explicitly --
+# they're injected separately per-entity (id/created_at/updated_at/
+# creator_id/assignee_id, see build_context's own _scalar_props) and aren't
+# representative of "a real schema-declared column of this kind".
+_FILTER_SORT_EXCLUDED_PROPS = frozenset(
+    {'id', 'created_at', 'updated_at', 'creator_id', 'updater_id', 'assignee_id'}
+)
+
+
+def select_filter_sort_representatives(entities: list, schema: dict) -> dict:
+    """For each ColumnFilterKind (lib/_pagination.ts) present among this
+    schema's (api: true, test: true, list: true) entities' own declared
+    scalar columns, auto-select one representative (entity, column) --
+    the first one encountered in schema/entity iteration order.
+
+    Backs a single generated cy:api spec (cmd_1200(b)) that exercises
+    FIELD_KINDS -> buildFilter/buildOrderBy's real dispatch path against
+    each consumer repo's own actual entities, via plain REST GET queries
+    (no MUI filter operator -- see lib/_pagination.ts's FilterEntry doc
+    comment: a REST caller via parsePageOpts only ever produces a bare
+    scalar, so this can only reach each kind's *default* clause -- the
+    full operator matrix is lib/_pagination.test.ts's job, not this
+    spec's). No new x-* key: representative selection is a pure read of
+    already-computed `_column_filter_kind` classification.
+
+    A kind absent from the schema entirely is reported (not silently
+    dropped) via the returned `uncovered` list, so a caller can surface
+    "this repo has no X-kind column" explicitly rather than looking like
+    full coverage when it isn't.
+    """
+    selected: dict[str, dict] = {}
+    for entity in entities:
+        gen_cfg = entity.get('generate_config') or {}
+        if not gen_cfg.get('test'):
+            continue
+        if not gen_cfg.get('api'):
+            continue
+        if gen_cfg.get('list', True) is False:
+            continue
+        parent = entity['parent']
+        model = entity.get('model') or parent
+        model_def = _raw_def(model, schema)
+        if not model_def:
+            continue
+        filtered_props = filter_fields(model_def.get('properties') or {}, gen_cfg.get('fields'))
+        write_only = set(get_write_only_field_names(model_def.get('properties') or {}))
+        for prop, defn in filtered_props.items():
+            if prop in _FILTER_SORT_EXCLUDED_PROPS or prop in write_only:
+                continue
+            if not _is_scalar_prop(defn):
+                continue
+            kind = _column_filter_kind(defn)
+            if kind in selected:
+                continue
+            selected[kind] = {
+                'entity': parent,
+                'pascal': to_pascal_case(parent),
+                'api_path': f'/api/{parent}',
+                'column': prop,
+            }
+        if len(selected) == len(FILTER_SORT_KIND_ORDER):
+            break
+    uncovered = [k for k in FILTER_SORT_KIND_ORDER if k not in selected]
+    return {'selected': selected, 'uncovered': uncovered, 'kind_order': FILTER_SORT_KIND_ORDER}
+
+
 def _dedupe_ordered(items):
     seen = set()
     result = []

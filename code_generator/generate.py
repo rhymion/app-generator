@@ -26,7 +26,10 @@ from helpers.bridge_prisma import emit_bridge_model, emit_parent_bridge_fk, emit
 from helpers.schema_helpers import get_flatten_rels
 from generate_types import extract_entities, extract_named_constants
 from context import build_entity_context
-from build_context import build_context, build_anonymize_user_context, _get_actual_type, set_prisma_models
+from build_context import (
+    build_context, build_anonymize_user_context, _get_actual_type, set_prisma_models,
+    select_filter_sort_representatives,
+)
 from helpers.label_field import build_label_expression
 from helpers.schema_helpers import derive_text_fields as _derive_text_fields
 from helpers.schema_helpers import get_splittable_bridge_field
@@ -2875,6 +2878,18 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'definition_key': def_key,
                 'primary_fk_dep': helper_ctx.get('primary_fk_dep'),
             })
+
+        # Filter/sort wiring-check spec (cmd_1200(b)): one cross-entity spec,
+        # not per-entity — auto-selects one representative (entity, column)
+        # per ColumnFilterKind found among this schema's own (api:true,
+        # test:true, list:true) entities and exercises FIELD_KINDS ->
+        # buildFilter/buildOrderBy's real dispatch path via plain REST GET
+        # queries against each consumer repo's own actual data. No new x-*
+        # key. A kind absent from this schema is reported in the generated
+        # file's own header comment, never silently omitted.
+        filter_sort_matrix = select_filter_sort_representatives(entities, schema)
+        _write(cypress_e2e / 'api' / '_filter_sort_matrix_gen.cy.ts',
+               _render(env, 'test_filter_sort_matrix.cy.ts.jinja2', filter_sort_matrix))
 
     # Task registry (always generated — empty registry when test_entities is
     # empty is still valid TypeScript, keeping cypress.config.ts's import
