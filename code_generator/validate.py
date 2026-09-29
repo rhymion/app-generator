@@ -2302,13 +2302,20 @@ def validate_schema(schema: dict) -> None:
                 f"service_scheduled_handler.ts), got {handler!r}."
             )
 
+        # `interval` is optional (cmd_1208): a task without one is reached only
+        # through `task:run-all` (nightly direct execution) and gets no
+        # vercel.json `crons` entry. validate.py cannot verify that the
+        # deployment actually runs task:run-all on a schedule -- see the
+        # operational warning in docs/knowledge/scheduled-task-operations.md.
+        # When present it must still be a non-empty cron string.
         interval = xsched.get('interval')
-        if not isinstance(interval, str) or not interval:
+        if interval is not None and (not isinstance(interval, str) or not interval):
             errors.append(
-                f"Definition '{def_key}': x-scheduled-task.interval is required and must be "
-                f"a non-empty cron expression string in the format Vercel's `crons[].schedule` "
-                f"accepts (cmd_781) — generate.py writes it verbatim into vercel.json's `crons` "
-                f"array for this task's /api/scheduled-tasks/{{task_id}} path."
+                f"Definition '{def_key}': x-scheduled-task.interval, when present, must be "
+                f"a non-empty cron expression string (5-field cron; generate.py writes it "
+                f"verbatim into vercel.json's `crons` array, and task:run-all reads it as "
+                f"'when this task is due'). Omit the key to schedule the task through "
+                f"task:run-all only."
             )
 
         depends_on = xsched.get('depends_on')
@@ -2438,14 +2445,15 @@ def validate_schema(schema: dict) -> None:
                     f"got {handler!r}."
                 )
 
+            # `interval` is optional (cmd_1208) -- see the entity-level check above.
             interval = item.get('interval')
-            if not isinstance(interval, str) or not interval:
+            if interval is not None and (not isinstance(interval, str) or not interval):
                 errors.append(
-                    f"{loc}.interval is required and must be a non-empty cron "
-                    f"expression string in the format Vercel's `crons[].schedule` "
-                    f"accepts (cmd_781) -- generate.py writes it verbatim into "
-                    f"vercel.json's `crons` array for this task's "
-                    f"/api/scheduled-tasks/{{task_id}} path."
+                    f"{loc}.interval, when present, must be a non-empty cron "
+                    f"expression string (5-field cron; generate.py writes it "
+                    f"verbatim into vercel.json's `crons` array, and task:run-all "
+                    f"reads it as 'when this task is due'). Omit the key to "
+                    f"schedule the task through task:run-all only."
                 )
 
             depends_on = item.get('depends_on')

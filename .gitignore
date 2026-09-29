@@ -50,6 +50,7 @@ yarn-error.log*
 !.env.example
 !.env.vercel.production.local.example
 !.env.gcp.production.local.example
+!.env.task-runner.production.local.example
 # .env.local, .env.*.local, .env.production remain ignored
 
 # GCP production secrets
@@ -200,6 +201,8 @@ lib/dashboard/types.ts
 !lib/legal/**
 !lib/openapi/**
 !lib/scheduled-tasks/system-actor.ts
+!lib/scheduled-tasks/run-all.ts
+!lib/scheduled-tasks/run-all.test.ts
 
 # ── app/[locale]/ ──
 app/\[locale\]/*/

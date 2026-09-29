@@ -184,6 +184,14 @@ bash scripts/gcp-deploy.sh  # Run Step 3 only
 gcp-setup.sh is idempotent so re-running is safe,
 but if there are no infrastructure changes, gcp-deploy.sh alone is sufficient.
 
+### Nightly scheduled tasks (optional)
+
+`bash scripts/gcp-task-runner.sh` provisions a Cloud Scheduler job and a
+minimal Cloud Run Job that runs `npm run task:run-all`, independent of where
+the app itself is hosted. It has its own secrets file and does not use the
+`app-*` secrets above. See `docs/knowledge/scheduled-task-operations.md`
+("Nightly trigger: Cloud Scheduler + a minimal Cloud Run Job").
+
 ### On Teardown
 
 ```bash

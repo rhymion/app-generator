@@ -100,6 +100,11 @@ PRISMA_ACCELERATE_API_KEY="${PRISMA_ACCELERATE_API_KEY:-}"
 # SQL instance) instead of Neon — see docs/knowledge/prisma-pool-max-tuning.md.
 PRISMA_POOL_MAX="${PRISMA_POOL_MAX:-}"
 
+# Optional: CRON_SECRET, registered by gcp-setup.sh Step 5 as app-cron-secret
+# when set (the nightly Cloud Run Job path has its own env file; see
+# scripts/gcp-task-runner.sh).
+CRON_SECRET="${CRON_SECRET:-}"
+
 # Upstash global DB primary region (Step 4.5). AWS-style region name; the DB is
 # created as global tier. ap-northeast-1 (Tokyo) is closest to GCP asia-northeast1.
 UPSTASH_PRIMARY_REGION="${UPSTASH_PRIMARY_REGION:-ap-northeast-1}"
@@ -117,6 +122,6 @@ export PROJECT_ID REGION SERVICE_NAME
 export SA_NAME SA_EMAIL REPO_NAME GCS_BUCKET
 export IMAGE MIGRATE_IMAGE DATABASE_URL DIRECT_URL REDIS_URL
 export AUTH_SECRET UPSTASH_EMAIL UPSTASH_API_KEY PRISMA_ACCELERATE_API_KEY
-export PRISMA_POOL_MAX
+export PRISMA_POOL_MAX CRON_SECRET
 export SEED_ADMIN_EMAIL SEED_ADMIN_PASSWORD
 export UPSTASH_PRIMARY_REGION

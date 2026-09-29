@@ -122,9 +122,17 @@ class TestHandlerAndIntervalRequired:
             validate_schema(schema)
         assert 'handler' in str(exc_info.value)
 
-    def test_missing_interval_rejected(self):
-        bad = dict(_VALID_EXPIRES)
-        del bad['interval']
+    def test_missing_interval_accepted(self):
+        """interval is optional (cmd_1208): an interval-less task is reached
+        only through task:run-all."""
+        ok = dict(_VALID_EXPIRES)
+        del ok['interval']
+        schema = _schema('widget', ok, extra_props={'expires_at': {'type': 'string'}})
+        validate_schema(schema)  # must not raise
+
+    @pytest.mark.parametrize('bad_interval', ['', 5, ['0 * * * *']])
+    def test_present_but_invalid_interval_rejected(self, bad_interval):
+        bad = dict(_VALID_EXPIRES, interval=bad_interval)
         schema = _schema('widget', bad, extra_props={'expires_at': {'type': 'string'}})
         with pytest.raises(SchemaValidationError) as exc_info:
             validate_schema(schema)
@@ -306,9 +314,16 @@ class TestBulkScheduledTasksShapeAndRequiredFields:
             validate_schema(schema)
         assert 'handler' in str(exc_info.value)
 
-    def test_missing_interval_rejected(self):
-        bad = dict(_VALID_BULK)
-        del bad['interval']
+    def test_missing_interval_accepted(self):
+        """interval is optional (cmd_1208): an interval-less task is reached
+        only through task:run-all."""
+        ok = dict(_VALID_BULK)
+        del ok['interval']
+        validate_schema({'definitions': {}, 'x-scheduled-tasks': [ok]})  # must not raise
+
+    @pytest.mark.parametrize('bad_interval', ['', 5, ['0 3 * * *']])
+    def test_present_but_invalid_interval_rejected(self, bad_interval):
+        bad = dict(_VALID_BULK, interval=bad_interval)
         schema = {'definitions': {}, 'x-scheduled-tasks': [bad]}
         with pytest.raises(SchemaValidationError) as exc_info:
             validate_schema(schema)
