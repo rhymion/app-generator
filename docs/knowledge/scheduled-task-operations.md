@@ -302,10 +302,8 @@ ever referenced by id for `creator_id`/`updater_id` attribution.
 `vercel.json` is not read at all under GCP Cloud Run — `generate.py` skips
 writing the `crons` key entirely when `x-cloud.provider: gcp` (mirroring how
 the same flag switches `app/api/upload/route.ts` from Vercel Blob to GCS).
-**There is no generator/deploy-script automation yet that provisions a GCP
-Cloud Scheduler job** — `scripts/gcp-setup.sh`/`gcp-deploy.sh` do not create
-one (confirmed by grep, 2026-08-22: no `scheduler`/`cron` reference in
-either script). Until that automation exists, provisioning is manual:
+Per-task Cloud Scheduler jobs are not provisioned by `gcp-setup.sh` or
+`gcp-deploy.sh`. To create one by hand:
 
 ```sh
 gcloud scheduler jobs create http <job-name> \
@@ -321,9 +319,91 @@ so either works. `CRON_SECRET` is not Vercel-specific; the same env var and
 `Authorization: Bearer` header work identically here since the route's auth
 check doesn't distinguish caller platform.
 
-Adding real Cloud Scheduler automation (parallel to `vercel-setup.sh`'s
-`vercel.json` write) is a natural follow-up, not yet scoped.
+For a nightly run of every task, use the task-runner Job below instead.
 
+### Nightly trigger: Cloud Scheduler + a minimal Cloud Run Job
+
+`scripts/gcp-task-runner.sh` provisions a small executor on GCP that runs
+`npm run task:run-all` every night. The app itself can stay on Vercel; only
+the trigger lives on GCP. It creates:
+
+- a Cloud Run Job `task-runner` (image built from the Dockerfile's `builder`
+  stage; command `npm run task:run-all`; one task, no retries)
+- a Cloud Scheduler job `task-runner-nightly` that POSTs to the Cloud Run
+  Jobs API (`.../jobs/task-runner:run`) with an OAuth token
+- two service accounts: `task-runner-sa` (the Job's runtime identity, with
+  access to its own secrets only) and `task-runner-invoker-sa` (may run this
+  one Job, via `roles/run.invoker` on the Job)
+- one Secret Manager secret per key in the secrets file (below)
+
+Try it on a separate project first:
+
+```sh
+# 1. Configure the target project and region
+echo 'PROJECT_ID=<your-test-project>' >> .env.production.local
+
+# 2. Fill in the secrets file (see the warning below)
+cp .env.task-runner.production.local.example .env.task-runner.production.local
+
+# 3. Preview: prints every command, runs nothing
+DRY_RUN=true ./scripts/gcp-task-runner.sh
+
+# 4. Live run
+./scripts/gcp-task-runner.sh
+```
+
+Reading the `DRY_RUN` output: every line starting with `[DRY-RUN]` is a
+command a live run would execute. No `gcloud` or `docker` process is started
+and no secret value is printed, only secret names. Where a live run picks
+between `create` and `update` based on what already exists, the preview
+shows `create`. The script never falls back to the ambient `gcloud` project;
+`PROJECT_ID` must be set explicitly (`DRY_RUN` uses a placeholder if not).
+
+Settings (environment or `.env.production.local`): `REGION`
+(default `asia-northeast1`), `SERVICE_NAME`, `REPO_NAME`,
+`TASK_RUNNER_SCHEDULE` (cron, default `0 2 * * *`), `TASK_RUNNER_TIME_ZONE`
+(default `Asia/Tokyo`), `TASK_RUNNER_TASK_TIMEOUT` (default `3600s`),
+`TASK_RUNNER_NPM_SCRIPT` (default `task:run-all`), `TASK_RUNNER_IMAGE` with
+`SKIP_BUILD=true` to reuse an image, and `TASK_RUNNER_JOB_NAME` /
+`TASK_RUNNER_SCHEDULER_JOB_NAME` / `TASK_RUNNER_SA_NAME` /
+`TASK_RUNNER_INVOKER_SA_NAME` for resource names. The Dockerfile is a
+generated file, so run `generate-code` with `x-cloud` enabled first when the
+script builds the image.
+
+**Collect every production secret, not just the database URL.** The secrets
+in `gcp-setup.sh` (`app-database-url` and the others) belong to a Cloud Run
+*service* hosted entirely on GCP. They are not what a Job for a
+Vercel-hosted app needs, and they are not shared with the Job. A scheduled
+task's handler is hand-edited business logic and can call anything the
+deployed app can: payment gateways, email or SMS providers, any third-party
+API. When the handler runs from the Job instead of inside the deployed app,
+every env var it reads must be present in the Job. List **all** production
+secrets of the target app (compare with the env vars configured on its
+production deployment) in `.env.task-runner.production.local`.
+`DATABASE_URL` (unpooled) and `CRON_SECRET` are required; the script stops
+if either is missing. A missing key otherwise fails only at run time, inside
+the handler that needs it.
+
+Permissions the operator needs: enable APIs (`serviceusage.services.enable`),
+create service accounts, secrets, an Artifact Registry repository, a Cloud
+Run Job and a Scheduler job, set IAM policies, and act as the two service
+accounts. Project Owner covers all of it.
+
+Verify after a live run:
+
+```sh
+gcloud scheduler jobs run task-runner-nightly --location=<region> --project=<project>
+gcloud run jobs executions list --job=task-runner --region=<region> --project=<project>
+```
+
+Cleanup, in a test project: delete the Scheduler job, the Cloud Run Job, the
+two service accounts, the `task-runner-*` secrets, and the
+`<service>-task-runner` images. Or delete the whole test project.
+
+`gcp-setup.sh` also enables `cloudscheduler.googleapis.com` and, when
+`CRON_SECRET` is set in `.env.production.local`, stores it as
+`app-cron-secret`. Wiring that secret into the Cloud Run service's env is
+still not done by `gcp-deploy.sh`.
 ### Where the three canonical env vars go under GCP
 
 The Vercel path canonically injects three env vars via `scripts/vercel-env.sh`:
@@ -337,8 +417,9 @@ in the same place:
   in `scripts/gcp-setup.sh` Step 5 (`upsert_secret` into GCP Secret Manager)
   and `scripts/gcp-deploy.sh`'s `--set-secrets` flag on `gcloud run deploy` —
   a **runtime** value, read by `process.env.CRON_SECRET` when a request
-  arrives, so injecting it at deploy time is sufficient. Not yet wired into
-  either script.
+  arrives, so injecting it at deploy time is sufficient. `gcp-setup.sh` now
+  stores it as `app-cron-secret` (when set); `gcp-deploy.sh` does not yet
+  mount it into the service.
 - **`NEXT_PUBLIC_APP_TITLE`/`NEXT_PUBLIC_APP_COPYRIGHT` are a different kind
   of variable and can't follow the same path.** Next.js inlines
   `NEXT_PUBLIC_` vars into the client bundle at **build** time. On Vercel,
