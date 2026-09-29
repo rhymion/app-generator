@@ -277,5 +277,12 @@
     "quarter": "Quarter",
     "week": "Week",
     "year": "Year"
+  },
+  "Payment": {
+    "successTitle": "Payment received",
+    "successMessage": "Thank you. Your payment was completed and your order is being processed.",
+    "cancelTitle": "Payment cancelled",
+    "cancelMessage": "Your payment was cancelled and you have not been charged. You can try again whenever you are ready.",
+    "backToHome": "Back to home"
   }
 }

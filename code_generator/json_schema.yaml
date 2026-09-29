@@ -75,17 +75,22 @@ x-payment:
   default: false
   description: |
     Opt-in Stripe payment integration. When at least one entity in the
-    schema declares `x-payment: true`, the generator emits three write-once
+    schema declares `x-payment: true`, the generator emits five write-once
     stub files (same convention as lib/<parent>/invalidate_handler.ts --
     written only if the file does not already exist, so hand-written
     implementations survive regeneration):
       - lib/stripe.ts                     -- Stripe SDK init, fail-closed on
                                               a missing STRIPE_SECRET_KEY
       - app/api/payment/checkout/route.ts -- Checkout Session creation stub
+                                              (API key or session auth)
+      - app/[locale]/payment/success/page.tsx and
+        app/[locale]/payment/cancel/page.tsx -- where Checkout sends the
+                                              buyer back
       - app/api/webhooks/stripe/route.ts  -- Webhook receiver stub
                                               (req.text() -> constructEvent)
     The generator does NOT generate a Plan/Product/Purchase-style entity, an
-    authz/entitlement layer, or any payment UI -- consumers model their own
+    authz/entitlement layer, or any payment UI beyond those two
+    return pages -- consumers model their own
     payment-related entities as ordinary schema entities and wire them into
     the stub routes. Scope is one-time purchases (Checkout Session
     mode: payment); subscription lifecycle handling is left to the consumer

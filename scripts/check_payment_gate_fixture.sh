@@ -4,7 +4,8 @@
 # Runs a small, self-contained fixture entity (x-payment: true) through the
 # real build_user_schema.py -> generate.py -> tsc pipeline and type-checks
 # the write-once Stripe integration stubs: lib/stripe.ts,
-# app/api/payment/checkout/route.ts, app/api/webhooks/stripe/route.ts.
+# app/api/payment/checkout/route.ts, app/api/webhooks/stripe/route.ts, and the
+# checkout return pages app/[locale]/payment/{success,cancel}/page.tsx.
 #
 # Why this exists: this repo's own json_schema.yaml declares no x-payment
 # key anywhere, so no CI job ever type-checks the Stripe stub templates --
@@ -53,12 +54,12 @@ if [ ! -f "$OUT_DIR/lib/stripe.ts" ]; then
   exit 1
 fi
 
-# Fixture-only shim for @/lib/authz -- see fixtures/payment_gate/shims/ for
+# Fixture-only shim for @/lib/api-auth -- see fixtures/payment_gate/shims/ for
 # the source of truth and why this exists rather than the real file.
-cp "$FIXTURE_DIR/shims/authz.ts" "$OUT_DIR/lib/authz.ts"
+cp "$FIXTURE_DIR/shims/api-auth.ts" "$OUT_DIR/lib/api-auth.ts"
 cp "$FIXTURE_DIR/tsconfig.json" "$OUT_DIR/tsconfig.json"
 
-echo "-- tsc --noEmit (lib/stripe.ts + checkout route + webhook route) --"
+echo "-- tsc --noEmit (lib/stripe.ts + checkout route + webhook route + return pages) --"
 set +e
 npx tsc -p "$OUT_DIR/tsconfig.json"
 tsc_status=$?

@@ -2,14 +2,26 @@
 
 // x-payment (cmd_706): Checkout Session creation stub. Fill in the price /
 // line_items for whatever you are selling, then redirect the client to the
-// returned URL. See docs/knowledge/stripe-payment-integration.md.
+// returned URL. Stripe sends the buyer back to /payment/success or
+// /payment/cancel (app/[locale]/payment/*/page.tsx, also write-once). See docs/knowledge/stripe-payment-integration.md.
 
-import { NextResponse } from 'next/server';
-import { getSessionUserId } from '@/lib/authz';
+import { NextRequest, NextResponse } from 'next/server';
+import { handleApiError, resolveActorId } from '@/lib/api-auth';
 import { stripe } from '@/lib/stripe';
 
-export async function POST(req: Request) {
-  const userId = await getSessionUserId();
+export async function POST(req: NextRequest) {
+  try {
+    return await createCheckoutSession(req);
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
+async function createCheckoutSession(req: NextRequest) {
+  // Same dual authentication as every other generated API route: a valid
+  // X-API-Key / Bearer header or a signed-in session. An invalid API key
+  // throws ApiError(401), which handleApiError() turns into a 401 response.
+  const userId = await resolveActorId(req);
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }

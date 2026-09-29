@@ -2012,6 +2012,18 @@ def generate(schema_path: str, output_dir: str) -> None:
             'Fill in the price_id / line_items for what you are selling.',
         )
 
+        # Checkout's success_url / cancel_url land on these two pages; without
+        # them the buyer gets a 404 right after paying or cancelling.
+        for _kind in ('success', 'cancel'):
+            _return_page_path = out / 'app' / '[locale]' / 'payment' / _kind / 'page.tsx'
+            _write_stub(_return_page_path, _render(env, f'stripe_payment_{_kind}_page.tsx.jinja2', {}))
+            print(f'  Checkout return page → app/[locale]/payment/{_kind}/page.tsx')
+            _note_stub_created(
+                _return_page_path,
+                'x-payment: true is declared on at least one entity.',
+                f'Adjust the Payment.{_kind}* copy in messages/*.json or replace the markup.',
+            )
+
         webhook_route_path = out / 'app' / 'api' / 'webhooks' / 'stripe' / 'route.ts'
         _write_stub(webhook_route_path, _render(env, 'stripe_webhook_route_stub.ts.jinja2', {}))
         print('  Webhook receiver stub → app/api/webhooks/stripe/route.ts')

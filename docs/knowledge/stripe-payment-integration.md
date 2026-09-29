@@ -1,14 +1,14 @@
 # Stripe payment integration — `x-payment` opt-in write-once stubs
 
-**Status: Implemented (generator side only)**
-**Date: 2026-08-16 (updated 2026-08-19: lazy Stripe client construction)**
+**Status: Implemented; verified against Stripe test mode**
+**Date: 2026-08-16 (updated 2026-09-29: dual-auth checkout, return pages, `stripe listen` instructions)**
 
 ## Scope decision
 
 Payments are not a default-schema feature. The generator does not generate
 a `Plan`/`Product`/`Purchase`-style entity, an authz/entitlement layer, or
 any payment UI. It provides a "plug-in point" only: a schema key
-(`x-payment`) that, when declared on any entity, causes three write-once
+(`x-payment`) that, when declared on any entity, causes five write-once
 stub files to be emitted the first time `generate-code` runs — the same
 write-once convention already used for
 `lib/<parent>/invalidate_handler.ts` (see
@@ -38,9 +38,18 @@ description) causes `generate.py` to write, once:
   `Proxy`, not at module evaluation time -- see the "Lazy construction
   note" below for why.
 - `app/api/payment/checkout/route.ts` — Checkout Session creation stub
-  (`POST`, session-authenticated via `getSessionUserId()`). The
-  `price_id` / `line_items` are left as a `TODO` for the consumer to wire
-  to their own entity.
+  (`POST(req: NextRequest)`). Authenticates like every other generated API
+  route: `resolveActorId(req)` from `lib/api-auth.ts` accepts a valid
+  `X-API-Key` / Bearer header or a signed-in session, and errors go through
+  `handleApiError()` (an invalid API key returns 401). The `price_id` /
+  `line_items` are left as a `TODO` for the consumer to wire to their own
+  entity.
+- `app/[locale]/payment/success/page.tsx` and
+  `app/[locale]/payment/cancel/page.tsx` — the pages Stripe sends the
+  buyer back to (the checkout stub's `success_url` / `cancel_url`). Their
+  copy comes from the `Payment` namespace in `messages/en.json` /
+  `messages/ja.json`; the pages are not public paths, so the buyer needs to
+  be signed in, as they were when creating the Checkout Session.
 - `app/api/webhooks/stripe/route.ts` — Webhook receiver stub. Verifies
   the signature via `req.text()` → `stripe.webhooks.constructEvent(...)`
   (Next.js App Router route handlers have no raw `req.body` the way
@@ -51,7 +60,7 @@ description) causes `generate.py` to write, once:
   `checkout.session.completed` is wired by default; the business logic
   inside that case is a `TODO`.
 
-All three are written via `_write_stub()` (write-once): once a consumer
+All five are written via `_write_stub()` (write-once): once a consumer
 edits them, regeneration never overwrites the edits.
 
 ## Why entity-level, not a top-level schema flag
@@ -61,7 +70,7 @@ edits them, regeneration never overwrites the edits.
 copied onto the reconstructed raw entity during the Stage 4 raw/view
 split, same as those. It is a boolean read directly off an entity
 definition (`defn.get('x-payment') is True`), not something that changes
-what pages/routes get generated for that entity itself — the three stub
+what pages/routes get generated for that entity itself — the five stub
 files it triggers are global (one `lib/stripe.ts`, not one per entity),
 so `generate.py` scans **all** entity definitions once
 (`_has_any_payment = any(...)`) and emits the stubs if any entity opted
@@ -77,8 +86,24 @@ are documented as placeholders in `.env.example` (no values). Both
 paths rather than silently no-op-ing (the check now happens the first
 time the code path actually runs, not at process/module boot -- see
 "Lazy construction note" below). Test keys (`sk_test_...`) are
-obtained from the Stripe Dashboard; webhook secrets for local dev via
-`stripe listen --forward-to localhost:<port>/api/webhooks/stripe`.
+obtained from the Stripe Dashboard.
+
+### Local webhook forwarding
+
+The Stripe CLI is a separate tool, not the `stripe` SDK package already in
+`package.json`: install it from the Stripe docs (or `npm install -g
+@stripe/cli`); do not add it to the app's `package.json`. Current CLI
+versions refuse `stripe listen` without an event selection, so list the
+events the webhook handles (only `checkout.session.completed` by default):
+
+```
+stripe listen --events checkout.session.completed \
+  --forward-to localhost:<port>/api/webhooks/stripe
+```
+
+Copy the `whsec_...` signing secret it prints into `STRIPE_WEBHOOK_SECRET`.
+When you add cases to the webhook's `switch` (subscription events, for
+example), add the same event names to `--events`.
 
 ## Lazy construction note (updated 2026-08-19: module-top-level throw removed)
 
@@ -165,7 +190,11 @@ longer does so by default.
 `build_user_schema.py` → `generate.py` pipeline in
 `code_generator/tests/test_payment_gate_fixture.py`, asserting:
 
-- all three stub files are written when `x-payment: true` is declared
+- all five stub files are written when `x-payment: true` is declared
+- the checkout stub resolves the caller with `resolveActorId` (API key or
+  session) and its `success_url` / `cancel_url` targets both have a
+  generated page whose copy comes from the `Payment` i18n namespace
+  (present in both `messages/en.json` and `messages/ja.json`)
 - both stubs' fail-closed checks are present in the generated content
 - the webhook route's `STRIPE_WEBHOOK_SECRET` check is inside the `POST`
   handler, not at module top level (regression guard for the module-eval
@@ -194,7 +223,7 @@ That test proves the stubs are *written* -- it does not type-check them.
 the same `payment_gate` fixture through the full
 `build_user_schema.py` → `generate.py` → `tsc --noEmit` pipeline and
 type-checks the actual generated `lib/stripe.ts` / checkout route /
-webhook route content against whatever `stripe` SDK version is installed
+webhook route / return pages content against whatever `stripe` SDK version is installed
 -- this is what catches an `apiVersion` literal going stale (see the API
 version note above) and any future change to the installed SDK's types
 that the stub content no longer satisfies. It is a required, unconditional
@@ -210,10 +239,17 @@ currently `^22.6.1` in `package.json` after subsequent dependency bumps) was
 added as a runtime dependency since `lib/stripe.ts` imports it unconditionally
 once written.
 
-## Deliberately out of scope for this task
+## Verified against Stripe test mode
 
-A sample payment-enabled entity in a real consuming application, and
-actual Stripe test-mode connection (webhook firing against a real test
-key), are blocked on real Stripe test keys being provisioned and are
-tracked as a separate follow-up task. This task verified only that the
-generator-side mechanism (schema key → write-once stubs) works correctly.
+The stubs have been exercised against Stripe test mode in a consumer app:
+a Checkout Session is created through `POST /api/payment/checkout`, a
+test-card payment completes, and `checkout.session.completed` is delivered
+to `/api/webhooks/stripe` through `stripe listen` and answered with 200.
+The generator repo itself still has no entity with `x-payment`, so its own
+gates cover the stubs through the `payment_gate` fixture only.
+
+## Out of scope
+
+A sample payment-enabled entity in a consuming application, and the
+business logic inside the webhook's `checkout.session.completed` case, are
+left to each consumer.

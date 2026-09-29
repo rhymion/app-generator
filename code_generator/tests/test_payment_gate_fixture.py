@@ -8,6 +8,7 @@ Modeled on code_generator/tests/test_invalidate_mechanism_fixture.py's
 fixture-pipeline pattern.
 """
 from pathlib import Path
+import re
 import shutil
 
 from build_user_schema import build_user_schema
@@ -59,6 +60,54 @@ def test_x_payment_true_writes_webhook_route_stub(tmp_path):
     assert 'req.text()' in content
     assert 'webhooks.constructEvent' in content
     assert "'checkout.session.completed'" in content
+
+
+def test_checkout_route_stub_accepts_api_key_and_session_auth(tmp_path):
+    # Issue #776: the stub used to authenticate with getSessionUserId() only,
+    # so a valid X-API-Key got 401. It must resolve the actor the same way as
+    # every other generated API route (resolveActorId from lib/api-auth).
+    out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
+    content = (out / 'app' / 'api' / 'payment' / 'checkout' / 'route.ts').read_text()
+    assert "resolveActorId" in content
+    assert "from '@/lib/api-auth'" in content
+    assert 'getSessionUserId' not in content
+    assert 'export async function POST(req: NextRequest)' in content
+    assert 'handleApiError' in content
+
+
+def test_x_payment_true_writes_checkout_return_pages(tmp_path):
+    # Issue #776: the checkout stub sends success_url / cancel_url to
+    # /payment/success and /payment/cancel; both pages must exist or the
+    # buyer lands on a 404.
+    out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
+    checkout = (out / 'app' / 'api' / 'payment' / 'checkout' / 'route.ts').read_text()
+    for kind in ('success', 'cancel'):
+        assert f'/payment/{kind}' in checkout
+        page = out / 'app' / '[locale]' / 'payment' / kind / 'page.tsx'
+        assert page.exists(), f'app/[[locale]]/payment/{kind}/page.tsx must be written'
+        content = page.read_text()
+        assert f"t('{kind}Title')" in content
+        assert f"t('{kind}Message')" in content
+
+
+def test_checkout_return_pages_hardcode_no_japanese_prose(tmp_path):
+    # Copy must come from the Payment i18n namespace, never be hardcoded
+    # (no Japanese prose in the shipped page).
+    out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
+    for kind in ('success', 'cancel'):
+        content = (out / 'app' / '[locale]' / 'payment' / kind / 'page.tsx').read_text()
+        assert not re.search(r'[\u3040-\u30ff\u4e00-\u9fff]', content)
+        assert "getTranslations('Payment')" in content
+
+
+def test_payment_i18n_keys_exist_in_both_locales():
+    import json
+
+    for lang in ('en', 'ja'):
+        messages = json.loads((REPO_ROOT / 'messages' / f'{lang}.json').read_text(encoding='utf-8'))
+        payment = messages['Payment']
+        for key in ('successTitle', 'successMessage', 'cancelTitle', 'cancelMessage', 'backToHome'):
+            assert payment.get(key), f'messages/{lang}.json is missing Payment.{key}'
 
 
 def test_stripe_lib_stub_is_fail_closed_on_missing_secret_key(tmp_path):
@@ -124,3 +173,4 @@ def test_no_x_payment_declared_writes_no_stubs(tmp_path):
     assert not (out / 'lib' / 'stripe.ts').exists()
     assert not (out / 'app' / 'api' / 'payment' / 'checkout' / 'route.ts').exists()
     assert not (out / 'app' / 'api' / 'webhooks' / 'stripe' / 'route.ts').exists()
+    assert not (out / 'app' / '[locale]' / 'payment').exists()

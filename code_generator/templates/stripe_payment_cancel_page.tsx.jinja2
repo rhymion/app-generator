@@ -1,0 +1,34 @@
+// GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
+
+// x-payment: cancel page. Stripe Checkout sends the buyer here via the
+// `cancel_url` set in app/api/payment/checkout/route.ts. Copy comes from the
+// `Payment` i18n namespace (messages/*.json) -- edit the keys there, or
+// replace the markup with your own order-summary UI.
+
+import { getTranslations, setRequestLocale } from 'next-intl/server';
+import { Link } from '@/i18n/navigation';
+import AppText from '@/components/ui/AppText';
+
+export default async function PaymentCancelPage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
+  setRequestLocale(locale);
+  const t = await getTranslations('Payment');
+
+  return (
+    <>
+      <AppText variant="h4" fontWeight="bold" mb={2}>
+        {t('cancelTitle')}
+      </AppText>
+      <AppText variant="body1" mb={2}>
+        {t('cancelMessage')}
+      </AppText>
+      <AppText variant="body2">
+        <Link href="/">{t('backToHome')}</Link>
+      </AppText>
+    </>
+  );
+}
