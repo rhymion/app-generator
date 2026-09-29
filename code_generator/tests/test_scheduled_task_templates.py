@@ -393,3 +393,45 @@ class TestXReadonlyFieldsScope:
             "to, so anything placed there leaks across views"
         )
         assert view.get("x-readonly-fields") == ["name"]
+
+
+class TestDependenciesTemplate:
+    def _render(self, entities: list) -> str:
+        return _ENV.get_template('scheduled_task_dependencies.ts.jinja2').render(
+            scheduled_task_entities=entities,
+        )
+
+    def test_empty_when_no_tasks_declared(self):
+        rendered = self._render([])
+        assert 'export const TASK_DEPENDENCIES: Record<string, string[]> = {' in rendered
+        assert 'export const TASK_INTERVALS: Record<string, string | null> = {' in rendered
+
+    def test_depends_on_and_interval_rendered_per_task(self):
+        a = dict(_BULK_DEMO_RESET)
+        b = dict(_EXPIRE_ENTITY, depends_on=['demo_reset', 'other'], interval='')
+        rendered = self._render([a, b])
+        assert "'demo_reset': []," in rendered
+        assert "'inventory_reservation_expire': ['demo_reset', 'other']," in rendered
+        assert "'demo_reset': '0 3 * * *'," in rendered
+        assert "'inventory_reservation_expire': null," in rendered
+
+
+class TestRunGuardTemplate:
+    def _render(self, has_tasks: bool) -> str:
+        return _ENV.get_template('scheduled_task_run_guard.ts.jinja2').render(has_tasks=has_tasks)
+
+    def test_real_guard_reads_records_and_predecessors(self):
+        rendered = self._render(True)
+        assert "import { TASK_DEPENDENCIES } from './dependencies'" in rendered
+        assert 'prisma.scheduled_task_run.findUnique' in rendered
+        assert "status: { in: ['succeeded', 'not_due'] }" in rendered
+        assert "return result('already_succeeded')" in rendered
+        assert "status: 'failed'" in rendered
+
+    def test_stub_variant_never_touches_the_table(self):
+        """With no task declared the table is not generated, so the guard
+        must not reference it (or tsc would fail in that consumer)."""
+        rendered = self._render(False)
+        assert 'prisma.scheduled_task_run' not in rendered
+        assert 'export async function runScheduledTask' in rendered
+        assert "from '@/lib/prisma'" not in rendered

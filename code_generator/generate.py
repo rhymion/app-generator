@@ -252,6 +252,50 @@ def inject_bridge_into_schema(schema_prisma_path: Path, bridges: dict) -> None:
         print(f'  Injected bridge models/FKs → prisma/schema.prisma')
 
 
+_SCHEDULED_TASK_RUN_PRISMA = """// Scheduled-task completion records (generated when the schema declares any
+// x-scheduled-task / x-scheduled-tasks entry). One row per (task_id,
+// business_date): running -> succeeded | failed, or not_due (task:run-all
+// found the task's `interval` not yet due). See lib/scheduled-tasks/run-guard.ts.
+enum ScheduledTaskRunStatus {
+  running
+  succeeded
+  failed
+  not_due
+}
+
+model scheduled_task_run {
+  id            String                 @id @default(cuid())
+  task_id       String
+  business_date DateTime               @db.Date
+  status        ScheduledTaskRunStatus
+  started_at    DateTime               @default(now()) @db.Timestamptz(0)
+  finished_at   DateTime?              @db.Timestamptz(0)
+  error_message String?
+
+  @@unique([task_id, business_date])
+  @@index([status, business_date])
+}
+"""
+
+
+def inject_scheduled_task_run_into_schema(schema_prisma_path: Path) -> None:
+    """Append the `scheduled_task_run` completion-record model to schema.prisma
+    (idempotent), same injection pattern as `inject_bridge_into_schema`.
+
+    Emitted only when the schema declares at least one scheduled task, so a
+    consumer with none gets no table. Generated rather than hand-written into
+    the base schema.prisma on purpose: a hand-written base model is silently
+    dropped from a consumer's prj/prisma/schema.prisma snapshot by prj:sync.
+    """
+    if not schema_prisma_path.exists():
+        return
+    content = schema_prisma_path.read_text()
+    if 'model scheduled_task_run {' in content:
+        return
+    schema_prisma_path.write_text(content.rstrip('\n') + '\n\n' + _SCHEDULED_TASK_RUN_PRISMA)
+    print('  Injected scheduled_task_run model → prisma/schema.prisma')
+
+
 # ---------------------------------------------------------------------------
 # Rendering helpers
 # ---------------------------------------------------------------------------
@@ -2378,6 +2422,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'task_id': task_id,
             'handler': x_scheduled['handler'],
             'interval': x_scheduled.get('interval', ''),
+            'depends_on': list(x_scheduled.get('depends_on') or []),
             'expires_at_before_now': bool(xfilter.get('expires_at_before_now', False)),
             'status_in': xfilter.get('status_in') or [],
             'module_path': def_key,
@@ -2413,6 +2458,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'task_id': task_id,
             'handler': x_scheduled_bulk['handler'],
             'interval': x_scheduled_bulk.get('interval', ''),
+            'depends_on': list(x_scheduled_bulk.get('depends_on') or []),
             'module_path': module_path,
             'run_name': to_camel_case(task_id) + 'Run',
         })
@@ -2439,6 +2485,18 @@ def generate(schema_path: str, output_dir: str) -> None:
         _render(env, 'scheduled_task_registry.ts.jinja2', {'scheduled_task_entities': all_scheduled_tasks}),
     )
     print(f'  Scheduled task registry → lib/scheduled-tasks/registry.ts ({len(all_scheduled_tasks)} task(s))')
+    _write(
+        out / 'lib' / 'scheduled-tasks' / 'run-guard.ts',
+        _render(env, 'scheduled_task_run_guard.ts.jinja2', {'has_tasks': bool(all_scheduled_tasks)}),
+    )
+    print('  Scheduled task completion-record guard → lib/scheduled-tasks/run-guard.ts')
+    if all_scheduled_tasks:
+        inject_scheduled_task_run_into_schema(out / 'prisma' / 'schema.prisma')
+    _write(
+        out / 'lib' / 'scheduled-tasks' / 'dependencies.ts',
+        _render(env, 'scheduled_task_dependencies.ts.jinja2', {'scheduled_task_entities': all_scheduled_tasks}),
+    )
+    print('  Scheduled task dependency graph → lib/scheduled-tasks/dependencies.ts')
     _write(
         out / 'app' / 'api' / 'scheduled-tasks' / '[task]' / 'route.ts',
         _render(env, 'scheduled_task_route.ts.jinja2', {}),
