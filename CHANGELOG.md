@@ -5,6 +5,26 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Made `depends_on` between scheduled tasks enforced at run time, and
+  added direct-execution scripts and a GCP nightly trigger** (issue #712,
+  follow-up to the generate-time validation from #713/#714). Every run of a
+  scheduled task now goes through a generated guard
+  (`lib/scheduled-tasks/run-guard.ts`) backed by a new `scheduled_task_run`
+  table (one row per `task_id` and UTC business date; generated into
+  `prisma/schema.prisma` only when a task is declared, so a consumer writes
+  its migration at deploy time). The guard suppresses duplicate runs,
+  refuses a task whose predecessor has no `succeeded` record for the day,
+  and records `failed` handlers; the HTTP route returns 409 for a blocked or
+  in-progress task. New `npm run task:run -- <task_id>` and
+  `npm run task:run-all` run tasks directly against the database in
+  `depends_on` order (a task with an `interval` is skipped on nights it is
+  not due; exit codes are documented). `interval` is now optional, and a
+  task without one is only run by `task:run-all`. New
+  `scripts/gcp-task-runner.sh` provisions a Cloud Run Job and a Cloud
+  Scheduler job that run `task:run-all` nightly (`DRY_RUN=true` previews it).
+  A consumer must declare `depends_on` in its own schema for any ordering
+  to apply. See `docs/knowledge/scheduled-task-operations.md`.
+
 - **Served the generated OpenAPI document at an authenticated route, and
   added a development/staging-only Swagger UI page** (issues #768/#769,
   fifth stage of AI-agent-facing API improvements). `GET

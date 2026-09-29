@@ -82,6 +82,8 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 
 - **GCP Cloud Run** (`x-cloud` annotation, opt-in) — multi-stage `Dockerfile`, GCS-backed uploads (Signed URL upload + proxy routes), and idempotent environment automation scripts (`gcp-env.sh`, `gcp-setup.sh`, `gcp-deploy.sh`, `gcp-seed.sh`, `gcp-teardown.sh`); Vercel remains the default when `x-cloud` is not set
 
+- **Scheduled tasks** (`x-scheduled-task` / `x-scheduled-tasks`) — recurring handlers with optional `depends_on` ordering, per-day completion records, and `npm run task:run` / `task:run-all` for running them directly against the database (nightly Cloud Run Job + Cloud Scheduler provisioning via `gcp-task-runner.sh`); see [docs/knowledge/scheduled-task-operations.md](docs/knowledge/scheduled-task-operations.md)
+
 ### Audit & Compliance
 
 - **Audit log** — schema-agnostic, read-only viewer (`app/[locale]/audit_log/page.tsx`) over all generated entities' create/update/delete actions
@@ -464,6 +466,7 @@ order — `x-cloud` enable → `generate-code` → `gcp-setup.sh` → `gcp-deplo
 | `gcp-deploy.sh` | Build the image, run migrations, deploy to Cloud Run |
 | `gcp-seed.sh` | Seed the database |
 | `gcp-teardown.sh` | Tear down GCP resources (two-step confirmation) |
+| `gcp-task-runner.sh` | Provision a nightly Cloud Run Job + Cloud Scheduler job that runs `task:run-all` (`DRY_RUN=true` previews) |
 
 `gcp-deploy.sh` needs the `Dockerfile` that `generate-code` emits — run
 `generate-code` after enabling `x-cloud`, before `gcp-deploy.sh`.
