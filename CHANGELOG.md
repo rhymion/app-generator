@@ -206,6 +206,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/prisma-schema-conventions.md` §5.
 
 ### Fixed
+- **A REST update that omitted a relation or child-list field cleared it**
+  (issue #777): `PUT /api/{parent}/{id}` and bulk `PUT` passed
+  `<field> ?? []` to `update{Parent}`, so, e.g., renaming a role via the
+  API removed all of its users, updating a user removed all of their
+  roles, and updating a purchase order without `lines` deleted every
+  line. CSV import's update path passed `[]` unconditionally with the
+  same effect. An omitted field now leaves the relation unchanged; an
+  explicitly supplied list (including `[]`) still replaces it. The
+  OpenAPI request schemas (`{Parent}CreateRequest`,
+  `{Parent}BulkUpdateItem`) now document these fields (`<child>_ids` id
+  lists and owned child-row arrays), which were previously absent, so the
+  accepted field names were not discoverable from Swagger. See
+  `docs/knowledge/generated-documentation-and-openapi-spec.md`.
+
 - **A decimal-kind column's filter crashed on a non-numeric value instead
   of returning zero rows** (found via a real consumer schema): unlike the
   `number`/`date`/`enum` kinds, `buildFilter`'s `'decimal'` branch never

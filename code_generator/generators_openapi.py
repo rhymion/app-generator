@@ -329,6 +329,28 @@ def build_entity_openapi(ctx: dict) -> dict:
         for name, defn in filtered_props.items()
         if name not in _READONLY_FIELDS
     }
+    # Relation/child-list inputs the REST routes read (Issue #777): a
+    # connect-style relation takes a flat id list (`<child>_ids`), an owned
+    # child list takes row objects (an existing row keeps its `id`).
+    for child in ctx.get('api_write_children', []):
+        if child['use_connect']:
+            items_schema: dict = {'type': 'string'}
+        else:
+            items_schema = {
+                'type': 'object',
+                'properties': {
+                    'id': {'type': 'string'},
+                    **{n: _clean_field_schema(d) for n, d in child['item_props'].items()},
+                },
+            }
+        create_properties[child['body_key']] = {
+            'type': 'array',
+            'items': items_schema,
+            'description': (
+                'Complete new list; replaces the current one. '
+                'On update, omit this field to leave it unchanged.'
+            ),
+        }
     create_required = sorted(f for f in required_fields if f in create_properties)
     create_schema: dict = {
         'type': 'object',

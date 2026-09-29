@@ -213,17 +213,16 @@ class TestEmbeddedChildImportConverges:
         ctx = build_context(_goods_receipt_entity(), _goods_receipt_schema())
         assert ctx['import_service_child_args'] == '[]'
 
-    def test_rendered_route_calls_service_functions_with_empty_child_array(self):
+    def test_rendered_route_calls_service_functions_with_child_args(self):
         ctx = build_context(_goods_receipt_entity(), _goods_receipt_schema())
         rendered = _render_import_route(ctx)
         assert "import { addGoodsReceipt, updateGoodsReceipt } from '@/lib/goods_receipt/service';" in rendered
-        # CSV rows can't express nested child rows -- `lines` must be an
-        # explicit empty array on both create and update, not omitted
-        # (omitting it would be a TS2554 arity mismatch against
-        # add/updateGoodsReceipt's declared signature). update{{Parent}}'s
-        # own signature ends in srcSnapshotRaw, so the create call's line
-        # ends in the empty-array literal but the update call's line ends
-        # in `, null);` with the empty array immediately before it.
+        # CSV rows can't express nested child rows. On create, `lines` must
+        # be an explicit empty array, not omitted (omitting it would be a
+        # TS2554 arity mismatch against addGoodsReceipt's declared
+        # signature). On update, an empty array would replace the row's
+        # existing lines with nothing (Issue #777), so the row's current
+        # lines are read back and passed through unchanged instead.
         assert 'await addGoodsReceipt(actorId,' in rendered
         assert 'await updateGoodsReceipt(actorId, action.id,' in rendered
         for line in rendered.splitlines():
@@ -233,9 +232,13 @@ class TestEmbeddedChildImportConverges:
                     f"empty child-array literal, got: {line!r}"
                 )
             if 'await updateGoodsReceipt(actorId, action.id,' in line:
-                assert line.rstrip().endswith('[], null);'), (
-                    f"expected the update call's second-to-last argument "
-                    f"to be the empty child-array literal, got: {line!r}"
+                assert 'prisma.goods_receipt.findUnique({ where: { id: action.id }, select: { lines: { select: { id: true' in line, (
+                    f"expected the update call to pass the row's current "
+                    f"lines, got: {line!r}"
+                )
+                assert not line.rstrip().endswith('[], null);'), (
+                    f"the update call must not clear lines with an empty "
+                    f"child-array literal, got: {line!r}"
                 )
 
     def test_no_raw_tx_fallback_emitted(self):
