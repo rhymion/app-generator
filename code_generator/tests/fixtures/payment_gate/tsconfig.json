@@ -14,13 +14,16 @@
     "jsx": "react-jsx",
     "paths": {
       "@/lib/stripe": ["./lib/stripe.ts"],
-      "@/lib/authz": ["./lib/authz.ts"]
+      "@/lib/api-auth": ["./lib/api-auth.ts"],
+      "@/*": ["../*"]
     }
   },
   "include": [
     "lib/stripe.ts",
     "app/api/payment/checkout/route.ts",
-    "app/api/webhooks/stripe/route.ts"
+    "app/api/webhooks/stripe/route.ts",
+    "app/[locale]/payment/success/page.tsx",
+    "app/[locale]/payment/cancel/page.tsx"
   ],
   "exclude": ["node_modules"]
 }

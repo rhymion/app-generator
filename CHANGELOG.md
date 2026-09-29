@@ -206,6 +206,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/prisma-schema-conventions.md` §5.
 
 ### Fixed
+- **The `x-payment` stubs no longer reject API keys or send buyers to a 404,
+  and the `stripe listen` instructions work with current Stripe CLI versions**
+  (issue #776). The generated `app/api/payment/checkout/route.ts` now
+  authenticates with `resolveActorId` (API key or session) instead of the
+  session only; `app/[locale]/payment/success/page.tsx` and
+  `app/[locale]/payment/cancel/page.tsx` are now written, with copy in a new
+  `Payment` i18n namespace; `.env.example` and
+  `docs/knowledge/stripe-payment-integration.md` give the `--events` form of
+  `stripe listen` and note that the CLI is installed separately from the
+  `stripe` SDK; and that doc now records the completed Stripe test-mode
+  verification instead of calling it pending. `test:payment-gate` also
+  type-checks the return pages.
 - **A decimal-kind column's filter crashed on a non-numeric value instead
   of returning zero rows** (found via a real consumer schema): unlike the
   `number`/`date`/`enum` kinds, `buildFilter`'s `'decimal'` branch never

@@ -65,7 +65,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - **承認後イベント発火** — `x-approval.on_approved.set_fields`（フィールド更新）および `x-approval.on_approved.emit_hook`（生成 `service_after_approve.ts` による カスタムロジック）；`approvable.approved_at` による冪等性保証。`x-approval-lines` は承認明細エンティティをインベントリ台帳操作に接続する作成前後のヘルパーを生成
 - **宣言的な書き込みロック値**（`x-write-locked-values`） — エンティティに `{field_name: [value, ...]}` 形式で注釈すると、通常の作成・更新がその値を直接書き込もうとした際に拒否される（画面・REST API・Server Action・CSV インポートすべてで強制）。値自体は選択肢として表示されたまま選択不可（disabled）になり、非表示にはならない；`x-approval` 由来のロック値との和集合として合成されるため、両方の仕組みが依存関係なく同一フィールドを同時に保護できる。詳細は [`docs/knowledge/x-write-locked-values-field-lockdown.md`](docs/knowledge/x-write-locked-values-field-lockdown.md) を参照してください
 - **終端却下**（`x-readonly-fields`） — エンティティが終端の却下状態に達した後にフィールドをロックするための注釈；却下時は `on_rejected_dispatch` 経由でワンスタブ（`service_after_reject_stub.ts`）を発火し、通知や在庫調整などのカスタムロジックに対応
-- **Stripe 決済**（`x-payment`、オプトイン） — 任意のエンティティへ `x-payment: true` を宣言すると、Stripe Checkout Session 作成と Webhook 処理の write-once スタブ（`lib/stripe.ts`、`app/api/payment/checkout/route.ts`、`app/api/webhooks/stripe/route.ts`）を生成、鍵未設定時は fail-closed；対応は一回払いのみで、エンティティ・認可・UI は生成しない — 詳細は後述の[決済](#決済stripeオプトイン)を参照
+- **Stripe 決済**（`x-payment`、オプトイン） — 任意のエンティティへ `x-payment: true` を宣言すると、Stripe Checkout Session 作成と Webhook 処理の write-once スタブ（`lib/stripe.ts`、`app/api/payment/checkout/route.ts`、`app/api/webhooks/stripe/route.ts`）と戻り先ページ `/payment/success`・`/payment/cancel` を生成、鍵未設定時は fail-closed；対応は一回払いのみで、エンティティ・認可は生成しない — 詳細は後述の[決済](#決済stripeオプトイン)を参照
 
 ### パフォーマンス
 
@@ -307,14 +307,16 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 ## 決済（Stripe、オプトイン）
 
 既定スキーマの機能ではありません。`json_schema.yaml` の任意のエンティティに
-`x-payment: true` を宣言すると、`generate-code` の初回実行時に 3 本の
+`x-payment: true` を宣言すると、`generate-code` の初回実行時に 5 本の
 write-once スタブファイルが書き込まれます(`lib/<parent>/invalidate_handler.ts`
 と同じ規約 — 編集内容は再生成後も保持されます): `lib/stripe.ts`(SDK 初期化、
 `STRIPE_SECRET_KEY` 未設定時は fail-closed)、`app/api/payment/checkout/route.ts`
-(Checkout Session 作成)、`app/api/webhooks/stripe/route.ts`(Webhook 受信、
+(Checkout Session 作成。API キーでもセッションでも認証可)、
+`app/[locale]/payment/success/page.tsx` と `app/[locale]/payment/cancel/page.tsx`
+(Checkout からの戻り先)、`app/api/webhooks/stripe/route.ts`(Webhook 受信、
 署名検証あり、`STRIPE_WEBHOOK_SECRET` 未設定時は fail-closed)。生成器は
-`Plan`/`Product`/`Purchase` 相当のエンティティ・認可/権限レイヤー・決済 UI は
-一切生成しません — それらは通常のスキーマエンティティとして自前でモデル化し、
+`Plan`/`Product`/`Purchase` 相当のエンティティ・認可/権限レイヤー・上記 2 ページ
+以外の決済 UI は生成しません — それらは通常のスキーマエンティティとして自前でモデル化し、
 上記スタブへ接続してください。対応範囲は一回払いのみ(Checkout Session
 `mode: payment`)で、サブスクリプションは対象外(必要であれば自前で追加)です。
 詳細は
