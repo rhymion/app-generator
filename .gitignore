@@ -309,6 +309,7 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/openapi_document.cy.ts
 !cypress/e2e/api/approval_request_resubmit_notification.cy.ts
 !cypress/e2e/api/write_once_side_effect_roundtrip_probe.cy.ts
+!cypress/e2e/api/update_omitted_relation_unchanged.cy.ts
 
 # ── cypress/support/ ──
 cypress/support/*/
