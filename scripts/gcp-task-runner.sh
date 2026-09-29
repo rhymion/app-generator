@@ -57,8 +57,8 @@ TASK_RUNNER_JOB_NAME="${TASK_RUNNER_JOB_NAME:-task-runner}"
 TASK_RUNNER_SA_NAME="${TASK_RUNNER_SA_NAME:-task-runner-sa}"
 TASK_RUNNER_INVOKER_SA_NAME="${TASK_RUNNER_INVOKER_SA_NAME:-task-runner-invoker-sa}"
 TASK_RUNNER_SCHEDULER_JOB_NAME="${TASK_RUNNER_SCHEDULER_JOB_NAME:-task-runner-nightly}"
-# Placeholder command name; keep in sync with the package.json script that
-# runs every scheduled task in dependency order.
+# Keep in sync with the package.json script that runs every scheduled task in
+# dependency order (`task:run-all`).
 TASK_RUNNER_NPM_SCRIPT="${TASK_RUNNER_NPM_SCRIPT:-task:run-all}"
 # Cron expression + IANA time zone for the nightly trigger.
 TASK_RUNNER_SCHEDULE="${TASK_RUNNER_SCHEDULE:-0 2 * * *}"
@@ -68,7 +68,9 @@ TASK_RUNNER_ENV_FILE="${TASK_RUNNER_ENV_FILE:-${PROJECT_ROOT}/.env.task-runner.p
 # Keys that must be present and non-empty in the env file. DATABASE_URL should
 # be the unpooled (direct) connection string. Add every other production
 # secret your handlers read; see docs/knowledge/scheduled-task-operations.md.
-TASK_RUNNER_REQUIRED_KEYS="${TASK_RUNNER_REQUIRED_KEYS:-DATABASE_URL CRON_SECRET}"
+# CRON_SECRET is not required: task:run-all runs the tasks directly and never
+# goes through the HTTP route that checks it.
+TASK_RUNNER_REQUIRED_KEYS="${TASK_RUNNER_REQUIRED_KEYS:-DATABASE_URL}"
 
 if [[ -z "${PROJECT_ID:-}" ]]; then
   if [[ "$DRY_RUN" == "true" ]]; then

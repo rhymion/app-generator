@@ -397,9 +397,10 @@ API. When the handler runs from the Job instead of inside the deployed app,
 every env var it reads must be present in the Job. List **all** production
 secrets of the target app (compare with the env vars configured on its
 production deployment) in `.env.task-runner.production.local`.
-`DATABASE_URL` (unpooled) and `CRON_SECRET` are required; the script stops
-if either is missing. A missing key otherwise fails only at run time, inside
-the handler that needs it.
+`DATABASE_URL` (unpooled) is required; the script stops if it is missing.
+`CRON_SECRET` is not needed, because `task:run-all` runs the tasks directly
+and never goes through the HTTP route that checks it. A missing handler key
+otherwise fails only at run time, inside the handler that needs it.
 
 Permissions the operator needs: enable APIs (`serviceusage.services.enable`),
 create service accounts, secrets, an Artifact Registry repository, a Cloud
