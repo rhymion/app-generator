@@ -145,6 +145,23 @@ on `b`, ...) is a valid, ordinary use of this key — it is how strict
 one-at-a-time ordering across a set of tasks is expressed, with no separate
 "serialize these" mechanism needed.
 
+## Omitting `interval`: a task nothing schedules runs silently never
+
+`interval` is optional on both entity-level `x-scheduled-task` and
+top-level `x-scheduled-tasks` entries. A task without one gets no
+`vercel.json` `crons` entry, so **nothing invokes it on its own**: it runs
+only when `task:run-all` (or `task:run <task_id>`) is executed. When present,
+`interval` must still be a non-empty cron string.
+
+`generate-code` cannot check whether the deployment actually runs
+`task:run-all` on a schedule — that is a deploy-time fact, not a schema-time
+one. Making `interval` optional therefore trades a generate-time guarantee
+("every declared task has a schedule") for a deploy-time operational
+discipline: **if `task:run-all` is not started every night, an interval-less
+task is silently inert.** Before relying on an interval-less task, confirm
+that something (Cloud Scheduler, an operator cron, a CI schedule) starts
+`task:run-all` nightly.
+
 ## Nothing calls this unless something outside the repo calls it
 
 The generated route is a passive HTTP endpoint. No generated artifact
