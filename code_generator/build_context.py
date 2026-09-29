@@ -829,6 +829,7 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             'output_type':      output_type,
             'props_no_id':      props_no_id,
             'props_with_id':    props_with_id,
+            'child_prop_defs':  {p: child_props_dict[p] for p in props_no_id},
             'field_type':       field_type,
             'field_type_with_id': field_type_with_id,
             'field_map_create': field_map_create,
@@ -963,6 +964,40 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
                 f"      }},"
             )
     return '\n'.join(lines)
+
+
+def _child_current_value_fallback(c: dict, model: str, id_expr: str, supplied_expr: str | None) -> str:
+    """Update-call argument for one write child that keeps the relation
+    unchanged when the caller did not supply it (Issue #777).
+
+    update{Parent} treats every child argument as the complete new state
+    (`set` for a connect-style relation, delete-missing/update/create for an
+    owned child list), so passing `[]` for an omitted field silently cleared
+    it. Instead, an omitted field (`supplied_expr` is undefined, or None for
+    a caller that can never supply it, e.g. CSV import) is filled with the
+    row's current value -- the same state the UI's edit form resubmits when
+    the user leaves a relation untouched, so every downstream path in
+    update{Parent} sees an input shape it already handles. An explicitly
+    supplied list (including `[]`) is passed through unchanged.
+
+    Owned child rows are JSON round-tripped so Decimal/DateTime columns
+    arrive as the same string forms the edit form submits.
+    """
+    pn = c['property_name']
+    if c['use_connect']:
+        current = (
+            f"((await prisma.{model}.findUnique({{ where: {{ id: {id_expr} }}, "
+            f"select: {{ {pn}: {{ select: {{ id: true }} }} }} }}))?.{pn}.map((r) => r.id) ?? [])"
+        )
+    else:
+        select = ', '.join(f"{p}: true" for p in c['props_with_id'])
+        current = (
+            f"(JSON.parse(JSON.stringify((await prisma.{model}.findUnique({{ where: {{ id: {id_expr} }}, "
+            f"select: {{ {pn}: {{ select: {{ {select} }} }} }} }}))?.{pn} ?? [])))"
+        )
+    if supplied_expr is None:
+        return current
+    return f"({supplied_expr} ?? {current})"
 
 
 def _build_child_assignee_notify_create_code(children_data: list[dict], parent: str, parent_pascal: str) -> str:
@@ -3591,6 +3626,15 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         f"{c['child_var']}_ids ?? []" if c['use_connect'] else f"{c['property_name']} ?? []"
         for c in write_ch
     )
+    # Update-side counterpart (Issue #777): an omitted relation/child-list
+    # field leaves the existing relation unchanged instead of clearing it.
+    child_service_args_update = ', '.join(
+        _child_current_value_fallback(
+            c, model, 'id',
+            f"{c['child_var']}_ids" if c['use_connect'] else c['property_name'],
+        )
+        for c in write_ch
+    )
 
     # Getters: include entries (list page).
     # When a relation's labelField walks through deeper m2o/o2o (e.g.
@@ -4162,6 +4206,16 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         *(f"{c['child_var']}_ids" if c['use_connect'] else c['property_name']
           for c in write_ch),
     ])
+    # Relation/child-list request-body fields the REST routes accept, for the
+    # OpenAPI request schemas (Issue #777 -- previously undocumented).
+    api_write_children = [
+        {
+            'body_key': f"{c['child_var']}_ids" if c['use_connect'] else c['property_name'],
+            'use_connect': c['use_connect'],
+            'item_props': {} if c['use_connect'] else c['child_prop_defs'],
+        }
+        for c in write_ch
+    ]
     # Null placeholders for flatten rel params (API routes don't edit flatten rels inline)
     _flatten_null_args = ', '.join(
         'null'
@@ -4172,7 +4226,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         f", {child_service_args}" if child_service_args else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
     service_args_for_update = f"actorId, id, {parent_service_args}" + (
-        f", {child_service_args}" if child_service_args else ""
+        f", {child_service_args_update}" if child_service_args_update else ""
     ) + (f", {_flatten_null_args}" if _flatten_null_args else "")
 
     # CSV import -> service.ts convergence (cmd_996, Issue #93; widened by
@@ -4202,16 +4256,19 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # unconverged fallback case, so no separate "is the service call
     # feasible" flag is needed; import_eligible alone answers it.
 
-    # Empty array/id-list literal per write_ch child, in the same order
-    # child_params_for_add/_for_update declare them (write_ch itself) --
-    # `[]` type-checks against either shape (`{childVar}Ids: string[]` or
+    # Empty array/id-list literal per write_ch child on create, in the same
+    # order child_params_for_add/_for_update declare them (write_ch itself)
+    # -- `[]` type-checks against either shape (`{childVar}Ids: string[]` or
     # `{childVar}Items: {field_type}[]`) via TypeScript's own contextual
-    # typing of a call argument, so no per-child type distinction is needed
-    # here the way child_service_args (REST route.ts's own call site) needs
-    # one. Empty on both add{{parent_pascal}} and update{{parent_pascal}} --
-    # a CSV row updating an existing parent still cannot express "these are
-    # now this row's children" any more than a create row can.
+    # typing of a call argument. On update, a CSV row cannot express "these
+    # are now this row's children", so the row's current children/relation
+    # ids are passed back unchanged (Issue #777) -- an empty literal there
+    # would replace them with nothing.
     import_service_child_args = ', '.join('[]' for _ in write_ch)
+    import_service_child_args_update = ', '.join(
+        _child_current_value_fallback(c, model, 'action.id', None)
+        for c in write_ch
+    )
 
     # One expression per add{{parent_pascal}}/update{{parent_pascal}} parent
     # parameter, in client_prop_infos order -- the SAME list and order
@@ -4401,6 +4458,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         # CSV import -> service.ts convergence (cmd_996, Issue #93; cmd_1124)
         import_service_parent_args=import_service_parent_args,
         import_service_child_args=import_service_child_args,
+        import_service_child_args_update=import_service_child_args_update,
+        api_write_children=api_write_children,
         flatten_null_args=flatten_null_args,
         # Field categories (FormUpsert / FormView)
         field_categories=field_categories,

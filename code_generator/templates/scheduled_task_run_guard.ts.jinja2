@@ -1,0 +1,221 @@
+// GENERATED — do not edit (regenerated on every `generate-code` run).
+// Shared completion-record guard: every path that runs a scheduled task —
+// the generated HTTP route (Vercel cron, GCP Cloud Scheduler, manual) and
+// `task:run` / `task:run-all` (scripts/scheduled-task-run.ts) — goes through
+// `runScheduledTask`, so all of them share one duplicate-suppression and
+// predecessor check and write the same `scheduled_task_run` records.
+//
+// Record: one `scheduled_task_run` row per (task_id, business_date), status
+// running -> succeeded | failed, or not_due (written by task:run-all when a
+// task's `interval` says tonight is not its turn). The row is written around
+// the WHOLE handler call, not inside any per-row transaction: a filtered-row
+// task's work spans many independent transactions, so there is no single
+// transaction the completion write could share.
+{% if has_tasks %}
+
+import prisma from '@/lib/prisma';
+import { TASK_REGISTRY } from './registry';
+import { TASK_DEPENDENCIES } from './dependencies';
+
+export type ScheduledTaskOutcome =
+  | 'succeeded'
+  | 'already_succeeded' // a `succeeded` record already exists for this business date — nothing ran
+  | 'failed' // the handler threw; `error` carries the original throw
+  | 'blocked' // a declared predecessor has no succeeded/not_due record for this business date
+  | 'already_running'; // a `running` record exists (in progress, or crashed mid-run) — see reclaimRunning
+
+export interface ScheduledTaskResult {
+  taskId: string;
+  businessDate: Date;
+  outcome: ScheduledTaskOutcome;
+  /** Predecessors lacking a usable record — set only when outcome is 'blocked'. */
+  blockedBy?: string[];
+  /** The handler's own throw — set only when outcome is 'failed'. */
+  error?: unknown;
+}
+
+export interface RunScheduledTaskOptions {
+  /** Injected clock (tests). Defaults to the current time. */
+  now?: Date;
+  /**
+   * Take over a `running` record instead of reporting `already_running`. A
+   * `running` row is either a live concurrent run or a run that crashed
+   * before writing a terminal status; nothing here can tell which, so
+   * automated paths never take it over silently. `task:run <task_id>` — the
+   * operator's explicit rerun — sets this.
+   */
+  reclaimRunning?: boolean;
+}
+
+/** The business date for a run: the UTC calendar day of `now`, as UTC midnight. */
+export function businessDateOf(now: Date = new Date()): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return (error as { code?: string } | null)?.code === 'P2002';
+}
+
+/** business_date of the task's most recent `succeeded` record, or null if it never succeeded. */
+export async function lastSucceededBusinessDate(taskId: string): Promise<Date | null> {
+  const row = await prisma.scheduled_task_run.findFirst({
+    where: { task_id: taskId, status: 'succeeded' },
+    orderBy: { business_date: 'desc' },
+    select: { business_date: true },
+  });
+  return row?.business_date ?? null;
+}
+
+/**
+ * Record that a task was considered tonight and found not yet due. Never
+ * overwrites a `succeeded`/`running` row for the same business date.
+ */
+export async function recordNotDue(taskId: string, options: RunScheduledTaskOptions = {}): Promise<void> {
+  const now = options.now ?? new Date();
+  const businessDate = businessDateOf(now);
+  try {
+    await prisma.scheduled_task_run.create({
+      data: { task_id: taskId, business_date: businessDate, status: 'not_due', started_at: now, finished_at: now },
+    });
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error;
+    // A row for tonight already exists (an earlier run-all pass) — keep it.
+  }
+}
+
+/**
+ * Run one scheduled task under the completion-record guard.
+ *
+ *  1. `succeeded` record for this business date  -> 'already_succeeded', nothing runs.
+ *  2. `running` record (and no reclaimRunning)   -> 'already_running', nothing runs.
+ *  3. a declared predecessor lacks a `succeeded` (or `not_due`) record for
+ *     this business date                         -> 'blocked', nothing runs, no record written.
+ *  4. otherwise claim the row as `running`, call the handler, and write
+ *     `succeeded`, or `failed` with the error message if it throws.
+ *
+ * A handler failure is returned (outcome 'failed', `error` set), not thrown,
+ * so `task:run-all` can carry on with independent branches; the HTTP route
+ * rethrows it.
+ */
+export async function runScheduledTask(
+  taskId: string,
+  systemActorId: string,
+  options: RunScheduledTaskOptions = {},
+): Promise<ScheduledTaskResult> {
+  const run = TASK_REGISTRY[taskId];
+  if (!run) {
+    throw new Error(`Unknown scheduled task: ${taskId}`);
+  }
+  const now = options.now ?? new Date();
+  const businessDate = businessDateOf(now);
+  const result = (outcome: ScheduledTaskOutcome, extra: Partial<ScheduledTaskResult> = {}): ScheduledTaskResult => ({
+    taskId,
+    businessDate,
+    outcome,
+    ...extra,
+  });
+
+  const existing = await prisma.scheduled_task_run.findUnique({
+    where: { task_id_business_date: { task_id: taskId, business_date: businessDate } },
+  });
+  if (existing?.status === 'succeeded') return result('already_succeeded');
+  if (existing?.status === 'running' && !options.reclaimRunning) return result('already_running');
+
+  const predecessors = TASK_DEPENDENCIES[taskId] ?? [];
+  if (predecessors.length > 0) {
+    const satisfied = await prisma.scheduled_task_run.findMany({
+      where: {
+        task_id: { in: predecessors },
+        business_date: businessDate,
+        status: { in: ['succeeded', 'not_due'] },
+      },
+      select: { task_id: true },
+    });
+    const done = new Set(satisfied.map((r) => r.task_id));
+    const blockedBy = predecessors.filter((p) => !done.has(p));
+    if (blockedBy.length > 0) return result('blocked', { blockedBy });
+  }
+
+  // Claim the (task_id, business_date) row. Losing the race to another
+  // process is reported as already_running rather than run twice.
+  if (!existing) {
+    try {
+      await prisma.scheduled_task_run.create({
+        data: { task_id: taskId, business_date: businessDate, status: 'running', started_at: now },
+      });
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      return result('already_running');
+    }
+  } else {
+    const claimed = await prisma.scheduled_task_run.updateMany({
+      where: { id: existing.id, status: existing.status },
+      data: { status: 'running', started_at: now, finished_at: null, error_message: null },
+    });
+    if (claimed.count === 0) return result('already_running');
+  }
+
+  try {
+    await run(systemActorId);
+  } catch (error) {
+    await prisma.scheduled_task_run.update({
+      where: { task_id_business_date: { task_id: taskId, business_date: businessDate } },
+      data: {
+        status: 'failed',
+        finished_at: new Date(),
+        error_message: (error instanceof Error ? error.message : String(error)).slice(0, 2000),
+      },
+    });
+    return result('failed', { error });
+  }
+  await prisma.scheduled_task_run.update({
+    where: { task_id_business_date: { task_id: taskId, business_date: businessDate } },
+    data: { status: 'succeeded', finished_at: new Date() },
+  });
+  return result('succeeded');
+}
+{% else %}
+
+// No scheduled task is declared in this schema, so no `scheduled_task_run`
+// table is generated. These stubs keep the route and scripts/scheduled-task-run.ts
+// compiling; declaring a task (x-scheduled-task / x-scheduled-tasks) and
+// re-running `generate-code` replaces this file with the real guard.
+
+export type ScheduledTaskOutcome =
+  | 'succeeded'
+  | 'already_succeeded'
+  | 'failed'
+  | 'blocked'
+  | 'already_running';
+
+export interface ScheduledTaskResult {
+  taskId: string;
+  businessDate: Date;
+  outcome: ScheduledTaskOutcome;
+  blockedBy?: string[];
+  error?: unknown;
+}
+
+export interface RunScheduledTaskOptions {
+  now?: Date;
+  reclaimRunning?: boolean;
+}
+
+export function businessDateOf(now: Date = new Date()): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+export async function lastSucceededBusinessDate(_taskId: string): Promise<Date | null> {
+  return null;
+}
+
+export async function recordNotDue(_taskId: string, _options: RunScheduledTaskOptions = {}): Promise<void> {}
+
+export async function runScheduledTask(
+  taskId: string,
+  _systemActorId: string,
+  _options: RunScheduledTaskOptions = {},
+): Promise<ScheduledTaskResult> {
+  throw new Error(`Unknown scheduled task: ${taskId}`);
+}
+{% endif %}

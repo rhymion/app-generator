@@ -135,6 +135,33 @@ DB-driven role/permission grant itself (which roles actually hold that
 permission) is runtime state this static generator cannot read, and was
 left undocumented rather than expressed via a new, unreviewed `x-*` key.
 
+### Relation and child-list request fields (write semantics)
+
+`{Parent}CreateRequest` (the `POST` and `PUT` body) and
+`{Parent}BulkUpdateItem` declare every relation/child-list input the REST
+routes read (`ctx['api_write_children']`, built from the same `write_ch`
+list `all_body_fields_create` destructures from the body):
+
+- a connect-style relation (many-to-many, optional-FK list) is a flat id
+  list named `<child>_ids` — e.g. `role.users_ids`, `user.roles_ids`,
+  `procedure.precededBy_ids` (the prefix is the child variable name, so a
+  camelCase relation keeps its camelCase prefix);
+- an owned child list (DataGrid lines) is an array of row objects under
+  the relation's own property name (e.g. `purchase_order.lines`); a row
+  that carries an existing `id` is updated in place, a row without one is
+  created, and an existing row missing from the list is deleted.
+
+A supplied list is the complete new state and replaces the current one
+(`[]` clears it). An **omitted** field on update (`PUT /api/{parent}/{id}`,
+bulk `PUT`) leaves the relation unchanged: the route fills it with the
+row's current value (`_child_current_value_fallback()` in
+`build_context.py` — current ids for a connect-style relation, current
+rows JSON round-tripped for an owned child list) before calling
+`update{Parent}`, which is the same input the UI edit form sends when a
+relation is left untouched. On create, an omitted field means an empty
+list. CSV import cannot express child rows at all, so its update path
+always passes the row's current value (create passes `[]`).
+
 CSV export/import get their own paths, mirroring `generate.py`'s own
 gating exactly: `GET /api/{parent}/export` when `can_list and
 can_export`, `POST /api/{parent}/import` when `import_eligible`. Neither

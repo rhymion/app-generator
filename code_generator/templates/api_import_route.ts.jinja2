@@ -521,7 +521,7 @@ export async function POST(request: NextRequest) {
 {% endif %}
         } else {
 {% if import_can_update %}
-          await update{{ parent_pascal }}(actorId, action.id, {{ import_service_parent_args }}{% if import_service_child_args %}, {{ import_service_child_args }}{% endif %}{% if flatten_null_args %}, {{ flatten_null_args }}{% endif %}, null);
+          await update{{ parent_pascal }}(actorId, action.id, {{ import_service_parent_args }}{% if import_service_child_args_update %}, {{ import_service_child_args_update }}{% endif %}{% if flatten_null_args %}, {{ flatten_null_args }}{% endif %}, null);
 {% else %}
           // Unreachable: import_can_update is false for this entity, so no
           // 'update' action is ever queued above -- kept only so this

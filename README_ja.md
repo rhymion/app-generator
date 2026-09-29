@@ -86,6 +86,8 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 
 - **GCP Cloud Run**（`x-cloud` アノテーション、オプトイン） — マルチステージ `Dockerfile`、GCS バックエンドのアップロード（Signed URL アップロード + プロキシルート）、冪等な環境自動化スクリプト（`gcp-env.sh`、`gcp-setup.sh`、`gcp-deploy.sh`、`gcp-seed.sh`、`gcp-teardown.sh`）；`x-cloud` 未指定時は Vercel がデフォルトのまま
 
+- **スケジュールタスク**（`x-scheduled-task` / `x-scheduled-tasks`） — 任意の `depends_on` による実行順序、日次の完了記録、データベースに対して直接実行する `npm run task:run` / `task:run-all`（`gcp-task-runner.sh` による夜間 Cloud Run Job + Cloud Scheduler のプロビジョニング）；[docs/knowledge/scheduled-task-operations.md](docs/knowledge/scheduled-task-operations.md) を参照
+
 ### 監査・コンプライアンス
 
 - **監査ログ** — 全エンティティの作成・更新・削除操作を横断表示する、スキーマ非依存の read-only ビューア（`app/[locale]/audit_log/page.tsx`）
@@ -449,6 +451,7 @@ preview デプロイと異なり自動的なクローラー保護を受けませ
 | `gcp-deploy.sh` | イメージビルド・マイグレーション実行・Cloud Run へのデプロイ |
 | `gcp-seed.sh` | データベースのシード |
 | `gcp-teardown.sh` | GCP リソースの削除（2段階確認付き） |
+| `gcp-task-runner.sh` | `task:run-all` を実行する夜間 Cloud Run Job + Cloud Scheduler ジョブのプロビジョニング（`DRY_RUN=true` でプレビュー） |
 
 `gcp-deploy.sh` は `generate-code` が生成する `Dockerfile` を要します —
 `x-cloud` を有効化した**後**に `generate-code` を実行し、`gcp-deploy.sh`

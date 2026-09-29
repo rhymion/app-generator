@@ -6,6 +6,16 @@ is not enough by itself for anything to actually run — this doc is the
 operational half: what generate.py produces, what has to be true outside
 the repo for it to fire, and how to tell whether it's actually firing.
 
+A task can be started three ways, and all three go through one shared
+completion-record guard (see "Completion records and the run guard"):
+
+- the generated HTTP route, called by Vercel Cron or any external scheduler;
+- `npm run task:run -- <task_id>`, one task, run directly against the database;
+- `npm run task:run-all`, every task in `depends_on` order, run directly
+  against the database. This is the intended nightly trigger for tasks that
+  declare `depends_on` (see "Running tasks directly: `task:run` and
+  `task:run-all`").
+
 There is a second, entity-agnostic mode — top-level `x-scheduled-tasks`
 (plural) — for operations that don't fit a single-entity filtered row scan.
 See "Bulk mode" below; everything else on this page (the route, auth,
@@ -42,6 +52,14 @@ tasks — either mode — declare a key):
 - `lib/scheduled-tasks/registry.ts` — maps every declared `task_id`, from
   either mechanism, to its `run()` function. The registry and the route
   below are unaware which mode produced any given entry.
+- `lib/scheduled-tasks/dependencies.ts` — `TASK_DEPENDENCIES` (`task_id` to
+  its declared `depends_on` predecessors) and `TASK_INTERVALS` (`task_id` to
+  its `interval` cron string, or `null`), in schema declaration order.
+- `lib/scheduled-tasks/run-guard.ts` — the completion-record guard every run
+  goes through. Without any declared task it is a stub that references no
+  table, so the route and scripts still compile.
+- the `scheduled_task_run` model and `ScheduledTaskRunStatus` enum, appended
+  to `prisma/schema.prisma` only when at least one task is declared.
 - `app/api/scheduled-tasks/[task]/route.ts` — the one HTTP endpoint that
   dispatches to `TASK_REGISTRY[task]`.
 - `vercel.json`'s `crons` array (Vercel path only — see below).
@@ -52,6 +70,11 @@ touches them):
 - `lib/scheduled-tasks/system-actor.ts` — the fixed lookup email for the
   scheduled-task system actor (see "Who does a scheduled write belong to"
   below).
+- `lib/scheduled-tasks/run-all.ts` — the pure planning logic behind
+  `task:run-all`: dependency ordering, the "is this task due tonight" check
+  and exit-code mapping.
+- `scripts/scheduled-task-run.ts` — the entry point behind `task:run` and
+  `task:run-all`.
 - `scripts/seed-baseline.ts` — upserts that system-actor user.
 
 ## Bulk mode (`x-scheduled-tasks`, top-level)
@@ -120,15 +143,17 @@ x-scheduled-tasks:
     depends_on: [payment_allocation]
 ```
 
-**This key is schema-authoring documentation plus generate-time validation
-— it does not yet change anything generated at runtime.** No template
-reads `depends_on`, no generated handler waits on a predecessor, and no
-completion-record table exists yet to check against. Declaring it records
-the intended order and gets it checked for consistency; making a task
-actually wait on its predecessor's completion is a separate, not-yet-built
-mechanism (see `planning/batch-ordering-design.md` in
-app-generator-project-docs for the full design, including why this is
-deliberately staged rather than built as one change).
+**The key is enforced twice.** At generate time the graph is validated (below).
+At run time every path that runs a task checks that each predecessor has a
+usable completion record for the same business date, and refuses to run the
+task otherwise (see "Completion records and the run guard"). `task:run-all`
+additionally orders its pass so predecessors run first.
+
+**The key only takes effect when it is declared.** A schema that declares no
+`depends_on` anywhere generates a graph with no edges, so nothing waits on
+anything: every task runs independently, in declaration order under
+`task:run-all`. A consumer that wants ordering has to declare `depends_on`
+in its own schema.
 
 `generate-code` validates the `depends_on` graph and fails closed —
 loudly, at generation time, never silently — on:
@@ -145,13 +170,157 @@ on `b`, ...) is a valid, ordinary use of this key — it is how strict
 one-at-a-time ordering across a set of tasks is expressed, with no separate
 "serialize these" mechanism needed.
 
+## The `interval` key
+
+`interval` is optional on both entity-level `x-scheduled-task` and
+top-level `x-scheduled-tasks` entries. When present it must be a non-empty
+five-field cron string.
+
+- **Vercel**: an entry with `interval` gets a `vercel.json` `crons` entry; one
+  without gets none, so **nothing invokes it on its own**.
+- **`task:run-all`**: `interval` says when a task is *due*, not when to
+  invoke it (see "Which tasks run tonight"). A task without one is due every
+  night.
+
+`generate-code` cannot check whether the deployment actually runs
+`task:run-all` on a schedule — that is a deploy-time fact, not a schema-time
+one. **If `task:run-all` is not started every night, an interval-less task is
+silently inert.** Before relying on an interval-less task, confirm that
+something (Cloud Scheduler, an operator cron, a CI schedule) starts
+`task:run-all` nightly.
+
+## Completion records and the run guard
+
+Every run of a task, from any of the three entry points, goes through
+`runScheduledTask` in `lib/scheduled-tasks/run-guard.ts`. It reads and writes
+one `scheduled_task_run` row per `(task_id, business_date)`; the business
+date is the UTC calendar day of the run.
+
+| Column | Meaning |
+|---|---|
+| `task_id`, `business_date` | Unique together — the row's identity |
+| `status` | `running`, `succeeded`, `failed` or `not_due` |
+| `started_at`, `finished_at` | When the run began and ended |
+| `error_message` | The handler's error message (first 2000 characters), on `failed` |
+
+For each call the guard decides, in this order:
+
+1. A `succeeded` record exists for the business date: **`already_succeeded`**,
+   nothing runs. A duplicate delivery is a no-op.
+2. A `running` record exists: **`already_running`**, nothing runs. A `running`
+   row is either a live concurrent run or a run that crashed before writing a
+   terminal status; nothing can tell which, so only `task:run <task_id>` takes
+   it over.
+3. A declared predecessor has no `succeeded` (or `not_due`) record for the
+   business date: **`blocked`**, nothing runs and no record is written. A
+   predecessor that was `not_due` tonight counts as satisfied — otherwise a
+   daily task behind a weekly one would be blocked six nights in seven.
+4. Otherwise the row is claimed as `running`, the handler is called, and the
+   row becomes `succeeded`, or `failed` with the error message. A `failed`
+   record is retried by the next call for the same business date.
+
+The record is written around the whole handler call, not inside any per-row
+transaction: a row-scan task's work spans many independent transactions, so
+there is no single one the completion write could share. Handlers therefore
+still need to be idempotent (a crash between the handler finishing and the
+`succeeded` write leaves a `running` row and a re-run possible).
+
+The generated HTTP route maps the outcomes to status codes: `succeeded` and
+`already_succeeded` return 200 (`{ ok, task, outcome }`), `blocked` and
+`already_running` return 409, and a handler failure is recorded and then
+returns the same 500 as before.
+
+`running` records are only taken over by `task:run <task_id>`, never by the
+HTTP route or by `task:run-all`.
+
+**Consumer migration.** The `scheduled_task_run` table is created by the
+generated Prisma schema. The generator does not write a migration for it;
+a consumer writes that migration when it deploys (the same cadence as any
+other schema change), not on every generator bump. Test databases pick the
+table up through `db:push`. A consumer that declares no task gets no table.
+
+## Running tasks directly: `task:run` and `task:run-all`
+
+```sh
+npm run task:run -- <task_id>   # one task
+npm run task:run-all            # every task, in depends_on order
+```
+
+Both run the handlers inside the calling process against the configured
+`DATABASE_URL`; they do not call the deployed app's HTTP route, so
+`CRON_SECRET` and the `ScheduledTaskRunner` role play no part. Both need the
+system-actor user that `db:seed-baseline` creates in the target database
+(see "Who does a scheduled write belong to") and stop with an error if it is
+missing.
+
+For staging or production, reuse the seed wrapper's environment loading and
+`--prod` / `DRY_RUN` handling rather than a second script:
+
+```sh
+SEED_COMMAND=task:run-all ./scripts/vercel-seed.sh [--prod]
+```
+
+For a nightly trigger on GCP, see "Nightly trigger: Cloud Scheduler + a
+minimal Cloud Run Job".
+
+A handler may call anything the deployed app can call (payment gateways,
+email, third-party APIs). Run outside the deployed app, **every env var those
+handlers read must be present in the environment that runs `task:run` /
+`task:run-all`**, not just `DATABASE_URL`.
+
+### Which tasks run tonight
+
+`task:run-all` walks every declared task in dependency order (Kahn's
+algorithm; ties between independent branches resolve in schema declaration
+order, so the order is the same on every run). For each task:
+
+- a task with no `interval` is always attempted;
+- a task with an `interval` is **due** once a cron occurrence has passed since
+  its last `succeeded` record, and one that has never succeeded is due
+  immediately. A task that is not due gets a `not_due` record and is skipped;
+- a due task goes through the guard, so one that already succeeded tonight
+  reports `already_succeeded` and does not run again.
+
+The comparison is by UTC calendar day and the cron expression is evaluated in
+UTC. A weekly task is picked up on the night its schedule falls; after a long
+stop it runs once to catch up rather than once per missed occurrence.
+
+A failed task does not stop the pass. Independent branches still run, and a
+task downstream of the failure is reported `blocked` by the guard's
+predecessor check. Running `task:run-all` again the same night retries the
+failed task and then runs what was blocked behind it; tasks that already
+succeeded are not run twice.
+
+### Exit codes
+
+| Command | Code | Meaning |
+|---|---|---|
+| `task:run` | 0 | Succeeded, or already succeeded for tonight |
+| | 1 | The handler threw |
+| | 2 | Blocked by a predecessor, or a run is already in progress |
+| | 64 | Usage error, or unknown `task_id` |
+| `task:run-all` | 0 | Every task succeeded, already succeeded, or was not due |
+| | 1 | Any task failed, was blocked, or already had a run in progress |
+| | 64 | Usage error |
+
+A `not_due` skip on its own never makes `task:run-all` exit non-zero.
+
+`not_due` records are written only by `task:run-all`. A task started through the
+HTTP route on a night `task:run-all` did not run has no `not_due` record for a
+weekly predecessor, so it is blocked by that predecessor's missing record.
+
+`task:run <task_id>` is the operator's explicit rerun: it takes over a stale
+`running` record and retries a `failed` one, but still refuses to run ahead of
+an unsatisfied predecessor.
+
 ## Nothing calls this unless something outside the repo calls it
 
-The generated route is a passive HTTP endpoint. No generated artifact
-invokes it on a schedule by itself. Something external has to call
-`GET /api/scheduled-tasks/<task_id>` (or `POST` — both are accepted, see
-below) on the declared `interval`. Which external caller that is depends on
-the deploy target.
+The generated route is a passive HTTP endpoint, and `task:run-all` is a
+command. No generated artifact invokes either on a schedule by itself.
+Something external has to call `GET /api/scheduled-tasks/<task_id>` (or
+`POST` — both are accepted, see below) on the declared `interval`, or start
+`task:run-all` every night. Which external caller that is depends on the
+deploy target.
 
 ## Vercel path (default)
 
@@ -302,10 +471,8 @@ ever referenced by id for `creator_id`/`updater_id` attribution.
 `vercel.json` is not read at all under GCP Cloud Run — `generate.py` skips
 writing the `crons` key entirely when `x-cloud.provider: gcp` (mirroring how
 the same flag switches `app/api/upload/route.ts` from Vercel Blob to GCS).
-**There is no generator/deploy-script automation yet that provisions a GCP
-Cloud Scheduler job** — `scripts/gcp-setup.sh`/`gcp-deploy.sh` do not create
-one (confirmed by grep, 2026-08-22: no `scheduler`/`cron` reference in
-either script). Until that automation exists, provisioning is manual:
+Per-task Cloud Scheduler jobs that call the HTTP route are not provisioned
+by `gcp-setup.sh` or `gcp-deploy.sh`. To create one by hand:
 
 ```sh
 gcloud scheduler jobs create http <job-name> \
@@ -321,8 +488,92 @@ so either works. `CRON_SECRET` is not Vercel-specific; the same env var and
 `Authorization: Bearer` header work identically here since the route's auth
 check doesn't distinguish caller platform.
 
-Adding real Cloud Scheduler automation (parallel to `vercel-setup.sh`'s
-`vercel.json` write) is a natural follow-up, not yet scoped.
+For a nightly run of every task, use the task-runner Job below instead.
+
+### Nightly trigger: Cloud Scheduler + a minimal Cloud Run Job
+
+`scripts/gcp-task-runner.sh` provisions a small executor on GCP that runs
+`npm run task:run-all` every night. The app itself can stay on Vercel; only
+the trigger lives on GCP. It creates:
+
+- a Cloud Run Job `task-runner` (image built from the Dockerfile's `builder`
+  stage; command `npm run task:run-all`; one task, no retries)
+- a Cloud Scheduler job `task-runner-nightly` that POSTs to the Cloud Run
+  Jobs API (`.../jobs/task-runner:run`) with an OAuth token
+- two service accounts: `task-runner-sa` (the Job's runtime identity, with
+  access to its own secrets only) and `task-runner-invoker-sa` (may run this
+  one Job, via `roles/run.invoker` on the Job)
+- one Secret Manager secret per key in the secrets file (below)
+
+Try it on a separate project first:
+
+```sh
+# 1. Configure the target project and region
+echo 'PROJECT_ID=<your-test-project>' >> .env.production.local
+
+# 2. Fill in the secrets file (see the warning below)
+cp .env.task-runner.production.local.example .env.task-runner.production.local
+
+# 3. Preview: prints every command, runs nothing
+DRY_RUN=true ./scripts/gcp-task-runner.sh
+
+# 4. Live run
+./scripts/gcp-task-runner.sh
+```
+
+Reading the `DRY_RUN` output: every line starting with `[DRY-RUN]` is a
+command a live run would execute. No `gcloud` or `docker` process is started
+and no secret value is printed, only secret names. Where a live run picks
+between `create` and `update` based on what already exists, the preview
+shows `create`. The script never falls back to the ambient `gcloud` project;
+`PROJECT_ID` must be set explicitly (`DRY_RUN` uses a placeholder if not).
+
+Settings (environment or `.env.production.local`): `REGION`
+(default `asia-northeast1`), `SERVICE_NAME`, `REPO_NAME`,
+`TASK_RUNNER_SCHEDULE` (cron, default `0 2 * * *`), `TASK_RUNNER_TIME_ZONE`
+(default `Asia/Tokyo`), `TASK_RUNNER_TASK_TIMEOUT` (default `3600s`),
+`TASK_RUNNER_NPM_SCRIPT` (default `task:run-all`), `TASK_RUNNER_IMAGE` with
+`SKIP_BUILD=true` to reuse an image, and `TASK_RUNNER_JOB_NAME` /
+`TASK_RUNNER_SCHEDULER_JOB_NAME` / `TASK_RUNNER_SA_NAME` /
+`TASK_RUNNER_INVOKER_SA_NAME` for resource names. The Dockerfile is a
+generated file, so run `generate-code` with `x-cloud` enabled first when the
+script builds the image.
+
+**Collect every production secret, not just the database URL.** The secrets
+in `gcp-setup.sh` (`app-database-url` and the others) belong to a Cloud Run
+*service* hosted entirely on GCP. They are not what a Job for a
+Vercel-hosted app needs, and they are not shared with the Job. A scheduled
+task's handler is hand-edited business logic and can call anything the
+deployed app can: payment gateways, email or SMS providers, any third-party
+API. When the handler runs from the Job instead of inside the deployed app,
+every env var it reads must be present in the Job. List **all** production
+secrets of the target app (compare with the env vars configured on its
+production deployment) in `.env.task-runner.production.local`.
+`DATABASE_URL` (unpooled) is required; the script stops if it is missing.
+`CRON_SECRET` is not needed, because `task:run-all` runs the tasks directly
+and never goes through the HTTP route that checks it. A missing handler key
+otherwise fails only at run time, inside the handler that needs it.
+
+Permissions the operator needs: enable APIs (`serviceusage.services.enable`),
+create service accounts, secrets, an Artifact Registry repository, a Cloud
+Run Job and a Scheduler job, set IAM policies, and act as the two service
+accounts. Project Owner covers all of it.
+
+Verify after a live run:
+
+```sh
+gcloud scheduler jobs run task-runner-nightly --location=<region> --project=<project>
+gcloud run jobs executions list --job=task-runner --region=<region> --project=<project>
+```
+
+Cleanup, in a test project: delete the Scheduler job, the Cloud Run Job, the
+two service accounts, the `task-runner-*` secrets, and the
+`<service>-task-runner` images. Or delete the whole test project.
+
+`gcp-setup.sh` also enables `cloudscheduler.googleapis.com` and, when
+`CRON_SECRET` is set in `.env.production.local`, stores it as
+`app-cron-secret`. Wiring that secret into the Cloud Run service's env is
+still not done by `gcp-deploy.sh`.
 
 ### Where the three canonical env vars go under GCP
 
@@ -337,8 +588,9 @@ in the same place:
   in `scripts/gcp-setup.sh` Step 5 (`upsert_secret` into GCP Secret Manager)
   and `scripts/gcp-deploy.sh`'s `--set-secrets` flag on `gcloud run deploy` —
   a **runtime** value, read by `process.env.CRON_SECRET` when a request
-  arrives, so injecting it at deploy time is sufficient. Not yet wired into
-  either script.
+  arrives, so injecting it at deploy time is sufficient. `gcp-setup.sh` now
+  stores it as `app-cron-secret` (when set); `gcp-deploy.sh` does not yet
+  mount it into the service.
 - **`NEXT_PUBLIC_APP_TITLE`/`NEXT_PUBLIC_APP_COPYRIGHT` are a different kind
   of variable and can't follow the same path.** Next.js inlines
   `NEXT_PUBLIC_` vars into the client bundle at **build** time. On Vercel,
@@ -355,9 +607,7 @@ in the same place:
   `ARG NEXT_PUBLIC_APP_TITLE` / `ARG NEXT_PUBLIC_APP_COPYRIGHT` plus matching
   `ENV` lines added to the Dockerfile template ahead of the `npm run build`
   step, and `--build-arg` passed from `gcp-deploy.sh`'s `docker build` calls.
-  **Not yet implemented** — a natural follow-up, same "not yet scoped" status
-  as the Cloud Scheduler automation above, not something this task's env-var
-  canonicalization implements.
+  **Not yet implemented.**
 
 Both paths still agree on what each var *means* and on the fact that
 `NEXT_PUBLIC_APP_TITLE`/`NEXT_PUBLIC_APP_COPYRIGHT` are build-time-only on

@@ -5,6 +5,26 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Made `depends_on` between scheduled tasks enforced at run time, and
+  added direct-execution scripts and a GCP nightly trigger** (issue #712,
+  follow-up to the generate-time validation from #713/#714). Every run of a
+  scheduled task now goes through a generated guard
+  (`lib/scheduled-tasks/run-guard.ts`) backed by a new `scheduled_task_run`
+  table (one row per `task_id` and UTC business date; generated into
+  `prisma/schema.prisma` only when a task is declared, so a consumer writes
+  its migration at deploy time). The guard suppresses duplicate runs,
+  refuses a task whose predecessor has no `succeeded` record for the day,
+  and records `failed` handlers; the HTTP route returns 409 for a blocked or
+  in-progress task. New `npm run task:run -- <task_id>` and
+  `npm run task:run-all` run tasks directly against the database in
+  `depends_on` order (a task with an `interval` is skipped on nights it is
+  not due; exit codes are documented). `interval` is now optional, and a
+  task without one is only run by `task:run-all`. New
+  `scripts/gcp-task-runner.sh` provisions a Cloud Run Job and a Cloud
+  Scheduler job that run `task:run-all` nightly (`DRY_RUN=true` previews it).
+  A consumer must declare `depends_on` in its own schema for any ordering
+  to apply. See `docs/knowledge/scheduled-task-operations.md`.
+
 - **Served the generated OpenAPI document at an authenticated route, and
   added a development/staging-only Swagger UI page** (issues #768/#769,
   fifth stage of AI-agent-facing API improvements). `GET
@@ -218,6 +238,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `stripe` SDK; and that doc now records the completed Stripe test-mode
   verification instead of calling it pending. `test:payment-gate` also
   type-checks the return pages.
+- **A REST update that omitted a relation or child-list field cleared it**
+  (issue #777): `PUT /api/{parent}/{id}` and bulk `PUT` passed
+  `<field> ?? []` to `update{Parent}`, so, e.g., renaming a role via the
+  API removed all of its users, updating a user removed all of their
+  roles, and updating a purchase order without `lines` deleted every
+  line. CSV import's update path passed `[]` unconditionally with the
+  same effect. An omitted field now leaves the relation unchanged; an
+  explicitly supplied list (including `[]`) still replaces it. The
+  OpenAPI request schemas (`{Parent}CreateRequest`,
+  `{Parent}BulkUpdateItem`) now document these fields (`<child>_ids` id
+  lists and owned child-row arrays), which were previously absent, so the
+  accepted field names were not discoverable from Swagger. See
+  `docs/knowledge/generated-documentation-and-openapi-spec.md`.
+
 - **A decimal-kind column's filter crashed on a non-numeric value instead
   of returning zero rows** (found via a real consumer schema): unlike the
   `number`/`date`/`enum` kinds, `buildFilter`'s `'decimal'` branch never
