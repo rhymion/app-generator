@@ -50,6 +50,7 @@ yarn-error.log*
 !.env.example
 !.env.vercel.production.local.example
 !.env.gcp.production.local.example
+!.env.task-runner.production.local.example
 # .env.local, .env.*.local, .env.production remain ignored
 
 # GCP production secrets
