@@ -71,6 +71,7 @@ from generators_i18n import (
     _collect_custom_component_sections,
     _merge_file_wins_messages,
 )
+from payment_config import payment_context
 from validate import (
     validate_schema, validate_prisma_indexes,
     validate_self_only_creator_id_columns, validate_defaults_cross_schema,
@@ -294,6 +295,53 @@ def inject_scheduled_task_run_into_schema(schema_prisma_path: Path) -> None:
         return
     schema_prisma_path.write_text(content.rstrip('\n') + '\n\n' + _SCHEDULED_TASK_RUN_PRISMA)
     print('  Injected scheduled_task_run model → prisma/schema.prisma')
+
+
+_PAYABLE_PRISMA = """// x-payment record lifecycle (generated when any entity declares
+// x-payment: true). One row per payable record: `pending` from the moment the
+// record is created until Stripe confirms payment, then `paid` (kept as the
+// permanent payment record). A record that is never paid is deleted together
+// with its row here. entity_name/record_id point at the paying entity's row by
+// value, deliberately without a foreign key, because the table serves every
+// x-payment entity at once. See lib/payment/.
+enum PayableStatus {
+  pending
+  paid
+}
+
+model payable {
+  id                         String        @id @default(cuid())
+  entity_name                String
+  record_id                  String
+  status                     PayableStatus @default(pending)
+  stripe_checkout_session_id String        @unique
+  amount                     Int?
+  currency                   String        @default("usd")
+  created_at                 DateTime      @default(now()) @db.Timestamptz(0)
+  paid_at                    DateTime?     @db.Timestamptz(0)
+
+  @@unique([entity_name, record_id])
+  @@index([status])
+}
+"""
+
+
+def inject_payable_into_schema(schema_prisma_path: Path) -> None:
+    """Append the `payable` model to schema.prisma (idempotent), same
+    injection pattern as `inject_scheduled_task_run_into_schema`.
+
+    Emitted only when at least one entity declares x-payment: true. Generated
+    rather than hand-written into the base schema.prisma on purpose: a
+    hand-written base model is silently dropped from a consumer's
+    prj/prisma/schema.prisma snapshot by prj:sync.
+    """
+    if not schema_prisma_path.exists():
+        return
+    content = schema_prisma_path.read_text()
+    if 'model payable {' in content:
+        return
+    schema_prisma_path.write_text(content.rstrip('\n') + '\n\n' + _PAYABLE_PRISMA)
+    print('  Injected payable model → prisma/schema.prisma')
 
 
 # ---------------------------------------------------------------------------
@@ -1086,6 +1134,9 @@ def generate(schema_path: str, output_dir: str) -> None:
     # enough, and already done per entity by build_context(), that
     # re-deriving it a second time outside the loop would be wasteful).
     state_transition_entries: list[dict] = []
+    # x-payment entities (Issue #775), collected across the loop for the shared
+    # lib/payment/ files emitted after it.
+    payment_entities: list[dict] = []
 
     for entity in entities:
         parent     = entity['parent']
@@ -1137,6 +1188,20 @@ def generate(schema_path: str, output_dir: str) -> None:
         # has_edit_guard/has_delete_guard/lockdown_field from the merge
         # just above as well.
         ctx = {**ctx, **capabilities_context(ctx)}
+        # x-payment (Issue #775): merged here so service.ts, the REST route
+        # and the Server Action all read the same resolved values.
+        ctx = {**ctx, **payment_context(model, schema)}
+        if ctx.get('is_payment') and can_new:
+            payment_entities.append({
+                'entity_name': parent,
+                'module': parent,
+                'model': model,
+                'pascal_name': ctx['parent_pascal'],
+                'source_kind': ctx['payment_source_kind'],
+                'source_field': ctx['payment_source_field'],
+                # delete{Entity}(actorId, ids) when audited, else (ids).
+                'is_audited': bool(ctx.get('is_audited')),
+            })
         if ctx.get('is_self_only') and ctx.get('self_only_admin_bypass'):
             self_only_admin_bypass_entities.append(parent)
         # State-transition entries: gated on can_update the same way
@@ -2024,13 +2089,27 @@ def generate(schema_path: str, output_dir: str) -> None:
                 f'Adjust the Payment.{_kind}* copy in messages/*.json or replace the markup.',
             )
 
+        # --- x-payment record lifecycle (Issue #775) --- always regenerated
+        # (not stubs): they depend on which entities declare x-payment.
+        # lib/payment/payment_source.ts is the one place that reads an
+        # entity's amount / Price id.
+        _payment_ctx = {'payment_entities': payment_entities}
+        for _pay_tpl, _pay_out in (
+            ('payment_source.ts.jinja2', 'payment_source.ts'),
+            ('payment_checkout.ts.jinja2', 'checkout.ts'),
+            ('payment_webhook_dispatch.ts.jinja2', 'payment_webhook_dispatch.ts'),
+        ):
+            _write(out / 'lib' / 'payment' / _pay_out, _render(env, _pay_tpl, _payment_ctx))
+        print(f'  Payment lifecycle → lib/payment/ ({len(payment_entities)} entities)')
+        inject_payable_into_schema(out / 'prisma' / 'schema.prisma')
+
         webhook_route_path = out / 'app' / 'api' / 'webhooks' / 'stripe' / 'route.ts'
         _write_stub(webhook_route_path, _render(env, 'stripe_webhook_route_stub.ts.jinja2', {}))
         print('  Webhook receiver stub → app/api/webhooks/stripe/route.ts')
         _note_stub_created(
             webhook_route_path,
             'x-payment: true is declared on at least one entity.',
-            'Set STRIPE_WEBHOOK_SECRET and implement checkout.session.completed handling.',
+            'Set STRIPE_WEBHOOK_SECRET (the payment lifecycle itself is handled in lib/payment/).',
         )
 
     # --- Comment/reaction service layer (lib/comment/service.ts, lib/reaction/service.ts) ---

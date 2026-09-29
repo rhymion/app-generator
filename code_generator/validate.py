@@ -27,6 +27,7 @@ from helpers.schema_helpers import (
 from helpers.state_machine_parser import ParseError, parse_state_machine_diagram
 from keys import x_approval as approval_key
 from manifest import sha256_file
+from payment_config import PAYMENT_AMOUNT_FIELD, PAYMENT_PRICE_ID_FIELD, PAYMENT_SOURCE_FIELDS
 from schema_deriver import parse_prisma_schema
 
 _SNAKE_CASE = re.compile(r'^(__)?[a-z][a-z0-9_]*$')
@@ -2565,6 +2566,61 @@ def validate_schema(schema: dict) -> None:
             f"docs/knowledge/scheduled-task-operations.md). Reduce the number of "
             f"distinct task_ids, or dispatch multiple filters from within one handler."
         )
+
+    # -----------------------------------------------------------------------
+    # 15.7. x-payment (Issue #775): the record lifecycle needs an amount /
+    #       Price for the Checkout Session and a delete path to remove an
+    #       unpaid (provisional) record. x-payment stays a bare boolean; the
+    #       amount's source is a field-name convention (payment_config.py).
+    #       Checked on whichever definition carries the key (the raw '__x'
+    #       half after build_user_schema.py, the bare entity otherwise).
+    # -----------------------------------------------------------------------
+    for def_key, defn in defs.items():
+        if not isinstance(defn, dict) or 'x-payment' not in defn:
+            continue
+        xpay = defn['x-payment']
+        entity = def_key[2:] if def_key.startswith('__') else def_key
+        if xpay is not True and xpay is not False:
+            errors.append(
+                f"Definition '{entity}': x-payment must be the boolean true (or false), got "
+                f"{xpay!r}. It takes no options: the amount comes from an "
+                f"'{PAYMENT_AMOUNT_FIELD}' or '{PAYMENT_PRICE_ID_FIELD}' field."
+            )
+            continue
+        if xpay is False:
+            continue
+        pay_props = get_entity_properties(def_key, schema)
+        pay_required = get_entity_required(def_key, schema)
+        present = [n for n in PAYMENT_SOURCE_FIELDS if n in pay_props]
+        if len(present) != 1:
+            errors.append(
+                f"Definition '{entity}': x-payment: true requires exactly one of the fields "
+                f"'{PAYMENT_AMOUNT_FIELD}' (integer, price in the smallest currency unit) or "
+                f"'{PAYMENT_PRICE_ID_FIELD}' (string, a Stripe Price id) -- "
+                + ("found neither." if not present else "found both, which is ambiguous.")
+            )
+        else:
+            src_field = present[0]
+            want_type = PAYMENT_SOURCE_FIELDS[src_field][1]
+            got_type = (pay_props[src_field] or {}).get('type')
+            if got_type != want_type:
+                errors.append(
+                    f"Definition '{entity}': x-payment field '{src_field}' must be of type "
+                    f"'{want_type}', got {got_type!r}."
+                )
+            if src_field not in pay_required:
+                errors.append(
+                    f"Definition '{entity}': x-payment field '{src_field}' must be required "
+                    f"(a non-nullable column) -- a record without it has nothing to charge."
+                )
+        # x-generate lives on the bare entity after build_user_schema.py.
+        pay_gen = (defs.get(entity, {}).get('x-generate') or defn.get('x-generate') or {})
+        if pay_gen.get('delete') is False:
+            errors.append(
+                f"Definition '{entity}': x-payment: true requires x-generate.delete to stay "
+                f"enabled -- an unpaid (expired or failed) record is removed through the "
+                f"entity's generated delete function."
+            )
 
     # -----------------------------------------------------------------------
     # 16. x-state-machines precondition guard (Issue #696, state-transition

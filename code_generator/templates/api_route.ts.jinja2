@@ -68,7 +68,14 @@ export async function POST(request: NextRequest) {
     // absent for every existing caller, so this is a pure opt-in.
     const _idempotencyKeyHeader = request.headers.get('Idempotency-Key');
     const result = await add{{ parent_pascal }}({{ service_args_for_create }}, _idempotencyKeyHeader ? { key: _idempotencyKeyHeader, bodyHash: hashIdempotencyBody(body) } : undefined);
+{% if is_payment %}
+    // x-payment: the record is provisional until it is paid. The caller sends
+    // the buyer to checkoutUrl (Stripe's hosted page); nothing else confirms it.
+    const { checkoutUrl, ...record } = result;
+    return NextResponse.json({ record, checkoutUrl }, { status: 201 });
+{% else %}
     return NextResponse.json(result, { status: 201 });
+{% endif %}
   } catch (error) {
 {% if reservation_config %}
     if (error instanceof InsufficientPoolCapacityError) {

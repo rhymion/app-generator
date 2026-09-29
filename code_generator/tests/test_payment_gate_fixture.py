@@ -59,7 +59,10 @@ def test_x_payment_true_writes_webhook_route_stub(tmp_path):
     content = stub.read_text()
     assert 'req.text()' in content
     assert 'webhooks.constructEvent' in content
-    assert "'checkout.session.completed'" in content
+    # The stub only verifies; what events do lives in the generated dispatcher.
+    assert 'dispatchPaymentEvent(event)' in content
+    dispatch = (out / 'lib' / 'payment' / 'payment_webhook_dispatch.ts').read_text()
+    assert "'checkout.session.completed'" in dispatch
 
 
 def test_checkout_route_stub_accepts_api_key_and_session_auth(tmp_path):
@@ -174,3 +177,108 @@ def test_no_x_payment_declared_writes_no_stubs(tmp_path):
     assert not (out / 'app' / 'api' / 'payment' / 'checkout' / 'route.ts').exists()
     assert not (out / 'app' / 'api' / 'webhooks' / 'stripe' / 'route.ts').exists()
     assert not (out / 'app' / '[locale]' / 'payment').exists()
+
+
+# ---------------------------------------------------------------------------
+# x-payment record lifecycle (Issue #775)
+# ---------------------------------------------------------------------------
+
+def test_payable_model_injected_only_when_an_entity_declares_x_payment(tmp_path):
+    out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path / 'with')
+    schema = (out / 'prisma' / 'schema.prisma').read_text()
+    assert 'model payable {' in schema
+    assert 'enum PayableStatus' in schema
+    # Second run is idempotent: the model is not appended twice.
+    intermediate = out / 'generated_json_schema.yaml'
+    generate(str(intermediate), str(out))
+    assert (out / 'prisma' / 'schema.prisma').read_text().count('model payable {') == 1
+
+    out2 = _run_pipeline(INVALIDATE_FIXTURE_DIR, tmp_path / 'without')
+    assert 'model payable' not in (out2 / 'prisma' / 'schema.prisma').read_text()
+    assert not (out2 / 'lib' / 'payment').exists()
+
+
+def test_create_paths_converge_on_add_service_for_every_payment_entity(tmp_path):
+    # Design section 9: the REST route and the Server Action both call
+    # add{Entity}(), which alone opens the Checkout Session, so the API cannot
+    # create a record that skips payment.
+    out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
+    for entity, pascal in (('paid_widget', 'PaidWidget'), ('paid_gadget', 'PaidGadget')):
+        service = (out / 'lib' / entity / 'service.ts').read_text()
+        assert "startPaymentCheckout('%s'" % entity in service
+        assert 'tx.payable.create' in service
+        # Failure to open a session removes the record via the entity's own delete.
+        assert f'delete{pascal}(' in service
+        route = (out / 'app' / 'api' / entity / 'route.ts').read_text()
+        assert f'add{pascal}(' in route
+        assert 'checkoutUrl' in route
+        actions = (out / 'lib' / entity / 'actions.ts').read_text()
+        assert 'redirect(_checkoutUrl)' in actions
+
+    plain = (out / 'lib' / 'plain_widget' / 'service.ts').read_text()
+    assert 'startPaymentCheckout' not in plain and 'payable' not in plain
+    plain_route = (out / 'app' / 'api' / 'plain_widget' / 'route.ts').read_text()
+    assert 'checkoutUrl' not in plain_route
+
+
+def test_webhook_dispatcher_routes_to_each_entitys_own_delete(tmp_path):
+    out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
+    dispatch = (out / 'lib' / 'payment' / 'payment_webhook_dispatch.ts').read_text()
+    assert "case 'paid_widget'" in dispatch and "case 'paid_gadget'" in dispatch
+    assert 'plain_widget' not in dispatch
+    assert 'deletePaidWidget' in dispatch and 'deletePaidGadget' in dispatch
+
+
+def _payment_schema(props: dict, x_payment=True, extra: dict | None = None) -> dict:
+    defn = {'properties': {'name': {'type': 'string'}, **props}, 'required': list(props), 'x-payment': x_payment}
+    defn.update(extra or {})
+    return {'definitions': {'booking': defn}}
+
+
+def test_x_payment_validation_fails_closed_without_an_amount_source():
+    import pytest
+    from validate import validate_schema, SchemaValidationError
+
+    with pytest.raises(SchemaValidationError) as exc:
+        validate_schema(_payment_schema({}))
+    assert 'amount_cents' in str(exc.value) and 'stripe_price_id' in str(exc.value)
+
+
+def test_x_payment_validation_rejects_both_amount_sources():
+    import pytest
+    from validate import validate_schema, SchemaValidationError
+
+    with pytest.raises(SchemaValidationError) as exc:
+        validate_schema(_payment_schema({'amount_cents': {'type': 'integer'}, 'stripe_price_id': {'type': 'string'}}))
+    assert 'ambiguous' in str(exc.value)
+
+
+def test_x_payment_validation_accepts_exactly_one_amount_source():
+    from validate import validate_schema
+
+    validate_schema(_payment_schema({'amount_cents': {'type': 'integer'}}))
+    validate_schema(_payment_schema({'stripe_price_id': {'type': 'string'}}))
+    validate_schema(_payment_schema({}, x_payment=False))
+
+
+def test_x_payment_validation_rejects_wrong_type_optional_and_object_form():
+    import pytest
+    from validate import validate_schema, SchemaValidationError
+
+    with pytest.raises(SchemaValidationError, match="must be of type 'integer'"):
+        validate_schema(_payment_schema({'amount_cents': {'type': 'string'}}))
+    optional = _payment_schema({'amount_cents': {'type': 'integer'}})
+    optional['definitions']['booking']['required'] = []
+    with pytest.raises(SchemaValidationError, match='must be required'):
+        validate_schema(optional)
+    with pytest.raises(SchemaValidationError, match='boolean true'):
+        validate_schema(_payment_schema({'amount_cents': {'type': 'integer'}}, x_payment={'amountField': 'x'}))
+
+
+def test_x_payment_validation_requires_delete_to_stay_enabled():
+    import pytest
+    from validate import validate_schema, SchemaValidationError
+
+    schema = _payment_schema({'amount_cents': {'type': 'integer'}}, extra={'x-generate': {'delete': False}})
+    with pytest.raises(SchemaValidationError, match='x-generate.delete'):
+        validate_schema(schema)

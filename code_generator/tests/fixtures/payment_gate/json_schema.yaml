@@ -18,7 +18,8 @@ definitions:
 
   # The entity this fixture exists to exercise: x-payment: true must trigger
   # the write-once Stripe integration stubs (lib/stripe.ts, checkout route,
-  # webhook route).
+  # webhook route) and the record lifecycle (lib/payment/*, the payable
+  # model). Its price is a per-record `amount_cents` field.
   paid_widget:
     x-generate:
       list: true
@@ -32,6 +33,25 @@ definitions:
     x-payment: true
     fields:
       name: {}
+      amount_cents: {}
+
+  # A second x-payment entity, priced by a pre-created Stripe Price instead
+  # (`stripe_price_id`): proves one webhook dispatches to the right entity
+  # when more than one declares x-payment.
+  paid_gadget:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-payment: true
+    fields:
+      name: {}
+      stripe_price_id: {}
 
   # Same-run control: an entity with no x-payment key at all. The write-once
   # stubs are triggered by ANY entity in the schema declaring

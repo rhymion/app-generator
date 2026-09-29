@@ -1,6 +1,6 @@
 {{ utility_code }}
 {% if can_create %}
-export async function add{{ parent_pascal }}(actorId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if bridge_child_params_str %}, {{ bridge_child_params_str }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}, idempotency?: { key: string; bodyHash: string }): Promise<{ id: string{% if has_assignee_id %}; assignee_id: string | null{% endif %}{% if server_value_override_fields %}; _server_value_overrides?: Record<string, string>{% endif %} }> {
+export async function add{{ parent_pascal }}(actorId: string{% if parent_params_with_types %}, {{ parent_params_with_types }}{% endif %}{% if bridge_child_params_str %}, {{ bridge_child_params_str }}{% endif %}{% if child_params_for_add %}, {{ child_params_for_add }}{% endif %}{% if flatten_update_params %}, {{ flatten_update_params }}{% endif %}, idempotency?: { key: string; bodyHash: string }): Promise<{ id: string{% if has_assignee_id %}; assignee_id: string | null{% endif %}{% if server_value_override_fields %}; _server_value_overrides?: Record<string, string>{% endif %}{% if is_payment %}; checkoutUrl?: string{% endif %} }> {
 {% if org_id_client_writable %}
   if (organizationId) {
     const _createOrgIds = (await getAssociatedOrganizations(actorId)).map((o) => o.id);
@@ -78,6 +78,18 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
       target_table: '{{ model }}',
       target_id: created.id,
       tx,
+    });
+{% endif %}
+{% if is_payment %}
+    // x-payment: the record is provisional until Stripe confirms payment. Its
+    // payable row commits with it; the Checkout Session is created after the
+    // commit (below), which then attaches the real session id.
+    await tx.payable.create({
+      data: {
+        entity_name: '{{ parent }}',
+        record_id: created.id,
+        stripe_checkout_session_id: `pending:${created.id}`,
+      },
     });
 {% endif %}
     // cmd_923a: post-create side effect hook, called in-tx -- a throw here
@@ -166,7 +178,33 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% endif %}
   }
 {% endif %}
+{% if is_payment %}
+  // x-payment: open the Stripe Checkout Session now that the create has
+  // committed. Every caller of add{{ parent_pascal }}() -- the form's Server
+  // Action, POST /api/{{ parent }}, bulk create, CSV import -- passes through
+  // here, so no path creates a confirmed record without paying: nothing but
+  // the verified Stripe webhook marks a payable row paid.
+  let _checkoutUrl: string | null = null;
+  if (_idempotentReplay) {
+    // Same request retried: resume the session opened the first time.
+    _checkoutUrl = await startPaymentCheckout('{{ parent }}', result.id);
+  } else {
+    try {
+      _checkoutUrl = await startPaymentCheckout('{{ parent }}', result.id);
+    } catch (e) {
+      // Nothing can be paid for. Remove the unpaid record through this
+      // entity's own delete function (so x-reservation and any hand-written
+      // afterDelete hook still run), then the payable row.
+      console.error('[x-payment] could not start checkout for {{ parent }}', result.id, e);
+      await delete{{ parent_pascal }}({% if is_audited %}actorId, {% endif %}[result.id]);
+      await prisma.payable.deleteMany({ where: { entity_name: '{{ parent }}', record_id: result.id } });
+      throw new AppError('UNKNOWN', 'Payment checkout could not be started');
+    }
+  }
+  return { ...result, ...(_checkoutUrl ? { checkoutUrl: _checkoutUrl } : {}) };
+{% else %}
   return result;
+{% endif %}
 }
 {% endif %}
 {% if can_update %}

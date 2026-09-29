@@ -25,6 +25,8 @@ model user {
   email               String        @unique
   created_paid_widgets  paid_widget[]  @relation("PaidWidgetCreator")
   updated_paid_widgets  paid_widget[]  @relation("PaidWidgetUpdater")
+  created_paid_gadgets  paid_gadget[]  @relation("PaidGadgetCreator")
+  updated_paid_gadgets  paid_gadget[]  @relation("PaidGadgetUpdater")
   created_plain_widgets plain_widget[] @relation("PlainWidgetCreator")
   updated_plain_widgets plain_widget[] @relation("PlainWidgetUpdater")
 }
@@ -33,12 +35,28 @@ model user {
 model paid_widget {
   id         String   @id @default(cuid())
   name       String
+  amount_cents Int
   created_at DateTime @default(now()) @db.Timestamptz(0)
   updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
   creator    user     @relation("PaidWidgetCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user     @relation("PaidWidgetUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// x-payment: true, priced by stripe_price_id -- the second entity.
+model paid_gadget {
+  id         String   @id @default(cuid())
+  name       String
+  stripe_price_id String
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("PaidGadgetCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("PaidGadgetUpdater", fields: [updater_id], references: [id])
   @@index([creator_id])
   @@index([updater_id])
 }
