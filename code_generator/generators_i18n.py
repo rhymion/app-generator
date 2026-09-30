@@ -442,7 +442,7 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
     `output_dir` — project root (same as passed to generate()).
     """
     # Entities that appear in the sidebar nav — shared with cleanup.py's
-    # own removal pass, see nav_config.nav_list_entities (cmd_817).
+    # own removal pass, see nav_config.nav_list_entities.
     nav_entities = nav_list_entities(entities)
 
     # EntityLabel keys for all entities (including alternate-model entities like setting*)
