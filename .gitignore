@@ -203,6 +203,9 @@ lib/dashboard/types.ts
 !lib/scheduled-tasks/system-actor.ts
 !lib/scheduled-tasks/run-all.ts
 !lib/scheduled-tasks/run-all.test.ts
+!lib/scheduled-tasks/access.ts
+!lib/scheduled-tasks/admin-view.ts
+!lib/scheduled-tasks/admin-view.test.ts
 
 # ── app/[locale]/ ──
 app/\[locale\]/*/

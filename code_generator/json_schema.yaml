@@ -535,6 +535,11 @@ definitions:
         default: false
       timezone:
         default: "UTC"
+      # Scheduled-task operations: NULL means the built-in default. Read at
+      # request time by the scheduled-task admin page, so changing them needs
+      # no generate-code run.
+      scheduled_task_stuck_after_minutes: {}
+      scheduled_task_recheck_minutes: {}
       # issue #681: organization_id carries prisma/schema.prisma's
       # `@@unique([organization_id])` -- at most one app_setting row per
       # organization. Declaring the FK as a one-to-one selector (matching

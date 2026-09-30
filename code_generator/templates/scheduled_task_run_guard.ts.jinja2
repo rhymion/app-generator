@@ -45,6 +45,12 @@ export interface RunScheduledTaskOptions {
    * operator's explicit rerun — sets this.
    */
   reclaimRunning?: boolean;
+  /**
+   * Run for this business date instead of today's. The admin page's rerun uses
+   * it so a recovery days later still operates on the date that failed. Must be
+   * UTC midnight, like `businessDateOf`'s result.
+   */
+  businessDate?: Date;
 }
 
 /** The business date for a run: the UTC calendar day of `now`, as UTC midnight. */
@@ -107,7 +113,7 @@ export async function runScheduledTask(
     throw new Error(`Unknown scheduled task: ${taskId}`);
   }
   const now = options.now ?? new Date();
-  const businessDate = businessDateOf(now);
+  const businessDate = options.businessDate ?? businessDateOf(now);
   const result = (outcome: ScheduledTaskOutcome, extra: Partial<ScheduledTaskResult> = {}): ScheduledTaskResult => ({
     taskId,
     businessDate,
@@ -199,6 +205,7 @@ export interface ScheduledTaskResult {
 export interface RunScheduledTaskOptions {
   now?: Date;
   reclaimRunning?: boolean;
+  businessDate?: Date;
 }
 
 export function businessDateOf(now: Date = new Date()): Date {

@@ -247,6 +247,11 @@ model app_setting {
   business_date String
   is_pinned     Boolean       @default(false)
   timezone      String        @default("UTC")
+  // Scheduled-task operations (NULL = built-in default; see lib/scheduled-tasks/admin-view.ts):
+  // minutes a `running` record may stay open before the admin page calls it stuck, and
+  // minutes between predecessor rechecks for a task waiting on one.
+  scheduled_task_stuck_after_minutes Int?
+  scheduled_task_recheck_minutes     Int?
   created_at    DateTime      @default(now()) @db.Timestamptz(0)
   updated_at    DateTime      @updatedAt @db.Timestamptz(0)
   creator_id    String

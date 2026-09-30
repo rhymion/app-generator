@@ -1,0 +1,231 @@
+// GENERATED — do not edit (regenerated on every `generate-code` run).
+// Data access and operator actions behind the scheduled-task admin page
+// (app/[locale]/scheduled_task_run). Generated only when the schema declares
+// at least one scheduled task, because it reads the `scheduled_task_run` table.
+//
+// Every action is auditable (an `audit_log` row naming the operator, the task,
+// the business date and the reason) and goes through the same guard as a
+// scheduled run, so a rerun still refuses to run ahead of an unmet predecessor.
+import prisma from '@/lib/prisma';
+import { recordAuditEvent } from '@/lib/audit-log';
+import { TASK_REGISTRY } from './registry';
+import { TASK_DEPENDENCIES, TASK_INTERVALS } from './dependencies';
+import { runScheduledTask, type ScheduledTaskOutcome } from './run-guard';
+import { SCHEDULED_TASK_ACTOR_EMAIL } from './system-actor';
+import {
+  DEFAULT_PREDECESSOR_RECHECK_MINUTES,
+  DEFAULT_STUCK_AFTER_MINUTES,
+  buildTaskRows,
+  isStuck,
+  positiveIntOr,
+  type RunRecord,
+  type TaskRunRow,
+} from './admin-view';
+
+export interface AdminSettings {
+  stuckAfterMinutes: number;
+  predecessorRecheckMinutes: number;
+}
+
+export interface AdminOverview {
+  businessDate: Date;
+  settings: AdminSettings;
+  /** One row per declared task for `businessDate`. */
+  rows: TaskRunRow[];
+  /** `failed` and stuck `running` records of other business dates, newest first. */
+  attention: TaskRunRow[];
+}
+
+export type AdminActionResult =
+  | { ok: true; outcome?: ScheduledTaskOutcome }
+  | { ok: false; code: 'UNKNOWN_TASK' | 'NOT_ALLOWED' | 'REASON_REQUIRED' | 'BLOCKED' | 'RUNNING' | 'FAILED' | 'NO_ACTOR'; detail?: string };
+
+const ATTENTION_LIMIT = 100;
+const MESSAGE_LIMIT = 2000;
+const REASON_LIMIT = 500;
+
+/**
+ * Operational settings, read from the tenant-wide default `app_setting` row
+ * (organization_id NULL) at request time so an operator changes them in the UI
+ * with no regeneration. A missing row or a NULL column falls back to the default.
+ */
+export async function loadAdminSettings(): Promise<AdminSettings> {
+  const row = await prisma.app_setting.findFirst({
+    where: { organization_id: null },
+    select: { scheduled_task_stuck_after_minutes: true, scheduled_task_recheck_minutes: true },
+  });
+  return {
+    stuckAfterMinutes: positiveIntOr(row?.scheduled_task_stuck_after_minutes, DEFAULT_STUCK_AFTER_MINUTES),
+    predecessorRecheckMinutes: positiveIntOr(row?.scheduled_task_recheck_minutes, DEFAULT_PREDECESSOR_RECHECK_MINUTES),
+  };
+}
+
+function toRecord(row: {
+  id: string;
+  task_id: string;
+  business_date: Date;
+  status: RunRecord['status'];
+  started_at: Date;
+  finished_at: Date | null;
+  error_message: string | null;
+}): RunRecord {
+  return row;
+}
+
+export async function loadAdminOverview(businessDate: Date, now: Date = new Date()): Promise<AdminOverview> {
+  const settings = await loadAdminSettings();
+  const stuckBefore = new Date(now.getTime() - settings.stuckAfterMinutes * 60_000);
+  const [dayRecords, attentionRecords] = await Promise.all([
+    prisma.scheduled_task_run.findMany({ where: { business_date: businessDate } }),
+    prisma.scheduled_task_run.findMany({
+      where: {
+        business_date: { not: businessDate },
+        OR: [{ status: 'failed' }, { status: 'running', started_at: { lt: stuckBefore } }],
+      },
+      orderBy: [{ business_date: 'desc' }, { task_id: 'asc' }],
+      take: ATTENTION_LIMIT,
+    }),
+  ]);
+  const build = (records: RunRecord[], date: Date) =>
+    buildTaskRows({
+      dependencies: TASK_DEPENDENCIES,
+      intervals: TASK_INTERVALS,
+      records,
+      businessDate: date,
+      now,
+      stuckAfterMinutes: settings.stuckAfterMinutes,
+    });
+  const attention = attentionRecords.flatMap((record) =>
+    build([toRecord(record)], record.business_date).filter((row) => row.taskId === record.task_id),
+  );
+  return { businessDate, settings, rows: build(dayRecords.map(toRecord), businessDate), attention };
+}
+
+async function findRecord(taskId: string, businessDate: Date) {
+  return prisma.scheduled_task_run.findUnique({
+    where: { task_id_business_date: { task_id: taskId, business_date: businessDate } },
+  });
+}
+
+async function audit(
+  action: string,
+  operatorId: string,
+  taskId: string,
+  businessDate: Date,
+  recordId: string | null,
+  metadata: Record<string, unknown>,
+) {
+  await recordAuditEvent({
+    action,
+    actor_user_id: operatorId,
+    target_table: 'scheduled_task_run',
+    target_id: recordId,
+    metadata: { task_id: taskId, business_date: businessDate.toISOString().slice(0, 10), ...metadata },
+  });
+}
+
+/**
+ * Rerun `taskId` for `businessDate` (the recorded date, not today). A `failed`
+ * or not-yet-run task is retried; a stuck `running` one is taken over. The
+ * handler runs inside this request, like a call to the generated HTTP route.
+ */
+export async function rerunTask(operatorId: string, taskId: string, businessDate: Date): Promise<AdminActionResult> {
+  if (!TASK_REGISTRY[taskId]) return { ok: false, code: 'UNKNOWN_TASK' };
+  const settings = await loadAdminSettings();
+  const now = new Date();
+  const record = await findRecord(taskId, businessDate);
+  const stuck = record ? isStuck(record, now, settings.stuckAfterMinutes) : false;
+  if (record?.status === 'succeeded' || (record?.status === 'running' && !stuck)) {
+    return { ok: false, code: 'NOT_ALLOWED' };
+  }
+  const actor = await prisma.user.findUnique({ where: { email: SCHEDULED_TASK_ACTOR_EMAIL }, select: { id: true } });
+  if (!actor) return { ok: false, code: 'NO_ACTOR' };
+
+  const result = await runScheduledTask(taskId, actor.id, { now, businessDate, reclaimRunning: stuck });
+  await audit('scheduled_task_run.rerun', operatorId, taskId, businessDate, record?.id ?? null, {
+    outcome: result.outcome,
+    took_over_stuck_run: stuck,
+    blocked_by: result.blockedBy,
+    error: result.error instanceof Error ? result.error.message.slice(0, REASON_LIMIT) : undefined,
+  });
+  switch (result.outcome) {
+    case 'blocked':
+      return { ok: false, code: 'BLOCKED', detail: (result.blockedBy ?? []).join(', ') };
+    case 'already_running':
+      return { ok: false, code: 'RUNNING' };
+    case 'failed':
+      return { ok: false, code: 'FAILED', detail: result.error instanceof Error ? result.error.message : String(result.error) };
+    default:
+      return { ok: true, outcome: result.outcome };
+  }
+}
+
+/**
+ * Mark a `failed` or stuck `running` record `succeeded` without rerunning it,
+ * for a case where an operator has confirmed no work was missed. This is what
+ * releases successors waiting on it. The previous error is kept in the message.
+ */
+export async function markResolved(operatorId: string, taskId: string, businessDate: Date, reason?: string): Promise<AdminActionResult> {
+  const settings = await loadAdminSettings();
+  const now = new Date();
+  const record = await findRecord(taskId, businessDate);
+  if (!record || !(record.status === 'failed' || isStuck(record, now, settings.stuckAfterMinutes))) {
+    return { ok: false, code: 'NOT_ALLOWED' };
+  }
+  const note = reason?.trim().slice(0, REASON_LIMIT);
+  const message = [`Resolved manually${note ? `: ${note}` : ''}`, record.error_message && `Previous error: ${record.error_message}`]
+    .filter(Boolean)
+    .join('. ')
+    .slice(0, MESSAGE_LIMIT);
+  const flipped = await prisma.scheduled_task_run.updateMany({
+    where: { id: record.id, status: record.status },
+    data: { status: 'succeeded', finished_at: now, error_message: message },
+  });
+  if (flipped.count === 0) return { ok: false, code: 'NOT_ALLOWED' };
+  await audit('scheduled_task_run.resolve', operatorId, taskId, businessDate, record.id, {
+    previous_status: record.status,
+    reason: note ?? null,
+  });
+  return { ok: true };
+}
+
+/**
+ * Skip `taskId` for `businessDate`: record it `succeeded` with no work done and
+ * the operator's reason. Also works where no record exists (a blocked or never
+ * started task), which is how a task that can no longer run is stepped over.
+ */
+export async function skipTask(operatorId: string, taskId: string, businessDate: Date, reason: string): Promise<AdminActionResult> {
+  if (!(taskId in TASK_DEPENDENCIES)) return { ok: false, code: 'UNKNOWN_TASK' };
+  const note = reason.trim().slice(0, REASON_LIMIT);
+  if (!note) return { ok: false, code: 'REASON_REQUIRED' };
+  const settings = await loadAdminSettings();
+  const now = new Date();
+  const record = await findRecord(taskId, businessDate);
+  const message = `Skipped: ${note}`;
+  let recordId: string | null = record?.id ?? null;
+  if (!record) {
+    try {
+      const created = await prisma.scheduled_task_run.create({
+        data: { task_id: taskId, business_date: businessDate, status: 'succeeded', started_at: now, finished_at: now, error_message: message },
+      });
+      recordId = created.id;
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code === 'P2002') return { ok: false, code: 'NOT_ALLOWED' };
+      throw error;
+    }
+  } else {
+    if (record.status === 'succeeded' || (record.status === 'running' && !isStuck(record, now, settings.stuckAfterMinutes))) {
+      return { ok: false, code: 'NOT_ALLOWED' };
+    }
+    const flipped = await prisma.scheduled_task_run.updateMany({
+      where: { id: record.id, status: record.status },
+      data: { status: 'succeeded', finished_at: now, error_message: message },
+    });
+    if (flipped.count === 0) return { ok: false, code: 'NOT_ALLOWED' };
+  }
+  await audit('scheduled_task_run.skip', operatorId, taskId, businessDate, recordId, {
+    previous_status: record?.status ?? null,
+    reason: note,
+  });
+  return { ok: true };
+}

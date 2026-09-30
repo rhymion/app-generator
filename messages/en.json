@@ -99,6 +99,8 @@
     "resubmit": "Re-submit",
     "role": "Role",
     "roles": "Roles",
+    "scheduledTaskRecheckMinutes": "Scheduled Task Recheck Minutes",
+    "scheduledTaskStuckAfterMinutes": "Scheduled Task Stuck After Minutes",
     "seriesField": "Series Field",
     "stackMode": "Stack Mode",
     "status": "Status",
