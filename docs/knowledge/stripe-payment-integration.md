@@ -117,6 +117,14 @@ the stored row, and never sees a client-submitted value. The default charges one
 unit of the Price per record. Edit the body when the count depends on the
 record, for example nights from a date range:
 `Math.max(1, Math.round((record.check_out.getTime() - record.check_in.getTime()) / 86_400_000))`.
+That expression counts elapsed 24-hour units, not calendar nights. It is exact
+for date-picker input (stored as UTC midnight) and absorbs a one-hour DST shift
+for same-time-of-day bookings, but a REST call with non-midnight times can
+disagree with the calendar: 22:00Z to 02:00Z two days later is 28 hours, so it
+rounds to one unit although it spans two calendar nights. A consumer that bills
+calendar nights compares UTC dates instead:
+`Math.max(1, Math.round((Date.UTC(co.getUTCFullYear(), co.getUTCMonth(), co.getUTCDate()) - Date.UTC(ci.getUTCFullYear(), ci.getUTCMonth(), ci.getUTCDate())) / 86_400_000))`,
+with `ci` and `co` the two dates.
 A result that is not a positive integer fails closed: no session is created and
 the caller gets an error. The hook returns one quantity today; charging several
 line items (a weekday and a weekend rate, for example) would widen its return
@@ -144,6 +152,17 @@ A consumer writes its migration at deploy time.
 The declaring entity's own table gets no extra column, so every generated list,
 view and export path keeps working: a provisional record is an ordinary row
 whose `payable` row says `pending`.
+
+A consumer's `prj/prisma/schema.prisma` must also carry the `payable` model and
+the `PayableStatus` enum. The first `generate-code` appends them to
+app-generator's `prisma/schema.prisma`; from then on `prj:sync` refuses to run
+(`generate-code` exits non-zero) with
+`prisma/schema.prisma sync SKIPPED -- consumer's prj/prisma/schema.prisma is
+missing generator-side content that would be silently dropped ...: model
+payable`, because copying the consumer's file over would delete generator-side
+content. Copy the generated `payable` model and `PayableStatus` enum into
+`prj/prisma/schema.prisma` in the same pull request that bumps the submodule
+pointer for the first `x-payment` entity.
 
 ### Interaction with `x-reservation`
 
