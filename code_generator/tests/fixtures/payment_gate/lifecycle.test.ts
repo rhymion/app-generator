@@ -8,9 +8,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
 import prisma, { db, resetDb } from './fake/prisma';
 import { stripeState, resetStripe } from './fake/stripe';
-import { afterDeleteRan, resetEntityService } from './fake/entity-service';
-import { startPaymentCheckout, expirePendingCheckout } from '../lib/payment/checkout';
-import { dispatchPaymentEvent } from '../lib/payment/payment_webhook_dispatch';
+import { afterDeleteRan, auditRan, resetEntityService } from './fake/entity-service';
+import { startPaymentCheckout, expirePendingCheckout, retrievePaidSession } from '../lib/payment/checkout';
+import { dispatchPaymentEvent, removeUnpaidPayable, confirmPaidSession } from '../lib/payment/payment_webhook_dispatch';
 
 // The generated paid_widget quantity hook is write-once and defaults to 1; a
 // consumer edits it. This wrapper runs the real generated default unless a
@@ -72,6 +72,10 @@ describe('starting checkout', () => {
     expect(params.client_reference_id).toBe(payable.id);
     expect(params.metadata).toEqual({ payable_id: payable.id });
     expect(params.cancel_url).toContain(`payable_id=${payable.id}`);
+    // Stripe's floor is 30 minutes, its default 24 hours: ask for the floor plus slack.
+    const lifetime = params.expires_at - Math.floor(Date.now() / 1000);
+    expect(lifetime).toBeGreaterThanOrEqual(30 * 60);
+    expect(lifetime).toBeLessThanOrEqual(32 * 60);
     expect(db.payable[0].stripe_checkout_session_id).toBe('cs_test_1');
     expect(db.payable[0].status).toBe('pending');
   });
@@ -257,24 +261,232 @@ describe('several x-payment entities behind one webhook', () => {
   });
 });
 
+// What the generated cancel page does with a hit on /payment/cancel?payable_id=...
+async function visitCancelPage(payableId: string) {
+  if (await expirePendingCheckout(payableId)) {
+    await removeUnpaidPayable(payableId);
+  }
+}
+
 describe('cancelling from the return page', () => {
-  it('expires the open session but leaves the deletion to the expired webhook', async () => {
+  it('removes the record right away, with no webhook ever delivered', async () => {
     const payable = await createProvisional('paid_widget', 'w1');
     await startPaymentCheckout('paid_widget', 'w1');
-    await expirePendingCheckout(payable.id);
+    await visitCancelPage(payable.id);
 
     expect(stripeState.expired).toEqual(['cs_test_1']);
-    expect(db.paid_widget).toHaveLength(1); // not removed here
-    await dispatchPaymentEvent(expired('cs_test_1'));
+    expect(afterDeleteRan).toEqual(['paid_widget:w1']);
     expect(db.paid_widget).toHaveLength(0);
+    expect(db.payable).toHaveLength(0);
   });
 
-  it('ignores an already-expired session, a paid payable and an unknown id', async () => {
+  it('leaves the later expired webhook with nothing to do', async () => {
     const payable = await createProvisional('paid_widget', 'w1');
     await startPaymentCheckout('paid_widget', 'w1');
-    await expirePendingCheckout(payable.id);
-    await expirePendingCheckout(payable.id); // Stripe rejects the second expire: swallowed
-    await expirePendingCheckout('nope');
+    await visitCancelPage(payable.id);
+    await dispatchPaymentEvent(expired('cs_test_1'));
+    expect(afterDeleteRan).toEqual(['paid_widget:w1']); // deleted once, not twice
+  });
+
+  it('removes nothing while Stripe still reports the session open', async () => {
+    const payable = await createProvisional('paid_widget', 'w1');
+    await startPaymentCheckout('paid_widget', 'w1');
+    stripeState.expireLeavesOpen = true; // someone else hitting the URL: Stripe keeps the session open
+    await visitCancelPage(payable.id);
+
+    expect(db.paid_widget).toHaveLength(1);
+    expect(db.payable).toHaveLength(1);
+    expect(afterDeleteRan).toEqual([]);
+  });
+
+  it('removes nothing when Stripe says the session completed', async () => {
+    const payable = await createProvisional('paid_widget', 'w1');
+    await startPaymentCheckout('paid_widget', 'w1');
+    stripeState.sessions.get('cs_test_1')!.status = 'complete'; // paid, webhook not yet processed
+    await visitCancelPage(payable.id);
+
+    expect(db.paid_widget).toHaveLength(1);
+    expect(db.payable).toHaveLength(1);
+    expect(afterDeleteRan).toEqual([]);
+  });
+
+  it('never removes a payable that is already paid', async () => {
+    const payable = await createProvisional('paid_widget', 'w1');
+    await startPaymentCheckout('paid_widget', 'w1');
+    await dispatchPaymentEvent(paid('cs_test_1'));
+    await visitCancelPage(payable.id);
+    await removeUnpaidPayable(payable.id); // even called directly
+    expect(db.paid_widget).toHaveLength(1);
+    expect(db.payable[0].status).toBe('paid');
+    expect(stripeState.expired).toEqual([]);
+  });
+
+  it('ignores a second visit, a placeholder session and an unknown id', async () => {
+    const pending = await createProvisional('paid_gadget', 'g0'); // no Checkout Session yet
+    const payable = await createProvisional('paid_widget', 'w1');
+    await startPaymentCheckout('paid_widget', 'w1');
+    await visitCancelPage(payable.id);
+    await visitCancelPage(payable.id); // record and payable already gone
+    await visitCancelPage(pending.id);
+    await visitCancelPage('nope');
     expect(stripeState.expired).toEqual(['cs_test_1']);
+    expect(afterDeleteRan).toEqual(['paid_widget:w1']);
+    expect(db.paid_gadget).toHaveLength(1);
+  });
+});
+
+// What the generated success page does with a hit on /payment/success?session_id=...
+async function visitSuccessPage(sessionId: string) {
+  const session = await retrievePaidSession(sessionId);
+  if (session) {
+    await confirmPaidSession(session);
+  }
+}
+
+function stripePays(id: string) {
+  Object.assign(stripeState.sessions.get(id)!, { status: 'complete', payment_status: 'paid', amount_total: 4200, currency: 'usd' });
+}
+
+describe('arriving on the success page', () => {
+  it('confirms the record when Stripe reports the session paid, with no webhook ever delivered', async () => {
+    await createProvisional('paid_widget', 'w1');
+    await startPaymentCheckout('paid_widget', 'w1');
+    stripePays('cs_test_1');
+    await visitSuccessPage('cs_test_1');
+
+    expect(db.payable[0].status).toBe('paid');
+    expect(db.payable[0].amount).toBe(4200);
+    expect(db.payable[0].paid_at).toBeTruthy();
+    expect(db.paid_widget).toHaveLength(1);
+  });
+
+  it('leaves the later completed webhook with nothing to change', async () => {
+    await createProvisional('paid_widget', 'w1');
+    await startPaymentCheckout('paid_widget', 'w1');
+    stripePays('cs_test_1');
+    await visitSuccessPage('cs_test_1');
+    const paidAt = db.payable[0].paid_at;
+    await dispatchPaymentEvent(paid('cs_test_1', { amount_total: 1 }));
+    expect(db.payable[0].paid_at).toBe(paidAt);
+    expect(db.payable[0].amount).toBe(4200);
+  });
+
+  it('confirms nothing while Stripe reports the session unpaid', async () => {
+    await createProvisional('paid_widget', 'w1');
+    await startPaymentCheckout('paid_widget', 'w1');
+    await visitSuccessPage('cs_test_1'); // someone opening the URL without paying
+    expect(db.payable[0].status).toBe('pending');
+  });
+
+  it('confirms nothing for a session id Stripe does not know, or one no payable row names', async () => {
+    await createProvisional('paid_widget', 'w1');
+    await startPaymentCheckout('paid_widget', 'w1');
+    await visitSuccessPage('cs_made_up');
+    stripeState.sessions.set('cs_other', { status: 'complete', url: 'u', payment_status: 'paid' });
+    await visitSuccessPage('cs_other'); // paid on Stripe, but not this app's session
+    expect(db.payable[0].status).toBe('pending');
+  });
+});
+
+// The cancel page and the webhook both settle the same payable, and Stripe
+// sends the expired event right after the cancel page expires the session, so
+// they routinely overlap. Whatever the order, the record is removed once, its
+// audit event and afterDelete hook run once, and a paid record is never touched.
+describe('the return pages and the webhook settling the same record', () => {
+  it('cancel page first, then the expired webhook: one removal, one audit event', async () => {
+    const payable = await createProvisional('paid_widget', 'w1');
+    await startPaymentCheckout('paid_widget', 'w1');
+    await visitCancelPage(payable.id);
+    await dispatchPaymentEvent(expired('cs_test_1'));
+    expect(afterDeleteRan).toEqual(['paid_widget:w1']);
+    expect(auditRan).toEqual(['paid_widget:w1']);
+    expect(db.payable).toHaveLength(0);
+  });
+
+  it('expired webhook first, then the cancel page: one removal, one audit event', async () => {
+    const payable = await createProvisional('paid_widget', 'w1');
+    await startPaymentCheckout('paid_widget', 'w1');
+    // Stripe expires the session (the buyer cancelled) and the event lands first.
+    stripeState.sessions.get('cs_test_1')!.status = 'expired';
+    await dispatchPaymentEvent(expired('cs_test_1'));
+    await visitCancelPage(payable.id);
+    expect(afterDeleteRan).toEqual(['paid_widget:w1']);
+    expect(auditRan).toEqual(['paid_widget:w1']);
+    expect(db.payable).toHaveLength(0);
+  });
+
+  it('cancel page and expired webhook at the same moment: one removal, one audit event', async () => {
+    const payable = await createProvisional('paid_widget', 'w1');
+    await startPaymentCheckout('paid_widget', 'w1');
+    await Promise.all([visitCancelPage(payable.id), dispatchPaymentEvent(expired('cs_test_1'))]);
+    expect(afterDeleteRan).toEqual(['paid_widget:w1']);
+    expect(auditRan).toEqual(['paid_widget:w1']);
+    expect(db.paid_widget).toHaveLength(0);
+    expect(db.payable).toHaveLength(0);
+  });
+
+  it('two overlapping removals of one payable: one removal, one audit event', async () => {
+    const payable = await createProvisional('paid_widget', 'w1');
+    await startPaymentCheckout('paid_widget', 'w1');
+    await Promise.all([removeUnpaidPayable(payable.id), removeUnpaidPayable(payable.id), removeUnpaidPayable(payable.id)]);
+    expect(afterDeleteRan).toEqual(['paid_widget:w1']);
+    expect(auditRan).toEqual(['paid_widget:w1']);
+  });
+
+  it('success page first, then the completed webhook: paid once, paid_at unchanged', async () => {
+    await createProvisional('paid_widget', 'w1');
+    await startPaymentCheckout('paid_widget', 'w1');
+    stripePays('cs_test_1');
+    await visitSuccessPage('cs_test_1');
+    const paidAt = db.payable[0].paid_at;
+    await dispatchPaymentEvent(paid('cs_test_1'));
+    expect(db.payable).toHaveLength(1);
+    expect(db.payable[0].paid_at).toBe(paidAt);
+  });
+
+  it('completed webhook first, then the success page: paid once, paid_at unchanged', async () => {
+    await createProvisional('paid_widget', 'w1');
+    await startPaymentCheckout('paid_widget', 'w1');
+    stripePays('cs_test_1');
+    await dispatchPaymentEvent(paid('cs_test_1'));
+    const paidAt = db.payable[0].paid_at;
+    await visitSuccessPage('cs_test_1');
+    expect(db.payable[0].paid_at).toBe(paidAt);
+    expect(db.payable[0].amount).toBe(4200);
+  });
+
+  it('success page and completed webhook at the same moment: one paid row, record kept', async () => {
+    await createProvisional('paid_widget', 'w1');
+    await startPaymentCheckout('paid_widget', 'w1');
+    stripePays('cs_test_1');
+    await Promise.all([visitSuccessPage('cs_test_1'), dispatchPaymentEvent(paid('cs_test_1'))]);
+    expect(db.payable).toHaveLength(1);
+    expect(db.payable[0].status).toBe('paid');
+    expect(db.paid_widget).toHaveLength(1);
+    expect(afterDeleteRan).toEqual([]);
+  });
+
+  it('a paid record survives the cancel page and an expired webhook arriving together', async () => {
+    const payable = await createProvisional('paid_widget', 'w1');
+    await startPaymentCheckout('paid_widget', 'w1');
+    stripePays('cs_test_1');
+    await visitSuccessPage('cs_test_1');
+    await Promise.all([visitCancelPage(payable.id), dispatchPaymentEvent(expired('cs_test_1'))]);
+    expect(db.paid_widget).toHaveLength(1);
+    expect(db.payable[0].status).toBe('paid');
+    expect(afterDeleteRan).toEqual([]);
+    expect(auditRan).toEqual([]);
+  });
+
+  it('a stranger opening the cancel URL while the session is open removes nothing, then the buyer can still pay', async () => {
+    const payable = await createProvisional('paid_widget', 'w1');
+    await startPaymentCheckout('paid_widget', 'w1');
+    stripeState.expireLeavesOpen = true;
+    await visitCancelPage(payable.id);
+    stripeState.expireLeavesOpen = false;
+    stripePays('cs_test_1');
+    await visitSuccessPage('cs_test_1');
+    expect(db.paid_widget).toHaveLength(1);
+    expect(db.payable[0].status).toBe('paid');
   });
 });

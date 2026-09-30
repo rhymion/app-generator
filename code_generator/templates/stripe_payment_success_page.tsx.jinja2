@@ -1,21 +1,36 @@
 // GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
 
 // x-payment: success page. Stripe Checkout sends the buyer here via the
-// `success_url` set in app/api/payment/checkout/route.ts. Copy comes from the
+// `success_url` set in lib/payment/checkout.ts (which appends ?session_id=...).
+// Visiting it retrieves that Checkout Session from Stripe and, only when Stripe
+// reports it paid, confirms the record right here -- the query string alone
+// never confirms anything. The `checkout.session.completed` webhook that follows
+// finds the record already paid and does nothing. Copy comes from the
 // `Payment` i18n namespace (messages/*.json) -- edit the keys there, or
 // replace the markup with your own order-summary UI.
 
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { Link } from '@/i18n/navigation';
 import AppText from '@/components/ui/AppText';
+import { retrievePaidSession } from '@/lib/payment/checkout';
+import { confirmPaidSession } from '@/lib/payment/payment_webhook_dispatch';
 
 export default async function PaymentSuccessPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ locale: string }>;
+  searchParams: Promise<{ session_id?: string }>;
 }) {
   const { locale } = await params;
+  const { session_id: sessionId } = await searchParams;
   setRequestLocale(locale);
+  if (sessionId) {
+    const session = await retrievePaidSession(sessionId);
+    if (session) {
+      await confirmPaidSession(session);
+    }
+  }
   const t = await getTranslations('Payment');
 
   return (

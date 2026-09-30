@@ -145,6 +145,11 @@ with no shared transaction at all; it is now wrapped in its own
 `afterDelete` throwing would do nothing to undo a delete that had already
 committed.
 
+`delete{Parent}()` runs `afterDelete` (and, for an audited entity, writes the
+audit event) only for rows the call actually deleted. If every id is already
+gone, or a concurrent delete of the same rows committed first, it does nothing,
+so a repeated or racing delete has its side effects once.
+
 ### `validateOnDelete`: the delete-side counterpart to `validateCustomRules`
 
 Create and update both run a hand-written validation hook
