@@ -256,6 +256,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/prisma-schema-conventions.md` §5.
 
 ### Fixed
+- **The detail view of an `x-reservation` `mode: item` entity no longer shows
+  the allocated foreign key twice** (issue #790). `FormView.tsx` appended a
+  raw-id text field for `result.allocatedField` after the normal related-record
+  field, and its label rendered as the untranslated key `Fields.room_id`. The
+  related record is now shown once; the edit form is unchanged.
 - **The `x-payment` stubs no longer reject API keys or send buyers to a 404,
   and the `stripe listen` instructions work with current Stripe CLI versions**
   (issue #776). The generated `app/api/payment/checkout/route.ts` now
