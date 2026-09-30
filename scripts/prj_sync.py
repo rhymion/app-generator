@@ -45,6 +45,16 @@ PRJ_DIR = PROJECT_ROOT.parent / "prj"
 _MODEL_RE = re.compile(r"^model\s+(\w+)\s*\{\n(.*?)^\}", re.MULTILINE | re.DOTALL)
 
 
+# Models that generate.py itself appends to prisma/schema.prisma on every
+# run (inject_scheduled_task_run_into_schema, inject_payable_into_schema).
+# They exist in the generator's schema only because a previous generate-code
+# wrote them there, and the next generate-code writes them again, so a
+# consumer snapshot that lacks one is not a drop: the guard must not demand a
+# manual mirror of it (Issue #786). Kept in step with generate.py by
+# code_generator/tests/test_prj_sync_schema_drop_guard.py.
+GENERATOR_INJECTED_MODELS = frozenset({"scheduled_task_run", "payable"})
+
+
 def _parse_prisma_models(text: str) -> dict[str, set[str]]:
     """Return {model_name: {field_name, ...}} for each `model X { ... }` block.
 
@@ -85,6 +95,11 @@ def _diff_prisma_schema_drop(dst_file: Path, src_file: Path) -> list[str]:
     tell those apart from file content alone, so it surfaces every case
     for a human to confirm rather than silently choosing either
     interpretation.
+
+    One exception: a model in GENERATOR_INJECTED_MODELS that the consumer
+    copy lacks entirely is not reported, because generate-code appends it
+    again after the sync (Issue #786). A consumer copy that does carry such
+    a model is still compared field by field like any other.
     """
     if not dst_file.exists() or not src_file.exists():
         return []
@@ -95,6 +110,8 @@ def _diff_prisma_schema_drop(dst_file: Path, src_file: Path) -> list[str]:
     dropped: list[str] = []
     for model_name, dst_fields in sorted(dst_models.items()):
         if model_name not in src_models:
+            if model_name in GENERATOR_INJECTED_MODELS:
+                continue
             dropped.append(f"model {model_name}")
             continue
         for field in sorted(dst_fields - src_models[model_name]):

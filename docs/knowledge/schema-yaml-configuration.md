@@ -755,6 +755,13 @@ any hand-written `validateCustomRules()` logic that inspected the field directly
 `prevRow`, the actual persisted value) could reject a save that never touched it. Always read a
 readonly field's real value from `prevRow`, never from `data`, in custom validation.
 
+**Bulk routes follow the single routes**: `POST /api/<entity>` answers 400 when the body
+carries any value for a readonly field, and `PUT /api/<entity>/<id>` answers 400 when the
+value differs from the stored one. `POST /api/<entity>/bulk` and `PUT /api/<entity>/bulk`
+apply the same two rules per item, with the same messages (`Field X is read-only and cannot
+be set` / `... cannot be changed`). A bulk call answers 207 with one result per item, so the
+rejection arrives as that item's `success: false` and the other items are still processed.
+
 ---
 
 ## 5. Many-to-One Relationships (`x-relationship`)
