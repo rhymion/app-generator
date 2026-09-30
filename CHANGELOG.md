@@ -206,6 +206,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   per Stripe account, and how a 400, a refused connection or a 500 shows up.
   The webhook route's missing-secret error and `.env.example` name the right
   file and list all four events.
+- **Added a "Production setup" section to the `x-payment` documentation**
+  (`docs/knowledge/stripe-payment-integration.md`): what is specific to this
+  app in a deployed environment (separate test and live mode objects, a
+  `stripe_price_id` on every row that supplies a Price, one webhook endpoint
+  and signing secret per environment, the environment variables, and
+  `NEXTAUTH_URL` for the Checkout return URLs), with links to Stripe's and
+  Vercel's own documentation for the Dashboard steps.
 - **`getModelPermissions` (`lib/authz.ts`) now issues one `permission.findMany`
   query per (request, user) instead of one per model queried**, from a
   request-scoped permission-check performance investigation. A cross-entity
