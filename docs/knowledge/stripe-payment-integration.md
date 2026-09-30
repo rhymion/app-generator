@@ -250,6 +250,15 @@ time the code path actually runs, not at process/module boot -- see
 "Lazy construction note" below). Test keys (`sk_test_...`) are
 obtained from the Stripe Dashboard.
 
+Which file holds the three keys depends on `NODE_ENV`:
+
+| Environment | File | Notes |
+|-------------|------|-------|
+| Development (`next dev`) | `.env.local` | gitignored |
+| Test environment (`NODE_ENV=test`, `next start` from the E2E scripts) | `.env.test.local` | gitignored; `.env.local` is not loaded in this environment |
+
+`.env.test` is committed, so never put a key in it.
+
 ### Local webhook forwarding
 
 The Stripe CLI is a separate tool, not the `stripe` SDK package already in
@@ -264,10 +273,98 @@ stripe listen \
   --forward-to localhost:<port>/api/webhooks/stripe
 ```
 
-Copy the `whsec_...` signing secret it prints into `STRIPE_WEBHOOK_SECRET`.
-When you handle further event types (subscription events, for example), add
-the same event names to `--events`. In the Stripe Dashboard, subscribe the
-endpoint to the same four events.
+Copy the `whsec_...` signing secret it prints into `STRIPE_WEBHOOK_SECRET`
+(in the file from the table above).
+
+The forwarder has to be running whenever you exercise a payment locally:
+
+- **Without `stripe listen`, the app never learns what happened at Stripe.**
+  A successful payment leaves the `payable` row `pending` with `paid_at`
+  null. Cancelling from the Checkout page expires the Session at Stripe, but
+  the `checkout.session.expired` event never arrives, so the provisional
+  record is not deleted and its room stays held.
+- **`<port>` is the port the running server listens on.** In the test
+  environment that is `PORT` from `.env.test`, which differs per worktree;
+  it is not necessarily 3000.
+- **The signing secret is stable.** `stripe listen --print-secret` returns
+  the same `whsec_...` on every call for a given Stripe account and CLI
+  login, and it equals what `stripe listen` prints, so it can be set once. A
+  secret copied from a Dashboard endpoint is a different secret: it makes
+  every locally forwarded event fail signature verification.
+- When you handle further event types (subscription events, for example),
+  add the same event names to `--events`. In the Stripe Dashboard, subscribe
+  the endpoint to the same four events.
+
+How a broken setup shows up in the `stripe listen` output:
+
+| Output for a forwarded event | Cause |
+|------------------------------|-------|
+| `[400]` | `STRIPE_WEBHOOK_SECRET` differs from the value `stripe listen` prints |
+| `connection refused` | `--forward-to` port is not the port the server uses |
+| `[500]` (server log: `STRIPE_WEBHOOK_SECRET is not set`) | the secret is missing from the file the running environment loads |
+| nothing at all | `stripe listen` is not running |
+
+In every row the record stays `pending` and a cancelled reservation stays in
+place.
+
+## Production setup
+
+This section lists what is specific to this app when it runs against a
+deployed environment (staging or production). Stripe's own screens change, so
+the steps in the Dashboard are left to Stripe's documentation, linked below.
+For a local machine see "Local webhook forwarding" above.
+
+1. **Test mode and live mode are separate worlds.** API keys, Products and
+   Prices, and webhook endpoints (each with its own signing secret) exist
+   once per mode, and an object from one mode cannot be used in the other
+   ([API keys](https://docs.stripe.com/keys),
+   [go-live checklist](https://docs.stripe.com/get-started/checklist/go-live)).
+   The usual split is staging on test mode and production on live mode, each
+   with its own keys, Prices and endpoint.
+2. **Every row that supplies a Price needs a `stripe_price_id`.** Create the
+   Product and Price in the mode the environment uses
+   ([Products and Prices](https://docs.stripe.com/products-prices/manage-prices))
+   and store the Price id on the entity that declares `stripe_price_id` (see
+   "Where the Price and quantity come from"). When the Price comes from a
+   related entity, such as `room`, fill it on **all** rows of that entity: a
+   record that points at a row with an empty value fails when the checkout is
+   created (`lib/payment/payment_source.ts`: "no `stripe_price_id` on its ...").
+   The ids in a database belong to one mode, so a database that is used in
+   production holds live-mode ids.
+3. **Register one webhook endpoint per environment.** The URL is
+   `https://<your-domain>/api/webhooks/stripe`, subscribed to the four events
+   from the forwarding command above (`checkout.session.completed`,
+   `checkout.session.expired`, `checkout.session.async_payment_succeeded`,
+   `checkout.session.async_payment_failed`). Each endpoint has its own signing
+   secret; it is not the value `stripe listen` prints
+   ([webhooks](https://docs.stripe.com/webhooks)).
+4. **Set the environment variables on the deployment:** `STRIPE_SECRET_KEY`,
+   `STRIPE_PUBLISHABLE_KEY` (both from the mode the environment uses) and
+   `STRIPE_WEBHOOK_SECRET` (from that environment's endpoint). Also set
+   `NEXTAUTH_URL` to the public origin: the Checkout success and cancel URLs
+   are built from it (`lib/payment/checkout.ts`), and it falls back to
+   `http://localhost:3000` when unset, which sends the buyer back to
+   localhost after paying.
+5. **Check it end to end.** Pay with a Stripe test card in a test-mode
+   environment (see [testing](https://docs.stripe.com/testing)) and confirm the
+   `payable` row becomes `paid`. When it stays `pending`, open the endpoint's
+   event deliveries in the Stripe Dashboard and read the response: `400` means
+   the signing secret differs from the endpoint's, `500` means
+   `STRIPE_WEBHOOK_SECRET` is not set in that environment.
+
+**Vercel Deployment Protection.** On Vercel, Deployment Protection requires
+authentication for every request to a protected deployment, and Standard
+Protection covers all deployments except the production domains
+([Deployment Protection](https://vercel.com/docs/deployment-protection)). A
+protected staging deployment therefore does not accept Stripe's unauthenticated
+webhook deliveries. Stripe cannot add headers to a delivery, so Vercel's
+[Protection Bypass for Automation](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation)
+supports a query parameter on the endpoint URL, `?x-vercel-protection-bypass=<secret>`.
+That URL then carries a secret: register it only in the Stripe endpoint
+settings.
+
+**Live payments** additionally require the Stripe account to be activated with
+its business details ([account setup](https://docs.stripe.com/get-started/account/activate)).
 
 ## Lazy construction note (updated 2026-08-19: module-top-level throw removed)
 
