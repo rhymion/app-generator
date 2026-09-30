@@ -1,7 +1,7 @@
 // Recording stand-in for @/lib/stripe (lifecycle.test.ts only): the three
 // Checkout Session calls lib/payment/checkout.ts makes, with just enough
 // state to tell an open session from an expired one.
-type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+type Row = Record<string, any>;
 
 export const stripeState = {
   created: [] as Row[],

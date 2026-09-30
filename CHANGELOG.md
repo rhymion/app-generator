@@ -6,17 +6,23 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 ## [Unreleased]
 ### Fixed
 - **Made the `x-payment` cancel and success pages settle the record
-  themselves, and shortened the Checkout Session lifetime** (issue #789). Cancelling used to
-  delete the record only when a later `checkout.session.expired` webhook arrived,
-  so nothing was removed where no webhook is delivered. The generated cancel page
-  now expires the session and removes the record when Stripe reports it expired
-  (a session still open or already complete removes nothing); the webhook finds
-  nothing left to do. The success page likewise retrieves the session and marks
-  the record paid when Stripe reports it paid. Sessions are created with `expires_at` about 31 minutes
-  ahead instead of Stripe's 24-hour default, so a buyer who takes longer to pay
-  finds the session expired. The cancel page is write-once, so an existing app
-  keeps its old pages until it adds the `removeUnpaidPayable` and
-  `confirmPaidSession` calls by hand.
+  themselves, and shortened the Checkout Session lifetime** (issue #789).
+  Cancelling used to delete the record only when a later
+  `checkout.session.expired` webhook arrived, so nothing was removed where no
+  webhook is delivered. The generated cancel page now expires the session and
+  removes the record when Stripe reports it expired (a session still open or
+  already complete removes nothing). The success page retrieves the session and
+  marks the record paid when Stripe reports it paid. The webhook stays as an
+  idempotent backstop. Sessions are created with `expires_at` 31 minutes ahead
+  (Stripe's 30-minute minimum plus one minute of slack) instead of Stripe's
+  24-hour default. The cancel and success pages are write-once, so an existing
+  app keeps its old pages until it adds the `removeUnpaidPayable` and
+  `retrievePaidSession`/`confirmPaidSession` calls by hand.
+- **Made the generated `delete{Entity}()` do nothing for rows that are already
+  gone.** It used to write an audit event and run `afterDelete` for every id it
+  was given, so deleting the same record twice (or two deletes racing) recorded
+  the delete twice. Now only rows the call actually deleted get an audit event
+  and hook run.
 
 ### Added
 - **Added an admin page for scheduled task runs** (issue #774, follow-up to

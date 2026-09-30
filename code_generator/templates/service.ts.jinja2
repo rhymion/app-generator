@@ -425,11 +425,16 @@ export async function delete{{ parent_pascal }}(actorId: string | null, ids: str
 {% if bridge_cleanup_rels %}
     const _bridgeRows = await tx.{{ model }}.findMany({ where: { id: { in: ids } }, select: {{ bridge_pre_delete_select }} });
 {% endif %}
-    await tx.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+    const _deleted = await tx.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+    // Nothing was deleted (every id was already gone, or a concurrent delete
+    // of the same rows committed first): no cleanup, audit event or
+    // afterDelete hook, so a repeated or racing delete of one record has its
+    // side effects exactly once.
+    if (_deleted.count === 0) return;
 {% if bridge_post_delete_cleanups %}
 {{ bridge_post_delete_cleanups | replace('await prisma.', '    await tx.') }}
 {% endif %}
-    for (const id of ids) {
+    for (const { id } of _deleteRows) {
       await recordAuditEvent({
         action: '{{ parent }}:delete',
         actor_user_id: actorId,
@@ -466,12 +471,20 @@ export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
     }
 {% if bridge_cleanup_rels %}
     const _bridgeRows = await tx.{{ model }}.findMany({ where: { id: { in: ids } }, select: {{ bridge_pre_delete_select }} });
-    await tx.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+    const _deleted = await tx.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+    // Nothing was deleted (already gone, or a concurrent delete committed
+    // first): no cleanup or afterDelete hook, so a repeated or racing delete
+    // has its side effects exactly once.
+    if (_deleted.count === 0) return;
 {{ bridge_post_delete_cleanups | replace('await prisma.', '    await tx.') }}
 {% else %}
-    await tx.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+    const _deleted = await tx.{{ model }}.deleteMany({ where: { id: { in: ids } } });
+    // Nothing was deleted (already gone, or a concurrent delete committed
+    // first): no afterDelete hook, so a repeated or racing delete has its
+    // side effects exactly once.
+    if (_deleted.count === 0) return;
 {% endif %}
-    for (const id of ids) {
+    for (const { id } of _deleteRows) {
       await afterDelete(tx, id);
     }
   });
