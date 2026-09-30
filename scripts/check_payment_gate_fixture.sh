@@ -5,7 +5,13 @@
 # real build_user_schema.py -> generate.py -> tsc pipeline and type-checks
 # the write-once Stripe integration stubs: lib/stripe.ts,
 # app/api/payment/checkout/route.ts, app/api/webhooks/stripe/route.ts, and the
-# checkout return pages app/[locale]/payment/{success,cancel}/page.tsx.
+# checkout return pages app/[locale]/payment/{success,cancel}/page.tsx -- plus
+# the generated record-lifecycle files lib/payment/{payment_source,checkout,
+# payment_webhook_dispatch}.ts, which are type-checked against a real generated
+# Prisma client (the `payable` model x-payment injects) and then *run* by
+# code_generator/tests/fixtures/payment_gate/lifecycle.test.ts against
+# in-memory fakes (confirm / remove / idempotent redelivery / two entities
+# behind one webhook).
 #
 # Why this exists: this repo's own json_schema.yaml declares no x-payment
 # key anywhere, so no CI job ever type-checks the Stripe stub templates --
@@ -48,6 +54,10 @@ python3 code_generator/build_user_schema.py \
 echo "-- generate.py (intermediate -> TS) --"
 python3 code_generator/generate.py "$OUT_DIR/generated_json_schema.yaml" "$OUT_DIR"
 
+echo "-- prisma generate (fixture-only client, isolated output) --"
+npx prisma generate --schema="$OUT_DIR/prisma/schema.prisma" >/tmp/payment_gate_prisma_generate.log 2>&1 \
+  || { cat /tmp/payment_gate_prisma_generate.log >&2; exit 1; }
+
 if [ ! -f "$OUT_DIR/lib/stripe.ts" ]; then
   echo "payment-gate fixture check: lib/stripe.ts was not written -- the" >&2
   echo "x-payment: true write-once stub mechanism did not fire." >&2
@@ -57,9 +67,11 @@ fi
 # Fixture-only shim for @/lib/api-auth -- see fixtures/payment_gate/shims/ for
 # the source of truth and why this exists rather than the real file.
 cp "$FIXTURE_DIR/shims/api-auth.ts" "$OUT_DIR/lib/api-auth.ts"
+cp "$FIXTURE_DIR/shims/prisma.ts" "$OUT_DIR/lib/prisma.ts"
+cp "$FIXTURE_DIR/shims/entity-service.ts" "$OUT_DIR/lib/entity-service.ts"
 cp "$FIXTURE_DIR/tsconfig.json" "$OUT_DIR/tsconfig.json"
 
-echo "-- tsc --noEmit (lib/stripe.ts + checkout route + webhook route + return pages) --"
+echo "-- tsc --noEmit (lib/stripe.ts + lib/payment + checkout route + webhook route + return pages) --"
 set +e
 npx tsc -p "$OUT_DIR/tsconfig.json"
 tsc_status=$?
@@ -74,6 +86,17 @@ if [ "$tsc_status" -ne 0 ]; then
   echo "templates (see scripts/check_payment_gate_fixture.sh header) no" >&2
   echo "longer type-check against the installed Stripe SDK version." >&2
   exit "$tsc_status"
+fi
+
+echo "-- vitest lifecycle.test.ts (generated lib/payment/*.ts against in-memory fakes) --"
+TEST_DIR="$OUT_DIR/lifecycle-test"
+mkdir -p "$TEST_DIR/fake"
+cp "$FIXTURE_DIR/shims/fake/"*.ts "$TEST_DIR/fake/"
+cp "$FIXTURE_DIR/lifecycle.test.ts" "$FIXTURE_DIR/vitest.config.mts" "$TEST_DIR/"
+if ! npx vitest run --config "$TEST_DIR/vitest.config.mts"; then
+  echo "payment-gate fixture check FAILED -- the generated x-payment record" >&2
+  echo "lifecycle (lib/payment/*.ts) no longer behaves as lifecycle.test.ts expects." >&2
+  exit 1
 fi
 
 exit 0

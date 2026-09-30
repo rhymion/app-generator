@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2017",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -13,17 +17,41 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "paths": {
-      "@/lib/stripe": ["./lib/stripe.ts"],
-      "@/lib/api-auth": ["./lib/api-auth.ts"],
-      "@/*": ["../*"]
+      "@/lib/stripe": [
+        "./lib/stripe.ts"
+      ],
+      "@/lib/api-auth": [
+        "./lib/api-auth.ts"
+      ],
+      "@/lib/prisma": [
+        "./lib/prisma.ts"
+      ],
+      "@/lib/payment/*": [
+        "./lib/payment/*"
+      ],
+      "@/lib/paid_widget/service": [
+        "./lib/entity-service.ts"
+      ],
+      "@/lib/paid_gadget/service": [
+        "./lib/entity-service.ts"
+      ],
+      "@/app/generated/prisma/client": [
+        "./prisma/.generated-client/client"
+      ],
+      "@/*": [
+        "../*"
+      ]
     }
   },
   "include": [
     "lib/stripe.ts",
+    "lib/payment/*.ts",
     "app/api/payment/checkout/route.ts",
     "app/api/webhooks/stripe/route.ts",
     "app/[locale]/payment/success/page.tsx",
     "app/[locale]/payment/cancel/page.tsx"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules"
+  ]
 }

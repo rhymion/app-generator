@@ -1,21 +1,31 @@
 // GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
 
 // x-payment: cancel page. Stripe Checkout sends the buyer here via the
-// `cancel_url` set in app/api/payment/checkout/route.ts. Copy comes from the
-// `Payment` i18n namespace (messages/*.json) -- edit the keys there, or
-// replace the markup with your own order-summary UI.
+// `cancel_url` (lib/payment/checkout.ts, which appends ?payable_id=...).
+// Visiting it expires the still-open Checkout Session; the
+// `checkout.session.expired` webhook then removes the unpaid record, so the
+// record is deleted in exactly one place. Copy comes from the `Payment` i18n
+// namespace (messages/*.json) -- edit the keys there, or replace the markup
+// with your own order-summary UI.
 
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { Link } from '@/i18n/navigation';
 import AppText from '@/components/ui/AppText';
+import { expirePendingCheckout } from '@/lib/payment/checkout';
 
 export default async function PaymentCancelPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ locale: string }>;
+  searchParams: Promise<{ payable_id?: string }>;
 }) {
   const { locale } = await params;
+  const { payable_id: payableId } = await searchParams;
   setRequestLocale(locale);
+  if (payableId) {
+    await expirePendingCheckout(payableId);
+  }
   const t = await getTranslations('Payment');
 
   return (

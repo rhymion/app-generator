@@ -1,81 +1,243 @@
-# Stripe payment integration — `x-payment` opt-in write-once stubs
+# Stripe payment integration — `x-payment` record lifecycle
 
-**Status: Implemented; verified against Stripe test mode**
-**Date: 2026-08-16 (updated 2026-09-29: dual-auth checkout, return pages, `stripe listen` instructions)**
+**Status: Implemented; the generator side is covered by the `payment_gate` fixture, the consumer side is verified against Stripe test mode separately**
+**Date: 2026-08-16 (updated 2026-09-30: Price from `stripe_price_id` only, server-side Price and quantity, promotion codes)**
 
 ## Scope decision
 
-Payments are not a default-schema feature. The generator does not generate
-a `Plan`/`Product`/`Purchase`-style entity, an authz/entitlement layer, or
-any payment UI. It provides a "plug-in point" only: a schema key
-(`x-payment`) that, when declared on any entity, causes five write-once
-stub files to be emitted the first time `generate-code` runs — the same
-write-once convention already used for
-`lib/<parent>/invalidate_handler.ts` (see
-`invalidate-no-handler-write-once-stub.md`).
-
-This mirrors how `x-generate.invalidate` is a plug-in point rather than
-generated domain behavior: the generator makes the wiring exist and build
-correctly; a human fills in the business logic.
+Payments are not a default-schema feature. Declaring `x-payment: true` on an
+entity ties that entity's record creation to a Stripe Checkout payment: a new
+record is provisional until Stripe confirms the payment, and is removed if the
+payment never happens. The generator does not generate a
+`Plan`/`Product`/`Purchase`-style entity or an entitlement layer.
 
 Scope is one-time purchases only (Checkout Session `mode: payment`).
 Subscription lifecycle handling (`invoice.paid`,
 `customer.subscription.deleted`, `invoice.payment_failed`, the
 `subscription_item.billing_period.start/end` fields, `billing_mode:
-'standard'`) is left for a consumer to add by hand if needed — out of
-scope for the generator stub.
+'standard'`) is left for a consumer to add by hand if needed. Restricting
+edits or deletes of a record after its payment succeeded is likewise not part
+of `x-payment`.
+
+## The record lifecycle
+
+1. **Create.** The entity's generated `add{Entity}()` service function
+   creates the row and, in the same transaction, a `payable` row with
+   `status: pending`. Every create path calls this one function — the form's
+   Server Action, `POST /api/{entity}`, bulk create, CSV import — so no path
+   creates a record that skips payment, and nothing but the webhook marks a
+   `payable` row paid.
+2. **Checkout.** After that transaction commits (a Stripe round trip never
+   runs inside a database transaction), `startPaymentCheckout()` creates the
+   Checkout Session and stores its id on the `payable` row. The single line
+   item is the record's Stripe Price and a quantity, both resolved on the
+   server (see "Where the Price and quantity come from"); the session sets
+   `allow_promotion_codes: true`, so the buyer can enter a Stripe promotion
+   code on the hosted page. `client_reference_id` and `metadata.payable_id`
+   both hold the `payable` row's id. If the session cannot be created, the record is removed through
+   the entity's own generated `delete{Entity}()` and the `payable` row is
+   deleted, and the caller gets an error.
+3. **Redirect.** The Server Action redirects the buyer to the hosted
+   Checkout URL. `POST /api/{entity}` returns `201` with
+   `{ "record": { ... }, "checkoutUrl": "https://checkout.stripe.com/..." }`
+   instead of the bare record (entities without `x-payment` are unchanged).
+4. **Confirm or remove.** `POST /api/webhooks/stripe` verifies the signature
+   and calls the generated `dispatchPaymentEvent()` inside one
+   `prisma.$transaction`:
+   - `checkout.session.completed` (when `payment_status` is `paid`) and
+     `checkout.session.async_payment_succeeded` set the `payable` row to
+     `paid`, stamp `paid_at` and record `session.amount_total` (the total
+     after any promotion code) and `session.currency`. The row is kept as
+     the permanent payment record.
+   - `checkout.session.expired` and `checkout.session.async_payment_failed`
+     delete the record through the entity's own `delete{Entity}()`, then the
+     `payable` row.
+   A failure inside the dispatch rolls the whole event back and the route
+   answers 500, so Stripe redelivers it.
+5. **Cancel page.** `/payment/cancel?payable_id=...` expires the still-open
+   session (`stripe.checkout.sessions.expire`). Removal itself still happens
+   only through the `checkout.session.expired` event, so the record is deleted
+   in exactly one place. `/payment/success` confirms nothing; it is a
+   plain page, because the webhook is the only thing guaranteed to arrive.
+
+Idempotency needs no separate table. A repeated success event for a `paid`
+row does nothing, and a repeated expiry event finds no `payable` row. An
+expiry event for a `paid` row never removes it.
+
+One window is left to Stripe's redelivery: the `payable` row holds the
+placeholder `pending:<record id>` until the real session id is attached, and
+an event for a session that is not attached yet finds no row. It is
+acknowledged and ignored, and a later delivery of the event matches.
+
+### Where the Price and quantity come from (no schema options)
+
+`x-payment` stays a bare boolean. There is no amount field: the Price is
+always a pre-created Stripe Price id, so discounts, promotion codes and other
+currencies are Stripe's own features on that Price and on the Checkout
+Session. The Price is found by the field name `stripe_price_id` (a required
+`string`), resolved at `generate-code` time in this order:
+
+1. **The entity itself** declares `stripe_price_id`. Every record of the
+   entity is charged at that one Price, supplied by the column's `default:`
+   (with a matching Prisma `@default(...)`), which is required. The field is
+   added to the entity's read-only fields automatically, so it is not a form
+   input and the REST `POST` and the Server Action reject a submitted value;
+   a buyer cannot choose the Price.
+2. **Exactly one related entity** declares it. `generate-code` scans the
+   entity's foreign keys (`x-relationship` fields), and the Price is read
+   through that relation on the server. `room_reservation` needs no price
+   field of its own when `room` declares `stripe_price_id`: a buyer's only
+   influence is which `room` the record points at, and each room carries its
+   own Price. Nothing about `x-reservation` is involved; a pool-allocated
+   `room_id` is an ordinary foreign key here.
+
+`generate-code` fails when the entity has neither, when more than one foreign
+key leads to an entity with `stripe_price_id` (two keys to the same entity
+count as two; the error names the entity and each key), when the field is not
+a `string` or is not required (or defaulted), when the own field has no
+`default:`, for the object form `x-payment: { ... }`, and for
+`x-generate.delete: false` (an unpaid record must be removable). Declaring
+`stripe_price_id` on the entity itself always wins over a related one. A Price
+that must differ per record but is not carried by a related entity is not
+supported. The field name lives in `code_generator/payment_config.py`; the
+generated `lib/payment/payment_source.ts` is the single runtime place that
+reads it.
+
+The quantity is decided by a write-once hook per `x-payment` entity,
+`lib/payment/<entity>_quantity.ts`:
+
+```ts
+export async function resolvePaidWidgetQuantity(_record: paid_widget): Promise<number> {
+  return 1;
+}
+```
+
+It runs on the server after the record's create transaction has committed, with
+the stored row, and never sees a client-submitted value. The default charges one
+unit of the Price per record. Edit the body when the count depends on the
+record, for example nights from a date range:
+`Math.max(1, Math.round((record.check_out.getTime() - record.check_in.getTime()) / 86_400_000))`.
+That expression counts elapsed 24-hour units, not calendar nights. It is exact
+for date-picker input (stored as UTC midnight) and absorbs a one-hour DST shift
+for same-time-of-day bookings, but a REST call with non-midnight times can
+disagree with the calendar: 22:00Z to 02:00Z two days later is 28 hours, so it
+rounds to one unit although it spans two calendar nights. A consumer that bills
+calendar nights compares UTC dates instead:
+`Math.max(1, Math.round((Date.UTC(co.getUTCFullYear(), co.getUTCMonth(), co.getUTCDate()) - Date.UTC(ci.getUTCFullYear(), ci.getUTCMonth(), ci.getUTCDate())) / 86_400_000))`,
+with `ci` and `co` the two dates.
+A result that is not a positive integer fails closed: no session is created and
+the caller gets an error. The hook returns one quantity today; charging several
+line items (a weekday and a weekend rate, for example) would widen its return
+type to a list of `{ priceId, quantity }` and `line_items` in
+`lib/payment/checkout.ts` to match, without moving where it is called from.
+
+### The `payable` model
+
+`generate.py` appends the `payable` model and `PayableStatus` enum to
+`prisma/schema.prisma` (idempotent, only when an entity declares
+`x-payment: true`), the same way `scheduled_task_run` is generated. It is
+generated on purpose: a model hand-written into the base `schema.prisma` is
+dropped from a consumer's `prj/prisma/schema.prisma` snapshot by `prj:sync`.
+A consumer writes its migration at deploy time.
+
+| Column | Notes |
+|---|---|
+| `id` | cuid; also the `client_reference_id` |
+| `entity_name`, `record_id` | The paying entity's row, by value (no foreign key: one table serves every `x-payment` entity). Unique together |
+| `status` | `pending` or `paid` |
+| `stripe_checkout_session_id` | Unique; the webhook's lookup key |
+| `amount`, `currency` | Filled from the Checkout Session; on payment they are overwritten with the paid `amount_total` (after any promotion code) and `currency` |
+| `created_at`, `paid_at` | |
+
+The declaring entity's own table gets no extra column, so every generated list,
+view and export path keeps working: a provisional record is an ordinary row
+whose `payable` row says `pending`.
+
+A consumer's `prj/prisma/schema.prisma` must also carry the `payable` model and
+the `PayableStatus` enum. The first `generate-code` appends them to
+app-generator's `prisma/schema.prisma`; from then on `prj:sync` refuses to run
+(`generate-code` exits non-zero) with
+`prisma/schema.prisma sync SKIPPED -- consumer's prj/prisma/schema.prisma is
+missing generator-side content that would be silently dropped ...: model
+payable`, because copying the consumer's file over would delete generator-side
+content. Copy the generated `payable` model and `PayableStatus` enum into
+`prj/prisma/schema.prisma` in the same pull request that bumps the submodule
+pointer for the first `x-payment` entity.
+
+### Interaction with `x-reservation`
+
+Item-mode `x-reservation` allocates inside `add{Entity}()`'s transaction, and its
+overlap check only looks at existing rows. A provisional record therefore holds
+its slot merely by existing, and deleting it releases the slot. Both removal
+paths (checkout failure and the webhook) call `delete{Entity}()`, never a raw
+Prisma delete, so `x-reservation` and any hand-written `afterDelete` run
+without payment-specific code.
 
 ## What `x-payment: true` generates
 
-Declaring `x-payment: true` on any entity in `json_schema.yaml` (see that
-file's own `x-payment` vocabulary block for the authoritative
-description) causes `generate.py` to write, once:
+`x-payment` is an entity-level data key (`_ENTITY_LEVEL_DATA_KEYS` in
+`build_user_schema.py`, copied onto the raw entity like `x-reservation`). The
+shared files below exist once per app, so `generate.py` scans every entity and
+emits them when any entity opted in.
 
+Always regenerated (not stubs):
+
+- `lib/payment/payment_source.ts` — reads an entity's Stripe Price id (from
+  itself or through a foreign key) and its quantity (via the hook below).
+- `lib/payment/checkout.ts` — `startPaymentCheckout()` and
+  `expirePendingCheckout()`.
+- `lib/payment/payment_webhook_dispatch.ts` — `dispatchPaymentEvent()`, one
+  statically imported `delete{Entity}()` branch per `x-payment` entity.
+- the `payable` model in `prisma/schema.prisma`.
+- `add{Entity}()`, `POST /api/{entity}` and the Server Action of each
+  `x-payment` entity carry the lifecycle above.
+
+Written once (write-once stubs; regeneration never overwrites edits):
+
+- `lib/payment/<entity>_quantity.ts` — one per `x-payment` entity; how many
+  units of the Price one record is charged for (default `1`).
 - `lib/stripe.ts` — Stripe SDK initialization. Fail-closed: throws when the
   client is first used (any `stripe.<method>(...)` call) if
   `STRIPE_SECRET_KEY` is unset, so a payment code path can never run
   silently half-configured. The client is constructed lazily behind a
   `Proxy`, not at module evaluation time -- see the "Lazy construction
   note" below for why.
-- `app/api/payment/checkout/route.ts` — Checkout Session creation stub
-  (`POST(req: NextRequest)`). Authenticates like every other generated API
-  route: `resolveActorId(req)` from `lib/api-auth.ts` accepts a valid
-  `X-API-Key` / Bearer header or a signed-in session, and errors go through
-  `handleApiError()` (an invalid API key returns 401). The `price_id` /
-  `line_items` are left as a `TODO` for the consumer to wire to their own
-  entity.
+- `app/api/payment/checkout/route.ts` — a standalone Checkout Session stub
+  (`POST(req: NextRequest)`) for a checkout that is not tied to an entity's
+  record; `x-payment` entities do not go through it. Authenticates like every
+  other generated API route: `resolveActorId(req)` accepts a valid `X-API-Key`
+  / Bearer header or a signed-in session, and errors go through
+  `handleApiError()`. The `price_id` / `line_items` are left as a `TODO`.
 - `app/[locale]/payment/success/page.tsx` and
   `app/[locale]/payment/cancel/page.tsx` — the pages Stripe sends the
-  buyer back to (the checkout stub's `success_url` / `cancel_url`). Their
-  copy comes from the `Payment` namespace in `messages/en.json` /
-  `messages/ja.json`; the pages are not public paths, so the buyer needs to
-  be signed in, as they were when creating the Checkout Session.
-- `app/api/webhooks/stripe/route.ts` — Webhook receiver stub. Verifies
-  the signature via `req.text()` → `stripe.webhooks.constructEvent(...)`
+  buyer back to. Their copy comes from the `Payment` namespace in
+  `messages/en.json` / `messages/ja.json`; the pages are not public paths, so
+  the buyer needs to be signed in, as they were when creating the Checkout
+  Session.
+- `app/api/webhooks/stripe/route.ts` — Webhook receiver. Verifies the
+  signature via `req.text()` → `stripe.webhooks.constructEvent(...)`
   (Next.js App Router route handlers have no raw `req.body` the way
-  Express does under `express.raw()` — reading as text is required).
-  Fails closed the same way as `lib/stripe.ts` if
-  `STRIPE_WEBHOOK_SECRET` is unset -- checked inside the `POST` handler,
-  not at module top level (see "Lazy construction note" below). Only
-  `checkout.session.completed` is wired by default; the business logic
-  inside that case is a `TODO`.
+  Express does under `express.raw()` — reading as text is required), then
+  calls `dispatchPaymentEvent()`. Fails closed the same way as
+  `lib/stripe.ts` if `STRIPE_WEBHOOK_SECRET` is unset -- checked inside the
+  `POST` handler, not at module top level (see "Lazy construction note"
+  below).
 
-All five are written via `_write_stub()` (write-once): once a consumer
-edits them, regeneration never overwrites the edits.
+### Migrating an existing webhook route
 
-## Why entity-level, not a top-level schema flag
-
-`x-payment` lives in `_ENTITY_LEVEL_DATA_KEYS` in `build_user_schema.py`
-(Category C, alongside `x-reservation`/`x-splittable`/`x-self-only`) —
-copied onto the reconstructed raw entity during the Stage 4 raw/view
-split, same as those. It is a boolean read directly off an entity
-definition (`defn.get('x-payment') is True`), not something that changes
-what pages/routes get generated for that entity itself — the five stub
-files it triggers are global (one `lib/stripe.ts`, not one per entity),
-so `generate.py` scans **all** entity definitions once
-(`_has_any_payment = any(...)`) and emits the stubs if any entity opted
-in, mirroring the existing `_has_any_mention` scan for the mention-parser
-utilities.
+`app/api/webhooks/stripe/route.ts` is the one write-once file that gained
+logic: an earlier version only verified the signature and did nothing with
+the event. Whether regeneration replaces it depends on the generator's
+manifest (`.generated-manifest.json`). If the file on disk still equals a
+render the manifest recorded for it, `generate-code` refreshes it
+automatically ("Refreshed (stale stub ...)"). If the manifest has no such
+record (for example after a fresh checkout that does not carry the manifest) or
+the file was edited, it is skipped, and the one-line change is made by hand:
+call `await dispatchPaymentEvent(event)` from `lib/payment/payment_webhook_dispatch`
+inside the signature-verified handler, answering 500 when it throws. Both
+outcomes were reproduced against the fixture. The file in the consumer that
+declares `x-payment` today (`app-template`) matched its manifest history, so
+it is refreshed by the next `generate-code`.
 
 ## Secrets
 
@@ -94,16 +256,18 @@ The Stripe CLI is a separate tool, not the `stripe` SDK package already in
 `package.json`: install it from the Stripe docs (or `npm install -g
 @stripe/cli`); do not add it to the app's `package.json`. Current CLI
 versions refuse `stripe listen` without an event selection, so list the
-events the webhook handles (only `checkout.session.completed` by default):
+events the webhook handles:
 
 ```
-stripe listen --events checkout.session.completed \
+stripe listen \
+  --events checkout.session.completed,checkout.session.async_payment_succeeded,checkout.session.async_payment_failed,checkout.session.expired \
   --forward-to localhost:<port>/api/webhooks/stripe
 ```
 
 Copy the `whsec_...` signing secret it prints into `STRIPE_WEBHOOK_SECRET`.
-When you add cases to the webhook's `switch` (subscription events, for
-example), add the same event names to `--events`.
+When you handle further event types (subscription events, for example), add
+the same event names to `--events`. In the Stripe Dashboard, subscribe the
+endpoint to the same four events.
 
 ## Lazy construction note (updated 2026-08-19: module-top-level throw removed)
 
@@ -185,71 +349,86 @@ longer does so by default.
 
 ## Verification
 
-`code_generator/tests/fixtures/payment_gate/` (`paid_widget` with
-`x-payment: true`, `plain_widget` without) run through the real
-`build_user_schema.py` → `generate.py` pipeline in
-`code_generator/tests/test_payment_gate_fixture.py`, asserting:
+`code_generator/tests/fixtures/payment_gate/` declares two `x-payment`
+entities (`paid_widget`, priced through its foreign key to `widget_catalog`,
+which carries `stripe_price_id`; `paid_gadget`, priced by its own
+`stripe_price_id` default) and a control entity without `x-payment`
+(`plain_widget`). It runs through the real `build_user_schema.py` →
+`generate.py` pipeline in `code_generator/tests/test_payment_gate_fixture.py`,
+asserting:
 
-- all five stub files are written when `x-payment: true` is declared
-- the checkout stub resolves the caller with `resolveActorId` (API key or
-  session) and its `success_url` / `cancel_url` targets both have a
-  generated page whose copy comes from the `Payment` i18n namespace
-  (present in both `messages/en.json` and `messages/ja.json`)
-- both stubs' fail-closed checks are present in the generated content
-- the webhook route's `STRIPE_WEBHOOK_SECRET` check is inside the `POST`
-  handler, not at module top level (regression guard for the module-eval
-  defect described in "Lazy construction note" above)
-- the exported `stripe` client is not constructed eagerly at module scope
-  (regression guard for the same defect)
+- all five stub files are written when `x-payment: true` is declared, and none
+  when no entity declares it (`invalidate_gate` is the negative control)
+- the `payable` model is generated once and only for `x-payment` schemas
+- for every `x-payment` entity, `add{Entity}()` creates the `payable` row and
+  opens the Checkout Session, the REST route and the Server Action both go
+  through it, and a checkout failure removes the record via `delete{Entity}()`;
+  the control entity has none of this
+- the webhook dispatcher has one branch per `x-payment` entity and none for the
+  control entity
+- the Price is read through the foreign key for `paid_widget` and off the
+  record for `paid_gadget`; the Checkout Session takes `{ price, quantity }`
+  with `allow_promotion_codes: true` and has no inline-amount branch
+- a quantity hook is written once per `x-payment` entity, defaults to `1`, and
+  keeps a hand edit across regeneration
+- `paid_gadget`'s own `stripe_price_id` is never client input: the REST route
+  and the Server Action reject a submitted value and the create data omits the
+  column, so the Prisma default is what is stored
+- validation fails for no Price source, an ambiguous related Price (different
+  or repeated foreign keys), a wrongly typed or optional Price field, an own
+  Price without a `default:`, an object-form `x-payment`, and
+  `x-generate.delete: false`; an `amount_cents` field is not a Price source
+- the checkout stub resolves the caller with `resolveActorId`, and its
+  `success_url` / `cancel_url` targets have generated pages whose copy comes
+  from the `Payment` i18n namespace (both `en.json` and `ja.json`)
+- the stubs' fail-closed checks are present, the webhook's
+  `STRIPE_WEBHOOK_SECRET` check is inside the `POST` handler, and the exported
+  `stripe` client is not constructed eagerly (regression guards for the
+  module-evaluation defect in "Lazy construction note")
 - a hand-edited `lib/stripe.ts` is not overwritten on a second run
-  (write-once)
-- no stub is written when no entity in the schema declares `x-payment`
-  (using `code_generator/tests/fixtures/invalidate_gate/`, which declares
-  no `x-payment` key anywhere, as the negative control)
 
-None of the fixture gates (`test:payment-gate` included) run an actual
-`next build` — they stop at `tsc --noEmit`, which cannot see the
-"Collecting page data" build step that surfaced the module-eval defect
-above (a full `next build` of even a minimal fixture app runs on the
-order of 30-60s, versus ~3s for the existing tsc-based check, and would
-need its own standalone Next.js app scaffold). The two pytest assertions
-listed above are a cheaper structural guard against the same defect class
-(a module-top-level throw reappearing in either stub) — chosen
-deliberately over adding `next build` to the fixture pipeline given that
-cost difference.
+`npm run test:payment-gate` (`scripts/check_payment_gate_fixture.sh`) runs the
+same fixture through `build_user_schema.py` → `generate.py` →
+`prisma generate` → `tsc --noEmit`, type-checking the generated
+`lib/payment/*.ts`, the stubs and the return pages against the installed
+`stripe` SDK and a real generated Prisma client (this is what catches an
+`apiVersion` literal going stale, see the API version note). It then runs
+`lifecycle.test.ts` with vitest against in-memory fakes of Prisma and Stripe,
+executing the generated code: a related entity's Price, or the record's own,
+is what the session is created with, and a missing related Price fails closed
+without creating a session; the quantity hook's result is the line-item
+quantity, and a quantity that is not a positive integer creates no session; the
+session allows promotion codes and the discounted `amount_total` is what a
+paid event records; a created record is `pending`; a paid event
+confirms it; a repeated paid event changes nothing; an expiry event (or a
+failed asynchronous payment) removes the record through the entity's delete
+function and the `payable` row; an event for one entity does not touch the
+other entity's pending row; an expiry after payment removes nothing; a retry
+finishes a removal a crash left half-done; the cancel page expires the session
+but leaves deletion to the expired event. The create-time rollback inside
+`add{Entity}()` is checked structurally by the pytest assertions above, not
+executed. It is a required, unconditional CI job (`payment-gate-fixture`).
 
-That test proves the stubs are *written* -- it does not type-check them.
-`npm run test:payment-gate` (`scripts/check_payment_gate_fixture.sh`) runs
-the same `payment_gate` fixture through the full
-`build_user_schema.py` → `generate.py` → `tsc --noEmit` pipeline and
-type-checks the actual generated `lib/stripe.ts` / checkout route /
-webhook route / return pages content against whatever `stripe` SDK version is installed
--- this is what catches an `apiVersion` literal going stale (see the API
-version note above) and any future change to the installed SDK's types
-that the stub content no longer satisfies. It is a required, unconditional
-CI job (`payment-gate-fixture`), same as the mention/decimal/OTO-mandatory/
-approval-lockdown gate fixtures.
+The fakes do not exercise Stripe itself, a real database, or
+`x-reservation`; those are checked in a consumer against Stripe test mode. Under
+Stripe's Adaptive Pricing it has not been measured whether `session.currency`
+holds the buyer's payment currency or the settlement currency.
 
-This repo's own `json_schema.yaml` declares no `x-payment` entity by
-default, so the stubs are never emitted by this repo's own
-`test:e2e:build`/`test:e2e:cy:api` gate runs — by design (opt-in, not a
-default-schema feature) -- `test:payment-gate` above exists specifically
-to cover that gap. The `stripe` npm package (originally added at `^22.5.0`,
-currently `^22.6.1` in `package.json` after subsequent dependency bumps) was
-added as a runtime dependency since `lib/stripe.ts` imports it unconditionally
-once written.
-
-## Verified against Stripe test mode
-
-The stubs have been exercised against Stripe test mode in a consumer app:
-a Checkout Session is created through `POST /api/payment/checkout`, a
-test-card payment completes, and `checkout.session.completed` is delivered
-to `/api/webhooks/stripe` through `stripe listen` and answered with 200.
-The generator repo itself still has no entity with `x-payment`, so its own
-gates cover the stubs through the `payment_gate` fixture only.
+This repo's own `json_schema.yaml` declares no `x-payment` entity, so its
+`test:e2e:build`/`test:e2e:cy:api` gate runs never emit these files;
+`test:payment-gate` exists to cover that gap. Neither gate runs a real
+`next build`: the "Collecting page data" step that surfaced the module-eval
+defect is not visible to `tsc --noEmit`, and a full `next build` of a minimal
+fixture app costs 30-60s against ~5s for the current check. The pytest
+assertions above are the cheaper structural guard for that defect class. The
+`stripe` npm package is a runtime dependency because `lib/stripe.ts` imports
+it unconditionally once written.
 
 ## Out of scope
 
-A sample payment-enabled entity in a consuming application, and the
-business logic inside the webhook's `checkout.session.completed` case, are
-left to each consumer.
+Subscriptions, several line items per record (differing weekday and weekend
+rates), a per-record Price that no related entity carries, restricting a record
+after payment, and showing a pending
+record differently in list or view screens (`payable.status` is available for
+it). A record whose Checkout Session never produces an event relies on Stripe
+expiring the session; no scheduled clean-up exists.

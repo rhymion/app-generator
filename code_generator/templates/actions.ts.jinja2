@@ -37,6 +37,13 @@ import { getAssociatedOrganizations } from '@/lib/organization/getters_associate
 {% if can_create or can_update %}
 export async function upsert{{ parent_pascal }}(data: FormData) {
 {{ upsert_body }}
+{% if is_payment and can_create %}
+
+  // x-payment: send the buyer to Stripe's hosted Checkout page.
+  if (_checkoutUrl) {
+    redirect(_checkoutUrl);
+  }
+{% endif %}
 
   redirect('/{{ parent }}');
 }

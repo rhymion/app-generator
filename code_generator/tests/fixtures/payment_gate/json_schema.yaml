@@ -16,9 +16,27 @@ definitions:
       name: {}
       email: {}
 
-  # The entity this fixture exists to exercise: x-payment: true must trigger
-  # the write-once Stripe integration stubs (lib/stripe.ts, checkout route,
-  # webhook route).
+  # The Price source for paid_widget: a related entity that carries the
+  # `stripe_price_id` (the room -> room_reservation shape). Given list/view
+  # pages -- generate_types.py's extract_entities() drops an entity whose
+  # every user-facing x-generate flag is False.
+  widget_catalog:
+    x-generate:
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name: {}
+      stripe_price_id: {}
+
+  # Exercises x-payment: true triggering the write-once Stripe integration
+  # stubs (lib/stripe.ts, checkout route, webhook route) and the record
+  # lifecycle (lib/payment/*, the payable model). It has no price field of
+  # its own: the Price is resolved server-side through its foreign key to
+  # widget_catalog, the only relation that carries `stripe_price_id`.
   paid_widget:
     x-generate:
       list: true
@@ -32,6 +50,31 @@ definitions:
     x-payment: true
     fields:
       name: {}
+      widget_catalog_id:
+        x-relationship:
+          type: many-to-one
+          target: widget_catalog
+          labelField: name
+
+  # A second x-payment entity, priced by its own `stripe_price_id` (the
+  # column's Prisma @default supplies the value, so it is excluded from client
+  # input and a buyer cannot pick the Price): proves one webhook dispatches to
+  # the right entity when more than one declares x-payment, and is the target
+  # of the price-tampering checks.
+  paid_gadget:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-payment: true
+    fields:
+      name: {}
+      stripe_price_id: {}
 
   # Same-run control: an entity with no x-payment key at all. The write-once
   # stubs are triggered by ANY entity in the schema declaring

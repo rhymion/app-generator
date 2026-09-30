@@ -5,6 +5,22 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Made `x-payment` create a provisional record that Stripe Checkout then
+  confirms or removes** (issue #775). Creating a record of an `x-payment`
+  entity, through the form or `POST /api/{entity}`, now stores it with a
+  `pending` row in a new generated `payable` table and opens a Checkout
+  Session. The form redirects to Stripe, and the API answers
+  `{ "record", "checkoutUrl" }` instead of the bare record. The webhook marks the
+  row `paid` on success and deletes the record through the entity's own delete
+  function when the session expires or the payment fails; a repeated event is
+  ignored, and several `x-payment` entities share one webhook. The Stripe Price is
+  a required `stripe_price_id` field on the entity or on the one related
+  entity that declares it, and `generate-code` fails otherwise; the quantity
+  comes from a generated write-once hook (default 1), and Checkout accepts
+  promotion codes. A consumer writes its migration for
+  `payable` at deploy time, and an existing `app/api/webhooks/stripe/route.ts`
+  is refreshed on regeneration only if it is unedited and recorded in the
+  manifest; otherwise add the `dispatchPaymentEvent(event)` call by hand.
 - **Made `depends_on` between scheduled tasks enforced at run time, and
   added direct-execution scripts and a GCP nightly trigger** (issue #712,
   follow-up to the generate-time validation from #713/#714). Every run of a
