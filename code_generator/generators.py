@@ -1114,10 +1114,20 @@ def actions_context(ctx: dict) -> dict:
             f"{indent}}}\n"
         )
 
+    # x-payment (Issue #775): a created record is provisional until paid, so
+    # the create branch keeps the Checkout URL add{Parent}() returns and the
+    # action redirects the buyer there (actions.ts.jinja2) instead of to the list.
+    is_payment = bool(ctx.get('is_payment')) and can_create
+    _create_call_expr = f'add{parent_pascal}(actorId, {parent_params}{full_child_args}{flatten_args_str})'
+    _create_stmt = (
+        f'_checkoutUrl = (await {_create_call_expr}).checkoutUrl;' if is_payment
+        else f'await {_create_call_expr};'
+    )
+
     def _upsert_body(has_ch: bool) -> str:
         _flatten_block = (f"{flatten_extractions_code}\n" if flatten_extractions_code else "")
         if can_create and can_update:
-            create_call = f'await add{parent_pascal}(actorId, {parent_params}{full_child_args}{flatten_args_str});'
+            create_call = _create_stmt
             update_call = f'await update{parent_pascal}(actorId, id, {parent_params}{full_child_args}{flatten_args_str}, srcSnapshotRaw);'
             if has_reservation:
                 if should_filter_by_org:
@@ -1274,10 +1284,7 @@ def actions_context(ctx: dict) -> dict:
                 + (f"{child_form_data_extractions}\n" if has_ch else "")
                 + _ro_reject_unguarded +
                 f"\n  const actorId = await getSessionUserIdOrThrow();\n"
-                + _wrap_call_with_catch(
-                    f'await add{parent_pascal}(actorId, {parent_params}{full_child_args}{flatten_args_str});',
-                    "  ",
-                )
+                + _wrap_call_with_catch(_create_stmt, "  ")
             )
 
     service_fns = [
@@ -1290,7 +1297,9 @@ def actions_context(ctx: dict) -> dict:
 
     return {
         'service_imports': service_imports,
-        'upsert_body': _upsert_body(has_children),
+        'upsert_body': (
+            '  let _checkoutUrl: string | undefined;\n' if is_payment else ''
+        ) + _upsert_body(has_children),
     }
 
 
@@ -3726,6 +3735,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         f" | '{reservation_config['pool']['entity']}'" if has_item_reservation and reservation_config else ''
     )
 
+    is_payment = bool(ctx.get('is_payment'))
     utility_code = (
         f"import prisma from '@/lib/prisma';\n"
         + (f"import {{ Prisma }} from '@/app/generated/prisma/client';\n" if has_item_reservation or can_create or can_update else '')
@@ -3771,6 +3781,8 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         # add{{ parent_pascal }}() must import the model's stub instead, same
         # as service_validation.ts's validateCustomRules import above.
         + (f"\nimport {{ afterCreate }} from '@/lib/{model}/service_after_create';" if can_create else '')
+        # x-payment (Issue #775): add{Parent}() opens the Checkout Session.
+        + ("\nimport { startPaymentCheckout } from '@/lib/payment/checkout';" if (is_payment and can_create) else '')
         # Idempotency-key support (ai-agent-integration-design.md) -- every
         # create-capable entity's add{{Entity}}() can be called with an
         # idempotency key from the route template; the check/record calls

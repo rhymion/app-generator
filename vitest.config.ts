@@ -23,6 +23,11 @@ export default defineConfig({
       //   lib/dashboard/catalog.ts, causing subsequent DashboardWidget.test imports to fail.
       //   Re-enable in isolated run (e.g. npm run test:flows) after ensuring catalog.ts exists.
       "**/test/flows/**",
+      // x-payment gate fixture: run by scripts/check_payment_gate_fixture.sh
+      // against generated code, with its own config (and the copy it stages
+      // under .generated-payment-gate/).
+      "code_generator/tests/fixtures/payment_gate/**",
+      ".generated-payment-gate/**",
     ],
   },
   resolve: {
