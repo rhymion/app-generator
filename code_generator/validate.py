@@ -27,7 +27,7 @@ from helpers.schema_helpers import (
 from helpers.state_machine_parser import ParseError, parse_state_machine_diagram
 from keys import x_approval as approval_key
 from manifest import sha256_file
-from payment_config import PAYMENT_AMOUNT_FIELD, PAYMENT_PRICE_ID_FIELD, PAYMENT_SOURCE_FIELDS
+from payment_config import PAYMENT_PRICE_ID_FIELD, resolve_payment_price_source
 from schema_deriver import parse_prisma_schema
 
 _SNAKE_CASE = re.compile(r'^(__)?[a-z][a-z0-9_]*$')
@@ -2568,10 +2568,12 @@ def validate_schema(schema: dict) -> None:
         )
 
     # -----------------------------------------------------------------------
-    # 15.7. x-payment (Issue #775): the record lifecycle needs an amount /
-    #       Price for the Checkout Session and a delete path to remove an
-    #       unpaid (provisional) record. x-payment stays a bare boolean; the
-    #       amount's source is a field-name convention (payment_config.py).
+    # 15.7. x-payment (Issue #775): the record lifecycle needs a Stripe Price
+    #       for the Checkout Session and a delete path to remove an unpaid
+    #       (provisional) record. x-payment stays a bare boolean; the Price's
+    #       source is a field-name convention (payment_config.py): the entity's
+    #       own `stripe_price_id`, else exactly one foreign key to an entity
+    #       that declares it.
     #       Checked on whichever definition carries the key (the raw '__x'
     #       half after build_user_schema.py, the bare entity otherwise).
     # -----------------------------------------------------------------------
@@ -2583,35 +2585,60 @@ def validate_schema(schema: dict) -> None:
         if xpay is not True and xpay is not False:
             errors.append(
                 f"Definition '{entity}': x-payment must be the boolean true (or false), got "
-                f"{xpay!r}. It takes no options: the amount comes from an "
-                f"'{PAYMENT_AMOUNT_FIELD}' or '{PAYMENT_PRICE_ID_FIELD}' field."
+                f"{xpay!r}. It takes no options: the Price comes from a "
+                f"'{PAYMENT_PRICE_ID_FIELD}' field."
             )
             continue
         if xpay is False:
             continue
         pay_props = get_entity_properties(def_key, schema)
         pay_required = get_entity_required(def_key, schema)
-        present = [n for n in PAYMENT_SOURCE_FIELDS if n in pay_props]
-        if len(present) != 1:
+        price_source = resolve_payment_price_source(pay_props, schema)
+        if price_source['kind'] == 'none':
             errors.append(
-                f"Definition '{entity}': x-payment: true requires exactly one of the fields "
-                f"'{PAYMENT_AMOUNT_FIELD}' (integer, price in the smallest currency unit) or "
-                f"'{PAYMENT_PRICE_ID_FIELD}' (string, a Stripe Price id) -- "
-                + ("found neither." if not present else "found both, which is ambiguous.")
+                f"Definition '{entity}': x-payment: true requires a '{PAYMENT_PRICE_ID_FIELD}' "
+                f"field (string, a Stripe Price id) on the entity itself or on exactly one entity "
+                f"it has a foreign key to -- found neither."
+            )
+        elif price_source['kind'] == 'ambiguous':
+            found = ', '.join(
+                f"'{c['fk_field']}' -> '{c['target']}'" for c in price_source['candidates']
+            )
+            errors.append(
+                f"Definition '{entity}': x-payment: true could not resolve "
+                f"'{PAYMENT_PRICE_ID_FIELD}' -- found it on more than one related entity via "
+                f"foreign keys {found}. The Price source must be unambiguous: remove one of the "
+                f"relationships, or declare '{PAYMENT_PRICE_ID_FIELD}' on '{entity}' itself."
             )
         else:
-            src_field = present[0]
-            want_type = PAYMENT_SOURCE_FIELDS[src_field][1]
-            got_type = (pay_props[src_field] or {}).get('type')
-            if got_type != want_type:
+            if price_source['kind'] == 'self':
+                price_owner, price_owner_props = entity, pay_props
+                price_owner_required = pay_required
+            else:
+                price_owner = price_source['target']
+                price_owner_props = get_entity_properties(price_owner, schema)
+                price_owner_required = get_entity_required(price_owner, schema)
+            price_def = price_owner_props[PAYMENT_PRICE_ID_FIELD] or {}
+            got_type = price_def.get('type')
+            if got_type != 'string':
                 errors.append(
-                    f"Definition '{entity}': x-payment field '{src_field}' must be of type "
-                    f"'{want_type}', got {got_type!r}."
+                    f"Definition '{price_owner}': x-payment field '{PAYMENT_PRICE_ID_FIELD}' must "
+                    f"be of type 'string', got {got_type!r}."
                 )
-            if src_field not in pay_required:
+            # A column with a default is non-nullable but not listed as
+            # required, so either one satisfies "always has a value".
+            if PAYMENT_PRICE_ID_FIELD not in price_owner_required and 'default' not in price_def:
                 errors.append(
-                    f"Definition '{entity}': x-payment field '{src_field}' must be required "
-                    f"(a non-nullable column) -- a record without it has nothing to charge."
+                    f"Definition '{price_owner}': x-payment field '{PAYMENT_PRICE_ID_FIELD}' must "
+                    f"be required (a non-nullable column) -- a record without it has nothing to charge."
+                )
+            if price_source['kind'] == 'self' and 'default' not in price_def:
+                errors.append(
+                    f"Definition '{entity}': x-payment field '{PAYMENT_PRICE_ID_FIELD}' must declare "
+                    f"a `default:` (with a matching Prisma @default). It is excluded from client "
+                    f"input so a buyer cannot choose the Price, and the default is what every "
+                    f"record is charged; to price per related record, declare the field on that "
+                    f"related entity instead."
                 )
         # x-generate lives on the bare entity after build_user_schema.py.
         pay_gen = (defs.get(entity, {}).get('x-generate') or defn.get('x-generate') or {})

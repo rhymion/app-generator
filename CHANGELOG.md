@@ -13,9 +13,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `{ "record", "checkoutUrl" }` instead of the bare record. The webhook marks the
   row `paid` on success and deletes the record through the entity's own delete
   function when the session expires or the payment fails; a repeated event is
-  ignored, and several `x-payment` entities share one webhook. The entity must
-  declare exactly one required `amount_cents` or `stripe_price_id` field, and
-  `generate-code` fails otherwise. A consumer writes its migration for
+  ignored, and several `x-payment` entities share one webhook. The Stripe Price is
+  a required `stripe_price_id` field on the entity or on the one related
+  entity that declares it, and `generate-code` fails otherwise; the quantity
+  comes from a generated write-once hook (default 1), and Checkout accepts
+  promotion codes. A consumer writes its migration for
   `payable` at deploy time, and an existing `app/api/webhooks/stripe/route.ts`
   is refreshed on regeneration only if it is unedited and recorded in the
   manifest; otherwise add the `dispatchPaymentEvent(event)` call by hand.

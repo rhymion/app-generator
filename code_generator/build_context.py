@@ -30,6 +30,7 @@ from helpers.schema_helpers import (
     resolve_set_fields,
 )
 from keys import x_approval as approval_key
+from payment_config import PAYMENT_PRICE_ID_FIELD
 from helpers.label_field import build_label_expression, render_prisma_include
 from helpers.bridge_direction import (
     collect_parent_bridge_fk_props, get_new_form_bridge,
@@ -1854,7 +1855,19 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         fn for fn, fp in filtered_props.items()
         if isinstance(fp, dict) and fp.get('x-readonly')
     }
-    readonly_fields: list[str] = sorted(_ro_from_entity | _ro_from_props | _server_value_prop_names)
+    # x-payment: the entity's own `stripe_price_id` is what every record is
+    # charged at, so it is never client input -- the column's default supplies
+    # it. Added here (not declared by the schema author) so it rides the same
+    # exclusion as x-readonly-fields. A Price on a *related* entity is not this
+    # entity's column and needs nothing here.
+    _ro_from_payment: set[str] = (
+        {PAYMENT_PRICE_ID_FIELD}
+        if model_def.get('x-payment') is True and PAYMENT_PRICE_ID_FIELD in filtered_props
+        else set()
+    )
+    readonly_fields: list[str] = sorted(
+        _ro_from_entity | _ro_from_props | _server_value_prop_names | _ro_from_payment
+    )
     # API route: select clause string and field list for AP-3=B readonly reject check.
     _api_ro_in_props = [f for f in readonly_fields if f in filtered_props]
     readonly_fields_api: list[str] = _api_ro_in_props

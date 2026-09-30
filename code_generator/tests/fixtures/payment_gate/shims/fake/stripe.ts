@@ -23,8 +23,7 @@ export const stripe = {
         const id = `cs_test_${stripeState.created.length}`;
         const url = `https://checkout.stripe.test/${id}`;
         stripeState.sessions.set(id, { status: 'open', url });
-        const line = params.line_items[0];
-        return { id, url, currency: 'usd', amount_total: line.price_data ? line.price_data.unit_amount : 9900 };
+        return { id, url, currency: 'usd', amount_total: 9900 };
       },
       async retrieve(id: string) {
         const s = stripeState.sessions.get(id);

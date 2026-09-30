@@ -1,7 +1,7 @@
 # Stripe payment integration — `x-payment` record lifecycle
 
 **Status: Implemented; the generator side is covered by the `payment_gate` fixture, the consumer side is verified against Stripe test mode separately**
-**Date: 2026-08-16 (updated 2026-09-29: record lifecycle, `payable` model, multi-entity webhook dispatch)**
+**Date: 2026-08-16 (updated 2026-09-30: Price from `stripe_price_id` only, server-side Price and quantity, promotion codes)**
 
 ## Scope decision
 
@@ -29,9 +29,12 @@ of `x-payment`.
    `payable` row paid.
 2. **Checkout.** After that transaction commits (a Stripe round trip never
    runs inside a database transaction), `startPaymentCheckout()` creates the
-   Checkout Session and stores its id on the `payable` row.
-   `client_reference_id` and `metadata.payable_id` both hold the `payable`
-   row's id. If the session cannot be created, the record is removed through
+   Checkout Session and stores its id on the `payable` row. The single line
+   item is the record's Stripe Price and a quantity, both resolved on the
+   server (see "Where the Price and quantity come from"); the session sets
+   `allow_promotion_codes: true`, so the buyer can enter a Stripe promotion
+   code on the hosted page. `client_reference_id` and `metadata.payable_id`
+   both hold the `payable` row's id. If the session cannot be created, the record is removed through
    the entity's own generated `delete{Entity}()` and the `payable` row is
    deleted, and the caller gets an error.
 3. **Redirect.** The Server Action redirects the buyer to the hosted
@@ -43,8 +46,9 @@ of `x-payment`.
    `prisma.$transaction`:
    - `checkout.session.completed` (when `payment_status` is `paid`) and
      `checkout.session.async_payment_succeeded` set the `payable` row to
-     `paid` and stamp `paid_at`. The row is kept as the permanent payment
-     record.
+     `paid`, stamp `paid_at` and record `session.amount_total` (the total
+     after any promotion code) and `session.currency`. The row is kept as
+     the permanent payment record.
    - `checkout.session.expired` and `checkout.session.async_payment_failed`
      delete the record through the entity's own `delete{Entity}()`, then the
      `payable` row.
@@ -65,22 +69,59 @@ placeholder `pending:<record id>` until the real session id is attached, and
 an event for a session that is not attached yet finds no row. It is
 acknowledged and ignored, and a later delivery of the event matches.
 
-### Where the amount comes from (no schema options)
+### Where the Price and quantity come from (no schema options)
 
-`x-payment` stays a bare boolean. The entity declares **exactly one** of two
-required fields, whose names are the convention:
+`x-payment` stays a bare boolean. There is no amount field: the Price is
+always a pre-created Stripe Price id, so discounts, promotion codes and other
+currencies are Stripe's own features on that Price and on the Checkout
+Session. The Price is found by the field name `stripe_price_id` (a required
+`string`), resolved at `generate-code` time in this order:
 
-| Field | Type | Meaning |
-|---|---|---|
-| `amount_cents` | integer | Per-record price in the smallest currency unit; sent as an inline `price_data` line item in `usd` |
-| `stripe_price_id` | string | A pre-created Stripe Price id, used as-is (the Price carries its own currency) |
+1. **The entity itself** declares `stripe_price_id`. Every record of the
+   entity is charged at that one Price, supplied by the column's `default:`
+   (with a matching Prisma `@default(...)`), which is required. The field is
+   added to the entity's read-only fields automatically, so it is not a form
+   input and the REST `POST` and the Server Action reject a submitted value;
+   a buyer cannot choose the Price.
+2. **Exactly one related entity** declares it. `generate-code` scans the
+   entity's foreign keys (`x-relationship` fields), and the Price is read
+   through that relation on the server. `room_reservation` needs no price
+   field of its own when `room` declares `stripe_price_id`: a buyer's only
+   influence is which `room` the record points at, and each room carries its
+   own Price. Nothing about `x-reservation` is involved; a pool-allocated
+   `room_id` is an ordinary foreign key here.
 
-`generate-code` fails when the entity declares neither field, both fields,
-the wrong field type, an optional field, the object form
-`x-payment: { ... }`, or `x-generate.delete: false` (an unpaid record must be
-removable). The field names live in `code_generator/payment_config.py`;
-the generated `lib/payment/payment_source.ts` is the single runtime place that
-reads them.
+`generate-code` fails when the entity has neither, when more than one foreign
+key leads to an entity with `stripe_price_id` (two keys to the same entity
+count as two; the error names the entity and each key), when the field is not
+a `string` or is not required (or defaulted), when the own field has no
+`default:`, for the object form `x-payment: { ... }`, and for
+`x-generate.delete: false` (an unpaid record must be removable). Declaring
+`stripe_price_id` on the entity itself always wins over a related one. A Price
+that must differ per record but is not carried by a related entity is not
+supported. The field name lives in `code_generator/payment_config.py`; the
+generated `lib/payment/payment_source.ts` is the single runtime place that
+reads it.
+
+The quantity is decided by a write-once hook per `x-payment` entity,
+`lib/payment/<entity>_quantity.ts`:
+
+```ts
+export async function resolvePaidWidgetQuantity(_record: paid_widget): Promise<number> {
+  return 1;
+}
+```
+
+It runs on the server after the record's create transaction has committed, with
+the stored row, and never sees a client-submitted value. The default charges one
+unit of the Price per record. Edit the body when the count depends on the
+record, for example nights from a date range:
+`Math.max(1, Math.round((record.check_out.getTime() - record.check_in.getTime()) / 86_400_000))`.
+A result that is not a positive integer fails closed: no session is created and
+the caller gets an error. The hook returns one quantity today; charging several
+line items (a weekday and a weekend rate, for example) would widen its return
+type to a list of `{ priceId, quantity }` and `line_items` in
+`lib/payment/checkout.ts` to match, without moving where it is called from.
 
 ### The `payable` model
 
@@ -97,7 +138,7 @@ A consumer writes its migration at deploy time.
 | `entity_name`, `record_id` | The paying entity's row, by value (no foreign key: one table serves every `x-payment` entity). Unique together |
 | `status` | `pending` or `paid` |
 | `stripe_checkout_session_id` | Unique; the webhook's lookup key |
-| `amount`, `currency` | Filled from the created session |
+| `amount`, `currency` | Filled from the Checkout Session; on payment they are overwritten with the paid `amount_total` (after any promotion code) and `currency` |
 | `created_at`, `paid_at` | |
 
 The declaring entity's own table gets no extra column, so every generated list,
@@ -122,7 +163,8 @@ emits them when any entity opted in.
 
 Always regenerated (not stubs):
 
-- `lib/payment/payment_source.ts` — reads an entity's amount / Price id.
+- `lib/payment/payment_source.ts` — reads an entity's Stripe Price id (from
+  itself or through a foreign key) and its quantity (via the hook below).
 - `lib/payment/checkout.ts` — `startPaymentCheckout()` and
   `expirePendingCheckout()`.
 - `lib/payment/payment_webhook_dispatch.ts` — `dispatchPaymentEvent()`, one
@@ -133,6 +175,8 @@ Always regenerated (not stubs):
 
 Written once (write-once stubs; regeneration never overwrites edits):
 
+- `lib/payment/<entity>_quantity.ts` — one per `x-payment` entity; how many
+  units of the Price one record is charged for (default `1`).
 - `lib/stripe.ts` — Stripe SDK initialization. Fail-closed: throws when the
   client is first used (any `stripe.<method>(...)` call) if
   `STRIPE_SECRET_KEY` is unset, so a payment code path can never run
@@ -287,8 +331,9 @@ longer does so by default.
 ## Verification
 
 `code_generator/tests/fixtures/payment_gate/` declares two `x-payment`
-entities (`paid_widget`, priced by `amount_cents`; `paid_gadget`, priced by
-`stripe_price_id`) and a control entity without `x-payment`
+entities (`paid_widget`, priced through its foreign key to `widget_catalog`,
+which carries `stripe_price_id`; `paid_gadget`, priced by its own
+`stripe_price_id` default) and a control entity without `x-payment`
 (`plain_widget`). It runs through the real `build_user_schema.py` →
 `generate.py` pipeline in `code_generator/tests/test_payment_gate_fixture.py`,
 asserting:
@@ -302,8 +347,18 @@ asserting:
   the control entity has none of this
 - the webhook dispatcher has one branch per `x-payment` entity and none for the
   control entity
-- validation fails for a missing, duplicated, wrongly typed or optional amount
-  field, an object-form `x-payment`, and `x-generate.delete: false`
+- the Price is read through the foreign key for `paid_widget` and off the
+  record for `paid_gadget`; the Checkout Session takes `{ price, quantity }`
+  with `allow_promotion_codes: true` and has no inline-amount branch
+- a quantity hook is written once per `x-payment` entity, defaults to `1`, and
+  keeps a hand edit across regeneration
+- `paid_gadget`'s own `stripe_price_id` is never client input: the REST route
+  and the Server Action reject a submitted value and the create data omits the
+  column, so the Prisma default is what is stored
+- validation fails for no Price source, an ambiguous related Price (different
+  or repeated foreign keys), a wrongly typed or optional Price field, an own
+  Price without a `default:`, an object-form `x-payment`, and
+  `x-generate.delete: false`; an `amount_cents` field is not a Price source
 - the checkout stub resolves the caller with `resolveActorId`, and its
   `success_url` / `cancel_url` targets have generated pages whose copy comes
   from the `Payment` i18n namespace (both `en.json` and `ja.json`)
@@ -320,7 +375,12 @@ same fixture through `build_user_schema.py` → `generate.py` →
 `stripe` SDK and a real generated Prisma client (this is what catches an
 `apiVersion` literal going stale, see the API version note). It then runs
 `lifecycle.test.ts` with vitest against in-memory fakes of Prisma and Stripe,
-executing the generated code: a created record is `pending`; a paid event
+executing the generated code: a related entity's Price, or the record's own,
+is what the session is created with, and a missing related Price fails closed
+without creating a session; the quantity hook's result is the line-item
+quantity, and a quantity that is not a positive integer creates no session; the
+session allows promotion codes and the discounted `amount_total` is what a
+paid event records; a created record is `pending`; a paid event
 confirms it; a repeated paid event changes nothing; an expiry event (or a
 failed asynchronous payment) removes the record through the entity's delete
 function and the `payable` row; an event for one entity does not touch the
@@ -331,7 +391,9 @@ but leaves deletion to the expired event. The create-time rollback inside
 executed. It is a required, unconditional CI job (`payment-gate-fixture`).
 
 The fakes do not exercise Stripe itself, a real database, or
-`x-reservation`; those are checked in a consumer against Stripe test mode.
+`x-reservation`; those are checked in a consumer against Stripe test mode. Under
+Stripe's Adaptive Pricing it has not been measured whether `session.currency`
+holds the buyer's payment currency or the settlement currency.
 
 This repo's own `json_schema.yaml` declares no `x-payment` entity, so its
 `test:e2e:build`/`test:e2e:cy:api` gate runs never emit these files;
@@ -345,7 +407,9 @@ it unconditionally once written.
 
 ## Out of scope
 
-Subscriptions, restricting a record after payment, and showing a pending
+Subscriptions, several line items per record (differing weekday and weekend
+rates), a per-record Price that no related entity carries, restricting a record
+after payment, and showing a pending
 record differently in list or view screens (`payable.status` is available for
 it). A record whose Checkout Session never produces an event relies on Stripe
 expiring the session; no scheduled clean-up exists.

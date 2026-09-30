@@ -1197,8 +1197,10 @@ def generate(schema_path: str, output_dir: str) -> None:
                 'module': parent,
                 'model': model,
                 'pascal_name': ctx['parent_pascal'],
-                'source_kind': ctx['payment_source_kind'],
-                'source_field': ctx['payment_source_field'],
+                'price_kind': ctx['payment_price_kind'],
+                'price_field': ctx['payment_price_field'],
+                'price_fk_field': ctx['payment_price_fk_field'],
+                'price_relation': ctx['payment_price_relation'],
                 # delete{Entity}(actorId, ids) when audited, else (ids).
                 'is_audited': bool(ctx.get('is_audited')),
             })
@@ -2092,8 +2094,20 @@ def generate(schema_path: str, output_dir: str) -> None:
         # --- x-payment record lifecycle (Issue #775) --- always regenerated
         # (not stubs): they depend on which entities declare x-payment.
         # lib/payment/payment_source.ts is the one place that reads an
-        # entity's amount / Price id.
+        # entity's Price id and quantity.
         _payment_ctx = {'payment_entities': payment_entities}
+        # One write-once quantity hook per x-payment entity: how many units of
+        # the resolved Price one record is charged for (default 1). Hand-edited
+        # for e.g. a per-night charge; never overwritten once it exists.
+        for _pay_e in payment_entities:
+            _qty_path = out / 'lib' / 'payment' / f"{_pay_e['entity_name']}_quantity.ts"
+            _write_stub(_qty_path, _render(env, 'payment_quantity_stub.ts.jinja2', _pay_e))
+            print(f"  Payment quantity hook → lib/payment/{_pay_e['entity_name']}_quantity.ts")
+            _note_stub_created(
+                _qty_path,
+                f"x-payment: true is declared on {_pay_e['entity_name']}.",
+                'Edit it if one record should be charged for more than one unit of the Price.',
+            )
         for _pay_tpl, _pay_out in (
             ('payment_source.ts.jinja2', 'payment_source.ts'),
             ('payment_checkout.ts.jinja2', 'checkout.ts'),

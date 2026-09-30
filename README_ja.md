@@ -65,7 +65,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - **承認後イベント発火** — `x-approval.on_approved.set_fields`（フィールド更新）および `x-approval.on_approved.emit_hook`（生成 `service_after_approve.ts` による カスタムロジック）；`approvable.approved_at` による冪等性保証。`x-approval-lines` は承認明細エンティティをインベントリ台帳操作に接続する作成前後のヘルパーを生成
 - **宣言的な書き込みロック値**（`x-write-locked-values`） — エンティティに `{field_name: [value, ...]}` 形式で注釈すると、通常の作成・更新がその値を直接書き込もうとした際に拒否される（画面・REST API・Server Action・CSV インポートすべてで強制）。値自体は選択肢として表示されたまま選択不可（disabled）になり、非表示にはならない；`x-approval` 由来のロック値との和集合として合成されるため、両方の仕組みが依存関係なく同一フィールドを同時に保護できる。詳細は [`docs/knowledge/x-write-locked-values-field-lockdown.md`](docs/knowledge/x-write-locked-values-field-lockdown.md) を参照してください
 - **終端却下**（`x-readonly-fields`） — エンティティが終端の却下状態に達した後にフィールドをロックするための注釈；却下時は `on_rejected_dispatch` 経由でワンスタブ（`service_after_reject_stub.ts`）を発火し、通知や在庫調整などのカスタムロジックに対応
-- **Stripe 決済**（`x-payment`、オプトイン） — エンティティへ `x-payment: true` を宣言すると、新規レコードは Stripe Checkout の支払いが確認されるまで仮の状態になり(フォームまたは REST API で作成、Webhook が確定または削除)、価格は `amount_cents` または `stripe_price_id` フィールドから取得；あわせて write-once の Stripe スタブと戻り先ページ `/payment/success`・`/payment/cancel` を生成、鍵未設定時は fail-closed；対応は一回払いのみ — 詳細は後述の[決済](#決済stripeオプトイン)を参照
+- **Stripe 決済**（`x-payment`、オプトイン） — エンティティへ `x-payment: true` を宣言すると、新規レコードは Stripe Checkout の支払いが確認されるまで仮の状態になり(フォームまたは REST API で作成、Webhook が確定または削除)、課金は Stripe Price(`stripe_price_id`。エンティティ自身または関連エンティティが持つ)とサーバー側で決める数量で行い、プロモーションコードに対応；あわせて write-once の Stripe スタブと戻り先ページ `/payment/success`・`/payment/cancel` を生成、鍵未設定時は fail-closed；対応は一回払いのみ — 詳細は後述の[決済](#決済stripeオプトイン)を参照
 
 ### パフォーマンス
 
@@ -315,9 +315,12 @@ Session が開かれます。フォームは購入者を Stripe のホスト画�
 `{ "record": ..., "checkoutUrl": ... }` を返します。その後、署名検証済みの Webhook が、
 支払い成功でレコードを確定し、セッション期限切れ・支払い失敗でレコードを削除します。
 複数のエンティティが `x-payment` を宣言でき、Webhook は 1 本で全てを受けます。
-エンティティには価格を与える必須フィールドをちょうど 1 つ持たせます:
-`amount_cents`(整数、最小通貨単位)または `stripe_price_id`(作成済みの Stripe Price)。
-満たさなければ `generate-code` は失敗します。生成器は `prisma/schema.prisma` へ
+課金対象は作成済みの Stripe Price で、必須の `stripe_price_id` フィールドからサーバー側で
+決まります。エンティティ自身が持つ場合(`default:` で固定、クライアント入力は不可)と、
+それを宣言している関連エンティティがちょうど 1 つある場合(例: `room_reservation` は
+`room` の Price で課金)があり、無い場合や複数ある場合は `generate-code` が失敗します。
+数量は write-once のフック `lib/payment/<entity>_quantity.ts`(既定は `1`)で決まり、
+Checkout では Stripe のプロモーションコードを入力できます。生成器は `prisma/schema.prisma` へ
 `payable` モデルを追加します。マイグレーションは配備時に書いてください。
 
 `generate-code` は初回実行時に 5 本の write-once スタブファイルも書き込みます

@@ -8,7 +8,7 @@
 
 import prisma from '@/lib/prisma';
 import { stripe } from '@/lib/stripe';
-import { resolvePaymentSource } from './payment_source';
+import { resolvePaymentQuantity, resolvePaymentSource } from './payment_source';
 
 // A payable row is created in add{Entity}()'s transaction, before any Stripe
 // session exists. stripe_checkout_session_id is unique, so it holds this
@@ -40,22 +40,15 @@ export async function startPaymentCheckout(entityName: string, recordId: string)
   }
 
   const source = await resolvePaymentSource(entityName, recordId);
+  const quantity = await resolvePaymentQuantity(entityName, recordId);
   const origin = process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
 
   const session = await stripe.checkout.sessions.create({
     mode: 'payment',
-    line_items: [
-      source.kind === 'amount'
-        ? {
-            price_data: {
-              currency: payable.currency,
-              unit_amount: source.amountCents,
-              product_data: { name: entityName },
-            },
-            quantity: 1,
-          }
-        : { price: source.priceId, quantity: 1 },
-    ],
+    line_items: [{ price: source.priceId, quantity }],
+    // Let the buyer enter a Stripe promotion code on the hosted page; the
+    // discounted total is what session.amount_total (recorded below) holds.
+    allow_promotion_codes: true,
     // The webhook needs the *record*, not the actor: both keys point at the
     // payable row, which names the entity and record.
     client_reference_id: payable.id,

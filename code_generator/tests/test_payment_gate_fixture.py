@@ -229,56 +229,176 @@ def test_webhook_dispatcher_routes_to_each_entitys_own_delete(tmp_path):
     assert 'deletePaidWidget' in dispatch and 'deletePaidGadget' in dispatch
 
 
+def test_price_is_read_through_the_related_entity_or_off_the_record_itself(tmp_path):
+    out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
+    source = (out / 'lib' / 'payment' / 'payment_source.ts').read_text()
+    # paid_widget has no price column: the Price is selected through its FK
+    # relation to widget_catalog, the only related entity that carries one.
+    assert 'select: { widget_catalog: { select: { stripe_price_id: true } } }' in source
+    # paid_gadget declares its own stripe_price_id.
+    assert "prisma.paid_gadget.findUnique({ where: { id: recordId }, select: { stripe_price_id: true } })" in source
+    assert 'amount' not in source.lower()
+
+
+def test_checkout_session_uses_price_and_server_quantity_with_promotion_codes(tmp_path):
+    out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
+    checkout = (out / 'lib' / 'payment' / 'checkout.ts').read_text()
+    assert 'line_items: [{ price: source.priceId, quantity }]' in checkout
+    assert 'allow_promotion_codes: true' in checkout
+    assert 'resolvePaymentQuantity(entityName, recordId)' in checkout
+    # No inline-amount path is left.
+    assert 'price_data' not in checkout and 'unit_amount' not in checkout
+    assert "currency: 'usd'" not in checkout
+
+
+def test_quantity_hook_is_written_once_per_payment_entity_and_defaults_to_one(tmp_path):
+    out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
+    for entity, pascal in (('paid_widget', 'PaidWidget'), ('paid_gadget', 'PaidGadget')):
+        hook = out / 'lib' / 'payment' / f'{entity}_quantity.ts'
+        assert hook.exists()
+        content = hook.read_text()
+        assert f'export async function resolve{pascal}Quantity(_record: {entity}): Promise<number>' in content
+        assert 'return 1;' in content
+    assert not (out / 'lib' / 'payment' / 'plain_widget_quantity.ts').exists()
+
+    # Write-once: a hand-edited hook survives regeneration.
+    hook = out / 'lib' / 'payment' / 'paid_widget_quantity.ts'
+    hand_edited = '// hand-edited\nexport async function resolvePaidWidgetQuantity() { return 3; }\n'
+    hook.write_text(hand_edited)
+    generate(str(out / 'generated_json_schema.yaml'), str(out))
+    assert hook.read_text() == hand_edited
+
+
+def test_own_price_field_is_never_client_input_but_a_related_price_needs_no_guard(tmp_path):
+    # A client must not be able to choose the Price. paid_gadget carries its own
+    # stripe_price_id, so it rides the read-only exclusion: the REST route and
+    # the Server Action reject a submitted value outright, and the create data
+    # never contains the column (the Prisma @default supplies it).
+    out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
+    route = (out / 'app' / 'api' / 'paid_gadget' / 'route.ts').read_text()
+    assert "body.stripe_price_id !== undefined" in route
+    assert 'read-only and cannot be set' in route
+    actions = (out / 'lib' / 'paid_gadget' / 'actions.ts').read_text()
+    assert "data.get('stripe_price_id') !== null" in actions
+    service = (out / 'lib' / 'paid_gadget' / 'service.ts').read_text()
+    add_body = service[service.index('export async function addPaidGadget'):]
+    add_body = add_body[:add_body.index('\nexport async function ')]
+    assert 'stripe_price_id' not in add_body
+
+    # paid_widget has no such column on its own row, so nothing to exclude:
+    # the only related input is which widget_catalog it points at.
+    widget_route = (out / 'app' / 'api' / 'paid_widget' / 'route.ts').read_text()
+    assert 'stripe_price_id' not in widget_route
+    assert 'widget_catalog_id' in widget_route
+
+
+def test_no_amount_field_is_recognised_any_more(tmp_path):
+    import pytest
+    from validate import validate_schema, SchemaValidationError
+
+    with pytest.raises(SchemaValidationError, match="requires a 'stripe_price_id'"):
+        validate_schema(_payment_schema({'amount_cents': {'type': 'integer'}}))
+
+
 def _payment_schema(props: dict, x_payment=True, extra: dict | None = None) -> dict:
     defn = {'properties': {'name': {'type': 'string'}, **props}, 'required': list(props), 'x-payment': x_payment}
     defn.update(extra or {})
     return {'definitions': {'booking': defn}}
 
 
-def test_x_payment_validation_fails_closed_without_an_amount_source():
+_PRICE = {'type': 'string', 'default': 'price_fixed'}
+
+
+def _fk(target: str) -> dict:
+    return {'type': 'string', 'x-relationship': {'type': 'many-to-one', 'target': target, 'labelField': 'name'}}
+
+
+def _priced_target() -> dict:
+    return {'properties': {'name': {'type': 'string'}, 'stripe_price_id': {'type': 'string'}}, 'required': ['stripe_price_id']}
+
+
+def test_x_payment_validation_fails_closed_without_a_price_source():
     import pytest
     from validate import validate_schema, SchemaValidationError
 
     with pytest.raises(SchemaValidationError) as exc:
         validate_schema(_payment_schema({}))
-    assert 'amount_cents' in str(exc.value) and 'stripe_price_id' in str(exc.value)
+    assert 'stripe_price_id' in str(exc.value) and 'found neither' in str(exc.value)
 
 
-def test_x_payment_validation_rejects_both_amount_sources():
-    import pytest
-    from validate import validate_schema, SchemaValidationError
-
-    with pytest.raises(SchemaValidationError) as exc:
-        validate_schema(_payment_schema({'amount_cents': {'type': 'integer'}, 'stripe_price_id': {'type': 'string'}}))
-    assert 'ambiguous' in str(exc.value)
-
-
-def test_x_payment_validation_accepts_exactly_one_amount_source():
+def test_x_payment_validation_accepts_own_price_or_exactly_one_related_price():
     from validate import validate_schema
 
-    validate_schema(_payment_schema({'amount_cents': {'type': 'integer'}}))
-    validate_schema(_payment_schema({'stripe_price_id': {'type': 'string'}}))
+    validate_schema(_payment_schema({'stripe_price_id': _PRICE}))
     validate_schema(_payment_schema({}, x_payment=False))
 
+    related = _payment_schema({'venue_id': _fk('venue')})
+    related['definitions']['venue'] = _priced_target()
+    validate_schema(related)
 
-def test_x_payment_validation_rejects_wrong_type_optional_and_object_form():
+
+def test_x_payment_validation_own_price_wins_over_a_related_one():
+    from validate import validate_schema
+
+    schema = _payment_schema({'stripe_price_id': _PRICE, 'venue_id': _fk('venue')})
+    schema['definitions']['venue'] = _priced_target()
+    validate_schema(schema)
+
+
+def test_x_payment_validation_rejects_an_ambiguous_related_price():
     import pytest
     from validate import validate_schema, SchemaValidationError
 
-    with pytest.raises(SchemaValidationError, match="must be of type 'integer'"):
-        validate_schema(_payment_schema({'amount_cents': {'type': 'string'}}))
-    optional = _payment_schema({'amount_cents': {'type': 'integer'}})
-    optional['definitions']['booking']['required'] = []
+    # Two related entities carry a Price.
+    schema = _payment_schema({'venue_id': _fk('venue'), 'catering_id': _fk('catering')})
+    schema['definitions']['venue'] = _priced_target()
+    schema['definitions']['catering'] = _priced_target()
+    with pytest.raises(SchemaValidationError) as exc:
+        validate_schema(schema)
+    message = str(exc.value)
+    assert "Definition 'booking'" in message
+    assert "'venue_id' -> 'venue'" in message and "'catering_id' -> 'catering'" in message
+    assert 'unambiguous' in message
+
+    # Two foreign keys to the same entity are just as ambiguous.
+    same = _payment_schema({'first_venue_id': _fk('venue'), 'second_venue_id': _fk('venue')})
+    same['definitions']['venue'] = _priced_target()
+    with pytest.raises(SchemaValidationError, match="'first_venue_id' -> 'venue', 'second_venue_id' -> 'venue'"):
+        validate_schema(same)
+
+
+def test_x_payment_validation_ignores_related_entities_without_a_price():
+    from validate import validate_schema
+
+    schema = _payment_schema({'venue_id': _fk('venue'), 'owner_id': _fk('owner')})
+    schema['definitions']['venue'] = _priced_target()
+    schema['definitions']['owner'] = {'properties': {'name': {'type': 'string'}}, 'required': []}
+    validate_schema(schema)
+
+
+def test_x_payment_validation_rejects_wrong_type_missing_default_and_object_form():
+    import pytest
+    from validate import validate_schema, SchemaValidationError
+
+    with pytest.raises(SchemaValidationError, match="must be of type 'string'"):
+        validate_schema(_payment_schema({'stripe_price_id': {'type': 'integer', 'default': 1}}))
+    # An own Price is excluded from client input, so it must carry a default.
+    with pytest.raises(SchemaValidationError, match='must declare a `default:`'):
+        validate_schema(_payment_schema({'stripe_price_id': {'type': 'string'}}))
+    # A related Price must be a non-nullable column.
+    related = _payment_schema({'venue_id': _fk('venue')})
+    related['definitions']['venue'] = _priced_target()
+    related['definitions']['venue']['required'] = []
     with pytest.raises(SchemaValidationError, match='must be required'):
-        validate_schema(optional)
+        validate_schema(related)
     with pytest.raises(SchemaValidationError, match='boolean true'):
-        validate_schema(_payment_schema({'amount_cents': {'type': 'integer'}}, x_payment={'amountField': 'x'}))
+        validate_schema(_payment_schema({'stripe_price_id': _PRICE}, x_payment={'priceField': 'x'}))
 
 
 def test_x_payment_validation_requires_delete_to_stay_enabled():
     import pytest
     from validate import validate_schema, SchemaValidationError
 
-    schema = _payment_schema({'amount_cents': {'type': 'integer'}}, extra={'x-generate': {'delete': False}})
+    schema = _payment_schema({'stripe_price_id': _PRICE}, extra={'x-generate': {'delete': False}})
     with pytest.raises(SchemaValidationError, match='x-generate.delete'):
         validate_schema(schema)

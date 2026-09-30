@@ -23,6 +23,8 @@ model user {
   id                  String        @id @default(cuid())
   name                String
   email               String        @unique
+  created_widget_catalogs widget_catalog[] @relation("WidgetCatalogCreator")
+  updated_widget_catalogs widget_catalog[] @relation("WidgetCatalogUpdater")
   created_paid_widgets  paid_widget[]  @relation("PaidWidgetCreator")
   updated_paid_widgets  paid_widget[]  @relation("PaidWidgetUpdater")
   created_paid_gadgets  paid_gadget[]  @relation("PaidGadgetCreator")
@@ -31,11 +33,29 @@ model user {
   updated_plain_widgets plain_widget[] @relation("PlainWidgetUpdater")
 }
 
-// x-payment: true -- must trigger the write-once Stripe stub files.
+// Carries the Stripe Price that paid_widget is charged at.
+model widget_catalog {
+  id              String        @id @default(cuid())
+  name            String
+  stripe_price_id String
+  paid_widgets    paid_widget[]
+  created_at      DateTime      @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime      @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user          @relation("WidgetCatalogCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user          @relation("WidgetCatalogUpdater", fields: [updater_id], references: [id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// x-payment: true -- must trigger the write-once Stripe stub files. Priced
+// through its foreign key to widget_catalog (no price column of its own).
 model paid_widget {
   id         String   @id @default(cuid())
   name       String
-  amount_cents Int
+  widget_catalog_id String
+  widget_catalog    widget_catalog @relation(fields: [widget_catalog_id], references: [id])
   created_at DateTime @default(now()) @db.Timestamptz(0)
   updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
@@ -44,13 +64,15 @@ model paid_widget {
   updater    user     @relation("PaidWidgetUpdater", fields: [updater_id], references: [id])
   @@index([creator_id])
   @@index([updater_id])
+  @@index([widget_catalog_id])
 }
 
-// x-payment: true, priced by stripe_price_id -- the second entity.
+// x-payment: true, priced by its own stripe_price_id (a fixed default) -- the
+// second entity.
 model paid_gadget {
   id         String   @id @default(cuid())
   name       String
-  stripe_price_id String
+  stripe_price_id String @default("price_gadget_fixed")
   created_at DateTime @default(now()) @db.Timestamptz(0)
   updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String

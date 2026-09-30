@@ -61,7 +61,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - **Approval event dispatch** — post-approval hooks (`x-approval.on_approved.set_fields`, `x-approval.on_approved.emit_hook`) with fire-once idempotency via `approvable.approved_at`; `x-approval-lines` generates matching pre-/post-create helpers that wire approval-line entities to inventory ledger operations
 - **Declarative write-locked values** (`x-write-locked-values`) — annotate an entity with `{field_name: [value, ...]}` to reject a plain create/update that writes one of those values directly (screen, REST API, Server Action, and CSV import all enforce it), while still rendering the value as a disabled — not hidden — form option; composes with `x-approval`'s own locked values as a union, so a field can be protected by either or both mechanisms at once, with no schema-authoring dependency between them; see [`docs/knowledge/x-write-locked-values-field-lockdown.md`](docs/knowledge/x-write-locked-values-field-lockdown.md)
 - **Terminal rejection** (`x-readonly-fields`) — annotate fields to lock them once an entity reaches a terminal rejected state; rejection fires a once-stub (`service_after_reject_stub.ts`) via `on_rejected_dispatch` for custom post-rejection logic (e.g. notifications, inventory adjustments)
-- **Stripe payments** (`x-payment`, opt-in) — declaring `x-payment: true` on an entity makes a new record provisional until Stripe Checkout confirms payment (created through the form or the REST API, confirmed or removed by the webhook), with the price taken from an `amount_cents` or `stripe_price_id` field; also generates write-once Stripe stubs and the `/payment/success` and `/payment/cancel` return pages, fail-closed on missing secrets; one-time purchases only — see [Payments](#payments-stripe-opt-in) below
+- **Stripe payments** (`x-payment`, opt-in) — declaring `x-payment: true` on an entity makes a new record provisional until Stripe Checkout confirms payment (created through the form or the REST API, confirmed or removed by the webhook), charged at a Stripe Price (`stripe_price_id`, on the entity or on a related entity) and a server-decided quantity, with promotion codes enabled; also generates write-once Stripe stubs and the `/payment/success` and `/payment/cancel` return pages, fail-closed on missing secrets; one-time purchases only — see [Payments](#payments-stripe-opt-in) below
 
 ### Performance
 
@@ -335,10 +335,13 @@ Checkout Session: the form redirects the buyer to Stripe's hosted page, and
 the API answers `{ "record": ..., "checkoutUrl": ... }`. The signature-verified
 webhook then confirms the record when the payment succeeds and deletes it when
 the session expires or the payment fails. Several entities can declare
-`x-payment`; one webhook serves them all. The entity must have exactly one
-required field that gives the price: `amount_cents` (integer, smallest currency
-unit) or `stripe_price_id` (a pre-created Stripe Price); `generate-code` fails
-otherwise. The generator adds a `payable` model to `prisma/schema.prisma` for
+`x-payment`; one webhook serves them all. The charge is a pre-created
+Stripe Price, resolved on the server from a required `stripe_price_id` field:
+either on the entity itself (fixed by its `default:`, never client input) or on
+the one related entity that declares it (for example `room_reservation` is
+priced by its `room`); `generate-code` fails if there is none or more than one.
+The quantity comes from a write-once hook, `lib/payment/<entity>_quantity.ts`
+(default `1`), and Checkout accepts Stripe promotion codes. The generator adds a `payable` model to `prisma/schema.prisma` for
 this; write your migration at deploy time.
 
 `generate-code` also writes five write-once stub files the first time it runs
