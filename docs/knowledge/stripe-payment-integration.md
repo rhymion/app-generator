@@ -55,10 +55,41 @@ of `x-payment`.
    A failure inside the dispatch rolls the whole event back and the route
    answers 500, so Stripe redelivers it.
 5. **Cancel page.** `/payment/cancel?payable_id=...` expires the still-open
-   session (`stripe.checkout.sessions.expire`). Removal itself still happens
-   only through the `checkout.session.expired` event, so the record is deleted
-   in exactly one place. `/payment/success` confirms nothing; it is a
-   plain page, because the webhook is the only thing guaranteed to arrive.
+   session (`stripe.checkout.sessions.expire`) and, only when Stripe reports
+   the session as `expired`, removes the record in the same request
+   (`removeUnpaidPayable()`: the entity's `delete{Entity}()`, then the
+   `payable` row). The page is an unauthenticated GET, so the query string
+   decides nothing on its own: a session Stripe reports as still open or as
+   complete (paid, or payment still processing) leaves the record in place,
+   and a `paid` row is never removed. The `checkout.session.expired` event
+   that follows finds no `payable` row and does nothing, so it stays as an
+   idempotent backstop rather than the only way a cancelled record goes away.
+   `/payment/success?session_id=...` is the mirror image: it retrieves the
+   session from Stripe and, only when Stripe returns it with
+   `payment_status: 'paid'`, marks the matching `payable` row `paid`
+   (`confirmPaidSession()`, the same function the completed-session webhook
+   uses). The `session_id` in the URL is only a lookup key; an unpaid session,
+   an id Stripe does not know, or a paid session no `payable` row names
+   confirms nothing. The completed event that follows finds the row already
+   `paid` and does nothing.
+6. **Abandoned checkout.** The session is created with `expires_at` 31
+   minutes ahead (`CHECKOUT_SESSION_LIFETIME_SECONDS` in `lib/payment/checkout.ts`;
+   Stripe accepts 30 minutes to 24 hours, in epoch seconds, and its default is
+   24 hours). A buyer who closes the tab without pressing Cancel releases the
+   record when the session expires, through the `checkout.session.expired`
+   event, so that path still depends on webhook delivery. A buyer who needs
+   more than about half an hour to pay finds the session expired.
+
+If the webhook is not delivered at all (for example no `stripe listen` in local
+development), a cancel from the cancel page still removes the record, but an
+abandoned checkout stays until the event arrives. A scheduled job that lists
+undelivered events is not implemented.
+
+The cancel and success pages are write-once files: an app generated before
+these changes keeps its old pages (the cancel page only expires the session; the
+success page is static). Copy the `removeUnpaidPayable` and
+`retrievePaidSession`/`confirmPaidSession` calls from the generated templates
+to get the new behaviour.
 
 Idempotency needs no separate table. A repeated success event for a `paid`
 row does nothing, and a repeated expiry event finds no `payable` row. An
@@ -184,10 +215,12 @@ Always regenerated (not stubs):
 
 - `lib/payment/payment_source.ts` — reads an entity's Stripe Price id (from
   itself or through a foreign key) and its quantity (via the hook below).
-- `lib/payment/checkout.ts` — `startPaymentCheckout()` and
-  `expirePendingCheckout()`.
-- `lib/payment/payment_webhook_dispatch.ts` — `dispatchPaymentEvent()`, one
-  statically imported `delete{Entity}()` branch per `x-payment` entity.
+- `lib/payment/checkout.ts` — `startPaymentCheckout()`,
+  `expirePendingCheckout()` (true only when Stripe confirms the session
+  expired) and `retrievePaidSession()` (the session only when Stripe reports
+  it paid).
+- `lib/payment/payment_webhook_dispatch.ts` — `dispatchPaymentEvent()`,
+  `confirmPaidSession()` and `removeUnpaidPayable()`, one statically imported `delete{Entity}()` branch per `x-payment` entity.
 - the `payable` model in `prisma/schema.prisma`.
 - `add{Entity}()`, `POST /api/{entity}` and the Server Action of each
   `x-payment` entity carry the lifecycle above.
@@ -501,8 +534,10 @@ confirms it; a repeated paid event changes nothing; an expiry event (or a
 failed asynchronous payment) removes the record through the entity's delete
 function and the `payable` row; an event for one entity does not touch the
 other entity's pending row; an expiry after payment removes nothing; a retry
-finishes a removal a crash left half-done; the cancel page expires the session
-but leaves deletion to the expired event. The create-time rollback inside
+finishes a removal a crash left half-done; the cancel page removes the record with no webhook delivered, but only when
+Stripe reports the session expired (an open or completed session, a paid
+payable and a repeat visit remove nothing), and the expired event that follows
+does nothing; the success page confirms a paid session with no webhook delivered, and confirms nothing for an unpaid, unknown or foreign session; the session is created with an `expires_at` of about 31 minutes. The create-time rollback inside
 `add{Entity}()` is checked structurally by the pytest assertions above, not
 executed. It is a required, unconditional CI job (`payment-gate-fixture`).
 

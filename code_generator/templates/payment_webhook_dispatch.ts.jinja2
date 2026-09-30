@@ -53,26 +53,44 @@ async function removeProvisionalRecord(entityName: string, recordId: string): Pr
   }
 }
 
+// Removes a payable that is still `pending`, and the record it guards. Shared
+// by the expired-session webhook and the cancel page, which calls it after
+// Stripe has confirmed the session expired. A payable that is already gone or
+// paid is left alone, so whichever of the two runs second does nothing.
+export async function removeUnpaidPayable(payableId: string): Promise<void> {
+  const payable = await prisma.payable.findUnique({ where: { id: payableId } });
+  if (!payable || payable.status !== 'pending') return;
+  await removeProvisionalRecord(payable.entity_name, payable.record_id);
+  await prisma.payable.deleteMany({ where: { id: payable.id, status: 'pending' } });
+}
+
+// Marks the payable a paid Checkout Session belongs to as `paid`. Shared by the
+// completed-session webhook and the success page, which calls it with a session
+// it just retrieved from Stripe. Only a row still `pending` is flipped, so
+// whichever of the two runs second does nothing.
+export async function confirmPaidSession(session: Stripe.Checkout.Session): Promise<void> {
+  // A completed session whose payment is still processing (a delayed payment
+  // method) is confirmed by async_payment_succeeded instead.
+  if (session.payment_status !== 'paid') return;
+  const payable = await findPayable(session);
+  if (!payable) return; // not one of ours
+  await prisma.payable.updateMany({
+    where: { id: payable.id, status: 'pending' },
+    data: {
+      status: 'paid',
+      paid_at: new Date(),
+      stripe_checkout_session_id: session.id,
+      ...(session.amount_total != null ? { amount: session.amount_total } : {}),
+      ...(session.currency ? { currency: session.currency } : {}),
+    },
+  });
+}
+
 export async function dispatchPaymentEvent(event: Stripe.Event): Promise<void> {
   switch (event.type) {
     case 'checkout.session.completed':
     case 'checkout.session.async_payment_succeeded': {
-      const session = event.data.object as Stripe.Checkout.Session;
-      // A completed session whose payment is still processing (a delayed
-      // payment method) is confirmed by async_payment_succeeded instead.
-      if (session.payment_status !== 'paid') return;
-      const payable = await findPayable(session);
-      if (!payable) return; // not one of ours
-      await prisma.payable.updateMany({
-        where: { id: payable.id, status: 'pending' },
-        data: {
-          status: 'paid',
-          paid_at: new Date(),
-          stripe_checkout_session_id: session.id,
-          ...(session.amount_total != null ? { amount: session.amount_total } : {}),
-          ...(session.currency ? { currency: session.currency } : {}),
-        },
-      });
+      await confirmPaidSession(event.data.object as Stripe.Checkout.Session);
       return;
     }
     case 'checkout.session.expired':
@@ -82,8 +100,7 @@ export async function dispatchPaymentEvent(event: Stripe.Event): Promise<void> {
       // Missing: not ours, or already removed by an earlier delivery.
       // Paid: an earlier event already confirmed it -- never remove that.
       if (!payable || payable.status !== 'pending') return;
-      await removeProvisionalRecord(payable.entity_name, payable.record_id);
-      await prisma.payable.deleteMany({ where: { id: payable.id, status: 'pending' } });
+      await removeUnpaidPayable(payable.id);
       return;
     }
     default:

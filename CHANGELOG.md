@@ -4,6 +4,20 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- **Made the `x-payment` cancel and success pages settle the record
+  themselves, and shortened the Checkout Session lifetime** (issue #789). Cancelling used to
+  delete the record only when a later `checkout.session.expired` webhook arrived,
+  so nothing was removed where no webhook is delivered. The generated cancel page
+  now expires the session and removes the record when Stripe reports it expired
+  (a session still open or already complete removes nothing); the webhook finds
+  nothing left to do. The success page likewise retrieves the session and marks
+  the record paid when Stripe reports it paid. Sessions are created with `expires_at` about 31 minutes
+  ahead instead of Stripe's 24-hour default, so a buyer who takes longer to pay
+  finds the session expired. The cancel page is write-once, so an existing app
+  keeps its old pages until it adds the `removeUnpaidPayable` and
+  `confirmPaidSession` calls by hand.
+
 ### Added
 - **Added an admin page for scheduled task runs** (issue #774, follow-up to
   #712). When a schema declares a scheduled task, `generate-code` now also
