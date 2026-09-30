@@ -250,6 +250,15 @@ time the code path actually runs, not at process/module boot -- see
 "Lazy construction note" below). Test keys (`sk_test_...`) are
 obtained from the Stripe Dashboard.
 
+Which file holds the three keys depends on `NODE_ENV`:
+
+| Environment | File | Notes |
+|-------------|------|-------|
+| Development (`next dev`) | `.env.local` | gitignored |
+| Test environment (`NODE_ENV=test`, `next start` from the E2E scripts) | `.env.test.local` | gitignored; `.env.local` is not loaded in this environment |
+
+`.env.test` is committed, so never put a key in it.
+
 ### Local webhook forwarding
 
 The Stripe CLI is a separate tool, not the `stripe` SDK package already in
@@ -264,10 +273,39 @@ stripe listen \
   --forward-to localhost:<port>/api/webhooks/stripe
 ```
 
-Copy the `whsec_...` signing secret it prints into `STRIPE_WEBHOOK_SECRET`.
-When you handle further event types (subscription events, for example), add
-the same event names to `--events`. In the Stripe Dashboard, subscribe the
-endpoint to the same four events.
+Copy the `whsec_...` signing secret it prints into `STRIPE_WEBHOOK_SECRET`
+(in the file from the table above).
+
+The forwarder has to be running whenever you exercise a payment locally:
+
+- **Without `stripe listen`, the app never learns what happened at Stripe.**
+  A successful payment leaves the `payable` row `pending` with `paid_at`
+  null. Cancelling from the Checkout page expires the Session at Stripe, but
+  the `checkout.session.expired` event never arrives, so the provisional
+  record is not deleted and its room stays held.
+- **`<port>` is the port the running server listens on.** In the test
+  environment that is `PORT` from `.env.test`, which differs per worktree;
+  it is not necessarily 3000.
+- **The signing secret is stable.** `stripe listen --print-secret` returns
+  the same `whsec_...` on every call for a given Stripe account and CLI
+  login, and it equals what `stripe listen` prints, so it can be set once. A
+  secret copied from a Dashboard endpoint is a different secret: it makes
+  every locally forwarded event fail signature verification.
+- When you handle further event types (subscription events, for example),
+  add the same event names to `--events`. In the Stripe Dashboard, subscribe
+  the endpoint to the same four events.
+
+How a broken setup shows up in the `stripe listen` output:
+
+| Output for a forwarded event | Cause |
+|------------------------------|-------|
+| `[400]` | `STRIPE_WEBHOOK_SECRET` differs from the value `stripe listen` prints |
+| `connection refused` | `--forward-to` port is not the port the server uses |
+| `[500]` (server log: `STRIPE_WEBHOOK_SECRET is not set`) | the secret is missing from the file the running environment loads |
+| nothing at all | `stripe listen` is not running |
+
+In every row the record stays `pending` and a cancelled reservation stays in
+place.
 
 ## Lazy construction note (updated 2026-08-19: module-top-level throw removed)
 

@@ -26,7 +26,8 @@ export async function POST(req: Request) {
     throw new Error(
       'STRIPE_WEBHOOK_SECRET is not set. Generate one with `stripe listen` ' +
       '(dev) or the Stripe Dashboard webhook settings (prod), then add it to ' +
-      '.env.local / your deployment env vars.'
+      '.env.test.local when running with NODE_ENV=test, .env.local for ' +
+      'development, or your deployment env vars.'
     );
   }
 

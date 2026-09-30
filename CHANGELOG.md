@@ -198,6 +198,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/generated-documentation-and-openapi-spec.md`.
 
 ### Changed
+- **Documented how to run `x-payment` payments locally.** The webhook forwarding
+  section of `docs/knowledge/stripe-payment-integration.md` now says what
+  happens without `stripe listen` (the record stays `pending`, a cancelled
+  reservation is not removed), which port and env file to use (the gitignored
+  `.env.test.local` under `NODE_ENV=test`), that the signing secret is stable
+  per Stripe account, and how a 400, a refused connection or a 500 shows up.
+  The webhook route's missing-secret error and `.env.example` name the right
+  file and list all four events.
 - **`getModelPermissions` (`lib/authz.ts`) now issues one `permission.findMany`
   query per (request, user) instead of one per model queried**, from a
   request-scoped permission-check performance investigation. A cross-entity
