@@ -16,7 +16,13 @@ from pathlib import Path
 
 from helpers.naming import to_camel_case, to_title_case
 from helpers.schema_helpers import filter_fields
-from nav_config import build_nav_config, nav_list_entities, upsert_nav_group_i18n
+from nav_config import (
+    build_nav_config,
+    nav_extra_entities,
+    nav_list_entities,
+    schema_declares_scheduled_tasks,
+    upsert_nav_group_i18n,
+)
 
 # The locale whose messages/*.json values ARE the schema-computed defaults
 # (see i18n/routing.ts defaultLocale). Every other locale file's newly-added
@@ -348,6 +354,58 @@ def _update_nav_group_i18n_file(path: Path, groups: list) -> tuple[bool, list[st
 # site-config.ts updater
 # ---------------------------------------------------------------------------
 
+# English defaults for the scheduled-task admin page's own text (the
+# `ScheduledTaskRun` namespace, written only when the schema declares a task).
+# Placeholders in braces are filled by the page/component; other locales get
+# these English strings until translated, like every other generated section.
+SCHEDULED_TASK_RUN_MESSAGES = {
+    'title': 'Scheduled tasks',
+    'forbidden': "You need the 'ScheduledTaskRunner' role to view scheduled task runs.",
+    'businessDate': 'Business date',
+    'show': 'Show',
+    'settingsNote': 'A run counts as stuck after {minutes} minutes. Change this in App Setting.',
+    'columnTask': 'Task',
+    'columnStatus': 'Status',
+    'columnStarted': 'Started',
+    'columnFinished': 'Finished',
+    'columnMessage': 'Message',
+    'columnWhy': 'Why',
+    'columnActions': 'Actions',
+    'statusRunning': 'Running',
+    'statusSucceeded': 'Succeeded',
+    'statusFailed': 'Failed',
+    'statusNotDue': 'Not due',
+    'statusStuck': 'Stuck',
+    'statusBlocked': 'Blocked',
+    'statusPending': 'Not run yet',
+    'whyBlocked': 'Waiting for {tasks}',
+    'whyRunning': 'Already running',
+    'whyStuck': 'Running for too long; the run may have crashed',
+    'whyNotDue': 'Not due tonight',
+    'whyPending': 'Has not been run for this date',
+    'rerun': 'Rerun',
+    'resolve': 'Mark resolved',
+    'skip': 'Skip',
+    'reasonLabel': 'Reason',
+    'reasonPlaceholder': 'Reason (required to skip)',
+    'confirmRerun': 'Rerun',
+    'confirmResolve': 'Mark as resolved without rerunning:',
+    'confirmSkip': 'Skip without running:',
+    'attentionTitle': 'Failed or stuck runs on other dates',
+    'attentionEmpty': 'No failed or stuck runs on other dates.',
+    'resultDone': 'Done.',
+    'resultUnknownTask': 'Unknown task.',
+    'resultNotAllowed': 'This action is not available for the current state of the run.',
+    'resultReasonRequired': 'A reason is required.',
+    'resultBlocked': 'Blocked: {tasks} has not succeeded for this date.',
+    'resultRunning': 'A run is already in progress.',
+    'resultFailed': 'The task failed: {detail}',
+    'resultNoActor': 'The scheduled-task system user is missing; run db:seed-baseline.',
+    'resultForbidden': "You need the 'ScheduledTaskRunner' role.",
+    'resultBadInput': 'Invalid request.',
+}
+
+
 def _update_site_config(path: Path, nav_entities: list, nav_config: dict) -> bool:
     content = path.read_text(encoding='utf-8')
 
@@ -443,12 +501,12 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
     """
     # Entities that appear in the sidebar nav — shared with cleanup.py's
     # own removal pass, see nav_config.nav_list_entities (cmd_817).
-    nav_entities = nav_list_entities(entities)
+    nav_entities = nav_list_entities(entities) + nav_extra_entities(schema)
 
     # EntityLabel keys for all entities (including alternate-model entities like setting*)
     entity_label_entries = {
         to_camel_case(e['parent']): to_title_case(e['parent'])
-        for e in entities
+        for e in entities + nav_extra_entities(schema)
     }
 
     # Nav keys (same set as nav_entities)
@@ -474,6 +532,8 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
     # Merge namespace-keyed sections rather than spreading (a spread would let a
     # colliding namespace clobber the other's entries entirely instead of merging).
     namespace_sections: dict[str, dict[str, str]] = {}
+    if schema_declares_scheduled_tasks(schema):
+        namespace_sections['ScheduledTaskRun'] = dict(SCHEDULED_TASK_RUN_MESSAGES)
     for ns_map in (native_enum_ns, custom_component_ns):
         for ns, ns_entries in ns_map.items():
             namespace_sections.setdefault(ns, {}).update(ns_entries)

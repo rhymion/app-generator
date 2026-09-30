@@ -252,6 +252,14 @@ def inject_bridge_into_schema(schema_prisma_path: Path, bridges: dict) -> None:
         print(f'  Injected bridge models/FKs → prisma/schema.prisma')
 
 
+# (template, output path) for the scheduled-task admin page; see nav_config.EXTRA_NAV_PARENT.
+_SCHEDULED_TASK_ADMIN_FILES = [
+    ('scheduled_task_admin.ts.jinja2', 'lib/scheduled-tasks/admin.ts'),
+    ('scheduled_task_admin_actions.ts.jinja2', 'app/[locale]/scheduled_task_run/actions.ts'),
+    ('scheduled_task_admin_page.tsx.jinja2', 'app/[locale]/scheduled_task_run/page.tsx'),
+    ('scheduled_task_admin_table.tsx.jinja2', 'components/scheduled_task_run/ScheduledTaskRunTable.tsx'),
+]
+
 _SCHEDULED_TASK_RUN_PRISMA = """// Scheduled-task completion records (generated when the schema declares any
 // x-scheduled-task / x-scheduled-tasks entry). One row per (task_id,
 // business_date): running -> succeeded | failed, or not_due (task:run-all
@@ -2504,6 +2512,11 @@ def generate(schema_path: str, output_dir: str) -> None:
     print('  Scheduled task completion-record guard → lib/scheduled-tasks/run-guard.ts')
     if all_scheduled_tasks:
         inject_scheduled_task_run_into_schema(out / 'prisma' / 'schema.prisma')
+        # Admin page over the completion records (run status, why a task did not
+        # run, rerun / mark resolved / skip). Emitted only with the table it reads.
+        for template, target in _SCHEDULED_TASK_ADMIN_FILES:
+            _write(out / target, _render(env, template, {}))
+        print('  Scheduled task admin page → app/[locale]/scheduled_task_run')
     _write(
         out / 'lib' / 'scheduled-tasks' / 'dependencies.ts',
         _render(env, 'scheduled_task_dependencies.ts.jinja2', {'scheduled_task_entities': all_scheduled_tasks}),

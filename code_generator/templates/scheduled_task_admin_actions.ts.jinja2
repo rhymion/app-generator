@@ -1,0 +1,39 @@
+'use server';
+
+// GENERATED — do not edit (regenerated on every `generate-code` run).
+// Server Actions behind the scheduled-task admin page. Each one is limited to
+// holders of the ScheduledTaskRunner role (lib/scheduled-tasks/access.ts) and
+// delegates to lib/scheduled-tasks/admin.ts, which audits it and runs it
+// through the same guard as a scheduled run.
+import { revalidatePath } from 'next/cache';
+import { getScheduledTaskOperatorId } from '@/lib/scheduled-tasks/access';
+import { markResolved, rerunTask, skipTask, type AdminActionResult } from '@/lib/scheduled-tasks/admin';
+import { parseBusinessDate } from '@/lib/scheduled-tasks/admin-view';
+
+export type ScheduledTaskActionResult = AdminActionResult | { ok: false; code: 'FORBIDDEN' | 'BAD_INPUT' };
+
+async function run(
+  taskId: string,
+  businessDate: string,
+  action: (operatorId: string, date: Date) => Promise<AdminActionResult>,
+): Promise<ScheduledTaskActionResult> {
+  const operatorId = await getScheduledTaskOperatorId();
+  if (!operatorId) return { ok: false, code: 'FORBIDDEN' };
+  const date = parseBusinessDate(businessDate);
+  if (typeof taskId !== 'string' || !taskId || !date) return { ok: false, code: 'BAD_INPUT' };
+  const result = await action(operatorId, date);
+  revalidatePath('/[locale]/scheduled_task_run', 'page');
+  return result;
+}
+
+export async function rerunScheduledTask(taskId: string, businessDate: string): Promise<ScheduledTaskActionResult> {
+  return run(taskId, businessDate, (operatorId, date) => rerunTask(operatorId, taskId, date));
+}
+
+export async function resolveScheduledTaskRun(taskId: string, businessDate: string, reason: string): Promise<ScheduledTaskActionResult> {
+  return run(taskId, businessDate, (operatorId, date) => markResolved(operatorId, taskId, date, String(reason ?? '')));
+}
+
+export async function skipScheduledTask(taskId: string, businessDate: string, reason: string): Promise<ScheduledTaskActionResult> {
+  return run(taskId, businessDate, (operatorId, date) => skipTask(operatorId, taskId, date, String(reason ?? '')));
+}

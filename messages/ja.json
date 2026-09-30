@@ -99,6 +99,8 @@
     "resubmit": "再申請",
     "role": "ロール",
     "roles": "ロール",
+    "scheduledTaskRecheckMinutes": "定時タスク再確認間隔（分）",
+    "scheduledTaskStuckAfterMinutes": "定時タスク停滞判定（分）",
     "seriesField": "系列項目",
     "stackMode": "積み上げモード",
     "status": "ステータス",

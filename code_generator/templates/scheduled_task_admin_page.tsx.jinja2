@@ -1,0 +1,82 @@
+// GENERATED — do not edit (regenerated on every `generate-code` run).
+// Admin page for scheduled task runs: per task and business date, the recorded
+// status, times and error, why a task did not run, and the operator actions
+// (rerun / mark resolved / skip). Limited to the ScheduledTaskRunner role.
+import { getTranslations } from 'next-intl/server';
+import { getScheduledTaskOperatorId } from '@/lib/scheduled-tasks/access';
+import { loadAdminOverview } from '@/lib/scheduled-tasks/admin';
+import { businessDateOf } from '@/lib/scheduled-tasks/run-guard';
+import { formatBusinessDate, parseBusinessDate, type TaskRunRow } from '@/lib/scheduled-tasks/admin-view';
+import ScheduledTaskRunTable, { type ScheduledTaskRunRowView } from '@/components/scheduled_task_run/ScheduledTaskRunTable';
+
+export const dynamic = 'force-dynamic';
+
+function toView(row: TaskRunRow): ScheduledTaskRunRowView {
+  return {
+    taskId: row.taskId,
+    businessDate: formatBusinessDate(row.businessDate),
+    status: row.status,
+    startedAt: row.startedAt?.toISOString() ?? null,
+    finishedAt: row.finishedAt?.toISOString() ?? null,
+    message: row.errorMessage,
+    blockedBy: row.blockedBy,
+    interval: row.interval,
+    actions: row.actions,
+  };
+}
+
+export default async function ScheduledTaskRunPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const t = await getTranslations('ScheduledTaskRun');
+  const operatorId = await getScheduledTaskOperatorId();
+  if (!operatorId) {
+    return (
+      <>
+        <h1>{t('title')}</h1>
+        <p id="scheduled-task-forbidden">{t('forbidden')}</p>
+      </>
+    );
+  }
+
+  const sp = await searchParams;
+  const rawDate = Array.isArray(sp.date) ? sp.date[0] : sp.date;
+  const businessDate = parseBusinessDate(rawDate) ?? businessDateOf();
+  const overview = await loadAdminOverview(businessDate);
+  const dateValue = formatBusinessDate(businessDate);
+
+  const keys = [
+    'columnTask', 'columnStatus', 'columnStarted', 'columnFinished', 'columnMessage', 'columnWhy', 'columnActions',
+    'statusRunning', 'statusSucceeded', 'statusFailed', 'statusNotDue', 'statusStuck', 'statusBlocked', 'statusPending',
+    'whyBlocked', 'whyRunning', 'whyStuck', 'whyNotDue', 'whyPending',
+    'rerun', 'resolve', 'skip', 'reasonLabel', 'reasonPlaceholder',
+    'resultDone', 'resultUnknownTask', 'resultNotAllowed', 'resultReasonRequired', 'resultBlocked', 'resultRunning',
+    'resultFailed', 'resultNoActor', 'resultForbidden', 'resultBadInput',
+    'confirmRerun', 'confirmResolve', 'confirmSkip',
+  ] as const;
+  // `raw`: some labels carry {placeholders} that the table fills in per row.
+  const labels = Object.fromEntries(keys.map((key) => [key, String(t.raw(key))]));
+
+  return (
+    <>
+      <h1>{t('title')}</h1>
+      <form method="get" id="scheduled-task-date-form">
+        <label htmlFor="scheduled-task-date">{t('businessDate')} </label>
+        <input id="scheduled-task-date" type="date" name="date" defaultValue={dateValue} />{' '}
+        <button type="submit">{t('show')}</button>
+      </form>
+      <p id="scheduled-task-settings-note">
+        {t('settingsNote', { minutes: overview.settings.stuckAfterMinutes })}
+      </p>
+      <ScheduledTaskRunTable rows={overview.rows.map(toView)} labels={labels} testId="scheduled-task-table" />
+      <h2>{t('attentionTitle')}</h2>
+      {overview.attention.length === 0 ? (
+        <p id="scheduled-task-attention-empty">{t('attentionEmpty')}</p>
+      ) : (
+        <ScheduledTaskRunTable rows={overview.attention.map(toView)} labels={labels} testId="scheduled-task-attention-table" showDate />
+      )}
+    </>
+  );
+}

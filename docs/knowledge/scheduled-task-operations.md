@@ -239,6 +239,74 @@ a consumer writes that migration when it deploys (the same cadence as any
 other schema change), not on every generator bump. Test databases pick the
 table up through `db:push`. A consumer that declares no task gets no table.
 
+## Admin page: run status, why a task did not run, and recovery
+
+When the schema declares a scheduled task, `generate-code` also writes an admin
+page at `/scheduled_task_run` (sidebar entry "Scheduled Task Run") over the
+`scheduled_task_run` table:
+
+- `app/[locale]/scheduled_task_run/page.tsx`, `actions.ts` and
+  `components/scheduled_task_run/ScheduledTaskRunTable.tsx`;
+- `lib/scheduled-tasks/admin.ts`, the data access and the three actions.
+
+Without a declared task none of these exist, like the table itself.
+
+**What it shows.** One row per declared task for a chosen business date
+(default: today, UTC; pick another with the date field or `?date=YYYY-MM-DD`),
+including tasks that have no record yet: status, started/finished time, the
+recorded message, and a "Why" column.
+
+| Status | Meaning | Why |
+|---|---|---|
+| Running | a `running` record younger than the stuck threshold | Already running |
+| Stuck | a `running` record older than the threshold | Running for too long; it may have crashed |
+| Succeeded / Failed | the stored status | (message column carries the error) |
+| Not due | a `not_due` record written by `task:run-all` | Not due tonight |
+| Blocked | no record, and a declared predecessor has no `succeeded`/`not_due` record | Waiting for the named predecessor(s) |
+| Not run yet | no record, nothing holding it back | Has not been run for this date |
+
+Below the table, failed and stuck records of **other** business dates are
+listed, newest first (at most 100), so a failure from last week is not lost
+just because the date field points at today.
+
+**Who can use it.** Only members of the `ScheduledTaskRunner` role, the same
+role that gates the generated HTTP route: grant it through the Role management
+UI. Anyone else sees a "you need the role" message and no sidebar entry, an
+Administrator included. The Server Actions re-check the role themselves.
+
+**Actions** (each writes an `audit_log` row: `scheduled_task_run.rerun` /
+`.resolve` / `.skip`, with the operator, task, business date and reason):
+
+| Action | Available for | Effect |
+|---|---|---|
+| Rerun | Failed, Stuck, Not due, Blocked, Not run yet | Runs the handler for the **recorded** business date (not today) through the same guard as any run, so a predecessor that has not succeeded still blocks it. A stuck `running` record is taken over. The handler runs inside the request, like a call to the HTTP route. |
+| Mark resolved | Failed, Stuck | Sets the record to `succeeded` without running anything, which releases successors waiting on it. The previous error is kept in the message. |
+| Skip | Failed, Stuck, Not due, Blocked, Not run yet | Records `succeeded` with no work done. A reason is required and is stored in the message (`Skipped: <reason>`). Works where no record exists, which is how a task that cannot run is stepped over. |
+
+Nothing is offered for a `succeeded` or a fresh `running` record. Mark resolved
+and skip both make the record `succeeded`; they differ in that skip also
+covers a task with no record, and requires a reason.
+
+**Operational settings.** Two nullable columns on the tenant-wide default
+`app_setting` row (`organization_id` NULL), edited through the App Setting UI
+with no regeneration:
+
+| Column | Default when NULL | Read by |
+|---|---|---|
+| `scheduled_task_stuck_after_minutes` | 60 | the admin page, to call a `running` record stuck |
+| `scheduled_task_recheck_minutes` | 5 | nothing yet |
+
+`scheduled_task_recheck_minutes` is stored for a predecessor wait/recheck, but
+the guard does not wait: a task behind an unmet predecessor is reported
+`blocked` and retried on the next run. Nothing reads the column today.
+
+**Consumer migration.** The two `app_setting` columns are added to the base
+`prisma/schema.prisma`; a consumer writes that migration when it deploys, like
+any other schema change. Test databases pick them up through `db:push`.
+
+**Not covered.** The page has no pagination beyond the 100-row attention list
+and does not change the ordering rules or the completion-record model.
+
 ## Running tasks directly: `task:run` and `task:run-all`
 
 ```sh

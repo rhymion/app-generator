@@ -148,6 +148,30 @@ def nav_list_entities(entities: list) -> list:
     return [e for e in entities if e['generate_config'].get('list', True)]
 
 
+# Sidebar link for the generated scheduled-task admin page. It is not a schema
+# entity (the `scheduled_task_run` table is injected by generate.py), so it is
+# added to the nav here instead of through nav_list_entities.
+EXTRA_NAV_PARENT = 'scheduled_task_run'
+
+
+def schema_declares_scheduled_tasks(schema: dict) -> bool:
+    """True when the schema has a top-level `x-scheduled-tasks` entry or any
+    entity-level `x-scheduled-task` — the same condition under which generate.py
+    emits the `scheduled_task_run` table and its admin page."""
+    if schema.get('x-scheduled-tasks'):
+        return True
+    return any(
+        isinstance(definition, dict) and definition.get('x-scheduled-task')
+        for definition in (schema.get('definitions') or {}).values()
+    )
+
+
+def nav_extra_entities(schema: dict) -> list:
+    """Nav entries that are not schema entities (see EXTRA_NAV_PARENT). Shared by
+    generate (generators_i18n) and cleanup, like nav_list_entities."""
+    return [{'parent': EXTRA_NAV_PARENT}] if schema_declares_scheduled_tasks(schema) else []
+
+
 def build_nav_config(entities: list, schema: dict) -> dict:
     """
     Parse `x-nav.parent`/`x-nav.order` off every entity plus the optional

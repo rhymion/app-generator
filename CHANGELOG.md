@@ -5,6 +5,19 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Added an admin page for scheduled task runs** (issue #774, follow-up to
+  #712). When a schema declares a scheduled task, `generate-code` now also
+  writes `/scheduled_task_run`: per task and business date it lists the
+  status, times and recorded error, says why a task did not run (blocked by a
+  named predecessor, already running, stuck, not due), and offers rerun (for
+  the recorded date, through the same guard), mark resolved and skip (with a
+  reason) for members of the `ScheduledTaskRunner` role. Every action is
+  written to the audit log. `app_setting` gains two nullable columns,
+  `scheduled_task_stuck_after_minutes` (when a `running` record counts as
+  stuck, default 60) and `scheduled_task_recheck_minutes` (stored, not read
+  yet); a consumer writes the migration when it deploys. The run guard accepts
+  an optional `businessDate`. See `docs/knowledge/scheduled-task-operations.md`.
+
 - **Made `depends_on` between scheduled tasks enforced at run time, and
   added direct-execution scripts and a GCP nightly trigger** (issue #712,
   follow-up to the generate-time validation from #713/#714). Every run of a

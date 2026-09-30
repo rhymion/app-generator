@@ -1,0 +1,198 @@
+'use client';
+
+// GENERATED — do not edit (regenerated on every `generate-code` run).
+// Table of scheduled task runs with the operator actions. The actions call the
+// Server Actions in app/[locale]/scheduled_task_run/actions.ts, which re-check
+// the ScheduledTaskRunner role on the server.
+import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
+import { AppAlert, AppButton, AppChip, AppTable, AppTableBody, AppTableCell, AppTableHead, AppTableRow } from '@/components/ui';
+import {
+  rerunScheduledTask,
+  resolveScheduledTaskRun,
+  skipScheduledTask,
+  type ScheduledTaskActionResult,
+} from '@/app/[locale]/scheduled_task_run/actions';
+
+export interface ScheduledTaskRunRowView {
+  taskId: string;
+  businessDate: string;
+  status: 'running' | 'succeeded' | 'failed' | 'not_due' | 'stuck' | 'blocked' | 'pending';
+  startedAt: string | null;
+  finishedAt: string | null;
+  message: string | null;
+  blockedBy: string[];
+  interval: string | null;
+  actions: { rerun: boolean; resolve: boolean; skip: boolean };
+}
+
+type Labels = Record<string, string>;
+
+const SCROLL_X = { overflowX: 'auto' } as const;
+
+const STATUS_LABEL_KEY: Record<ScheduledTaskRunRowView['status'], string> = {
+  running: 'statusRunning',
+  succeeded: 'statusSucceeded',
+  failed: 'statusFailed',
+  not_due: 'statusNotDue',
+  stuck: 'statusStuck',
+  blocked: 'statusBlocked',
+  pending: 'statusPending',
+};
+
+const STATUS_COLOR: Record<ScheduledTaskRunRowView['status'], 'default' | 'success' | 'error' | 'warning' | 'info'> = {
+  running: 'info',
+  succeeded: 'success',
+  failed: 'error',
+  not_due: 'default',
+  stuck: 'warning',
+  blocked: 'warning',
+  pending: 'default',
+};
+
+function whyText(row: ScheduledTaskRunRowView, labels: Labels): string {
+  switch (row.status) {
+    case 'blocked':
+      return labels.whyBlocked.replace('{tasks}', row.blockedBy.join(', '));
+    case 'running':
+      return labels.whyRunning;
+    case 'stuck':
+      return labels.whyStuck;
+    case 'not_due':
+      return labels.whyNotDue;
+    case 'pending':
+      return labels.whyPending;
+    default:
+      return '';
+  }
+}
+
+function resultMessage(result: ScheduledTaskActionResult, labels: Labels): string {
+  if (result.ok) return labels.resultDone;
+  const detail = 'detail' in result && result.detail ? result.detail : '';
+  switch (result.code) {
+    case 'UNKNOWN_TASK': return labels.resultUnknownTask;
+    case 'NOT_ALLOWED': return labels.resultNotAllowed;
+    case 'REASON_REQUIRED': return labels.resultReasonRequired;
+    case 'BLOCKED': return labels.resultBlocked.replace('{tasks}', detail);
+    case 'RUNNING': return labels.resultRunning;
+    case 'FAILED': return labels.resultFailed.replace('{detail}', detail);
+    case 'NO_ACTOR': return labels.resultNoActor;
+    case 'FORBIDDEN': return labels.resultForbidden;
+    case 'BAD_INPUT': return labels.resultBadInput;
+  }
+}
+
+export default function ScheduledTaskRunTable({
+  rows,
+  labels,
+  testId,
+  showDate = false,
+}: {
+  rows: ScheduledTaskRunRowView[];
+  labels: Labels;
+  testId: string;
+  showDate?: boolean;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [reasons, setReasons] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  const keyOf = (row: ScheduledTaskRunRowView) => `${row.taskId}|${row.businessDate}`;
+
+  function act(row: ScheduledTaskRunRowView, kind: 'rerun' | 'resolve' | 'skip') {
+    const confirmText = { rerun: labels.confirmRerun, resolve: labels.confirmResolve, skip: labels.confirmSkip }[kind];
+    if (!window.confirm(`${confirmText} ${row.taskId} (${row.businessDate})`)) return;
+    const reason = reasons[keyOf(row)] ?? '';
+    startTransition(async () => {
+      const result =
+        kind === 'rerun'
+          ? await rerunScheduledTask(row.taskId, row.businessDate)
+          : kind === 'resolve'
+            ? await resolveScheduledTaskRun(row.taskId, row.businessDate, reason)
+            : await skipScheduledTask(row.taskId, row.businessDate, reason);
+      setNotice({ ok: result.ok, text: resultMessage(result, labels) });
+      router.refresh();
+    });
+  }
+
+  return (
+    <>
+      {notice && (
+        <AppAlert severity={notice.ok ? 'success' : 'error'}>
+          <span data-testid="scheduled-task-notice">{notice.text}</span>
+        </AppAlert>
+      )}
+      <div data-testid={testId} style={SCROLL_X}>
+        <AppTable size="small" ariaLabel={labels.columnTask}>
+          <AppTableHead>
+            <AppTableRow>
+              <AppTableCell>{labels.columnTask}</AppTableCell>
+              <AppTableCell>{labels.columnStatus}</AppTableCell>
+              <AppTableCell>{labels.columnStarted}</AppTableCell>
+              <AppTableCell>{labels.columnFinished}</AppTableCell>
+              <AppTableCell>{labels.columnMessage}</AppTableCell>
+              <AppTableCell>{labels.columnWhy}</AppTableCell>
+              <AppTableCell>{labels.columnActions}</AppTableCell>
+            </AppTableRow>
+          </AppTableHead>
+          <AppTableBody>
+            {rows.map((row) => {
+              const canAct = row.actions.rerun || row.actions.resolve || row.actions.skip;
+              return (
+                <AppTableRow key={keyOf(row)}>
+                  <AppTableCell>
+                    <span data-testid={`task-${row.taskId}`}>{row.taskId}</span>
+                    {showDate ? ` (${row.businessDate})` : ''}
+                    {row.interval ? <div><small>{row.interval}</small></div> : null}
+                  </AppTableCell>
+                  <AppTableCell>
+                    <AppChip
+                      label={labels[STATUS_LABEL_KEY[row.status]]}
+                      color={STATUS_COLOR[row.status]}
+                      size="small"
+                    />
+                  </AppTableCell>
+                  <AppTableCell>{row.startedAt ?? ''}</AppTableCell>
+                  <AppTableCell>{row.finishedAt ?? ''}</AppTableCell>
+                  <AppTableCell>{row.message ?? ''}</AppTableCell>
+                  <AppTableCell>{whyText(row, labels)}</AppTableCell>
+                  <AppTableCell>
+                    {canAct && (
+                      <>
+                        {(row.actions.resolve || row.actions.skip) && (
+                          <input
+                            type="text"
+                            aria-label={labels.reasonLabel}
+                            placeholder={labels.reasonPlaceholder}
+                            value={reasons[keyOf(row)] ?? ''}
+                            onChange={(e) => setReasons((prev) => ({ ...prev, [keyOf(row)]: e.target.value }))}
+                          />
+                        )}
+                        {row.actions.rerun && (
+                          <AppButton size="small" variant="outlined" disabled={pending} onClick={() => act(row, 'rerun')}>
+                            {labels.rerun}
+                          </AppButton>
+                        )}
+                        {row.actions.resolve && (
+                          <AppButton size="small" variant="outlined" disabled={pending} onClick={() => act(row, 'resolve')}>
+                            {labels.resolve}
+                          </AppButton>
+                        )}
+                        {row.actions.skip && (
+                          <AppButton size="small" variant="outlined" disabled={pending} onClick={() => act(row, 'skip')}>
+                            {labels.skip}
+                          </AppButton>
+                        )}
+                      </>
+                    )}
+                  </AppTableCell>
+                </AppTableRow>
+              );
+            })}
+          </AppTableBody>
+        </AppTable>
+      </div>
+    </>
+  );
+}
