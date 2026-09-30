@@ -647,7 +647,7 @@ def _clean_appended_files(out: Path, entities: list, schema: dict) -> None:
 
     # Must retract the same nav entries generate added — shared with
     # generators_i18n.py's own generate-side filter, see
-    # nav_config.nav_list_entities (cmd_817).
+    # nav_config.nav_list_entities.
     nav_entities = nav_list_entities(entities) + nav_extra_entities(schema)
     nav_hrefs = [f'/{e["parent"]}' for e in nav_entities]
 
