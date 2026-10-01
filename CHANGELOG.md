@@ -5,6 +5,21 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Fixed
+- **Stopped asking adopters of `x-payment` to copy the `payable` model into
+  `prj/prisma/schema.prisma`** (issue #786). The second `generate-code` in an
+  app failed in `prj:sync` with `model payable` reported as dropped, because
+  the model is appended by the generator and the consumer snapshot had no copy.
+  `prj:sync` now treats the models `generate.py` appends itself (`payable`,
+  `scheduled_task_run`) as expected and lets the next `generate-code` append
+  them again. Every other missing model or field is still reported.
+- **Made the bulk routes reject read-only fields like the single routes do**
+  (issue #787). `POST .../bulk` used to drop a read-only field from an item and
+  report it as a success, while `POST` answered 400. A bulk create now fails an
+  item that carries a read-only field, and a bulk update fails an item whose
+  read-only value differs from the stored one, each with the single route's
+  message. This applies to every `x-readonly` / `x-readonly-fields` field, not
+  only payment fields. A client that relied on a bulk item silently ignoring a
+  read-only value now gets that item reported as failed.
 - **Made the `x-payment` cancel and success pages settle the record
   themselves, and shortened the Checkout Session lifetime** (issue #789).
   Cancelling used to delete the record only when a later

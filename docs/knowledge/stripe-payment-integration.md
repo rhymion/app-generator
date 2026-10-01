@@ -197,16 +197,13 @@ The declaring entity's own table gets no extra column, so every generated list,
 view and export path keeps working: a provisional record is an ordinary row
 whose `payable` row says `pending`.
 
-A consumer's `prj/prisma/schema.prisma` must also carry the `payable` model and
-the `PayableStatus` enum. The first `generate-code` appends them to
-app-generator's `prisma/schema.prisma`; from then on `prj:sync` refuses to run
-(`generate-code` exits non-zero) with
-`prisma/schema.prisma sync SKIPPED -- consumer's prj/prisma/schema.prisma is
-missing generator-side content that would be silently dropped ...: model
-payable`, because copying the consumer's file over would delete generator-side
-content. Copy the generated `payable` model and `PayableStatus` enum into
-`prj/prisma/schema.prisma` in the same pull request that bumps the submodule
-pointer for the first `x-payment` entity.
+A consumer does not copy the `payable` model into its own
+`prj/prisma/schema.prisma`. `prj:sync` knows the models `generate.py` appends
+itself (`GENERATOR_INJECTED_MODELS` in `scripts/prj_sync.py`: `payable` and
+`scheduled_task_run`) and does not count one as dropped when the consumer's
+snapshot lacks it; the next `generate-code` appends it again. The drop guard
+still reports every other model or field the snapshot is missing, and a
+snapshot that does carry `payable` is still compared field by field.
 
 ### Interaction with `x-reservation`
 

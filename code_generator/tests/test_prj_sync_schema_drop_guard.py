@@ -203,3 +203,83 @@ def test_prj_sync_no_prj_dir_is_still_a_noop_success(tmp_path):
     dst_dir.mkdir()
     rc = prj_sync.prj_sync(tmp_path / "does_not_exist", dst_dir)
     assert rc == 0
+
+
+# ---------------------------------------------------------------------------
+# Generator-injected models (Issue #786): generate.py appends `payable` /
+# `scheduled_task_run` to prisma/schema.prisma itself, so a consumer snapshot
+# that lacks them is not a drop.
+# ---------------------------------------------------------------------------
+
+CONSUMER_BASE = """\
+model user {
+  id    String @id @default(cuid())
+  email String @unique
+}
+"""
+
+# What the generator's schema looks like after the first generate-code on a
+# tree that declares x-payment: the consumer base plus the injected model.
+GENERATOR_AFTER_FIRST_GENERATE = CONSUMER_BASE + """
+model payable {
+  id        String @id @default(cuid())
+  record_id String
+  status    String
+}
+"""
+
+
+def test_diff_ignores_generator_injected_model_missing_from_consumer(tmp_path):
+    dst = _make_tree(tmp_path / "dst", "schema.prisma", GENERATOR_AFTER_FIRST_GENERATE)
+    src = _make_tree(tmp_path / "src", "schema.prisma", CONSUMER_BASE)
+
+    assert prj_sync._diff_prisma_schema_drop(dst, src) == []
+
+
+def test_diff_still_flags_non_injected_model_next_to_injected_one(tmp_path):
+    dst_text = GENERATOR_AFTER_FIRST_GENERATE + "\nmodel idempotency_key {\n  id String @id\n}\n"
+    dst = _make_tree(tmp_path / "dst", "schema.prisma", dst_text)
+    src = _make_tree(tmp_path / "src", "schema.prisma", CONSUMER_BASE)
+
+    assert prj_sync._diff_prisma_schema_drop(dst, src) == ["model idempotency_key"]
+
+
+def test_diff_still_compares_fields_of_injected_model_the_consumer_carries(tmp_path):
+    src_text = CONSUMER_BASE + "\nmodel payable {\n  id String @id @default(cuid())\n}\n"
+    dst = _make_tree(tmp_path / "dst", "schema.prisma", GENERATOR_AFTER_FIRST_GENERATE)
+    src = _make_tree(tmp_path / "src", "schema.prisma", src_text)
+
+    assert prj_sync._diff_prisma_schema_drop(dst, src) == ["payable.record_id", "payable.status"]
+
+
+def test_second_prj_sync_after_generate_code_does_not_fail_issue_786(tmp_path, capsys):
+    """The exact #786 sequence: generate-code has appended `payable` to the
+    generator schema, the consumer snapshot has no such model, prj:sync runs
+    again. It used to exit 1 (asking for a manual mirror); it must now copy
+    the consumer schema through and exit 0."""
+    prj_dir = tmp_path / "prj"
+    dst_dir = tmp_path / "generator_root"
+    _make_tree(prj_dir, "prisma/schema.prisma", CONSUMER_BASE)
+    _make_tree(dst_dir, "prisma/schema.prisma", GENERATOR_AFTER_FIRST_GENERATE)
+
+    rc = prj_sync.prj_sync(prj_dir, dst_dir)
+
+    assert rc == 0
+    assert (dst_dir / "prisma/schema.prisma").read_text(encoding="utf-8") == CONSUMER_BASE
+    assert "ERROR" not in capsys.readouterr().err
+
+
+def test_injected_model_list_matches_what_generate_py_injects():
+    """GENERATOR_INJECTED_MODELS must name exactly the models generate.py
+    appends, or the guard either demands a needless manual mirror (name
+    missing) or waves through a real drop (name added by mistake)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    import generate
+
+    injected: set[str] = set()
+    for attr in dir(generate):
+        value = getattr(generate, attr)
+        if attr.startswith("_") and attr.endswith("_PRISMA") and isinstance(value, str):
+            injected |= set(prj_sync._parse_prisma_models(value))
+
+    assert injected == set(prj_sync.GENERATOR_INJECTED_MODELS)
