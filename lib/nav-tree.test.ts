@@ -128,3 +128,45 @@ describe('nav-tree', () => {
     });
   });
 });
+
+describe('administration group (default site-config shape)', () => {
+  const adminHrefs = ['/user', '/role', '/permission', '/organization', '/approval_flow', '/dashboard', '/app_setting'];
+  const adminGroupHrefs = (tree: ReturnType<typeof buildRootTree>) => {
+    const node = tree.find((n) => n.kind === 'group' && n.group.slug === 'administration');
+    return node && node.kind === 'group' ? node.children.map((c) => (c.kind === 'link' ? c.link.href : '')) : null;
+  };
+  // Mirrors what generate-code writes for the default schema; kept literal so the
+  // test does not depend on whether lib/site-config.ts is currently generated.
+  const links: NavLink[] = [
+    { label: 'Home', href: '/', external: false },
+    { label: 'Audit Log', href: '/audit_log', group: 'administration', order: 80 },
+    ...adminHrefs.map((href, i) => ({ label: href.slice(1), href, group: 'administration', order: (i + 1) * 10 })),
+  ];
+  const groups: NavGroup[] = [{ slug: 'administration', labelKey: 'groups.administration', order: 900, icon: 'Settings' }];
+
+  it('renders as one group after the flat links when the viewer can see its entities', () => {
+    const tree = buildRootTree(links, groups);
+    expect(tree.some((n) => n.kind === 'group' && n.group.slug === 'administration')).toBe(true);
+    const flat = tree.filter((n) => n.kind === 'link').map((n) => (n.kind === 'link' ? n.link.href : ''));
+    expect(flat).toEqual(['/']);
+    expect(adminGroupHrefs(tree)).toEqual([...adminHrefs, '/audit_log']);
+  });
+
+  it('is not rendered when hiddenHrefs hides all eight administration links', () => {
+    const visible = links.filter((l) => !adminHrefs.includes(l.href) && l.href !== '/audit_log');
+    const tree = buildRootTree(visible, groups);
+    expect(tree.some((n) => n.kind === 'group' && n.group.slug === 'administration')).toBe(false);
+  });
+
+  it('is still rendered when only audit_log is visible, as the group\'s sole child', () => {
+    const visible = links.filter((l) => !adminHrefs.includes(l.href));
+    expect(adminGroupHrefs(buildRootTree(visible, groups))).toEqual(['/audit_log']);
+  });
+
+  it('negative control: an audit_log row without group/order stays a flat top-level link', () => {
+    const flatAudit = links.map((l) => (l.href === '/audit_log' ? { label: l.label, href: l.href } : l));
+    const tree = buildRootTree(flatAudit, groups);
+    expect(tree.filter((n) => n.kind === 'link').map((n) => (n.kind === 'link' ? n.link.href : ''))).toContain('/audit_log');
+    expect(adminGroupHrefs(tree)).toEqual(adminHrefs);
+  });
+});

@@ -149,6 +149,9 @@
     "appSetting": "業務日付設定",
     "auditLog": "監査ログ",
     "dashboard": "ダッシュボード",
+    "groups": {
+      "administration": "管理"
+    },
     "home": "ホーム",
     "organization": "組織",
     "permission": "権限",

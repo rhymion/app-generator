@@ -1,11 +1,11 @@
 # Nested Sidebar Navigation (`x-nav` / `x-nav-groups`)
 
-Generated apps render their sidebar as a flat list of entity links by
-default. This feature lets a schema group related entities under a
-collapsible heading, and lets those headings themselves nest into a
-multi-level tree. It is entirely additive: a schema that declares neither
-`x-nav` nor `x-nav-groups` produces zero groups, and every entity keeps its
-existing flat, top-level link — see [§9](#9-golden-diff-zero).
+Generated apps render their sidebar as a flat list of entity links unless
+the schema groups them. This feature lets a schema group related entities
+under a collapsible heading, and lets those headings themselves nest into a
+multi-level tree. The default schema groups its seven administration
+entities under one `administration` group; an entity with no `x-nav` keeps
+a flat, top-level link — see [§9](#9-default-administration-group).
 
 Implementation: `code_generator/nav_config.py` (schema parsing, validation,
 group-list construction), `code_generator/generators_i18n.py` (writes the
@@ -67,11 +67,20 @@ group).
   append/upsert-only and idempotent: `generate → cleanup → generate` must
   reproduce byte-for-byte identical output, and cleanup must restore the
   exact pre-generate baseline.
-- **D11.** The feature is golden-diff-zero: the default schema declares
-  no `x-nav`/`x-nav-groups` anywhere, so it produces no groups and no
-  behavior change from before this feature existed. At render time, a
-  group with no visible descendant link (recursively) is omitted rather
-  than shown as an empty heading.
+- **D11.** The default schema declares one group, `administration`
+  (order 900, icon `Settings`), and places `user` (10), `role` (20),
+  `permission` (30), `organization` (40), `approval_flow` (50),
+  `dashboard` (60) and `app_setting` (70) in it through ordinary `x-nav`
+  declarations — the same path business entities use, with no separate
+  menu code. Business entities in the default schema declare no `x-nav`.
+  The Audit Log link is a static row outside the schema; it carries
+  `group: "administration"` and `order: 80` directly in `lib/site-config.ts`,
+  so it renders as the last entry of the group. The Home link stays at the
+  top level. At render time, a group with no visible descendant link
+  (recursively) is omitted rather than shown as an empty heading, so a
+  viewer who can read none of the seven entities or Audit Log sees no
+  `administration` heading, while a viewer who can see only Audit Log sees
+  the heading with that single child.
 
 ## 1. Overview
 
@@ -323,16 +332,33 @@ used. A group's label instead resolves directly from its own `labelKey`
 field (§7.1) via `useTranslations("Nav")` — groups have no entry in
 `navTranslationKeys`.
 
-## 9. Golden-diff-zero
+## 9. Default administration group
 
 The default/dogfood schema (`code_generator/json_schema.yaml`) declares
-no `x-nav` and no `x-nav-groups` anywhere. With no group declared,
-`build_nav_config` returns `{'groups': [], 'entity_group': {}}` for every
-entity, and every entity keeps its pre-feature, flat top-level
-`NavLink` — no `group`/`order` field is added, no `NavGroup` entries
-exist, and the sidebar renders exactly as it did before this feature
-existed (D11). This is enforced as a standing precondition, not just
-asserted once: `code_generator/tests/test_nav_config.py`'s paired-entity
-regression test re-checks at import time that the live default schema
-still declares no `x-nav` on `organization` before mutating a copy of it
-to exercise the raw/view-split resolution path.
+`x-nav-groups.administration` and an `x-nav` on each of the seven
+administration entities (D11). `build_nav_config` therefore returns one
+group and seven `entity_group` entries for the default schema, and
+`lib/site-config.ts` carries `group: "administration"` plus the order on
+each of those links. `x-nav` sits on the definition key; for an entity
+split into a raw (`__`-prefixed) entity and a view, the lookup falls back
+to the raw entity, so the declaration resolves either way.
+
+Audit Log is the eighth entry but is not a schema entity, so `x-nav` cannot
+reach it: its `group` and `order` are written on its static row in
+`lib/site-config.ts`, which generate and cleanup never rewrite
+(`cleanup.HANDWRITTEN_ALLOWLIST`). A consumer cannot move it through the
+schema; it edits that row directly.
+
+A consumer schema overrides the placement by declaring `x-nav` on the same
+entity (a different `parent` or `order`) or by redeclaring
+`x-nav-groups.administration` (label order or icon). `_update_site_config`
+skips an href that already has a row, so after changing a declaration run
+`npm run cleanup` before `generate-code` to rewrite the existing rows.
+
+`code_generator/tests/test_admin_nav_group.py` covers the grouping, the
+`generate → cleanup → generate` byte-identity, the label seed that leaves a
+human translation alone, and the override, each with a control run on the
+default schema stripped of the declarations; it also asserts the tracked
+Audit Log row carries its group. `lib/nav-tree.test.ts` covers the group
+being omitted when all eight links are hidden, and rendered with Audit Log
+as its only child when that is the only visible link.

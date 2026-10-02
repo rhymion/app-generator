@@ -149,6 +149,9 @@
     "appSetting": "App Setting",
     "auditLog": "Audit Log",
     "dashboard": "Dashboard",
+    "groups": {
+      "administration": "Administration"
+    },
     "home": "Home",
     "organization": "Organization",
     "permission": "Permission",
