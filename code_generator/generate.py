@@ -3014,6 +3014,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             # callIndex reset task on the same condition test_helper.ts.jinja2
             # used to decide whether _reset{{ pascal }}CallSeq() exists at all.
             spec_ctx['primary_fk_dep'] = helper_ctx.get('primary_fk_dep')
+            spec_ctx['is_payment'] = payment_context(model, schema)['is_payment']
             _write(cypress_e2e / f'{parent}.cy.ts',
                    _prefix_unused_then_callback_params(_strip_unused_exact_re_helper(
                        _render(env, 'test_spec.cy.ts.jinja2', spec_ctx))))

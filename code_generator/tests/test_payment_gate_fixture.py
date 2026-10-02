@@ -486,3 +486,11 @@ def test_x_payment_fake_stripe_session_ids_are_unique_per_process(tmp_path):
     # restart, so ids must not restart from a bare counter.
     assert 'Math.random()' in fake
     assert '`${fakeStripeState.idPrefix}${fakeStripeState.created.length}`' in fake
+
+
+def test_x_payment_generated_ui_spec_follows_the_checkout_redirect(tmp_path):
+    out = _fixture_with_generated_tests(tmp_path)
+    spec = (out / 'cypress' / 'e2e' / 'paid_widget.cy.ts').read_text()
+    # A create redirects to the checkout URL (the success page under the fake
+    # client); both create tests must expect that, then return to the list.
+    assert spec.count("cy.url().should('include', '/payment/success');") == 2
