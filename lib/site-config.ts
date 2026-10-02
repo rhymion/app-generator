@@ -80,7 +80,7 @@ export const siteConfig = {
   /** Links listed in the sidebar navigation */
   navLinks: [
     { label: "Home", href: "/", external: false },
-    { label: "Audit Log", href: "/audit_log" },
+    { label: "Audit Log", href: "/audit_log", group: "administration", order: 80 },
       { label: "User", href: "/user", group: "administration", order: 10 },
     { label: "Role", href: "/role", group: "administration", order: 20 },
     { label: "Organization", href: "/organization", group: "administration", order: 40 },

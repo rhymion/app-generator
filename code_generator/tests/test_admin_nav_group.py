@@ -32,6 +32,8 @@ _ADMIN_ORDER = {
     'app_setting': 70,
 }
 
+_AUDIT_ROW = '{ label: "Audit Log", href: "/audit_log", group: "administration", order: 80 },'
+
 _BASELINE = '''export type NavLink = {
   label: string;
   href: string;
@@ -51,7 +53,7 @@ export type NavGroup = {
 export const siteConfig = {
   navLinks: [
     { label: "Home", href: "/", external: false },
-    { label: "Audit Log", href: "/audit_log" },
+    { label: "Audit Log", href: "/audit_log", group: "administration", order: 80 },
   ] satisfies NavLink[],
 
   navGroups: [
@@ -124,7 +126,7 @@ def test_generate_cleanup_generate_is_byte_identical(tmp_path: Path) -> None:
     for model, order in _ADMIN_ORDER.items():
         assert f'href: "/{model}", group: "administration", order: {order}' in first, model
     assert 'slug: "administration"' in first
-    assert '{ label: "Audit Log", href: "/audit_log" },' in first, 'audit_log stays a flat static row'
+    assert _AUDIT_ROW in first, 'audit_log keeps its static row, grouped, untouched by generate'
 
     cleanup._clean_site_config(
         path,
@@ -132,6 +134,7 @@ def test_generate_cleanup_generate_is_byte_identical(tmp_path: Path) -> None:
         [g['slug'] for g in nav_config['groups']],
     )
     assert path.read_text(encoding='utf-8') == _BASELINE, 'cleanup retracts every administration row and the group'
+    assert _AUDIT_ROW in path.read_text(encoding='utf-8'), 'cleanup leaves the static audit_log row alone'
 
     _generate_site_config(path, built)
     assert path.read_text(encoding='utf-8') == first
@@ -143,8 +146,9 @@ def test_negative_control_flat_links_without_declarations(tmp_path: Path) -> Non
     path.write_text(_BASELINE, encoding='utf-8')
     _generate_site_config(path, built)
     content = path.read_text(encoding='utf-8')
-    assert 'administration' not in content
+    assert 'slug: "administration"' not in content
     assert '{ label: "User", href: "/user" },' in content
+    assert _AUDIT_ROW in content, 'the static audit_log row keeps its own group even with no schema declarations'
 
 
 def test_group_label_seeded_without_overwriting_human_translation(tmp_path: Path) -> None:
@@ -168,3 +172,21 @@ def test_group_label_seeded_without_overwriting_human_translation(tmp_path: Path
     update_i18n_and_config(entities, built, out)
     ja_after = json.loads((messages / 'ja.json').read_text(encoding='utf-8'))
     assert ja_after['Nav']['groups']['administration'] == '管理'
+
+
+def test_tracked_site_config_groups_the_static_audit_log_row() -> None:
+    # audit_log is not a schema entity (cleanup.HANDWRITTEN_ALLOWLIST), so no x-nav can reach it:
+    # its group/order live on the static row in lib/site-config.ts itself. Cleanup only retracts
+    # generated rows, so this holds whether or not generate-code has run in this checkout.
+    content = (_REPO_ROOT.parent / 'lib' / 'site-config.ts').read_text(encoding='utf-8')
+    assert _AUDIT_ROW in content
+
+
+def test_negative_control_audit_log_row_without_group_is_flat(tmp_path: Path) -> None:
+    built = _build(tmp_path)
+    path = tmp_path / 'site-config.ts'
+    path.write_text(_BASELINE.replace(', group: "administration", order: 80', ''), encoding='utf-8')
+    _generate_site_config(path, built)
+    content = path.read_text(encoding='utf-8')
+    assert '{ label: "Audit Log", href: "/audit_log" },' in content
+    assert _AUDIT_ROW not in content

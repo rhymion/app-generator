@@ -44,11 +44,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `administration` group.** `user`, `role`, `permission`, `organization`,
   `approval_flow`, `dashboard` and `app_setting` now sit under a single
   collapsible "Administration" heading, declared in the default schema with the
-  same `x-nav` / `x-nav-groups` keys business entities use. Home and Audit Log
-  stay at the top level. A consumer schema moves or reorders them by
-  redeclaring `x-nav`; the heading is hidden when the viewer can read none of
-  the seven. Because the generator skips a link that already has a row, run
-  `npm run cleanup` before `generate-code` to pick the grouping up in an
+  same `x-nav` / `x-nav-groups` keys business entities use. Audit Log joins the
+  same group as its last entry; it is not a schema entity, so its placement is
+  set on its static row in `lib/site-config.ts` rather than through `x-nav`.
+  Only Home stays at the top level. A consumer schema moves or reorders the
+  seven entities by redeclaring `x-nav`, and edits the Audit Log row in
+  `lib/site-config.ts` directly; the heading is hidden when the viewer can read
+  none of the eight. Because the generator skips a link that already has a row,
+  run `npm run cleanup` before `generate-code` to pick the grouping up in an
   existing app.
 - **Added an admin page for scheduled task runs** (issue #774, follow-up to
   #712). When a schema declares a scheduled task, `generate-code` now also

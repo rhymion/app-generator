@@ -73,11 +73,14 @@ group).
   `dashboard` (60) and `app_setting` (70) in it through ordinary `x-nav`
   declarations — the same path business entities use, with no separate
   menu code. Business entities in the default schema declare no `x-nav`.
-  The Home and Audit Log links are static rows outside the schema and stay
-  at the top level. At render time, a group with no visible descendant link
+  The Audit Log link is a static row outside the schema; it carries
+  `group: "administration"` and `order: 80` directly in `lib/site-config.ts`,
+  so it renders as the last entry of the group. The Home link stays at the
+  top level. At render time, a group with no visible descendant link
   (recursively) is omitted rather than shown as an empty heading, so a
-  viewer who can read none of the seven entities sees no `administration`
-  heading.
+  viewer who can read none of the seven entities or Audit Log sees no
+  `administration` heading, while a viewer who can see only Audit Log sees
+  the heading with that single child.
 
 ## 1. Overview
 
@@ -340,6 +343,12 @@ each of those links. `x-nav` sits on the definition key; for an entity
 split into a raw (`__`-prefixed) entity and a view, the lookup falls back
 to the raw entity, so the declaration resolves either way.
 
+Audit Log is the eighth entry but is not a schema entity, so `x-nav` cannot
+reach it: its `group` and `order` are written on its static row in
+`lib/site-config.ts`, which generate and cleanup never rewrite
+(`cleanup.HANDWRITTEN_ALLOWLIST`). A consumer cannot move it through the
+schema; it edits that row directly.
+
 A consumer schema overrides the placement by declaring `x-nav` on the same
 entity (a different `parent` or `order`) or by redeclaring
 `x-nav-groups.administration` (label order or icon). `_update_site_config`
@@ -349,5 +358,7 @@ skips an href that already has a row, so after changing a declaration run
 `code_generator/tests/test_admin_nav_group.py` covers the grouping, the
 `generate → cleanup → generate` byte-identity, the label seed that leaves a
 human translation alone, and the override, each with a control run on the
-default schema stripped of the declarations. `lib/nav-tree.test.ts` covers
-the group being omitted when all seven links are hidden.
+default schema stripped of the declarations; it also asserts the tracked
+Audit Log row carries its group. `lib/nav-tree.test.ts` covers the group
+being omitted when all eight links are hidden, and rendered with Audit Log
+as its only child when that is the only visible link.
