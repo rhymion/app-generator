@@ -33,7 +33,7 @@ definitions:
       stripe_price_id: {}
 
   # Exercises x-payment: true triggering the write-once Stripe integration
-  # stubs (lib/stripe.ts, checkout route, webhook route) and the record
+  # stubs (lib/stripe.ts, webhook route) and the record
   # lifecycle (lib/payment/*, the payable model). It has no price field of
   # its own: the Price is resolved server-side through its foreign key to
   # widget_catalog, the only relation that carries `stripe_price_id`.

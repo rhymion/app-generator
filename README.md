@@ -344,11 +344,10 @@ The quantity comes from a write-once hook, `lib/payment/<entity>_quantity.ts`
 (default `1`), and Checkout accepts Stripe promotion codes. The generator adds a `payable` model to `prisma/schema.prisma` for
 this; write your migration at deploy time.
 
-`generate-code` also writes five write-once stub files the first time it runs
+`generate-code` also writes four write-once stub files the first time it runs
 (same convention as `lib/<parent>/invalidate_handler.ts` — edits survive
 regeneration): `lib/stripe.ts` (SDK init, fails closed if `STRIPE_SECRET_KEY`
-is unset), `app/api/payment/checkout/route.ts` (a standalone Checkout Session
-stub; accepts an API key or a session), `app/[locale]/payment/success/page.tsx`
+is unset), `app/[locale]/payment/success/page.tsx`
 and `app/[locale]/payment/cancel/page.tsx` (where Checkout sends the buyer
 back), and `app/api/webhooks/stripe/route.ts` (webhook receiver,
 signature-verified, fails closed if `STRIPE_WEBHOOK_SECRET` is unset). Scope is

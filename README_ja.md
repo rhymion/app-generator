@@ -323,11 +323,10 @@ Session が開かれます。フォームは購入者を Stripe のホスト画�
 Checkout では Stripe のプロモーションコードを入力できます。生成器は `prisma/schema.prisma` へ
 `payable` モデルを追加します。マイグレーションは配備時に書いてください。
 
-`generate-code` は初回実行時に 5 本の write-once スタブファイルも書き込みます
+`generate-code` は初回実行時に 4 本の write-once スタブファイルも書き込みます
 (`lib/<parent>/invalidate_handler.ts` と同じ規約 — 編集内容は再生成後も保持されます):
 `lib/stripe.ts`(SDK 初期化、`STRIPE_SECRET_KEY` 未設定時は fail-closed)、
-`app/api/payment/checkout/route.ts`(単独の Checkout Session 作成スタブ。API キーでも
-セッションでも認証可)、`app/[locale]/payment/success/page.tsx` と
+`app/[locale]/payment/success/page.tsx` と
 `app/[locale]/payment/cancel/page.tsx`(Checkout からの戻り先)、
 `app/api/webhooks/stripe/route.ts`(Webhook 受信、署名検証あり、
 `STRIPE_WEBHOOK_SECRET` 未設定時は fail-closed)。対応範囲は一回払いのみ

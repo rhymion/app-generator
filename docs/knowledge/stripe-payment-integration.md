@@ -246,12 +246,6 @@ Written once (write-once stubs; regeneration never overwrites edits):
   silently half-configured. The client is constructed lazily behind a
   `Proxy`, not at module evaluation time -- see the "Lazy construction
   note" below for why.
-- `app/api/payment/checkout/route.ts` — a standalone Checkout Session stub
-  (`POST(req: NextRequest)`) for a checkout that is not tied to an entity's
-  record; `x-payment` entities do not go through it. Authenticates like every
-  other generated API route: `resolveActorId(req)` accepts a valid `X-API-Key`
-  / Bearer header or a signed-in session, and errors go through
-  `handleApiError()`. The `price_id` / `line_items` are left as a `TODO`.
 - `app/[locale]/payment/success/page.tsx` and
   `app/[locale]/payment/cancel/page.tsx` — the pages Stripe sends the
   buyer back to. Their copy comes from the `Payment` namespace in
@@ -266,6 +260,22 @@ Written once (write-once stubs; regeneration never overwrites edits):
   `lib/stripe.ts` if `STRIPE_WEBHOOK_SECRET` is unset -- checked inside the
   `POST` handler, not at module top level (see "Lazy construction note"
   below).
+
+### No standalone Checkout route
+
+There is no `app/api/payment/checkout/route.ts`. Checkout is entered only
+through an `x-payment` entity's own create path (`startPaymentCheckout()` in
+`lib/payment/checkout.ts`), which takes the Price from the entity or its
+related entity, never from the request. A route that accepted a `price_id`
+from the caller would let any signed-in user or API key create a Checkout
+Session for any Price, so the generator no longer writes one.
+
+An app generated before this change may still have the file. `npm run
+cleanup` removes it when it is unchanged from what the generator wrote (it is
+recorded in `.generated-manifest.json`); an edited copy, or one left because
+`generate-code` ran without a prior `cleanup`, stays on disk. Nothing generated
+imports it, so delete `app/api/payment/checkout/route.ts` by hand unless the
+app deliberately uses it.
 
 ### Migrating an existing webhook route
 
@@ -419,8 +429,8 @@ function), and the webhook route stub did the same for
 `STRIPE_WEBHOOK_SECRET`. This broke `next build` in any consumer that
 declared `x-payment: true`: Next.js's "Collecting page data" build step
 evaluates every route module regardless of which HTTP methods it
-exports, so importing `app/api/payment/checkout/route.ts` (a `POST`-only
-route) pulled in `lib/stripe.ts`, whose top-level `throw` fired during
+exports, so importing a `POST`-only route such as the Checkout route this
+generator then wrote (since removed) pulled in `lib/stripe.ts`, whose top-level `throw` fired during
 the build itself whenever `STRIPE_SECRET_KEY` was unset -- as it normally
 is on a Vercel Preview deploy, so every Preview build for a consumer with
 `x-payment` declared failed outright.
@@ -448,9 +458,8 @@ Verified by reproducing the failure first: temporarily declaring
 `env -u STRIPE_SECRET_KEY -u STRIPE_WEBHOOK_SECRET -u
 STRIPE_PUBLISHABLE_KEY npm run build` reproduced the exact
 `Failed to collect page data for /api/payment/checkout` failure this note
-describes; after the fix, the same command succeeds with both
-`/api/payment/checkout` and `/api/webhooks/stripe` re-appearing in the
-build output, and a separate manual check confirmed
+describes; after the fix, the same command succeeds with the routes
+re-appearing in the build output, and a separate manual check confirmed
 `stripe.checkout.sessions.create(...)` still throws
 `STRIPE_SECRET_KEY is not set...` when actually invoked with the key
 unset.
@@ -499,7 +508,7 @@ which carries `stripe_price_id`; `paid_gadget`, priced by its own
 `generate.py` pipeline in `code_generator/tests/test_payment_gate_fixture.py`,
 asserting:
 
-- all five stub files are written when `x-payment: true` is declared, and none
+- all four stub files are written when `x-payment: true` is declared, and none
   when no entity declares it (`invalidate_gate` is the negative control)
 - the `payable` model is generated once and only for `x-payment` schemas
 - for every `x-payment` entity, `add{Entity}()` creates the `payable` row and
@@ -520,9 +529,11 @@ asserting:
   or repeated foreign keys), a wrongly typed or optional Price field, an own
   Price without a `default:`, an object-form `x-payment`, and
   `x-generate.delete: false`; an `amount_cents` field is not a Price source
-- the checkout stub resolves the caller with `resolveActorId`, and its
-  `success_url` / `cancel_url` targets have generated pages whose copy comes
-  from the `Payment` i18n namespace (both `en.json` and `ja.json`)
+- no standalone Checkout route is written, and nothing generated references
+  `/api/payment/checkout`
+- the `success_url` / `cancel_url` targets in `lib/payment/checkout.ts` have
+  generated pages whose copy comes from the `Payment` i18n namespace (both
+  `en.json` and `ja.json`)
 - the stubs' fail-closed checks are present, the webhook's
   `STRIPE_WEBHOOK_SECRET` check is inside the `POST` handler, and the exported
   `stripe` client is not constructed eagerly (regression guards for the

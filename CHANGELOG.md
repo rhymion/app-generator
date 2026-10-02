@@ -4,6 +4,17 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
+### Removed
+- **Stopped generating the standalone Checkout Session route
+  `app/api/payment/checkout/route.ts` for `x-payment`** (issue #785). Any signed-in
+  user or API key could POST an arbitrary `price_id` to it and get a Checkout
+  Session for any Price. Nothing generated called it: Checkout starts from the
+  `x-payment` entity's own create path (`lib/payment/checkout.ts`), which reads
+  the Price from the entity, so the payment flow is unchanged. An app generated
+  earlier keeps its copy unless `npm run cleanup` removes it (only when it is
+  unedited); delete `app/api/payment/checkout/route.ts` by hand if it is still
+  there and the app does not use it.
+
 ### Fixed
 - **Stopped asking adopters of `x-payment` to copy the `payable` model into
   `prj/prisma/schema.prisma`** (issue #786). The second `generate-code` in an
