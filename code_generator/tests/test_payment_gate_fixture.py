@@ -402,3 +402,47 @@ def test_x_payment_validation_requires_delete_to_stay_enabled():
     schema = _payment_schema({'stripe_price_id': _PRICE}, extra={'x-generate': {'delete': False}})
     with pytest.raises(SchemaValidationError, match='x-generate.delete'):
         validate_schema(schema)
+
+
+def test_x_payment_checkout_goes_through_the_switchable_stripe_client(tmp_path):
+    out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
+    checkout = (out / 'lib' / 'payment' / 'checkout.ts').read_text()
+    # The lifecycle must not import the write-once lib/stripe.ts directly: that
+    # file is never regenerated, so an existing consumer would not get the switch.
+    assert "from './stripe_client'" in checkout
+    assert "from '@/lib/stripe'" not in checkout
+
+
+def test_x_payment_fake_stripe_switch_is_explicit_and_refuses_live(tmp_path):
+    out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
+    client = (out / 'lib' / 'payment' / 'stripe_client.ts').read_text()
+    assert (out / 'lib' / 'payment' / 'fake_stripe.ts').exists()
+    # Off unless the explicit variable is exactly 1, and never keyed on NODE_ENV
+    # (a hand run against real test keys shares NODE_ENV=test with the gate).
+    assert "env.PAYMENT_FAKE_STRIPE === '1'" in client
+    assert 'process.env.NODE_ENV' not in client
+    # Fail-closed in a live environment.
+    assert "VERCEL_ENV === 'production'" in client
+    assert 'sk_live_' in client
+    assert 'throw new Error(' in client
+    # The real client is the default branch.
+    assert 'return realStripe;' in client
+
+
+def test_x_payment_fake_stripe_never_reaches_the_network(tmp_path):
+    out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
+    fake = (out / 'lib' / 'payment' / 'fake_stripe.ts').read_text()
+    assert 'fetch(' not in fake
+    assert "from 'stripe'" not in fake
+
+
+def test_gate_scripts_set_the_fake_stripe_switch_and_hand_run_scripts_do_not():
+    import json
+    scripts = json.loads((REPO_ROOT / 'package.json').read_text())['scripts']
+    for name in ('test:e2e:cy:api', 'test:e2e:cy:ui', 'test:e2e:cy:start', 'test:e2e:cy:dev'):
+        assert 'PAYMENT_FAKE_STRIPE=1' in scripts[name], name
+    # Scripts a person uses to try real Stripe test mode by hand stay on real Stripe.
+    for name, cmd in scripts.items():
+        if name.startswith('test:e2e:cy:'):
+            continue
+        assert 'PAYMENT_FAKE_STRIPE' not in cmd, name

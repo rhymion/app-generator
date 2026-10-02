@@ -2119,6 +2119,8 @@ def generate(schema_path: str, output_dir: str) -> None:
         for _pay_tpl, _pay_out in (
             ('payment_source.ts.jinja2', 'payment_source.ts'),
             ('payment_checkout.ts.jinja2', 'checkout.ts'),
+            ('payment_stripe_client.ts.jinja2', 'stripe_client.ts'),
+            ('payment_fake_stripe.ts.jinja2', 'fake_stripe.ts'),
             ('payment_webhook_dispatch.ts.jinja2', 'payment_webhook_dispatch.ts'),
         ):
             _write(out / 'lib' / 'payment' / _pay_out, _render(env, _pay_tpl, _payment_ctx))
