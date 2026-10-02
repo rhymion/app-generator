@@ -350,7 +350,10 @@ regeneration): `lib/stripe.ts` (SDK init, fails closed if `STRIPE_SECRET_KEY`
 is unset), `app/[locale]/payment/success/page.tsx`
 and `app/[locale]/payment/cancel/page.tsx` (where Checkout sends the buyer
 back), and `app/api/webhooks/stripe/route.ts` (webhook receiver,
-signature-verified, fails closed if `STRIPE_WEBHOOK_SECRET` is unset). Scope is
+signature-verified, fails closed if `STRIPE_WEBHOOK_SECRET` is unset). The
+generated specs of an `x-payment` entity need no Stripe key: the `test:e2e:cy:*`
+scripts set `PAYMENT_FAKE_STRIPE=1`, which swaps in an in-memory fake client
+(never in a live environment); without it the real client is used. Scope is
 one-time purchases only (Checkout Session `mode: payment`); subscriptions are
 left for a consumer to add. See
 [docs/knowledge/stripe-payment-integration.md](docs/knowledge/stripe-payment-integration.md).

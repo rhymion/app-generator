@@ -8,7 +8,7 @@
 
 import type Stripe from 'stripe';
 import prisma from '@/lib/prisma';
-import { stripe } from '@/lib/stripe';
+import { stripe } from './stripe_client';
 import { resolvePaymentQuantity, resolvePaymentSource } from './payment_source';
 
 // A payable row is created in add{Entity}()'s transaction, before any Stripe

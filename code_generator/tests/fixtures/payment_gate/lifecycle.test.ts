@@ -9,6 +9,8 @@ import type Stripe from 'stripe';
 import prisma, { db, resetDb } from './fake/prisma';
 import { stripeState, resetStripe } from './fake/stripe';
 import { afterDeleteRan, auditRan, resetEntityService } from './fake/entity-service';
+import { stripe as paymentStripe } from '../lib/payment/stripe_client';
+import { fakeStripe } from '../lib/payment/fake_stripe';
 import { startPaymentCheckout, expirePendingCheckout, retrievePaidSession } from '../lib/payment/checkout';
 import { dispatchPaymentEvent, removeUnpaidPayable, confirmPaidSession } from '../lib/payment/payment_webhook_dispatch';
 
@@ -53,8 +55,10 @@ const paid = (id: string, extra: Partial<Stripe.Checkout.Session> = {}) =>
 const expired = (id: string) => event('checkout.session.expired', { id });
 
 beforeEach(() => {
+  vi.unstubAllEnvs(); // back to the suite default (PAYMENT_FAKE_STRIPE=1, see vitest.config.mts)
   resetDb();
   resetStripe();
+  stripeState.idPrefix = 'cs_test_'; // deterministic ids; the real fake randomizes them per process
   resetEntityService();
   quantityHook.override = undefined;
   quantityHook.received = [];
@@ -65,7 +69,8 @@ describe('starting checkout', () => {
     const payable = await createProvisional('paid_widget', 'w1');
     const url = await startPaymentCheckout('paid_widget', 'w1');
 
-    expect(url).toBe('https://checkout.stripe.test/cs_test_1');
+    // the fake sends the buyer to the success URL itself (no hosted page offline)
+    expect(url).toBe('http://localhost:3000/payment/success?session_id=cs_test_1');
     const params = stripeState.created[0];
     expect(params.mode).toBe('payment');
     expect(params.line_items).toEqual([{ price: 'price_catalog', quantity: 1 }]);
@@ -95,9 +100,19 @@ describe('starting checkout', () => {
   });
 
   it('fails closed, creating no session, when the related entity carries no Price', async () => {
+    vi.stubEnv('PAYMENT_FAKE_STRIPE', ''); // the real client: the Price check stays
     await createProvisional('paid_widget', 'w1', '');
     await expect(startPaymentCheckout('paid_widget', 'w1')).rejects.toThrow(/no stripe_price_id on its widget_catalog_id/);
     expect(stripeState.created).toHaveLength(0);
+  });
+
+  it('with the fake client switched on, a missing Price resolves to a placeholder (both Price kinds)', async () => {
+    await createProvisional('paid_widget', 'w1', '');
+    await createProvisional('paid_gadget', 'g1');
+    db.paid_gadget[0].stripe_price_id = '';
+    await startPaymentCheckout('paid_widget', 'w1');
+    await startPaymentCheckout('paid_gadget', 'g1');
+    expect(stripeState.created.map((p) => p.line_items[0].price)).toEqual(['price_fake', 'price_fake']);
   });
 
   it('lets the buyer enter a promotion code on the hosted page', async () => {
@@ -488,5 +503,65 @@ describe('the return pages and the webhook settling the same record', () => {
     await visitSuccessPage('cs_test_1');
     expect(db.paid_widget).toHaveLength(1);
     expect(db.payable[0].status).toBe('paid');
+  });
+});
+
+// Which Stripe client lib/payment/ talks to. In this suite "real" is the
+// @/lib/stripe alias, i.e. fake/stripe.ts; the point is only who is chosen
+// and when -- the fake must never be reachable without the explicit switch.
+describe('choosing the Stripe client (PAYMENT_FAKE_STRIPE)', () => {
+  const realCreate = () => (paymentStripe.checkout.sessions as unknown as { create: unknown }).create;
+
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('uses the real client by default -- NODE_ENV=test alone does not switch to the fake', async () => {
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('PAYMENT_FAKE_STRIPE', '');
+    const { stripe: real } = await import('./fake/real-stripe');
+    expect(realCreate()).toBe(real.checkout.sessions.create);
+    expect(realCreate()).not.toBe(fakeStripe.checkout.sessions.create);
+  });
+
+  it('only the exact value 1 turns the fake on', async () => {
+    const { isFakeStripeRequested } = await import('../lib/payment/stripe_client');
+    expect(isFakeStripeRequested({})).toBe(false);
+    expect(isFakeStripeRequested({ PAYMENT_FAKE_STRIPE: 'true' } as never)).toBe(false);
+    expect(isFakeStripeRequested({ PAYMENT_FAKE_STRIPE: '0' } as never)).toBe(false);
+    expect(isFakeStripeRequested({ PAYMENT_FAKE_STRIPE: '1' } as never)).toBe(true);
+  });
+
+  it('treats VERCEL_ENV=production and a live key as live environments', async () => {
+    const { isLiveEnvironment } = await import('../lib/payment/stripe_client');
+    expect(isLiveEnvironment({})).toBe(false);
+    expect(isLiveEnvironment({ STRIPE_SECRET_KEY: 'sk_test_x' } as never)).toBe(false);
+    expect(isLiveEnvironment({ VERCEL_ENV: 'preview' } as never)).toBe(false);
+    expect(isLiveEnvironment({ VERCEL_ENV: 'production' } as never)).toBe(true);
+    expect(isLiveEnvironment({ STRIPE_SECRET_KEY: 'sk_live_x' } as never)).toBe(true);
+  });
+
+  it.each([
+    ['VERCEL_ENV', 'production'],
+    ['STRIPE_SECRET_KEY', 'sk_live_not_a_real_key'],
+  ])('refuses the fake, and does not fall back to a client, when %s says live', (name, value) => {
+    vi.stubEnv('PAYMENT_FAKE_STRIPE', '1');
+    vi.stubEnv(name, value);
+    expect(() => paymentStripe.checkout).toThrow(/live environment/);
+  });
+
+  it('keeps the placeholder Price out of a live environment', async () => {
+    const { isFakeStripeActive } = await import('../lib/payment/stripe_client');
+    expect(isFakeStripeActive({ PAYMENT_FAKE_STRIPE: '1' } as never)).toBe(true);
+    expect(isFakeStripeActive({ PAYMENT_FAKE_STRIPE: '1', VERCEL_ENV: 'production' } as never)).toBe(false);
+    expect(isFakeStripeActive({ PAYMENT_FAKE_STRIPE: '1', STRIPE_SECRET_KEY: 'sk_live_x' } as never)).toBe(false);
+    expect(isFakeStripeActive({} as never)).toBe(false);
+  });
+
+  it('hands out the fake when switched on outside a live environment', () => {
+    vi.stubEnv('PAYMENT_FAKE_STRIPE', '1');
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
+    expect(realCreate()).toBe(fakeStripe.checkout.sessions.create);
   });
 });

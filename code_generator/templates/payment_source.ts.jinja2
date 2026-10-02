@@ -7,13 +7,21 @@
 // at the entity declaring it (validated at generate time). Nothing a client
 // submits reaches either value. Everything else in lib/payment/ goes through
 // these functions.
+//
+// With the fake Stripe client switched on (PAYMENT_FAKE_STRIPE=1, gates and CI
+// only -- see stripe_client.ts) a missing Price id resolves to a placeholder
+// instead of failing: the fake never sends it anywhere, and a keyless gate has
+// no real Price to put on a record. The real client keeps the fail-closed check.
 
 import prisma from '@/lib/prisma';
+import { isFakeStripeActive } from './stripe_client';
 {% for e in payment_entities %}
 import { resolve{{ e.pascal_name }}Quantity } from './{{ e.entity_name }}_quantity';
 {% endfor %}
 
 export type PaymentSource = { priceId: string };
+
+const FAKE_PRICE_ID = 'price_fake';
 
 export async function resolvePaymentSource(entityName: string, recordId: string): Promise<PaymentSource> {
   switch (entityName) {
@@ -29,6 +37,9 @@ export async function resolvePaymentSource(entityName: string, recordId: string)
       }
       const priceId = row.{{ e.price_relation }}?.{{ e.price_field }};
       if (!priceId) {
+        if (isFakeStripeActive()) {
+          return { priceId: FAKE_PRICE_ID };
+        }
         throw new Error(`{{ e.entity_name }} ${recordId}: no {{ e.price_field }} on its {{ e.price_fk_field }}`);
       }
       return { priceId };
@@ -38,6 +49,9 @@ export async function resolvePaymentSource(entityName: string, recordId: string)
         throw new Error(`{{ e.entity_name }} ${recordId} not found`);
       }
       if (!row.{{ e.price_field }}) {
+        if (isFakeStripeActive()) {
+          return { priceId: FAKE_PRICE_ID };
+        }
         throw new Error(`{{ e.entity_name }} ${recordId}: {{ e.price_field }} is empty`);
       }
       return { priceId: row.{{ e.price_field }} };

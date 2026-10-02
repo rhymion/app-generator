@@ -2110,6 +2110,8 @@ def generate(schema_path: str, output_dir: str) -> None:
         for _pay_tpl, _pay_out in (
             ('payment_source.ts.jinja2', 'payment_source.ts'),
             ('payment_checkout.ts.jinja2', 'checkout.ts'),
+            ('payment_stripe_client.ts.jinja2', 'stripe_client.ts'),
+            ('payment_fake_stripe.ts.jinja2', 'fake_stripe.ts'),
             ('payment_webhook_dispatch.ts.jinja2', 'payment_webhook_dispatch.ts'),
         ):
             _write(out / 'lib' / 'payment' / _pay_out, _render(env, _pay_tpl, _payment_ctx))
@@ -3003,6 +3005,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             # callIndex reset task on the same condition test_helper.ts.jinja2
             # used to decide whether _reset{{ pascal }}CallSeq() exists at all.
             spec_ctx['primary_fk_dep'] = helper_ctx.get('primary_fk_dep')
+            spec_ctx['is_payment'] = payment_context(model, schema)['is_payment']
             _write(cypress_e2e / f'{parent}.cy.ts',
                    _prefix_unused_then_callback_params(_strip_unused_exact_re_helper(
                        _render(env, 'test_spec.cy.ts.jinja2', spec_ctx))))
@@ -3025,6 +3028,11 @@ def generate(schema_path: str, output_dir: str) -> None:
                 # so without this the reset guard in test_api_spec.cy.ts.jinja2
                 # would be permanently undefined/falsy.
                 api_ctx['primary_fk_dep'] = helper_ctx.get('primary_fk_dep')
+                # x-payment: POST answers { record, checkoutUrl } (api_route.ts.jinja2),
+                # so the created row is under `record`, not at the top of the body.
+                api_ctx['created_body'] = (
+                    '.body.record' if payment_context(model, schema)['is_payment'] else '.body'
+                )
                 _write(cypress_e2e / 'api' / f'{parent}.cy.ts',
                        _prefix_unused_then_callback_params(
                            _render(env, 'test_api_spec.cy.ts.jinja2', api_ctx)))

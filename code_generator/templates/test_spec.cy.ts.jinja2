@@ -103,6 +103,14 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endif %}
 {% endfor %}
 {{ I }}cy.clickButton('Save');
+{% if is_payment %}
+{{ I }}// x-payment: a create ends at the checkout URL; under the fake Stripe client
+{{ I }}// (PAYMENT_FAKE_STRIPE=1, set by the test:e2e:cy:* scripts) that is the success page.
+{{ I }}cy.url().should('include', '/payment/success');
+{% if can_list %}
+{{ I }}cy.visit('/en/{{ parent }}');
+{% endif %}
+{% endif %}
 {{ I }}cy.url().should('include', '/{{ parent }}');
 {{ I }}cy.url().should('not.include', '/{{ parent }}/');
 {% if can_list %}
@@ -194,6 +202,14 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% endif %}
 {% endfor %}
 {{ I }}cy.clickButton('Save');
+{% if is_payment %}
+{{ I }}// x-payment: a create ends at the checkout URL; under the fake Stripe client
+{{ I }}// (PAYMENT_FAKE_STRIPE=1, set by the test:e2e:cy:* scripts) that is the success page.
+{{ I }}cy.url().should('include', '/payment/success');
+{% if can_list %}
+{{ I }}cy.visit('/en/{{ parent }}');
+{% endif %}
+{% endif %}
 {{ I }}cy.url().should('include', '/{{ parent }}');
 {{ I }}cy.url().should('not.include', '/{{ parent }}/');
 {% if can_list %}
