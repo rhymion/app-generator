@@ -128,3 +128,28 @@ describe('nav-tree', () => {
     });
   });
 });
+
+describe('administration group (default site-config shape)', () => {
+  const adminHrefs = ['/user', '/role', '/permission', '/organization', '/approval_flow', '/dashboard', '/app_setting'];
+  // Mirrors what generate-code writes for the default schema; kept literal so the
+  // test does not depend on whether lib/site-config.ts is currently generated.
+  const links: NavLink[] = [
+    { label: 'Home', href: '/', external: false },
+    { label: 'Audit Log', href: '/audit_log' },
+    ...adminHrefs.map((href, i) => ({ label: href.slice(1), href, group: 'administration', order: (i + 1) * 10 })),
+  ];
+  const groups: NavGroup[] = [{ slug: 'administration', labelKey: 'groups.administration', order: 900, icon: 'Settings' }];
+
+  it('renders as one group after the flat links when the viewer can see its entities', () => {
+    const tree = buildRootTree(links, groups);
+    expect(tree.some((n) => n.kind === 'group' && n.group.slug === 'administration')).toBe(true);
+    const flat = tree.filter((n) => n.kind === 'link').map((n) => (n.kind === 'link' ? n.link.href : ''));
+    expect(flat).toEqual(['/', '/audit_log']);
+  });
+
+  it('is not rendered when hiddenHrefs hides all seven administration entities', () => {
+    const visible = links.filter((l) => !adminHrefs.includes(l.href));
+    const tree = buildRootTree(visible, groups);
+    expect(tree.some((n) => n.kind === 'group' && n.group.slug === 'administration')).toBe(false);
+  });
+});
