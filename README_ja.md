@@ -330,7 +330,9 @@ Checkout では Stripe のプロモーションコードを入力できます。
 セッションでも認証可)、`app/[locale]/payment/success/page.tsx` と
 `app/[locale]/payment/cancel/page.tsx`(Checkout からの戻り先)、
 `app/api/webhooks/stripe/route.ts`(Webhook 受信、署名検証あり、
-`STRIPE_WEBHOOK_SECRET` 未設定時は fail-closed)。対応範囲は一回払いのみ
+`STRIPE_WEBHOOK_SECRET` 未設定時は fail-closed)。`x-payment` エンティティの生成 spec は
+Stripe 鍵なしで通ります(`test:e2e:cy:*` スクリプトが `PAYMENT_FAKE_STRIPE=1` を立て、メモリ上の偽
+client に差し替えます。本番相当の環境では決して有効にならず、変数が無ければ実 client を使います)。対応範囲は一回払いのみ
 (Checkout Session `mode: payment`)で、サブスクリプションは対象外(必要であれば自前で追加)です。
 詳細は
 [docs/knowledge/stripe-payment-integration.md](docs/knowledge/stripe-payment-integration.md)

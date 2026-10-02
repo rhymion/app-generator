@@ -232,6 +232,11 @@ Always regenerated (not stubs):
 - `lib/payment/payment_webhook_dispatch.ts` — `dispatchPaymentEvent()`,
   `confirmPaidSession()` and `removeUnpaidPayable()`, one statically imported
   `delete{Entity}()` branch per `x-payment` entity.
+- `lib/payment/stripe_client.ts` — the Stripe client `lib/payment/` talks to:
+  the real `lib/stripe.ts` client unless `PAYMENT_FAKE_STRIPE=1` is set (see
+  "Generated specs without a Stripe key").
+- `lib/payment/fake_stripe.ts` — the in-memory Checkout Session fake that
+  switch hands out.
 - the `payable` model in `prisma/schema.prisma`.
 - `add{Entity}()`, `POST /api/{entity}` and the Server Action of each
   `x-payment` entity carry the lifecycle above.
@@ -489,6 +494,39 @@ longer does so by default.
 - Checkout Session `mode: 'payment'`, `stripe.checkout.sessions.create()`
   shape, and `stripe.webhooks.constructEvent()` are unchanged.
 
+## Generated specs without a Stripe key
+
+A gate or CI run has no Stripe key and no real Price, yet the generated API,
+UI and mobile specs of an `x-payment` entity create records, and a create opens
+a Checkout Session. The generated specs therefore run against a fake Stripe
+client, chosen by one explicit environment variable:
+
+- `PAYMENT_FAKE_STRIPE=1` makes `lib/payment/stripe_client.ts` hand out
+  `lib/payment/fake_stripe.ts` instead of the client from `lib/stripe.ts`. Any
+  other value, or no value, keeps the real client. The `test:e2e:cy:api`,
+  `test:e2e:cy:ui`, `test:e2e:cy:start` and `test:e2e:cy:dev` npm scripts set it
+  and nothing else does: `test:e2e:start`, `test:e2e:dev`, `dev` and every
+  production start path leave it unset, so trying real Stripe test mode by hand
+  (test key in `.env.test.local`, `stripe listen`) still reaches Stripe.
+- `NODE_ENV` is not part of the condition. A hand run against Stripe test keys
+  shares `NODE_ENV=test` with the gate, and `next build` bakes
+  `NODE_ENV=production` into the bundle, so it cannot tell them apart.
+- It fails closed in a live environment. With the variable set and either
+  `VERCEL_ENV=production` or an `sk_live_` key present, the first use of the
+  client throws; it neither falls back to the real client nor serves the fake.
+- The fake never touches the network. `create` returns the success URL as the
+  checkout URL (the hosted page is unreachable offline) and keeps the session in
+  memory; `retrieve` and `expire` answer from that state.
+- While the fake is active, a record whose related entity (or itself) has no
+  `stripe_price_id` resolves to the placeholder Price `price_fake` instead of
+  failing, since the fake never sends it anywhere. With the real client the
+  check is unchanged and still refuses to start checkout.
+
+The generator's `payment_gate` fixture uses the same `fake_stripe.ts` as its
+Stripe double (`shims/fake/stripe.ts` re-exports it), so there is one fake. The
+real Stripe path stays covered by that fixture's lifecycle test and by
+test-mode verification in a consumer.
+
 ## Verification
 
 `code_generator/tests/fixtures/payment_gate/` declares two `x-payment`
@@ -511,6 +549,9 @@ asserting:
 - the Price is read through the foreign key for `paid_widget` and off the
   record for `paid_gadget`; the Checkout Session takes `{ price, quantity }`
   with `allow_promotion_codes: true` and has no inline-amount branch
+- the fake Stripe client is chosen only by `PAYMENT_FAKE_STRIPE=1`, is refused
+  in a live environment, and the placeholder Price exists only behind it; only
+  the `test:e2e:cy:*` npm scripts set the variable
 - a quantity hook is written once per `x-payment` entity, defaults to `1`, and
   keeps a hand edit across regeneration
 - `paid_gadget`'s own `stripe_price_id` is never client input: the REST route

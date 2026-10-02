@@ -246,6 +246,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/generated-documentation-and-openapi-spec.md`.
 
 ### Changed
+- **Generated specs of an `x-payment` entity now pass without Stripe keys**
+  (issue #788). The `test:e2e:cy:*` npm scripts set `PAYMENT_FAKE_STRIPE=1`,
+  which makes `lib/payment/stripe_client.ts` hand out a generated in-memory
+  Checkout Session fake (`lib/payment/fake_stripe.ts`) and resolve a missing
+  Price id to a placeholder. Without the variable the real client is used as
+  before, so hand runs against Stripe test keys and production are unchanged;
+  with it set in a live environment the client throws instead of faking. An
+  adopter can drop an `x-generate.test: false` workaround on its `x-payment`
+  entity once its app-generator pointer includes this change.
 - **Documented how to run `x-payment` payments locally.** The webhook forwarding
   section of `docs/knowledge/stripe-payment-integration.md` now says what
   happens without `stripe listen` (the record stays `pending`, a cancelled
