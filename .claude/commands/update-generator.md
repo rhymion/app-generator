@@ -246,7 +246,7 @@ branches are ever compiled by step 15 otherwise. ~6s. See
 
 **Step 11 (`test:payment-gate`)**: same shape as steps 4-10, for the
 write-once Stripe integration stubs (`lib/stripe.ts`,
-`app/api/payment/checkout/route.ts`, `app/api/webhooks/stripe/route.ts`)
+`app/api/webhooks/stripe/route.ts`)
 emitted when a fixture entity declares `x-payment: true`. Exists because
 `code_generator/tests/test_payment_gate_fixture.py` only proves the stubs
 are *written* — it never proves the written TypeScript actually

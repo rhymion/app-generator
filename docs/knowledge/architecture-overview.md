@@ -151,7 +151,7 @@ per-lifecycle hook stubs (`service_after_create_stub.ts.jinja2`, `..._after_upda
 (`autocomplete_filter_stub.ts.jinja2`, `list_filter_stub.ts.jinja2`, `invalidate_handler_stub.ts.jinja2`,
 `virtual_resolver.ts.jinja2`, `service_validation_delete_stub.ts.jinja2`), the scheduled-job stubs
 (`service_scheduled_handler_stub.ts.jinja2`, `..._scheduled_bulk_handler_stub`), and the Stripe
-integration stubs (`stripe_lib_stub.ts.jinja2`, `stripe_checkout_route_stub.ts.jinja2`,
+integration stubs (`stripe_lib_stub.ts.jinja2`,
 `stripe_webhook_route_stub.ts.jinja2`). This list drifts as new extension points are added — the
 living source of truth is `grep -n "_write_stub(" code_generator/generate.py`.
 

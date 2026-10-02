@@ -546,8 +546,7 @@ jobs:
     # cmd_753: a small fixture entity (x-payment: true) run through the real
     # generate-code -> tsc pipeline, catching regressions in the write-once
     # Stripe integration stub templates (stripe_lib_stub.ts.jinja2,
-    # stripe_checkout_route_stub.ts.jinja2, stripe_webhook_route_stub.ts.
-    # jinja2) -- including a stale Stripe SDK apiVersion literal, the exact
+    # stripe_webhook_route_stub.ts.jinja2) -- including a stale Stripe SDK apiVersion literal, the exact
     # drift that motivated this gate (the stub pinned a literal that the
     # installed `stripe` SDK's own type no longer accepted). A branch this
     # repo's own generate-code/build (the e2e-tests job) never compiles,

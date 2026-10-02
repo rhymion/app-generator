@@ -2061,7 +2061,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     # --- Stripe payment integration write-once stubs (cmd_706) ---
     # Emitted when at least one entity in any schema definition declares
     # x-payment: true. Same write-once convention as
-    # lib/<parent>/invalidate_handler.ts (cmd_583) -- these three files are
+    # lib/<parent>/invalidate_handler.ts (cmd_583) -- these files are
     # only written if they don't already exist, so a consumer's hand-written
     # implementation is never clobbered by regeneration.
     _has_any_payment = any(
@@ -2076,15 +2076,6 @@ def generate(schema_path: str, output_dir: str) -> None:
             stripe_lib_path,
             'x-payment: true is declared on at least one entity.',
             'Set STRIPE_SECRET_KEY in your env (this stub fails closed if unset).',
-        )
-
-        checkout_route_path = out / 'app' / 'api' / 'payment' / 'checkout' / 'route.ts'
-        _write_stub(checkout_route_path, _render(env, 'stripe_checkout_route_stub.ts.jinja2', {}))
-        print('  Checkout Session stub → app/api/payment/checkout/route.ts')
-        _note_stub_created(
-            checkout_route_path,
-            'x-payment: true is declared on at least one entity.',
-            'Fill in the price_id / line_items for what you are selling.',
         )
 
         # Checkout's success_url / cancel_url land on these two pages; without

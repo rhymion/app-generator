@@ -4,8 +4,7 @@
 # Runs a small, self-contained fixture entity (x-payment: true) through the
 # real build_user_schema.py -> generate.py -> tsc pipeline and type-checks
 # the write-once Stripe integration stubs: lib/stripe.ts,
-# app/api/payment/checkout/route.ts, app/api/webhooks/stripe/route.ts, and the
-# checkout return pages app/[locale]/payment/{success,cancel}/page.tsx -- plus
+# app/api/webhooks/stripe/route.ts, and the checkout return pages app/[locale]/payment/{success,cancel}/page.tsx -- plus
 # the generated record-lifecycle files lib/payment/{payment_source,checkout,
 # payment_webhook_dispatch}.ts, which are type-checked against a real generated
 # Prisma client (the `payable` model x-payment injects) and then *run* by
@@ -64,14 +63,14 @@ if [ ! -f "$OUT_DIR/lib/stripe.ts" ]; then
   exit 1
 fi
 
-# Fixture-only shim for @/lib/api-auth -- see fixtures/payment_gate/shims/ for
-# the source of truth and why this exists rather than the real file.
-cp "$FIXTURE_DIR/shims/api-auth.ts" "$OUT_DIR/lib/api-auth.ts"
+# Fixture-only shims for @/lib/prisma and the entity service -- see
+# fixtures/payment_gate/shims/ for the source of truth and why these exist
+# rather than the real files.
 cp "$FIXTURE_DIR/shims/prisma.ts" "$OUT_DIR/lib/prisma.ts"
 cp "$FIXTURE_DIR/shims/entity-service.ts" "$OUT_DIR/lib/entity-service.ts"
 cp "$FIXTURE_DIR/tsconfig.json" "$OUT_DIR/tsconfig.json"
 
-echo "-- tsc --noEmit (lib/stripe.ts + lib/payment + checkout route + webhook route + return pages) --"
+echo "-- tsc --noEmit (lib/stripe.ts + lib/payment + webhook route + return pages) --"
 set +e
 npx tsc -p "$OUT_DIR/tsconfig.json"
 tsc_status=$?

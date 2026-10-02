@@ -20,9 +20,6 @@
       "@/lib/stripe": [
         "./lib/stripe.ts"
       ],
-      "@/lib/api-auth": [
-        "./lib/api-auth.ts"
-      ],
       "@/lib/prisma": [
         "./lib/prisma.ts"
       ],
@@ -46,7 +43,6 @@
   "include": [
     "lib/stripe.ts",
     "lib/payment/*.ts",
-    "app/api/payment/checkout/route.ts",
     "app/api/webhooks/stripe/route.ts",
     "app/[locale]/payment/success/page.tsx",
     "app/[locale]/payment/cancel/page.tsx"

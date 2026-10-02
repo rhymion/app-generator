@@ -1,7 +1,6 @@
 """
 This test suite proves the x-payment
-write-once stub mechanism (lib/stripe.ts, app/api/payment/checkout/route.ts,
-app/api/webhooks/stripe/route.ts) actually fires end-to-end through the real
+write-once stub mechanism (lib/stripe.ts, app/api/webhooks/stripe/route.ts) actually fires end-to-end through the real
 build_user_schema.py -> generate.py pipeline, not just at a unit-test level.
 
 Modeled on code_generator/tests/test_invalidate_mechanism_fixture.py's
@@ -43,13 +42,19 @@ def test_x_payment_true_writes_stripe_lib_stub(tmp_path):
     assert 'STRIPE_SECRET_KEY' in content
 
 
-def test_x_payment_true_writes_checkout_route_stub(tmp_path):
+def test_x_payment_true_does_not_write_standalone_checkout_route(tmp_path):
+    # Issue #785: a standalone POST /api/payment/checkout let any authenticated
+    # caller create a Checkout Session for an arbitrary price_id. The only
+    # entrance to Checkout is the x-payment entity's own create path
+    # (lib/payment/checkout.ts), so no such route may be generated.
     out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
-    stub = out / 'app' / 'api' / 'payment' / 'checkout' / 'route.ts'
-    assert stub.exists(), 'app/api/payment/checkout/route.ts must be written when x-payment: true is declared'
-    content = stub.read_text()
-    assert 'checkout.sessions.create' in content
-    assert "mode: 'payment'" in content
+    assert not (out / 'app' / 'api' / 'payment').exists(), (
+        'no app/api/payment/** route may be written for x-payment'
+    )
+    assert (out / 'lib' / 'payment' / 'checkout.ts').exists()
+    for generated in out.rglob('*.ts*'):
+        text = generated.read_text()
+        assert '/api/payment/checkout' not in text, f'{generated} still references the removed route'
 
 
 def test_x_payment_true_writes_webhook_route_stub(tmp_path):
@@ -65,25 +70,12 @@ def test_x_payment_true_writes_webhook_route_stub(tmp_path):
     assert "'checkout.session.completed'" in dispatch
 
 
-def test_checkout_route_stub_accepts_api_key_and_session_auth(tmp_path):
-    # Issue #776: the stub used to authenticate with getSessionUserId() only,
-    # so a valid X-API-Key got 401. It must resolve the actor the same way as
-    # every other generated API route (resolveActorId from lib/api-auth).
-    out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
-    content = (out / 'app' / 'api' / 'payment' / 'checkout' / 'route.ts').read_text()
-    assert "resolveActorId" in content
-    assert "from '@/lib/api-auth'" in content
-    assert 'getSessionUserId' not in content
-    assert 'export async function POST(req: NextRequest)' in content
-    assert 'handleApiError' in content
-
-
 def test_x_payment_true_writes_checkout_return_pages(tmp_path):
-    # Issue #776: the checkout stub sends success_url / cancel_url to
+    # Issue #776: lib/payment/checkout.ts sends success_url / cancel_url to
     # /payment/success and /payment/cancel; both pages must exist or the
     # buyer lands on a 404.
     out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
-    checkout = (out / 'app' / 'api' / 'payment' / 'checkout' / 'route.ts').read_text()
+    checkout = (out / 'lib' / 'payment' / 'checkout.ts').read_text()
     for kind in ('success', 'cancel'):
         assert f'/payment/{kind}' in checkout
         page = out / 'app' / '[locale]' / 'payment' / kind / 'page.tsx'
@@ -174,7 +166,7 @@ def test_no_x_payment_declared_writes_no_stubs(tmp_path):
     # the stub files must not appear.
     out = _run_pipeline(INVALIDATE_FIXTURE_DIR, tmp_path)
     assert not (out / 'lib' / 'stripe.ts').exists()
-    assert not (out / 'app' / 'api' / 'payment' / 'checkout' / 'route.ts').exists()
+    assert not (out / 'app' / 'api' / 'payment').exists()
     assert not (out / 'app' / 'api' / 'webhooks' / 'stripe' / 'route.ts').exists()
     assert not (out / 'app' / '[locale]' / 'payment').exists()
 
