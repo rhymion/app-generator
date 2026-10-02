@@ -477,3 +477,12 @@ def test_x_payment_generated_api_spec_reads_the_created_row_from_record(tmp_path
     # POST answers { record, checkoutUrl } for an x-payment entity.
     assert '${res.body.record.id}' in spec
     assert '${res.body.id}' not in spec
+
+
+def test_x_payment_fake_stripe_session_ids_are_unique_per_process(tmp_path):
+    out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
+    fake = (out / 'lib' / 'payment' / 'fake_stripe.ts').read_text()
+    # payable.stripe_checkout_session_id is unique and survives a server
+    # restart, so ids must not restart from a bare counter.
+    assert 'Math.random()' in fake
+    assert '`${fakeStripeState.idPrefix}${fakeStripeState.created.length}`' in fake

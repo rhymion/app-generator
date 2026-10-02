@@ -58,6 +58,7 @@ beforeEach(() => {
   vi.unstubAllEnvs(); // back to the suite default (PAYMENT_FAKE_STRIPE=1, see vitest.config.mts)
   resetDb();
   resetStripe();
+  stripeState.idPrefix = 'cs_test_'; // deterministic ids; the real fake randomizes them per process
   resetEntityService();
   quantityHook.override = undefined;
   quantityHook.received = [];

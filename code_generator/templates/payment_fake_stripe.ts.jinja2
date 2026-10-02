@@ -23,10 +23,21 @@ type FakeStripeState = {
   expired: string[];
   // Simulates Stripe answering expire() without closing the session.
   expireLeavesOpen: boolean;
+  // Prefix of every session id. Random per process (and per reset): the payable
+  // row keeps its session id in a unique column that outlives the process, and a
+  // counter restarting at 1 would collide with the previous run's rows, which
+  // real Stripe ids never do.
+  idPrefix: string;
 };
 
 function freshState(): FakeStripeState {
-  return { created: [], sessions: new Map(), expired: [], expireLeavesOpen: false };
+  return {
+    created: [],
+    sessions: new Map(),
+    expired: [],
+    expireLeavesOpen: false,
+    idPrefix: `cs_test_${Math.random().toString(36).slice(2, 10)}_`,
+  };
 }
 
 // Pinned on globalThis: `next dev` evaluates route modules more than once, and
@@ -43,7 +54,7 @@ export const fakeStripe = {
     sessions: {
       async create(params: Row) {
         fakeStripeState.created.push(params);
-        const id = `cs_test_${fakeStripeState.created.length}`;
+        const id = `${fakeStripeState.idPrefix}${fakeStripeState.created.length}`;
         // The buyer is sent to the success URL itself (Stripe's hosted page is
         // not reachable without the network); the placeholder is expanded the
         // way Stripe expands it.
