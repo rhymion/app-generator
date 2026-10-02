@@ -446,3 +446,14 @@ def test_gate_scripts_set_the_fake_stripe_switch_and_hand_run_scripts_do_not():
         if name.startswith('test:e2e:cy:'):
             continue
         assert 'PAYMENT_FAKE_STRIPE' not in cmd, name
+
+
+def test_x_payment_missing_price_placeholder_only_with_the_fake_client(tmp_path):
+    out = _run_pipeline(PAYMENT_FIXTURE_DIR, tmp_path)
+    source = (out / 'lib' / 'payment' / 'payment_source.ts').read_text()
+    # Both Price kinds keep their fail-closed throw; the placeholder is reachable
+    # only behind isFakeStripeActive().
+    assert source.count('if (isFakeStripeActive()) {') == 2
+    assert source.count("return { priceId: FAKE_PRICE_ID };") == 2
+    assert 'no stripe_price_id on its widget_catalog_id' in source
+    assert 'stripe_price_id is empty' in source

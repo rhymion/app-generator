@@ -22,6 +22,11 @@ export function isLiveEnvironment(env: NodeJS.ProcessEnv = process.env): boolean
   return env.VERCEL_ENV === 'production' || (env.STRIPE_SECRET_KEY ?? '').startsWith('sk_live_');
 }
 
+// True only when the fake would actually be handed out (switched on, not live).
+export function isFakeStripeActive(env: NodeJS.ProcessEnv = process.env): boolean {
+  return isFakeStripeRequested(env) && !isLiveEnvironment(env);
+}
+
 type PaymentStripe = typeof realStripe;
 
 function resolve(): PaymentStripe {

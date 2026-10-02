@@ -55,6 +55,7 @@ const paid = (id: string, extra: Partial<Stripe.Checkout.Session> = {}) =>
 const expired = (id: string) => event('checkout.session.expired', { id });
 
 beforeEach(() => {
+  vi.unstubAllEnvs(); // back to the suite default (PAYMENT_FAKE_STRIPE=1, see vitest.config.mts)
   resetDb();
   resetStripe();
   resetEntityService();
@@ -98,9 +99,19 @@ describe('starting checkout', () => {
   });
 
   it('fails closed, creating no session, when the related entity carries no Price', async () => {
+    vi.stubEnv('PAYMENT_FAKE_STRIPE', ''); // the real client: the Price check stays
     await createProvisional('paid_widget', 'w1', '');
     await expect(startPaymentCheckout('paid_widget', 'w1')).rejects.toThrow(/no stripe_price_id on its widget_catalog_id/);
     expect(stripeState.created).toHaveLength(0);
+  });
+
+  it('with the fake client switched on, a missing Price resolves to a placeholder (both Price kinds)', async () => {
+    await createProvisional('paid_widget', 'w1', '');
+    await createProvisional('paid_gadget', 'g1');
+    db.paid_gadget[0].stripe_price_id = '';
+    await startPaymentCheckout('paid_widget', 'w1');
+    await startPaymentCheckout('paid_gadget', 'g1');
+    expect(stripeState.created.map((p) => p.line_items[0].price)).toEqual(['price_fake', 'price_fake']);
   });
 
   it('lets the buyer enter a promotion code on the hosted page', async () => {
@@ -536,6 +547,14 @@ describe('choosing the Stripe client (PAYMENT_FAKE_STRIPE)', () => {
     vi.stubEnv('PAYMENT_FAKE_STRIPE', '1');
     vi.stubEnv(name, value);
     expect(() => paymentStripe.checkout).toThrow(/live environment/);
+  });
+
+  it('keeps the placeholder Price out of a live environment', async () => {
+    const { isFakeStripeActive } = await import('../lib/payment/stripe_client');
+    expect(isFakeStripeActive({ PAYMENT_FAKE_STRIPE: '1' } as never)).toBe(true);
+    expect(isFakeStripeActive({ PAYMENT_FAKE_STRIPE: '1', VERCEL_ENV: 'production' } as never)).toBe(false);
+    expect(isFakeStripeActive({ PAYMENT_FAKE_STRIPE: '1', STRIPE_SECRET_KEY: 'sk_live_x' } as never)).toBe(false);
+    expect(isFakeStripeActive({} as never)).toBe(false);
   });
 
   it('hands out the fake when switched on outside a live environment', () => {
