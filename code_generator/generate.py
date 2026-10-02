@@ -3036,6 +3036,11 @@ def generate(schema_path: str, output_dir: str) -> None:
                 # so without this the reset guard in test_api_spec.cy.ts.jinja2
                 # would be permanently undefined/falsy.
                 api_ctx['primary_fk_dep'] = helper_ctx.get('primary_fk_dep')
+                # x-payment: POST answers { record, checkoutUrl } (api_route.ts.jinja2),
+                # so the created row is under `record`, not at the top of the body.
+                api_ctx['created_body'] = (
+                    '.body.record' if payment_context(model, schema)['is_payment'] else '.body'
+                )
                 _write(cypress_e2e / 'api' / f'{parent}.cy.ts',
                        _prefix_unused_then_callback_params(
                            _render(env, 'test_api_spec.cy.ts.jinja2', api_ctx)))

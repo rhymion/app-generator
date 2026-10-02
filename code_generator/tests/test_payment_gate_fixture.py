@@ -457,3 +457,23 @@ def test_x_payment_missing_price_placeholder_only_with_the_fake_client(tmp_path)
     assert source.count("return { priceId: FAKE_PRICE_ID };") == 2
     assert 'no stripe_price_id on its widget_catalog_id' in source
     assert 'stripe_price_id is empty' in source
+
+
+def _fixture_with_generated_tests(tmp_path: Path) -> Path:
+    """The payment fixture, but with paid_widget's own generated specs switched on."""
+    fixture = tmp_path / 'fixture'
+    shutil.copytree(PAYMENT_FIXTURE_DIR, fixture)
+    schema_path = fixture / 'json_schema.yaml'
+    text = schema_path.read_text()
+    head, sep, tail = text.partition('  paid_widget:\n')
+    assert sep, 'paid_widget not found in the payment fixture'
+    schema_path.write_text(head + sep + tail.replace('test: false', 'test: true', 1))
+    return _run_pipeline(fixture, tmp_path / 'out')
+
+
+def test_x_payment_generated_api_spec_reads_the_created_row_from_record(tmp_path):
+    out = _fixture_with_generated_tests(tmp_path)
+    spec = (out / 'cypress' / 'e2e' / 'api' / 'paid_widget.cy.ts').read_text()
+    # POST answers { record, checkoutUrl } for an x-payment entity.
+    assert '${res.body.record.id}' in spec
+    assert '${res.body.id}' not in spec
