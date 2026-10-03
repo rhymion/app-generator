@@ -14,6 +14,7 @@ from helpers.type_mapping import get_ts_type
 from helpers.schema_helpers import (
     get_parent_relationships,
     get_parent_fk_props,
+    resolve_parent_fk_props,
     find_fk_derivation_path,
     get_detail_properties,
     get_approval_lines_props,
@@ -3912,9 +3913,15 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
             })
             continue
 
+        # The parent link is never a grid column: `{model}_id` by convention, plus
+        # the column(s) the parent's relation names for a DataGrid child.
+        col_skip_keys = {f'{model}_id'}
+        if child_raw.get('output_type') not in ('list', 'comments'):
+            col_skip_keys |= set(child_raw.get('parent_fk') or ())
+
         rel_params = []
         for key, prop in child_props.items():
-            if key == f'{model}_id':
+            if key in col_skip_keys:
                 continue
             rel = prop.get('x-relationship', {})
             if rel.get('type') == 'many-to-one':
@@ -3964,7 +3971,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
         col_seen_ns: set[str] = set()
         for key in _column_order_source:
             prop = child_props[key]
-            if key in ('id', f'{model}_id', 'created_at', 'updated_at', 'creator_id'):
+            if key in ('id', 'created_at', 'updated_at', 'creator_id') or key in col_skip_keys:
                 continue
 
             col_editable = 'false' if key in readonly_field_names else 'editable'
@@ -5877,7 +5884,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
         # Grid child — exclude only the actual parent FK column(s), found via x-relationship
         # annotations (not all FKs targeting the parent, e.g. reference_id → db_table stays).
-        parent_fk_props_child = get_parent_fk_props(child_def, model)
+        parent_fk_props_child = resolve_parent_fk_props(c, child_def, model)
         child_rels = [r for r in get_parent_relationships(child_def) if r['prop_name'] not in parent_fk_props_child]
         rel_opt_args = ', '.join(f'{to_camel_case(r["prop_name"])}Config' for r in child_rels)
         rel_args_str = f', {rel_opt_args}' if rel_opt_args else ''
@@ -6010,7 +6017,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         if c.get('output_type') == 'list' or (c.get('relationship') or {}).get('type') == 'many-to-many':
             continue
         cdef = _raw_def(c['name'], schema)
-        parent_fk_props_cdef = get_parent_fk_props(cdef, model)
+        parent_fk_props_cdef = resolve_parent_fk_props(c, cdef, model)
         child_prop_name = c['property_name']
         for r in get_parent_relationships(cdef):
             if r['prop_name'] in parent_fk_props_cdef:
@@ -6133,7 +6140,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             continue
 
         # Grid child
-        parent_fk_props_ser = get_parent_fk_props(child_def, model)
+        parent_fk_props_ser = resolve_parent_fk_props(c, child_def, model)
         exclude_ser = parent_fk_props_ser | {'id', 'created_at', 'updated_at', 'creator_id'}
         ser_props = [k for k in child_props_dict if k not in exclude_ser]
         serialize = '\n'.join(f"          {p}: field.{p}," for p in ser_props)
@@ -6170,7 +6177,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
 
         # Required fields excluding the parent FK and audit columns; booleans always have a value
         child_required_all = child_def.get('required', [])
-        parent_fk_props_val = get_parent_fk_props(child_def, model)
+        parent_fk_props_val = resolve_parent_fk_props(c, child_def, model)
         required_validatable = [
             k for k in child_required_all
             if k not in exclude_validation
@@ -6484,7 +6491,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     _indep_grid_child_rel_targets: set[str] = set()
     for _c in readonly_indep_grid_ch:
         _c_def = _raw_def(_c['name'], schema)
-        _c_parent_fk_props = get_parent_fk_props(_c_def, model)
+        _c_parent_fk_props = resolve_parent_fk_props(_c, _c_def, model)
         _indep_grid_child_rel_targets |= {
             r['target']
             for r in get_parent_relationships(_c_def)

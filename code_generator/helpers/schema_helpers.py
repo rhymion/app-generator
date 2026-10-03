@@ -865,6 +865,21 @@ def get_parent_fk_props(child_def: dict, parent_model: str) -> set[str]:
     return found or {convention}
 
 
+def resolve_parent_fk_props(child_entry: dict, child_def: dict, parent_model: str) -> set[str]:
+    """Structural parent FK column(s) of an embedded child.
+
+    DataGrid children use the column(s) the parent's Prisma relation names
+    (`parent_fk`, recorded by build_user_schema.py as `x-parent-fk`), so an
+    unrelated second FK to the same model is never taken for the structural
+    link. `list` children and children without a recorded `parent_fk` keep the
+    `get_parent_fk_props` convention/annotation lookup unchanged.
+    """
+    declared = child_entry.get('parent_fk')
+    if declared and child_entry.get('output_type') not in ('list', 'comments'):
+        return set(declared)
+    return get_parent_fk_props(child_def, parent_model)
+
+
 def get_one_to_one_rels(parent_def: dict, schema: dict) -> list[dict]:
     """Returns outbound one-to-one FK relationship metadata (FK is on this model).
 

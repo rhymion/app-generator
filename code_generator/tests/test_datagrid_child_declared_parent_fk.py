@@ -132,3 +132,47 @@ def test_unpairable_relation_is_reported_not_guessed(tmp_path):
     props = schema['definitions']['widget']['properties']
     assert 'x-parent-fk' not in props['lines']
     assert any('structural parent FK' in str(w.message) for w in caught)
+
+
+# --- grid columns and the parent form --------------------------------------
+
+def _named_contexts(tmp_path):
+    from generators import column_def_context, form_upsert_context
+
+    schema = _intermediate(tmp_path, **NAMED)
+    entity = {
+        'parent': 'widget', 'model': 'widget', 'definition_key': 'widget',
+        'children': _extract_children(schema['definitions']['widget'], schema),
+        'generate_config': {
+            'list': True, 'view': True, 'new': True, 'edit': True,
+            'delete': True, 'api': False, 'test': False, 'fields': None,
+        },
+    }
+    ctx = build_context(entity, schema)
+    return ctx, column_def_context(ctx, schema), form_upsert_context(ctx, schema)
+
+
+def test_structural_fk_is_not_a_grid_column(tmp_path):
+    _, cols, _ = _named_contexts(tmp_path)
+    fn_code = cols['column_children'][0]['fn_code']
+    assert "field: 'owner_ref_id'" not in fn_code, fn_code
+    assert 'ownerRefIdConfig' not in fn_code, fn_code
+
+
+def test_unrelated_second_fk_is_a_grid_column_with_fetched_data(tmp_path):
+    ctx, cols, _ = _named_contexts(tmp_path)
+    fn_code = cols['column_children'][0]['fn_code']
+    assert "field: 'related_widget_id'" in fn_code, fn_code
+    assert 'related_widget' in ctx['include_props_detail']
+
+
+def test_form_treats_only_the_structural_fk_as_the_parent_link(tmp_path):
+    ctx, _, form = _named_contexts(tmp_path)
+    setup = form['child_grid_setup']
+    assert 'relatedWidgetIdConfig' in setup, setup
+    assert 'ownerRefIdConfig' not in setup, setup
+    # The unrelated FK is written from the grid row; the structural FK is not.
+    assert 'related_widget_id: f.related_widget_id' in ctx['child_nested_create']
+    assert 'owner_ref_id' not in ctx['child_nested_create']
+    # A new row is linked to the parent through the structural FK.
+    assert 'owner_ref_id: src.id' in setup, setup

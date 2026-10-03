@@ -13,7 +13,7 @@ from helpers.naming import (
 from helpers.type_mapping import get_ts_type
 from helpers.schema_helpers import (
     filter_fields, get_parent_relationships, get_detail_relation_name,
-    is_optional_fk_to_parent, get_parent_fk_props, get_one_to_one_rels,
+    is_optional_fk_to_parent, get_parent_fk_props, resolve_parent_fk_props, get_one_to_one_rels,
     get_detail_ref_rels, get_flatten_rels, get_approval_lines_props,
     derive_text_fields, derive_searchable_relation_fields,
     derive_cross_entity_searchable_fields,
@@ -532,7 +532,7 @@ def _build_form_data_gets(prop_infos: list[dict], required_props: set | None = N
 # ---------------------------------------------------------------------------
 
 def _get_child_parent_id_props(child_name: str, model: str, parent_rels_raw: list[dict],
-                               schema: dict) -> set[str]:
+                               schema: dict, child_entry: dict | None = None) -> set[str]:
     """What FK props in the child definition point back to the parent?
 
     For self-referential children, uses the parent's own many-to-one rels to itself.
@@ -542,6 +542,8 @@ def _get_child_parent_id_props(child_name: str, model: str, parent_rels_raw: lis
     if child_name == model:
         return {r['prop_name'] for r in parent_rels_raw if r['target'] == model}
     child_def = _raw_def(child_name, schema)
+    if child_entry is not None:
+        return resolve_parent_fk_props(child_entry, child_def, model)
     return get_parent_fk_props(child_def, model)
 
 
@@ -673,7 +675,7 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
         )
         child_props_dict = child_def.get('properties', {})
 
-        parent_id_props = _get_child_parent_id_props(child_name, model, parent_rels_raw, schema)
+        parent_id_props = _get_child_parent_id_props(child_name, model, parent_rels_raw, schema, child_raw)
 
         # System-managed bridge FKs: never client-writable via the parent's nested
         # create/update body (they're set internally by reservation/approval flows,
@@ -1295,7 +1297,7 @@ def _get_selection_targets(children_raw: list[dict], parent_rels_raw: list[dict]
             continue
         child_def = _raw_def(child_raw['name'], schema)
         if child_def.get('properties'):
-            parent_fk_props = get_parent_fk_props(child_def, model)
+            parent_fk_props = resolve_parent_fk_props(child_raw, child_def, model)
             child_entity_rel_targets.extend(
                 r['target'] for r in get_parent_relationships(child_def)
                 if r['prop_name'] not in parent_fk_props
@@ -3847,7 +3849,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 # circular include). Another FK on the child that happens to
                 # target the same model for a different purpose must stay in
                 # the fetched include.
-                parent_fk_props = set(c.get('parent_fk') or ()) or get_parent_fk_props(cdef, model)
+                parent_fk_props = resolve_parent_fk_props(c, cdef, model)
                 child_rels = [r for r in child_rels_raw if r['prop_name'] not in parent_fk_props]
             if not child_rels:
                 child_include_entries.append(f"{prop}: true")
