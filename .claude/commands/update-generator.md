@@ -33,6 +33,7 @@ Run in this order:
 2. `npm run test:pytest`       — Python unit tests for code generator
 3. `npm run test:vitest`      — vitest unit/component tests
 4. `npm run test:mention-gate` — fixture-schema generate-code → tsc check (see below)
+4a. `npm run test:mention-gate-plain-image` — same mention fixture with `user.image` as a plain `format: uri` column instead of a direct-attachment FK → tsc check (see below)
 5. `npm run test:decimal-gate` — fixture-schema generate-code → tsc check (see below)
 6. `npm run test:oto-mandatory-gate` — required one-to-one selector fixture generate-code → tsc check (see below)
 7. `npm run test:oto-decimal-gate` — one-to-one selector target with a Decimal column fixture generate-code → tsc check (see below)
@@ -78,9 +79,9 @@ number CI can never reproduce. Running lint first (matching CI's exact
 condition) makes local and CI agree on the same count by construction; see
 `docs/knowledge/lint-gate-must-match-ci-precondition.md`.
 
-Steps 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, and 14 run unconditionally, with no "unchanged" exemption: CI's
+Steps 2, 3, 4, 4a, 5, 6, 7, 8, 9, 10, 11, 12, 13, and 14 run unconditionally, with no "unchanged" exemption: CI's
 `unit-tests` (`npm run test:vitest`), `pytest` (Python Generator Tests),
-`mention-gate-fixture`, `decimal-gate-fixture`, `oto-mandatory-gate-fixture`,
+`mention-gate-fixture`, `mention-gate-plain-image-fixture`, `decimal-gate-fixture`, `oto-mandatory-gate-fixture`,
 `oto-decimal-gate-fixture`, `chart-decimal-gate-fixture`,
 `chart-scalar-gate-fixture`, `approval-lockdown-gate-fixture`,
 `payment-gate-fixture`, `direct-attachment-gate-fixture`,
@@ -105,6 +106,16 @@ never catch because no entity in this repo's own `json_schema.yaml` wires a
 does not (only this one branch — this repo's templates have on the order of
 700 `{% if %}` branches total, most still uncovered by any fixture), and how
 to extend it to a new dark branch.
+
+**Step 4a (`test:mention-gate-plain-image`)**: sibling of step 4. It runs the
+same commentable + comment + `x-mention: true` shape through the same
+`build_user_schema.py` → `generate.py` → `tsc --noEmit` pipeline, but with
+`user.image` kept as a plain `format: uri` string column. Step 4's fixture
+declares `user.image` as a direct-attachment FK, so it only type-checks one of
+the two Prisma select shapes the comment/mention creator avatar select can
+produce (`image: { select: { path: true } }` vs `image: true`); a consumer that
+declares `x-mention: true` without having adopted the FK shape is equally
+valid. ~6s, no database. See `scripts/check_mention_gate_plain_image_fixture.sh`.
 
 **Step 5 (`test:decimal-gate`, cmd_705)**: same shape as step 4, for a
 different dark branch — a fixture entity with a required and a nullable
