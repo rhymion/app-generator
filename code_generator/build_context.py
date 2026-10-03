@@ -3838,11 +3838,17 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 child_include_entries.append(narrowed)
                 continue
             child_rels_raw = get_parent_relationships(cdef)
-            # Exclude only the structural parent FK (avoid circular include).
-            # Another FK on the child that happens to target the same model
-            # for a different purpose must stay in the fetched include.
-            parent_fk_props = get_parent_fk_props(cdef, model)
-            child_rels = [r for r in child_rels_raw if r['prop_name'] not in parent_fk_props]
+            if out_type == 'list':
+                # Exclude back-ref to the current parent model (avoid circular
+                # include) -- mirrors the one_to_one_include_entries guard below.
+                child_rels = [r for r in child_rels_raw if r['target'] != model]
+            else:
+                # DataGrid child: exclude only the structural parent FK (avoid
+                # circular include). Another FK on the child that happens to
+                # target the same model for a different purpose must stay in
+                # the fetched include.
+                parent_fk_props = get_parent_fk_props(cdef, model)
+                child_rels = [r for r in child_rels_raw if r['prop_name'] not in parent_fk_props]
             if not child_rels:
                 child_include_entries.append(f"{prop}: true")
             else:
