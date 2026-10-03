@@ -16,6 +16,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   there and the app does not use it.
 
 ### Fixed
+- **Started a nullable date, time or date-time column in a new child DataGrid
+  row empty** instead of filling it with the current time. A required one still
+  starts with a value, and nullable numbers, decimals and enums already started
+  empty, so an untouched optional date used to be saved as "now".
 - **Stopped one child grid from removing the form props another child grid
   needs** (issue #802). When a read-only independent child, a read-only parent
   FK, or an FK left out of `x-display.form` shared a relation target with an

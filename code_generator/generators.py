@@ -5899,6 +5899,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             if actual == 'boolean':
                 return str(defn.get('default', False)).lower()
             if actual == 'string' and fmt in ('date', 'date-time', 'time'):
+                # A nullable date/time column starts empty, like a nullable
+                # number, decimal or enum; a required one starts with a value.
+                if nullable:
+                    return 'null'
                 return "dayjs().toISOString()"
             if actual == 'string' and defn.get('_prisma_decimal_type'):
                 # Decimal-backed field: a plain quoted decimal string (never a
