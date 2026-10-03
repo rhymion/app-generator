@@ -16,6 +16,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   there and the app does not use it.
 
 ### Fixed
+- **Stopped one child grid from removing the form props another child grid
+  needs** (issue #802). When a read-only independent child, a read-only parent
+  FK, or an FK left out of `x-display.form` shared a relation target with an
+  editable inline child grid, the parent form dropped that target's
+  `initial{Target}s` / `search{Target}Options` props while the grid still used
+  them, and the generated app failed to compile (`Cannot find name
+  'initial{Target}s'`). The props are now kept whenever an editable child grid
+  needs them.
 - **Kept a child DataGrid's second FK to the parent's model in the fetched data**
   (issue #800). When an embedded child had a structural FK to the parent plus a
   separate FK to the same model, the parent detail query dropped both, so the
