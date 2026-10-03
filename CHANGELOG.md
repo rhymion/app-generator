@@ -16,6 +16,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   there and the app does not use it.
 
 ### Fixed
+- **Kept a child DataGrid's second FK to the parent's model in the fetched data**
+  (issue #800). When an embedded child had a structural FK to the parent plus a
+  separate FK to the same model, the parent detail query dropped both, so the
+  second FK's grid column rendered empty. Only the structural parent FK is
+  excluded now.
 - **Stopped asking adopters of `x-payment` to copy the `payable` model into
   `prj/prisma/schema.prisma`** (issue #786). The second `generate-code` in an
   app failed in `prj:sync` with `model payable` reported as dropped, because
