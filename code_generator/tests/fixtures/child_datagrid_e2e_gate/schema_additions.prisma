@@ -1,0 +1,174 @@
+// Fixture models for the child-datagrid-e2e-gate (appended to a COPY of
+// prisma/schema.prisma by scripts/check_child_datagrid_e2e_gate_fixture.sh;
+// the default schema is never edited). Relation back-fields that the default
+// `user` and `organization` models need are listed in
+// schema_relations.json and inserted into the copy by the same script.
+
+enum ProbeKind {
+  string
+  number
+  boolean
+  date
+}
+
+model parent1 {
+  id              String           @id @default(cuid())
+  name            String           @unique
+  organization_id String?
+  organization    organization?    @relation(fields: [organization_id], references: [id], onDelete: SetNull)
+  description     String?
+  price           Int
+  due_date        DateTime         @db.Timestamptz(0)
+  created_at      DateTime         @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime         @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user             @relation("Parent1Creator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user             @relation("Parent1Updater", fields: [updater_id], references: [id])
+  parent1_child1s parent1_child1[]
+  parent1_child2s parent1_child2[] @relation("child2_parent")
+  related_child2s parent1_child2[] @relation("child2_related")
+  owned_parent_onlys parent_only[] @relation("po_owner")
+  probe_other_plain parent_only_probe[] @relation("probe_other_plain")
+  probe_other_comp parent_only_probe[] @relation("probe_other_comp")
+  probe_other_dot parent_only_probe[] @relation("probe_other_dot")
+  probe_other_cd parent_only_probe[] @relation("probe_other_cd")
+  probe_other_req parent_only_probe[] @relation("probe_other_req")
+
+  @@index([creator_id])
+  @@index([organization_id])
+  @@index([updater_id])
+}
+
+// Independent child: own writable pages, so the parent screen shows it read-only.
+model parent1_child1 {
+  id             String       @id @default(cuid())
+  name           String
+  parent1_id     String
+  parent1        parent1      @relation(fields: [parent1_id], references: [id], onDelete: Cascade)
+  parent_only_id String?
+  parent_only    parent_only? @relation(fields: [parent_only_id], references: [id])
+  created_at     DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime     @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user         @relation("P1C1Creator", fields: [creator_id], references: [id])
+  updater_id     String
+  updater        user         @relation("P1C1Updater", fields: [updater_id], references: [id])
+
+  @@index([parent1_id])
+  @@index([parent_only_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// Child with read-only own pages (new/edit/delete false): edited inline from the
+// parent. Two FKs to the parent's own model (the structural link is named by
+// the Prisma relation, not by a column-name convention).
+model parent1_child2 {
+  id                 String       @id @default(cuid())
+  name               String
+  parent1_id         String
+  parent1            parent1      @relation("child2_parent", fields: [parent1_id], references: [id], onDelete: Cascade)
+  parent_only_id     String?
+  parent_only        parent_only? @relation(fields: [parent_only_id], references: [id])
+  related_parent1_id String?
+  related_parent1    parent1?     @relation("child2_related", fields: [related_parent1_id], references: [id], onDelete: SetNull)
+  required           Boolean      @default(true)
+  start_date         DateTime?    @db.Timestamptz(0)
+  end_date           DateTime     @db.Timestamptz(0)
+  created_at         DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at         DateTime     @updatedAt @db.Timestamptz(0)
+  creator_id         String
+  creator            user         @relation("P1C2Creator", fields: [creator_id], references: [id])
+  updater_id         String
+  updater            user         @relation("P1C2Updater", fields: [updater_id], references: [id])
+
+  @@index([parent1_id])
+  @@index([related_parent1_id])
+  @@index([parent_only_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model parent_only {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  login_time  DateTime? @db.Timestamptz(0)
+  logout_time DateTime? @db.Timestamptz(0)
+  owner_id    String?
+  owner       parent1?  @relation("po_owner", fields: [owner_id], references: [id])
+  created_at  DateTime  @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime  @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user      @relation("ParentOnlyCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user      @relation("ParentOnlyUpdater", fields: [updater_id], references: [id])
+  parent1_child1s    parent1_child1[]
+  parent1_child2s    parent1_child2[]
+  parent_only_probes parent_only_probe[] @relation("probe_parent")
+  probe_same_plain parent_only_probe[] @relation("probe_same_plain")
+  probe_same_comp parent_only_probe[] @relation("probe_same_comp")
+  probe_same_dot parent_only_probe[] @relation("probe_same_dot")
+  probe_same_cd parent_only_probe[] @relation("probe_same_cd")
+  probe_same_req parent_only_probe[] @relation("probe_same_req")
+
+  @@index([owner_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// Inline child with no pages of its own: every column type, required and
+// nullable, plus FKs to the parent's own model (parent_only) and to another
+// model (parent1) under each label form.
+model parent_only_probe {
+  id             String      @id @default(cuid())
+  parent_only_id String
+  parent_only    parent_only @relation("probe_parent", fields: [parent_only_id], references: [id], onDelete: Cascade)
+  str_req        String
+  str_null       String?
+  int_req        Int
+  int_null       Int?
+  dec_req        Decimal     @db.Decimal(10, 2)
+  dec_null       Decimal?    @db.Decimal(10, 2)
+  date_req       DateTime    @db.Timestamptz(0)
+  date_null      DateTime?   @db.Timestamptz(0)
+  dt_req         DateTime    @db.Timestamptz(0)
+  dt_null        DateTime?   @db.Timestamptz(0)
+  enum_req       ProbeKind
+  enum_null      ProbeKind?
+  same_plain_id String?
+  same_plain parent_only? @relation("probe_same_plain", fields: [same_plain_id], references: [id])
+  same_comp_id String?
+  same_comp parent_only? @relation("probe_same_comp", fields: [same_comp_id], references: [id])
+  same_dot_id String?
+  same_dot parent_only? @relation("probe_same_dot", fields: [same_dot_id], references: [id])
+  same_cd_id String?
+  same_cd parent_only? @relation("probe_same_cd", fields: [same_cd_id], references: [id])
+  same_req_id String
+  same_req parent_only @relation("probe_same_req", fields: [same_req_id], references: [id])
+  other_plain_id String?
+  other_plain parent1? @relation("probe_other_plain", fields: [other_plain_id], references: [id])
+  other_comp_id String?
+  other_comp parent1? @relation("probe_other_comp", fields: [other_comp_id], references: [id])
+  other_dot_id String?
+  other_dot parent1? @relation("probe_other_dot", fields: [other_dot_id], references: [id])
+  other_cd_id String?
+  other_cd parent1? @relation("probe_other_cd", fields: [other_cd_id], references: [id])
+  other_req_id String
+  other_req parent1 @relation("probe_other_req", fields: [other_req_id], references: [id])
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+
+  @@index([parent_only_id])
+  @@index([same_plain_id])
+  @@index([same_comp_id])
+  @@index([same_dot_id])
+  @@index([same_cd_id])
+  @@index([same_req_id])
+  @@index([other_plain_id])
+  @@index([other_comp_id])
+  @@index([other_dot_id])
+  @@index([other_cd_id])
+  @@index([other_req_id])
+}

@@ -52,6 +52,7 @@
     "test:direct-attachment-gate": "bash scripts/check_direct_attachment_gate_fixture.sh",
     "test:uri-kind-gate": "bash scripts/check_uri_kind_gate_fixture.sh",
     "test:filter-sort-gate": "bash scripts/check_filter_sort_gate_fixture.sh",
+    "test:child-datagrid-e2e-gate": "bash scripts/check_child_datagrid_e2e_gate_fixture.sh",
     "start": "node scripts/run-next-start.js",
     "test": "vitest",
     "test:coverage": "vitest --coverage",

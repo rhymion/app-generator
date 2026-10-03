@@ -1,0 +1,189 @@
+# Fixture entities for the child-datagrid-e2e-gate. ONLY the entities this gate
+# needs: scripts/check_child_datagrid_e2e_gate_fixture.sh merges them into a
+# COPY of the default code_generator/json_schema.yaml inside a disposable build
+# directory. The default schema, its generated output and every other fixture
+# stay untouched.
+#
+#   parent1            parent with three kinds of child below (+ organization FK)
+#   parent1_child1     independent child (own writable pages): read-only on parent1's screens
+#   parent1_child2     child with read-only own pages (new/edit/delete false): inline-editable
+#   parent_only        parent of the probe child; target of FKs from the others
+#   parent_only_probe  inline child, no pages: all column types x required/nullable,
+#                      FKs to parent_only (same model) and parent1 (other model),
+#                      each under the plain / composite / dotted / composite+dotted label forms
+definitions:
+  parent1_child1:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      parent_only_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship: {}
+      name:
+        minLength: 1
+        maxLength: 50
+      parent1_id:
+        pattern: "^c[a-z0-9]{24,}$"
+
+  parent1_child2:
+    x-generate:
+      list: true
+      view: true
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      parent_only_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship: {}
+      name:
+        minLength: 1
+      related_parent1_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship: {}
+      required:
+        default: true
+      start_date:
+        format: date
+      end_date:
+        format: date
+
+  parent1:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    fields:
+      name:
+        minLength: 1
+        maxLength: 100
+      organization_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship: {}
+      description: {}
+      price:
+        minimum: 0
+        maximum: 1000000
+      due_date: {}
+    required:
+      - parent1_child1s
+      - parent1_child2s
+    x-import-key: [name]
+    properties:
+      organization:
+        $ref: "#/definitions/organization"
+      parent1_child1s:
+        type: array
+        items:
+          $ref: "#/definitions/parent1_child1"
+      parent1_child2s:
+        type: array
+        items:
+          $ref: "#/definitions/parent1_child2"
+
+  parent_only_probe:
+    fields:
+      parent_only_id:
+        pattern: "^c[a-z0-9]{24,}$"
+      str_req: {}
+      str_null: {}
+      int_req: {}
+      int_null: {}
+      dec_req: {}
+      dec_null: {}
+      date_req:
+        format: date
+      date_null:
+        format: date
+      dt_req:
+        format: date-time
+      dt_null:
+        format: date-time
+      # A native enum column needs its member list declared here: the generated
+      # nested create only type-checks with the literal union.
+      enum_req:
+        enum: [string, number, boolean, date]
+      enum_null:
+        enum: [string, number, boolean, date]
+      same_plain_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          labelField: name
+      same_comp_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          labelField: [name, description]
+      same_dot_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          labelField: owner.name
+      same_cd_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          labelField: [name, owner.name]
+      same_req_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          labelField: name
+      other_plain_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          labelField: name
+      other_comp_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          labelField: [name, description]
+      other_dot_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          labelField: organization.name
+      other_cd_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          labelField: [name, organization.name]
+      other_req_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          labelField: name
+
+  parent_only:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    fields:
+      name:
+        minLength: 1
+      description: {}
+      login_time: {}
+      logout_time: {}
+      owner_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship: {}
+    properties:
+      owner:
+        $ref: "#/definitions/parent1"
+      parent_only_probes:
+        type: array
+        items:
+          $ref: "#/definitions/parent_only_probe"
