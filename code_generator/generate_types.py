@@ -75,6 +75,9 @@ def _extract_children(defn: dict, schema: dict) -> list[dict]:
                 'output_type': prop.get('x-outputType') or prop.get('outputType'),
                 'file_type': prop.get('x-fileType'),
                 'relationship': relationship,
+                # Structural parent FK column(s) of the child, named by the
+                # Prisma relation (build_user_schema.py); None when unnamed.
+                'parent_fk': prop.get('x-parent-fk'),
             })
 
     return children

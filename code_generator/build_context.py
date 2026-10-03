@@ -3847,7 +3847,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
                 # circular include). Another FK on the child that happens to
                 # target the same model for a different purpose must stay in
                 # the fetched include.
-                parent_fk_props = get_parent_fk_props(cdef, model)
+                parent_fk_props = set(c.get('parent_fk') or ()) or get_parent_fk_props(cdef, model)
                 child_rels = [r for r in child_rels_raw if r['prop_name'] not in parent_fk_props]
             if not child_rels:
                 child_include_entries.append(f"{prop}: true")

@@ -69,6 +69,7 @@ silently misinterpreted.
 
 from __future__ import annotations
 
+import warnings
 import argparse
 import sys
 from pathlib import Path
@@ -340,6 +341,80 @@ def _auto_infer_fk_fields(entry: dict, model: "PrismaModel") -> dict:
     return fields_spec
 
 
+class _AmbiguousParentFk(Exception):
+    pass
+
+
+def _structural_parent_fk(parent_model: "PrismaModel", prop_name: str, prisma_models: dict):
+    """Name the child column that links an embedded child back to its parent.
+
+    The parent's own declaration of the child (a list relation field on its
+    Prisma model) is paired with the child's relation-object field that
+    points back at the parent: by relation name when the list side carries
+    one, otherwise the single unnamed back-reference. Returns the FK column
+    names, None when the child has no FK-bearing back-reference, and raises
+    _AmbiguousParentFk when several match (never guessed from column names).
+    """
+    list_field = parent_model.fields.get(prop_name)
+    if list_field is None or not list_field.is_list:
+        return None
+    child_model = prisma_models.get(list_field.prisma_type)
+    if child_model is None:
+        return None
+    candidates = [
+        f for f in child_model.fields.values()
+        if f.is_relation_object and not f.is_list
+        and f.prisma_type == parent_model.name
+        and f.relation_fk_fields
+        and f.relation_name == list_field.relation_name
+    ]
+    if len(candidates) == 1:
+        return list(candidates[0].relation_fk_fields)
+    if len(candidates) > 1:
+        raise _AmbiguousParentFk
+    return None  # no FK-bearing back-reference (many-to-many, polymorphic): nothing to name
+
+
+def _annotate_parent_fks(entry: dict, entity_key: str, prisma_models: dict) -> dict:
+    """Return `entry` with `x-parent-fk` added to each embedded-child array
+    property whose structural parent FK column the Prisma schema names.
+
+    A Prisma list relation to a child that cannot be paired unambiguously is
+    left unannotated and reported, so the generator's fallback is never a
+    silent one.
+    """
+    props = entry.get("properties")
+    parent_model = prisma_models.get(entity_key)
+    if not props or parent_model is None:
+        return entry
+    new_props = dict(props)
+    changed = False
+    for prop_name, prop in props.items():
+        if not isinstance(prop, dict) or prop.get("type") != "array":
+            continue
+        if not (prop.get("items") or {}).get("$ref"):
+            continue
+        pf = parent_model.fields.get(prop_name)
+        if pf is None or not pf.is_list or pf.prisma_type not in prisma_models:
+            continue
+        try:
+            fk_cols = _structural_parent_fk(parent_model, prop_name, prisma_models)
+        except _AmbiguousParentFk:
+            warnings.warn(
+                f"'{entity_key}.{prop_name}': cannot tell which column of "
+                f"'{pf.prisma_type}' is the structural parent FK from the Prisma "
+                f"relation; falling back to the column-name convention "
+                f"('{entity_key}_id'). Name the relation on both sides to make it explicit.",
+                stacklevel=2,
+            )
+            continue
+        if fk_cols is None:
+            continue
+        new_props[prop_name] = {**prop, "x-parent-fk": fk_cols}
+        changed = True
+    return {**entry, "properties": new_props} if changed else entry
+
+
 def _build_raw_and_view(
     entity_key: str,
     entry: dict,
@@ -416,7 +491,7 @@ def build_intermediate_schema(
     _validate_entity_names(user_definitions, prisma_models)
 
     for entity_key, raw_entry in user_definitions.items():
-        entry = raw_entry or {}
+        entry = _annotate_parent_fks(raw_entry or {}, entity_key, prisma_models)
         try:
             if entity_key in prisma_models and _has_view_level_config(entry):
                 raw, view = _build_raw_and_view(entity_key, entry, prisma_models, prisma_enums)
