@@ -6498,13 +6498,31 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             if r['prop_name'] not in _c_parent_fk_props
             and r['target'] != _c['name']
         }
+    # A target an editable inline grid child's own FK also needs (its
+    # EntityAutocompleteCellConfig, see child_entity_rel_opt below) is NOT
+    # indep-grid-only: dropping its initial{Xxx}s/search{Xxx}Options props
+    # because a read-only independent child shares it leaves the editable
+    # child's config referencing props the form never declared.
+    _editable_child_rel_targets: set[str] = set()
+    for _ec in non_comment_ch:
+        if _ec.get('output_type') == 'list' or (_ec.get('relationship') or {}).get('type') == 'many-to-many':
+            continue
+        _ec_def = _raw_def(_ec['name'], schema)
+        _ec_parent_fk_props = resolve_parent_fk_props(_ec, _ec_def, model)
+        _editable_child_rel_targets |= {
+            r['target']
+            for r in get_parent_relationships(_ec_def)
+            if r['prop_name'] not in _ec_parent_fk_props
+        }
     _indep_grid_only_targets = (
-        _indep_grid_child_rel_targets - _editable_rel_targets - _readonly_only_targets - _undisplayed_only_targets
+        _indep_grid_child_rel_targets - _editable_rel_targets - _readonly_only_targets
+        - _undisplayed_only_targets - _editable_child_rel_targets
     )
     selection_targets = [
         t for t in selection_targets
-        if t not in _readonly_only_targets and t not in _undisplayed_only_targets
-        and t not in _indep_grid_only_targets
+        if t in _editable_child_rel_targets
+        or (t not in _readonly_only_targets and t not in _undisplayed_only_targets
+            and t not in _indep_grid_only_targets)
     ]
     _all_targets = list(selection_targets) + [
         r['target'] for r in selector_oto_rels if _displayed(r['prop_name'])
