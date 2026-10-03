@@ -147,3 +147,33 @@ def test_new_row_seeds_a_nullable_date_column_empty_and_a_required_one_with_a_va
     required = re.search(rf'\b{type_name}_req: (.+),', block).group(1)
     assert nullable == 'null', f'{type_name}_null starts as {nullable}'
     assert required != 'null' and 'dayjs()' in required, f'{type_name}_req starts as {required}'
+
+
+@pytest.mark.parametrize('mode', WRITABLE_MODES)
+def test_required_enum_has_no_empty_choice_and_starts_with_its_first_member(mode):
+    """A required (native) enum column cannot be left empty: its select options
+    carry no empty choice and a new row starts with the first member. A
+    nullable enum has the empty choice and starts empty."""
+    import copy
+
+    from generators import column_def_context
+
+    schema = copy.deepcopy(SCHEMA)
+    child = _child_name('plain', 'solo', mode)
+    for col in ('enum_req', 'enum_null'):
+        schema['definitions'][child]['properties'][col]['_prisma_native_enum_type'] = 'Kind'
+    ctx = build_context(_entity('plain', 'solo'), schema)
+    form = form_upsert_context(ctx, schema)
+
+    block = _new_row_block(form, child)
+    assert re.search(r"\benum_req: 'alpha'", block), block
+    assert re.search(r"\benum_null: null", block), block
+
+    pascal = ''.join(p.title() for p in f'{child}s'.split('_'))
+    fn = next(e['fn_code'] for e in column_def_context(ctx, schema)['column_children']
+              if f'use{pascal}Columns' in e['fn_code'])
+    required_col = re.search(r"field: 'enum_req'.*", fn).group(0)
+    nullable_col = re.search(r"field: 'enum_null'.*", fn).group(0)
+    assert 'valueOptions' in required_col and "'alpha'" in required_col and "'beta'" in required_col
+    assert "value: ''" not in required_col and '-- None --' not in required_col, required_col
+    assert "value: ''" in nullable_col and '-- None --' in nullable_col, nullable_col
