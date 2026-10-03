@@ -1,0 +1,15 @@
+{
+  "user": [
+    "created_parent1s parent1[] @relation(\"Parent1Creator\")",
+    "updated_parent1s parent1[] @relation(\"Parent1Updater\")",
+    "created_parent_onlys parent_only[] @relation(\"ParentOnlyCreator\")",
+    "updated_parent_onlys parent_only[] @relation(\"ParentOnlyUpdater\")",
+    "created_p1c1s parent1_child1[] @relation(\"P1C1Creator\")",
+    "updated_p1c1s parent1_child1[] @relation(\"P1C1Updater\")",
+    "created_p1c2s parent1_child2[] @relation(\"P1C2Creator\")",
+    "updated_p1c2s parent1_child2[] @relation(\"P1C2Updater\")"
+  ],
+  "organization": [
+    "parent1s parent1[]"
+  ]
+}

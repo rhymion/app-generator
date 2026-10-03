@@ -161,6 +161,10 @@ code_generator/.generated/
 # code_generator/tests/fixtures/filter_sort_gate/ on every run.
 .generated-filter-sort-gate/
 
+# child-datagrid-e2e-gate: disposable app copy built and run by
+# scripts/check_child_datagrid_e2e_gate_fixture.sh (never committed).
+.generated-child-datagrid-e2e-gate/
+
 # sample data
 custom/
 memory/

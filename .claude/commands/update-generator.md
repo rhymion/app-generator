@@ -33,6 +33,7 @@ Run in this order:
 2. `npm run test:pytest`       — Python unit tests for code generator
 3. `npm run test:vitest`      — vitest unit/component tests
 4. `npm run test:mention-gate` — fixture-schema generate-code → tsc check (see below)
+4a. `npm run test:mention-gate-plain-image` — same mention fixture with `user.image` as a plain `format: uri` column instead of a direct-attachment FK → tsc check (see below)
 5. `npm run test:decimal-gate` — fixture-schema generate-code → tsc check (see below)
 6. `npm run test:oto-mandatory-gate` — required one-to-one selector fixture generate-code → tsc check (see below)
 7. `npm run test:oto-decimal-gate` — one-to-one selector target with a Decimal column fixture generate-code → tsc check (see below)
@@ -43,6 +44,7 @@ Run in this order:
 12. `npm run test:direct-attachment-gate` — x-relationship type:direct FK fixture generate-code → tsc check (see below)
 13. `npm run test:uri-kind-gate` — x-uri-kind list-page/editable-child-DataGrid fixture generate-code → tsc check (see below)
 14. `npm run test:filter-sort-gate` — single entity carrying every ColumnFilterKind (enum/boolean/number/decimal/date/date-time/time/string) fixture generate-code → tsc check (see below)
+14a. `npm run test:child-datagrid-e2e-gate` — builds and RUNS a fixture app (default schema + the dedicated fixture schema) and runs its Cypress specs: embedded child DataGrid written from the parent screens (see below)
 15. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
 16. `npm run check:generated`  — generated code matches templates/schema
 17. `npm run test:e2e:cy:api`  — API Cypress specs only
@@ -78,9 +80,9 @@ number CI can never reproduce. Running lint first (matching CI's exact
 condition) makes local and CI agree on the same count by construction; see
 `docs/knowledge/lint-gate-must-match-ci-precondition.md`.
 
-Steps 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, and 14 run unconditionally, with no "unchanged" exemption: CI's
+Steps 2, 3, 4, 4a, 5, 6, 7, 8, 9, 10, 11, 12, 13, and 14 run unconditionally, with no "unchanged" exemption: CI's
 `unit-tests` (`npm run test:vitest`), `pytest` (Python Generator Tests),
-`mention-gate-fixture`, `decimal-gate-fixture`, `oto-mandatory-gate-fixture`,
+`mention-gate-fixture`, `mention-gate-plain-image-fixture`, `decimal-gate-fixture`, `oto-mandatory-gate-fixture`,
 `oto-decimal-gate-fixture`, `chart-decimal-gate-fixture`,
 `chart-scalar-gate-fixture`, `approval-lockdown-gate-fixture`,
 `payment-gate-fixture`, `direct-attachment-gate-fixture`,
@@ -105,6 +107,16 @@ never catch because no entity in this repo's own `json_schema.yaml` wires a
 does not (only this one branch — this repo's templates have on the order of
 700 `{% if %}` branches total, most still uncovered by any fixture), and how
 to extend it to a new dark branch.
+
+**Step 4a (`test:mention-gate-plain-image`)**: sibling of step 4. It runs the
+same commentable + comment + `x-mention: true` shape through the same
+`build_user_schema.py` → `generate.py` → `tsc --noEmit` pipeline, but with
+`user.image` kept as a plain `format: uri` string column. Step 4's fixture
+declares `user.image` as a direct-attachment FK, so it only type-checks one of
+the two Prisma select shapes the comment/mention creator avatar select can
+produce (`image: { select: { path: true } }` vs `image: true`); a consumer that
+declares `x-mention: true` without having adopted the FK shape is equally
+valid. ~6s, no database. See `scripts/check_mention_gate_plain_image_fixture.sh`.
 
 **Step 5 (`test:decimal-gate`, cmd_705)**: same shape as step 4, for a
 different dark branch — a fixture entity with a required and a nullable
@@ -327,6 +339,29 @@ emitted together, not just one at a time) could hide in. ~6-7s (measured:
 6.6s, in the same order of magnitude as `test:decimal-gate`'s ~6.4-6.6s and
 `test:mention-gate`'s ~7.8s baseline). See
 `scripts/check_filter_sort_gate_fixture.sh`.
+
+**Step 14a (`test:child-datagrid-e2e-gate`)**: the one gate that builds and
+RUNS an app. `scripts/check_child_datagrid_e2e_gate_fixture.sh` copies the
+working tree into a disposable `.generated-child-datagrid-e2e-gate/`, merges
+the entities of `code_generator/tests/fixtures/child_datagrid_e2e_gate/` (a
+dedicated schema: `json_schema.yaml`, `schema_additions.prisma`,
+`schema_relations.json`) into the copy's schema, then runs the repository's own
+`npm run test:e2e:build` and `scripts/run-e2e.js` inside the copy, executing
+only the specs in that fixture's `cypress/e2e/`. The default schema, its
+generated output and the other fixtures are never edited. The copy has its own
+docker compose project and three ports derived from the checkout's path (a port
+already in use fails the run) and its own throwaway `AUTH_SECRET`; cleanup is
+`docker compose -p <that project> down -v`. The specs cover what a type check
+cannot: an embedded child DataGrid created, edited and deleted from the
+parent's new and edit screens (UI, Server Action, service, REST route), FK label
+display and selection for the plain / composite / dotted / composite+dotted
+label forms against the parent's own model and another model, required vs
+nullable columns left empty, a child with its own writable pages staying
+read-only on the parent screens, and a read-only or independent sibling not
+removing the form props an editable child grid needs. ~8-10 min. CI runs it as
+`child-datagrid-e2e-gate-fixture`, skipped for a docs-only diff exactly like
+`e2e-tests`; locally it always runs. See
+`scripts/check_child_datagrid_e2e_gate_fixture.sh`.
 
 Step 21 only proves both README files were touched, not that their content
 actually agrees — if this task's diff includes a README.md change, bring

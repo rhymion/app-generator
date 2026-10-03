@@ -138,7 +138,19 @@ def _rebuild_from_stage2_fixture():
     legacy = _load(STAGE2_REFERENCE_PATH)
     converted = convert_to_user_schema(legacy, prisma_models)
     _merge_internal_definitions(converted, SCHEMA_PATH, _make_yaml())
-    return build_intermediate_schema(converted, prisma_models, prisma_enums)
+    return _strip_parent_fk(build_intermediate_schema(converted, prisma_models, prisma_enums))
+
+
+def _strip_parent_fk(node):
+    """Drop the derived-only `x-parent-fk` annotation (the structural parent
+    FK that build_user_schema names from the Prisma relation). The frozen
+    references predate it, and these tests compare everything else; the
+    annotation itself is covered by test_datagrid_child_declared_parent_fk.py."""
+    if isinstance(node, dict):
+        return {k: _strip_parent_fk(v) for k, v in node.items() if k != "x-parent-fk"}
+    if isinstance(node, list):
+        return [_strip_parent_fk(v) for v in node]
+    return node
 
 
 def test_stage4_derivation_matches_reference():
