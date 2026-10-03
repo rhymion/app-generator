@@ -17,7 +17,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ### Fixed
 - **Started a nullable date, time or date-time column in a new child DataGrid
-  row empty** instead of filling it with the current time. A required one still
+  row empty** (issue #804) instead of filling it with the current time. A required one still
   starts with a value, and nullable numbers, decimals and enums already started
   empty, so an untouched optional date used to be saved as "now".
 - **Stopped one child grid from removing the form props another child grid
