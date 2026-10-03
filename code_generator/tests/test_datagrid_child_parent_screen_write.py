@@ -133,3 +133,17 @@ def test_editable_child_has_no_write_controls_on_the_parent_screen(form_name, si
     assert f'{child}s' not in ctx['child_nested_update']
     assert f"'{child}[]'" not in form['child_form_data_handling']
     assert f'invalid{pascal}' not in form['child_validation_code']
+
+
+@pytest.mark.parametrize('mode', WRITABLE_MODES)
+@pytest.mark.parametrize('type_name', ['date', 'time', 'date_time'])
+def test_new_row_seeds_a_nullable_date_column_empty_and_a_required_one_with_a_value(mode, type_name):
+    """A new grid row must not fill in a nullable date/time column: leaving it
+    empty has to be the default, as it already is for nullable numbers, decimals
+    and enums. A required date/time column still starts with a value."""
+    _, form = _generated('plain', 'solo')
+    block = _new_row_block(form, _child_name('plain', 'solo', mode))
+    nullable = re.search(rf'\b{type_name}_null: (.+),', block).group(1)
+    required = re.search(rf'\b{type_name}_req: (.+),', block).group(1)
+    assert nullable == 'null', f'{type_name}_null starts as {nullable}'
+    assert required != 'null' and 'dayjs()' in required, f'{type_name}_req starts as {required}'
