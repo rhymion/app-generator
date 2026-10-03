@@ -44,7 +44,8 @@ jobs:
         # oto-mandatory-gate-fixture/approval-lockdown-gate-fixture/
         # payment-gate-fixture/uri-kind-gate-fixture/
         # filter-sort-gate-fixture keep running
-        # unconditionally — e2e-tests is
+        # unconditionally — e2e-tests (and child-datagrid-e2e-gate-fixture,
+        # the same kind of job) is
         # the dominant cost (~57-60 min per cmd_719) and the other eleven
         # stay as a safety net against a path-judgment mistake here). Not a
         # top-level `paths-ignore:` trigger filter — that would make the
@@ -290,6 +291,39 @@ jobs:
         run: npm run test:e2e:build
       - name: Run API E2E tests
         run: npm run test:e2e:cy:start
+
+  child-datagrid-e2e-gate-fixture:
+    name: Child DataGrid E2E Gate Fixture Check
+    # Builds and runs a whole app generated from the default schema plus the
+    # dedicated fixture schema in
+    # code_generator/tests/fixtures/child_datagrid_e2e_gate/ and runs its
+    # Cypress specs (embedded child DataGrid written from the parent screens,
+    # FK label forms, required vs nullable columns, sibling children). Same
+    # shape and cost class as e2e-tests, so it is gated on detect-changes the
+    # same way; the local gate (npm run test:child-datagrid-e2e-gate, step 14a
+    # of .claude/commands/update-generator.md) runs it without that exemption.
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - name: Cache Cypress binary
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:child-datagrid-e2e-gate
 
   pytest:
     name: Python Generator Tests
