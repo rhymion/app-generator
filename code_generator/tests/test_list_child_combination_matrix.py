@@ -391,15 +391,27 @@ def _attaches_by_nullable_link(row):
     return row['relation'] == 'o2m' and row['nullable']
 
 
+def _rendered(template, ctx):
+    """The text the generator emits for `template`, not just the context behind it."""
+    from generate import _make_env, _render
+    return _render(_make_env(), template, ctx)
+
+
 @pytest.mark.parametrize('row,shape', CASES, ids=[_case_id(r, s) for r, s in CASES])
 def test_service_rejects_a_record_that_belongs_to_another_parent(row, shape):
     parent, kid, _ = _names(row, shape)
     ctx = _ctx(row, shape)
-    create, update = ctx['child_attach_guard_create'], ctx['child_attach_guard_update']
+    link = f'{parent}_id'
+    # The generated service: only a nullable one-to-many child gets the guard.
+    service = _rendered('service.ts.jinja2', ctx)
+    guarded = f'{link}: {{ not: null }}' in service
+    assert guarded == _attaches_by_nullable_link(row), (_describe(row), service)
+    if guarded:
+        assert "'VALIDATION'" in service and f'{{ {link}: {{ not: id }} }}' in service
+    create, update = ctx.get('child_attach_guard_create', ''), ctx.get('child_attach_guard_update', '')
     if not _attaches_by_nullable_link(row):
         assert create == '' and update == '', (_describe(row), create, update)
         return
-    link = f'{parent}_id'
     assert f'tx.{kid}.findMany' in create and f'{link}: {{ not: null }}' in create
     assert "'VALIDATION'" in create and "'kids'" in create
     # On update a record that already belongs to this parent stays accepted.
@@ -418,9 +430,15 @@ def test_service_rejects_a_record_that_belongs_to_another_parent(row, shape):
 def test_search_offers_only_records_without_a_parent(row, shape):
     parent, kid, _ = _names(row, shape)
     kid_ctx = build_context(_kid_entity(row, shape), SCHEMA) if not row['self_ref'] else _ctx(row, shape)
-    callers = kid_ctx['list_child_attach_callers']
+    # The generated search: it narrows the picker only for a nullable one-to-many parent.
+    getters = _rendered('getters.ts.jinja2', kid_ctx)
+    narrowed = 'LIST_CHILD_ATTACH_FK' in getters
+    assert narrowed == _attaches_by_nullable_link(row), (_describe(row), getters)
+    if narrowed:
+        assert f'"{parent}": "{parent}_id"' in getters
+    callers = kid_ctx.get('list_child_attach_callers', {})
     if not _attaches_by_nullable_link(row):
-        assert callers == {} and not kid_ctx['list_child_attach_self_fk'], (_describe(row), callers)
+        assert callers == {} and not kid_ctx.get('list_child_attach_self_fk'), (_describe(row), callers)
         return
     assert callers == {parent: f'{parent}_id'}, callers
     if row['self_ref']:
