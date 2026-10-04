@@ -1,0 +1,24 @@
+{
+  "user": [
+    "created_lc_plain_parents lc_plain_parent[] @relation(\"LcPlainParentCreator\")",
+    "updated_lc_plain_parents lc_plain_parent[] @relation(\"LcPlainParentUpdater\")",
+    "created_lc_edit_parents lc_edit_parent[] @relation(\"LcEditParentCreator\")",
+    "updated_lc_edit_parents lc_edit_parent[] @relation(\"LcEditParentUpdater\")",
+    "created_lc_edit_children lc_edit_child[] @relation(\"LcEditChildCreator\")",
+    "updated_lc_edit_children lc_edit_child[] @relation(\"LcEditChildUpdater\")",
+    "created_lc_m2m_parents lc_m2m_parent[] @relation(\"LcM2mParentCreator\")",
+    "updated_lc_m2m_parents lc_m2m_parent[] @relation(\"LcM2mParentUpdater\")",
+    "created_lc_m2m_children lc_m2m_child[] @relation(\"LcM2mChildCreator\")",
+    "updated_lc_m2m_children lc_m2m_child[] @relation(\"LcM2mChildUpdater\")",
+    "created_lc_nodes lc_node[] @relation(\"LcNodeCreator\")",
+    "updated_lc_nodes lc_node[] @relation(\"LcNodeUpdater\")",
+    "created_lc_ro_parents lc_ro_parent[] @relation(\"LcRoParentCreator\")",
+    "created_lc_ro_children lc_ro_child[] @relation(\"LcRoChildCreator\")",
+    "updated_lc_ro_parents lc_ro_parent[] @relation(\"LcRoParentUpdater\")",
+    "updated_lc_ro_children lc_ro_child[] @relation(\"LcRoChildUpdater\")",
+    "created_lc_req_parents lc_req_parent[] @relation(\"LcReqParentCreator\")",
+    "created_lc_req_children lc_req_child[] @relation(\"LcReqChildCreator\")",
+    "updated_lc_req_parents lc_req_parent[] @relation(\"LcReqParentUpdater\")",
+    "updated_lc_req_children lc_req_child[] @relation(\"LcReqChildUpdater\")"
+  ]
+}

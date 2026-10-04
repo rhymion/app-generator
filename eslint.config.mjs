@@ -36,7 +36,7 @@ const eslintConfig = defineConfig([
   // themselves are correct and intentional, so the rule is disabled only
   // for the API e2e specs where this pattern appears.
   {
-    files: ["cypress/e2e/api/**/*.cy.ts", "code_generator/tests/fixtures/child_datagrid_e2e_gate/cypress/**/*.cy.ts"],
+    files: ["cypress/e2e/api/**/*.cy.ts", "code_generator/tests/fixtures/child_datagrid_e2e_gate/cypress/**/*.cy.ts", "code_generator/tests/fixtures/list_child_e2e_gate/cypress/**/*.cy.ts"],
     rules: {
       "@typescript-eslint/no-unused-expressions": "off",
     },
@@ -105,6 +105,8 @@ const eslintConfig = defineConfig([
     ".generated-filter-sort-gate/**",
     // Disposable app copy built by the child-datagrid-e2e-gate script.
     ".generated-child-datagrid-e2e-gate/**",
+    // Disposable app copy built by the list-child-e2e-gate script.
+    ".generated-list-child-e2e-gate/**",
     // Local Python virtualenv (code_generator/tests pytest deps) — never
     // part of the shipped product, and not every contributor even has one.
     ".venv/**",

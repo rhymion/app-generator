@@ -55,7 +55,11 @@ async function {{ parent_pascal }}NewContent() {
 {% if target == 'organization' %}
     searchAssociatedOrganizationOptions('', [], 50),
 {% else %}
+{% if target in list_child_attach_targets %}
+    search{{ target | pascal_case }}Options('', [], 50, { callerEntity: '{{ parent }}' }),
+{% else %}
     search{{ target | pascal_case }}Options('', [], 50),
+{% endif %}
 {% endif %}
 {% endfor %}
 {% for oto in selector_oto_rels %}

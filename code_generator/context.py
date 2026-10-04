@@ -550,7 +550,7 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
         c['name'] for c in children_raw
         if (c.get('output_type') == 'list'
             and (c.get('relationship') or {}).get('type') != 'many-to-many'
-            and is_optional_fk_to_parent(schema['definitions'].get(c['name'], {}), model))
+            and is_optional_fk_to_parent(_raw_def(c['name'], schema), model))
     ]
     # Exclude _locally_declared_child_names for the same reason import_targets
     # does above: a self-referencing child's own relation target (e.g.

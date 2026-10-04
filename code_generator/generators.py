@@ -6283,6 +6283,11 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                     "query, includeIds, undefined, "
                     f"{{ callerEntity: '{model}', formValues: {_formvalues_expr} }}"
                 )
+            elif not is_m2m:
+                # Optional-FK list child: the picker offers only records that
+                # are not attached to a parent yet. The target names its
+                # caller through `callerEntity` to select that narrowing.
+                _search_call_args = f"query, includeIds, undefined, {{ callerEntity: '{parent}' }}"
             _ch_prop_def = model_def.get('properties', {}).get(prop_name, {})
             _ch_width_cols = _ui_width_cols(_ch_prop_def)
             if _ch_width_cols:

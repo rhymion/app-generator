@@ -1333,6 +1333,44 @@ model bug {
 }
 ```
 
+#### Relations of a list child that the parent fetches
+
+The parent's detail query (`get{Parent}Detail`) fetches every relation of an
+`x-outputType: list` child except its structural parent link, the column the parent owns the
+child through (a circular include otherwise). A second FK on the child that targets the
+parent's own model for another purpose is fetched like any other FK, so a label that reads it
+(`labelField: [name, rel_par.name]` on the parent's `x-relationships` entry) renders. A
+many-to-many child has no structural parent link, so all of its FKs are fetched. A child whose
+label walks a relation of the child (a dotted `labelField`) has that relation fetched too.
+
+`code_generator/tests/test_list_child_combination_matrix.py` covers every combination of the
+child page (none / read-only / editable), the nullable link, one-to-many or many-to-many,
+self-reference, a sibling child with its own FK to the parent's model, and composite and dotted
+labels; the `list-child-e2e-gate` fixture (`npm run test:list-child-e2e-gate`) runs
+representatives of them in a generated app, including that taking a child with no pages, or
+with read-only pages, out of the parent's list deletes the child record (its link to the parent
+is required, so it is always attached to a parent), and that a child with editable pages and a
+required link has a read-only list on the parent (no add or remove from the screen, and a child
+list sent to the server action or the REST route is ignored).
+
+#### Attaching an existing child to the parent's list
+
+What the parent screen can do with the list depends on the child:
+
+| Child page | Link to the parent | Relation | Adding an existing record | Removing a record |
+|---|---|---|---|---|
+| none or read-only | required | one-to-many | text typed on the parent screen creates the child record | deletes the child record |
+| editable | nullable | one-to-many | only a record that has no parent yet | detaches it; the record stays |
+| editable | required | one-to-many | not possible (the list is read-only) | not possible |
+| editable | nullable | many-to-many | any record, including one that belongs to other parents | removes the association; the record stays |
+
+A one-to-many child with a nullable link belongs to at most one parent, so a record that
+already has a parent is never moved: the child's search (`search{Child}Options`, called with
+`callerEntity` set to the parent) leaves it out, and `add{Parent}` / `update{Parent}` reject it
+with a `VALIDATION` error on the list property, for the Server Action and the REST route alike.
+For a self-referencing child the record itself and all of its ancestors are also left out and
+rejected, which keeps the tree free of cycles.
+
 ---
 
 ### 7.4 Read-only embedded grid for independent children (non-`list`, non-`comments` `x-outputType`)

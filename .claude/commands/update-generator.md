@@ -45,6 +45,7 @@ Run in this order:
 13. `npm run test:uri-kind-gate` — x-uri-kind list-page/editable-child-DataGrid fixture generate-code → tsc check (see below)
 14. `npm run test:filter-sort-gate` — single entity carrying every ColumnFilterKind (enum/boolean/number/decimal/date/date-time/time/string) fixture generate-code → tsc check (see below)
 14a. `npm run test:child-datagrid-e2e-gate` — builds and RUNS a fixture app (default schema + the dedicated fixture schema) and runs its Cypress specs: embedded child DataGrid written from the parent screens (see below)
+14b. `npm run test:list-child-e2e-gate` — builds and RUNS a fixture app (default schema + the dedicated fixture schema) and runs its Cypress specs: a child embedded with `x-outputType: list` shown on the parent's screens, and association add / remove from the parent screen (see below)
 15. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
 16. `npm run check:generated`  — generated code matches templates/schema
 17. `npm run test:e2e:cy:api`  — API Cypress specs only
@@ -362,6 +363,24 @@ removing the form props an editable child grid needs. ~8-10 min. CI runs it as
 `child-datagrid-e2e-gate-fixture`, skipped for a docs-only diff exactly like
 `e2e-tests`; locally it always runs. See
 `scripts/check_child_datagrid_e2e_gate_fixture.sh`.
+
+**Step 14b (`test:list-child-e2e-gate`)**: same machinery as step 14a.
+`scripts/check_list_child_e2e_gate_fixture.sh` copies the working tree into a
+disposable `.generated-list-child-e2e-gate/`, merges the entities of
+`code_generator/tests/fixtures/list_child_e2e_gate/` into the copy's schema
+(through `scripts/compose_child_datagrid_e2e_fixture.py`, which merges any
+fixture directory), builds the copy and runs only that fixture's Cypress specs,
+with its own docker compose project, ports and `AUTH_SECRET` (ports differ from
+step 14a's). The specs cover what the generator-level matrix
+(`code_generator/tests/test_list_child_combination_matrix.py`) cannot: a child
+with no pages of its own, an editable child with a nullable link whose label
+reads a second FK to the parent's own model (plus a sibling child with its own
+FK to that model), a many-to-many child and a self-referencing child, each shown
+on the parent's screens; and, from the parent screen, adding an existing child
+to the list and removing one from it without deleting the child record. CI runs
+it as `list-child-e2e-gate-fixture`, skipped for a docs-only diff exactly like
+`e2e-tests`; locally it always runs. See
+`scripts/check_list_child_e2e_gate_fixture.sh`.
 
 Step 21 only proves both README files were touched, not that their content
 actually agrees — if this task's diff includes a README.md change, bring

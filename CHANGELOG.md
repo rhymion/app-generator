@@ -16,6 +16,35 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   there and the app does not use it.
 
 ### Fixed
+- **Kept a list child's second FK to the parent's model in the fetched data**
+  (issue #801). A child embedded with `x-outputType: list` that had a structural
+  FK to the parent plus a separate FK to the same model lost both from the parent
+  detail query, so anything reading the second FK (for example a label
+  `[name, rel_par.name]`) rendered empty; a sibling list child's own FK to the
+  parent's model was dropped the same way. Only the structural parent FK is
+  excluded now, and a many-to-many list child, which has none, keeps all of its FKs.
+  Added `code_generator/tests/test_list_child_combination_matrix.py` (every
+  combination of the seven child axes, with and without the second FK) and the
+  `list-child-e2e-gate` fixture gate (`npm run test:list-child-e2e-gate`), which also
+  pins that removing a child with no pages, or with read-only pages, from the parent
+  screen deletes the child record, and that a child with editable pages and a required
+  link to its parent cannot be added to or taken out of the parent's list (screen,
+  server action or REST route).
+- **A one-to-many list child that already has a parent is no longer moved to
+  another parent** (issue #807; behaviour change). For a child embedded with
+  `x-outputType: list` that has its own pages and a nullable link to the parent,
+  the parent's picker offered children of other parents, and adding one (from the
+  screen, the Server Action or the REST route) silently took it away from its
+  original parent. The picker now offers only children without a parent, and the
+  service rejects any other child with a validation error. For a self-referencing
+  child the record itself and all of its ancestors are also excluded and rejected,
+  so no cycle can be created. Many-to-many children are unchanged: a child may
+  still belong to several parents.
+- **Declared the option props of a list child whose link to the parent is
+  nullable** (issue #805). `FormUpsertProps` left out `initial{Child}s` and
+  `search{Child}Options` for such a child (looked up on the view entity instead
+  of the raw one), although the form and the edit and new pages pass and read
+  them, so the generated app failed to compile.
 - **Started a nullable date, time or date-time column in a new child DataGrid
   row empty** (issue #804) instead of filling it with the current time. A required one still
   starts with a value, and nullable numbers, decimals and enums already started
