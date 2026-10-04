@@ -455,6 +455,54 @@ def test_search_offers_only_records_without_a_parent(row, shape):
         assert parent_ctx['list_child_attach_targets'] == [kid]
 
 
+def _is_required_link_editable_child(row):
+    """Kind (C): a one-to-many child with its own editable pages and a required
+    link to the parent. The parent's list is read-only for it."""
+    return row['relation'] == 'o2m' and row['page'] == 'editable' and not row['nullable']
+
+
+def _generated_action_and_form(row, shape):
+    """The parent's generated Server Action and the form that posts to it."""
+    from generators import actions_context, form_upsert_context
+    ctx = _ctx(row, shape)
+    action = _rendered('actions.ts.jinja2', {**ctx, **actions_context(ctx)})
+    form = _rendered('form_upsert.tsx.jinja2', {**ctx, **form_upsert_context(ctx, SCHEMA)})
+    return ctx, action, form
+
+
+def _reads_child_list(row, shape):
+    """Whether the generated Server Action reads the `kids` list from the form data
+    and hands it to add/update, and whether the form posts it."""
+    _, action, form = _generated_action_and_form(row, shape)
+    key = 'kid'  # the form field is the singular of the `kids` property
+    read = f"data.getAll('{key}[]')" in action
+    passed = 'kidsIds' in action or 'kidsItems' in action
+    posted = f"'{key}[]'" in form
+    return read, passed, posted
+
+
+@pytest.mark.parametrize('row,shape', [c for c in CASES if _is_required_link_editable_child(c[0])],
+                         ids=[_case_id(r, s) for r, s in CASES if _is_required_link_editable_child(r)])
+def test_server_action_does_not_read_the_list_of_a_required_link_child(row, shape):
+    """(C): the child list is read-only on the parent screen, so the generated Server Action
+    never reads it from the form data nor passes it to add/update, and the form never posts it."""
+    assert _reads_child_list(row, shape) == (False, False, False), _describe(row)
+
+
+def test_server_action_reads_the_list_only_when_the_parent_can_attach_children():
+    """Control for the test above, in the same table: the (A) row (same child page,
+    same relation, nullable link) does read the list, so the check tells (A) from (C)."""
+    pairs = [(r, s) for r, s in CASES
+             if r['relation'] == 'o2m' and r['page'] == 'editable' and not r['self_ref']]
+    assert pairs, 'no (A)/(C) rows'
+    seen = set()
+    for row, shape in pairs:
+        expected = (True, True, True) if row['nullable'] else (False, False, False)
+        assert _reads_child_list(row, shape) == expected, _describe(row)
+        seen.add(row['nullable'])
+    assert seen == {True, False}, 'the table must hold both an (A) and a (C) row'
+
+
 def _kid_entity(row, shape):
     parent, kid, _ = _names(row, shape)
     key = ('kid', kid)

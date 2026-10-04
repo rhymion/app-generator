@@ -45,7 +45,10 @@ describe('editable list child with a required link', () => {
     cy.contains('button', /add kids/i).should('not.exist');
   });
 
-  it('keeps the associations when a save from the parent screen carries a child list', () => {
+  // Checks only that the Server Action accepts an extra `kid[]` field without effect.
+  // It does not prove the action never reads the child list: that is pinned by the
+  // generator test `test_server_action_does_not_read_the_list_of_a_required_link_child`.
+  it('accepts an extra child-list field in a save from the parent screen without changing any association', () => {
     cy.intercept('POST', `**/lc_req_parent/edit/${'*'}`, (req) => {
       const type = String(req.headers['content-type'] ?? '');
       const boundary = /boundary=(.+)$/.exec(type)?.[1];
