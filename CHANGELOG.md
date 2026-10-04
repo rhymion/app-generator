@@ -16,6 +16,16 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   there and the app does not use it.
 
 ### Fixed
+- **Kept a list child's second FK to the parent's model in the fetched data**
+  (issue #801). A child embedded with `x-outputType: list` that had a structural
+  FK to the parent plus a separate FK to the same model lost both from the parent
+  detail query, so anything reading the second FK (for example a label
+  `[name, rel_par.name]`) rendered empty; a sibling list child's own FK to the
+  parent's model was dropped the same way. Only the structural parent FK is
+  excluded now, and a many-to-many list child, which has none, keeps all of its FKs.
+  Added `code_generator/tests/test_list_child_combination_matrix.py` (every
+  combination of the seven child axes, with and without the second FK) and the
+  `list-child-e2e-gate` fixture gate (`npm run test:list-child-e2e-gate`).
 - **Started a nullable date, time or date-time column in a new child DataGrid
   row empty** (issue #804) instead of filling it with the current time. A required one still
   starts with a value, and nullable numbers, decimals and enums already started

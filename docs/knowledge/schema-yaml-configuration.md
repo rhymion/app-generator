@@ -1333,6 +1333,22 @@ model bug {
 }
 ```
 
+#### Relations of a list child that the parent fetches
+
+The parent's detail query (`get{Parent}Detail`) fetches every relation of an
+`x-outputType: list` child except its structural parent link, the column the parent owns the
+child through (a circular include otherwise). A second FK on the child that targets the
+parent's own model for another purpose is fetched like any other FK, so a label that reads it
+(`labelField: [name, rel_par.name]` on the parent's `x-relationships` entry) renders. A
+many-to-many child has no structural parent link, so all of its FKs are fetched. A child whose
+label walks a relation of the child (a dotted `labelField`) has that relation fetched too.
+
+`code_generator/tests/test_list_child_combination_matrix.py` covers every combination of the
+child page (none / read-only / editable), the nullable link, one-to-many or many-to-many,
+self-reference, a sibling child with its own FK to the parent's model, and composite and dotted
+labels; the `list-child-e2e-gate` fixture (`npm run test:list-child-e2e-gate`) runs
+representatives of them in a generated app.
+
 ---
 
 ### 7.4 Read-only embedded grid for independent children (non-`list`, non-`comments` `x-outputType`)
