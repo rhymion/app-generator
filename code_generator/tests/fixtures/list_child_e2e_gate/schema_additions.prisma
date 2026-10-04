@@ -135,3 +135,68 @@ model lc_node {
   @@index([creator_id])
   @@index([updater_id])
 }
+
+model lc_ro_child {
+  id         String   @id @default(cuid())
+  name       String
+  lc_ro_parent_id String
+  lc_ro_parent    lc_ro_parent @relation(fields: [lc_ro_parent_id], references: [id], onDelete: Cascade)
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("LcRoChildCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("LcRoChildUpdater", fields: [updater_id], references: [id])
+
+  @@index([lc_ro_parent_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model lc_ro_parent {
+  id         String   @id @default(cuid())
+  name       String   @unique
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("LcRoParentCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("LcRoParentUpdater", fields: [updater_id], references: [id])
+  kids       lc_ro_child[]
+
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// One-to-many with an editable child page and a required link to the parent.
+model lc_req_child {
+  id              String       @id @default(cuid())
+  name            String
+  lc_req_parent_id String
+  lc_req_parent   lc_req_parent @relation(fields: [lc_req_parent_id], references: [id], onDelete: Cascade)
+  created_at      DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime     @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user         @relation("LcReqChildCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user         @relation("LcReqChildUpdater", fields: [updater_id], references: [id])
+
+  @@index([lc_req_parent_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model lc_req_parent {
+  id         String         @id @default(cuid())
+  name       String         @unique
+  created_at DateTime       @default(now()) @db.Timestamptz(0)
+  updated_at DateTime       @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user           @relation("LcReqParentCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user           @relation("LcReqParentUpdater", fields: [updater_id], references: [id])
+  kids       lc_req_child[]
+
+  @@index([creator_id])
+  @@index([updater_id])
+}

@@ -10,7 +10,8 @@
 # second FK to the parent's own model and a sibling child; many-to-many;
 # self-reference), the child's label built from that second FK, and from the
 # parent screen adding an existing child to the list and removing one from it
-# without deleting the child record.
+# without deleting the child record; a child with no pages or read-only pages is deleted
+# when removed; a child with editable pages and a required link cannot be added or removed.
 #
 # Isolation (the repository's own schema, generated output, database and other
 # fixtures are never touched):

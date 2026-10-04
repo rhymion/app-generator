@@ -1347,7 +1347,11 @@ label walks a relation of the child (a dotted `labelField`) has that relation fe
 child page (none / read-only / editable), the nullable link, one-to-many or many-to-many,
 self-reference, a sibling child with its own FK to the parent's model, and composite and dotted
 labels; the `list-child-e2e-gate` fixture (`npm run test:list-child-e2e-gate`) runs
-representatives of them in a generated app.
+representatives of them in a generated app, including that taking a child with no pages, or
+with read-only pages, out of the parent's list deletes the child record (its link to the parent
+is required, so it is always attached to a parent), and that a child with editable pages and a
+required link has a read-only list on the parent (no add or remove from the screen, and a child
+list sent to the server action or the REST route is ignored).
 
 ---
 

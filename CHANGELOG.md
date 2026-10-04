@@ -25,7 +25,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   excluded now, and a many-to-many list child, which has none, keeps all of its FKs.
   Added `code_generator/tests/test_list_child_combination_matrix.py` (every
   combination of the seven child axes, with and without the second FK) and the
-  `list-child-e2e-gate` fixture gate (`npm run test:list-child-e2e-gate`).
+  `list-child-e2e-gate` fixture gate (`npm run test:list-child-e2e-gate`), which also
+  pins that removing a child with no pages, or with read-only pages, from the parent
+  screen deletes the child record, and that a child with editable pages and a required
+  link to its parent cannot be added to or taken out of the parent's list (screen,
+  server action or REST route).
 - **Declared the option props of a list child whose link to the parent is
   nullable** (issue #805). `FormUpsertProps` left out `initial{Child}s` and
   `search{Child}Options` for such a child (looked up on the view entity instead

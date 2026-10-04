@@ -18,7 +18,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = REPO_ROOT / 'code_generator' / 'tests' / 'fixtures' / 'list_child_e2e_gate'
 COMPOSE = REPO_ROOT / 'scripts' / 'compose_child_datagrid_e2e_fixture.py'
 ENTITIES = ('lc_plain_parent', 'lc_plain_child', 'lc_edit_parent', 'lc_edit_child',
-            'lc_edit_sibling', 'lc_m2m_parent', 'lc_m2m_child', 'lc_node')
+            'lc_edit_sibling', 'lc_m2m_parent', 'lc_m2m_child', 'lc_node',
+            'lc_ro_parent', 'lc_ro_child', 'lc_req_parent', 'lc_req_child')
 
 
 @pytest.fixture()

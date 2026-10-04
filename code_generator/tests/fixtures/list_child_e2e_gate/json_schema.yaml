@@ -16,6 +16,10 @@
 #   lc_edit_parent  / lc_edit_sibling    a sibling child with its own FK to the same model
 #   lc_m2m_parent   / lc_m2m_child       child has editable pages, many-to-many
 #   lc_node         / lc_node            self-reference, editable pages, nullable link
+#   lc_ro_parent    / lc_ro_child        child has read-only pages (list/view only),
+#                                        one-to-many, required link (removal = deletion)
+#   lc_req_parent   / lc_req_child       child has editable pages, one-to-many, REQUIRED
+#                                        link (parent list is read-only)
 definitions:
   lc_plain_child:
     fields:
@@ -182,3 +186,89 @@ definitions:
         x-outputType: list
         items:
           $ref: "#/definitions/lc_node"
+
+  lc_ro_child:
+    x-generate:
+      list: true
+      view: true
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: true
+      test: true
+    fields:
+      name:
+        minLength: 1
+      lc_ro_parent_id:
+        pattern: "^c[a-z0-9]{24,}$"
+
+  lc_ro_parent:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    fields:
+      name:
+        minLength: 1
+    required:
+      - kids
+    x-relationships:
+      kids:
+        type: one-to-many
+        target: lc_ro_child
+        labelField: name
+    properties:
+      kids:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/lc_ro_child"
+
+  lc_req_child:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    fields:
+      name:
+        minLength: 1
+      lc_req_parent_id:
+        pattern: "^c[a-z0-9]{24,}$"
+
+  lc_req_parent:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    fields:
+      name:
+        minLength: 1
+    required:
+      - kids
+    x-relationships:
+      kids:
+        type: one-to-many
+        target: lc_req_child
+        labelField: name
+    properties:
+      kids:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/lc_req_child"
