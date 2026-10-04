@@ -79,4 +79,101 @@ describe('editable list child with a nullable link', () => {
     cy.visit(`/en/lc_edit_parent/view/${parentId}`);
     cy.contains('Edit Kid Edit Parent').should('be.visible');
   });
+
+  // A one-to-many child belongs to at most one parent: a child that already has a
+  // parent is not offered to another parent and is never moved by one. A child
+  // without a parent can still be added.
+  describe('a child that already belongs to another parent', () => {
+    let otherId: string;
+    let freeId: string;
+
+    const stillBelongsToFirstParent = () =>
+      cy.request({ url: `/api/lc_edit_child/${childId}`, headers }).then((res) => {
+        expect(res.body.lc_edit_parent_id).to.eq(parentId);
+      });
+
+    beforeEach(() => {
+      cy.request({ method: 'POST', url: '/api/lc_edit_parent', headers, body: { name: 'Other Parent', kids_ids: [], sibs: [] } })
+        .its('body.id').then((id) => { otherId = id; });
+      cy.then(() => cy.request({
+        method: 'POST', url: '/api/lc_edit_child', headers,
+        body: { name: 'Free Kid', lc_edit_parent_id: null, rel_par_id: parentId },
+      })).its('body.id').then((id) => { freeId = id; });
+    });
+
+    it('is not offered in the picker, while a child without a parent is', () => {
+      cy.visit(`/en/lc_edit_parent/edit/${otherId}`);
+      cy.clickButton('Add Kids');
+      cy.get('div[role="dialog"]').find('input').type('Edit Kid');
+      cy.get('.MuiAutocomplete-popper').should('be.visible');
+      cy.get('.MuiAutocomplete-popper').should('not.contain', 'Edit Kid');
+      cy.get('div[role="dialog"]').find('input').clear().type('Free Kid');
+      cy.get('.MuiAutocomplete-popper li').contains('Free Kid').should('be.visible');
+    });
+
+    it('is rejected by the REST route on update and on create, and stays with its parent', () => {
+      cy.request({
+        method: 'PUT', url: `/api/lc_edit_parent/${otherId}`, headers, failOnStatusCode: false,
+        body: { name: 'Other Parent', kids_ids: [childId], sibs: [] },
+      }).its('status').should('be.within', 400, 499);
+      stillBelongsToFirstParent();
+      cy.request({
+        method: 'POST', url: '/api/lc_edit_parent', headers, failOnStatusCode: false,
+        body: { name: 'Third Parent', kids_ids: [childId], sibs: [] },
+      }).its('status').should('be.within', 400, 499);
+      stillBelongsToFirstParent();
+    });
+
+    // Adds Free Kid through the picker, then swaps the id in the `kid[]` field of the
+    // Server Action request for `sentId`, the way a client that bypasses the picker would.
+    const saveSending = (sentId: string) => {
+      cy.intercept('POST', `**/lc_edit_parent/edit/${'*'}`, (req) => {
+        if (!req.headers['next-action']) return;
+        const body = typeof req.body === 'string' ? req.body : new TextDecoder().decode(req.body as ArrayBuffer);
+        // The picker's search calls reach the same URL; only the save carries `kid[]`.
+        if (!/name="[^"]*kid\[\]"/.test(body)) return;
+        req.alias = 'save';
+        req.body = body.split(`"id":"${freeId}"`).join(`"id":"${sentId}"`);
+      });
+      cy.visit(`/en/lc_edit_parent/edit/${otherId}`);
+      cy.clickButton('Add Kids');
+      cy.get('div[role="dialog"]').find('input').type('Free Kid');
+      cy.get('.MuiAutocomplete-popper li').contains('Free Kid').click();
+      cy.get('div[role="dialog"]').find('button').contains('Add').click();
+      cy.clickButton('Save');
+      cy.wait('@save').then((i) => {
+        expect(String(i.request.body)).to.include(`"id":"${sentId}"`);
+      });
+    };
+
+    it('control: the server action attaches a child without a parent', () => {
+      saveSending(freeId);
+      cy.url().should('not.include', `/lc_edit_parent/edit/${otherId}`);
+      cy.request({ url: `/api/lc_edit_child/${freeId}`, headers }).its('body.lc_edit_parent_id').should('eq', otherId);
+    });
+
+    it('is rejected by the server action behind the parent screen, and stays with its parent', () => {
+      saveSending(childId);
+      cy.url().should('include', `/lc_edit_parent/edit/${otherId}`);
+      stillBelongsToFirstParent();
+      cy.request({ url: `/api/lc_edit_child/${freeId}`, headers }).its('body.lc_edit_parent_id').should('eq', null);
+    });
+
+    it('lets a child without a parent be added over the REST route', () => {
+      cy.request({
+        method: 'PUT', url: `/api/lc_edit_parent/${otherId}`, headers,
+        body: { name: 'Other Parent', kids_ids: [freeId], sibs: [] },
+      }).its('status').should('eq', 200);
+      cy.request({ url: `/api/lc_edit_child/${freeId}`, headers }).its('body.lc_edit_parent_id').should('eq', otherId);
+      stillBelongsToFirstParent();
+    });
+
+    it('keeps the children a parent already has when it is saved again', () => {
+      cy.request({
+        method: 'PUT', url: `/api/lc_edit_parent/${parentId}`, headers,
+        body: { name: 'Edit Parent', kids_ids: [childId], sibs: [] },
+      }).its('status').should('eq', 200);
+      stillBelongsToFirstParent();
+    });
+  });
 });

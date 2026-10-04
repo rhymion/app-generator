@@ -376,3 +376,74 @@ def test_include_does_not_depend_on_the_sibling_child():
             solo = _entry_text(_ctx(row, shape)['include_props_detail'], 'kids')
             with_sib = _entry_text(_ctx(other, shape)['include_props_detail'], 'kids')
             assert solo == with_sib, (row['id'], other['id'], shape)
+
+
+# --- attaching a record that already has a parent (issue #801 follow-up) ------
+#
+# A one-to-many list child with a nullable link belongs to at most one parent:
+# the service rejects a record that belongs to another parent (never moving it),
+# and the child's search offers only records that have no parent yet. A
+# self-referencing child is also never its own child or the child of a
+# descendant. A many-to-many child may belong to several parents; a child with a
+# required link, or with no link to detach, is not attached from the parent list.
+
+def _attaches_by_nullable_link(row):
+    return row['relation'] == 'o2m' and row['nullable']
+
+
+@pytest.mark.parametrize('row,shape', CASES, ids=[_case_id(r, s) for r, s in CASES])
+def test_service_rejects_a_record_that_belongs_to_another_parent(row, shape):
+    parent, kid, _ = _names(row, shape)
+    ctx = _ctx(row, shape)
+    create, update = ctx['child_attach_guard_create'], ctx['child_attach_guard_update']
+    if not _attaches_by_nullable_link(row):
+        assert create == '' and update == '', (_describe(row), create, update)
+        return
+    link = f'{parent}_id'
+    assert f'tx.{kid}.findMany' in create and f'{link}: {{ not: null }}' in create
+    assert "'VALIDATION'" in create and "'kids'" in create
+    # On update a record that already belongs to this parent stays accepted.
+    assert f'{{ {link}: {{ not: id }} }}' in update
+    assert 'rel_par' not in create + update
+    # Only a self-referencing child can be given a cycle.
+    walks_ancestors = '_cursor' in update
+    assert walks_ancestors == row['self_ref'], update
+    assert '_cursor' not in create
+    if row['self_ref']:
+        assert 'kidsIds.includes(id)' in update
+        assert '_kidsAncestors.has(kid)' in update
+
+
+@pytest.mark.parametrize('row,shape', CASES, ids=[_case_id(r, s) for r, s in CASES])
+def test_search_offers_only_records_without_a_parent(row, shape):
+    parent, kid, _ = _names(row, shape)
+    kid_ctx = build_context(_kid_entity(row, shape), SCHEMA) if not row['self_ref'] else _ctx(row, shape)
+    callers = kid_ctx['list_child_attach_callers']
+    if not _attaches_by_nullable_link(row):
+        assert callers == {} and not kid_ctx['list_child_attach_self_fk'], (_describe(row), callers)
+        return
+    assert callers == {parent: f'{parent}_id'}, callers
+    if row['self_ref']:
+        assert kid_ctx['list_child_attach_self_fk'] == f'{parent}_id'
+        assert 'notIn' in ''.join(kid_ctx['attach_ancestor_walk_code'].split()) or '_cursor' in kid_ctx['attach_ancestor_walk_code']
+    else:
+        assert not kid_ctx['list_child_attach_self_fk']
+        assert kid_ctx['attach_ancestor_walk_code'] == ''
+    # The parent's new/edit screens narrow the initial list for the same child.
+    parent_ctx = _ctx(row, shape)
+    if row['self_ref']:
+        assert parent_ctx['list_child_attach_targets'] == []
+    else:
+        assert parent_ctx['list_child_attach_targets'] == [kid]
+
+
+def _kid_entity(row, shape):
+    parent, kid, _ = _names(row, shape)
+    key = ('kid', kid)
+    if key not in _CACHE:
+        _CACHE[key] = {
+            'parent': kid, 'model': kid, 'definition_key': kid, 'children': [],
+            'generate_config': {'list': True, 'view': True, 'new': True, 'edit': True,
+                                'delete': True, 'api': False, 'test': False, 'fields': None},
+        }
+    return _CACHE[key]

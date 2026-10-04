@@ -30,6 +30,16 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   screen deletes the child record, and that a child with editable pages and a required
   link to its parent cannot be added to or taken out of the parent's list (screen,
   server action or REST route).
+- **A one-to-many list child that already has a parent is no longer moved to
+  another parent** (issue #807; behaviour change). For a child embedded with
+  `x-outputType: list` that has its own pages and a nullable link to the parent,
+  the parent's picker offered children of other parents, and adding one (from the
+  screen, the Server Action or the REST route) silently took it away from its
+  original parent. The picker now offers only children without a parent, and the
+  service rejects any other child with a validation error. For a self-referencing
+  child the record itself and all of its ancestors are also excluded and rejected,
+  so no cycle can be created. Many-to-many children are unchanged: a child may
+  still belong to several parents.
 - **Declared the option props of a list child whose link to the parent is
   nullable** (issue #805). `FormUpsertProps` left out `initial{Child}s` and
   `search{Child}Options` for such a child (looked up on the view entity instead

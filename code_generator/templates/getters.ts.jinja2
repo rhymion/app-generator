@@ -491,6 +491,13 @@ export async function fetch{{ parent_pascal }}Page(opts: PageOpts): Promise<Page
   return get{{ parent_pascal }}Page(opts, permissions, userId);
 }
 
+{% if list_child_attach_callers %}
+// Parents that attach a {{ parent }} to themselves through a nullable FK (a one-to-many
+// list child). Such a record belongs to at most one parent, so a parent's picker
+// offers only the records that are not attached to any parent yet.
+const LIST_CHILD_ATTACH_FK: Record<string, string> = {{ list_child_attach_callers | tojson }};
+
+{% endif %}
 /**
  * Lightweight search for autocomplete pickers. Returns up to `limit` rows
  * matching `query`{% if searchable_fields_display %} (substring on {{ searchable_fields_display | join(' / ') }}){% endif %} plus any rows in `includeIds` so the
@@ -560,10 +567,31 @@ export async function search{{ parent_pascal }}Options(
     matchOr.push({ id: { in: includeIds } });
   }
   const customWhere = filterAutocompleteOptions(context);
+{% if list_child_attach_callers %}
+  // Attached to another parent already: not offered (the service rejects it too).
+  const attachFk = context.callerEntity && Object.hasOwn(LIST_CHILD_ATTACH_FK, context.callerEntity)
+    ? LIST_CHILD_ATTACH_FK[context.callerEntity]
+    : undefined;
+  const attachWhere: Record<string, unknown>[] = [];
+  if (attachFk) {
+    attachWhere.push({ OR: [{ [attachFk]: null }, ...(includeIds.length > 0 ? [{ id: { in: includeIds } }] : [])] });
+{% if list_child_attach_self_fk %}
+    // A record is never offered as its own child, nor an ancestor of itself (no cycles).
+    const selfId = context.callerEntity === '{{ parent }}' && typeof context.formValues?.id === 'string' ? context.formValues.id : null;
+    if (selfId) {
+{{ attach_ancestor_walk_code }}
+      attachWhere.push({ id: { notIn: [selfId, ...ancestorIds] } });
+    }
+{% endif %}
+  }
+{% endif %}
   const where = {
     AND: [
       ...accessAnd,
       ...(matchOr.length > 0 ? [{ OR: matchOr }] : []),
+{% if list_child_attach_callers %}
+      ...attachWhere,
+{% endif %}
 {% if can_invalidate %}
       { invalidated_at: null },
 {% endif %}

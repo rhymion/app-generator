@@ -28,6 +28,9 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
     await validateOnAdd(tx, {
 {{ validation_data_obj }}
     }, actorId);
+{% if child_attach_guard_create %}
+{{ child_attach_guard_create }}
+{% endif %}
 {% if bridge_child_pre_create_code %}
 {{ bridge_child_pre_create_code }}
 {% endif %}
@@ -276,6 +279,9 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
     await validateOnUpdate(tx, id, {
 {{ validation_data_obj }}
     }, _prevRow, actorId);
+{% if child_attach_guard_update %}
+{{ child_attach_guard_update }}
+{% endif %}
 {% if item_reservation_update_check_code %}
 {{ item_reservation_update_check_code }}
 {% endif %}

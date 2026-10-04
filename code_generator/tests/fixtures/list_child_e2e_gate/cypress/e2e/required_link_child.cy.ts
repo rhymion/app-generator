@@ -51,14 +51,16 @@ describe('editable list child with a required link', () => {
       const boundary = /boundary=(.+)$/.exec(type)?.[1];
       if (!boundary || !req.headers['next-action']) return;
       const body = typeof req.body === 'string' ? req.body : new TextDecoder().decode(req.body as ArrayBuffer);
-      const extra = `--${boundary}\r\nContent-Disposition: form-data; name="kid[]"\r\n\r\n${JSON.stringify({ id: k2, name: 'Req Kid 2' })}\r\n`;
+      // React prefixes every Server Action form field with an index ("_1_name").
+      const prefix = /name="(_?\d+_)name"/.exec(body)?.[1] ?? '';
+      const extra = `--${boundary}\r\nContent-Disposition: form-data; name="${prefix}kid[]"\r\n\r\n${JSON.stringify({ id: k2, name: 'Req Kid 2' })}\r\n`;
       req.body = body.replace(`--${boundary}--`, `${extra}--${boundary}--`);
     }).as('save');
     cy.visit(`/en/lc_req_parent/edit/${r1}`);
     cy.clearAndFillField('Name', 'Req Parent 1 renamed');
     cy.clickButton('Save');
     cy.wait('@save').then((i) => {
-      expect(String(i.request.body)).to.include('name="kid[]"');
+      expect(String(i.request.body)).to.match(/name="(_?\d+_)?kid\[\]"/);
     });
     cy.url().should('not.include', '/lc_req_parent/edit');
     belongsTo(k1, r1);

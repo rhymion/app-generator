@@ -34,4 +34,19 @@ describe('list child without its own pages', () => {
       cy.contains('Plain Kid B').should('be.visible');
     });
   });
+
+  it('creates a child record by typing its text on the parent screen', () => {
+    cy.visit('/en/lc_plain_parent/new');
+    cy.clearAndFillField('Name', 'Typed Parent');
+    cy.clickButton('Add Kids');
+    cy.get('div[role="dialog"]').find('input').type('Typed Kid');
+    cy.get('div[role="dialog"]').find('button').contains('Add').click();
+    cy.clickButton('Save');
+    cy.url().should('not.include', '/lc_plain_parent/new');
+    // The record was created with the child; the parent's view screen shows it.
+    cy.visit('/en/lc_plain_parent');
+    cy.contains('.MuiDataGrid-cell', 'Typed Parent').find('a').first().click();
+    cy.url().should('include', '/lc_plain_parent/view/');
+    cy.contains('Typed Kid').should('be.visible');
+  });
 });

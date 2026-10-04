@@ -620,6 +620,100 @@ def _child_readonly_default_value(prop_name: str, defn: dict, child_def: dict) -
     return 'null'
 
 
+def _list_child_attach_fk(child_raw: dict, schema: dict, parent_model: str) -> str | None:
+    """FK column that attaches a list child to `parent_model`, or None.
+
+    Only a one-to-many `list` child whose structural FK to the parent is
+    nullable is attached by pointing that FK at the parent (many-to-many
+    children are attached through a join table and may belong to several
+    parents; a required FK means the child is never attached or detached from
+    the parent's list). Such a child belongs to at most one parent, so a child
+    that already has another parent must not be attached to a second one.
+    """
+    if child_raw.get('output_type') != 'list':
+        return None
+    if (child_raw.get('relationship') or {}).get('type') == 'many-to-many':
+        return None
+    child_def = _raw_def(child_raw['name'], schema)
+    if not is_optional_fk_to_parent(child_def, parent_model):
+        return None
+    props = child_def.get('properties', {})
+    for fk in sorted(get_parent_fk_props(child_def, parent_model)):
+        if fk in props:
+            return fk
+    return None
+
+
+def _list_child_attach_callers(schema: dict, child_model: str) -> dict[str, str]:
+    """{parent entity: FK column} for every entity that embeds `child_model`
+    as a one-to-many list child attached through a nullable FK."""
+    callers: dict[str, str] = {}
+    for def_key, defn in (schema.get('definitions') or {}).items():
+        if def_key.startswith('__') or def_key.endswith('_input'):
+            continue
+        for child in _extract_children_of(defn, schema):
+            if child['name'] != child_model:
+                continue
+            fk = _list_child_attach_fk(child, schema, def_key)
+            if fk:
+                callers[def_key] = fk
+    return callers
+
+
+def _extract_children_of(defn: dict, schema: dict) -> list[dict]:
+    from generate_types import _extract_children
+    return _extract_children(defn, schema)
+
+
+def _ancestor_walk_code(client: str, model: str, fk: str, start_expr: str, var: str, indent: str) -> str:
+    """TypeScript that collects the ancestors of `start_expr` (the chain of
+    `fk` values) into the Set `var`. A cycle already stored in the data ends
+    the walk instead of looping."""
+    return (
+        f"{indent}const {var} = new Set<string>();\n"
+        f"{indent}for (let _cursor: string | null = {start_expr}; _cursor; ) {{\n"
+        f"{indent}  const _row: Record<string, string | null> | null = await {client}.{model}.findUnique({{ where: {{ id: _cursor }}, select: {{ {fk}: true }} }});\n"
+        f"{indent}  _cursor = _row?.{fk} ?? null;\n"
+        f"{indent}  if (!_cursor || {var}.has(_cursor)) break;\n"
+        f"{indent}  {var}.add(_cursor);\n"
+        f"{indent}}}\n"
+    )
+
+
+def _build_child_attach_guard(children_data: list[dict], model: str, for_update: bool) -> str:
+    """Service-layer check that every record sent for a one-to-many list child
+    can be attached to this parent: it must not already belong to another
+    parent (it is never moved), and for a self-referencing child it must be
+    neither the record itself nor one of its ancestors (no cycles). Both the
+    Server Action and the REST route reach the service through here."""
+    blocks = []
+    for c in children_data:
+        fk = c.get('attach_fk')
+        if not fk or not c['use_connect']:
+            continue
+        pn, cv, cm = c['property_name'], c['child_var'], c['name']
+        ids = f"{cv}Ids"
+        taken = f"_{cv}Taken"
+        reject = (f"throw new AppError('VALIDATION', 'A record that belongs to another parent '"
+                  f" + 'or to itself cannot be attached', '{pn}', 'invalid');")
+        if for_update:
+            where = f"{{ id: {{ in: {ids} }}, AND: [{{ {fk}: {{ not: null }} }}, {{ {fk}: {{ not: id }} }}] }}"
+        else:
+            where = f"{{ id: {{ in: {ids} }}, {fk}: {{ not: null }} }}"
+        lines = [
+            f"    if ({ids}.length > 0) {{\n"
+            f"      const {taken} = await tx.{cm}.findMany({{ where: {where}, select: {{ id: true }} }});\n"
+            f"      if ({taken}.length > 0) {reject}\n"
+        ]
+        if for_update and cm == model:
+            lines.append(f"      if ({ids}.includes(id)) {reject}\n")
+            lines.append(_ancestor_walk_code('tx', cm, fk, 'id', f"_{cv}Ancestors", '      '))
+            lines.append(f"      if ({ids}.some((kid) => _{cv}Ancestors.has(kid))) {reject}\n")
+        lines.append("    }")
+        blocks.append(''.join(lines))
+    return '\n'.join(blocks)
+
+
 def _build_child_data(children_raw: list[dict], model: str, schema: dict,
                       parent_rels_raw: list[dict]) -> list[dict]:
     result = []
@@ -820,6 +914,7 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
         # parsed Prisma schema instead.
         child_has_audit_fields = _model_has_audit_fields(child_name)
 
+        _attach_fk = _list_child_attach_fk(child_raw, schema, model) if use_connect else None
         result.append({
             **child_raw,
             'child_var':        child_var,
@@ -827,6 +922,7 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             'form_key':         form_key,
             'is_many_to_many':  is_many_to_many,
             'use_connect':      use_connect,
+            **({'attach_fk': _attach_fk} if _attach_fk else {}),
             'is_independent':   is_independent,
             'nested_writable':  nested_writable,
             'output_type':      output_type,
@@ -3205,6 +3301,11 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
 
     child_nested_create = _build_child_nested_create(write_ch)
     child_nested_update = _build_child_nested_update(write_ch)
+    # Parents that attach THIS entity to themselves through a nullable FK: the
+    # search below narrows its options to records that are not attached yet.
+    list_child_attach_callers = _list_child_attach_callers(schema, parent)
+    child_attach_guard_create = _build_child_attach_guard(write_ch, model, for_update=False)
+    child_attach_guard_update = _build_child_attach_guard(write_ch, model, for_update=True)
     child_assignee_notify_create_code = _build_child_assignee_notify_create_code(
         write_ch, parent, to_pascal_case(parent)
     )
@@ -3246,6 +3347,20 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
 
     # Selection targets (page_new, page_edit)
     selection_targets = _get_selection_targets(children_raw, parent_rels_raw, schema, model)
+    # Selection targets whose picker must offer only records that are not
+    # attached to a parent yet (one-to-many list child, nullable link). A target
+    # the parent also reaches through a plain many-to-one FK keeps its full
+    # initial list: both pickers share one list.
+    _model_props = _raw_def(model, schema).get('properties', {})
+    _plain_fk_targets = {
+        r['target'] for r in parent_rels_raw
+        if (_model_props.get(r['prop_name'], {}).get('x-relationship') or {}).get('type') == 'many-to-one'
+    }
+    list_child_attach_targets = [
+        c['name'] for c in children_raw
+        if c['name'] != model and c['name'] not in _plain_fk_targets
+        and _list_child_attach_fk(c, schema, model)
+    ]
     # Extend with bridge parent targets so child forms load parent entity autocomplete options
     if bridge_child_ir:
         selection_targets = _dedupe_ordered([*selection_targets, *bridge_child_ir.get('parent_targets', [])])
@@ -4453,6 +4568,14 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         child_args_for_call=child_args_for_call,
         child_nested_create=child_nested_create,
         child_nested_update=child_nested_update,
+        list_child_attach_callers=list_child_attach_callers,
+        list_child_attach_self_fk=list_child_attach_callers.get(parent),
+        attach_ancestor_walk_code=(
+            _ancestor_walk_code('prisma', model, list_child_attach_callers[parent], 'selfId', 'ancestorIds', '      ').rstrip('\n')
+            if parent in list_child_attach_callers else ''
+        ),
+        child_attach_guard_create=child_attach_guard_create,
+        child_attach_guard_update=child_attach_guard_update,
         child_assignee_notify_create_code=child_assignee_notify_create_code,
         child_assignee_notify_update_code=child_assignee_notify_update_code,
         comment_actions_code=comment_actions_code,
@@ -4470,6 +4593,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         include_entries_detail=include_entries_detail,
         # Selection targets (page_new / page_edit)
         selection_targets=selection_targets,
+        list_child_attach_targets=list_child_attach_targets,
         required_relation_fields=required_relation_fields,
         fk_preservation_update_code=fk_preservation_update_code,
         # API routes

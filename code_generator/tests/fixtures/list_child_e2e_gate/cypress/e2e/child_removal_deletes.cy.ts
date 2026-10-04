@@ -49,4 +49,19 @@ describe('removing a child that is always attached to its parent', () => {
       });
     });
   });
+
+  it('creates a child with read-only pages by typing its text on the parent screen', () => {
+    cy.visit('/en/lc_ro_parent/new');
+    cy.clearAndFillField('Name', 'Typed Ro Parent');
+    cy.clickButton('Add Kids');
+    cy.get('div[role="dialog"]').find('input').type('Typed Ro Kid');
+    cy.get('div[role="dialog"]').find('button').contains('Add').click();
+    cy.clickButton('Save');
+    cy.url().should('not.include', '/lc_ro_parent/new');
+    // The record was created with the child; the parent's view screen shows it.
+    cy.visit('/en/lc_ro_parent');
+    cy.contains('.MuiDataGrid-cell', 'Typed Ro Parent').find('a').first().click();
+    cy.url().should('include', '/lc_ro_parent/view/');
+    cy.contains('Typed Ro Kid').should('be.visible');
+  });
 });

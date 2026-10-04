@@ -1353,6 +1353,24 @@ is required, so it is always attached to a parent), and that a child with editab
 required link has a read-only list on the parent (no add or remove from the screen, and a child
 list sent to the server action or the REST route is ignored).
 
+#### Attaching an existing child to the parent's list
+
+What the parent screen can do with the list depends on the child:
+
+| Child page | Link to the parent | Relation | Adding an existing record | Removing a record |
+|---|---|---|---|---|
+| none or read-only | required | one-to-many | text typed on the parent screen creates the child record | deletes the child record |
+| editable | nullable | one-to-many | only a record that has no parent yet | detaches it; the record stays |
+| editable | required | one-to-many | not possible (the list is read-only) | not possible |
+| editable | nullable | many-to-many | any record, including one that belongs to other parents | removes the association; the record stays |
+
+A one-to-many child with a nullable link belongs to at most one parent, so a record that
+already has a parent is never moved: the child's search (`search{Child}Options`, called with
+`callerEntity` set to the parent) leaves it out, and `add{Parent}` / `update{Parent}` reject it
+with a `VALIDATION` error on the list property, for the Server Action and the REST route alike.
+For a self-referencing child the record itself and all of its ancestors are also left out and
+rejected, which keeps the tree free of cycles.
+
 ---
 
 ### 7.4 Read-only embedded grid for independent children (non-`list`, non-`comments` `x-outputType`)

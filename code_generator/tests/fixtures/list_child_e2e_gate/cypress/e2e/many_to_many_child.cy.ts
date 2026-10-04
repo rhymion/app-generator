@@ -59,4 +59,27 @@ describe('editable many-to-many list child', () => {
     cy.visit(`/en/lc_m2m_parent/view/${parentId}`);
     cy.contains('M2m Kid').should('be.visible');
   });
+
+  it('adds a child that already belongs to another parent; both parents keep it', () => {
+    cy.request({ method: 'POST', url: '/api/lc_m2m_parent', headers, body: { name: 'M2m Parent 2', kids_ids: [] } })
+      .its('body.id').then((second) => {
+        cy.visit(`/en/lc_m2m_parent/edit/${second}`);
+        cy.clickButton('Add Kids');
+        cy.get('div[role="dialog"]').find('input').type('M2m Kid');
+        cy.get('.MuiAutocomplete-popper li').contains('M2m Kid').click();
+        cy.get('div[role="dialog"]').find('button').contains('Add').click();
+        cy.clickButton('Save');
+        cy.url().should('not.include', '/lc_m2m_parent/edit');
+        cy.visit(`/en/lc_m2m_parent/view/${second}`);
+        cy.contains('M2m Kid').should('be.visible');
+        cy.visit(`/en/lc_m2m_parent/view/${parentId}`);
+        cy.contains('M2m Kid').should('be.visible');
+      });
+  });
+
+  it('accepts a child of another parent over the REST route', () => {
+    cy.request({ method: 'POST', url: '/api/lc_m2m_parent', headers, body: { name: 'M2m Parent 3', kids_ids: [childId] } })
+      .its('status').should('eq', 201);
+    cy.request({ url: `/api/lc_m2m_parent/${parentId}`, headers }).its('body.kids').should('have.length', 1);
+  });
 });
