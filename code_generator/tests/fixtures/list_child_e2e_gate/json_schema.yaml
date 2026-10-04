@@ -1,0 +1,181 @@
+# Fixture entities for the list-child-e2e-gate. ONLY the entities this gate
+# needs: scripts/check_list_child_e2e_gate_fixture.sh merges them into a COPY of
+# the default code_generator/json_schema.yaml inside a disposable build
+# directory. The default schema, its generated output and every other fixture
+# stay untouched.
+#
+# Every parent embeds its child with `x-outputType: list`.
+#
+#   lc_plain_parent / lc_plain_child     child has no pages, one-to-many, plain label
+#   lc_edit_parent  / lc_edit_child      child has editable pages, one-to-many, nullable
+#                                        link, a second FK to the parent's own model
+#                                        (the label walks it), composite + dotted label
+#   lc_edit_parent  / lc_edit_sibling    a sibling child with its own FK to the same model
+#   lc_m2m_parent   / lc_m2m_child       child has editable pages, many-to-many
+#   lc_node         / lc_node            self-reference, editable pages, nullable link
+definitions:
+  lc_plain_child:
+    fields:
+      name:
+        minLength: 1
+      lc_plain_parent_id:
+        pattern: "^c[a-z0-9]{24,}$"
+
+  lc_plain_parent:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    fields:
+      name:
+        minLength: 1
+    required:
+      - kids
+    x-relationships:
+      kids:
+        type: one-to-many
+        target: lc_plain_child
+        labelField: name
+    properties:
+      kids:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/lc_plain_child"
+
+  lc_edit_child:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    fields:
+      name:
+        minLength: 1
+      lc_edit_parent_id:
+        pattern: "^c[a-z0-9]{24,}$"
+      rel_par_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship: {}
+
+  lc_edit_sibling:
+    fields:
+      name:
+        minLength: 1
+      lc_edit_parent_id:
+        pattern: "^c[a-z0-9]{24,}$"
+      related_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship: {}
+
+  lc_edit_parent:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    fields:
+      name:
+        minLength: 1
+    required:
+      - kids
+      - sibs
+    x-relationships:
+      kids:
+        type: one-to-many
+        target: lc_edit_child
+        labelField: [name, rel_par.name]
+    properties:
+      kids:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/lc_edit_child"
+      sibs:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/lc_edit_sibling"
+
+  lc_m2m_child:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    fields:
+      name:
+        minLength: 1
+
+  lc_m2m_parent:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    fields:
+      name:
+        minLength: 1
+    required:
+      - kids
+    x-relationships:
+      kids:
+        type: many-to-many
+        target: lc_m2m_child
+        labelField: name
+    properties:
+      kids:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/lc_m2m_child"
+
+  lc_node:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    fields:
+      name:
+        minLength: 1
+      lc_node_id:
+        pattern: "^c[a-z0-9]{24,}$"
+    required:
+      - kids
+    x-relationships:
+      kids:
+        type: one-to-many
+        target: lc_node
+        labelField: name
+    properties:
+      kids:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/lc_node"

@@ -1,0 +1,137 @@
+// Fixture models for the list-child-e2e-gate (appended to a COPY of
+// prisma/schema.prisma by scripts/check_list_child_e2e_gate_fixture.sh; the
+// default schema is never edited). Relation back-fields that the default `user`
+// model needs are listed in schema_relations.json and inserted into the copy by
+// the same script.
+
+// Child with no pages of its own, required link to the parent.
+model lc_plain_child {
+  id                 String          @id @default(cuid())
+  name               String
+  lc_plain_parent_id String
+  lc_plain_parent    lc_plain_parent @relation(fields: [lc_plain_parent_id], references: [id], onDelete: Cascade)
+  created_at         DateTime        @default(now()) @db.Timestamptz(0)
+  updated_at         DateTime        @updatedAt @db.Timestamptz(0)
+
+  @@index([lc_plain_parent_id])
+}
+
+model lc_plain_parent {
+  id         String           @id @default(cuid())
+  name       String           @unique
+  created_at DateTime         @default(now()) @db.Timestamptz(0)
+  updated_at DateTime         @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user             @relation("LcPlainParentCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user             @relation("LcPlainParentUpdater", fields: [updater_id], references: [id])
+  kids       lc_plain_child[]
+
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// Independent child (own editable pages): nullable link to the parent plus a
+// second FK to the parent's own model (the shape of the list-child include fix).
+model lc_edit_child {
+  id                String          @id @default(cuid())
+  name              String
+  lc_edit_parent_id String?
+  lc_edit_parent    lc_edit_parent? @relation("lc_edit_kids", fields: [lc_edit_parent_id], references: [id], onDelete: SetNull)
+  rel_par_id        String?
+  rel_par           lc_edit_parent? @relation("lc_edit_rel_par", fields: [rel_par_id], references: [id], onDelete: SetNull)
+  created_at        DateTime        @default(now()) @db.Timestamptz(0)
+  updated_at        DateTime        @updatedAt @db.Timestamptz(0)
+  creator_id        String
+  creator           user            @relation("LcEditChildCreator", fields: [creator_id], references: [id])
+  updater_id        String
+  updater           user            @relation("LcEditChildUpdater", fields: [updater_id], references: [id])
+
+  @@index([lc_edit_parent_id])
+  @@index([rel_par_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// Sibling child with no pages: its own FK targets the parent's model as well.
+model lc_edit_sibling {
+  id                String          @id @default(cuid())
+  name              String
+  lc_edit_parent_id String
+  lc_edit_parent    lc_edit_parent  @relation("lc_edit_sibs", fields: [lc_edit_parent_id], references: [id], onDelete: Cascade)
+  related_id        String?
+  related           lc_edit_parent? @relation("lc_edit_sibling_related", fields: [related_id], references: [id], onDelete: SetNull)
+  created_at        DateTime        @default(now()) @db.Timestamptz(0)
+  updated_at        DateTime        @updatedAt @db.Timestamptz(0)
+
+  @@index([lc_edit_parent_id])
+  @@index([related_id])
+}
+
+model lc_edit_parent {
+  id             String            @id @default(cuid())
+  name           String            @unique
+  created_at     DateTime          @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime          @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user              @relation("LcEditParentCreator", fields: [creator_id], references: [id])
+  updater_id     String
+  updater        user              @relation("LcEditParentUpdater", fields: [updater_id], references: [id])
+  kids           lc_edit_child[]   @relation("lc_edit_kids")
+  rel_par_of     lc_edit_child[]   @relation("lc_edit_rel_par")
+  sibs           lc_edit_sibling[] @relation("lc_edit_sibs")
+  related_of     lc_edit_sibling[] @relation("lc_edit_sibling_related")
+
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// Many-to-many with an independent child.
+model lc_m2m_child {
+  id         String           @id @default(cuid())
+  name       String           @unique
+  created_at DateTime         @default(now()) @db.Timestamptz(0)
+  updated_at DateTime         @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user             @relation("LcM2mChildCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user             @relation("LcM2mChildUpdater", fields: [updater_id], references: [id])
+  parents    lc_m2m_parent[]  @relation("LcM2mKids")
+
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model lc_m2m_parent {
+  id         String         @id @default(cuid())
+  name       String         @unique
+  created_at DateTime       @default(now()) @db.Timestamptz(0)
+  updated_at DateTime       @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user           @relation("LcM2mParentCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user           @relation("LcM2mParentUpdater", fields: [updater_id], references: [id])
+  kids       lc_m2m_child[] @relation("LcM2mKids")
+
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// Self-reference: the child entity is the parent entity.
+model lc_node {
+  id         String    @id @default(cuid())
+  name       String    @unique
+  lc_node_id String?
+  lc_node    lc_node?  @relation("lc_node_tree", fields: [lc_node_id], references: [id], onDelete: SetNull)
+  kids       lc_node[] @relation("lc_node_tree")
+  created_at DateTime  @default(now()) @db.Timestamptz(0)
+  updated_at DateTime  @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user      @relation("LcNodeCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user      @relation("LcNodeUpdater", fields: [updater_id], references: [id])
+
+  @@index([lc_node_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
