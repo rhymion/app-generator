@@ -4,7 +4,10 @@
 # directory. The default schema, its generated output and every other fixture
 # stay untouched.
 #
-# Every parent embeds its child with `x-outputType: list`.
+# Every parent embeds its child with `x-outputType: list`. `api: true` lets the
+# specs create and read records through the REST routes, and `test: true` puts an
+# entity in the generated test helpers' permission grant (`ALL_ENTITIES`), which
+# `db:grantAllPermissions` uses; the generated entity specs themselves are not run.
 #
 #   lc_plain_parent / lc_plain_child     child has no pages, one-to-many, plain label
 #   lc_edit_parent  / lc_edit_child      child has editable pages, one-to-many, nullable
@@ -30,7 +33,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
-      test: false
+      test: true
     fields:
       name:
         minLength: 1
@@ -57,7 +60,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
-      test: false
+      test: true
     fields:
       name:
         minLength: 1
@@ -86,7 +89,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
-      test: false
+      test: true
     fields:
       name:
         minLength: 1
@@ -119,7 +122,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
-      test: false
+      test: true
     fields:
       name:
         minLength: 1
@@ -133,7 +136,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
-      test: false
+      test: true
     fields:
       name:
         minLength: 1
@@ -160,7 +163,7 @@ definitions:
       delete: true
       invalidate: false
       api: true
-      test: false
+      test: true
     fields:
       name:
         minLength: 1
