@@ -47,7 +47,7 @@ describe('editable list child with a nullable link', () => {
   it('opens the child on its own page', () => {
     cy.visit(`/en/lc_edit_child/view/${childId}`);
     cy.url().should('include', `/lc_edit_child/view/${childId}`);
-    cy.contains('Edit Kid').should('be.visible');
+    cy.checkField('Name', 'Edit Kid');
   });
 
   it('takes the child out of the list and adds it back; the child record stays', () => {
@@ -61,7 +61,7 @@ describe('editable list child with a nullable link', () => {
     cy.contains('Edit Kid').should('not.exist');
     // The child record itself is still there, on its own page and through the API.
     cy.visit(`/en/lc_edit_child/view/${childId}`);
-    cy.contains('Edit Kid').should('be.visible');
+    cy.checkField('Name', 'Edit Kid');
     cy.request({ url: `/api/lc_edit_child/${childId}`, headers }).then((res) => {
       expect(res.status).to.eq(200);
       expect(res.body.name).to.eq('Edit Kid');

@@ -33,7 +33,7 @@ describe('editable many-to-many list child', () => {
     cy.contains('M2m Kid').should('be.visible');
     cy.visit(`/en/lc_m2m_child/view/${childId}`);
     cy.url().should('include', `/lc_m2m_child/view/${childId}`);
-    cy.contains('M2m Kid').should('be.visible');
+    cy.checkField('Name', 'M2m Kid');
   });
 
   it('removes the child from the list, keeps the record, and adds it back', () => {
@@ -46,7 +46,7 @@ describe('editable many-to-many list child', () => {
 
     // The child record itself is untouched: its page opens and the API returns it.
     cy.visit(`/en/lc_m2m_child/view/${childId}`);
-    cy.contains('M2m Kid').should('be.visible');
+    cy.checkField('Name', 'M2m Kid');
     cy.request({ url: `/api/lc_m2m_child/${childId}`, headers }).its('status').should('eq', 200);
 
     cy.visit(`/en/lc_m2m_parent/edit/${parentId}`);

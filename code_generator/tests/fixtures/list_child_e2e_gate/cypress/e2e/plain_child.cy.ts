@@ -24,7 +24,7 @@ describe('list child without its own pages', () => {
     }).its('body.id').then((id) => {
       // Reach the view screen the way a user does: from the parent's list page.
       cy.visit('/en/lc_plain_parent');
-      cy.contains('Plain Parent').click();
+      cy.contains('.MuiDataGrid-cell', 'Plain Parent').find('a').first().click();
       cy.url().should('include', `/lc_plain_parent/view/${id}`);
       cy.contains('Plain Kid A').should('be.visible');
       cy.contains('Plain Kid B').should('be.visible');

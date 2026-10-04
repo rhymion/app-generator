@@ -32,7 +32,7 @@ describe('self-referencing list child', () => {
     cy.visit(`/en/lc_node/view/${rootId}`);
     cy.contains('Leaf Node').should('be.visible');
     cy.visit(`/en/lc_node/view/${childId}`);
-    cy.contains('Leaf Node').should('be.visible');
+    cy.checkField('Name', 'Leaf Node');
   });
 
   it('takes a child out, keeps the record, adds it back, and never offers the node itself', () => {
