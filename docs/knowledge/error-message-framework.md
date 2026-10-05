@@ -562,6 +562,53 @@ has no vocabulary for "go look at row 3 of a different entity's list" — see th
 
 ---
 
+## Hand-written rejections with a message key
+
+A hand-written rule (`service_validation_custom.ts`, or any code that throws `AppError`) can name
+the text the user sees instead of the generic "{field} has an invalid or disallowed value." It
+attaches an i18n key and optional interpolation values to the error:
+
+```ts
+throw new AppError(
+  'VALIDATION',
+  'order has lines',                  // internal message, never the UI text
+  'order_type',                            // field the message attaches to (optional)
+  undefined,                              // reason: the generated custom-rule wrapper sets 'invalid'
+  'ValidationMessages.orderHasLines', // namespace-qualified i18n key
+  { code: 'A-100' },                   // optional ICU arguments (strings and numbers only)
+);
+```
+
+- **AppError.** `messageKey?: string` and `messageArgs?: Record<string, string | number>` are
+  optional public fields, the fifth and sixth constructor arguments. Existing calls are unchanged.
+- **Server Action.** `ActionFailure` carries `messageKey` and `messageArgs` only when the caught
+  `AppError` had a key. The generated catch blocks read them inline, through a cast, so an app whose
+  write-once `lib/_errors.ts` predates these fields still compiles.
+- **REST.** `handleApiError` adds `messageKey` and `messageArgs` to the JSON error body only when
+  present; `error`, `code`, `field` and `reason` are unchanged. A response without a key is
+  byte-for-byte what it was.
+- **Form.** For a `VALIDATION` failure, the generated `FormUpsert` translates the key with the
+  arguments when the key starts with `ValidationMessages.` or `Errors.` and exists in the loaded
+  messages (`t.has`). The text shows on the form's error area, which is where every
+  generated error appears. Any other case shows the generic text below.
+- **Namespaces.** Keys for hand-written rules belong to the consumer, in the `ValidationMessages`
+  namespace of the consumer's `prj/messages/en.json` and `ja.json` (deep-merged by `prj_sync`). A key
+  must exist in both locales. Keys for behavior the generator itself emits belong to the
+  generator-owned `Errors` namespace.
+- **Fallback.** A missing or unknown key, or a key outside the two namespaces, shows the existing
+  `fieldInvalid` / `fieldRequired` text. It never throws and never prints the raw key.
+- **Not covered.** CSV import row errors keep the internal message text, the editable DataGrid cell
+  editor and bulk delete do not read the key, and `NOT_FOUND` / `PERMISSION_DENIED` never use one
+  (organization isolation stays masked as `NOT_FOUND`).
+
+**Leak rules.** The author of the message controls what it says, so the policy in *Disclosure Policy*
+applies to every key. A message states the rule that was broken, not counts, names or identifiers of
+records the user cannot read, and never confirms that a record exists in another organization. The
+internal `AppError` message is still forwarded to REST clients and shown in CSV rows, so it must be
+safe to show too.
+
+---
+
 ## Impact on Existing Specs
 
 | Impact area | Current behavior | After framework | Spec change needed |

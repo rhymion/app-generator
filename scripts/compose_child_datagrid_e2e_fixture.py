@@ -10,6 +10,10 @@ copy it is pointed at and never on the repository's own schema files:
   * prisma/schema.prisma             <- the copy's default schema + the fixture's
     models (schema_additions.prisma) + the relation back-fields the default
     `user` / `organization` models need (schema_relations.json).
+  * lib/<entity>/service_validation_custom.ts <- custom_validation/<entity>.ts, placed
+    before generate-code so the write-once stub is not written over it, and
+  * messages/{en,ja}.json            <- messages_validation.json (a consumer
+    namespace, as prj_sync would merge it).
 
 Usage: compose_child_datagrid_e2e_fixture.py <fixture_dir> <app_copy_dir>
 """
@@ -61,6 +65,26 @@ def compose_prisma(fixture_dir: Path, app_dir: Path) -> None:
     target.write_text(text.rstrip("\n") + "\n\n" + additions, encoding="utf-8")
 
 
+def compose_custom_validation(fixture_dir: Path, app_dir: Path) -> None:
+    # Optional: a fixture without these files (the list-child fixture shares this script) is untouched.
+    source_dir = fixture_dir / "custom_validation"
+    for source in sorted(source_dir.glob("*.ts")):
+        target = app_dir / "lib" / source.stem / "service_validation_custom.ts"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+
+    messages_file = fixture_dir / "messages_validation.json"
+    if not messages_file.exists():
+        return
+    additions = json.loads(messages_file.read_text(encoding="utf-8"))
+    for locale, namespaces in additions.items():
+        path = app_dir / "messages" / f"{locale}.json"
+        messages = json.loads(path.read_text(encoding="utf-8"))
+        for namespace, entries in namespaces.items():
+            messages.setdefault(namespace, {}).update(entries)
+        path.write_text(json.dumps(messages, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 3:
         print(__doc__, file=sys.stderr)
@@ -68,6 +92,7 @@ def main(argv: list[str]) -> int:
     fixture_dir, app_dir = Path(argv[1]).resolve(), Path(argv[2]).resolve()
     compose_json_schema(fixture_dir, app_dir)
     compose_prisma(fixture_dir, app_dir)
+    compose_custom_validation(fixture_dir, app_dir)
     return 0
 
 

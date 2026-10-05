@@ -79,6 +79,8 @@ export default function FormUpsert({{ form_upsert_params }}) {
   const te = useTranslations('EntityLabel');
   const tc = useTranslations('Common');
   const terr = useTranslations('Errors');
+  // Root translator: resolves a hand-written rejection's namespace-qualified messageKey.
+  const tmsg = useTranslations();
 {% if enum_ns_hooks %}
 {{ enum_ns_hooks }}
 {% endif %}
@@ -117,8 +119,16 @@ export default function FormUpsert({{ form_upsert_params }}) {
       case 'SESSION_EXPIRED':   return terr('sessionExpired');
       case 'PERMISSION_DENIED': return terr('permissionDenied');
       case 'NOT_FOUND':         return terr('notFound');
-{% if exclusive_parent_error_fields %}
       case 'VALIDATION': {
+        // A hand-written rejection may carry an i18n key. Only a key under an allowed
+        // namespace that exists in the loaded messages is shown; anything else falls
+        // back to the generic text below (never an exception, never the raw key).
+        const { messageKey, messageArgs } = err as { messageKey?: string; messageArgs?: Record<string, string | number> };
+        const tkey = tmsg as unknown as { has: (key: string) => boolean; (key: string, values?: Record<string, string | number>): string };
+        if (messageKey && /^(ValidationMessages|Errors)\./.test(messageKey) && tkey.has(messageKey)) {
+          return tkey(messageKey, messageArgs);
+        }
+{% if exclusive_parent_error_fields %}
         // x-exclusive-parents: the error names the first listed FK column; show
         // all of the listed columns instead of that one alone.
         const exclusiveFields: Record<string, string> = {
@@ -128,11 +138,9 @@ export default function FormUpsert({{ form_upsert_params }}) {
         };
         const listed = err.field ? exclusiveFields[err.field] : undefined;
         if (listed) return terr(err.reason === 'invalid' ? 'exclusiveParentsInvalid' : 'exclusiveParentsMissing', { fields: listed });
+{% endif %}
         return err.field ? (err.reason === 'invalid' ? terr('fieldInvalid', { field: err.field }) : terr('fieldRequired', { field: err.field })) : terr('unknown');
       }
-{% else %}
-      case 'VALIDATION':        return err.field ? (err.reason === 'invalid' ? terr('fieldInvalid', { field: err.field }) : terr('fieldRequired', { field: err.field })) : terr('unknown');
-{% endif %}
       case 'CONFLICT':          return err.field ? terr('fieldAlreadyLinked', { field: err.field }) : terr('staleMutation');
       case 'RESERVATION_LOCKED': return terr('reservationLocked');
       case 'RELATED_RECORD_INVALID': return terr('relatedRecordInvalid');

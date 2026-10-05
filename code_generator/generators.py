@@ -1077,7 +1077,7 @@ def actions_context(ctx: dict) -> dict:
             f"{indent}  {call_stmt}",
             f"{indent}}} catch (e) {{",
             f"{indent}  if (e instanceof AppError) {{",
-            f"{indent}    return {{ ok: false, errorCode: e.code, field: e.field, reason: e.reason }} satisfies ActionFailure;",
+            f"{indent}    return {{ ok: false, errorCode: e.code, field: e.field, reason: e.reason, ...((m: {{ messageKey?: string; messageArgs?: Record<string, string | number> }}) => (m.messageKey ? {{ messageKey: m.messageKey, messageArgs: m.messageArgs }} : {{}}))(e) }} satisfies ActionFailure;",
             f"{indent}  }}",
         ]
         if has_reservation:
@@ -1109,7 +1109,7 @@ def actions_context(ctx: dict) -> dict:
             f"{block}"
             f"{indent}}} catch (e) {{\n"
             f"{indent}  if (e instanceof AppError) {{\n"
-            f"{indent}    return {{ ok: false, errorCode: e.code, field: e.field, reason: e.reason }} satisfies ActionFailure;\n"
+            f"{indent}    return {{ ok: false, errorCode: e.code, field: e.field, reason: e.reason, ...((m: {{ messageKey?: string; messageArgs?: Record<string, string | number> }}) => (m.messageKey ? {{ messageKey: m.messageKey, messageArgs: m.messageArgs }} : {{}}))(e) }} satisfies ActionFailure;\n"
             f"{indent}  }}\n"
             f"{indent}  throw e;\n"
             f"{indent}}}\n"

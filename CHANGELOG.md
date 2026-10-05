@@ -103,6 +103,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   and hook run.
 
 ### Added
+- **Hand-written validation can pass an i18n message key to the form** (issue #817).
+  An `AppError` takes optional `messageKey` and `messageArgs`. They travel on the Server
+  Action failure and in the REST error body (only when present), and the generated form
+  shows the translated text instead of "{field} has an invalid or disallowed value."
+  Keys for hand-written rules live in the consumer's `ValidationMessages` namespace; a
+  missing key falls back to the generic text. Behavior without a key is unchanged, but
+  the emitted failure-return lines and the custom-rule wrapper gain the optional fields,
+  so regenerated `actions.ts`, `FormUpsert.tsx` and `service_validation.ts` differ.
 - **Added `x-exclusive-parents` to hide the other parents' FK columns in an
   embedded child DataGrid** (issue #811). A child owned by exactly one of several
   parents, each through its own nullable FK, declares

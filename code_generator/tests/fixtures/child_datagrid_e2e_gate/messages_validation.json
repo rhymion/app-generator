@@ -1,0 +1,12 @@
+{
+  "en": {
+    "ValidationMessages": {
+      "fixtureNameReserved": "This name is reserved for fixtures (limit {max})."
+    }
+  },
+  "ja": {
+    "ValidationMessages": {
+      "fixtureNameReserved": "この名前はフィクスチャ用に予約されています（上限 {max}）。"
+    }
+  }
+}

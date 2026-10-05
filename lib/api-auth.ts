@@ -181,6 +181,8 @@ export function handleApiError(error: unknown): NextResponse {
         code: error.code,
         ...(error.field ? { field: error.field } : {}),
         ...(error.reason ? { reason: error.reason } : {}),
+        ...(error.messageKey ? { messageKey: error.messageKey } : {}),
+        ...(error.messageKey && error.messageArgs ? { messageArgs: error.messageArgs } : {}),
       },
       { status: APP_ERROR_STATUS_MAP[error.code] ?? 500 },
     );

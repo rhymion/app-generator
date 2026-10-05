@@ -270,7 +270,11 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
     await (validateCustomRules as CustomRulesFn)(tx, data, currentId, prevRow, actorId);
   } catch (e) {
     if (e instanceof AppError && e.code === 'VALIDATION' && !e.reason) {
-      throw new AppError('VALIDATION', e.message, e.field, 'invalid');
+      // Keep a message key the hand-written rule attached (read through a cast so
+      // an older write-once lib/_errors.ts without these fields still compiles).
+      const m = e as { messageKey?: string; messageArgs?: Record<string, string | number> };
+      const retagged = new AppError('VALIDATION', e.message, e.field, 'invalid');
+      throw m.messageKey ? Object.assign(retagged, { messageKey: m.messageKey, messageArgs: m.messageArgs }) : retagged;
     }
     throw e;
   }
