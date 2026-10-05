@@ -13,7 +13,9 @@
     "created_excl_betas excl_beta[] @relation(\"ExclBetaCreator\")",
     "updated_excl_betas excl_beta[] @relation(\"ExclBetaUpdater\")",
     "created_excl_links excl_link[] @relation(\"ExclLinkCreator\")",
-    "updated_excl_links excl_link[] @relation(\"ExclLinkUpdater\")"
+    "updated_excl_links excl_link[] @relation(\"ExclLinkUpdater\")",
+    "created_excl_owneds excl_owned[] @relation(\"ExclOwnedCreator\")",
+    "updated_excl_owneds excl_owned[] @relation(\"ExclOwnedUpdater\")"
   ],
   "organization": [
     "parent1s parent1[]"

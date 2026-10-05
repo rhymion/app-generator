@@ -1575,8 +1575,9 @@ names, `x-parent-fk`). Everything else is unchanged:
   a column.
 - The child's own list, view, new and edit pages keep every column, so a reader there can tell
   which parent a row belongs to.
-- The hidden FK stays in the row type and the write payload. A row added from P's screen sets
-  only P's FK and leaves the other NULL; editing a row sends the hidden FK back unchanged.
+- The hidden FK stays in the row type and in the create payload. A row added from P's screen sets
+  only P's FK and leaves the other NULL; editing a row from P's screen does not write the hidden
+  FK at all, so it keeps its stored value.
 - The key is opt-in. A child that does not declare it generates the same output as before.
 
 Schema validation fails closed on:
@@ -1595,9 +1596,52 @@ Schema validation fails closed on:
 The last rule exists because a row added from one parent's screen cannot set another parent's FK,
 so a required one would make that insert fail.
 
-The premise is that one FK is filled per row. Nothing rejects a row holding both FKs: neither input
-validation nor a database constraint is generated, and such a row would have one of its two FKs
-hidden on each parent screen. A check for it would be a separate addition built on this key.
+### Save-time check: exactly one owner
+
+A save of the child must leave exactly one of the listed parents' structural FK columns set. The
+generator emits `lib/<child>/exclusive_parents.ts` for each declaring child, holding the full
+column set (every listed parent's structural FK, not the per-parent subset the grid hides) and
+`validateExclusiveParents()`. It throws `AppError('VALIDATION')` with `reason: 'missing'` when no
+column is set and `reason: 'invalid'` when two or more are. `field` is the first listed column in
+sorted order. REST returns 422 with `{ error, code, field, reason }`; the forms show
+`Errors.exclusiveParentsMissing` / `Errors.exclusiveParentsInvalid` (en and ja), which name every
+listed column, in the form's error banner. The check is application-level only: there is no
+`validate.py` rule, Prisma model change or database constraint.
+
+The row is judged as it will be after the save. REST PUT (single and bulk) and the Server Action
+replace every column: an omitted nullable column is written as `null`. An update that omits an owner
+column therefore clears it. It is rejected as `missing` when no owner remains, and it moves the row
+between owners when it also sets another owner column (one owner before and after). Setting a second
+owner next to the first is `invalid`. Only a caller that passes a column as `undefined` (for example a
+CSV import whose file lacks the column) leaves the stored value in place, and the check then judges
+the stored value.
+
+Every write path of the child is covered:
+
+| Write path | Where the check runs |
+|---|---|
+| REST create/update, single and bulk; Server Action; CSV import of the child | `validateOnAdd` / `validateOnUpdate` of the child's service (only when the child has its own `new` or `edit`) |
+| A parent's nested child create/update (REST, Server Action, CSV import of the parent) | the parent service, before the nested write: a create counts the parent as the owner and judges the other columns the item supplies; an update reads the existing rows back (one `findMany` by id) and judges the merged row |
+| `x-approval` `on_approved` / `on_rejected` / `on_withdrawn` `set_fields` | the dispatch, in the approval transaction, only when `set_fields` writes a listed column (a throw rolls the approval back) |
+
+A child with its own writable pages (`new`, `edit` or `delete` not `false`) is read-only on the
+parents' screens, so it is written only through its own service; a child whose own pages are
+read-only is written only through its parents' nested writes.
+
+A nested update from a parent screen is the exception to replace semantics: it does not write the
+hidden other-parent columns, so they keep their stored values, and it judges them against the
+stored row. A row that already holds more than one owner is therefore rejected when saved from a
+parent screen, not repaired; fixing such a row means editing it on the child's own page or in the
+data. The same rejection applies to any later save of that row.
+
+Not covered:
+
+- Whether the owner is a particular kind of row (for example a composite step only), and
+  cycles between owners.
+- Bridge children (`approvable`, `commentable`, `attachable`) are not listed-FK children.
+- Writes that do not set a listed column: the split action (it writes the entity's `status` and
+  ledger rows), ledger and pool stubs, and the invalidate stub.
+- A direct write outside the generated code.
 
 ## 8. `x-outputType` — Rendering Mode for Children and Related Entities
 

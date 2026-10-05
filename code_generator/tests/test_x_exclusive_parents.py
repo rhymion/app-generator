@@ -148,12 +148,15 @@ def test_context_records_the_hidden_columns(models):
     assert _contexts(schema, 'beta')[0]['children_data'][0]['exclusive_parent_fks'] == ['alpha_id']
 
 
-def test_write_payload_still_carries_the_hidden_fk(models):
-    """The hidden FK stays in the row type and payload; a row added from the
-    parent screen never sets it, so it stays NULL."""
+def test_write_payload_still_carries_the_hidden_fk_on_create_only(models):
+    """The hidden FK stays in the row type and in the create payload; a row added
+    from the parent screen never sets it, so it stays NULL. The update of an
+    existing row does not write it (the exactly-one-owner check judges it)."""
     ctx, _, form = _contexts(_schema(models), 'alpha')
     assert 'beta_id: f.beta_id' in ctx['child_nested_create']
-    assert 'beta_id: f.beta_id' in ctx['child_nested_update']
+    update = ctx['child_nested_update']
+    assert 'beta_id: f.beta_id' in update[update.index('create:'):]
+    assert 'beta_id' not in update[update.index('update:'):update.index('create:')]
     assert 'alpha_id: src.id' in form['child_grid_setup']
 
 

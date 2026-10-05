@@ -1,6 +1,9 @@
 import prisma from '@/lib/prisma';
 import { validateCustomRules } from '@/lib/{{ model }}/service_validation_custom';
 import { AppError } from '@/lib/_errors';
+{% if exclusive_parent_columns %}
+import { EXCLUSIVE_PARENT_COLUMNS, validateExclusiveParents } from '@/lib/{{ model }}/exclusive_parents';
+{% endif %}
 {% if state_machine_transitions and can_update %}
 import { assertTransitionAllowed, assertInitialStateAllowed } from '@/lib/state_transitions';
 {% endif %}
@@ -142,6 +145,21 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
       throw new AppError('CONFLICT', `${relation.label} is already linked`, relation.key);
     }
   }
+{% if exclusive_parent_columns %}
+
+  // x-exclusive-parents: judge the row as it will be after the save. A column
+  // the caller leaves out (undefined) keeps the existing row's value, so a
+  // partial update that adds a second owner, or clears the only one, is
+  // rejected.
+  validateExclusiveParents(
+    Object.fromEntries(
+      EXCLUSIVE_PARENT_COLUMNS.map((column) => [
+        column,
+        data[column] !== undefined ? data[column] : prevRow?.[column],
+      ]),
+    ),
+  );
+{% endif %}
 {% if write_locked_fields %}
 
   {

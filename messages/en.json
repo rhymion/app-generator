@@ -25,6 +25,8 @@
   },
   "Errors": {
     "capacityExhausted": "No capacity is available. Please try a different selection.",
+    "exclusiveParentsInvalid": "Only one of {fields} can be set; the others must be empty.",
+    "exclusiveParentsMissing": "Exactly one of {fields} must be set.",
     "fieldAlreadyLinked": "{field} is already linked to another record.",
     "fieldInvalid": "{field} has an invalid or disallowed value.",
     "fieldRequired": "{field} is required.",
