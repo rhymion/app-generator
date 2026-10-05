@@ -38,6 +38,11 @@ export type ErrorCode =
 // omitted one. Unused for every other ErrorCode.
 export type ValidationReason = 'missing' | 'invalid';
 
+// Interpolation values for a message key. Chosen by the hand-written code;
+// strings and numbers only, so a raw record or object can never be spread
+// into user-facing text by accident.
+export type MessageArgs = Record<string, string | number>;
+
 export class AppError extends Error {
   readonly name = 'AppError';
   constructor(
@@ -45,6 +50,13 @@ export class AppError extends Error {
     message: string,                 // internal debug message — never sent to the UI verbatim
     public readonly field?: string,  // affected form field key (for VALIDATION / CONFLICT)
     public readonly reason?: ValidationReason,  // VALIDATION only — see ValidationReason
+    // Optional i18n key, qualified with its next-intl namespace (for example
+    // 'ValidationMessages.stepHasPlacements'), that the generated form
+    // translates instead of the generic fieldInvalid / fieldRequired text.
+    // A key that is absent from the messages falls back to that generic text.
+    // See docs/knowledge/error-message-framework.md.
+    public readonly messageKey?: string,
+    public readonly messageArgs?: MessageArgs,  // ICU arguments for messageKey
   ) {
     super(message);
   }
@@ -52,7 +64,14 @@ export class AppError extends Error {
 
 // Discriminated union for server action return values.
 export type ActionSuccess = { ok: true };
-export type ActionFailure = { ok: false; errorCode: ErrorCode; field?: string; reason?: ValidationReason };
+export type ActionFailure = {
+  ok: false;
+  errorCode: ErrorCode;
+  field?: string;
+  reason?: ValidationReason;
+  messageKey?: string;       // present only when the thrown AppError carried one
+  messageArgs?: MessageArgs;
+};
 export type ActionResult = ActionSuccess | ActionFailure;
 
 // Extracts a violated-column label from a Prisma P2002 error's `meta`
