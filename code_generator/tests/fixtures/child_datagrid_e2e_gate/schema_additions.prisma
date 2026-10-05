@@ -172,3 +172,60 @@ model parent_only_probe {
   @@index([other_cd_id])
   @@index([other_req_id])
 }
+
+// x-exclusive-parents: a child owned by exactly one of two parents (one nullable
+// structural FK filled per row), plus a non-parent FK to the first parent's model.
+model excl_alpha {
+  id          String      @id @default(cuid())
+  name        String      @unique
+  created_at  DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user        @relation("ExclAlphaCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user        @relation("ExclAlphaUpdater", fields: [updater_id], references: [id])
+  excl_links  excl_link[] @relation("excl_link_alpha")
+  placed_links excl_link[] @relation("excl_link_placed")
+
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model excl_beta {
+  id          String      @id @default(cuid())
+  name        String      @unique
+  created_at  DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user        @relation("ExclBetaCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user        @relation("ExclBetaUpdater", fields: [updater_id], references: [id])
+  excl_links  excl_link[] @relation("excl_link_beta")
+
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model excl_link {
+  id              String      @id @default(cuid())
+  name            String
+  excl_alpha_id   String?
+  excl_alpha      excl_alpha? @relation("excl_link_alpha", fields: [excl_alpha_id], references: [id], onDelete: Cascade)
+  excl_beta_id    String?
+  excl_beta       excl_beta?  @relation("excl_link_beta", fields: [excl_beta_id], references: [id], onDelete: Cascade)
+  placed_alpha_id String?
+  placed_alpha    excl_alpha? @relation("excl_link_placed", fields: [placed_alpha_id], references: [id])
+  created_at      DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user        @relation("ExclLinkCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user        @relation("ExclLinkUpdater", fields: [updater_id], references: [id])
+
+  @@index([name])
+  @@index([creator_id])
+  @@index([updater_id])
+  @@index([excl_alpha_id])
+  @@index([excl_beta_id])
+  @@index([placed_alpha_id])
+}

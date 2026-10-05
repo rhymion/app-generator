@@ -112,6 +112,17 @@ inventory:
      scoped differently — see "x-readonly vs x-readonly-fields" below for
      which to reach for. -->
 
+Hide the other parents' FK columns in a child grid when each row belongs to exactly one of several parents:
+
+```yaml
+step_placement:
+  x-exclusive-parents: [test_case, step]
+```
+<!-- why: step_placement has a nullable test_case_id and a nullable step_id, one filled
+     per row; the grid on the test_case screen drops the step_id column and the grid on
+     the step screen drops test_case_id. Both parents must embed the child as a
+     one-to-many DataGrid; see docs/knowledge/schema-yaml-configuration.md §7.7. -->
+
 ### `x-readonly` vs `x-readonly-fields`: which one to use
 
 Both make a field non-editable in the generated form (shown, not accepted,

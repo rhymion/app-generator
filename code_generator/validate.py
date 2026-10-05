@@ -14,7 +14,7 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from build_context import _raw_def
+from build_context import _raw_def, _extract_children_of
 from helpers.bridge_direction import get_new_form_bridge
 from helpers.label_field import resolve_label_paths
 from helpers.naming import to_pascal_case
@@ -22,7 +22,7 @@ from helpers.schema_helpers import (
     get_parent_relationships, get_internal_bridge_fk_prop_names,
     get_entity_properties, get_entity_required, get_self_only_flags,
     get_direct_attachment_fk_props, schema_has_direct_attachment_fk,
-    is_write_only_prop, _get_actual_type, resolve_set_fields,
+    is_write_only_prop, _get_actual_type, resolve_set_fields, resolve_parent_fk_props,
 )
 from helpers.state_machine_parser import ParseError, parse_state_machine_diagram
 from keys import x_approval as approval_key
@@ -785,6 +785,82 @@ def _state_machine_reachable_states(
                 seen.add(nxt)
                 stack.append(nxt)
     return seen
+
+
+def _exclusive_parents_errors(schema: dict) -> list[str]:
+    """Errors for every child entity declaring `x-exclusive-parents`.
+
+    The key lists the parent entities that each own the child through their own
+    nullable structural FK (one is filled per row). It is only meaningful when
+    every listed parent embeds the child as a one-to-many DataGrid child, so
+    anything else is rejected rather than ignored.
+    """
+    defs = schema.get('definitions', {})
+    errors: list[str] = []
+    for child, _ in defs.items():
+        if child.startswith('__'):
+            continue
+        child_def = _raw_def(child, schema)
+        if 'x-exclusive-parents' not in child_def:
+            continue
+        where = f"Entity '{child}': x-exclusive-parents"
+        declared = child_def['x-exclusive-parents']
+        if (not isinstance(declared, list)
+                or not all(isinstance(n, str) and n for n in declared)):
+            errors.append(f"{where} must be a list of parent entity names.")
+            continue
+        if len(declared) < 2:
+            errors.append(
+                f"{where} must list at least 2 parent entities, got {len(declared)}; "
+                f"the key hides the other parents' FK columns, so a single parent has nothing to hide."
+            )
+        if len(set(declared)) != len(declared):
+            dups = sorted(n for n, k in Counter(declared).items() if k > 1)
+            errors.append(f"{where} lists duplicate entities: {dups}.")
+        if child in declared:
+            errors.append(f"{where} must not list the child itself ('{child}').")
+        child_props = child_def.get('properties', {})
+        child_required = set(child_def.get('required') or ())
+        for parent in dict.fromkeys(declared):
+            if parent == child:
+                continue
+            if parent not in defs and f'__{parent}' not in defs:
+                errors.append(f"{where} lists unknown entity '{parent}'.")
+                continue
+            entries = [e for e in _extract_children_of(defs.get(parent) or {}, schema)
+                       if e['name'] == child]
+            grid = [e for e in entries
+                    if e.get('output_type') not in ('list', 'comments')
+                    and (e.get('relationship') or {}).get('type') != 'many-to-many']
+            if not grid:
+                if entries:
+                    errors.append(
+                        f"{where}: '{parent}' embeds '{child}' as an x-outputType list/comments or "
+                        f"many-to-many child; the key applies to one-to-many DataGrid children only."
+                    )
+                else:
+                    errors.append(
+                        f"{where}: '{parent}' does not have '{child}' as a one-to-many child "
+                        f"(no array property of '{parent}' references it)."
+                    )
+                continue
+            fks: set[str] = set()
+            for entry in grid:
+                fks |= resolve_parent_fk_props(entry, child_def, parent)
+            missing = sorted(fk for fk in fks if fk not in child_props)
+            if missing:
+                errors.append(
+                    f"{where}: the parent FK column(s) {missing} that '{parent}' uses to own "
+                    f"'{child}' do not exist on '{child}'."
+                )
+            for fk in sorted(fks & set(child_props)):
+                prop_type = child_props[fk].get('type') if isinstance(child_props[fk], dict) else None
+                if fk in child_required or not (isinstance(prop_type, list) and 'null' in prop_type):
+                    errors.append(
+                        f"{where}: the FK '{child}.{fk}' to '{parent}' is required. A row added "
+                        f"from another listed parent's screen cannot set it, so it must be nullable."
+                    )
+    return errors
 
 
 def validate_schema(schema: dict) -> None:
@@ -2957,6 +3033,11 @@ def validate_schema(schema: dict) -> None:
             # (validateOnAdd/Update) is responsible for rejecting a value
             # that isn't a legal transition target, exactly as it would
             # reject any other invalid value.
+
+    # -----------------------------------------------------------------------
+    # x-exclusive-parents
+    # -----------------------------------------------------------------------
+    errors.extend(_exclusive_parents_errors(schema))
 
     # -----------------------------------------------------------------------
     # Report

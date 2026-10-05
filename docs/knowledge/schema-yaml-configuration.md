@@ -1545,6 +1545,60 @@ possible parent types.
 
 ---
 
+## 7.7 `x-exclusive-parents` — a child owned by exactly one of several parents
+
+A child can be embedded by several parents, each through its own nullable structural FK, with
+exactly one of those FKs filled per row. On a parent's screens the other parents' FK columns are
+always empty for the rows shown, so the key hides them. Declare it on the child, as an entity-level
+key whose value lists the parent entities:
+
+```yaml
+step_placement:
+  x-exclusive-parents: [test_case, step]
+test_case:
+  properties:
+    step_placements:
+      type: array
+      items: { $ref: "#/definitions/step_placement" }
+step:
+  properties:
+    step_placements:
+      type: array
+      items: { $ref: "#/definitions/step_placement" }
+```
+
+On the view and create/edit screens of a listed parent P, the child's embedded DataGrid omits the
+structural parent FK columns of the other listed parents (the columns each other parent's relation
+names, `x-parent-fk`). Everything else is unchanged:
+
+- A FK to the same entity that is not a parent link (for example `placed_step_id → step`) stays
+  a column.
+- The child's own list, view, new and edit pages keep every column, so a reader there can tell
+  which parent a row belongs to.
+- The hidden FK stays in the row type and the write payload. A row added from P's screen sets
+  only P's FK and leaves the other NULL; editing a row sends the hidden FK back unchanged.
+- The key is opt-in. A child that does not declare it generates the same output as before.
+
+Schema validation fails closed on:
+
+| Rule | Error when |
+|---|---|
+| value | it is not a list of entity names |
+| entity | a listed name is not an entity |
+| count | fewer than two names are listed |
+| duplicates | a name is listed twice |
+| self | the child lists itself |
+| embedding | a listed entity does not embed the child as a one-to-many DataGrid child (an `x-outputType: list` / `comments` or many-to-many embedding does not count) |
+| FK column | a listed parent's structural FK column does not exist on the child |
+| nullable | a listed parent's structural FK on the child is required |
+
+The last rule exists because a row added from one parent's screen cannot set another parent's FK,
+so a required one would make that insert fail.
+
+The premise is that one FK is filled per row. Nothing rejects a row holding both FKs: neither input
+validation nor a database constraint is generated, and such a row would have one of its two FKs
+hidden on each parent screen. A check for it would be a separate addition built on this key.
+
 ## 8. `x-outputType` — Rendering Mode for Children and Related Entities
 
 Controls how a property under `properties:` is displayed in the detail view.
