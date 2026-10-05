@@ -714,30 +714,51 @@ def _build_child_attach_guard(children_data: list[dict], model: str, for_update:
     return '\n'.join(blocks)
 
 
+def _exclusive_parent_columns(child_name: str, schema: dict) -> dict[str, list[str]]:
+    """Structural parent FK columns per parent listed in the child's
+    `x-exclusive-parents` (parent entity -> sorted columns).
+
+    Empty when the child does not declare the key, so schemas without it are
+    unaffected. Each parent's columns are resolved with the same lookup the
+    child's own parent link uses (`resolve_parent_fk_props`), so an unrelated FK
+    to the same entity is kept out.
+    """
+    child_def = _raw_def(child_name, schema)
+    declared = child_def.get('x-exclusive-parents')
+    if not isinstance(declared, list):
+        return {}
+    defs = schema.get('definitions') or {}
+    columns: dict[str, list[str]] = {}
+    for parent in declared:
+        cols: set[str] = set()
+        for entry in _extract_children_of(defs.get(parent) or {}, schema):
+            if entry['name'] != child_name or entry.get('output_type') in ('list', 'comments'):
+                continue
+            cols |= resolve_parent_fk_props(entry, child_def, parent)
+        columns[parent] = sorted(cols)
+    return columns
+
+
+def _exclusive_parent_all_columns(child_name: str, schema: dict) -> list[str]:
+    """Every listed parent's structural FK column, sorted and de-duplicated.
+
+    This is the full set the exactly-one-owner check counts; it is not the
+    per-parent subset used to hide columns on one parent's screen.
+    """
+    return sorted({c for cols in _exclusive_parent_columns(child_name, schema).values() for c in cols})
+
+
 def _exclusive_parent_fks(child_raw: dict, model: str, schema: dict) -> list[str]:
     """Structural parent FK columns of the OTHER parents listed in the child's
     `x-exclusive-parents`, as seen from the screen of parent `model`.
 
     Empty when the child does not declare the key or `model` is not listed, so
-    schemas without the key are unaffected. Each other parent's columns are
-    resolved with the same lookup the child's own parent link uses
-    (`resolve_parent_fk_props`), so an unrelated FK to the same entity is kept.
+    schemas without the key are unaffected.
     """
-    child_name = child_raw['name']
-    declared = _raw_def(child_name, schema).get('x-exclusive-parents')
-    if not isinstance(declared, list) or model not in declared:
+    columns = _exclusive_parent_columns(child_raw['name'], schema)
+    if model not in columns:
         return []
-    child_def = _raw_def(child_name, schema)
-    defs = schema.get('definitions') or {}
-    excluded: set[str] = set()
-    for other in declared:
-        if other == model:
-            continue
-        for entry in _extract_children_of(defs.get(other) or {}, schema):
-            if entry['name'] != child_name or entry.get('output_type') in ('list', 'comments'):
-                continue
-            excluded |= resolve_parent_fk_props(entry, child_def, other)
-    return sorted(excluded)
+    return sorted({c for parent, cols in columns.items() if parent != model for c in cols})
 
 
 def _build_child_data(children_raw: list[dict], model: str, schema: dict,
@@ -4693,6 +4714,10 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         write_locked_values=write_locked_values,
         write_locked_fields=write_locked_fields,
         write_locked_values_select=write_locked_values_select,
+        # x-exclusive-parents: every listed parent's structural FK column when
+        # this entity declares the key (empty otherwise). The exactly-one-owner
+        # check counts this full set.
+        exclusive_parent_columns=_exclusive_parent_all_columns(model, schema),
         # x-server-value: server-computed field values (cmd_556/cmd_565).
         server_value_fields=server_value_fields,
         server_value_override_fields=server_value_override_fields,

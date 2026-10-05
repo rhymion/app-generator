@@ -27,7 +27,7 @@ from helpers.schema_helpers import (
     derive_post_decision_freeze_values,
 )
 from keys import x_approval as approval_key
-from build_context import get_uri_kind
+from build_context import get_uri_kind, _exclusive_parent_all_columns
 from helpers.bridge_direction import get_new_form_bridge
 
 
@@ -4718,6 +4718,16 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
 # form_upsert.tsx
 # ---------------------------------------------------------------------------
 
+def _exclusive_parent_error_fields(ctx: dict, schema: dict) -> dict[str, str]:
+    """First listed FK column -> label of all listed columns, for this entity
+    (when it declares x-exclusive-parents) and for each child embedded on its
+    form. The exactly-one-owner error carries only the first column, so the form
+    uses this to name every listed column. Empty when nothing declares the key."""
+    columns = [ctx.get('exclusive_parent_columns') or []]
+    columns += [_exclusive_parent_all_columns(c['name'], schema) for c in ctx.get('children_data', [])]
+    return {cols[0]: ', '.join(cols) for cols in columns if cols}
+
+
 def form_upsert_context(ctx: dict, schema: dict) -> dict:
     parent        = ctx['parent']
     model         = ctx['model']
@@ -7045,6 +7055,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'rel_opt_setups':           '\n'.join(rel_opt_setups),
         'child_entity_rel_opt':     child_entity_rel_option_setups,
         'validation_call':          validation_call,
+        'exclusive_parent_error_fields': _exclusive_parent_error_fields(ctx, schema),
         'comment_children_jsx':     '\n'.join(comment_jsx_parts),
         'comment_add_id_expr':      comment_add_id_expr,
         'custom_upsert_imports':    custom_upsert_imports,

@@ -28,7 +28,7 @@ from generate_types import extract_entities, extract_named_constants
 from context import build_entity_context
 from build_context import (
     build_context, build_anonymize_user_context, _get_actual_type, set_prisma_models,
-    select_filter_sort_representatives,
+    select_filter_sort_representatives, _exclusive_parent_all_columns,
 )
 from helpers.label_field import build_label_expression
 from helpers.schema_helpers import derive_text_fields as _derive_text_fields
@@ -2272,6 +2272,21 @@ def generate(schema_path: str, output_dir: str) -> None:
         _render(env, 'on_approved_dispatch.ts.jinja2', {'approvable_entities': approvable_entities}),
     )
     print(f'  Approval dispatch → lib/approval_request/on_approved_dispatch.ts ({len(approvable_entities)} entities)')
+
+    # --- x-exclusive-parents helper (lib/<child>/exclusive_parents.ts) ---
+    #
+    # One helper per declared child, written whether or not the child has pages
+    # of its own: the parent's nested child writes import it even for a child
+    # with no x-generate. Nothing is written for a schema without the key.
+    for def_key in defs:
+        if def_key.startswith('__'):
+            continue
+        _excl_columns = _exclusive_parent_all_columns(def_key, schema)
+        if _excl_columns:
+            _write(
+                out / 'lib' / def_key / 'exclusive_parents.ts',
+                _render(env, 'exclusive_parents.ts.jinja2', {'child': def_key, 'columns': _excl_columns}),
+            )
 
     # --- Approvable target resolver (lib/approval_request/resolve_target.ts) ---
     #
