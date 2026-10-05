@@ -66,13 +66,17 @@ def compose_prisma(fixture_dir: Path, app_dir: Path) -> None:
 
 
 def compose_custom_validation(fixture_dir: Path, app_dir: Path) -> None:
+    # Optional: a fixture without these files (the list-child fixture shares this script) is untouched.
     source_dir = fixture_dir / "custom_validation"
     for source in sorted(source_dir.glob("*.ts")):
         target = app_dir / "lib" / source.stem / "service_validation_custom.ts"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
 
-    additions = json.loads((fixture_dir / "messages_validation.json").read_text(encoding="utf-8"))
+    messages_file = fixture_dir / "messages_validation.json"
+    if not messages_file.exists():
+        return
+    additions = json.loads(messages_file.read_text(encoding="utf-8"))
     for locale, namespaces in additions.items():
         path = app_dir / "messages" / f"{locale}.json"
         messages = json.loads(path.read_text(encoding="utf-8"))
