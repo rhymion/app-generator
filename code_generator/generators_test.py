@@ -149,7 +149,10 @@ from helpers.label_field import (
     build_label_expression, render_prisma_include, resolve_label_paths, relation_chain_targets,
     build_string_only_label_expression,
 )
-from build_context import _get_entity_options, _raw_def, is_forced_required_field, get_uri_kind
+from build_context import (
+    _get_entity_options, _raw_def, is_forced_required_field, get_uri_kind,
+    _exclusive_parent_columns,
+)
 from generate_types import extract_entities
 from generators import resolve_approval_submit_on
 
@@ -2195,6 +2198,30 @@ def _resolve_pool_extra_deps(
     return pool_extra_fk_props, pool_extra_deps
 
 
+def _exclusive_owner_fields(fields: list, model_name: str, schema: dict) -> list:
+    """Field metas of an `x-exclusive-parents` child as the generated tests use them.
+
+    The save-time validator requires exactly one owner column, so the generated
+    helper rows, API bodies and form fills write the owner of the first declared
+    parent that has a resolvable column (as a required field) and none of the
+    other owner columns. A child without the declaration gets `fields` back
+    unchanged.
+    """
+    by_parent = _exclusive_parent_columns(model_name, schema)
+    all_cols = {c for cols in by_parent.values() for c in cols}
+    if not all_cols:
+        return fields
+    owner = next((cols[0] for cols in by_parent.values() if cols), None)
+    result = []
+    for f in fields:
+        if f['prop_name'] in all_cols - {owner}:
+            continue
+        if f['prop_name'] == owner and f['category'] == 'autocomplete':
+            f = {**f, 'required': True}
+        result.append(f)
+    return result
+
+
 def helper_context(
     parent: str,
     children: list,
@@ -2218,6 +2245,7 @@ def helper_context(
         properties, required_fields, relationships, generate_config.get('fields'), entity_options,
         range_end_field=_date_range['end'] if _date_range else None,
     )
+    fields = _exclusive_owner_fields(fields, model_name, schema)
     # Detect outbound one-to-one FK fields (e.g. approvable_id on leave_request).
     # These are internal bridge records the service creates automatically — not user-facing.
     # Exclude from fill/assert commands and from prisma data field lists; handle separately.
@@ -3471,6 +3499,7 @@ def spec_context(
         properties, required_fields, relationships, generate_config.get('fields'), entity_options,
         range_end_field=_date_range['end'] if _date_range else None,
     )
+    fields = _exclusive_owner_fields(fields, model_name, schema)
     # Exclude outbound one-to-one FK fields (internal bridge records, not user-facing).
     _internal_fk_prop_names = {d['prop_name'] for d in get_internal_one_to_one_fks(model_name, schema)}
     fields = [f for f in fields if f['prop_name'] not in _internal_fk_prop_names]
@@ -4701,6 +4730,7 @@ def api_spec_context(
         filtered_props, required_fields_list, relationships, gen_cfg.get('fields'), _api_entity_options,
         range_end_field=_api_date_range['end'] if _api_date_range else None,
     )
+    all_field_metas = _exclusive_owner_fields(all_field_metas, model, schema)
     # Exclude outbound one-to-one FK fields (internal bridge records — service creates them automatically).
     _api_internal_fk_prop_names = {d['prop_name'] for d in get_internal_one_to_one_fks(model, schema)}
     all_field_metas = [f for f in all_field_metas if f['prop_name'] not in _api_internal_fk_prop_names]
