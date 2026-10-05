@@ -714,6 +714,32 @@ def _build_child_attach_guard(children_data: list[dict], model: str, for_update:
     return '\n'.join(blocks)
 
 
+def _exclusive_parent_fks(child_raw: dict, model: str, schema: dict) -> list[str]:
+    """Structural parent FK columns of the OTHER parents listed in the child's
+    `x-exclusive-parents`, as seen from the screen of parent `model`.
+
+    Empty when the child does not declare the key or `model` is not listed, so
+    schemas without the key are unaffected. Each other parent's columns are
+    resolved with the same lookup the child's own parent link uses
+    (`resolve_parent_fk_props`), so an unrelated FK to the same entity is kept.
+    """
+    child_name = child_raw['name']
+    declared = _raw_def(child_name, schema).get('x-exclusive-parents')
+    if not isinstance(declared, list) or model not in declared:
+        return []
+    child_def = _raw_def(child_name, schema)
+    defs = schema.get('definitions') or {}
+    excluded: set[str] = set()
+    for other in declared:
+        if other == model:
+            continue
+        for entry in _extract_children_of(defs.get(other) or {}, schema):
+            if entry['name'] != child_name or entry.get('output_type') in ('list', 'comments'):
+                continue
+            excluded |= resolve_parent_fk_props(entry, child_def, other)
+    return sorted(excluded)
+
+
 def _build_child_data(children_raw: list[dict], model: str, schema: dict,
                       parent_rels_raw: list[dict]) -> list[dict]:
     result = []
@@ -915,8 +941,10 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
         child_has_audit_fields = _model_has_audit_fields(child_name)
 
         _attach_fk = _list_child_attach_fk(child_raw, schema, model) if use_connect else None
+        _exclusive_fks = _exclusive_parent_fks(child_raw, model, schema)
         result.append({
             **child_raw,
+            **({'exclusive_parent_fks': _exclusive_fks} if _exclusive_fks else {}),
             'child_var':        child_var,
             'child_pascal':     child_pascal,
             'form_key':         form_key,

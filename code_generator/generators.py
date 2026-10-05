@@ -3918,6 +3918,9 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
         col_skip_keys = {f'{model}_id'}
         if child_raw.get('output_type') not in ('list', 'comments'):
             col_skip_keys |= set(child_raw.get('parent_fk') or ())
+        # x-exclusive-parents: the other listed parents' structural FKs are never
+        # filled for rows shown under this parent, so they are not grid columns.
+        col_skip_keys |= set(child_raw.get('exclusive_parent_fks') or ())
 
         rel_params = []
         for key, prop in child_props.items():
@@ -5885,7 +5888,10 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         # Grid child — exclude only the actual parent FK column(s), found via x-relationship
         # annotations (not all FKs targeting the parent, e.g. reference_id → db_table stays).
         parent_fk_props_child = resolve_parent_fk_props(c, child_def, model)
-        child_rels = [r for r in get_parent_relationships(child_def) if r['prop_name'] not in parent_fk_props_child]
+        # x-exclusive-parents columns are not grid columns, so they take no Config argument either.
+        child_rels = [r for r in get_parent_relationships(child_def)
+                      if r['prop_name'] not in parent_fk_props_child
+                      and r['prop_name'] not in (c.get('exclusive_parent_fks') or ())]
         rel_opt_args = ', '.join(f'{to_camel_case(r["prop_name"])}Config' for r in child_rels)
         rel_args_str = f', {rel_opt_args}' if rel_opt_args else ''
 
@@ -6021,7 +6027,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         if c.get('output_type') == 'list' or (c.get('relationship') or {}).get('type') == 'many-to-many':
             continue
         cdef = _raw_def(c['name'], schema)
-        parent_fk_props_cdef = resolve_parent_fk_props(c, cdef, model)
+        parent_fk_props_cdef = resolve_parent_fk_props(c, cdef, model) | set(c.get('exclusive_parent_fks') or ())
         child_prop_name = c['property_name']
         for r in get_parent_relationships(cdef):
             if r['prop_name'] in parent_fk_props_cdef:
@@ -6500,7 +6506,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     _indep_grid_child_rel_targets: set[str] = set()
     for _c in readonly_indep_grid_ch:
         _c_def = _raw_def(_c['name'], schema)
-        _c_parent_fk_props = resolve_parent_fk_props(_c, _c_def, model)
+        _c_parent_fk_props = resolve_parent_fk_props(_c, _c_def, model) | set(_c.get('exclusive_parent_fks') or ())
         _indep_grid_child_rel_targets |= {
             r['target']
             for r in get_parent_relationships(_c_def)
@@ -6517,7 +6523,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         if _ec.get('output_type') == 'list' or (_ec.get('relationship') or {}).get('type') == 'many-to-many':
             continue
         _ec_def = _raw_def(_ec['name'], schema)
-        _ec_parent_fk_props = resolve_parent_fk_props(_ec, _ec_def, model)
+        _ec_parent_fk_props = resolve_parent_fk_props(_ec, _ec_def, model) | set(_ec.get('exclusive_parent_fks') or ())
         _editable_child_rel_targets |= {
             r['target']
             for r in get_parent_relationships(_ec_def)
