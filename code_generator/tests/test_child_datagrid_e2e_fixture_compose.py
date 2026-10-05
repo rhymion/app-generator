@@ -38,7 +38,8 @@ def test_compose_adds_the_fixture_entities_and_models(app_copy):
     assert result.returncode == 0, result.stderr
     schema = (app_copy / 'code_generator' / 'json_schema.yaml').read_text()
     prisma = (app_copy / 'prisma' / 'schema.prisma').read_text()
-    for entity in ('parent1', 'parent1_child1', 'parent1_child2', 'parent_only', 'parent_only_probe'):
+    for entity in ('parent1', 'parent1_child1', 'parent1_child2', 'parent_only', 'parent_only_probe',
+                   'excl_alpha', 'excl_beta', 'excl_link'):
         assert f'\n  {entity}:\n' in schema
         assert f'model {entity} {{' in prisma
     assert 'enum ProbeKind {' in prisma

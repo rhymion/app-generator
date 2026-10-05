@@ -11,6 +11,10 @@
 #   parent_only_probe  inline child, no pages: all column types x required/nullable,
 #                      FKs to parent_only (same model) and parent1 (other model),
 #                      each under the plain / composite / dotted / composite+dotted label forms
+#   excl_alpha         parent (view, create/edit) of excl_link, also the target of its non-parent FK
+#   excl_beta          second parent of excl_link
+#   excl_link          x-exclusive-parents [excl_alpha, excl_beta]: inline-editable child with
+#                      read-only own pages (list/view), so its standalone pages keep both parent FKs
 definitions:
   parent1_child1:
     x-generate:
@@ -187,3 +191,74 @@ definitions:
         type: array
         items:
           $ref: "#/definitions/parent_only_probe"
+
+  excl_link:
+    x-exclusive-parents: [excl_alpha, excl_beta]
+    # Every FK is listed so the child's own list page shows both parent columns; the
+    # grids on the parents' screens must still hide the other parent's FK.
+    x-display:
+      table:
+        - name: {}
+        - excl_alpha_id: {}
+        - excl_beta_id: {}
+        - placed_alpha_id: {}
+    x-generate:
+      list: true
+      view: true
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name:
+        minLength: 1
+      excl_alpha_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship: {}
+      excl_beta_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship: {}
+      placed_alpha_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          labelField: name
+
+  excl_alpha:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    fields:
+      name:
+        minLength: 1
+    properties:
+      excl_links:
+        type: array
+        items:
+          $ref: "#/definitions/excl_link"
+
+  excl_beta:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    fields:
+      name:
+        minLength: 1
+    properties:
+      excl_links:
+        type: array
+        items:
+          $ref: "#/definitions/excl_link"
