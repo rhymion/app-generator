@@ -1608,10 +1608,13 @@ sorted order. REST returns 422 with `{ error, code, field, reason }`; the forms 
 listed column, in the form's error banner. The check is application-level only: there is no
 `validate.py` rule, Prisma model change or database constraint.
 
-The row is judged as it will be after the save. A listed column the caller leaves out keeps the
-stored value; a column sent as `null` is a clear. A partial update that adds a second owner is
-`invalid`, and one that clears the only owner is `missing`. An update that touches neither column is
-judged on the stored row, so it passes only if that row already holds exactly one owner.
+The row is judged as it will be after the save. REST PUT (single and bulk) and the Server Action
+replace every column: an omitted nullable column is written as `null`. An update that omits an owner
+column therefore clears it. It is rejected as `missing` when no owner remains, and it moves the row
+between owners when it also sets another owner column (one owner before and after). Setting a second
+owner next to the first is `invalid`. Only a caller that passes a column as `undefined` (for example a
+CSV import whose file lacks the column) leaves the stored value in place, and the check then judges
+the stored value.
 
 Every write path of the child is covered:
 
@@ -1625,7 +1628,8 @@ A child with its own writable pages (`new`, `edit` or `delete` not `false`) is r
 parents' screens, so it is written only through its own service; a child whose own pages are
 read-only is written only through its parents' nested writes.
 
-A nested update does not write the hidden other-parent columns, and it judges them against the
+A nested update from a parent screen is the exception to replace semantics: it does not write the
+hidden other-parent columns, so they keep their stored values, and it judges them against the
 stored row. A row that already holds more than one owner is therefore rejected when saved from a
 parent screen, not repaired; fixing such a row means editing it on the child's own page or in the
 data. The same rejection applies to any later save of that row.
