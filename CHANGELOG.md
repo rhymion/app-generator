@@ -16,6 +16,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   there and the app does not use it.
 
 ### Fixed
+- **Returned the second instance of the primary display FK from the generated test
+  helper when its entity has two FKs to the same model** (issue #813). The API spec
+  reads `deps.<fk>2` for `PUT /:id` and both bulk `PUT` examples, but the helper only
+  returned `<fk>` (and `<fk>Alias`), so those three examples failed with
+  `TypeError: Cannot read properties of undefined (reading 'id')`. Entities
+  without two FKs to the same model generate byte-identical output.
 - **Kept a list child's second FK to the parent's model in the fetched data**
   (issue #801). A child embedded with `x-outputType: list` that had a structural
   FK to the parent plus a separate FK to the same model lost both from the parent

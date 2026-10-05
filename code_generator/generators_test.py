@@ -892,7 +892,7 @@ def split_same_target_fk_deps(
             var_name = to_camel_case(prop_stem)
             dep_title = to_title_case(prop_stem)
             if not any(d['var_name'] == var_name for d in deps) and not any(d['var_name'] == var_name for d in new_deps):
-                new_deps.append({'target': target, 'var_name': var_name, 'title': dep_title, 'fk_deps': _orig_fk_deps})
+                new_deps.append({'target': target, 'var_name': var_name, 'title': dep_title, 'fk_deps': _orig_fk_deps, 'is_split_fk_dep': True})
             entity_fk_deps.append({'prop_name': r['prop_name'], 'dep_var_name': var_name})
             new_var_names.append(var_name)
         insert_at = min(orig_index, len(deps))
@@ -2573,7 +2573,11 @@ def helper_context(
     }
     enriched_deps = []
     for dep in deps:
-        is_direct = 'title' in dep  # UA / self-ref / m2m deps added directly
+        # UA / self-ref / m2m deps are added directly (pre-set 'title'). A
+        # prop-stem dep split off a multi-FK target is a regular FK dep that
+        # merely carries a title, so it still qualifies for needs_second --
+        # the spec reads `deps.<primaryVar>2` for the primary display FK.
+        is_direct = 'title' in dep and not dep.get('is_split_fk_dep')
         title_str = dep.get('_title_override') or dep.get('title') or to_title_case(dep['target'])
         dep_def = schema['definitions'].get(dep['target'], {})
         x_rels = dep_def.get('x-relationships', {})
