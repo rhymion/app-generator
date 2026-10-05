@@ -1,0 +1,38 @@
+// GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
+// Hand-written dependency values for the generated test helper of {{ parent }}.
+//
+// helper.ts calls dependencyValues() before it creates a dependency row (a
+// parent row this entity needs) and before the find-or-create lookup that may
+// reuse one. Return the values to use. Returning `defaults` unchanged keeps the
+// generated behaviour.
+//
+//   key       identifies the dependency: '<target model>.<dependency name>'.
+//             DependencyKey lists every key this helper uses, so a mistyped
+//             key fails the type check. The same key applies to every copy of
+//             that dependency in the helper (second instance, per-row copy,
+//             lookup and create).
+//   defaults  the columns the helper would use. For a lookup these are the
+//             lookup columns only.
+//
+// Rules: a plain column of the dependency's model may be added or changed;
+// foreign-key and system columns may not be reassigned or removed. Any other
+// result throws, naming the key and the column.
+//
+// Applies only to dependencies created by this entity's helper; a dependency
+// created inside another entity's helper needs the same rule in that helper's
+// own helper_custom.ts.
+//
+// Consumers: keep the file you edit at prj/cypress/support/{{ parent }}/helper_custom.ts
+// (prj:sync copies it over this one). Edits made only in the generated tree
+// are lost on a fresh checkout. Do not rename the exports of helper.ts.
+//
+// Example:
+//   if (key === 'step.step') return { ...defaults, step_type: 'composite' };
+import type { DependencyKey } from './helper';
+
+export function dependencyValues(
+  _key: DependencyKey,
+  defaults: Record<string, unknown>,
+): Record<string, unknown> {
+  return defaults;
+}

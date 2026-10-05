@@ -3015,6 +3015,10 @@ def generate(schema_path: str, output_dir: str) -> None:
             helper_ctx = helper_context(parent, children, schema, model, def_key, gen_cfg)
             _write(cypress_support / parent / 'helper.ts',
                    _render(env, 'test_helper.ts.jinja2', helper_ctx))
+            # Hand-written dependency values for helper.ts. Write-once, and no
+            # AUTO-GENERATED marker, so the orphan sweep never removes it.
+            _write_stub(cypress_support / parent / 'helper_custom.ts',
+                        _render(env, 'helper_custom_stub.ts.jinja2', {'parent': parent}))
 
             # e2e spec (desktop)
             spec_ctx = spec_context(parent, children, schema, model, def_key, gen_cfg, _test_entity_count)
