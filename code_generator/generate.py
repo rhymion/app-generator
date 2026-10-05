@@ -28,7 +28,7 @@ from generate_types import extract_entities, extract_named_constants
 from context import build_entity_context
 from build_context import (
     build_context, build_anonymize_user_context, _get_actual_type, set_prisma_models,
-    select_filter_sort_representatives,
+    select_filter_sort_representatives, _exclusive_parent_all_columns,
 )
 from helpers.label_field import build_label_expression
 from helpers.schema_helpers import derive_text_fields as _derive_text_fields
@@ -2262,6 +2262,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'pascal_name': to_pascal_case(def_key),
             'set_fields': resolved_sf,
             'emit_hook': bool(on_approved.get('emit_hook', False)),
+            'exclusive_check': bool(set(resolved_sf) & set(_exclusive_parent_all_columns(def_key, schema))),
             'has_ledger_source': bool(x_ledger_source),
             'ledger_source': x_ledger_source,
             'is_ship_skeleton': False,
@@ -2272,6 +2273,21 @@ def generate(schema_path: str, output_dir: str) -> None:
         _render(env, 'on_approved_dispatch.ts.jinja2', {'approvable_entities': approvable_entities}),
     )
     print(f'  Approval dispatch → lib/approval_request/on_approved_dispatch.ts ({len(approvable_entities)} entities)')
+
+    # --- x-exclusive-parents helper (lib/<child>/exclusive_parents.ts) ---
+    #
+    # One helper per declared child, written whether or not the child has pages
+    # of its own: the parent's nested child writes import it even for a child
+    # with no x-generate. Nothing is written for a schema without the key.
+    for def_key in defs:
+        if def_key.startswith('__'):
+            continue
+        _excl_columns = _exclusive_parent_all_columns(def_key, schema)
+        if _excl_columns:
+            _write(
+                out / 'lib' / def_key / 'exclusive_parents.ts',
+                _render(env, 'exclusive_parents.ts.jinja2', {'child': def_key, 'columns': _excl_columns}),
+            )
 
     # --- Approvable target resolver (lib/approval_request/resolve_target.ts) ---
     #
@@ -2352,6 +2368,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'pascal_name': to_pascal_case(def_key),
             'set_fields': resolved_sf,
             'emit_hook': bool(on_rejected.get('emit_hook', False)),
+            'exclusive_check': bool(set(resolved_sf) & set(_exclusive_parent_all_columns(def_key, schema))),
             'terminal': bool(on_rejected.get('terminal', False)),
         })
     # tx / approvableId are only read inside the per-entity `if (set_fields or
@@ -2404,6 +2421,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'pascal_name': to_pascal_case(def_key),
             'set_fields': resolved_sf,
             'emit_hook': bool(on_withdrawn.get('emit_hook', False)),
+            'exclusive_check': bool(set(resolved_sf) & set(_exclusive_parent_all_columns(def_key, schema))),
         })
     # Always emitted (mirrors on_rejected_dispatch.ts above) — actions.ts
     # imports this unconditionally, so it must exist even with zero entities.

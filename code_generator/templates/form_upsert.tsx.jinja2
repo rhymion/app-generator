@@ -128,6 +128,17 @@ export default function FormUpsert({{ form_upsert_params }}) {
         if (messageKey && /^(ValidationMessages|Errors)\./.test(messageKey) && tkey.has(messageKey)) {
           return tkey(messageKey, messageArgs);
         }
+{% if exclusive_parent_error_fields %}
+        // x-exclusive-parents: the error names the first listed FK column; show
+        // all of the listed columns instead of that one alone.
+        const exclusiveFields: Record<string, string> = {
+{% for first, label in exclusive_parent_error_fields.items() %}
+          '{{ first }}': '{{ label }}',
+{% endfor %}
+        };
+        const listed = err.field ? exclusiveFields[err.field] : undefined;
+        if (listed) return terr(err.reason === 'invalid' ? 'exclusiveParentsInvalid' : 'exclusiveParentsMissing', { fields: listed });
+{% endif %}
         return err.field ? (err.reason === 'invalid' ? terr('fieldInvalid', { field: err.field }) : terr('fieldRequired', { field: err.field })) : terr('unknown');
       }
       case 'CONFLICT':          return err.field ? terr('fieldAlreadyLinked', { field: err.field }) : terr('staleMutation');

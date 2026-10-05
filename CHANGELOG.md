@@ -16,6 +16,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   there and the app does not use it.
 
 ### Fixed
+- **Returned the second instance of the primary display FK from the generated test
+  helper when its entity has two FKs to the same model** (issue #813). The API spec
+  reads `deps.<fk>2` for `PUT /:id` and both bulk `PUT` examples, but the helper only
+  returned `<fk>` (and `<fk>Alias`), so those three examples failed with
+  `TypeError: Cannot read properties of undefined (reading 'id')`. Entities
+  without two FKs to the same model generate byte-identical output.
 - **Kept a list child's second FK to the parent's model in the fetched data**
   (issue #801). A child embedded with `x-outputType: list` that had a structural
   FK to the parent plus a separate FK to the same model lost both from the parent
@@ -114,6 +120,17 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   Validation rejects unknown or duplicate names, fewer than two parents, a parent
   that does not embed the child as a one-to-many DataGrid, and a required parent FK.
   See `docs/knowledge/schema-yaml-configuration.md` §7.7.
+- **Rejected saves of an `x-exclusive-parents` child that do not have exactly one
+  owner** (issue #814, follow-up to #811). A save that leaves none of the listed
+  parents' FK columns set (`missing`) or two or more (`invalid`) now fails with a
+  422 `VALIDATION` error on every write path: the child's own service (REST,
+  Server Action, CSV import), a parent's nested child create/update, and approval
+  `set_fields` that write a listed column. An update is judged on the row as it will
+  be after the save. A parent-screen update no longer writes the hidden other-parent
+  FK columns, so a row that already holds two owners is rejected there instead of
+  being cleared. Application-level only: no schema rule, Prisma change or database
+  constraint, and a child without the key is unchanged. Adds the
+  `Errors.exclusiveParentsMissing` / `exclusiveParentsInvalid` messages (en, ja).
 - **Grouped the built-in administration entities in the sidebar under one
   `administration` group.** `user`, `role`, `permission`, `organization`,
   `approval_flow`, `dashboard` and `app_setting` now sit under a single

@@ -11,6 +11,9 @@
 # required vs nullable columns left empty, a child with its own writable pages
 # staying read-only on the parent screens, and sibling children not removing
 # each other's form props.
+# Also covers x-exclusive-parents save-time validation (REST, nested parent writes and the
+# standalone and parent forms); the fixture's cypress/support/project-tasks.ts is copied into
+# the build copy for the one state the application can no longer create (a row holding both owners).
 #
 # Isolation (the repository's own schema, generated output, database and other
 # fixtures are never touched):
@@ -98,6 +101,10 @@ echo "-- merging the fixture schema into the copy --"
 python3 scripts/compose_child_datagrid_e2e_fixture.py "$FIXTURE_DIR" "$BUILD_DIR"
 mkdir -p "$BUILD_DIR/cypress/e2e/child_datagrid_e2e_gate"
 cp -r "$FIXTURE_DIR/cypress/e2e/." "$BUILD_DIR/cypress/e2e/child_datagrid_e2e_gate/"
+# Fixture-specific Cypress tasks (cypress.config.ts loads cypress/support/project-tasks.ts when present).
+if [ -f "$FIXTURE_DIR/cypress/support/project-tasks.ts" ]; then
+  cp "$FIXTURE_DIR/cypress/support/project-tasks.ts" "$BUILD_DIR/cypress/support/project-tasks.ts"
+fi
 
 echo "-- writing the copy's own environment --"
 python3 - "$BUILD_DIR/.env.test" "$PROJECT" "$APP_PORT" "$POSTGRES_PORT" "$REDIS_PORT" <<'PY'

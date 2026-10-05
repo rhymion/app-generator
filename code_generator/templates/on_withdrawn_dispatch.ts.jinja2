@@ -5,6 +5,9 @@ import type { PrismaClient } from '@/app/generated/prisma/client';
 
 {% include "_partials/tx_type.ts.jinja2" %}
 {% for entity in withdrawable_entities %}
+{% if entity.exclusive_check %}
+import { validateExclusiveParents as validate{{ entity.pascal_name }}ExclusiveParents } from '@/lib/{{ entity.snake_name }}/exclusive_parents';
+{% endif %}
 {% if entity.emit_hook %}
 import { afterWithdraw as {{ entity.pascal_name }}AfterWithdraw } from '@/lib/{{ entity.snake_name }}/service_after_withdraw';
 {% endif %}
@@ -44,6 +47,12 @@ export async function dispatchOnWithdrawn(
     const entity = await tx.{{ entity.snake_name }}.findFirst({ where: { approvable_id: approvableId } });
     if (!entity) return;
 {% if entity.set_fields %}
+{% if entity.exclusive_check %}
+    // x-exclusive-parents: this write changes a listed owner column, so the row
+    // as it will be after the update must still hold exactly one owner. A throw
+    // rolls back the surrounding transaction.
+    validate{{ entity.pascal_name }}ExclusiveParents({ ...entity, {% for field, value in entity.set_fields.items() %}{{ field }}: {% if value is number %}{{ value }}{% else %}'{{ value }}'{% endif %}{% if not loop.last %}, {% endif %}{% endfor %} });
+{% endif %}
     await tx.{{ entity.snake_name }}.update({
       where: { id: entity.id },
       data: { {% for field, value in entity.set_fields.items() %}{{ field }}: {% if value is number %}{{ value }}{% else %}'{{ value }}'{% endif %}{% if not loop.last %}, {% endif %}{% endfor %} },
