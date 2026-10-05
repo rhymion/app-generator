@@ -16,6 +16,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   there and the app does not use it.
 
 ### Fixed
+- **Skipped the child grid column that `x-exclusive-parents` hides in a parent's generated UI
+  spec** (issue #822). A listed parent's form hides the other parents' FK columns in the
+  embedded child grid, but the parent's generated UI spec still selected them, so
+  "creates with full data (all fields and children)" timed out waiting for a cell that
+  does not exist. The spec now skips every column the form hides. Entities without the
+  declaration generate identical output.
 - **Wrote exactly one owner in the generated tests of a child that declares
   `x-exclusive-parents`** (issue #819). The generated helper rows, API create bodies
   and form fills left the owner columns empty or set all of them, so the save-time

@@ -374,6 +374,8 @@ The fixture entity `hook_slot` in `code_generator/tests/fixtures/child_datagrid_
 
 The generated helper rows, API create bodies and form fills of a child that declares `x-exclusive-parents` write exactly one owner: the owner column of the first declared parent that has a resolvable column, treated as a required field. The other owner columns are not written, so the save-time validator (`lib/{entity}/exclusive_parents.ts`) accepts the generated PUT and create requests. Entities without the declaration generate the same files as before.
 
+A listed parent's form hides the other listed parents' FK columns in the embedded child grid (`exclusive_parent_fks` in the child data), so that parent's generated UI spec skips the same columns: they are removed from the child's field lists in `spec_context` (`_drop_hidden_exclusive_parent_columns` in `generators_test.py`), which covers the create, edit and child-removal examples of the desktop spec and the dependencies registered only for a hidden column. The API spec and the helper are not filtered: they write through the child's own service, where the owner rule above applies.
+
 ---
 
 ## Relationship Between Client and Server Validation
