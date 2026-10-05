@@ -97,6 +97,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   and hook run.
 
 ### Added
+- **Added `x-exclusive-parents` to hide the other parents' FK columns in an
+  embedded child DataGrid** (issue #811). A child owned by exactly one of several
+  parents, each through its own nullable FK, declares
+  `x-exclusive-parents: [parent_a, parent_b]`. On a listed parent's view and
+  create/edit screens the grid omits the other listed parents' parent-link columns;
+  other FKs, the child's own pages and a schema without the key are unchanged.
+  Validation rejects unknown or duplicate names, fewer than two parents, a parent
+  that does not embed the child as a one-to-many DataGrid, and a required parent FK.
+  See `docs/knowledge/schema-yaml-configuration.md` §7.7.
 - **Grouped the built-in administration entities in the sidebar under one
   `administration` group.** `user`, `role`, `permission`, `organization`,
   `approval_flow`, `dashboard` and `app_setting` now sit under a single
