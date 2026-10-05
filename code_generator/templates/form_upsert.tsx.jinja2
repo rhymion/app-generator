@@ -79,6 +79,8 @@ export default function FormUpsert({{ form_upsert_params }}) {
   const te = useTranslations('EntityLabel');
   const tc = useTranslations('Common');
   const terr = useTranslations('Errors');
+  // Root translator: resolves a hand-written rejection's namespace-qualified messageKey.
+  const tmsg = useTranslations();
 {% if enum_ns_hooks %}
 {{ enum_ns_hooks }}
 {% endif %}
@@ -117,7 +119,16 @@ export default function FormUpsert({{ form_upsert_params }}) {
       case 'SESSION_EXPIRED':   return terr('sessionExpired');
       case 'PERMISSION_DENIED': return terr('permissionDenied');
       case 'NOT_FOUND':         return terr('notFound');
-      case 'VALIDATION':        return err.field ? (err.reason === 'invalid' ? terr('fieldInvalid', { field: err.field }) : terr('fieldRequired', { field: err.field })) : terr('unknown');
+      case 'VALIDATION': {
+        // A hand-written rejection may carry an i18n key. Only a key under an allowed
+        // namespace that exists in the loaded messages is shown; anything else falls
+        // back to the generic text below (never an exception, never the raw key).
+        const { messageKey, messageArgs } = err as { messageKey?: string; messageArgs?: Record<string, string | number> };
+        if (messageKey && /^(ValidationMessages|Errors)\./.test(messageKey) && tmsg.has(messageKey as never)) {
+          return tmsg(messageKey as never, messageArgs);
+        }
+        return err.field ? (err.reason === 'invalid' ? terr('fieldInvalid', { field: err.field }) : terr('fieldRequired', { field: err.field })) : terr('unknown');
+      }
       case 'CONFLICT':          return err.field ? terr('fieldAlreadyLinked', { field: err.field }) : terr('staleMutation');
       case 'RESERVATION_LOCKED': return terr('reservationLocked');
       case 'RELATED_RECORD_INVALID': return terr('relatedRecordInvalid');
