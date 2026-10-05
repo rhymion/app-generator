@@ -106,3 +106,63 @@ def test_parent_form_names_every_listed_column_of_its_embedded_child(models):
 
 def test_form_without_the_key_has_no_special_wording(models):
     assert _error_fields(_schema(models, exclusive=None), 'placement') == {}
+
+
+# --- parent screen: nested child writes ---------------------------------------
+
+def _service(schema: dict, name: str) -> str:
+    from generators import service_context
+    ctx = build_context(_entity(schema, name), schema)
+    return _env().get_template('service.ts.jinja2').render({**ctx, **service_context(ctx, schema)})
+
+
+@pytest.mark.parametrize('parent', ['alpha', 'beta'])
+def test_parent_service_checks_nested_child_rows_on_create_and_update(models, parent):
+    out = _service(_schema(models), parent)
+    assert "from '@/lib/placement/exclusive_parents'" in out
+    # create: the owner column counts as filled, the item supplies the rest
+    assert out.count('validatePlacementsExclusiveParents(') >= 3  # create, new row on update, existing row on update
+    assert 'for (const f of placementsItems)' in out
+    # update: existing rows are judged against the stored row
+    assert 'await tx.placement.findMany({ where: { id: { in: _placementsExclusiveIds } }' in out
+    assert 'item[col] !== undefined ? item[col] : stored[col]' in out
+
+
+def test_create_check_runs_before_the_nested_create(models):
+    out = _service(_schema(models), 'alpha')
+    add = out[out.index('export async function addAlpha'):out.index('export async function updateAlpha')]
+    assert add.index('validatePlacementsExclusiveParents(') < add.index('tx.alpha.create(')
+    upd = out[out.index('export async function updateAlpha'):]
+    assert upd.index('validatePlacementsExclusiveParents(') < upd.index('tx.alpha.update(')
+
+
+def test_nested_update_omits_the_hidden_other_parent_fk(models):
+    out = _service(_schema(models), 'alpha')
+    upd = out[out.index('export async function updateAlpha'):]
+    update_branch = upd[upd.index('update: placementsItems'):upd.index('create: placementsItems.filter(f => !f.id)')]
+    assert 'beta_id' not in update_branch
+    assert 'name: f.name' in update_branch
+    # a create still carries it, so a crafted item is rejected by the check
+    create_branch = upd[upd.index('create: placementsItems.filter(f => !f.id)'):]
+    assert 'beta_id: f.beta_id || null' in create_branch
+
+
+def test_nested_update_keeps_every_column_without_the_key(models):
+    out = _service(_schema(models, exclusive=None), 'alpha')
+    assert 'exclusive' not in out.lower()
+    upd = out[out.index('export async function updateAlpha'):]
+    update_branch = upd[upd.index('update: placementsItems'):upd.index('create: placementsItems.filter(f => !f.id)')]
+    assert 'beta_id: f.beta_id || null' in update_branch
+
+
+def test_every_nested_child_emitter_calls_the_helper(models):
+    """A nested write path added without the call would reopen the gap: every
+    child the parent writes through its own nested create/update gets both."""
+    from build_context import _build_child_exclusive_create_check, _build_child_exclusive_update_check
+    schema = _schema(models)
+    ctx = build_context(_entity(schema, 'alpha'), schema)
+    written = [c for c in ctx['children_data'] if not c['use_connect'] and c['nested_writable']]
+    assert written
+    for c in written:
+        assert f"validate{c['child_pascal']}ExclusiveParents(" in _build_child_exclusive_create_check(written)
+        assert f"validate{c['child_pascal']}ExclusiveParents(" in _build_child_exclusive_update_check(written)

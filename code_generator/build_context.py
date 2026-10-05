@@ -893,12 +893,17 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
             )
             for p in props_no_id
         )
+        # x-exclusive-parents: the other listed parents' FK columns are hidden on
+        # this parent's screen, so a nested update never writes them. Omitting
+        # them (rather than writing `|| null`) keeps a row that already holds
+        # another owner intact, where the nested check then rejects it.
+        _exclusive_fks = _exclusive_parent_fks(child_raw, model, schema)
         field_map_update = '\n'.join(
             f'          {p}: f.{p} || null,'
             if _is_nullable_cuid(child_props_dict.get(p, {}))
             else f'          {p}: f.{p},'
             for p in props_no_id
-            if p not in readonly_field_names
+            if p not in readonly_field_names and p not in _exclusive_fks
         )
 
         child_var    = safe_var_name(prop_name)
@@ -962,10 +967,13 @@ def _build_child_data(children_raw: list[dict], model: str, schema: dict,
         child_has_audit_fields = _model_has_audit_fields(child_name)
 
         _attach_fk = _list_child_attach_fk(child_raw, schema, model) if use_connect else None
-        _exclusive_fks = _exclusive_parent_fks(child_raw, model, schema)
         result.append({
             **child_raw,
             **({'exclusive_parent_fks': _exclusive_fks} if _exclusive_fks else {}),
+            **({
+                'exclusive_columns': _exclusive_parent_all_columns(child_name, schema),
+                'exclusive_owner_columns': sorted(resolve_parent_fk_props(child_raw, child_def, model)),
+            } if _exclusive_fks else {}),
             'child_var':        child_var,
             'child_pascal':     child_pascal,
             'form_key':         form_key,
@@ -1112,6 +1120,80 @@ def _build_child_nested_update(children_data: list[dict]) -> str:
                 f"      }},"
             )
     return '\n'.join(lines)
+
+
+def _exclusive_check_children(children_data: list[dict]) -> list[dict]:
+    """Write children whose rows are owned by exactly one of several listed
+    parents (x-exclusive-parents) and are written by the parent's own nested
+    create/update. A connect-style child writes no owned rows."""
+    return [c for c in children_data if c.get('exclusive_columns') and not c['use_connect']]
+
+
+def exclusive_parents_service_imports(children_data: list[dict], can_update: bool) -> str:
+    """Import lines for the per-child exactly-one-owner helpers the parent
+    service calls. Empty when no write child declares x-exclusive-parents. The
+    column list is only needed by the update check."""
+    return ''.join(
+        "\nimport { "
+        + (f"EXCLUSIVE_PARENT_COLUMNS as {c['child_pascal']}ExclusiveColumns, " if can_update else '')
+        + f"validateExclusiveParents as validate{c['child_pascal']}ExclusiveParents }} "
+        f"from '@/lib/{c['name']}/exclusive_parents';"
+        for c in _exclusive_check_children(children_data)
+    )
+
+
+def _build_child_exclusive_create_check(children_data: list[dict]) -> str:
+    """Exactly-one-owner check for the child rows a parent create writes.
+    Prisma sets the owner FK of a nested create to the new parent, so the
+    check counts it as filled and judges the other listed columns the item
+    supplies (a crafted item that sets another one is rejected)."""
+    blocks = []
+    for c in _exclusive_check_children(children_data):
+        cv, cp = c['child_var'], c['child_pascal']
+        owner = ', '.join(f"{o}: true" for o in c['exclusive_owner_columns'])
+        blocks.append(
+            f"    for (const f of {cv}Items) {{\n"
+            f"      validate{cp}ExclusiveParents({{ ...f, {owner} }});\n"
+            f"    }}"
+        )
+    return '\n'.join(blocks)
+
+
+def _build_child_exclusive_update_check(children_data: list[dict]) -> str:
+    """Exactly-one-owner check for the child rows a parent update writes.
+    An existing row is judged on its value after the save: the item's value for
+    a listed column it supplies, the stored value for one it does not (the
+    hidden other-parent columns are never supplied by the grid). A new row is
+    judged like a create."""
+    blocks = []
+    for c in _exclusive_check_children(children_data):
+        cv, cp, cm = c['child_var'], c['child_pascal'], c['name']
+        select = ', '.join(f"{col}: true" for col in ['id', *c['exclusive_columns']])
+        owner = ', '.join(f"{o}: true" for o in c['exclusive_owner_columns'])
+        ids, existing = f"_{cv}ExclusiveIds", f"_{cv}ExclusiveRows"
+        blocks.append(
+            f"    {{\n"
+            f"      const {ids} = {cv}Items.map((f) => f.id).filter((x): x is string => Boolean(x));\n"
+            f"      const {existing} = new Map(\n"
+            f"        ({ids}.length > 0\n"
+            f"          ? await tx.{cm}.findMany({{ where: {{ id: {{ in: {ids} }} }}, select: {{ {select} }} }})\n"
+            f"          : []\n"
+            f"        ).map((r) => [r.id, r as Record<string, unknown>] as const),\n"
+            f"      );\n"
+            f"      for (const f of {cv}Items) {{\n"
+            f"        const item = f as Record<string, unknown>;\n"
+            f"        const stored = f.id ? {existing}.get(f.id) : undefined;\n"
+            f"        if (!f.id) {{\n"
+            f"          validate{cp}ExclusiveParents({{ ...item, {owner} }});\n"
+            f"        }} else if (stored) {{\n"
+            f"          validate{cp}ExclusiveParents(Object.fromEntries(\n"
+            f"            {cp}ExclusiveColumns.map((col) => [col, item[col] !== undefined ? item[col] : stored[col]]),\n"
+            f"          ));\n"
+            f"        }}\n"
+            f"      }}\n"
+            f"    }}"
+        )
+    return '\n'.join(blocks)
 
 
 def _child_current_value_fallback(c: dict, model: str, id_expr: str, supplied_expr: str | None) -> str:
@@ -3355,6 +3437,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     list_child_attach_callers = _list_child_attach_callers(schema, parent)
     child_attach_guard_create = _build_child_attach_guard(write_ch, model, for_update=False)
     child_attach_guard_update = _build_child_attach_guard(write_ch, model, for_update=True)
+    child_exclusive_create_check = _build_child_exclusive_create_check(write_ch)
+    child_exclusive_update_check = _build_child_exclusive_update_check(write_ch)
+    child_exclusive_imports = exclusive_parents_service_imports(write_ch, can_update)
     child_assignee_notify_create_code = _build_child_assignee_notify_create_code(
         write_ch, parent, to_pascal_case(parent)
     )
@@ -4625,6 +4710,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         ),
         child_attach_guard_create=child_attach_guard_create,
         child_attach_guard_update=child_attach_guard_update,
+        child_exclusive_create_check=child_exclusive_create_check,
+        child_exclusive_update_check=child_exclusive_update_check,
+        child_exclusive_imports=child_exclusive_imports,
         child_assignee_notify_create_code=child_assignee_notify_create_code,
         child_assignee_notify_update_code=child_assignee_notify_update_code,
         comment_actions_code=comment_actions_code,
