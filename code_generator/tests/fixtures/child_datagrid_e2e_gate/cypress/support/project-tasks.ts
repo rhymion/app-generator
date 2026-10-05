@@ -10,12 +10,14 @@ const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: `${p
 
 export function getProjectTasks(): Record<string, (...args: any[]) => any> {
   return {
-    // db:grantAllPermissions covers the entities generated with test: true. excl_owned is not one
-    // (a generated create test would leave its owner FKs empty), so give the test user's
-    // Administrator role the same full permission on it. Call after db:grantAllPermissions.
+    // db:grantAllPermissions covers the entities generated with test: true, which includes
+    // excl_owned. Kept for the specs that call it: it gives the test user's Administrator role
+    // the same full permission on excl_owned unless that row already exists.
     async 'db:grantExclOwnedPermission'() {
       const user = await prisma.user.findUniqueOrThrow({ where: { email: TEST_CREDENTIALS.email }, select: { id: true } });
       const role = await prisma.role.findFirstOrThrow({ where: { name: 'Administrator' }, select: { id: true } });
+      const existing = await prisma.permission.findFirst({ where: { name: 'excl_owned', role_id: role.id }, select: { id: true } });
+      if (existing) return null;
       await prisma.permission.create({
         data: {
           name: 'excl_owned',
@@ -30,6 +32,22 @@ export function getProjectTasks(): Record<string, (...args: any[]) => any> {
         },
       });
       return null;
+    },
+    // Writes a hook_unit row straight through the database client (the lookup spec needs one
+    // that matches the helper's lookup name but not the hand-written value).
+    async 'db:insertHookUnit'(params: { name: string; kind: string }) {
+      const user = await prisma.user.findFirstOrThrow({ select: { id: true } });
+      const row = await prisma.hook_unit.create({
+        data: { name: params.name, kind: params.kind, creator_id: user.id, updater_id: user.id },
+        select: { id: true },
+      });
+      return row.id;
+    },
+    async 'db:getHookUnits'() {
+      return prisma.hook_unit.findMany({
+        orderBy: { created_at: 'asc' },
+        select: { id: true, name: true, kind: true },
+      });
     },
     // Writes an excl_link row owned by BOTH parents, straight through the database client.
     // The application rejects such a save, so this is the only way to put in the state that

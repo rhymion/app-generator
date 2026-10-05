@@ -19,8 +19,10 @@ rolls back the whole create.
 |---|---|---|
 | Property-level custom field | `components/{entity}/{prop}.tsx` | Replace a form field with a custom UI component |
 | Entity-level custom component | `components/{entity}/{ComponentName}.tsx` | Add a custom widget to the list, view, or edit page |
-| Client-side form validation | `components/{entity}/form_validation.ts` | Real-time validation in FormUpsert |
 | Server-side service validation | `lib/{entity}/service_validation_custom.ts` | Pre-write validation inside DB transactions |
+| Test-helper dependency values | `cypress/support/{entity}/helper_custom.ts` | Hand-written column values for the dependency rows a generated test helper creates |
+
+`components/{entity}/form_validation.ts` is generated output, not an extension point: see section 3.
 
 ---
 
@@ -206,10 +208,10 @@ const validationError = useFormValidation({
 
 ### Generator behavior
 
-- On first generation: writes a **no-op stub** at `components/{entity}/form_validation.ts`.
-- On subsequent runs: stub is **never overwritten** if the file already exists.
+- Every run writes `components/{entity}/form_validation.ts` with `_write()`, rendered from the schema (required-field and decimal checks). The file is **overwritten on every run**, so a hand edit is lost; it is not write-once.
+- Hand-written server-side rules belong in `lib/{entity}/service_validation_custom.ts` (section 4), which the generator never overwrites.
 
-### Stub (default)
+### Generated body (default shape)
 
 ```ts
 export function useFormValidation(_values: Record<string, unknown>): string | null {
@@ -218,6 +220,8 @@ export function useFormValidation(_values: Record<string, unknown>): string | nu
 ```
 
 ### Custom implementation
+
+The generator overwrites this file, so the example below shows the shape of the hook only; it is not kept across runs.
 
 The hook receives all `useState`-based form values (datetimes, relationship IDs, booleans, enums, custom props) plus `isEdit` and `id`. Text/number fields use refs and are not included since they don't trigger reactive re-renders.
 
@@ -306,6 +310,72 @@ to it, not a duplicate source of truth.
 
 ---
 
+## 5. Test-Helper Dependency Values (`helper_custom.ts`)
+
+`cypress/support/{entity}/helper.ts` is overwritten on every run. It creates the
+parent rows (dependencies) its entity needs, with each column's default value. A
+consumer whose business rules constrain a dependency row (for example a parent
+whose type column must hold a particular value, while the column's default stays
+unchanged for end users) hand-writes only those values in
+`cypress/support/{entity}/helper_custom.ts` and keeps generating the whole helper.
+
+### Where the file lives
+
+- The generator writes a stub with `_write_stub()` the first time, for every entity generated with `test: true`. It has no `AUTO-GENERATED` marker, so the orphan sweep in `cleanup.py` never removes a customized copy. An entity whose helper is hand-written and tracked (`audit_log`) gets no stub.
+- That file is in the generator tree, which is gitignored there and is not the consumer's repository. A consumer keeps its copy at `prj/cypress/support/{entity}/helper_custom.ts`; `prj:sync` copies it to the same relative path before `generate-code`, and the write-once stub is then left alone. Edits made only under the generator tree are lost on a fresh checkout.
+- A second `generate-code` run keeps an edited file. An untouched stub is deleted by `cleanup` and written again.
+
+### Contract
+
+```ts
+import type { DependencyKey } from './helper';
+
+export function dependencyValues(
+  key: DependencyKey,
+  defaults: Record<string, unknown>,
+): Record<string, unknown>;
+```
+
+- `DependencyKey` is `'<target model>.<dependency name>'`, for example `'step.step'` or `'step.placedStep'`. The name is the dependency's variable name: the foreign-key property stem when two or more foreign keys point at one model, otherwise the target. `helper.ts` exports the union of every key it uses, so a mistyped key fails the type check.
+- The same key applies to every copy of that dependency in the helper: the plain create, the second instance, the per-row copies created in `populate<Entity>Data` / `populate<Entity>FullData`, the nested copies, and the find-or-create lookup.
+- Before each create, `helper.ts` calls `dependencyValues(key, defaults)` with the columns it would write and creates the row with what comes back. Returning `defaults` keeps the generated behavior, which is what the stub does.
+- Before each find-or-create lookup, it calls the hook with the lookup columns as `defaults` and uses the result as the `where`. A row that only matches the default value is therefore not reused when the hook changes that column.
+- The hook applies only to dependencies created by this entity's helper. A dependency created inside another entity's helper needs the same rule in that helper's `helper_custom.ts`.
+- The hook changes dependency values only. The helper's exported names are unchanged and may be relied on by hand-written specs: `populate<Entity>Dependencies`, `populate<Entity>Data`, `populate<Entity>FullData`, `_reset<Entity>CallSeq` (when generated), `populate<Entity><Child>Data`, `populate<Entity>With<Rel>Data`, `setup<Entity>ApprovalFlow`, and the approval and mention variants. Do not rename them.
+
+### Fail-closed rules
+
+`cypress/support/dependency-values.ts` checks what the hook returns and throws, naming the key and the column:
+
+- a column that was not supplied must be a plain column of the dependency's model (not a foreign key, relation or system column);
+- a supplied foreign-key or system column may not be changed or removed;
+- a non-object result is rejected.
+
+A removed or renamed hook file, or a changed `DependencyKey` export, fails `tsc` / `next build`; Cypress itself loads the helper without a type check, so the failure shows at build time.
+
+### Example
+
+```ts
+// prj/cypress/support/step_placement/helper_custom.ts
+import type { DependencyKey } from './helper';
+
+export function dependencyValues(
+  key: DependencyKey,
+  defaults: Record<string, unknown>,
+): Record<string, unknown> {
+  if (key === 'step.step') return { ...defaults, step_type: 'composite' };
+  return defaults;
+}
+```
+
+The fixture entity `hook_slot` in `code_generator/tests/fixtures/child_datagrid_e2e_gate/` exercises this (`custom_helper/hook_slot.ts`, spec `helper_custom_dependency_values.cy.ts`).
+
+### Entities with `x-exclusive-parents`
+
+The generated helper rows, API create bodies and form fills of a child that declares `x-exclusive-parents` write exactly one owner: the owner column of the first declared parent that has a resolvable column, treated as a required field. The other owner columns are not written, so the save-time validator (`lib/{entity}/exclusive_parents.ts`) accepts the generated PUT and create requests. Entities without the declaration generate the same files as before.
+
+---
+
 ## Relationship Between Client and Server Validation
 
 For the booking entity, both `form_validation.ts` and `service_validation_custom.ts` check overlap, but serve different roles:
@@ -327,7 +397,7 @@ The client-side check is UX; the server-side check is the enforcement layer.
 components/{entity}/
   FormUpsert.tsx          ← overwritten by generator
   FormView.tsx            ← overwritten by generator
-  form_validation.ts      ← stub created once, never overwritten
+  form_validation.ts      ← overwritten by generator (schema-derived checks)
   {prop}.tsx              ← never touched by generator (type-a custom field)
   {ComponentName}.tsx     ← never touched by generator (type-b entity component)
 
@@ -336,4 +406,8 @@ lib/{entity}/
   service_validation.ts       ← overwritten by generator (schema-driven checks; calls into service_validation_custom.ts)
   service_validation_custom.ts ← stub created once, never overwritten
   service_after_create.ts     ← stub created once, never overwritten (written whenever this lib dir is the model's own, regardless of can_new/can_create)
+
+cypress/support/{entity}/
+  helper.ts                   ← overwritten by generator
+  helper_custom.ts            ← stub created once, never overwritten (one per test entity)
 ```

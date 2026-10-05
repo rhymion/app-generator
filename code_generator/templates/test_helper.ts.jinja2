@@ -1,6 +1,8 @@
 // AUTO-GENERATED - DO NOT EDIT
 import { prisma{% if has_approvable %}, ALL_ENTITIES{% endif %} } from '../db-helpers';
 import { TEST_CREDENTIALS } from '../test-credentials';
+import { dependencyData, dependencyLookup } from '../dependency-values';
+import { dependencyValues } from './helper_custom';
 {% if needs_format_label_value %}
 import { formatLabelValue } from '@/lib/_format';
 {% endif %}
@@ -10,6 +12,19 @@ import { notify } from '@/lib/_notifier';
 {% if has_approvable %}
 import { createId } from '@paralleldrive/cuid2';
 {% endif %}
+
+// Hand-written dependency values live in ./helper_custom.ts (write-once; a
+// consumer keeps its copy at prj/cypress/support/{{ parent }}/helper_custom.ts).
+export type DependencyKey = {{ dependency_hook_keys_ts }};
+const _DEP_COLUMNS = {
+{% for c in dependency_hook_columns %}
+  {{ c.model }}: { scalars: {{ c.scalars_ts }}, protectedColumns: {{ c.protected_ts }} },
+{% endfor %}
+};
+const _dep = (key: DependencyKey, model: string, defaults: Record<string, unknown>) =>
+  dependencyData(dependencyValues, _DEP_COLUMNS, key, model, defaults) as any;
+const _depWhere = (key: DependencyKey, model: string, where: Record<string, unknown>) =>
+  dependencyLookup(dependencyValues, _DEP_COLUMNS, key, model, where) as any;
 
 async function getTestUser() {
   const testUser = await prisma.user.findUnique({
@@ -48,7 +63,7 @@ async function _create{{ pascal }}BaseDeps() {
   // Idempotent: re-use an existing row when the helper is called more than
   // once in a single test (e.g. parent populator + child populator).
   let {{ dep.var_name }}Record = await prisma.{{ dep.target }}.findFirst({
-    where: {{ dep.lookup_where }},
+    where: _depWhere('{{ dep.target }}.{{ dep.var_name }}', '{{ dep.target }}', {{ dep.lookup_where }}),
     orderBy: { created_at: 'asc' },
 {% if dep.prisma_include_str %}
     include: { {{ dep.prisma_include_str }} },
@@ -59,7 +74,7 @@ async function _create{{ pascal }}BaseDeps() {
     const {{ dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
     {{ dep.var_name }}Record = await prisma.{{ dep.target }}.create({
-      data: {
+      data: _dep('{{ dep.target }}.{{ dep.var_name }}', '{{ dep.target }}', {
 {% for fk in dep.internal_fk_deps %}
         {{ fk.prop_name }}: {{ dep.var_name }}{{ fk.var_name | pascal_case }}.id,
 {% endfor %}
@@ -78,7 +93,7 @@ async function _create{{ pascal }}BaseDeps() {
           connect: [testUser.id].map((id) => ({ id })),
         },
 {% endif %}
-      },
+      }),
 {% if dep.prisma_include_str %}
       include: { {{ dep.prisma_include_str }} },
 {% endif %}
@@ -89,7 +104,7 @@ async function _create{{ pascal }}BaseDeps() {
   const {{ dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
   const {{ dep.var_name }}Record = await prisma.{{ dep.target }}.create({
-    data: {
+    data: _dep('{{ dep.target }}.{{ dep.var_name }}', '{{ dep.target }}', {
 {% for fk in dep.internal_fk_deps %}
       {{ fk.prop_name }}: {{ dep.var_name }}{{ fk.var_name | pascal_case }}.id,
 {% endfor %}
@@ -108,7 +123,7 @@ async function _create{{ pascal }}BaseDeps() {
         connect: [testUser.id].map((id) => ({ id })),
       },
 {% endif %}
-    },
+    }),
 {% if dep.prisma_include_str %}
     include: { {{ dep.prisma_include_str }} },
 {% endif %}
@@ -122,7 +137,7 @@ async function _create{{ pascal }}BaseDeps() {
 {% if dep.needs_second %}
 {% if dep.lookup_field %}
   let {{ dep.var_name }}2Record = await prisma.{{ dep.target }}.findFirst({
-    where: {{ dep.lookup_where_second }},
+    where: _depWhere('{{ dep.target }}.{{ dep.var_name }}', '{{ dep.target }}', {{ dep.lookup_where_second }}),
     orderBy: { created_at: 'asc' },
 {% if dep.prisma_include_str %}
     include: { {{ dep.prisma_include_str }} },
@@ -133,7 +148,7 @@ async function _create{{ pascal }}BaseDeps() {
     const {{ dep.var_name }}2{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
     {{ dep.var_name }}2Record = await prisma.{{ dep.target }}.create({
-      data: {
+      data: _dep('{{ dep.target }}.{{ dep.var_name }}', '{{ dep.target }}', {
 {% for fk in dep.internal_fk_deps %}
         {{ fk.prop_name }}: {{ dep.var_name }}2{{ fk.var_name | pascal_case }}.id,
 {% endfor %}
@@ -147,7 +162,7 @@ async function _create{{ pascal }}BaseDeps() {
 {% if dep.has_updater_id %}
         updater_id: testUser.id,
 {% endif %}
-      },
+      }),
 {% if dep.prisma_include_str %}
       include: { {{ dep.prisma_include_str }} },
 {% endif %}
@@ -158,7 +173,7 @@ async function _create{{ pascal }}BaseDeps() {
   const {{ dep.var_name }}2{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
   const {{ dep.var_name }}2Record = await prisma.{{ dep.target }}.create({
-    data: {
+    data: _dep('{{ dep.target }}.{{ dep.var_name }}', '{{ dep.target }}', {
 {% for fk in dep.internal_fk_deps %}
       {{ fk.prop_name }}: {{ dep.var_name }}2{{ fk.var_name | pascal_case }}.id,
 {% endfor %}
@@ -172,7 +187,7 @@ async function _create{{ pascal }}BaseDeps() {
 {% if dep.has_updater_id %}
       updater_id: testUser.id,
 {% endif %}
-    },
+    }),
 {% if dep.prisma_include_str %}
     include: { {{ dep.prisma_include_str }} },
 {% endif %}
@@ -203,7 +218,7 @@ async function _create{{ pascal }}BaseDeps() {
   const {{ dep.var_name }}{{ b.var_name | pascal_case }} = await prisma.{{ b.target }}.create({ data: {{ b.create_data }} });
 {% endfor %}
   const {{ dep.var_name }} = await prisma.{{ dep.target }}.create({
-    data: {
+    data: _dep('{{ dep.target }}.{{ dep.var_name }}', '{{ dep.target }}', {
 {% for b in dep.bridge_otos %}
       {{ b.prop_name }}: {{ dep.var_name }}{{ b.var_name | pascal_case }}.id,
 {% endfor %}
@@ -215,7 +230,7 @@ async function _create{{ pascal }}BaseDeps() {
 {% endfor %}
       creator_id: testUser.id,
       updater_id: testUser.id,
-    },
+    }),
   });
 {% endfor %}
   await prisma.{{ reservation_nolines_pool_seed.pool_entity }}.create({
@@ -248,7 +263,7 @@ export async function populate{{ pascal }}Dependencies() {
   // record with no distinguishing field issues a fresh create() every call
   // and trips any @@unique its own required fields participate in (cmd_592).
   let {{ dep.var_name }}Record = await prisma.{{ dep.target }}.findFirst({
-    where: {{ dep.lookup_where }},
+    where: _depWhere('{{ dep.target }}.{{ dep.var_name }}', '{{ dep.target }}', {{ dep.lookup_where }}),
     orderBy: { created_at: 'asc' },
 {% if dep.prisma_include_str %}
     include: { {{ dep.prisma_include_str }} },
@@ -259,7 +274,7 @@ export async function populate{{ pascal }}Dependencies() {
     const {{ dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
     {{ dep.var_name }}Record = await prisma.{{ dep.target }}.create({
-      data: {
+      data: _dep('{{ dep.target }}.{{ dep.var_name }}', '{{ dep.target }}', {
 {% for fk in dep.internal_fk_deps %}
         {{ fk.prop_name }}: {{ dep.var_name }}{{ fk.var_name | pascal_case }}.id,
 {% endfor %}
@@ -273,7 +288,7 @@ export async function populate{{ pascal }}Dependencies() {
 {% if dep.has_updater_id %}
         updater_id: testUser.id,
 {% endif %}
-      },
+      }),
 {% if dep.prisma_include_str %}
       include: { {{ dep.prisma_include_str }} },
 {% endif %}
@@ -284,7 +299,7 @@ export async function populate{{ pascal }}Dependencies() {
   const {{ dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
   const {{ dep.var_name }}Record = await prisma.{{ dep.target }}.create({
-    data: {
+    data: _dep('{{ dep.target }}.{{ dep.var_name }}', '{{ dep.target }}', {
 {% for fk in dep.internal_fk_deps %}
       {{ fk.prop_name }}: {{ dep.var_name }}{{ fk.var_name | pascal_case }}.id,
 {% endfor %}
@@ -298,7 +313,7 @@ export async function populate{{ pascal }}Dependencies() {
 {% if dep.has_updater_id %}
       updater_id: testUser.id,
 {% endif %}
-    },
+    }),
 {% if dep.prisma_include_str %}
     include: { {{ dep.prisma_include_str }} },
 {% endif %}
@@ -329,7 +344,7 @@ export async function populate{{ pascal }}Dependencies() {
   // Idempotent: re-use an existing row (created by an earlier helper call in
   // the same test) instead of creating a duplicate that would trip @unique.
   let {{ dep.var_name }}Record = await prisma.{{ dep.target }}.findFirst({
-    where: {{ dep.lookup_where }},
+    where: _depWhere('{{ dep.target }}.{{ dep.var_name }}', '{{ dep.target }}', {{ dep.lookup_where }}),
     orderBy: { created_at: 'asc' },
 {% if dep.prisma_include_str %}
     include: { {{ dep.prisma_include_str }} },
@@ -340,7 +355,7 @@ export async function populate{{ pascal }}Dependencies() {
     const {{ dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
     {{ dep.var_name }}Record = await prisma.{{ dep.target }}.create({
-      data: {
+      data: _dep('{{ dep.target }}.{{ dep.var_name }}', '{{ dep.target }}', {
 {% for fk in dep.internal_fk_deps %}
         {{ fk.prop_name }}: {{ dep.var_name }}{{ fk.var_name | pascal_case }}.id,
 {% endfor %}
@@ -359,7 +374,7 @@ export async function populate{{ pascal }}Dependencies() {
           connect: [testUser.id].map((id) => ({ id })),
         },
 {% endif %}
-      },
+      }),
 {% if dep.prisma_include_str %}
       include: { {{ dep.prisma_include_str }} },
 {% endif %}
@@ -370,7 +385,7 @@ export async function populate{{ pascal }}Dependencies() {
   const {{ dep.var_name }}{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
   const {{ dep.var_name }}Record = await prisma.{{ dep.target }}.create({
-    data: {
+    data: _dep('{{ dep.target }}.{{ dep.var_name }}', '{{ dep.target }}', {
 {% for fk in dep.internal_fk_deps %}
       {{ fk.prop_name }}: {{ dep.var_name }}{{ fk.var_name | pascal_case }}.id,
 {% endfor %}
@@ -389,7 +404,7 @@ export async function populate{{ pascal }}Dependencies() {
         connect: [testUser.id].map((id) => ({ id })),
       },
 {% endif %}
-    },
+    }),
 {% if dep.prisma_include_str %}
     include: { {{ dep.prisma_include_str }} },
 {% endif %}
@@ -403,7 +418,7 @@ export async function populate{{ pascal }}Dependencies() {
 {% if dep.needs_second %}
 {% if dep.lookup_field %}
   let {{ dep.var_name }}2Record = await prisma.{{ dep.target }}.findFirst({
-    where: {{ dep.lookup_where_second }},
+    where: _depWhere('{{ dep.target }}.{{ dep.var_name }}', '{{ dep.target }}', {{ dep.lookup_where_second }}),
     orderBy: { created_at: 'asc' },
 {% if dep.prisma_include_str %}
     include: { {{ dep.prisma_include_str }} },
@@ -414,7 +429,7 @@ export async function populate{{ pascal }}Dependencies() {
     const {{ dep.var_name }}2{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
     {{ dep.var_name }}2Record = await prisma.{{ dep.target }}.create({
-      data: {
+      data: _dep('{{ dep.target }}.{{ dep.var_name }}', '{{ dep.target }}', {
 {% for fk in dep.internal_fk_deps %}
         {{ fk.prop_name }}: {{ dep.var_name }}2{{ fk.var_name | pascal_case }}.id,
 {% endfor %}
@@ -428,7 +443,7 @@ export async function populate{{ pascal }}Dependencies() {
 {% if dep.has_updater_id %}
         updater_id: testUser.id,
 {% endif %}
-      },
+      }),
 {% if dep.prisma_include_str %}
       include: { {{ dep.prisma_include_str }} },
 {% endif %}
@@ -439,7 +454,7 @@ export async function populate{{ pascal }}Dependencies() {
   const {{ dep.var_name }}2{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
 {% endfor %}
   const {{ dep.var_name }}2Record = await prisma.{{ dep.target }}.create({
-    data: {
+    data: _dep('{{ dep.target }}.{{ dep.var_name }}', '{{ dep.target }}', {
 {% for fk in dep.internal_fk_deps %}
       {{ fk.prop_name }}: {{ dep.var_name }}2{{ fk.var_name | pascal_case }}.id,
 {% endfor %}
@@ -453,7 +468,7 @@ export async function populate{{ pascal }}Dependencies() {
 {% if dep.has_updater_id %}
       updater_id: testUser.id,
 {% endif %}
-    },
+    }),
 {% if dep.prisma_include_str %}
     include: { {{ dep.prisma_include_str }} },
 {% endif %}
@@ -472,7 +487,7 @@ export async function populate{{ pascal }}Dependencies() {
   const {{ dep.var_name }}{{ b.var_name | pascal_case }} = await prisma.{{ b.target }}.create({ data: {{ b.create_data }} });
 {% endfor %}
   const {{ dep.var_name }} = await prisma.{{ dep.target }}.create({
-    data: {
+    data: _dep('{{ dep.target }}.{{ dep.var_name }}', '{{ dep.target }}', {
 {% for b in dep.bridge_otos %}
       {{ b.prop_name }}: {{ dep.var_name }}{{ b.var_name | pascal_case }}.id,
 {% endfor %}
@@ -484,7 +499,7 @@ export async function populate{{ pascal }}Dependencies() {
 {% endfor %}
       creator_id: testUser.id,
       updater_id: testUser.id,
-    },
+    }),
   });
 {% endfor %}
   await prisma.{{ reservation_lines_pool_seed.pool_entity }}.create({
@@ -516,7 +531,7 @@ export async function populate{{ pascal }}Dependencies() {
   const {{ dep.var_name }}{{ b.var_name | pascal_case }} = await prisma.{{ b.target }}.create({ data: {{ b.create_data }} });
 {% endfor %}
   const {{ dep.var_name }} = await prisma.{{ dep.target }}.create({
-    data: {
+    data: _dep('{{ dep.target }}.{{ dep.var_name }}', '{{ dep.target }}', {
 {% for b in dep.bridge_otos %}
       {{ b.prop_name }}: {{ dep.var_name }}{{ b.var_name | pascal_case }}.id,
 {% endfor %}
@@ -528,7 +543,7 @@ export async function populate{{ pascal }}Dependencies() {
 {% endfor %}
       creator_id: testUser.id,
       updater_id: testUser.id,
-    },
+    }),
   });
 {% endfor %}
   await prisma.{{ reservation_nolines_pool_seed.pool_entity }}.create({
@@ -592,7 +607,7 @@ export async function populate{{ pascal }}Data(length: number) {
     // its own fresh {{ nested.target }} row instead of the shared populate{{ pascal }}Dependencies()
     // instance, or every {{ primary_fk_dep.target }} row in the loop renders an identical label.
     const {{ nested.dep_var_name }}Fresh = await prisma.{{ nested.target }}.create({
-      data: {
+      data: _dep('{{ nested.target }}.{{ nested.dep_var_name }}', '{{ nested.target }}', {
 {% for ef in nested.extra_required_fields %}
         {{ ef.prop_name }}: {{ ef.prisma_val_unique }},
 {% endfor %}
@@ -601,11 +616,11 @@ export async function populate{{ pascal }}Data(length: number) {
 {% endfor %}
         creator_id: testUser.id,
         updater_id: testUser.id,
-      },
+      }),
     });
 {% endfor %}
     const {{ primary_fk_dep.var_name }}Item = await prisma.{{ primary_fk_dep.target }}.create({
-      data: {
+      data: _dep('{{ primary_fk_dep.target }}.{{ primary_fk_dep.var_name }}', '{{ primary_fk_dep.target }}', {
 {% for fk in primary_fk_dep.internal_fk_deps %}
         {{ fk.prop_name }}: {{ primary_fk_dep.var_name }}{{ fk.var_name | pascal_case }}.id,
 {% endfor %}
@@ -621,7 +636,7 @@ export async function populate{{ pascal }}Data(length: number) {
 {% endfor %}
         creator_id: testUser.id,
         updater_id: testUser.id,
-      },
+      }),
     });
 {% endif %}
 {% endif %}
@@ -634,7 +649,7 @@ export async function populate{{ pascal }}Data(length: number) {
     // populate{{ pascal }}Dependencies() instance (deps.{{ oto.var_name }}), which
     // would trip {{ oto.target }}'s own uniqueness on the 2nd create().
     const {{ oto.var_name }}Item = await prisma.{{ oto.target }}.create({
-      data: {
+      data: _dep('{{ oto.target }}.{{ oto.var_name }}', '{{ oto.target }}', {
 {% for fk in oto.internal_fk_deps %}
         {{ fk.prop_name }}: {{ oto.var_name }}{{ fk.var_name | pascal_case }}.id,
 {% endfor %}
@@ -646,7 +661,7 @@ export async function populate{{ pascal }}Data(length: number) {
 {% endfor %}
         creator_id: testUser.id,
         updater_id: testUser.id,
-      },
+      }),
     });
 {% endfor %}
 {% for fk in internal_fk_deps %}
@@ -768,7 +783,7 @@ export async function populate{{ pascal }}FullData(length: number) {
     // cmd_958: see populate{{ pascal }}Data for the rationale — {{ nested.target }} needs
     // its own fresh row per iteration to disambiguate {{ primary_fk_dep.target }}'s label.
     const {{ nested.dep_var_name }}Fresh = await prisma.{{ nested.target }}.create({
-      data: {
+      data: _dep('{{ nested.target }}.{{ nested.dep_var_name }}', '{{ nested.target }}', {
 {% for ef in nested.extra_required_fields %}
         {{ ef.prop_name }}: {{ ef.prisma_val_unique }},
 {% endfor %}
@@ -777,11 +792,11 @@ export async function populate{{ pascal }}FullData(length: number) {
 {% endfor %}
         creator_id: testUser.id,
         updater_id: testUser.id,
-      },
+      }),
     });
 {% endfor %}
     const {{ primary_fk_dep.var_name }}Item = await prisma.{{ primary_fk_dep.target }}.create({
-      data: {
+      data: _dep('{{ primary_fk_dep.target }}.{{ primary_fk_dep.var_name }}', '{{ primary_fk_dep.target }}', {
 {% for fk in primary_fk_dep.internal_fk_deps %}
         {{ fk.prop_name }}: {{ primary_fk_dep.var_name }}{{ fk.var_name | pascal_case }}.id,
 {% endfor %}
@@ -797,7 +812,7 @@ export async function populate{{ pascal }}FullData(length: number) {
 {% endfor %}
         creator_id: testUser.id,
         updater_id: testUser.id,
-      },
+      }),
     });
 {% endif %}
 {% endif %}
@@ -809,7 +824,7 @@ export async function populate{{ pascal }}FullData(length: number) {
     // {{ oto.target }} per iteration, not the shared populate{{ pascal }}Dependencies()
     // instance (deps.{{ oto.var_name }}).
     const {{ oto.var_name }}Item = await prisma.{{ oto.target }}.create({
-      data: {
+      data: _dep('{{ oto.target }}.{{ oto.var_name }}', '{{ oto.target }}', {
 {% for fk in oto.internal_fk_deps %}
         {{ fk.prop_name }}: {{ oto.var_name }}{{ fk.var_name | pascal_case }}.id,
 {% endfor %}
@@ -821,7 +836,7 @@ export async function populate{{ pascal }}FullData(length: number) {
 {% endfor %}
         creator_id: testUser.id,
         updater_id: testUser.id,
-      },
+      }),
     });
 {% endfor %}
 {% for fk in internal_fk_deps %}

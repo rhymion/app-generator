@@ -1616,6 +1616,11 @@ owner next to the first is `invalid`. Only a caller that passes a column as `und
 CSV import whose file lacks the column) leaves the stored value in place, and the check then judges
 the stored value.
 
+A child generated with `test: true` writes exactly one owner in its generated test data: the helper
+rows, API create bodies and form fills use the owner column of the first declared parent that has a
+resolvable column, as a required field, and skip the other owner columns, so the generated requests pass
+this check.
+
 Every write path of the child is covered:
 
 | Write path | Where the check runs |

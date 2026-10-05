@@ -16,6 +16,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   there and the app does not use it.
 
 ### Fixed
+- **Wrote exactly one owner in the generated tests of a child that declares
+  `x-exclusive-parents`** (issue #819). The generated helper rows, API create bodies
+  and form fills left the owner columns empty or set all of them, so the save-time
+  validator from #816 rejected the generated PUT and create requests. They now use
+  the owner column of the first declared parent that has a resolvable column, as a
+  required field, and skip the other owner columns. Entities without the declaration
+  generate identical output.
 - **Returned the second instance of the primary display FK from the generated test
   helper when its entity has two FKs to the same model** (issue #813). The API spec
   reads `deps.<fk>2` for `PUT /:id` and both bulk `PUT` examples, but the helper only
@@ -103,6 +110,21 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   and hook run.
 
 ### Added
+- **Hand-written dependency values for the generated test helper** (issue #819).
+  Every entity generated with `test: true` gets a write-once
+  `cypress/support/<entity>/helper_custom.ts` exporting `dependencyValues(key, defaults)`;
+  a consumer keeps its copy at `prj/cypress/support/<entity>/helper_custom.ts`. The
+  generated `helper.ts` passes the values of every dependency row it creates, and the
+  `where` of every find-or-create lookup, through it, so a rule on a dependency
+  (for example a type column that must hold a particular value while its default stays
+  unchanged) is written by hand and the rest of the helper stays generated. Plain
+  columns may be set; foreign-key and system columns may not be reassigned, and anything
+  else throws naming the dependency and the column. No new schema key. Behavior is
+  unchanged while the hook returns the defaults, but the text of every generated
+  `helper.ts` changes (an import and a call at each dependency create) and each test
+  entity gets one new `helper_custom.ts`. Consumers do not track generated output, so
+  nothing needs committing. The child-datagrid gate now also runs the generated specs of
+  a test-enabled exclusive child and of an entity with a hand-written hook.
 - **Hand-written validation can pass an i18n message key to the form** (issue #817).
   An `AppError` takes optional `messageKey` and `messageArgs`. They travel on the Server
   Action failure and in the REST error body (only when present), and the generated form

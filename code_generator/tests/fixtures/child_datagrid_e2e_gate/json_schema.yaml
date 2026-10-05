@@ -18,7 +18,12 @@
 #                      its rows are written only through the parents' nested writes
 #   excl_owned         x-exclusive-parents [excl_alpha, excl_beta] on a child with its own writable
 #                      pages and REST route (new/edit/api): read-only on the parents' screens, so its
-#                      rows are written only through its own service (REST, Server Action, forms)
+#                      rows are written only through its own service (REST, Server Action, forms);
+#                      generated with test: true, so its generated helper and specs must write
+#                      exactly one owner
+#   hook_unit          dependency target of hook_slot; kind defaults to 'atomic'
+#   hook_slot          two FKs to hook_unit; the fixture's hand-written helper_custom.ts makes the
+#                      `unit` dependency 'composite' and leaves `second_unit` alone
 definitions:
   parent1_child1:
     x-generate:
@@ -244,7 +249,7 @@ definitions:
       delete: false
       invalidate: false
       api: true
-      test: false
+      test: true
     fields:
       name:
         minLength: 1
@@ -300,3 +305,40 @@ definitions:
         type: array
         items:
           $ref: "#/definitions/excl_owned"
+
+  hook_unit:
+    x-generate:
+      list: true
+      view: true
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name:
+        minLength: 1
+      kind: {}
+
+  hook_slot:
+    x-generate:
+      list: true
+      view: true
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: true
+      test: true
+    fields:
+      name:
+        minLength: 1
+      unit_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship: {}
+      second_unit_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship: {}
+    required:
+      - unit_id

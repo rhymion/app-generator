@@ -44,7 +44,7 @@ describe('API: x-exclusive-parents rejects a save without exactly one owner', ()
     cy.task('db:reset');
     cy.task('db:seed');
     cy.task('db:grantAllPermissions');
-    // excl_owned is not generated with test: true, so the shared grant does not cover it.
+    // Idempotent: db:grantAllPermissions already covers excl_owned (test: true).
     cy.task('db:grantExclOwnedPermission');
     const created = (name: string, entity: string) =>
       post(entity, { name, excl_links: [], excl_owneds: [] }).then((r) => {

@@ -27,7 +27,7 @@ function seed(): Cypress.Chainable<Ids> {
   cy.task('db:reset');
   cy.task('db:seed');
   cy.task('db:grantAllPermissions');
-  // excl_owned is not generated with test: true, so the shared grant does not cover it.
+  // Idempotent: db:grantAllPermissions already covers excl_owned (test: true).
   cy.task('db:grantExclOwnedPermission');
   Cypress.session.clearAllSavedSessions();
   cy.clearCookies();

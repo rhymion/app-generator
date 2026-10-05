@@ -7,6 +7,7 @@ Builds Jinja2 template contexts for:
   - cypress/support/generated-tasks.ts  (task registry for cypress.config.ts)
   - cypress/e2e/api/{entity}.cy.ts      (API test spec)
 """
+import json
 import re
 from datetime import datetime
 
@@ -149,7 +150,10 @@ from helpers.label_field import (
     build_label_expression, render_prisma_include, resolve_label_paths, relation_chain_targets,
     build_string_only_label_expression,
 )
-from build_context import _get_entity_options, _raw_def, is_forced_required_field, get_uri_kind
+from build_context import (
+    _get_entity_options, _raw_def, is_forced_required_field, get_uri_kind,
+    _exclusive_parent_columns,
+)
 from generate_types import extract_entities
 from generators import resolve_approval_submit_on
 
@@ -2195,6 +2199,56 @@ def _resolve_pool_extra_deps(
     return pool_extra_fk_props, pool_extra_deps
 
 
+_SYSTEM_DEP_COLUMNS = ('id', 'creator_id', 'updater_id', 'created_at', 'updated_at')
+
+
+def _dependency_columns(model: str, schema: dict) -> dict:
+    """Columns of a dependency model for the helper's dependency-value hook.
+
+    `scalars` are the plain columns a hand-written hook may set. Everything
+    carrying `x-relationship` (foreign keys and relation properties) and the
+    system columns are `protected`: the hook may not reassign them.
+    """
+    props = (_raw_def(model, schema) or {}).get('properties') or {}
+    scalars, protected = [], list(_SYSTEM_DEP_COLUMNS)
+    for name, prop in props.items():
+        if name in _SYSTEM_DEP_COLUMNS:
+            continue
+        if prop.get('x-relationship') or prop.get('type') in ('array', 'object') or '$ref' in prop:
+            protected.append(name)
+        else:
+            scalars.append(name)
+    return {
+        'model': model,
+        'scalars_ts': json.dumps(sorted(scalars)),
+        'protected_ts': json.dumps(sorted(protected)),
+    }
+
+
+def _exclusive_owner_fields(fields: list, model_name: str, schema: dict) -> list:
+    """Field metas of an `x-exclusive-parents` child as the generated tests use them.
+
+    The save-time validator requires exactly one owner column, so the generated
+    helper rows, API bodies and form fills write the owner of the first declared
+    parent that has a resolvable column (as a required field) and none of the
+    other owner columns. A child without the declaration gets `fields` back
+    unchanged.
+    """
+    by_parent = _exclusive_parent_columns(model_name, schema)
+    all_cols = {c for cols in by_parent.values() for c in cols}
+    if not all_cols:
+        return fields
+    owner = next((cols[0] for cols in by_parent.values() if cols), None)
+    result = []
+    for f in fields:
+        if f['prop_name'] in all_cols - {owner}:
+            continue
+        if f['prop_name'] == owner and f['category'] == 'autocomplete':
+            f = {**f, 'required': True}
+        result.append(f)
+    return result
+
+
 def helper_context(
     parent: str,
     children: list,
@@ -2218,6 +2272,7 @@ def helper_context(
         properties, required_fields, relationships, generate_config.get('fields'), entity_options,
         range_end_field=_date_range['end'] if _date_range else None,
     )
+    fields = _exclusive_owner_fields(fields, model_name, schema)
     # Detect outbound one-to-one FK fields (e.g. approvable_id on leave_request).
     # These are internal bridge records the service creates automatically — not user-facing.
     # Exclude from fill/assert commands and from prisma data field lists; handle separately.
@@ -3396,6 +3451,20 @@ def helper_context(
                 'pool_extra_deps': _pool_extra_deps_nolines,
             }
 
+    # Hand-written dependency-value hook (helper_custom.ts): one key per
+    # dependency the helper can create, and the plain / protected columns of
+    # each dependency's model so the runtime can fail closed.
+    _hook_deps = list(non_self_deps) + list(self_ref_deps)
+    _hook_pairs = [(d['target'], d['var_name']) for d in _hook_deps]
+    if primary_fk_dep and not primary_fk_dep.get('is_user_account'):
+        _hook_pairs.append((primary_fk_dep['target'], primary_fk_dep['var_name']))
+        _hook_pairs += [(n['target'], n['dep_var_name']) for n in primary_fk_dep.get('nested_fk_deps') or []]
+    _hook_pairs += [(o['target'], o['var_name']) for o in extra_oto_fk_deps]
+    dependency_hook_keys = sorted({f'{t}.{v}' for t, v in _hook_pairs})
+    dependency_hook_columns = [
+        _dependency_columns(t, schema) for t in sorted({t for t, _ in _hook_pairs})
+    ]
+
     return {
         'parent': parent,
         'pascal': pascal,
@@ -3408,6 +3477,8 @@ def helper_context(
         'has_self_ref_deps': has_self_ref_deps,
         'non_self_deps_return': non_self_deps_return,
         'has_parent_deps': bool(entity_fk_deps) or bool(ua_dep_fields),
+        'dependency_hook_keys_ts': ' | '.join(f"'{k}'" for k in dependency_hook_keys) or 'never',
+        'dependency_hook_columns': dependency_hook_columns,
         'needs_deps_in_populate': needs_deps_in_populate,
         'needs_deps_in_populate_full': needs_deps_in_populate_full,
         'ua_dep_fields': ua_dep_fields,
@@ -3471,6 +3542,7 @@ def spec_context(
         properties, required_fields, relationships, generate_config.get('fields'), entity_options,
         range_end_field=_date_range['end'] if _date_range else None,
     )
+    fields = _exclusive_owner_fields(fields, model_name, schema)
     # Exclude outbound one-to-one FK fields (internal bridge records, not user-facing).
     _internal_fk_prop_names = {d['prop_name'] for d in get_internal_one_to_one_fks(model_name, schema)}
     fields = [f for f in fields if f['prop_name'] not in _internal_fk_prop_names]
@@ -4701,6 +4773,7 @@ def api_spec_context(
         filtered_props, required_fields_list, relationships, gen_cfg.get('fields'), _api_entity_options,
         range_end_field=_api_date_range['end'] if _api_date_range else None,
     )
+    all_field_metas = _exclusive_owner_fields(all_field_metas, model, schema)
     # Exclude outbound one-to-one FK fields (internal bridge records — service creates them automatically).
     _api_internal_fk_prop_names = {d['prop_name'] for d in get_internal_one_to_one_fks(model, schema)}
     all_field_metas = [f for f in all_field_metas if f['prop_name'] not in _api_internal_fk_prop_names]

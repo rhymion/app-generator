@@ -14,6 +14,8 @@
 # Also covers x-exclusive-parents save-time validation (REST, nested parent writes and the
 # standalone and parent forms); the fixture's cypress/support/project-tasks.ts is copied into
 # the build copy for the one state the application can no longer create (a row holding both owners).
+# Also runs the generated specs of excl_owned (the generated test helper writes exactly one owner)
+# and hook_slot (the hand-written helper_custom.ts dependency values, fixture dir custom_helper/).
 #
 # Isolation (the repository's own schema, generated output, database and other
 # fixtures are never touched):
@@ -140,10 +142,14 @@ cd "$BUILD_DIR"
 echo "-- npm run test:e2e:build (docker up, generate-code, db:push, seed, next build) --"
 NODE_ENV=test npm run test:e2e:build
 
+# The fixture's own specs, plus the GENERATED specs of the two fixture entities that exist to
+# prove the generated test helper: excl_owned (exactly one owner under x-exclusive-parents) and
+# hook_slot (hand-written dependency values).
+DEFAULT_SPECS="cypress/e2e/child_datagrid_e2e_gate/**/*.cy.ts,cypress/e2e/excl_owned.cy.ts,cypress/e2e/api/excl_owned.cy.ts,cypress/e2e/hook_slot.cy.ts,cypress/e2e/api/hook_slot.cy.ts"
 echo "-- cypress: fixture specs --"
 set +e
 NODE_ENV=test PAYMENT_FAKE_STRIPE=1 node scripts/run-e2e.js test:e2e:start \
-  "cypress run --browser chromium --spec \"${GATE_SPEC:-cypress/e2e/child_datagrid_e2e_gate/**/*.cy.ts}\""
+  "cypress run --browser chromium --spec \"${GATE_SPEC:-$DEFAULT_SPECS}\""
 status=$?
 set -e
 
