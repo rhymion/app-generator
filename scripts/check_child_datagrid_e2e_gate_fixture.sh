@@ -14,6 +14,7 @@
 # Also covers x-exclusive-parents save-time validation (REST, nested parent writes and the
 # standalone and parent forms); the fixture's cypress/support/project-tasks.ts is copied into
 # the build copy for the one state the application can no longer create (a row holding both owners).
+# Also checks the generated parent UI specs of excl_alpha/excl_beta for the hidden owner column.
 # Also runs the generated specs of excl_owned (the generated test helper writes exactly one owner)
 # and hook_slot (the hand-written helper_custom.ts dependency values, fixture dir custom_helper/).
 #
@@ -141,6 +142,26 @@ cd "$BUILD_DIR"
 
 echo "-- npm run test:e2e:build (docker up, generate-code, db:push, seed, next build) --"
 NODE_ENV=test npm run test:e2e:build
+
+# x-exclusive-parents: a parent's generated UI spec must not select the child grid column the
+# parent's form hides (excl_alpha's grid has no excl_beta_id column, excl_beta's none for
+# excl_alpha_id). Checked on the generated text; the examples that fill the grid ("creates with
+# full data", the child-removal examples) are not run here because the generated child-seed
+# helper (db:populate<Parent><Child>) has a separate, known gap that keeps "Edit 3.2" and
+# "Fail edit 6.2" red for any child with a required creator relation.
+echo "-- generated parent UI specs skip the hidden exclusive-parent column --"
+for pair in "excl_alpha:excl_beta_id" "excl_beta:excl_alpha_id"; do
+  spec="cypress/e2e/${pair%%:*}.cy.ts"
+  column="${pair##*:}"
+  if [ ! -f "$spec" ]; then
+    echo "child-datagrid-e2e-gate: generated spec $spec not found" >&2
+    exit 1
+  fi
+  if grep -q "'$column'" "$spec"; then
+    echo "child-datagrid-e2e-gate: $spec selects the hidden column $column" >&2
+    exit 1
+  fi
+done
 
 # The fixture's own specs, plus the GENERATED specs of the two fixture entities that exist to
 # prove the generated test helper: excl_owned (exactly one owner under x-exclusive-parents) and
