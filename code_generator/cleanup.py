@@ -14,7 +14,7 @@ run happens to also be tearing down an unrelated temp fixture" -- deleting by
 current-schema-membership treated both cases the same and previously wiped
 translations wholesale (cmd_560). See docs/knowledge/i18n-locale-routing.md.
 
-Stubs (form_validation.ts, service_validation.ts) are deleted unless
+Stubs (service_validation.ts) are deleted unless
 --keep-stubs is passed, since they may contain user customizations.
 service_after_create.ts (cmd_923a) is a permanent write-once hook stub, like
 service_validation_custom.ts -- never swept here, even for an orphaned
