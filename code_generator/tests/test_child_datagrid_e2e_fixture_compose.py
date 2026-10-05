@@ -6,6 +6,7 @@ docker or a browser, that the merge works, never edits the repository's own
 files, refuses to shadow a default entity, and yields a schema the generator
 accepts end to end (derivation, validation, code generation).
 """
+import json
 import shutil
 import subprocess
 import sys
@@ -25,6 +26,7 @@ def app_copy(tmp_path):
     shutil.copy(REPO_ROOT / 'code_generator' / 'json_schema.yaml', tmp_path / 'code_generator')
     shutil.copy(REPO_ROOT / 'code_generator' / 'json_schema_internal.yaml', tmp_path / 'code_generator')
     shutil.copy(REPO_ROOT / 'prisma' / 'schema.prisma', tmp_path / 'prisma')
+    shutil.copytree(REPO_ROOT / 'messages', tmp_path / 'messages')
     return tmp_path
 
 
@@ -45,6 +47,17 @@ def test_compose_adds_the_fixture_entities_and_models(app_copy):
     assert 'enum ProbeKind {' in prisma
     assert 'created_parent1s parent1[] @relation("Parent1Creator")' in prisma
     assert 'parent1s parent1[]' in prisma
+
+
+def test_compose_places_the_custom_validation_and_consumer_messages(app_copy):
+    result = _compose(FIXTURE_DIR, app_copy)
+    assert result.returncode == 0, result.stderr
+    custom = (app_copy / 'lib' / 'parent_only' / 'service_validation_custom.ts').read_text()
+    assert "'ValidationMessages.fixtureNameReserved'" in custom
+    for locale in ('en', 'ja'):
+        messages = json.loads((app_copy / 'messages' / f'{locale}.json').read_text())
+        assert 'fixtureNameReserved' in messages['ValidationMessages']
+        assert 'Errors' in messages  # the default namespaces are kept
 
 
 def test_compose_leaves_the_repositorys_own_files_alone(app_copy):
