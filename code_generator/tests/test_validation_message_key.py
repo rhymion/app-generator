@@ -75,8 +75,8 @@ class TestReturnLinesCarryOptionalKey:
 class TestFormUpsertKeyPath:
     def test_translated_path_emitted(self):
         block = _form_block()
-        assert 'tmsg.has(messageKey as never)' in block
-        assert 'return tmsg(messageKey as never, messageArgs)' in block
+        assert 'tkey.has(messageKey)' in block
+        assert 'return tkey(messageKey, messageArgs)' in block
 
     def test_only_allowed_namespaces_are_translated(self):
         assert '/^(ValidationMessages|Errors)\\./.test(messageKey)' in _form_block()
@@ -85,13 +85,13 @@ class TestFormUpsertKeyPath:
         block = _form_block()
         assert "err.reason === 'invalid' ? terr('fieldInvalid', { field: err.field }) : terr('fieldRequired', { field: err.field })" in block
         # The key branch returns before the fallback; the fallback never prints the key.
-        assert block.index('tmsg.has(') < block.index("terr('fieldInvalid'")
+        assert block.index('tkey.has(') < block.index("terr('fieldInvalid'")
         assert 'return messageKey' not in block
 
     def test_key_applies_to_validation_only(self):
         """NOT_FOUND / PERMISSION_DENIED stay masked: no key is read for them."""
         block = _form_block()
-        assert block.count('tmsg.has(') == 1
+        assert block.count('tkey.has(') == 1
         assert block.index("case 'NOT_FOUND':") < block.index("case 'VALIDATION'")
         assert "case 'NOT_FOUND':         return terr('notFound');" in block
 

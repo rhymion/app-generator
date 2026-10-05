@@ -124,8 +124,9 @@ export default function FormUpsert({{ form_upsert_params }}) {
         // namespace that exists in the loaded messages is shown; anything else falls
         // back to the generic text below (never an exception, never the raw key).
         const { messageKey, messageArgs } = err as { messageKey?: string; messageArgs?: Record<string, string | number> };
-        if (messageKey && /^(ValidationMessages|Errors)\./.test(messageKey) && tmsg.has(messageKey as never)) {
-          return tmsg(messageKey as never, messageArgs);
+        const tkey = tmsg as unknown as { has: (key: string) => boolean; (key: string, values?: Record<string, string | number>): string };
+        if (messageKey && /^(ValidationMessages|Errors)\./.test(messageKey) && tkey.has(messageKey)) {
+          return tkey(messageKey, messageArgs);
         }
         return err.field ? (err.reason === 'invalid' ? terr('fieldInvalid', { field: err.field }) : terr('fieldRequired', { field: err.field })) : terr('unknown');
       }
