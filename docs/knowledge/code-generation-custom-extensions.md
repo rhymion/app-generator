@@ -290,6 +290,13 @@ export async function validateCustomRules(
   `docs/knowledge/actor-id-handoff-to-custom-validation.md`.
 - Throwing rejects the save; the message surfaces to the caller (UI form or
   direct API request) alike, since this hook runs for both entry points.
+- To show a specific, translated reason on the form, throw an `AppError` with a
+  namespace-qualified message key as its fifth argument (and optional values as the
+  sixth): `throw new AppError('VALIDATION', 'internal note', 'order_type', undefined,
+  'ValidationMessages.orderHasLines')`. Add the key to the `ValidationMessages`
+  namespace of the consumer's `prj/messages/en.json` and `ja.json`. A missing key shows
+  the generic text. The REST error body carries the key too. See "Hand-written
+  rejections with a message key" in `docs/knowledge/error-message-framework.md`.
 
 Full design rationale (why this is a hand-written socket rather than a
 schema-declared mechanism, and the self-referential-m2m case that motivated
