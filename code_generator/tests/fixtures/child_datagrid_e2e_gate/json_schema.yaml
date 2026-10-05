@@ -14,7 +14,11 @@
 #   excl_alpha         parent (view, create/edit) of excl_link, also the target of its non-parent FK
 #   excl_beta          second parent of excl_link
 #   excl_link          x-exclusive-parents [excl_alpha, excl_beta]: inline-editable child with
-#                      read-only own pages (list/view), so its standalone pages keep both parent FKs
+#                      read-only own pages (list/view), so its standalone pages keep both parent FKs;
+#                      its rows are written only through the parents' nested writes
+#   excl_owned         x-exclusive-parents [excl_alpha, excl_beta] on a child with its own writable
+#                      pages and REST route (new/edit/api): read-only on the parents' screens, so its
+#                      rows are written only through its own service (REST, Server Action, forms)
 definitions:
   parent1_child1:
     x-generate:
@@ -225,6 +229,32 @@ definitions:
         x-relationship:
           labelField: name
 
+  excl_owned:
+    x-exclusive-parents: [excl_alpha, excl_beta]
+    x-display:
+      table:
+        - name: {}
+        - excl_alpha_id: {}
+        - excl_beta_id: {}
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: false
+      invalidate: false
+      api: true
+      test: false
+    fields:
+      name:
+        minLength: 1
+      excl_alpha_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship: {}
+      excl_beta_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship: {}
+
   excl_alpha:
     x-generate:
       list: true
@@ -243,6 +273,10 @@ definitions:
         type: array
         items:
           $ref: "#/definitions/excl_link"
+      excl_owneds:
+        type: array
+        items:
+          $ref: "#/definitions/excl_owned"
 
   excl_beta:
     x-generate:
@@ -262,3 +296,7 @@ definitions:
         type: array
         items:
           $ref: "#/definitions/excl_link"
+      excl_owneds:
+        type: array
+        items:
+          $ref: "#/definitions/excl_owned"
