@@ -2262,6 +2262,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'pascal_name': to_pascal_case(def_key),
             'set_fields': resolved_sf,
             'emit_hook': bool(on_approved.get('emit_hook', False)),
+            'exclusive_check': bool(set(resolved_sf) & set(_exclusive_parent_all_columns(def_key, schema))),
             'has_ledger_source': bool(x_ledger_source),
             'ledger_source': x_ledger_source,
             'is_ship_skeleton': False,
@@ -2367,6 +2368,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'pascal_name': to_pascal_case(def_key),
             'set_fields': resolved_sf,
             'emit_hook': bool(on_rejected.get('emit_hook', False)),
+            'exclusive_check': bool(set(resolved_sf) & set(_exclusive_parent_all_columns(def_key, schema))),
             'terminal': bool(on_rejected.get('terminal', False)),
         })
     # tx / approvableId are only read inside the per-entity `if (set_fields or
@@ -2419,6 +2421,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'pascal_name': to_pascal_case(def_key),
             'set_fields': resolved_sf,
             'emit_hook': bool(on_withdrawn.get('emit_hook', False)),
+            'exclusive_check': bool(set(resolved_sf) & set(_exclusive_parent_all_columns(def_key, schema))),
         })
     # Always emitted (mirrors on_rejected_dispatch.ts above) — actions.ts
     # imports this unconditionally, so it must exist even with zero entities.

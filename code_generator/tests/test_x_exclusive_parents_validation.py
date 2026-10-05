@@ -166,3 +166,36 @@ def test_every_nested_child_emitter_calls_the_helper(models):
     for c in written:
         assert f"validate{c['child_pascal']}ExclusiveParents(" in _build_child_exclusive_create_check(written)
         assert f"validate{c['child_pascal']}ExclusiveParents(" in _build_child_exclusive_update_check(written)
+
+
+# --- approval dispatch updates --------------------------------------------------
+
+_DISPATCH = {
+    'on_approved_dispatch.ts.jinja2': ('approvable_entities', {}),
+    'on_rejected_dispatch.ts.jinja2': ('rejectable_entities', {'rejected_body_needed': True, 'rejected_hook_needed': False}),
+    'on_withdrawn_dispatch.ts.jinja2': ('withdrawable_entities', {'withdrawn_body_needed': True, 'withdrawn_hook_needed': False}),
+}
+
+
+def _dispatch(template: str, exclusive_check: bool) -> str:
+    collection, extra = _DISPATCH[template]
+    entity = {
+        'snake_name': 'placement', 'pascal_name': 'Placement', 'set_fields': {'alpha_id': 'cabc', 'name': 'x'},
+        'emit_hook': False, 'terminal': False, 'exclusive_check': exclusive_check,
+    }
+    return _env().get_template(template).render({collection: [entity], **extra})
+
+
+@pytest.mark.parametrize('template', sorted(_DISPATCH))
+def test_dispatch_checks_a_set_fields_write_of_a_listed_column(template):
+    out = _dispatch(template, True)
+    assert "from '@/lib/placement/exclusive_parents'" in out
+    call = "validatePlacementExclusiveParents({ ...entity, alpha_id: 'cabc', name: 'x' });"
+    assert call in out
+    assert out.index(call) < out.index('tx.placement.update(')
+
+
+@pytest.mark.parametrize('template', sorted(_DISPATCH))
+def test_dispatch_without_a_listed_column_in_set_fields_has_no_check(template):
+    out = _dispatch(template, False)
+    assert 'exclusive' not in out.lower()
