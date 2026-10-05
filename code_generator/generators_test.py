@@ -1953,6 +1953,31 @@ def gen_child_datagrid_object(child_meta: dict, action: str) -> str:
     return '{ ' + ', '.join(entries) + ' }'
 
 
+def _drop_hidden_exclusive_parent_columns(child_metas: list, model_name: str, schema: dict) -> list:
+    """Remove from each child meta the FK columns that `model_name`'s form hides.
+
+    An `x-exclusive-parents` child's grid on a listed parent's screen has no
+    column for the other listed parents (build_context._exclusive_parent_fks), so
+    that parent's UI spec must not select or fill one. Children without the
+    declaration, and parents not listed in it, are returned unchanged.
+    """
+    result = []
+    for meta in child_metas:
+        by_parent = _exclusive_parent_columns(meta['child']['name'], schema)
+        hidden = {c for p, cols in by_parent.items() if p != model_name for c in cols} if model_name in by_parent else set()
+        if not hidden:
+            result.append(meta)
+            continue
+        keep = lambda fs: [f for f in fs if f['prop_name'] not in hidden]  # noqa: E731
+        result.append({
+            **meta,
+            'fields': keep(meta['fields']),
+            'required_fields': keep(meta['required_fields']),
+            'optional_fields': keep(meta['optional_fields']),
+        })
+    return result
+
+
 def gen_child_full_datagrid_object(child_meta: dict) -> str:
     """Generate fillDataGridRow object for all fields (scalar only)."""
     entries = _child_scalar_entries(child_meta['fields'], child_meta['names']['title'], cypress_create_value)
@@ -3647,7 +3672,9 @@ def spec_context(
             search_differs = bool(search_expr and search_expr != label_expr)
         dep_search_info[r['prop_name']] = {'search_differs': search_differs}
 
-    child_metas = analyze_children(children, schema, model_name)
+    child_metas = _drop_hidden_exclusive_parent_columns(
+        analyze_children(children, schema, model_name), model_name, schema,
+    )
     list_autocomplete_children = [c for c in child_metas if c['render_type'] == 'editable-list-autocomplete']
 
     # Include self-referential FK deps and m2m self-ref children in has_deps
