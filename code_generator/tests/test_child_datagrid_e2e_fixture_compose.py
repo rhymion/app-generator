@@ -100,3 +100,10 @@ def test_composed_schema_derives_validates_and_generates(app_copy):
     parent = schema['definitions']['parent_only']['allOf'][1]['properties'] \
         if 'allOf' in schema['definitions']['parent_only'] else schema['definitions']['parent_only']['properties']
     assert parent['parent_only_probes']['x-parent-fk'] == ['parent_only_id']
+
+
+def test_compose_places_the_hand_written_helper_hook(app_copy):
+    result = _compose(FIXTURE_DIR, app_copy)
+    assert result.returncode == 0, result.stderr
+    hook = (app_copy / 'cypress' / 'support' / 'hook_slot' / 'helper_custom.ts').read_text()
+    assert "key === 'hook_unit.unit'" in hook

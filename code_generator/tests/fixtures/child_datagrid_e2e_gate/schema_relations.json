@@ -15,7 +15,11 @@
     "created_excl_links excl_link[] @relation(\"ExclLinkCreator\")",
     "updated_excl_links excl_link[] @relation(\"ExclLinkUpdater\")",
     "created_excl_owneds excl_owned[] @relation(\"ExclOwnedCreator\")",
-    "updated_excl_owneds excl_owned[] @relation(\"ExclOwnedUpdater\")"
+    "updated_excl_owneds excl_owned[] @relation(\"ExclOwnedUpdater\")",
+    "created_hook_units hook_unit[] @relation(\"HookUnitCreator\")",
+    "updated_hook_units hook_unit[] @relation(\"HookUnitUpdater\")",
+    "created_hook_slots hook_slot[] @relation(\"HookSlotCreator\")",
+    "updated_hook_slots hook_slot[] @relation(\"HookSlotUpdater\")"
   ],
   "organization": [
     "parent1s parent1[]"

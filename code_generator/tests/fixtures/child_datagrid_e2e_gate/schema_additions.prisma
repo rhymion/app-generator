@@ -253,3 +253,43 @@ model excl_owned {
   @@index([excl_alpha_id])
   @@index([excl_beta_id])
 }
+
+// Dependency target of hook_slot. `kind` has a default the hand-written test-helper hook overrides.
+model hook_unit {
+  id         String      @id @default(cuid())
+  name       String
+  kind       String      @default("atomic")
+  created_at DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user        @relation("HookUnitCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user        @relation("HookUnitUpdater", fields: [updater_id], references: [id])
+  units        hook_slot[] @relation("hook_slot_unit")
+  second_units hook_slot[] @relation("hook_slot_second_unit")
+
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// Two foreign keys to the same model, so the helper creates two distinct dependencies.
+model hook_slot {
+  id             String     @id @default(cuid())
+  name           String
+  unit_id        String
+  unit           hook_unit  @relation("hook_slot_unit", fields: [unit_id], references: [id])
+  second_unit_id String?
+  second_unit    hook_unit? @relation("hook_slot_second_unit", fields: [second_unit_id], references: [id])
+  created_at     DateTime   @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime   @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user       @relation("HookSlotCreator", fields: [creator_id], references: [id])
+  updater_id     String
+  updater        user       @relation("HookSlotUpdater", fields: [updater_id], references: [id])
+
+  @@index([name])
+  @@index([creator_id])
+  @@index([updater_id])
+  @@index([unit_id])
+  @@index([second_unit_id])
+}

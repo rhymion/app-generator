@@ -12,6 +12,8 @@ copy it is pointed at and never on the repository's own schema files:
     `user` / `organization` models need (schema_relations.json).
   * lib/<entity>/service_validation_custom.ts <- custom_validation/<entity>.ts, placed
     before generate-code so the write-once stub is not written over it, and
+  * cypress/support/<entity>/helper_custom.ts <- custom_helper/<entity>.ts, placed
+    before generate-code so the write-once test-helper hook stub is not written over it, and
   * messages/{en,ja}.json            <- messages_validation.json (a consumer
     namespace, as prj_sync would merge it).
 
@@ -85,6 +87,14 @@ def compose_custom_validation(fixture_dir: Path, app_dir: Path) -> None:
         path.write_text(json.dumps(messages, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def compose_custom_helper(fixture_dir: Path, app_dir: Path) -> None:
+    # Optional, like compose_custom_validation.
+    for source in sorted((fixture_dir / "custom_helper").glob("*.ts")):
+        target = app_dir / "cypress" / "support" / source.stem / "helper_custom.ts"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 3:
         print(__doc__, file=sys.stderr)
@@ -93,6 +103,7 @@ def main(argv: list[str]) -> int:
     compose_json_schema(fixture_dir, app_dir)
     compose_prisma(fixture_dir, app_dir)
     compose_custom_validation(fixture_dir, app_dir)
+    compose_custom_helper(fixture_dir, app_dir)
     return 0
 
 
