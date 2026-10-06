@@ -100,19 +100,23 @@ def _party_def() -> dict:
 def _claim_def(multi_fk: bool) -> dict:
     properties = {
         'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'},
+        'claim_no': {'type': 'string'},
         'insured_party_id': {
             'type': 'string',
             'x-relationship': {'type': 'many-to-one', 'target': 'party', 'labelField': 'name'},
         },
     }
-    required = ['id', 'insured_party_id']
+    required = ['id', 'claim_no', 'insured_party_id']
     if multi_fk:
         properties['insurer_party_id'] = {
             'type': 'string',
             'x-relationship': {'type': 'many-to-one', 'target': 'party', 'labelField': 'name'},
         }
         required.append('insurer_party_id')
-    return {'type': 'object', 'required': required, 'properties': properties}
+    return {
+        'type': 'object', 'required': required, 'properties': properties,
+        'x-display': {'table': [{'claim_no': {'primary': True}}]},
+    }
 
 
 def _schema(multi_fk: bool) -> dict:
@@ -236,10 +240,10 @@ class TestSpecContextFailCreateSectionsMultiFk:
         ctx = spec_context('claim', [], _schema(multi_fk=False), 'claim', 'claim_detail', _GEN_CFG, 0)
         all_fill_cmds = '\n'.join(ctx['all_fill_cmds'])
         assert 'deps.insuredParty.name' in all_fill_cmds
-        # Only one required field (the FK itself) -> it's the one skipped, so
-        # fail_create_5_1's fill_cmds end up empty rather than the section
-        # being absent entirely.
-        assert ctx['fail_create_5_1']['fill_cmds'] == []
+        # 5.1 skips the required non-autocomplete field (the primary `claim_no`),
+        # so the FK is the one required field it still fills.
+        fill_cmds_5_1 = '\n'.join(ctx['fail_create_5_1']['fill_cmds'])
+        assert 'deps.insuredParty.name' in fill_cmds_5_1
 
 
 def _indirect_schema() -> dict:

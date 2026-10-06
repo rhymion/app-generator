@@ -59,6 +59,7 @@ model placement {
 
 def _user_schema(exclusive=('alpha', 'beta')) -> dict:
     placement = {
+        'x-display': {'table': [{'name': {'primary': True}}]},
         'fields': {
             'name': {},
             'alpha_id': {'x-relationship': {}},
@@ -71,10 +72,12 @@ def _user_schema(exclusive=('alpha', 'beta')) -> dict:
     return {
         'definitions': {
             'alpha': {
+                'x-display': {'table': [{'name': {'primary': True}}]},
                 'fields': {'name': {}},
                 'properties': {'placements': {'type': 'array', 'items': {'$ref': '#/definitions/placement'}}},
             },
             'beta': {
+                'x-display': {'table': [{'name': {'primary': True}}]},
                 'fields': {'name': {}},
                 'properties': {'placements': {'type': 'array', 'items': {'$ref': '#/definitions/placement'}}},
             },
