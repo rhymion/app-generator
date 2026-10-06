@@ -3272,6 +3272,7 @@ def helper_context(
                     'target': _nested_dep['target'],
                     'extra_required_fields': _nested_efs,
                     'fk_deps': _nested_dep.get('fk_deps') or [],
+                    'internal_fk_deps': _nested_dep.get('internal_fk_deps') or [],
                 })
         primary_fk_dep['nested_fk_deps'] = _nested_fk_deps
 
@@ -3326,6 +3327,48 @@ def helper_context(
             continue
         _seen_oto_vars.add(_var)
         extra_oto_fk_deps.append(_dep)
+
+    # Composite @@unique made only of required FKs: the populate loop would write
+    # the same FK pair on every iteration (every FK reads the single shared
+    # `deps.<var>` row), so the 2nd create() fails with P2002 as soon as length>=2
+    # (e.g. step_argument's @@unique([step_placement_id, parameter_id])). Unless one
+    # FK of the group already gets a fresh row per iteration (the primary display
+    # FK, or a one-to-one FK above), give ONE of them its own fresh row per loop
+    # iteration, reusing the one-to-one per-iteration create. The FK picked is the
+    # one whose target is cheapest and safest to duplicate: fewest FK deps, and
+    # never a target with a composite @@unique of its own over FKs (a fresh copy
+    # sharing the same parents would collide on that). Groups holding a scalar column are left
+    # alone (the scalar may already vary per row), as are self-referencing deps.
+    _fresh_vars = {_pv for _pv in (primary_fk_dep['var_name'] if primary_fk_dep else None, *_seen_oto_vars) if _pv}
+    _required_fk_by_prop = {
+        f['prop_name']: f['dep_var_name'] for f in required_fields_prisma
+        if f['category'] == 'autocomplete' and f.get('dep_var_name')
+    }
+    for _group in (_prisma_uniques.get(model_name) or {}).get('composite', []):
+        if len(_group) < 2 or not all(_c in _required_fk_by_prop for _c in _group):
+            continue
+        _group_vars = [_required_fk_by_prop[_c] for _c in _group]
+        if len(set(_group_vars)) < len(_group_vars) or any(_v in _fresh_vars for _v in _group_vars):
+            continue
+        _cands = []
+        for _v in _group_vars:
+            _cd = next((d for d in enriched_deps if d['var_name'] == _v), None)
+            if _cd is None or _cd['target'] == 'user' or _cd.get('is_self_ref_dep'):
+                continue
+            _own_fk_props = {fk['prop_name'] for fk in (_cd.get('fk_deps') or [])}
+            _own_composite = any(
+                len(_g) > 1 and set(_g) <= _own_fk_props
+                for _g in (_prisma_uniques.get(_cd['target']) or {}).get('composite', [])
+            )
+            if _own_composite:
+                continue
+            _cands.append((len(_cd.get('fk_deps') or []), len(_cands), _cd))
+        if not _cands:
+            continue
+        _pick = min(_cands, key=lambda c: c[:2])[2]
+        _seen_oto_vars.add(_pick['var_name'])
+        _fresh_vars.add(_pick['var_name'])
+        extra_oto_fk_deps.append({**_pick, 'composite_unique_member': True})
     extra_oto_fk_dep_vars = {d['var_name'] for d in extra_oto_fk_deps}
 
     # x-ledger-source pool FK(s) (poolIdField / fromPoolIdField / toPoolIdField)
@@ -3881,6 +3924,11 @@ def spec_context(
     check_field_use_accordion = False
     check_field_inner_label = None
     check_field_skip = False
+    # True only for an entity with no primary column and no `name` column whose
+    # list shows the first required FK's label: that list renders no link in a
+    # row/cell and its card title is the row id, so the generated spec opens a
+    # record by its id instead of clicking a link.
+    list_nav_by_record_id = False
 
     if prim_is_fk:
         primary_rel = next((r for r in relationships if r['prop_name'] == f'{prim}_id'), None)
@@ -4126,6 +4174,7 @@ def spec_context(
             _fk_label = _first_required_fk_display_label(fields, schema)
             list_id_1 = _fk_label if _fk_label is not None else f'{title} 1'
             list_id_is_unique = _fk_label is None
+            list_nav_by_record_id = _fk_label is not None
             after_create_id = _fk_label if _fk_label is not None else f'Test {title}'
             after_create_id_is_expr = False
             primary_dep_var_for_list = None
@@ -4136,6 +4185,22 @@ def spec_context(
             check_field_label = 'Name'
             check_field_value_1 = f'{title} 1'
             check_field_updated = f'Updated {title}'
+            if _fk_label is not None:
+                # The form and the view page render no 'Name' field and no
+                # '{Title} 1' text for this entity: the edit step has no field
+                # to rename, and the view assertion targets the first required
+                # FK, whose label is the one the list shows and the edit leaves
+                # unchanged.
+                _fk_field = next(
+                    f for f in fields
+                    if f.get('category') == 'autocomplete' and f.get('dep_target') and f.get('required')
+                )
+                has_edit_primary = False
+                edit_field_label = None
+                edit_update_value = None
+                check_field_label = _fk_field['label']
+                check_field_value_1 = _fk_label
+                check_field_updated = _fk_label
 
     # detail_required: which children are required in the parent form
     detail_def = schema['definitions'].get(definition_key, {})
@@ -4503,6 +4568,7 @@ def spec_context(
         # List identifiers
         'list_id_1': list_id_1,
         'list_id_is_unique': list_id_is_unique,
+        'list_nav_by_record_id': list_nav_by_record_id,
         'after_create_id': after_create_id,
         'after_create_id_is_expr': after_create_id_is_expr,
         'primary_dep_var_for_list': primary_dep_var_for_list,
