@@ -28,7 +28,7 @@ function exactRe(text: string): RegExp {
 describe('Testing {{ title }} pages and their behavior [mobile]', () => {
   beforeEach(() => {
     cy.viewport(MOBILE.width, MOBILE.height);
-{% if primary_fk_dep and not primary_fk_dep.is_user_account and primary_fk_dep.extra_required_fields %}
+{% if uses_call_seq %}
     cy.task('db:reset{{ pascal }}CallSeq');
 {% endif %}
     cy.task('db:reset');
