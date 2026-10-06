@@ -92,3 +92,17 @@ def test_entity_without_a_declared_primary_is_refused():
 def test_a_name_column_does_not_stand_in_for_a_declared_primary():
     with pytest.raises(ValueError, match="without a primary column"):
         _render('name_undeclared', 'test_spec.cy.ts.jinja2')
+
+
+NO_LIST_CFG = {**CFG, 'list': False}
+
+
+def test_entity_without_a_list_view_needs_no_primary_and_gets_no_list_steps():
+    """list: false is a structural exclusion: no primary needed, no list step generated."""
+    ctx = spec_context('step_placement', [], _schema('none'), 'step_placement', 'step_placement', NO_LIST_CFG)
+    text = _env().get_template('test_spec.cy.ts.jinja2').render(**ctx)
+    assert ctx['can_list'] is False
+    assert 'MuiDataGrid' not in text, text
+    assert "cy.visit('/en/step_placement')" not in text, text
+    assert "'Step Placement 1'" not in text and 'Updated Step Placement' not in text, text
+    assert "it('2.1 creates with minimal data" in text, text

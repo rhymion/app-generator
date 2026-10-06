@@ -16,8 +16,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   must add the declaration to any entity of its own that lacks one.
   The generated specs no longer guess when no primary is declared: the UI spec's `name`-column
   fallback and its no-primary navigation-by-record-id variant (issues #698, #831) and the API
-  spec's `name` assertion are removed, and a UI spec for an entity without a primary column is
-  refused. The shared list components still default `primaryField` to `name`; that default is
+  spec's `name` assertion are removed, and a UI spec for an entity that has a list view but no primary column is
+  refused (an entity with `x-generate.list: false` needs no primary and gets no list steps). The shared list components still default `primaryField` to `name`; that default is
   not changed here.
 
 ### Removed

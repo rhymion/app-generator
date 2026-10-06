@@ -4190,28 +4190,47 @@ def spec_context(
             check_field_updated = 'Test User'
             check_field_skip = True  # created_by is list-only virtual; not in FormView
         else:
-            if not prim:
+            if not prim and can_list:
                 # No declared primary column: a list-view entity is rejected by
                 # validate.py before generation, so only an entity with no list
-                # view reaches here, and its UI spec has no list row to open.
+                # view should reach here. An entity with `x-generate.list: false`
+                # has no list step in its spec (every list assertion and
+                # navigation is guarded by `can_list`), so it needs no primary.
                 raise ValueError(
                     f"Entity '{parent}': cannot generate a UI spec without a primary "
                     f"column. Declare an x-display.table column with 'primary: true'."
                 )
-            # A declared primary that is not a form field: the list shows it, but
-            # no form input carries it, so the spec asserts the generic placeholder.
-            list_id_1 = f'{title} 1'
-            list_id_is_unique = True
-            after_create_id = f'Test {title}'
-            after_create_id_is_expr = False
-            primary_dep_var_for_list = None
-            list_id_updated = f'Updated {title}'
-            has_edit_primary = True
-            edit_field_label = 'Name'
-            edit_update_value = f'Updated {title}'
-            check_field_label = 'Name'
-            check_field_value_1 = f'{title} 1'
-            check_field_updated = f'Updated {title}'
+            if not prim:
+                # No list view and no primary: nothing to rename or to look up
+                # in the list, so the spec skips the primary edit and check steps.
+                list_id_1 = f'{title} 1'
+                list_id_is_unique = True
+                after_create_id = f'Test {title}'
+                after_create_id_is_expr = False
+                primary_dep_var_for_list = None
+                list_id_updated = f'Updated {title}'
+                has_edit_primary = False
+                edit_field_label = None
+                edit_update_value = None
+                check_field_label = None
+                check_field_value_1 = None
+                check_field_updated = None
+                check_field_skip = True
+            else:
+                # A declared primary that is not a form field: the list shows it, but
+                # no form input carries it, so the spec asserts the generic placeholder.
+                list_id_1 = f'{title} 1'
+                list_id_is_unique = True
+                after_create_id = f'Test {title}'
+                after_create_id_is_expr = False
+                primary_dep_var_for_list = None
+                list_id_updated = f'Updated {title}'
+                has_edit_primary = True
+                edit_field_label = 'Name'
+                edit_update_value = f'Updated {title}'
+                check_field_label = 'Name'
+                check_field_value_1 = f'{title} 1'
+                check_field_updated = f'Updated {title}'
 
     # detail_required: which children are required in the parent form
     detail_def = schema['definitions'].get(definition_key, {})
