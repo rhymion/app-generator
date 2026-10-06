@@ -255,6 +255,38 @@ def _get_base_properties(defn: dict, schema: dict | None = None) -> dict:
     return defn['properties']
 
 
+def _numeric_unique_seed(prop: dict, index: int) -> int:
+    """Value of the `index`-th (1-based) seeded row's integer/number column.
+
+    Single source of truth for the per-row numeric seed: the dependency
+    populate helpers emit it as a TypeScript expression (`_numeric_unique_expr`)
+    and the generated specs compute the label text a list shows for such a row
+    from this function, so both agree. `index * 100` clamped to the declared
+    `minimum` / `maximum`, the same rule as the entity's own helper
+    (`cypress_create_value`, 'number' category).
+    """
+    val = index * 100
+    mx = prop.get('maximum')
+    mn = prop.get('minimum')
+    if mn is not None:
+        val = max(mn, val)
+    if mx is not None:
+        val = min(mx, val)
+    return val
+
+
+def _numeric_unique_expr(prop: dict, index_expr: str) -> str:
+    """TypeScript counterpart of `_numeric_unique_seed` for a loop index variable."""
+    expr = f'{index_expr} * 100'
+    mn = prop.get('minimum')
+    mx = prop.get('maximum')
+    if mn is not None:
+        expr = f'Math.max({mn}, {expr})'
+    if mx is not None:
+        expr = f'Math.min({mx}, {expr})'
+    return expr
+
+
 def _seed_relation_label_value(
     target: str,
     label_field,
@@ -397,7 +429,9 @@ def _seed_path_part(
         title = to_title_case(final_field)
         return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
     if prop_type in ('integer', 'number'):
-        return str(unique_index * 100) if unique_index is not None else str(label_prop.get('minimum', 0))
+        if unique_index is None:
+            return str(label_prop.get('minimum', 0))
+        return str(_numeric_unique_seed(label_prop, unique_index))
     if prop_type == 'boolean':
         return 'false'
     title = to_title_case(final_field)
@@ -623,8 +657,8 @@ def _get_dep_populate_fields(target: str, var_name: str, title: str, schema: dic
             val_second = f"'Test {field_title} B'"
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
-            val = val_unique = str(mn)
-            val_second = str(mn)
+            val = val_second = str(mn)
+            val_unique = _numeric_unique_expr(prop, 'i')
         elif actual == 'boolean':
             # Booleans must emit a literal `false` / `true`, not a string. The
             # previous fall-through produced `TEST-FOO-${Date.now()}` which
@@ -771,7 +805,7 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
         elif actual in ('integer', 'number'):
             mn = prop.get('minimum', 0)
             val = str(mn)
-            val_unique = val
+            val_unique = _numeric_unique_expr(prop, 'i')
             val_second = val
         else:
             val = f'`TEST-{prop_name.upper()}-${{Date.now()}}`'
