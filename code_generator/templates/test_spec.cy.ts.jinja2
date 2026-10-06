@@ -136,7 +136,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}// it sorts to the bottom of the (ascending, freshly-scrolled) grid,
 {{ I }}// same assumption 2.2's identical branch below already relies on.
 {{ I }}cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
+{% if list_nav_by_record_id %}
+{{ I }}cy.get('.MuiDataGrid-row').last().invoke('attr', 'data-id').then((id) => { cy.visit(`/en/{{ parent }}/view/${id}`); });
+{% else %}
 {{ I }}cy.get('.MuiDataGrid-row').last().find('a').first().click();
+{% endif %}
 {% else %}
 {{ I }}cy.contains(exactRe('{{ after_create_id }}')).click();
 {% endif %}
@@ -228,7 +232,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}cy.get('.MuiDataGrid-row').last().find('a').first().click();
 {% elif not list_id_is_unique %}
 {{ I }}cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
+{% if list_nav_by_record_id %}
+{{ I }}cy.get('.MuiDataGrid-row').last().invoke('attr', 'data-id').then((id) => { cy.visit(`/en/{{ parent }}/view/${id}`); });
+{% else %}
 {{ I }}cy.get('.MuiDataGrid-row').last().find('a').first().click();
+{% endif %}
 {% else %}
 {{ I }}cy.contains(exactRe('{{ after_create_id }}')).click();
 {% endif %}
@@ -437,7 +445,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if list_id_is_unique %}
         cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
+{% if list_nav_by_record_id %}
+        cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).closest('.MuiDataGrid-row').invoke('attr', 'data-id').then((id) => { cy.visit(`/en/{{ parent }}/view/${id}`); });
+{% else %}
         cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
+{% endif %}
 {% endif %}
         cy.get('a[aria-label="Edit"]').click();
 {% elif can_list %}
@@ -488,7 +500,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% elif can_list and can_view %}
         cy.visit('/en/{{ parent }}');
         cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
+{% if list_nav_by_record_id %}
+        cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).closest('.MuiDataGrid-row').invoke('attr', 'data-id').then((id) => { cy.visit(`/en/{{ parent }}/view/${id}`); });
+{% else %}
         cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
+{% endif %}
         cy.get('a[aria-label="Edit"]').click();
 {% elif can_list %}
         cy.visit('/en/{{ parent }}');
@@ -632,7 +648,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if list_id_is_unique %}
       cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
+{% if list_nav_by_record_id %}
+      cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).closest('.MuiDataGrid-row').invoke('attr', 'data-id').then((id) => { cy.visit(`/en/{{ parent }}/view/${id}`); });
+{% else %}
       cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
+{% endif %}
 {% endif %}
       cy.get('a[aria-label="Edit"]').click();
 {% else %}
@@ -749,7 +769,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if list_id_is_unique %}
       cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
+{% if list_nav_by_record_id %}
+      cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).closest('.MuiDataGrid-row').invoke('attr', 'data-id').then((id) => { cy.visit(`/en/{{ parent }}/view/${id}`); });
+{% else %}
       cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
+{% endif %}
 {% endif %}
       cy.get('a[aria-label="Edit"]').click();
 {% else %}
@@ -786,7 +810,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if list_id_is_unique %}
         cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
+{% if list_nav_by_record_id %}
+        cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).closest('.MuiDataGrid-row').invoke('attr', 'data-id').then((id) => { cy.visit(`/en/{{ parent }}/view/${id}`); });
+{% else %}
         cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
+{% endif %}
 {% endif %}
         cy.get('a[aria-label="Edit"]').click();
 {% elif can_list %}
@@ -893,7 +921,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if list_id_is_unique %}
           cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
+{% if list_nav_by_record_id %}
+          cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).closest('.MuiDataGrid-row').invoke('attr', 'data-id').then((id) => { cy.visit(`/en/{{ parent }}/view/${id}`); });
+{% else %}
           cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
+{% endif %}
 {% endif %}
           cy.get('a[aria-label="Edit"]').click();
 {% elif can_view %}
@@ -932,7 +964,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if list_id_is_unique %}
           cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
+{% if list_nav_by_record_id %}
+          cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).closest('.MuiDataGrid-row').invoke('attr', 'data-id').then((id) => { cy.visit(`/en/{{ parent }}/view/${id}`); });
+{% else %}
           cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
+{% endif %}
 {% endif %}
           cy.get('a[aria-label="Edit"]').click();
 {% elif can_view %}
@@ -969,7 +1005,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if list_id_is_unique %}
           cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
+{% if list_nav_by_record_id %}
+          cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).closest('.MuiDataGrid-row').invoke('attr', 'data-id').then((id) => { cy.visit(`/en/{{ parent }}/view/${id}`); });
+{% else %}
           cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
+{% endif %}
 {% endif %}
           cy.get('a[aria-label="Edit"]').click();
 {% elif can_view %}
@@ -1045,7 +1085,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if list_id_is_unique %}
           cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
+{% if list_nav_by_record_id %}
+          cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).closest('.MuiDataGrid-row').invoke('attr', 'data-id').then((id) => { cy.visit(`/en/{{ parent }}/view/${id}`); });
+{% else %}
           cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
+{% endif %}
 {% endif %}
           cy.get('a[aria-label="Edit"]').click();
 {% elif can_view %}

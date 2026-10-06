@@ -3924,6 +3924,11 @@ def spec_context(
     check_field_use_accordion = False
     check_field_inner_label = None
     check_field_skip = False
+    # True only for an entity with no primary column and no `name` column whose
+    # list shows the first required FK's label: that list renders no link in a
+    # row/cell and its card title is the row id, so the generated spec opens a
+    # record by its id instead of clicking a link.
+    list_nav_by_record_id = False
 
     if prim_is_fk:
         primary_rel = next((r for r in relationships if r['prop_name'] == f'{prim}_id'), None)
@@ -4169,6 +4174,7 @@ def spec_context(
             _fk_label = _first_required_fk_display_label(fields, schema)
             list_id_1 = _fk_label if _fk_label is not None else f'{title} 1'
             list_id_is_unique = _fk_label is None
+            list_nav_by_record_id = _fk_label is not None
             after_create_id = _fk_label if _fk_label is not None else f'Test {title}'
             after_create_id_is_expr = False
             primary_dep_var_for_list = None
@@ -4546,6 +4552,7 @@ def spec_context(
         # List identifiers
         'list_id_1': list_id_1,
         'list_id_is_unique': list_id_is_unique,
+        'list_nav_by_record_id': list_nav_by_record_id,
         'after_create_id': after_create_id,
         'after_create_id_is_expr': after_create_id_is_expr,
         'primary_dep_var_for_list': primary_dep_var_for_list,
