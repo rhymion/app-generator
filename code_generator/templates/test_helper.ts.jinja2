@@ -606,8 +606,14 @@ export async function populate{{ pascal }}Data(length: number) {
     // through {{ nested.target }} ({{ nested.dep_var_name }}) — give this loop iteration
     // its own fresh {{ nested.target }} row instead of the shared populate{{ pascal }}Dependencies()
     // instance, or every {{ primary_fk_dep.target }} row in the loop renders an identical label.
+{% for fk in nested.internal_fk_deps %}
+    const {{ nested.dep_var_name }}Fresh{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
     const {{ nested.dep_var_name }}Fresh = await prisma.{{ nested.target }}.create({
       data: _dep('{{ nested.target }}.{{ nested.dep_var_name }}', '{{ nested.target }}', {
+{% for fk in nested.internal_fk_deps %}
+        {{ fk.prop_name }}: {{ nested.dep_var_name }}Fresh{{ fk.var_name | pascal_case }}.id,
+{% endfor %}
 {% for ef in nested.extra_required_fields %}
         {{ ef.prop_name }}: {{ ef.prisma_val_unique }},
 {% endfor %}
@@ -789,8 +795,14 @@ export async function populate{{ pascal }}FullData(length: number) {
 {% for nested in primary_fk_dep.nested_fk_deps %}
     // cmd_958: see populate{{ pascal }}Data for the rationale — {{ nested.target }} needs
     // its own fresh row per iteration to disambiguate {{ primary_fk_dep.target }}'s label.
+{% for fk in nested.internal_fk_deps %}
+    const {{ nested.dep_var_name }}Fresh{{ fk.var_name | pascal_case }} = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
     const {{ nested.dep_var_name }}Fresh = await prisma.{{ nested.target }}.create({
       data: _dep('{{ nested.target }}.{{ nested.dep_var_name }}', '{{ nested.target }}', {
+{% for fk in nested.internal_fk_deps %}
+        {{ fk.prop_name }}: {{ nested.dep_var_name }}Fresh{{ fk.var_name | pascal_case }}.id,
+{% endfor %}
 {% for ef in nested.extra_required_fields %}
         {{ ef.prop_name }}: {{ ef.prisma_val_unique }},
 {% endfor %}

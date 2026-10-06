@@ -3272,6 +3272,7 @@ def helper_context(
                     'target': _nested_dep['target'],
                     'extra_required_fields': _nested_efs,
                     'fk_deps': _nested_dep.get('fk_deps') or [],
+                    'internal_fk_deps': _nested_dep.get('internal_fk_deps') or [],
                 })
         primary_fk_dep['nested_fk_deps'] = _nested_fk_deps
 
