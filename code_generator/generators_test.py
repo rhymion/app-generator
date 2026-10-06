@@ -262,8 +262,14 @@ def _seed_relation_label_value(
     schema: dict,
     *,
     unique_index: int | None = None,
+    name_title: str | None = None,
 ) -> str:
     """Expected UI label for a populated FK target.
+
+    `name_title` overrides the title used for a bare `name` label field. The
+    populate helper names a dependency row after the foreign-key stem, which
+    differs from the target model title when the FK is aliased (e.g.
+    `placed_step_id` -> `step` seeds `Test Placed Step ...`).
 
     `label_field` may be a single field name, a dotted path through outbound
     m2o / one-to-one relations, or a list of either — mirroring what the UI
@@ -284,7 +290,7 @@ def _seed_relation_label_value(
     if resolved:
         parts = []
         for r in resolved:
-            parts.append(_seed_path_part(target, r, schema, unique_index=unique_index))
+            parts.append(_seed_path_part(target, r, schema, unique_index=unique_index, name_title=name_title))
         return ' '.join(parts)
 
     # Fallback for callers that pass a missing/unknown label_field — keep the
@@ -307,6 +313,7 @@ def _seed_path_part(
     schema: dict,
     *,
     unique_index: int | None,
+    name_title: str | None = None,
 ) -> str:
     """Expected UI value of a single resolved labelField path on the target row.
 
@@ -359,7 +366,7 @@ def _seed_path_part(
     prop_type = next((t for t in prop_type_raw if t != 'null'), None) if isinstance(prop_type_raw, list) else prop_type_raw
 
     if final_field == 'name':
-        title = to_title_case(cursor_entity)
+        title = name_title if (name_title and cursor_entity == target) else to_title_case(cursor_entity)
         if cursor_entity == 'user':
             # is_user_account targets are excluded from Phase2's per-call
             # callIndex namespace (test_helper.ts.jinja2 §4.2/cmd614) — the
@@ -3856,6 +3863,7 @@ def spec_context(
             primary_rel.get('label_field_is_date', False),
             schema,
             unique_index=1,
+            name_title=dep_title,
         ) if primary_rel else f'Test {dep_title} 1'
         list_id_is_unique = True
         after_create_id = None
@@ -3886,6 +3894,7 @@ def spec_context(
             primary_rel.get('label_field', 'name'),
             primary_rel.get('label_field_is_date', False),
             schema,
+            name_title=dep_title,
         ) if primary_rel else list_id_1) if not prim_is_server_value else list_id_1
         has_edit_primary = not prim_is_server_value
         edit_field_label = dep_title
