@@ -46,6 +46,7 @@ model widget {
   creator        user      @relation("WidgetCreator", fields: [creator_id], references: [id])
   updater_id     String
   updater        user      @relation("WidgetUpdater", fields: [updater_id], references: [id])
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
 }
@@ -61,6 +62,7 @@ model gadget {
   creator    user     @relation("GadgetCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user     @relation("GadgetUpdater", fields: [updater_id], references: [id])
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
 }
@@ -78,6 +80,7 @@ model sprocket {
   creator        user      @relation("SprocketCreator", fields: [creator_id], references: [id])
   updater_id     String
   updater        user      @relation("SprocketUpdater", fields: [updater_id], references: [id])
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
 }
@@ -96,6 +99,7 @@ model cog {
   creator    user     @relation("CogCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user     @relation("CogUpdater", fields: [updater_id], references: [id])
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
 }

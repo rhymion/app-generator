@@ -58,6 +58,7 @@ model filter_sort_gate_item {
   creator    user                 @relation("FilterSortGateItemCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user                 @relation("FilterSortGateItemUpdater", fields: [updater_id], references: [id])
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
 }

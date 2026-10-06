@@ -57,6 +57,7 @@ model state_transition_gate_widget {
   creator    user                             @relation("StateTransitionGateWidgetCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user                             @relation("StateTransitionGateWidgetUpdater", fields: [updater_id], references: [id])
+  @@index([code])
   @@index([creator_id])
   @@index([updater_id])
 }
@@ -76,6 +77,7 @@ model state_transition_gate_readonly_widget {
   creator    user                                       @relation("StateTransitionGateReadonlyWidgetCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user                                       @relation("StateTransitionGateReadonlyWidgetUpdater", fields: [updater_id], references: [id])
+  @@index([code])
   @@index([creator_id])
   @@index([updater_id])
 }

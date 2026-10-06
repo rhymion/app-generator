@@ -35,6 +35,10 @@ definitions:
       invalidate: false
       api: false
       test: false
+    x-display:
+      table:
+        - name:
+            primary: true
     fields:
       parent_only_id:
         pattern: "^c[a-z0-9]{24,}$"
@@ -55,6 +59,10 @@ definitions:
       invalidate: false
       api: false
       test: false
+    x-display:
+      table:
+        - name:
+            primary: true
     fields:
       parent_only_id:
         pattern: "^c[a-z0-9]{24,}$"
@@ -81,6 +89,10 @@ definitions:
       invalidate: false
       api: true
       test: true
+    x-display:
+      table:
+        - name:
+            primary: true
     fields:
       name:
         minLength: 1
@@ -184,6 +196,10 @@ definitions:
       invalidate: false
       api: true
       test: true
+    x-display:
+      table:
+        - name:
+            primary: true
     fields:
       name:
         minLength: 1
@@ -207,7 +223,8 @@ definitions:
     # grids on the parents' screens must still hide the other parent's FK.
     x-display:
       table:
-        - name: {}
+        - name:
+            primary: true
         - excl_alpha_id: {}
         - excl_beta_id: {}
         - placed_alpha_id: {}
@@ -238,7 +255,8 @@ definitions:
     x-exclusive-parents: [excl_alpha, excl_beta]
     x-display:
       table:
-        - name: {}
+        - name:
+            primary: true
         - excl_alpha_id: {}
         - excl_beta_id: {}
     x-generate:
@@ -270,6 +288,10 @@ definitions:
       invalidate: false
       api: true
       test: true
+    x-display:
+      table:
+        - name:
+            primary: true
     fields:
       name:
         minLength: 1
@@ -293,6 +315,10 @@ definitions:
       invalidate: false
       api: true
       test: true
+    x-display:
+      table:
+        - name:
+            primary: true
     fields:
       name:
         minLength: 1
@@ -316,6 +342,10 @@ definitions:
       invalidate: false
       api: false
       test: false
+    x-display:
+      table:
+        - name:
+            primary: true
     fields:
       name:
         minLength: 1
@@ -331,6 +361,10 @@ definitions:
       invalidate: false
       api: true
       test: true
+    x-display:
+      table:
+        - name:
+            primary: true
     fields:
       name:
         minLength: 1

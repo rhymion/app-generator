@@ -45,6 +45,7 @@ model widget_catalog {
   creator         user          @relation("WidgetCatalogCreator", fields: [creator_id], references: [id])
   updater_id      String
   updater         user          @relation("WidgetCatalogUpdater", fields: [updater_id], references: [id])
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
 }
@@ -62,6 +63,7 @@ model paid_widget {
   creator    user     @relation("PaidWidgetCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user     @relation("PaidWidgetUpdater", fields: [updater_id], references: [id])
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
   @@index([widget_catalog_id])
@@ -79,6 +81,7 @@ model paid_gadget {
   creator    user     @relation("PaidGadgetCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user     @relation("PaidGadgetUpdater", fields: [updater_id], references: [id])
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
 }
@@ -93,6 +96,7 @@ model plain_widget {
   creator    user     @relation("PlainWidgetCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user     @relation("PlainWidgetUpdater", fields: [updater_id], references: [id])
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
 }

@@ -30,6 +30,7 @@ model plain_widget {
   creator    user     @relation("PlainWidgetCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user     @relation("PlainWidgetUpdater", fields: [updater_id], references: [id])
+  @@index([label])
   @@index([creator_id])
   @@index([updater_id])
 }

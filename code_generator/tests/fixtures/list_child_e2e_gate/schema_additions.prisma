@@ -49,6 +49,7 @@ model lc_edit_child {
 
   @@index([lc_edit_parent_id])
   @@index([rel_par_id])
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
 }
@@ -149,6 +150,7 @@ model lc_ro_child {
   updater    user     @relation("LcRoChildUpdater", fields: [updater_id], references: [id])
 
   @@index([lc_ro_parent_id])
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
 }
@@ -182,6 +184,7 @@ model lc_req_child {
   updater         user         @relation("LcReqChildUpdater", fields: [updater_id], references: [id])
 
   @@index([lc_req_parent_id])
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
 }

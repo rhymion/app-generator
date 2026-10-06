@@ -32,6 +32,10 @@ definitions:
         handler: invalidateWidget
       api: true
       test: false
+    x-display:
+      table:
+        - name:
+            primary: true
     fields:
       name: {}
 
@@ -47,6 +51,10 @@ definitions:
       invalidate: false
       api: true
       test: false
+    x-display:
+      table:
+        - name:
+            primary: true
     fields:
       name: {}
 
@@ -67,6 +75,10 @@ definitions:
       invalidate: true
       api: true
       test: false
+    x-display:
+      table:
+        - name:
+            primary: true
     fields:
       name: {}
 
@@ -84,5 +96,9 @@ definitions:
       invalidate: true
       api: true
       test: false
+    x-display:
+      table:
+        - name:
+            primary: true
     fields:
       name: {}

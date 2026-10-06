@@ -53,6 +53,10 @@ definitions:
       on_rejected:
         set_fields:
           status: rejected
+    x-display:
+      table:
+        - code:
+            primary: true
     fields:
       code: {}
       status:
@@ -73,6 +77,10 @@ definitions:
       invalidate: false
       api: false
       test: false
+    x-display:
+      table:
+        - code:
+            primary: true
     fields:
       code: {}
       stage:

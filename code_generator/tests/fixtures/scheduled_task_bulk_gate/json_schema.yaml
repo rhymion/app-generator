@@ -51,6 +51,10 @@ definitions:
       handler: afterTimeout
       interval: "0 * * * *"
       depends_on: [demo_reset]
+    x-display:
+      table:
+        - name:
+            primary: true
     fields:
       name: {}
       status:

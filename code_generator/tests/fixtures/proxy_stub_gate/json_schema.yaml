@@ -29,6 +29,10 @@ definitions:
       invalidate: false
       api: true
       test: false
+    x-display:
+      table:
+        - name:
+            primary: true
     fields:
       name: {}
 

@@ -32,6 +32,10 @@ definitions:
       invalidate: false
       api: true
       test: false
+    x-display:
+      table:
+        - label:
+            primary: true
     fields:
       code: {}
       label: {}
