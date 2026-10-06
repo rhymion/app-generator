@@ -4,6 +4,22 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
+### Changed
+- **A list-view entity must declare an `x-display.table` column with `primary: true`**
+  (issue #837). Schema validation now fails, naming the entity, when an entity that has a list page
+  declares none; a shown column merely named `name` no longer stands in for it. Entities with
+  `x-generate.list: false`, a chart-only `x-display`, `x-internal` entities and child-only
+  entities are not affected, and there is no exception by entity name. The default schema's
+  `role`, `organization` and `permission` declare it (the list link and card title stay on `name`;
+  `role` and `organization` now declare their `name` and `description` columns explicitly, with
+  `@@index` entries on both), so every consumer picks this up on its next generator update and
+  must add the declaration to any entity of its own that lacks one.
+  The generated specs no longer guess when no primary is declared: the UI spec's `name`-column
+  fallback and its no-primary navigation-by-record-id variant (issues #698, #831) and the API
+  spec's `name` assertion are removed, and a UI spec for an entity without a primary column is
+  refused. The shared list components still default `primaryField` to `name`; that default is
+  not changed here.
+
 ### Removed
 - **Stopped generating the standalone Checkout Session route
   `app/api/payment/checkout/route.ts` for `x-payment`** (issue #785). Any signed-in
