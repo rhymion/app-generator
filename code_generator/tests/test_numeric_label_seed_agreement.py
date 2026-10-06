@@ -93,3 +93,33 @@ def test_dependency_rows_without_a_row_index_keep_the_minimum():
     prop = {"type": "integer", "minimum": 1}
     schema = _schema(prop)
     assert _seed_relation_label_value("placement", "slot_no", False, schema) == "1"
+
+
+@pytest.mark.parametrize(
+    "prop",
+    [
+        {"type": "integer"},
+        {"type": "integer", "minimum": 1},
+        {"type": "integer", "minimum": 1, "maximum": 100000},
+    ],
+)
+def test_label_is_distinct_per_row_when_bounds_leave_room(prop):
+    # Specs seed a handful of rows; without a bound tighter than the row
+    # spacing every row gets its own label text.
+    schema = _schema(prop)
+    rows = range(1, 6)
+    labels = [_seed_relation_label_value("placement", "slot_no", False, schema, unique_index=i) for i in rows]
+    assert len(set(labels)) == len(labels)
+    assert [_numeric_unique_seed(prop, i) for i in rows] == [100, 200, 300, 400, 500]
+
+
+def test_tight_bounds_repeat_the_clamped_value_across_rows():
+    # Known limit, same as the entity's own helper: a bound tighter than the
+    # row spacing (here minimum 500) clamps several rows to one value. The
+    # populate helper and the expected label still agree row for row, so the
+    # list assertion holds; only the numeric part of the label repeats.
+    prop = {"type": "integer", "minimum": 500}
+    schema = _schema(prop)
+    labels = [_seed_relation_label_value("placement", "slot_no", False, schema, unique_index=i) for i in (1, 2, 3)]
+    assert labels == ["500", "500", "500"]
+    assert [_numeric_unique_seed(prop, i) for i in (1, 2, 3)] == [500, 500, 500]
