@@ -558,6 +558,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if seed_count == 0 %}
       cy.task('db:populate{{ pascal }}', 2);
       cy.visit('/en/{{ parent }}');
+{% if list_id_is_unique %}
+      // Confirm the row is present before deleting, so the closing
+      // `not.exist` assertion below can only pass because of the delete.
+      cy.contains(exactRe('{{ list_id_1 }}')).should('be.visible');
+{% endif %}
       cy.selectDataGridRows([0]);
       cy.get('div').find('button[aria-label="Delete Selected"]').first().click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();
@@ -584,6 +589,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if seed_count == 0 %}
       cy.task('db:populate{{ pascal }}', 3);
       cy.visit('/en/{{ parent }}');
+{% if list_id_is_unique %}
+      // Confirm the row is present before deleting, so the closing
+      // `not.exist` assertion below can only pass because of the delete.
+      cy.contains(exactRe('{{ list_id_1 }}')).should('be.visible');
+{% endif %}
       cy.selectDataGridRows([0, 1]);
       cy.get('div').find('button[aria-label="Delete Selected"]').first().click();
       cy.get('div[role="dialog"]').find('button').contains('Delete').first().click();

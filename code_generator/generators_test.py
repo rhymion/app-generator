@@ -404,6 +404,34 @@ def _seed_path_part(
     return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
 
 
+def _first_required_fk_display_label(fields: list, schema: dict) -> str | None:
+    """Rendered display label of the first required FK on a seeded row.
+
+    An entity with no primary column and no `name` column shows only the
+    display labels of its parents in the list (and card) view, so a text such
+    as `'{Title} 1'` never appears on screen. The parent's label is the same
+    text the form's `checkField` assertion uses for that FK (the dependency
+    row's `A`-suffixed label), so it is the string the list renders for a row
+    seeded against the dependency helper's rows.
+
+    Returns None when no required FK has a statically known label (none
+    declared, or the label field is the raw row id).
+    """
+    for f in fields:
+        if f.get('category') != 'autocomplete' or not f.get('dep_target') or not f.get('required'):
+            continue
+        label_field = f.get('dep_label_field')
+        if label_field == 'id':
+            return None
+        if label_field and label_field != 'name':
+            return _seed_relation_label_value(
+                f['dep_target'], label_field, f.get('dep_label_field_is_date', False), schema,
+            )
+        stem = re.sub(r'_id$', '', f['prop_name'])
+        return f'Test {to_title_case(stem)} A'
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Decimal test-value derivation (cmd_754)
 # ---------------------------------------------------------------------------
@@ -4090,9 +4118,15 @@ def spec_context(
             check_field_updated = 'Test User'
             check_field_skip = True  # created_by is list-only virtual; not in FormView
         else:
-            list_id_1 = f'{title} 1'
-            list_id_is_unique = True
-            after_create_id = f'Test {title}'
+            # No primary column and no `name` column: the list/card never
+            # renders a '{Title} 1' / 'Test {Title}' placeholder, only the
+            # parents' display labels. Assert the first required FK's label;
+            # it repeats across rows seeded against the same dependency, so
+            # it does not identify a single row (list_id_is_unique False).
+            _fk_label = _first_required_fk_display_label(fields, schema)
+            list_id_1 = _fk_label if _fk_label is not None else f'{title} 1'
+            list_id_is_unique = _fk_label is None
+            after_create_id = _fk_label if _fk_label is not None else f'Test {title}'
             after_create_id_is_expr = False
             primary_dep_var_for_list = None
             list_id_updated = f'Updated {title}'
