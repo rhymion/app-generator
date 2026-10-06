@@ -100,3 +100,58 @@ class TestFillAssertSymmetry:
         # fill references deps.parent.name; assert expects 'Test Parent A'
         assert "deps.parent.name" in fill_cmds[0]
         assert "'Test Parent A'" in assert_cmds[0]
+
+
+class TestGenAssertCommandsSecondFKToSameTarget:
+    """Two FKs to one target whose label is not the bare `name` field.
+
+    The populate helper names each dependency row after its foreign-key stem, so
+    the expected label of the second FK must follow its own stem rather than
+    repeat the first FK's value.
+    """
+
+    @staticmethod
+    def _schema() -> dict:
+        return {
+            'definitions': {
+                'parameter': {
+                    'type': 'object',
+                    'required': ['id', 'title', 'name'],
+                    'properties': {
+                        'id': {'type': 'string'},
+                        'title': {'type': 'string'},
+                        'name': {'type': 'string'},
+                    },
+                },
+            },
+        }
+
+    @staticmethod
+    def _field(prop_name: str, label: str) -> dict:
+        field = _fk_field(prop_name, 'parameter', label)
+        field['dep_label_field'] = ['title', 'name']
+        return field
+
+    def test_each_fk_expects_its_own_stem_title(self):
+        fields = [
+            self._field('parameter_id', 'Parameter'),
+            self._field('source_parameter_id', 'Source Parameter'),
+        ]
+        fk_dep_vars = {'parameter_id': 'parameter', 'source_parameter_id': 'sourceParameter'}
+        cmds = gen_assert_commands(fields, 'Step Argument', '', fk_dep_vars, schema=self._schema())
+        assert cmds == [
+            "cy.checkField('Parameter', 'Test Title A Test Parameter A');",
+            "cy.checkField('Source Parameter', 'Test Title A Test Source Parameter A');",
+        ]
+
+    def test_single_fk_to_target_is_unchanged(self):
+        fields = [self._field('parameter_id', 'Parameter')]
+        cmds = gen_assert_commands(
+            fields, 'Step Argument', '', {'parameter_id': 'parameter'}, schema=self._schema()
+        )
+        assert cmds == ["cy.checkField('Parameter', 'Test Title A Test Parameter A');"]
+
+    def test_without_dep_vars_falls_back_to_target_title(self):
+        fields = [self._field('source_parameter_id', 'Source Parameter')]
+        cmds = gen_assert_commands(fields, 'Step Argument', '', None, schema=self._schema())
+        assert cmds == ["cy.checkField('Source Parameter', 'Test Title A Test Parameter A');"]

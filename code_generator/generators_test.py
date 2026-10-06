@@ -1868,15 +1868,19 @@ def gen_assert_commands(
                 dep_label_field = field.get('dep_label_field')
                 # Prefer the rich resolver (handles list-form labelField, dotted
                 # paths, and the YYYY-MM-DD date format produced by formatLabelValue).
+                prop_stem = re.sub(r'_id$', '', field['prop_name'])
                 if dep_label_field and dep_label_field != 'name' and schema is not None:
+                    # The populate helper names the dependency row after the
+                    # foreign-key stem, so a second foreign key to the same
+                    # target must expect its own row's label, not the first's.
                     dep_title = _seed_relation_label_value(
                         dep_target,
                         dep_label_field,
                         field.get('dep_label_field_is_date', False),
                         schema,
+                        name_title=to_title_case(prop_stem) if dep_var else None,
                     )
                 elif dep_var:
-                    prop_stem = re.sub(r'_id$', '', field['prop_name'])
                     dep_title = f'Test {to_title_case(prop_stem)} A'
                 else:
                     dep_title = f'Test {to_title_case(dep_target)} A'
