@@ -500,11 +500,7 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% elif can_list and can_view %}
         cy.visit('/en/{{ parent }}');
         cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-{% if list_nav_by_record_id %}
-        cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).closest('.MuiDataGrid-row').invoke('attr', 'data-id').then((id) => { cy.visit(`/en/{{ parent }}/view/${id}`); });
-{% else %}
         cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
-{% endif %}
         cy.get('a[aria-label="Edit"]').click();
 {% elif can_list %}
         cy.visit('/en/{{ parent }}');
