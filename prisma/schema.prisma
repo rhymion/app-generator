@@ -157,6 +157,8 @@ model role {
   permissions   permission[]
   requestor_approval_flows approval_flow[] @relation("ApprovalFlowRequestorRole")
   approver_approval_flows  approval_flow[] @relation("ApprovalFlowApproverRole")
+  @@index([name])
+  @@index([description])
   @@index([creator_id])
   @@index([updater_id])
 }
@@ -178,6 +180,8 @@ model organization {
   // requires the non-FK side to be `Model?`, not `Model[]`, for the client
   // type to reflect that real cardinality instead of a misleading array.
   app_setting app_setting?
+  @@index([name])
+  @@index([description])
   @@index([creator_id])
   @@index([updater_id])
 }
