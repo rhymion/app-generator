@@ -3963,7 +3963,7 @@ def spec_context(
         all_assert_cmds_no_bool.append(f"{I}cy.checkField('{ua['label']}', '{ua['dep_name']}');")
 
     # Compute list identifiers based on primary display field.
-    # Priority: FK primary → explicit non-name primary → name → fallback.
+    # Priority: FK primary → explicit non-name primary → name primary.
     prim = _get_primary_display_field_name(parent_def)
     prim_is_fk = bool(prim and f'{prim}_id' in (parent_def.get('properties') or {}))
     # cmd_611/612: a primary FK that is also x-server-value is never rendered
@@ -4164,7 +4164,7 @@ def spec_context(
             check_field_label = lbl
             check_field_value_1 = list_id_1
             check_field_updated = list_id_updated
-    elif has_name:
+    elif prim == 'name' and has_name:
         name_meta = next((f for f in fields if f['prop_name'] == 'name'), None)
         if name_meta and name_meta.get('category') == 'entity_select':
             opts = name_meta.get('entity_options') or []
@@ -5088,9 +5088,8 @@ def api_spec_context(
             ua_update_field = candidates[0]
             ua_update_expr = f'records[0].{candidates[0]["prop_name"]} + 100'
 
-    # Compute assertions for 3.1 and 4.1 based on primary display field
-    # Fallback: use 'name' field if no x-display primary is set
-    has_name_field = any(f['prop_name'] == 'name' for f in all_field_metas)
+    # Compute assertions for 3.1 and 4.1 from the declared primary display field.
+    # An entity with no declared primary column only asserts its id.
     if primary_fk_is_ua and ua_update_field:
         assert_create = f'expect(getRes.body.{primary_field_name}.id).to.eq(deps.{primary_dep_var}.id);'
         assert_update = f'expect(getRes.body.{ua_update_field["prop_name"]}).to.eq({ua_update_expr});'
@@ -5124,23 +5123,9 @@ def api_spec_context(
         else:
             assert_create = 'expect(getRes.body.id).to.exist;'
             assert_update = 'expect(getRes.body.id).to.eq(records[0].id);'
-    elif has_name_field:
-        name_meta_api = next((f for f in all_field_metas if f['prop_name'] == 'name'), None)
-        if name_meta_api and name_meta_api.get('category') == 'entity_select':
-            _opts = name_meta_api.get('entity_options') or []
-            _create_val = api_value(name_meta_api, title)
-            _update_val = f"'{_opts[1]['value']}'" if len(_opts) > 1 else _create_val
-            assert_create = f"expect(getRes.body.name).to.eq({_create_val});"
-            assert_update = f"expect(getRes.body.name).to.eq({_update_val});"
-        else:
-            assert_create = f"expect(getRes.body.name).to.eq('Test {title}');"
-            assert_update = f"expect(getRes.body.name).to.eq('Updated {title}');"
     else:
         assert_create = 'expect(getRes.body.id).to.exist;'
         assert_update = 'expect(getRes.body.id).to.eq(records[0].id);'
-
-    # For the name-fallback case, _put_body_impl also needs to change 'name'
-    has_name_fallback = has_name_field and not primary_field_name and not primary_is_fk
 
     # 5.1: choose which required non-autocomplete field to omit
     non_ac_required = [f for f in all_field_metas if f['required'] and f['category'] != 'autocomplete']
@@ -5226,14 +5211,6 @@ def api_spec_context(
                 else:
                     update_label = primary_meta.get('label', to_title_case(prop)) if primary_meta else to_title_case(prop)
                     out.append(f"{indent}{prop}: 'Updated {update_label}',")
-            elif has_name_fallback and prop == 'name':
-                nm = next((f for f in all_field_metas if f['prop_name'] == 'name'), None)
-                if nm and nm.get('category') == 'entity_select':
-                    _opts = nm.get('entity_options') or []
-                    _v = f"'{_opts[1]['value']}'" if len(_opts) > 1 else api_value(nm, title)
-                    out.append(f"{indent}name: {_v},")
-                else:
-                    out.append(f"{indent}name: 'Updated {title}',")
             else:
                 out.append(f"{indent}{prop}: {record_var}.{prop},")
         for c in api_child_metas:
