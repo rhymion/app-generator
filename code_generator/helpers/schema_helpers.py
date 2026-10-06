@@ -584,6 +584,54 @@ def derive_cross_entity_searchable_fields(entity_name: str, schema: dict) -> lis
     return result
 
 
+def is_integer_prop(prop: dict) -> bool:
+    t = prop.get('type')
+    if isinstance(t, str):
+        return t == 'integer'
+    if isinstance(t, list):
+        return 'integer' in t and all(v in ('integer', 'null') for v in t)
+    return False
+
+
+def derive_searchable_integer_fields(entity_name: str, schema: dict) -> list[str]:
+    """Own integer fields that appear as a plain (non-dotted) segment of some
+    FK's `x-relationship.labelField` targeting `entity_name`.
+
+    The screen label of such a relation ends in the integer's digits
+    (e.g. `[test_case.title, step.name, step_no]` renders `Title Step 1`),
+    but `contains` is a string-only Prisma operator, so the integer segment
+    never joins the text/relation search fields and the last typed token
+    matches nothing. The generated `searchXxxOptions` matches an all-digit
+    token against these fields by equality instead, in addition to the
+    string fields (see getters.ts.jinja2) — purely additive per token.
+
+    Only integer columns qualify: enum, boolean, decimal, date and FK
+    columns keep their existing behavior. Order follows first reference in
+    schema declaration order, de-duplicated.
+    """
+    own_props = get_entity_properties(entity_name, schema)
+    result: list[str] = []
+    for other_def in schema.get('definitions', {}).values():
+        if not isinstance(other_def, dict):
+            continue
+        for prop in (other_def.get('properties') or {}).values():
+            if not isinstance(prop, dict):
+                continue
+            rel = prop.get('x-relationship') or {}
+            if rel.get('target') != entity_name:
+                continue
+            for path in _label_field_paths(rel.get('labelField')):
+                if '.' in path or path in result:
+                    continue
+                final_prop = own_props.get(path)
+                if not isinstance(final_prop, dict) or not is_integer_prop(final_prop):
+                    continue
+                if isinstance(final_prop.get('enum'), list) or final_prop.get('x-relationship'):
+                    continue
+                result.append(path)
+    return result
+
+
 def _get_entity_base_props(entity: str, schema: dict) -> dict:
     """Returns the base (raw-entity) properties for an entity, resolving allOf if needed.
 

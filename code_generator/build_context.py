@@ -16,7 +16,7 @@ from helpers.schema_helpers import (
     is_optional_fk_to_parent, get_parent_fk_props, resolve_parent_fk_props, get_one_to_one_rels,
     get_detail_ref_rels, get_flatten_rels, get_approval_lines_props,
     derive_text_fields, derive_searchable_relation_fields,
-    derive_cross_entity_searchable_fields,
+    derive_cross_entity_searchable_fields, derive_searchable_integer_fields,
     get_internal_bridge_fk_prop_names,
     get_entity_properties, get_self_only_flags,
     derive_write_locked_values,
@@ -3043,9 +3043,15 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     for _rf in derive_cross_entity_searchable_fields(model, schema):
         if _rf not in searchable_relation_fields:
             searchable_relation_fields.append(_rf)
+    # Integer columns that other entities' labelField shows as a plain segment
+    # (e.g. step_no): matched by equality against an all-digit token, since
+    # `contains` is string-only. See derive_searchable_integer_fields().
+    searchable_integer_fields = [
+        f for f in derive_searchable_integer_fields(model, schema) if f in filtered_props
+    ]
     searchable_fields_display = searchable_text_fields + [
         f"{rf['relation']}.{rf['field']}" for rf in searchable_relation_fields
-    ]
+    ] + searchable_integer_fields
     # Default ordering for the search action — newest entities are the most
     # likely autocomplete picks. Falls back to id when no audit column exists.
     default_search_order_field = (
@@ -4654,6 +4660,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         decimal_scales_quoted=decimal_scales_quoted,
         searchable_text_fields=searchable_text_fields,
         searchable_relation_fields=searchable_relation_fields,
+        searchable_integer_fields=searchable_integer_fields,
         searchable_fields_display=searchable_fields_display,
         default_search_order_field=default_search_order_field,
         default_search_order_dir=default_search_order_dir,

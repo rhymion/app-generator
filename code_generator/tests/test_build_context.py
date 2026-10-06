@@ -2756,3 +2756,60 @@ class TestNormalizedValueExprWriteOnly:
         columns only."""
         expr = _normalized_value_expr("password", "password", self._write_only_defn(nullable=False))
         assert expr == "password === '' ? undefined : password"
+
+
+# ---------------------------------------------------------------------------
+# Integer labelField segment search: the displayed label of a relation can end
+# in an integer (e.g. a step number). `contains` is string-only, so the
+# generated searchXxxOptions matches an all-digit token by equality as well.
+# ---------------------------------------------------------------------------
+
+class TestSearchableIntegerLabelSegment:
+
+    @staticmethod
+    def _schema(label_field, extra_props: dict = None) -> dict:
+        return {"definitions": {
+            "placement": {
+                "type": "object",
+                "required": ["id", "name", "step_no"],
+                "properties": _base_props({"step_no": {"type": "integer"}, **(extra_props or {})}),
+            },
+            "argument": {
+                "type": "object",
+                "required": ["id", "name", "placement_id"],
+                "properties": _base_props({"placement_id": _fk_field("placement", label=label_field)}),
+            },
+        }}
+
+    @staticmethod
+    def _render(schema: dict) -> str:
+        from generate import _make_env
+        from generators import service_context
+        ctx = build_context(_entity("placement"), schema)
+        full_ctx = {**ctx, **service_context(ctx, schema)}
+        return _make_env().get_template('getters.ts.jinja2').render(**full_ctx)
+
+    def test_integer_segment_is_derived(self):
+        schema = self._schema(["name", "step_no"])
+        ctx = build_context(_entity("placement"), schema)
+        assert ctx["searchable_integer_fields"] == ["step_no"]
+
+    def test_search_matches_digit_token_by_equality(self):
+        rendered = self._render(self._schema(["name", "step_no"]))
+        assert "if (/^\\d{1,9}$/.test(token)) {" in rendered
+        assert "orClauses.push({ step_no: { equals: Number(token) } });" in rendered
+        # string fields keep their contains match for the same token
+        assert "orClauses.push({ name: { contains: token, mode: 'insensitive' } });" in rendered
+
+    def test_no_integer_segment_leaves_search_unchanged(self):
+        schema = self._schema(["name"])
+        ctx = build_context(_entity("placement"), schema)
+        assert ctx["searchable_integer_fields"] == []
+        rendered = self._render(schema)
+        assert "equals: Number(token)" not in rendered
+        assert "test(token)" not in rendered
+
+    def test_non_integer_numeric_segment_not_derived(self):
+        schema = self._schema(["name", "ratio"], {"ratio": {"type": "number"}})
+        ctx = build_context(_entity("placement"), schema)
+        assert ctx["searchable_integer_fields"] == []
