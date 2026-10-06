@@ -85,3 +85,18 @@ def test_entity_with_a_name_column_is_unchanged():
     assert BY_ID not in text, text
     _, mobile = _render('name', 'test_spec_mobile.cy.ts.jinja2')
     assert 'view/${records[0].id}' not in mobile, mobile
+
+
+def test_no_primary_entity_asserts_a_field_the_form_renders():
+    ctx, text = _render('none', 'test_spec.cy.ts.jinja2')
+    assert ctx['has_edit_primary'] is False
+    assert ctx['edit_primary_cmd'] is None
+    assert "checkField('Name'" not in text and "clearAndFillField('Name'" not in text, text
+    assert "'Step Placement 1'" not in text and 'Updated Step Placement' not in text, text
+    assert "cy.checkField('Step', 'Test Step A');" in text, text
+
+
+def test_entity_with_a_name_column_still_edits_the_name():
+    ctx, text = _render('name', 'test_spec.cy.ts.jinja2')
+    assert ctx['has_edit_primary'] is True
+    assert "clearAndFillField('Name'" in text, text

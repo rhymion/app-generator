@@ -4185,6 +4185,22 @@ def spec_context(
             check_field_label = 'Name'
             check_field_value_1 = f'{title} 1'
             check_field_updated = f'Updated {title}'
+            if _fk_label is not None:
+                # The form and the view page render no 'Name' field and no
+                # '{Title} 1' text for this entity: the edit step has no field
+                # to rename, and the view assertion targets the first required
+                # FK, whose label is the one the list shows and the edit leaves
+                # unchanged.
+                _fk_field = next(
+                    f for f in fields
+                    if f.get('category') == 'autocomplete' and f.get('dep_target') and f.get('required')
+                )
+                has_edit_primary = False
+                edit_field_label = None
+                edit_update_value = None
+                check_field_label = _fk_field['label']
+                check_field_value_1 = _fk_label
+                check_field_updated = _fk_label
 
     # detail_required: which children are required in the parent form
     detail_def = schema['definitions'].get(definition_key, {})
