@@ -533,7 +533,7 @@ export async function search{{ parent_pascal }}Options(
 {% endif %}
   const accessAnd = await build{{ parent_pascal }}AccessWhere(permissions, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
 
-{% if searchable_text_fields or searchable_relation_fields %}
+{% if searchable_text_fields or searchable_relation_fields or searchable_integer_fields %}
   const trimmed = query.trim();
   // Token-split AND search: each whitespace-separated token must match at
   // least one searchable field (OR), and every token must match (AND) —
@@ -545,7 +545,7 @@ export async function search{{ parent_pascal }}Options(
   const tokens = trimmed.split(/\s+/).filter(Boolean);
 {% endif %}
   const matchOr: Record<string, unknown>[] = [];
-{% if searchable_text_fields or searchable_relation_fields %}
+{% if searchable_text_fields or searchable_relation_fields or searchable_integer_fields %}
   if (tokens.length > 0) {
     const searchAnd = tokens.map((token) => {
       const orClauses: Record<string, unknown>[] = [];
@@ -555,6 +555,16 @@ export async function search{{ parent_pascal }}Options(
 {% for rf in searchable_relation_fields %}
       orClauses.push({ {{ rf.relation }}: { {{ rf.field }}: { contains: token, mode: 'insensitive' } } });
 {% endfor %}
+{% if searchable_integer_fields %}
+      // An integer segment of the displayed label (e.g. a step number) has no
+      // string column to `contains`-match, so an all-digit token is also
+      // matched by equality. At most 9 digits keeps the value inside Int.
+      if (/^\d{1,9}$/.test(token)) {
+{% for f in searchable_integer_fields %}
+        orClauses.push({ {{ f }}: { equals: Number(token) } });
+{% endfor %}
+      }
+{% endif %}
       return { OR: orClauses };
     });
     matchOr.push({ AND: searchAnd });

@@ -96,6 +96,20 @@ Each qualifying path in a composite `labelField` contributes its own independent
 qualify, others don't) without that being an error; it just means search coverage on that relation
 is narrower than its display label.
 
+## Integer segments of a label
+
+A plain (non-dotted) `labelField` segment that is an **integer** property of the target (for
+example `step_no` in `[test_case.title, step.name, step_no]`) is part of the on-screen label but
+cannot be matched with `contains`, which is string-only. `derive_searchable_integer_fields()`
+(`code_generator/helpers/schema_helpers.py`) collects these from every FK that targets the
+entity, and the generated `search<Entity>Options()` adds an equality clause to the per-token OR
+for any token made of 1-9 digits (`{ step_no: { equals: Number(token) } }`). The string clauses
+stay, so a token such as `1` still matches names containing `1`; only entities whose label has an
+integer segment change. Typing the label exactly as displayed (`Title Step 1`) now finds the row.
+
+Not covered: integer or decimal segments reached through a dotted path, and number/decimal/date
+segments. Those still match nothing in the search.
+
 ## Practical takeaway for schema authors
 
 If a relation's target entity has no single natural human-readable field, prefer a composite

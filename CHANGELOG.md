@@ -16,6 +16,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   there and the app does not use it.
 
 ### Fixed
+- **Matched the integer segment of a relation label in the generated autocomplete search**
+  (issue #842). When a relation's `labelField` ends in an integer property (for example a step
+  number), typing the label as displayed never found the option: the last token matched no
+  string column. The generated `search<Entity>Options()` now also matches a token of 1-9 digits
+  by equality against those integer fields. Only entities whose label has such a segment change.
 - **Skipped the child grid column that `x-exclusive-parents` hides in a parent's generated UI
   spec** (issue #822). A listed parent's form hides the other parents' FK columns in the
   embedded child grid, but the parent's generated UI spec still selected them, so
