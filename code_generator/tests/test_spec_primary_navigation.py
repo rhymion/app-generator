@@ -1,13 +1,12 @@
 """
-An entity with no primary column and no `name` column lists the first required
-FK's label, but its list renders no link in a row or cell and its card title is
-the row id. The generated specs open a record by its id (the grid row's
-`data-id`, or the seeded record) instead of clicking a link that is not there.
-Entities with a primary column, or with a `name` column, keep clicking the link.
+Specs open a record through the link in the list row or card, using the primary
+column the entity declares. An entity that declares no primary column cannot get
+a UI spec: the generator refuses rather than guessing which text the list shows.
 """
 import sys
 from pathlib import Path
 
+import pytest
 from jinja2 import Environment, FileSystemLoader
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -36,6 +35,10 @@ def _schema(kind: str) -> dict:
     elif kind == 'name':
         props['name'] = {'type': 'string'}
         required.append('name')
+        entity['x-display'] = {'table': [{'name': {'primary': True}}]}
+    elif kind == 'name_undeclared':
+        props['name'] = {'type': 'string'}
+        required.append('name')
     return {'definitions': {
         'step': {
             'type': 'object', 'required': ['id', 'name'],
@@ -60,43 +63,46 @@ def _render(kind: str, template: str) -> tuple[dict, str]:
     return ctx, _env().get_template(template).render(**ctx)
 
 
-def test_no_primary_entity_navigates_by_record_id():
-    ctx, text = _render('none', 'test_spec.cy.ts.jinja2')
-    assert ctx['list_nav_by_record_id'] is True
-    assert CLICK_LINK not in text, text
-    assert text.count(BY_ID) >= 5, text
-    assert "cy.visit(`/en/step_placement/view/${id}`)" in text
-
-
-def test_no_primary_entity_mobile_opens_the_card_by_record_id():
-    _, text = _render('none', 'test_spec_mobile.cy.ts.jinja2')
-    assert 'cy.visit(`/en/step_placement/view/${records[0].id}`)' in text, text
 
 
 def test_entity_with_a_primary_column_is_unchanged():
     ctx, text = _render('primary', 'test_spec.cy.ts.jinja2')
-    assert ctx['list_nav_by_record_id'] is False
     assert BY_ID not in text, text
 
 
 def test_entity_with_a_name_column_is_unchanged():
     ctx, text = _render('name', 'test_spec.cy.ts.jinja2')
-    assert ctx['list_nav_by_record_id'] is False
     assert BY_ID not in text, text
     _, mobile = _render('name', 'test_spec_mobile.cy.ts.jinja2')
     assert 'view/${records[0].id}' not in mobile, mobile
 
-
-def test_no_primary_entity_asserts_a_field_the_form_renders():
-    ctx, text = _render('none', 'test_spec.cy.ts.jinja2')
-    assert ctx['has_edit_primary'] is False
-    assert ctx['edit_primary_cmd'] is None
-    assert "checkField('Name'" not in text and "clearAndFillField('Name'" not in text, text
-    assert "'Step Placement 1'" not in text and 'Updated Step Placement' not in text, text
-    assert "cy.checkField('Step', 'Test Step A');" in text, text
 
 
 def test_entity_with_a_name_column_still_edits_the_name():
     ctx, text = _render('name', 'test_spec.cy.ts.jinja2')
     assert ctx['has_edit_primary'] is True
     assert "clearAndFillField('Name'" in text, text
+
+
+def test_entity_without_a_declared_primary_is_refused():
+    with pytest.raises(ValueError, match="without a primary column"):
+        _render('none', 'test_spec.cy.ts.jinja2')
+
+
+def test_a_name_column_does_not_stand_in_for_a_declared_primary():
+    with pytest.raises(ValueError, match="without a primary column"):
+        _render('name_undeclared', 'test_spec.cy.ts.jinja2')
+
+
+NO_LIST_CFG = {**CFG, 'list': False}
+
+
+def test_entity_without_a_list_view_needs_no_primary_and_gets_no_list_steps():
+    """list: false is a structural exclusion: no primary needed, no list step generated."""
+    ctx = spec_context('step_placement', [], _schema('none'), 'step_placement', 'step_placement', NO_LIST_CFG)
+    text = _env().get_template('test_spec.cy.ts.jinja2').render(**ctx)
+    assert ctx['can_list'] is False
+    assert 'MuiDataGrid' not in text, text
+    assert "cy.visit('/en/step_placement')" not in text, text
+    assert "'Step Placement 1'" not in text and 'Updated Step Placement' not in text, text
+    assert "it('2.1 creates with minimal data" in text, text

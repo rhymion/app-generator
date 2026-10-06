@@ -440,34 +440,6 @@ def _seed_path_part(
     return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
 
 
-def _first_required_fk_display_label(fields: list, schema: dict) -> str | None:
-    """Rendered display label of the first required FK on a seeded row.
-
-    An entity with no primary column and no `name` column shows only the
-    display labels of its parents in the list (and card) view, so a text such
-    as `'{Title} 1'` never appears on screen. The parent's label is the same
-    text the form's `checkField` assertion uses for that FK (the dependency
-    row's `A`-suffixed label), so it is the string the list renders for a row
-    seeded against the dependency helper's rows.
-
-    Returns None when no required FK has a statically known label (none
-    declared, or the label field is the raw row id).
-    """
-    for f in fields:
-        if f.get('category') != 'autocomplete' or not f.get('dep_target') or not f.get('required'):
-            continue
-        label_field = f.get('dep_label_field')
-        if label_field == 'id':
-            return None
-        if label_field and label_field != 'name':
-            return _seed_relation_label_value(
-                f['dep_target'], label_field, f.get('dep_label_field_is_date', False), schema,
-            )
-        stem = re.sub(r'_id$', '', f['prop_name'])
-        return f'Test {to_title_case(stem)} A'
-    return None
-
-
 # ---------------------------------------------------------------------------
 # Decimal test-value derivation (cmd_754)
 # ---------------------------------------------------------------------------
@@ -3963,7 +3935,7 @@ def spec_context(
         all_assert_cmds_no_bool.append(f"{I}cy.checkField('{ua['label']}', '{ua['dep_name']}');")
 
     # Compute list identifiers based on primary display field.
-    # Priority: FK primary → explicit non-name primary → name → fallback.
+    # Priority: FK primary → explicit non-name primary → name primary.
     prim = _get_primary_display_field_name(parent_def)
     prim_is_fk = bool(prim and f'{prim}_id' in (parent_def.get('properties') or {}))
     # cmd_611/612: a primary FK that is also x-server-value is never rendered
@@ -3981,11 +3953,6 @@ def spec_context(
     check_field_use_accordion = False
     check_field_inner_label = None
     check_field_skip = False
-    # True only for an entity with no primary column and no `name` column whose
-    # list shows the first required FK's label: that list renders no link in a
-    # row/cell and its card title is the row id, so the generated spec opens a
-    # record by its id instead of clicking a link.
-    list_nav_by_record_id = False
 
     if prim_is_fk:
         primary_rel = next((r for r in relationships if r['prop_name'] == f'{prim}_id'), None)
@@ -4164,7 +4131,7 @@ def spec_context(
             check_field_label = lbl
             check_field_value_1 = list_id_1
             check_field_updated = list_id_updated
-    elif has_name:
+    elif prim == 'name' and has_name:
         name_meta = next((f for f in fields if f['prop_name'] == 'name'), None)
         if name_meta and name_meta.get('category') == 'entity_select':
             opts = name_meta.get('entity_options') or []
@@ -4223,41 +4190,47 @@ def spec_context(
             check_field_updated = 'Test User'
             check_field_skip = True  # created_by is list-only virtual; not in FormView
         else:
-            # No primary column and no `name` column: the list/card never
-            # renders a '{Title} 1' / 'Test {Title}' placeholder, only the
-            # parents' display labels. Assert the first required FK's label;
-            # it repeats across rows seeded against the same dependency, so
-            # it does not identify a single row (list_id_is_unique False).
-            _fk_label = _first_required_fk_display_label(fields, schema)
-            list_id_1 = _fk_label if _fk_label is not None else f'{title} 1'
-            list_id_is_unique = _fk_label is None
-            list_nav_by_record_id = _fk_label is not None
-            after_create_id = _fk_label if _fk_label is not None else f'Test {title}'
-            after_create_id_is_expr = False
-            primary_dep_var_for_list = None
-            list_id_updated = f'Updated {title}'
-            has_edit_primary = True
-            edit_field_label = 'Name'
-            edit_update_value = f'Updated {title}'
-            check_field_label = 'Name'
-            check_field_value_1 = f'{title} 1'
-            check_field_updated = f'Updated {title}'
-            if _fk_label is not None:
-                # The form and the view page render no 'Name' field and no
-                # '{Title} 1' text for this entity: the edit step has no field
-                # to rename, and the view assertion targets the first required
-                # FK, whose label is the one the list shows and the edit leaves
-                # unchanged.
-                _fk_field = next(
-                    f for f in fields
-                    if f.get('category') == 'autocomplete' and f.get('dep_target') and f.get('required')
+            if not prim and can_list:
+                # No declared primary column: a list-view entity is rejected by
+                # validate.py before generation, so only an entity with no list
+                # view should reach here. An entity with `x-generate.list: false`
+                # has no list step in its spec (every list assertion and
+                # navigation is guarded by `can_list`), so it needs no primary.
+                raise ValueError(
+                    f"Entity '{parent}': cannot generate a UI spec without a primary "
+                    f"column. Declare an x-display.table column with 'primary: true'."
                 )
+            if not prim:
+                # No list view and no primary: nothing to rename or to look up
+                # in the list, so the spec skips the primary edit and check steps.
+                list_id_1 = f'{title} 1'
+                list_id_is_unique = True
+                after_create_id = f'Test {title}'
+                after_create_id_is_expr = False
+                primary_dep_var_for_list = None
+                list_id_updated = f'Updated {title}'
                 has_edit_primary = False
                 edit_field_label = None
                 edit_update_value = None
-                check_field_label = _fk_field['label']
-                check_field_value_1 = _fk_label
-                check_field_updated = _fk_label
+                check_field_label = None
+                check_field_value_1 = None
+                check_field_updated = None
+                check_field_skip = True
+            else:
+                # A declared primary that is not a form field: the list shows it, but
+                # no form input carries it, so the spec asserts the generic placeholder.
+                list_id_1 = f'{title} 1'
+                list_id_is_unique = True
+                after_create_id = f'Test {title}'
+                after_create_id_is_expr = False
+                primary_dep_var_for_list = None
+                list_id_updated = f'Updated {title}'
+                has_edit_primary = True
+                edit_field_label = 'Name'
+                edit_update_value = f'Updated {title}'
+                check_field_label = 'Name'
+                check_field_value_1 = f'{title} 1'
+                check_field_updated = f'Updated {title}'
 
     # detail_required: which children are required in the parent form
     detail_def = schema['definitions'].get(definition_key, {})
@@ -4625,7 +4598,6 @@ def spec_context(
         # List identifiers
         'list_id_1': list_id_1,
         'list_id_is_unique': list_id_is_unique,
-        'list_nav_by_record_id': list_nav_by_record_id,
         'after_create_id': after_create_id,
         'after_create_id_is_expr': after_create_id_is_expr,
         'primary_dep_var_for_list': primary_dep_var_for_list,
@@ -5088,9 +5060,8 @@ def api_spec_context(
             ua_update_field = candidates[0]
             ua_update_expr = f'records[0].{candidates[0]["prop_name"]} + 100'
 
-    # Compute assertions for 3.1 and 4.1 based on primary display field
-    # Fallback: use 'name' field if no x-display primary is set
-    has_name_field = any(f['prop_name'] == 'name' for f in all_field_metas)
+    # Compute assertions for 3.1 and 4.1 from the declared primary display field.
+    # An entity with no declared primary column only asserts its id.
     if primary_fk_is_ua and ua_update_field:
         assert_create = f'expect(getRes.body.{primary_field_name}.id).to.eq(deps.{primary_dep_var}.id);'
         assert_update = f'expect(getRes.body.{ua_update_field["prop_name"]}).to.eq({ua_update_expr});'
@@ -5124,23 +5095,9 @@ def api_spec_context(
         else:
             assert_create = 'expect(getRes.body.id).to.exist;'
             assert_update = 'expect(getRes.body.id).to.eq(records[0].id);'
-    elif has_name_field:
-        name_meta_api = next((f for f in all_field_metas if f['prop_name'] == 'name'), None)
-        if name_meta_api and name_meta_api.get('category') == 'entity_select':
-            _opts = name_meta_api.get('entity_options') or []
-            _create_val = api_value(name_meta_api, title)
-            _update_val = f"'{_opts[1]['value']}'" if len(_opts) > 1 else _create_val
-            assert_create = f"expect(getRes.body.name).to.eq({_create_val});"
-            assert_update = f"expect(getRes.body.name).to.eq({_update_val});"
-        else:
-            assert_create = f"expect(getRes.body.name).to.eq('Test {title}');"
-            assert_update = f"expect(getRes.body.name).to.eq('Updated {title}');"
     else:
         assert_create = 'expect(getRes.body.id).to.exist;'
         assert_update = 'expect(getRes.body.id).to.eq(records[0].id);'
-
-    # For the name-fallback case, _put_body_impl also needs to change 'name'
-    has_name_fallback = has_name_field and not primary_field_name and not primary_is_fk
 
     # 5.1: choose which required non-autocomplete field to omit
     non_ac_required = [f for f in all_field_metas if f['required'] and f['category'] != 'autocomplete']
@@ -5226,14 +5183,6 @@ def api_spec_context(
                 else:
                     update_label = primary_meta.get('label', to_title_case(prop)) if primary_meta else to_title_case(prop)
                     out.append(f"{indent}{prop}: 'Updated {update_label}',")
-            elif has_name_fallback and prop == 'name':
-                nm = next((f for f in all_field_metas if f['prop_name'] == 'name'), None)
-                if nm and nm.get('category') == 'entity_select':
-                    _opts = nm.get('entity_options') or []
-                    _v = f"'{_opts[1]['value']}'" if len(_opts) > 1 else api_value(nm, title)
-                    out.append(f"{indent}name: {_v},")
-                else:
-                    out.append(f"{indent}name: 'Updated {title}',")
             else:
                 out.append(f"{indent}{prop}: {record_var}.{prop},")
         for c in api_child_metas:

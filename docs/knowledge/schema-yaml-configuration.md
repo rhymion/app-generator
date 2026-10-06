@@ -1789,14 +1789,17 @@ booking:
 | `primary: true` | This column's cell links to the view or edit page |
 | `width` | Pixel width of the DataGrid column |
 
-If `x-display.table` is omitted entirely, the generated list page (`page_list.tsx.jinja2`) emits
-no `displayFields`/`primaryField` props at all, and `ResponsiveListClient`/`DataGridClient` fall
-back to their own hardcoded default columns — `name` and `description` — **not** "all fields in
-definition order". If the entity has neither of those two exact field names (e.g. its primary
-display field is called `title`), the list page silently renders blank/id-only cells for every
-row with no build or type error (found via `personal_note` — see
-`docs/knowledge/self-only-entity.md`). Always declare `x-display.table` with a `primary: true`
-column whenever the entity's natural label field isn't literally named `name`.
+An entity that has a list page must declare an `x-display.table` column with
+`primary: true`; `validate.py` rejects the schema otherwise, naming the entity. A column that is
+merely called `name` does not stand in for it. An entity has a list page when `x-generate.list`
+is not `false` and it either has no `x-display` or declares an `x-display.table`. Entities with
+`x-generate.list: false`, an `x-display` without `table` (chart only), `x-internal` entities and
+child-only entities are not asked for a primary column. There is no exception by entity name or
+role: `role`, `organization` and `permission` declare theirs like any other entity.
+
+The primary column is the list's link column and the card title, and the generated UI and API
+specs assert it. Every `x-display.table` column is also exposed for filtering and sorting, so the
+Prisma model needs an `@@index` on it (`python3 scripts/add_required_indexes.py` adds them).
 
 When a table column refers to a relationship name (e.g., `resource`), the generator renders
 `resource.name` (the `labelField`) in that column.

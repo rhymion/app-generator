@@ -74,19 +74,10 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
 
     it('1.4 opens the view page when the card title is tapped', () => {
 {% if can_view %}
-{% if list_nav_by_record_id %}
-      // The card title of an entity with no primary column is not the label asserted
-      // elsewhere, so the card is opened through its record id.
-      cy.task<any[]>('db:populate{{ pascal }}', 1).then((records) => {
-        cy.visit(`/en/{{ parent }}/view/${records[0].id}`);
-        cy.url().should('include', '/{{ parent }}/view');
-      });
-{% else %}
       cy.task('db:populate{{ pascal }}', 1);
       cy.visit('/en/{{ parent }}');
       cy.contains(exactRe('{{ list_id_1 }}')).click();
       cy.url().should('include', '/{{ parent }}/view');
-{% endif %}
 {% else %}
       // {{ parent }} has can_view = false — view route is not generated.
       cy.log('skipped: view page not generated for {{ parent }}');

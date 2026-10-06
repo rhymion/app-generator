@@ -46,6 +46,7 @@ model oto_decimal_gate_target {
   creator         user                   @relation("OtoDecimalGateTargetCreator", fields: [creator_id], references: [id])
   updater_id      String
   updater         user                   @relation("OtoDecimalGateTargetUpdater", fields: [updater_id], references: [id])
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
 }

@@ -1447,7 +1447,7 @@ def validate_schema(schema: dict) -> None:
                         )
 
     # -----------------------------------------------------------------------
-    # 6. x-display list primary field — required + non-nullable + labelField
+    # 6. x-display list primary field — declared + non-nullable + labelField
     # -----------------------------------------------------------------------
     def _is_optional_field(field_name: str, field_props: dict, req_set: set) -> bool:
         """True when field is absent from required list OR has 'null' in type union."""
@@ -1471,6 +1471,21 @@ def validate_schema(schema: dict) -> None:
         else:
             continue
 
+        # Same "has a list view" test generate.py applies before writing the
+        # list page: the list flag is on AND (no x-display at all OR an
+        # x-display.table is declared). Chart-only x-display entities, entities
+        # with `x-generate.list: false`, x-internal entities and child-only
+        # entities (never returned by extract_entities) have no list view.
+        if isinstance(xdisplay, list):
+            has_table_decl = True
+        elif isinstance(xdisplay, dict):
+            has_table_decl = isinstance(xdisplay.get('table'), list)
+        else:
+            has_table_decl = False
+        has_list_view = bool(entity.get('generate_config', {}).get('list', True)) and (
+            not xdisplay or has_table_decl
+        )
+
         # Locate the primary display field (first entry with primary: true)
         primary_field: str | None = None
         for item in table:
@@ -1484,6 +1499,15 @@ def validate_schema(schema: dict) -> None:
                 break
 
         if primary_field is None:
+            if has_list_view:
+                _missing_primary_msg = (
+                    f"Entity '{model}': has a list view but no x-display.table column "
+                    f"with 'primary: true'. Declare an x-display.table column "
+                    f"with 'primary: true'; it is the list link column and card title, "
+                    f"and a column that is merely named 'name' does not stand in for it."
+                )
+                if _missing_primary_msg not in errors:
+                    errors.append(_missing_primary_msg)
             continue
 
         fk_prop = f'{primary_field}_id'

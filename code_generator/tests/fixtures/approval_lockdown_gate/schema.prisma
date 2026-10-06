@@ -60,6 +60,7 @@ model approval_lockdown_gate_item {
   creator    user                            @relation("ApprovalLockdownGateItemCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user                            @relation("ApprovalLockdownGateItemUpdater", fields: [updater_id], references: [id])
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
 }
@@ -77,6 +78,7 @@ model write_lockdown_gate_item {
   creator    user                          @relation("WriteLockdownGateItemCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user                          @relation("WriteLockdownGateItemUpdater", fields: [updater_id], references: [id])
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
 }

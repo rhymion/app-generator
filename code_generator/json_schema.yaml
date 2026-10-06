@@ -248,6 +248,13 @@ definitions:
         type: many-to-many
         target: user
     x-import-key: [name]
+    x-display:
+      table:
+        - name:
+            primary: true
+            width: 200
+        - description:
+            width: 400
     fields:
       name: {}
       description: {}
@@ -281,6 +288,13 @@ definitions:
     x-search:
       org_id_field: id
     x-import-key: [name]
+    x-display:
+      table:
+        - name:
+            primary: true
+            width: 200
+        - description:
+            width: 400
     fields:
       name: {}
       description:
@@ -317,6 +331,7 @@ definitions:
     x-display:
       table:
         - name:
+            primary: true
             width: 200
         - role:
             width: 200

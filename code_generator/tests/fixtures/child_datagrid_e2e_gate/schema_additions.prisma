@@ -57,6 +57,7 @@ model parent1_child1 {
 
   @@index([parent1_id])
   @@index([parent_only_id])
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
 }
@@ -86,6 +87,7 @@ model parent1_child2 {
   @@index([parent1_id])
   @@index([related_parent1_id])
   @@index([parent_only_id])
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
 }
@@ -268,6 +270,7 @@ model hook_unit {
   units        hook_slot[] @relation("hook_slot_unit")
   second_units hook_slot[] @relation("hook_slot_second_unit")
 
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
 }

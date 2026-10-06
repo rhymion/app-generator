@@ -72,7 +72,10 @@ def _widget(status_field=None, extra=None, with_import=True, with_generate=True)
     }
     if status_field is not None:
         props['status'] = status_field
-    defn = {'type': 'object', 'required': ['id', 'code'], 'properties': props}
+    defn = {
+        'type': 'object', 'required': ['id', 'code'], 'properties': props,
+        'x-display': {'table': [{'code': {'primary': True}}]},
+    }
     if with_import:
         defn['x-import-key'] = ['code']
     if with_generate:
@@ -394,6 +397,7 @@ class TestRealSchemaShapes:
                         'status': {'type': 'string', 'enum': ['draft', 'confirmed', 'cancelled']},
                     },
                     'x-import-key': ['receipt_no'],
+                    'x-display': {'table': [{'receipt_no': {'primary': True}}]},
                     'x-approval-lines': ['lines'],
                 },
                 'goods_receipt': {
@@ -411,9 +415,11 @@ class TestRealSchemaShapes:
                 },
                 '__goods_receipt_line': {
                     'type': 'object',
-                    'required': ['id', 'goods_receipt_id'],
+                    'required': ['id', 'goods_receipt_id', 'line_no'],
+                    'x-display': {'table': [{'line_no': {'primary': True}}]},
                     'properties': {
                         'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'},
+                        'line_no': {'type': 'string'},
                         'goods_receipt_id': {'type': 'string'},
                         'status': {'type': 'string', 'enum': ['pending', 'split', 'rejected']},
                     },
@@ -446,6 +452,7 @@ class TestRealSchemaShapes:
                         'status': {'type': 'string', 'enum': ['draft', 'confirmed', 'cancelled']},
                     },
                     'x-import-key': ['receipt_no'],
+                    'x-display': {'table': [{'receipt_no': {'primary': True}}]},
                     'x-approval-lines': ['lines'],
                 },
                 'goods_receipt': {
@@ -463,9 +470,11 @@ class TestRealSchemaShapes:
                 },
                 '__goods_receipt_line': {
                     'type': 'object',
-                    'required': ['id', 'goods_receipt_id'],
+                    'required': ['id', 'goods_receipt_id', 'line_no'],
+                    'x-display': {'table': [{'line_no': {'primary': True}}]},
                     'properties': {
                         'id': {'type': 'string', 'pattern': '^c[a-z0-9]{24,}$'},
+                        'line_no': {'type': 'string'},
                         'goods_receipt_id': {'type': 'string'},
                         'status': {'type': 'string', 'enum': ['pending', 'split', 'rejected']},
                     },
@@ -513,6 +522,7 @@ class TestRealSchemaShapes:
                         'status': {'type': 'string', 'enum': ['pending', 'shipped', 'delivered', 'cancelled']},
                     },
                     'x-import-key': ['shipment_number'],
+                    'x-display': {'table': [{'shipment_number': {'primary': True}}]},
                 },
                 'shipment': {
                     'allOf': [
@@ -535,6 +545,7 @@ class TestRealSchemaShapes:
                         'status': {'type': 'string', '_prisma_native_enum_type': 'ShipmentLineStatus', 'enum': ['picked', 'packed']},
                     },
                     'x-import-key': ['item.sku', 'shipment.shipment_number'],
+                    'x-display': {'table': [{'quantity_shipped': {'primary': True}}]},
                 },
                 'shipment_line': {
                     'allOf': [

@@ -38,6 +38,7 @@ model widget {
   creator    user     @relation("WidgetCreator", fields: [creator_id], references: [id])
   updater_id String
   updater    user     @relation("WidgetUpdater", fields: [updater_id], references: [id])
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
 }

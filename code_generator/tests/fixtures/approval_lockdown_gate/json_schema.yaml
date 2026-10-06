@@ -74,6 +74,10 @@ definitions:
       on_rejected:
         set_fields:
           status: released
+    x-display:
+      table:
+        - name:
+            primary: true
     fields:
       name: {}
       status:
@@ -105,6 +109,10 @@ definitions:
       status:
         - in_underwriting
         - issued
+    x-display:
+      table:
+        - name:
+            primary: true
     fields:
       name: {}
       status:
