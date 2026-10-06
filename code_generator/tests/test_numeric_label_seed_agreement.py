@@ -113,8 +113,8 @@ def test_label_is_distinct_per_row_when_bounds_leave_room(prop):
     assert [_numeric_unique_seed(prop, i) for i in rows] == [100, 200, 300, 400, 500]
 
 
-def test_tight_bounds_repeat_the_clamped_value_across_rows():
-    # Known limit, same as the entity's own helper: a bound tighter than the
+def test_known_limitation_tight_bounds_repeat_the_clamped_value_across_rows():
+    # Known limitation (accepted): a bound tighter than the
     # row spacing (here minimum 500) clamps several rows to one value. The
     # populate helper and the expected label still agree row for row, so the
     # list assertion holds; only the numeric part of the label repeats.

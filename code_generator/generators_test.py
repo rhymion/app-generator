@@ -262,8 +262,10 @@ def _numeric_unique_seed(prop: dict, index: int) -> int:
     populate helpers emit it as a TypeScript expression (`_numeric_unique_expr`)
     and the generated specs compute the label text a list shows for such a row
     from this function, so both agree. `index * 100` clamped to the declared
-    `minimum` / `maximum`, the same rule as the entity's own helper
-    (`cypress_create_value`, 'number' category).
+    `minimum` / `maximum`. This is the per-row rule of an entity's own populate
+    helper (`prisma_value`, 'number' category), except that `prisma_value`
+    applies `maximum` only when `minimum` is declared too. It is not the rule
+    of `cypress_create_value`, which types a fixed 100 (clamped) into forms.
     """
     val = index * 100
     mx = prop.get('maximum')
