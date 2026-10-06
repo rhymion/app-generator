@@ -1,4 +1,7 @@
-"""Tests for x-display list primary field required validation (Section 6 of validate_schema)."""
+"""Tests for x-display list primary field validation (Section 6 of validate_schema).
+
+A list-view entity must declare an x-display.table column with primary: true.
+"""
 import pytest
 from validate import validate_schema, SchemaValidationError
 
@@ -71,19 +74,6 @@ class TestRequiredPrimaryFieldPasses:
                     },
                 },
             },
-        )
-        validate_schema(schema)  # must not raise
-
-    def test_no_primary_column_skips_validation(self):
-        """Entity with x-display.table but no primary: true — no error raised."""
-        schema = _entity_schema(
-            model='product',
-            props={
-                'id': {'type': 'string'},
-                'code': {'type': ['string', 'null']},
-            },
-            required=['id'],
-            xdisplay={'table': [{'code': {'width': 100}}]},
         )
         validate_schema(schema)  # must not raise
 
@@ -488,4 +478,107 @@ class TestNonPrimaryLabelFieldColumnValidation:
                 },
             },
         )
+        validate_schema(schema)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# (e) a list-view entity without a primary column is rejected
+# ---------------------------------------------------------------------------
+
+_MISSING_PRIMARY_MESSAGE = "has a list view but no x-display.table column with 'primary: true'"
+
+
+def _product_props() -> dict:
+    return {
+        'id': {'type': 'string'},
+        'name': {'type': 'string'},
+        'code': {'type': ['string', 'null']},
+    }
+
+
+class TestMissingPrimaryRejected:
+    def test_table_without_primary_rejected(self):
+        schema = _entity_schema(
+            model='product', props=_product_props(), required=['id', 'name'],
+            xdisplay={'table': [{'code': {'width': 100}}]},
+        )
+        with pytest.raises(SchemaValidationError, match="Entity 'product'") as exc:
+            validate_schema(schema)
+        assert _MISSING_PRIMARY_MESSAGE in str(exc.value)
+
+    def test_name_column_does_not_stand_in_for_primary(self):
+        """A shown column literally named 'name' is not a primary."""
+        schema = _entity_schema(
+            model='product', props=_product_props(), required=['id', 'name'],
+            xdisplay={'table': [{'name': {'width': 200}}]},
+        )
+        with pytest.raises(SchemaValidationError) as exc:
+            validate_schema(schema)
+        assert _MISSING_PRIMARY_MESSAGE in str(exc.value)
+
+    def test_list_form_x_display_without_primary_rejected(self):
+        schema = _entity_schema(
+            model='product', props=_product_props(), required=['id', 'name'],
+            xdisplay=[{'name': {}}],
+        )
+        with pytest.raises(SchemaValidationError) as exc:
+            validate_schema(schema)
+        assert _MISSING_PRIMARY_MESSAGE in str(exc.value)
+
+    def test_no_x_display_at_all_rejected(self):
+        """No x-display means the default table is shown, so a primary is still required."""
+        schema = _entity_schema(
+            model='product', props=_product_props(), required=['id', 'name'],
+            xdisplay={},
+        )
+        with pytest.raises(SchemaValidationError) as exc:
+            validate_schema(schema)
+        assert _MISSING_PRIMARY_MESSAGE in str(exc.value)
+
+    def test_other_entity_names_get_no_special_case(self):
+        """role / organization / permission are checked like any other entity."""
+        for model in ('role', 'organization', 'permission'):
+            schema = _entity_schema(
+                model=model, props=_product_props(), required=['id', 'name'],
+                xdisplay={'table': [{'name': {}}]},
+            )
+            with pytest.raises(SchemaValidationError, match=f"Entity '{model}'"):
+                validate_schema(schema)
+
+
+class TestStructuralExclusionsAccepted:
+    """Entities with no list view are not asked for a primary column."""
+
+    def test_list_false_accepted(self):
+        schema = _entity_schema(
+            model='product', props=_product_props(), required=['id', 'name'],
+            xdisplay={'table': [{'name': {}}]},
+        )
+        schema['definitions']['product']['x-generate'] = {'list': False}
+        validate_schema(schema)  # must not raise
+
+    def test_x_display_without_table_accepted(self):
+        """A chart-only x-display has no list page."""
+        schema = _entity_schema(
+            model='product',
+            props={
+                'id': {'type': 'string'},
+                'name': {'type': 'string'},
+                'starts_on': {'type': 'string', 'format': 'date'},
+                'amount': {'type': 'integer'},
+            },
+            required=['id', 'name', 'starts_on', 'amount'],
+            xdisplay={'chart': {'start': 'starts_on', 'end': 'starts_on', 'value': 'amount'}},
+        )
+        try:
+            validate_schema(schema)
+        except SchemaValidationError as exc:
+            assert _MISSING_PRIMARY_MESSAGE not in str(exc)
+
+    def test_x_internal_accepted(self):
+        schema = _entity_schema(
+            model='product', props=_product_props(), required=['id', 'name'],
+            xdisplay={'table': [{'name': {}}]},
+        )
+        schema['definitions']['__product']['x-internal'] = {'page': False, 'embed': False, 'api': False}
         validate_schema(schema)  # must not raise
