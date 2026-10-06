@@ -152,7 +152,7 @@ from helpers.label_field import (
 )
 from build_context import (
     _get_entity_options, _raw_def, is_forced_required_field, get_uri_kind,
-    _exclusive_parent_columns,
+    _exclusive_parent_columns, _model_has_audit_fields,
 )
 from generate_types import extract_entities
 from generators import resolve_approval_submit_on
@@ -3147,6 +3147,9 @@ def helper_context(
         # same nested-create pattern as populate{{pascal}}Data's own internal_fk_deps,
         # otherwise this "add child to existing parent" helper omits a required column.
         child_internal_fk_deps = get_all_internal_fk_deps(child_name, schema)
+        # A child that is also a full entity carries required creator_id /
+        # updater_id columns; embedded-only children (no audit columns) do not.
+        child_has_audit_fields = _model_has_audit_fields(child_name)
         enriched_datagrid_children.append({
             'model_name': child_name,
             'pascal': child_pascal,
@@ -3155,7 +3158,8 @@ def helper_context(
             'fields_prisma': child_fields_prisma,
             'has_fk_deps': has_fk_deps,
             'internal_fk_deps': child_internal_fk_deps,
-            'needs_test_user': any(d['target'] == 'user' for d in child_internal_fk_deps),
+            'has_audit_fields': child_has_audit_fields,
+            'needs_test_user': child_has_audit_fields or any(d['target'] == 'user' for d in child_internal_fk_deps),
         })
 
     enriched_comment_children = []
