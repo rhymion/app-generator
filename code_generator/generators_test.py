@@ -3326,6 +3326,48 @@ def helper_context(
             continue
         _seen_oto_vars.add(_var)
         extra_oto_fk_deps.append(_dep)
+
+    # Composite @@unique made only of required FKs: the populate loop would write
+    # the same FK pair on every iteration (every FK reads the single shared
+    # `deps.<var>` row), so the 2nd create() fails with P2002 as soon as length>=2
+    # (e.g. step_argument's @@unique([step_placement_id, parameter_id])). Unless one
+    # FK of the group already gets a fresh row per iteration (the primary display
+    # FK, or a one-to-one FK above), give ONE of them its own fresh row per loop
+    # iteration, reusing the one-to-one per-iteration create. The FK picked is the
+    # one whose target is cheapest and safest to duplicate: fewest FK deps, and
+    # never a target with a composite @@unique of its own over FKs (a fresh copy
+    # sharing the same parents would collide on that). Groups holding a scalar column are left
+    # alone (the scalar may already vary per row), as are self-referencing deps.
+    _fresh_vars = {_pv for _pv in (primary_fk_dep['var_name'] if primary_fk_dep else None, *_seen_oto_vars) if _pv}
+    _required_fk_by_prop = {
+        f['prop_name']: f['dep_var_name'] for f in required_fields_prisma
+        if f['category'] == 'autocomplete' and f.get('dep_var_name')
+    }
+    for _group in (_prisma_uniques.get(model_name) or {}).get('composite', []):
+        if len(_group) < 2 or not all(_c in _required_fk_by_prop for _c in _group):
+            continue
+        _group_vars = [_required_fk_by_prop[_c] for _c in _group]
+        if len(set(_group_vars)) < len(_group_vars) or any(_v in _fresh_vars for _v in _group_vars):
+            continue
+        _cands = []
+        for _v in _group_vars:
+            _cd = next((d for d in enriched_deps if d['var_name'] == _v), None)
+            if _cd is None or _cd['target'] == 'user' or _cd.get('is_self_ref_dep'):
+                continue
+            _own_fk_props = {fk['prop_name'] for fk in (_cd.get('fk_deps') or [])}
+            _own_composite = any(
+                len(_g) > 1 and set(_g) <= _own_fk_props
+                for _g in (_prisma_uniques.get(_cd['target']) or {}).get('composite', [])
+            )
+            if _own_composite:
+                continue
+            _cands.append((len(_cd.get('fk_deps') or []), len(_cands), _cd))
+        if not _cands:
+            continue
+        _pick = min(_cands, key=lambda c: c[:2])[2]
+        _seen_oto_vars.add(_pick['var_name'])
+        _fresh_vars.add(_pick['var_name'])
+        extra_oto_fk_deps.append({**_pick, 'composite_unique_member': True})
     extra_oto_fk_dep_vars = {d['var_name'] for d in extra_oto_fk_deps}
 
     # x-ledger-source pool FK(s) (poolIdField / fromPoolIdField / toPoolIdField)
