@@ -152,7 +152,7 @@ from helpers.label_field import (
 )
 from build_context import (
     _get_entity_options, _raw_def, is_forced_required_field, get_uri_kind,
-    _exclusive_parent_columns,
+    _exclusive_parent_columns, _model_has_audit_fields,
 )
 from generate_types import extract_entities
 from generators import resolve_approval_submit_on
@@ -262,8 +262,14 @@ def _seed_relation_label_value(
     schema: dict,
     *,
     unique_index: int | None = None,
+    name_title: str | None = None,
 ) -> str:
     """Expected UI label for a populated FK target.
+
+    `name_title` overrides the title used for a bare `name` label field. The
+    populate helper names a dependency row after the foreign-key stem, which
+    differs from the target model title when the FK is aliased (e.g.
+    `placed_step_id` -> `step` seeds `Test Placed Step ...`).
 
     `label_field` may be a single field name, a dotted path through outbound
     m2o / one-to-one relations, or a list of either — mirroring what the UI
@@ -284,7 +290,7 @@ def _seed_relation_label_value(
     if resolved:
         parts = []
         for r in resolved:
-            parts.append(_seed_path_part(target, r, schema, unique_index=unique_index))
+            parts.append(_seed_path_part(target, r, schema, unique_index=unique_index, name_title=name_title))
         return ' '.join(parts)
 
     # Fallback for callers that pass a missing/unknown label_field — keep the
@@ -307,6 +313,7 @@ def _seed_path_part(
     schema: dict,
     *,
     unique_index: int | None,
+    name_title: str | None = None,
 ) -> str:
     """Expected UI value of a single resolved labelField path on the target row.
 
@@ -359,7 +366,7 @@ def _seed_path_part(
     prop_type = next((t for t in prop_type_raw if t != 'null'), None) if isinstance(prop_type_raw, list) else prop_type_raw
 
     if final_field == 'name':
-        title = to_title_case(cursor_entity)
+        title = name_title if (name_title and cursor_entity == target) else to_title_case(cursor_entity)
         if cursor_entity == 'user':
             # is_user_account targets are excluded from Phase2's per-call
             # callIndex namespace (test_helper.ts.jinja2 §4.2/cmd614) — the
@@ -395,6 +402,34 @@ def _seed_path_part(
         return 'false'
     title = to_title_case(final_field)
     return f'Test {title} 0_{unique_index}' if unique_index is not None else f'Test {title} A'
+
+
+def _first_required_fk_display_label(fields: list, schema: dict) -> str | None:
+    """Rendered display label of the first required FK on a seeded row.
+
+    An entity with no primary column and no `name` column shows only the
+    display labels of its parents in the list (and card) view, so a text such
+    as `'{Title} 1'` never appears on screen. The parent's label is the same
+    text the form's `checkField` assertion uses for that FK (the dependency
+    row's `A`-suffixed label), so it is the string the list renders for a row
+    seeded against the dependency helper's rows.
+
+    Returns None when no required FK has a statically known label (none
+    declared, or the label field is the raw row id).
+    """
+    for f in fields:
+        if f.get('category') != 'autocomplete' or not f.get('dep_target') or not f.get('required'):
+            continue
+        label_field = f.get('dep_label_field')
+        if label_field == 'id':
+            return None
+        if label_field and label_field != 'name':
+            return _seed_relation_label_value(
+                f['dep_target'], label_field, f.get('dep_label_field_is_date', False), schema,
+            )
+        stem = re.sub(r'_id$', '', f['prop_name'])
+        return f'Test {to_title_case(stem)} A'
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -3147,6 +3182,9 @@ def helper_context(
         # same nested-create pattern as populate{{pascal}}Data's own internal_fk_deps,
         # otherwise this "add child to existing parent" helper omits a required column.
         child_internal_fk_deps = get_all_internal_fk_deps(child_name, schema)
+        # A child that is also a full entity carries required creator_id /
+        # updater_id columns; embedded-only children (no audit columns) do not.
+        child_has_audit_fields = _model_has_audit_fields(child_name)
         enriched_datagrid_children.append({
             'model_name': child_name,
             'pascal': child_pascal,
@@ -3155,7 +3193,8 @@ def helper_context(
             'fields_prisma': child_fields_prisma,
             'has_fk_deps': has_fk_deps,
             'internal_fk_deps': child_internal_fk_deps,
-            'needs_test_user': any(d['target'] == 'user' for d in child_internal_fk_deps),
+            'has_audit_fields': child_has_audit_fields,
+            'needs_test_user': child_has_audit_fields or any(d['target'] == 'user' for d in child_internal_fk_deps),
         })
 
     enriched_comment_children = []
@@ -3852,6 +3891,7 @@ def spec_context(
             primary_rel.get('label_field_is_date', False),
             schema,
             unique_index=1,
+            name_title=dep_title,
         ) if primary_rel else f'Test {dep_title} 1'
         list_id_is_unique = True
         after_create_id = None
@@ -3882,6 +3922,7 @@ def spec_context(
             primary_rel.get('label_field', 'name'),
             primary_rel.get('label_field_is_date', False),
             schema,
+            name_title=dep_title,
         ) if primary_rel else list_id_1) if not prim_is_server_value else list_id_1
         has_edit_primary = not prim_is_server_value
         edit_field_label = dep_title
@@ -4077,9 +4118,15 @@ def spec_context(
             check_field_updated = 'Test User'
             check_field_skip = True  # created_by is list-only virtual; not in FormView
         else:
-            list_id_1 = f'{title} 1'
-            list_id_is_unique = True
-            after_create_id = f'Test {title}'
+            # No primary column and no `name` column: the list/card never
+            # renders a '{Title} 1' / 'Test {Title}' placeholder, only the
+            # parents' display labels. Assert the first required FK's label;
+            # it repeats across rows seeded against the same dependency, so
+            # it does not identify a single row (list_id_is_unique False).
+            _fk_label = _first_required_fk_display_label(fields, schema)
+            list_id_1 = _fk_label if _fk_label is not None else f'{title} 1'
+            list_id_is_unique = _fk_label is None
+            after_create_id = _fk_label if _fk_label is not None else f'Test {title}'
             after_create_id_is_expr = False
             primary_dep_var_for_list = None
             list_id_updated = f'Updated {title}'

@@ -900,6 +900,10 @@ export async function populate{{ pascal }}{{ child.pascal }}Data(parentId: strin
 {% if child.has_order %}
         order: i,
 {% endif %}
+{% if child.has_audit_fields %}
+        creator_id: testUser.id,
+        updater_id: testUser.id,
+{% endif %}
 {% for fk in child.internal_fk_deps %}
         {{ fk.prop_name }}: {{ fk.var_name }}Item.id,
 {% endfor %}
