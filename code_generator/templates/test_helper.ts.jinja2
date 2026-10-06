@@ -34,7 +34,7 @@ async function getTestUser() {
   return testUser;
 }
 
-{% if (primary_fk_dep and not primary_fk_dep.is_user_account and (primary_fk_dep.extra_required_fields or primary_fk_dep.nested_fk_deps)) or (extra_oto_fk_deps | selectattr('extra_required_fields') | list) %}
+{% if uses_call_seq %}
 // cmd_620 (Option β, full isolation): monotonic per-call index shared by
 // populate{{ pascal }}Data and populate{{ pascal }}FullData. Persists for the life
 // of the Cypress plugin (Node) process, so it stays unique across every call
@@ -573,7 +573,7 @@ export async function populate{{ pascal }}Data(length: number) {
 {% elif needs_deps_in_populate %}
   const deps = await populate{{ pascal }}Dependencies();
 {% endif %}
-{% if (primary_fk_dep and not primary_fk_dep.is_user_account and (primary_fk_dep.extra_required_fields or primary_fk_dep.nested_fk_deps)) or (extra_oto_fk_deps | selectattr('extra_required_fields') | list) %}
+{% if uses_call_seq %}
   // cmd_620 (Option β, full isolation): each populate{{ pascal }}Data/FullData
   // call gets its own slice of the per-iteration FK dep's namespace (callIndex),
   // so two calls in the same test — or a hand-written spec calling this helper
@@ -767,7 +767,7 @@ export async function populate{{ pascal }}FullData(length: number) {
 {% if needs_deps_in_populate_full %}
   const deps = await populate{{ pascal }}Dependencies();
 {% endif %}
-{% if (primary_fk_dep and not primary_fk_dep.is_user_account and (primary_fk_dep.extra_required_fields or primary_fk_dep.nested_fk_deps)) or (extra_oto_fk_deps | selectattr('extra_required_fields') | list) %}
+{% if uses_call_seq %}
   // cmd_620 (Option β) — see populate{{ pascal }}Data for the rationale. Shares
   // the same counter as populate{{ pascal }}Data so the two functions can never
   // hand out the same callIndex to a caller within one test.

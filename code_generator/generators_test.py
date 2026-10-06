@@ -3375,6 +3375,22 @@ def helper_context(
         extra_oto_fk_deps.append({**_pick, 'composite_unique_member': True})
     extra_oto_fk_dep_vars = {d['var_name'] for d in extra_oto_fk_deps}
 
+    # Whether the helper numbers its per-iteration rows with a module-level call
+    # counter (`_<Entity>CallSeq`). One predicate, shared by the helper (declares
+    # and increments the counter), the three spec templates (reset it in
+    # beforeEach) and the tasks registry (exposes the reset task): if any of
+    # them used a narrower condition, rows would be numbered from a counter that
+    # is never reset and the specs' first-call labels (`..._0_1`) would only
+    # match when the spec happens to run first in the Cypress process.
+    uses_call_seq = bool(
+        (
+            primary_fk_dep is not None
+            and not primary_fk_dep.get('is_user_account')
+            and (primary_fk_dep.get('extra_required_fields') or primary_fk_dep.get('nested_fk_deps'))
+        )
+        or any(d.get('extra_required_fields') for d in extra_oto_fk_deps)
+    )
+
     # x-ledger-source pool FK(s) (poolIdField / fromPoolIdField / toPoolIdField)
     # are usually schema-optional — the real pool target is often resolved after
     # creation (e.g. via a split action) — so they're excluded from
@@ -3604,6 +3620,7 @@ def helper_context(
         'comment_children': enriched_comment_children,
         'primary_fk_dep': primary_fk_dep,
         'extra_oto_fk_deps': extra_oto_fk_deps,
+        'uses_call_seq': uses_call_seq,
         'extra_oto_fk_dep_vars': sorted(extra_oto_fk_dep_vars),
         'internal_fk_deps': internal_fk_deps,
         'has_approvable': has_approvable,
@@ -4605,9 +4622,9 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
     """Build context for the generated-tasks.ts registry template.
 
     `entities` is a list of dicts: {parent, model_name, children,
-    primary_fk_dep} — primary_fk_dep is threaded through from the same
-    entity's helper_context() result (cmd_625) so the reset-task guard here
-    matches the one that decided whether _reset{{ pascal }}CallSeq() exists.
+    primary_fk_dep, uses_call_seq} — uses_call_seq is threaded through from the
+    same entity's helper_context() result so the reset-task guard here matches
+    the one that decided whether _reset{{ pascal }}CallSeq() exists.
     """
     enriched_entities = []
     # The fallback `db:populateUser` task at the bottom of the registry only
@@ -4654,6 +4671,7 @@ def tasks_registry_context(entities: list, schema: dict) -> dict:
             'helper_path': f'./{parent}/helper',
             'reservation_helper_path': f'./{parent}/reservation_gen_helper',
             'primary_fk_dep': entity.get('primary_fk_dep'),
+            'uses_call_seq': entity.get('uses_call_seq', False),
             'datagrid_children': [
                 {'pascal': to_pascal_case(c['child']['name'])}
                 for c in datagrid_children
