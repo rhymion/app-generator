@@ -870,6 +870,27 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
 # actions.ts
 # ---------------------------------------------------------------------------
 
+def can_save_and_continue(ctx: dict) -> bool:
+    """Whether the entity's form offers a "Save and continue editing" button.
+
+    Needs an update path (an `/edit/[id]` route to stay on or land on), so
+    `x-generate.edit: false` never gets one. Two kinds of entity are excluded
+    because staying on the form after a save would be wrong for them:
+    - x-payment: a create ends at the Stripe Checkout page, and the record is
+      provisional until it is paid.
+    - approval-locked records (`has_edit_guard`): a save can fire the approval
+      `submit_on` edge and lock the record, after which the next save on the
+      same screen would always be refused.
+    The per-user part (update permission on `/new`) is decided at render time
+    from the permissions the page already passes to the form.
+    """
+    return (
+        bool(ctx.get('can_update'))
+        and not ctx.get('is_payment')
+        and not ctx.get('has_edit_guard')
+    )
+
+
 def actions_context(ctx: dict) -> dict:
     parent        = ctx['parent']
     model         = ctx['model']
@@ -1120,8 +1141,13 @@ def actions_context(ctx: dict) -> dict:
     # action redirects the buyer there (actions.ts.jinja2) instead of to the list.
     is_payment = bool(ctx.get('is_payment')) and can_create
     _create_call_expr = f'add{parent_pascal}(actorId, {parent_params}{full_child_args}{flatten_args_str})'
+    # "Save and continue editing": a create keeps the new id so the action can
+    # land on /edit/[id]. Mutually exclusive with x-payment (see
+    # can_save_and_continue).
+    can_continue = can_save_and_continue(ctx)
     _create_stmt = (
         f'_checkoutUrl = (await {_create_call_expr}).checkoutUrl;' if is_payment
+        else f'_createdId = (await {_create_call_expr}).id;' if (can_continue and can_create)
         else f'await {_create_call_expr};'
     )
 
@@ -1298,8 +1324,15 @@ def actions_context(ctx: dict) -> dict:
 
     return {
         'service_imports': service_imports,
+        'can_continue': can_continue,
         'upsert_body': (
             '  let _checkoutUrl: string | undefined;\n' if is_payment else ''
+        ) + (
+            # The mode is read before anything else so a failed save (which
+            # returns early) never reaches the redirect below.
+            "  const _continueEditing = data.get('__continue') === '1';\n"
+            + ('  let _createdId: string | undefined;\n' if can_create else '')
+            if can_continue else ''
         ) + _upsert_body(has_children),
     }
 
@@ -6598,7 +6631,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # entity with neither can_delete/can_invalidate/entity_edit_components
     # would have hit a "Cannot find name 'permissions'" tsc error on this
     # exact branch, mention-unrelated).
-    _permissions_used = bool(can_delete) or bool(ctx.get('can_invalidate')) or has_current_user_role_ids or has_comment_children
+    _permissions_used = bool(can_delete) or bool(ctx.get('can_invalidate')) or has_current_user_role_ids or has_comment_children or can_save_and_continue(ctx)
     _permissions_binding = 'permissions' if _permissions_used else 'permissions: _permissions'
     if extra_default_props or has_comment_children or has_current_user_role_ids or _is_bridge_child:
         form_upsert_params = (
@@ -7051,7 +7084,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'has_indep_list_children':  has_indep_list_children,
         'indep_list_readonly_jsx':  indep_list_readonly_jsx,
         'form_upsert_params':       form_upsert_params,
-        'enum_ns_hooks':            _all_enum_ns_hooks,
+        'can_continue':             can_save_and_continue(ctx),
+        'enum_ns_hooks':           _all_enum_ns_hooks,
         'enum_opt_setups':          _all_enum_opt_setups,
         'rel_opt_setups':           '\n'.join(rel_opt_setups),
         'child_entity_rel_opt':     child_entity_rel_option_setups,

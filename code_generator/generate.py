@@ -48,6 +48,7 @@ from generators import (
     chart_context,
     page_list_context,
     actions_context,
+    can_save_and_continue,
     service_context,
     column_def_context,
     form_view_context,
@@ -1199,6 +1200,9 @@ def generate(schema_path: str, output_dir: str) -> None:
         # x-payment (Issue #775): merged here so service.ts, the REST route
         # and the Server Action all read the same resolved values.
         ctx = {**ctx, **payment_context(model, schema)}
+        # "Save and continue editing" (Issue #832): needs is_payment and
+        # has_edit_guard from the merges above, so it is derived last.
+        ctx = {**ctx, 'can_continue': can_save_and_continue(ctx)}
         if ctx.get('is_payment') and can_new:
             payment_entities.append({
                 'entity_name': parent,
