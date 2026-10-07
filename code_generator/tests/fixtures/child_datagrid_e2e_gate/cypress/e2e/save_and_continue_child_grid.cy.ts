@@ -119,7 +119,7 @@ describe('save and continue editing: inline child grid', () => {
       cy.clickButton(CONTINUE);
       cy.url().should('match', /\?saved=\d+$/).then((firstSaved) => {
         probeCount(id).should('eq', 2);
-        cy.contains('button', 'Save').should('not.be.disabled');
+        getDataGridCell(1, 'str_req', CHILD).should('contain.text', 'text required');
         cy.clickButton(CONTINUE);
         cy.url().should('match', /\?saved=\d+$/).and('not.eq', firstSaved);
         probeCount(id).should('eq', 2);
