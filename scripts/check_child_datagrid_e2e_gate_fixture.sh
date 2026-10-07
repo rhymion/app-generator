@@ -15,6 +15,8 @@
 # standalone and parent forms); the fixture's cypress/support/project-tasks.ts is copied into
 # the build copy for the one state the application can no longer create (a row holding both owners).
 # Also checks the generated parent UI specs of excl_alpha/excl_beta for the hidden owner column.
+# Also covers x-create-inline (inline_note/inline_topic): the dialog that creates the referenced record in
+# place, at desktop and phone width, including a save for another organisation refused with the request altered.
 # Also runs the generated specs of excl_owned (the generated test helper writes exactly one owner)
 # and hook_slot (the hand-written helper_custom.ts dependency values, fixture dir custom_helper/).
 #

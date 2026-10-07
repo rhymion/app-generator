@@ -24,6 +24,9 @@
 #   hook_unit          dependency target of hook_slot; kind defaults to 'atomic'
 #   hook_slot          two FKs to hook_unit; the fixture's hand-written helper_custom.ts makes the
 #                      `unit` dependency 'composite' and leaves `second_unit` alone
+#   inline_topic       organisation-scoped (required organization FK): the target of
+#                      inline_note.inline_topic_id (x-create-inline), so its form opens in a dialog
+#   inline_note        declares x-create-inline on its required FK to inline_topic
 definitions:
   parent1_child1:
     x-generate:
@@ -376,3 +379,51 @@ definitions:
         x-relationship: {}
     required:
       - unit_id
+
+  inline_topic:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: false
+      test: false
+    x-display:
+      table:
+        - name:
+            primary: true
+    fields:
+      name:
+        minLength: 1
+      organization_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship: {}
+    required:
+      - organization_id
+
+  inline_note:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: false
+      test: false
+    x-display:
+      table:
+        - title:
+            primary: true
+    fields:
+      title:
+        minLength: 1
+      inline_topic_id:
+        pattern: "^c[a-z0-9]{24,}$"
+        x-relationship:
+          labelField: name
+        x-create-inline: true
+    required:
+      - inline_topic_id

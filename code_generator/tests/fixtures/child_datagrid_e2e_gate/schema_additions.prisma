@@ -296,3 +296,43 @@ model hook_slot {
   @@index([unit_id])
   @@index([second_unit_id])
 }
+
+// Organisation-scoped target of inline_note.inline_topic_id (x-create-inline).
+model inline_topic {
+  id              String       @id @default(cuid())
+  name            String
+  organization_id String
+  organization    organization @relation(fields: [organization_id], references: [id])
+  created_at      DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime     @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user         @relation("InlineTopicCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user         @relation("InlineTopicUpdater", fields: [updater_id], references: [id])
+  notes           inline_note[]
+
+  @@index([name])
+  @@index([organization_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+// Declares x-create-inline on its required FK to inline_topic.
+model inline_note {
+  id              String       @id @default(cuid())
+  title           String
+  inline_topic_id String
+  inline_topic    inline_topic @relation(fields: [inline_topic_id], references: [id])
+  created_at      DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime     @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user         @relation("InlineNoteCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user         @relation("InlineNoteUpdater", fields: [updater_id], references: [id])
+
+  @@index([title])
+  @@index([inline_topic_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
