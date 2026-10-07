@@ -33,6 +33,50 @@ export function getProjectTasks(): Record<string, (...args: any[]) => any> {
       });
       return null;
     },
+    // x-create-inline: two organisations, the test user a member of the first only. The
+    // dialog's organisation options come from the user's memberships, so the second one
+    // exists to show that it is neither offered nor accepted.
+    async 'db:setupInlineOrganizations'() {
+      const user = await prisma.user.findUniqueOrThrow({ where: { email: TEST_CREDENTIALS.email }, select: { id: true } });
+      const orgA = await prisma.organization.create({
+        data: { name: 'Inline Org A', creator_id: user.id, updater_id: user.id, users: { connect: [{ id: user.id }] } },
+        select: { id: true },
+      });
+      const orgB = await prisma.organization.create({
+        data: { name: 'Inline Org B', creator_id: user.id, updater_id: user.id },
+        select: { id: true },
+      });
+      return { orgA: orgA.id, orgB: orgB.id };
+    },
+    // inline_note and inline_topic are generated with test: false, so db:grantAllPermissions does
+    // not cover them. `topicCreate: false` gives the Administrator role everything on
+    // inline_topic except create, for the example that shows the control is not offered.
+    async 'db:grantInlinePermissions'(params: { topicCreate: boolean }) {
+      const user = await prisma.user.findUniqueOrThrow({ where: { email: TEST_CREDENTIALS.email }, select: { id: true } });
+      const role = await prisma.role.findFirstOrThrow({ where: { name: 'Administrator' }, select: { id: true } });
+      for (const name of ['inline_note', 'inline_topic']) {
+        await prisma.permission.create({
+          data: {
+            name,
+            role_id: role.id,
+            create: name === 'inline_topic' ? params.topicCreate : true,
+            read: true,
+            update: true,
+            delete: true,
+            import: true,
+            creator_id: user.id,
+            updater_id: user.id,
+          },
+        });
+      }
+      return null;
+    },
+    async 'db:getInlineTopics'() {
+      return prisma.inline_topic.findMany({ orderBy: { created_at: 'asc' }, select: { id: true, name: true, organization_id: true } });
+    },
+    async 'db:getInlineNotes'() {
+      return prisma.inline_note.findMany({ orderBy: { created_at: 'asc' }, select: { id: true, title: true, inline_topic_id: true } });
+    },
     // Writes a hook_unit row straight through the database client (the lookup spec needs one
     // that matches the helper's lookup name but not the hand-written value).
     async 'db:insertHookUnit'(params: { name: string; kind: string }) {

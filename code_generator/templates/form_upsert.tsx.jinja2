@@ -24,7 +24,13 @@ import { upsert{{ parent_pascal }}{% if can_delete %}, remove{{ parent_pascal }}
 import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 {% endif %}
 import type { FormUpsertProps{% if has_comment_children and named_constants %}, CommentReactionSummary{% endif %} } from '@/lib/{{ parent }}/types';
-import type { ActionFailure } from '@/lib/_errors';
+import type { ActionFailure{% if is_inline_create_target %}, ActionCreated{% endif %} } from '@/lib/_errors';
+{% if is_inline_create_target %}
+import { useInlineCreate } from '@/components/_standard/InlineCreate';
+{% endif %}
+{% if inline_create_imports %}
+{{ inline_create_imports }}
+{% endif %}
 import FormWithChildGrid from '@/components/_standard/FormWithChildGrid';
 import AuditInfo from '@/components/_standard/AuditInfo';
 import { {% if uses_app_field_text %}AppFieldText, {% endif %}{% if uses_app_field_boolean %}AppFieldBoolean, {% endif %}AppValidationError{% if has_entity_autocomplete %}, AppFieldRelation{% endif %}{% if has_flatten_accordion_upsert %}, AppSection{% endif %}{% if has_field_select %}, AppFieldSelect{% endif %} } from '@/components/ui';
@@ -90,11 +96,20 @@ export default function FormUpsert({{ form_upsert_params }}) {
   const canDelete = permissions ? permissions.delete : true;
 {% endif %}
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
+{% if is_inline_create_target %}
+  // x-create-inline: set when another entity's form opened this form in a dialog.
+  const inlineCreate = useInlineCreate();
+{% endif %}
 {% if can_continue %}
   // "Save and continue editing": an edit screen is only reachable with update
   // permission; on /new the same permission is required for the record to be
   // editable once it exists.
+{% if is_inline_create_target %}
+  // Not offered in a dialog: the dialog closes after the save.
+  const canContinue = !inlineCreate && (isEdit || Boolean(permissions?.update));
+{% else %}
   const canContinue = isEdit || Boolean(permissions?.update);
+{% endif %}
 {% endif %}
 {% if all_states %}
 
@@ -171,6 +186,12 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% endif %}
     const formData = new FormData();
     formData.set('id', src.id);
+{% if is_inline_create_target %}
+    // Ask the action for the new id instead of a redirect (x-create-inline).
+    if (inlineCreate) {
+      formData.set('__return_id', '1');
+    }
+{% endif %}
 {% if can_continue %}
     const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
     if (canContinue && submitter?.value === 'continue') {
@@ -189,9 +210,13 @@ export default function FormUpsert({{ form_upsert_params }}) {
 
     try {
       startTransition(async () => {
-        const result = (await upsert{{ parent_pascal }}(formData)) as ActionFailure | void;
+        const result = (await upsert{{ parent_pascal }}(formData)) as ActionFailure{% if is_inline_create_target %} | ActionCreated{% endif %} | void;
         if (result && !result.ok) {
           setError(getErrorMessage(result));
+{% if is_inline_create_target %}
+        } else if (inlineCreate && result && 'id' in result) {
+          await inlineCreate.onCreated(result.id);
+{% endif %}
         }
       });
     } catch (err) {
@@ -213,6 +238,12 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% endif %}
 
   const handleBack = () => {
+{% if is_inline_create_target %}
+    if (inlineCreate) {
+      inlineCreate.onCancel();
+      return;
+    }
+{% endif %}
     router.push('/{{ parent }}');
   };
 {% if has_comment_children %}
@@ -268,6 +299,9 @@ export default function FormUpsert({{ form_upsert_params }}) {
         onInvalidate={isEdit && canDelete ? handleInvalidate : undefined}
 {% endif %}
         onBack={handleBack}
+{% if is_inline_create_target %}
+        inDialog={Boolean(inlineCreate)}
+{% endif %}
         deleteEntityLabel={te('{{ parent_camel }}')}
         submitButtonLabel={tc('save')}
 {% if can_continue %}
@@ -277,6 +311,9 @@ export default function FormUpsert({{ form_upsert_params }}) {
       />
 {% if comment_children_jsx %}
 {{ comment_children_jsx }}
+{% endif %}
+{% if inline_create_dialogs_jsx %}
+{{ inline_create_dialogs_jsx }}
 {% endif %}
 {% for comp in entity_edit_components %}
       <{{ comp.name }} src={src}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId} />

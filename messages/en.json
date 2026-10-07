@@ -11,6 +11,8 @@
     "cancel": "Cancel",
     "chart": "Chart",
     "close": "Close",
+    "createNew": "Create new",
+    "createdInlineNotice": "A new {entity} was created. It stays even if this form is not saved.",
     "delete": "Delete",
     "deleteDialogTitle": "Delete {entity}",
     "deleteMessage": "Are you sure you want to delete this {entity}? Deleted data cannot be recovered.",

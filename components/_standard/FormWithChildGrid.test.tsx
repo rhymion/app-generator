@@ -50,6 +50,23 @@ describe('FormWithChildGrid', () => {
     });
   });
 
+  describe('shown in the create-in-place dialog (x-create-inline)', () => {
+    it('shows the usual back control with its confirmation on its own page', () => {
+      render(<FormWithChildGrid {...defaultProps} />);
+      fireEvent.click(screen.getByLabelText('Back to List'));
+      expect(defaultProps.onBack).not.toHaveBeenCalled();
+      expect(screen.getByText('backDialogTitle')).toBeInTheDocument();
+    });
+
+    it('cancels at once, with no return-to-list confirmation, when inDialog', () => {
+      render(<FormWithChildGrid {...defaultProps} inDialog />);
+      expect(screen.queryByLabelText('Back to List')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByLabelText('cancel'));
+      expect(defaultProps.onBack).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText('backDialogTitle')).not.toBeInTheDocument();
+    });
+  });
+
   describe('rendering', () => {
     it('renders title', () => {
       render(<FormWithChildGrid {...defaultProps} />);

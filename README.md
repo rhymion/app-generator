@@ -33,6 +33,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 - Many-to-one, many-to-many, one-to-one, and self-referential relationships
 - Inline DataGrid children and embedded lists
 - Independent children with their own pages
+- **Create the referenced record in place** (`x-create-inline: true` on a many-to-one FK field) — the field's autocomplete also offers *Create new*, which opens the target's own generated form in a dialog and selects the saved record, so the user does not leave the form to create it first; the target's permissions, validation and organisation scoping apply unchanged. See [`docs/knowledge/create-fk-record-in-place.md`](docs/knowledge/create-fk-record-in-place.md)
 - **Generalized bridge pattern** — reusable schema-level bridge for real one-to-one and polymorphic relations via an internal through-table (`<model>able`); no extra FK columns on the parent, parent autocomplete preserved, and internal bridge tables omitted from JSON schema output
 
 ### Authentication & Authorization

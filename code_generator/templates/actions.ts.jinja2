@@ -44,6 +44,16 @@ export async function upsert{{ parent_pascal }}(data: FormData) {
     redirect(_checkoutUrl);
   }
 {% endif %}
+{% if inline_create_target %}
+
+  // x-create-inline: a dialog on another entity's form saves through this same
+  // action, so the permission, validation and organisation checks above ran
+  // unchanged. It needs the new id back to select it, so the id is returned
+  // instead of redirecting. A failed save returned above.
+  if (_returnId) {
+    return { ok: true as const, id: _createdId as string };
+  }
+{% endif %}
 {% if can_continue %}
 
   // "Save and continue editing": stay on the record instead of going back to

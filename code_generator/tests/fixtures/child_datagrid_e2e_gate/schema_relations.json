@@ -19,9 +19,14 @@
     "created_hook_units hook_unit[] @relation(\"HookUnitCreator\")",
     "updated_hook_units hook_unit[] @relation(\"HookUnitUpdater\")",
     "created_hook_slots hook_slot[] @relation(\"HookSlotCreator\")",
-    "updated_hook_slots hook_slot[] @relation(\"HookSlotUpdater\")"
+    "updated_hook_slots hook_slot[] @relation(\"HookSlotUpdater\")",
+    "created_inline_topics inline_topic[] @relation(\"InlineTopicCreator\")",
+    "updated_inline_topics inline_topic[] @relation(\"InlineTopicUpdater\")",
+    "created_inline_notes inline_note[] @relation(\"InlineNoteCreator\")",
+    "updated_inline_notes inline_note[] @relation(\"InlineNoteUpdater\")"
   ],
   "organization": [
-    "parent1s parent1[]"
+    "parent1s parent1[]",
+    "inline_topics inline_topic[]"
   ]
 }

@@ -18,7 +18,7 @@ from helpers.schema_helpers import (
     derive_text_fields, derive_searchable_relation_fields,
     derive_cross_entity_searchable_fields, derive_searchable_integer_fields,
     get_internal_bridge_fk_prop_names,
-    get_entity_properties, get_self_only_flags,
+    get_entity_properties, get_self_only_flags, get_inline_create_targets,
     derive_write_locked_values,
     derive_write_locked_values_for_view,
     get_direct_attachment_fk_props,
@@ -4842,4 +4842,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         # governs this entity, and the flow's static shape.
         is_approvable=is_approvable,
         approval_config=approval_config,
+        # x-create-inline: some many-to-one field offers to create a record of
+        # THIS entity in place. This entity then gets the dialog component and
+        # the return-id mode of its save action. validate.py has already
+        # rejected targets that cannot safely be created that way.
+        is_inline_create_target=parent in get_inline_create_targets(schema),
     )

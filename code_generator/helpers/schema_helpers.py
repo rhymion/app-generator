@@ -1354,8 +1354,45 @@ def get_parent_relationships(parent_def: dict, schema: dict | None = None) -> li
             # FK field carries no 'x-autocomplete-context' annotation — the
             # unchanged (Phase-1) default.
             'autocomplete_context_fields': list(prop.get('x-autocomplete-context') or []),
+            # x-create-inline: the field's autocomplete also offers "Create new",
+            # which opens the target's own generated form in a dialog.
+            'create_inline': prop.get('x-create-inline') is True,
         })
     return result
+
+
+def get_inline_create_fields(schema: dict) -> list[dict]:
+    """Every field that declares `x-create-inline: true`.
+
+    Each entry: {entity, prop_name, target, rel_type}. `target` and `rel_type`
+    come from the field's own `x-relationship` and are empty when it has none
+    (validate.py rejects that shape). Entities are visited by their view key
+    (`x`), never by the raw `__x` twin, so a field is reported once.
+    """
+    found = []
+    for key in (schema.get('definitions') or {}):
+        if key.startswith('__'):
+            continue
+        for prop_name, prop in get_entity_properties(key, schema).items():
+            if not isinstance(prop, dict) or prop.get('x-create-inline') is not True:
+                continue
+            rel = prop.get('x-relationship') or {}
+            found.append({
+                'entity': key,
+                'prop_name': prop_name,
+                'target': rel.get('target', ''),
+                'rel_type': rel.get('type', ''),
+            })
+    return found
+
+
+def get_inline_create_targets(schema: dict) -> set[str]:
+    """Entities some many-to-one field offers to create in place (the entities
+    that need the dialog component and the return-id mode of their save action)."""
+    return {
+        f['target'] for f in get_inline_create_fields(schema)
+        if f['target'] and f['rel_type'] == 'many-to-one'
+    }
 
 
 def get_direct_attachment_fk_props(parent_def: dict) -> list[dict]:
