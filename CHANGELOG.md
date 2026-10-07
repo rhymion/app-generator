@@ -4,6 +4,18 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
+### Added
+- **"Save and continue editing" button on generated forms** (issue #832). A second submit button
+  beside Save saves the record and stays on it: after a create the URL moves from `/new` to
+  `/edit/[id]`, so attachments and comments can be used straight away; after an update the same
+  edit screen reloads with the saved values. A failed save keeps the form and its values. The
+  button is not generated for `x-generate.edit: false`, `x-payment` and approval-lockable
+  entities, and on `/new` it is shown only to a user with update permission (a user whose update
+  right comes only from the Creator role does not get it there). The edit page keys the form on a
+  `saved` search parameter so embedded child grids are re-seeded from the saved record. No new
+  `x-*` key; `Common.saveAndContinue` is the new message. See
+  `docs/knowledge/save-and-continue-editing.md`.
+
 ### Changed
 - **A list-view entity must declare an `x-display.table` column with `primary: true`**
   (issue #837). Schema validation now fails, naming the entity, when an entity that has a list page
