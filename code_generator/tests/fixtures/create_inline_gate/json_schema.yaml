@@ -1,0 +1,104 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+format-version: 3.0
+
+# Fixture for x-create-inline (Issue #846).
+#   inline_note.inline_topic_id   x-create-inline: true  -> inline_topic is a target
+#   inline_note.inline_category_id  plain FK              -> inline_category is not a target
+#   inline_topic.inline_category_id plain FK              -> the target form's own selection field
+definitions:
+  user:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name: {}
+      email: {}
+
+  inline_category:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - name:
+            primary: true
+    fields:
+      name: {}
+
+  inline_topic:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - name:
+            primary: true
+    fields:
+      name: {}
+      inline_category_id:
+        x-relationship:
+          labelField: name
+
+  inline_note:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - title:
+            primary: true
+    fields:
+      title: {}
+      inline_topic_id:
+        x-relationship:
+          labelField: name
+        x-create-inline: true
+      inline_category_id:
+        x-relationship:
+          labelField: name
+
+  inline_locked:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - title:
+            primary: true
+    x-readonly-fields: [inline_topic_id]
+    fields:
+      title: {}
+      inline_topic_id:
+        x-relationship:
+          labelField: name
+        x-create-inline: true
