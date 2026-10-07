@@ -863,6 +863,94 @@ def _exclusive_parents_errors(schema: dict) -> list[str]:
     return errors
 
 
+def _create_inline_errors(schema: dict) -> list[str]:
+    """Errors for every field declaring `x-create-inline`.
+
+    The key makes a many-to-one FK field also offer "Create new": the target's own
+    generated form opens in a dialog and, once saved, the new record is selected. The
+    dialog reuses the target's form and save action, so the declaration is only accepted
+    for targets whose own create path is safe to run from inside another form. Every
+    other shape is an error (fail closed), never silently ignored: a schema author who
+    declared the key expects the control to exist.
+    """
+    defs = schema.get('definitions', {})
+    errors: list[str] = []
+    for def_key in defs:
+        if def_key.startswith('__') or not _SNAKE_CASE.match(def_key):
+            continue
+        for prop_name, prop_def in get_entity_properties(def_key, schema).items():
+            if not isinstance(prop_def, dict) or 'x-create-inline' not in prop_def:
+                continue
+            flag = prop_def['x-create-inline']
+            where = f"Definition '{def_key}', property '{prop_name}': x-create-inline"
+            if not isinstance(flag, bool):
+                errors.append(f"{where} must be true or false, got {flag!r}.")
+                continue
+            if not flag:
+                continue
+            rel = prop_def.get('x-relationship') or {}
+            rel_type = rel.get('type')
+            target = rel.get('target', '')
+            if rel_type != 'many-to-one' or not target:
+                kind = {
+                    'one-to-one': 'a one-to-one selector',
+                    'one-to-one_bridge': 'a one-to-one bridge',
+                    'direct': 'a direct attachment',
+                }.get(rel_type, 'not a many-to-one relation')
+                errors.append(
+                    f"{where} is only supported on a many-to-one foreign-key field "
+                    f"(`x-relationship: {{type: many-to-one, target: ...}}`); this field is {kind}."
+                )
+                continue
+            if target not in defs and f'__{target}' not in defs:
+                continue  # an unknown target is already reported by the relationship checks
+            raw = _raw_def(target, schema)
+            target_view = defs.get(target) or {}
+            target_where = f"{where} points at '{target}', which"
+            if target_view.get('x-internal') or raw.get('x-internal'):
+                errors.append(f"{target_where} is x-internal and has no generated form.")
+                continue
+            gen = target_view.get('x-generate') or raw.get('x-generate') or {}
+            core_flags = ('list', 'view', 'new', 'edit', 'delete', 'api')
+            if not gen or all(gen.get(k) is False for k in core_flags):
+                errors.append(
+                    f"{target_where} has no generated pages (an internal or bridge entity), "
+                    f"so there is no form to open."
+                )
+                continue
+            if gen.get('new') is False:
+                errors.append(
+                    f"{target_where} has no create form (`x-generate.new: false`), so a user "
+                    f"cannot create one from here either."
+                )
+            if approval_key.has(raw):
+                errors.append(
+                    f"{target_where} declares x-approval: creating it starts an approval flow, "
+                    f"so the new record could not be used at once."
+                )
+            if raw.get('x-payment'):
+                errors.append(
+                    f"{target_where} declares x-payment: saving it redirects to a hosted "
+                    f"checkout page, which cannot happen inside a dialog."
+                )
+            if get_self_only_flags(target_view)[0] or get_self_only_flags(raw)[0]:
+                errors.append(
+                    f"{target_where} declares x-self-only: the record belongs to its creator, "
+                    f"so creating it from another entity's form is ambiguous."
+                )
+            nested = sorted(
+                name for name, p in get_entity_properties(target, schema).items()
+                if isinstance(p, dict) and p.get('x-create-inline') is True
+            )
+            if nested:
+                errors.append(
+                    f"{target_where} itself declares x-create-inline on {nested}. The dialog "
+                    f"shows the target's form, which must not open a further dialog "
+                    f"(nesting depth is 1)."
+                )
+    return errors
+
+
 def validate_schema(schema: dict) -> None:
     """Validate *schema* and raise SchemaValidationError listing all problems."""
     defs = schema.get('definitions', {})
@@ -3062,6 +3150,11 @@ def validate_schema(schema: dict) -> None:
     # x-exclusive-parents
     # -----------------------------------------------------------------------
     errors.extend(_exclusive_parents_errors(schema))
+
+    # -----------------------------------------------------------------------
+    # x-create-inline
+    # -----------------------------------------------------------------------
+    errors.extend(_create_inline_errors(schema))
 
     # -----------------------------------------------------------------------
     # Report
