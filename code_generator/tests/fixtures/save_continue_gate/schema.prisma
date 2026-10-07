@@ -1,0 +1,66 @@
+// Self-contained fixture Prisma schema for the save-and-continue fixture
+// (not the project's real prisma/schema.prisma).
+
+generator client {
+  provider = "prisma-client"
+  previewFeatures = ["relationJoins"]
+  output   = "./.generated-client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model user {
+  id                  String        @id @default(cuid())
+  name                String
+  email               String        @unique
+  created_continue_plains continue_plain[] @relation("ContinuePlainCreator")
+  updated_continue_plains continue_plain[] @relation("ContinuePlainUpdater")
+  created_continue_create_onlys continue_create_only[] @relation("ContinueCreateOnlyCreator")
+  updated_continue_create_onlys continue_create_only[] @relation("ContinueCreateOnlyUpdater")
+  created_continue_edit_onlys continue_edit_only[] @relation("ContinueEditOnlyCreator")
+  updated_continue_edit_onlys continue_edit_only[] @relation("ContinueEditOnlyUpdater")
+}
+
+model continue_plain {
+  id         String   @id @default(cuid())
+  name       String
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("ContinuePlainCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("ContinuePlainUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model continue_create_only {
+  id         String   @id @default(cuid())
+  name       String
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("ContinueCreateOnlyCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("ContinueCreateOnlyUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model continue_edit_only {
+  id         String   @id @default(cuid())
+  name       String
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("ContinueEditOnlyCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("ContinueEditOnlyUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([creator_id])
+  @@index([updater_id])
+}

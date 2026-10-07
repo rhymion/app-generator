@@ -1,0 +1,70 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+format-version: 3.0
+
+# Fixture for the "Save and continue editing" button (the x-generate.edit /
+# x-generate.new matrix). Three entities differ only in those two flags.
+definitions:
+  user:
+    x-generate:
+      list: false
+      view: false
+      new: false
+      edit: false
+      delete: false
+      invalidate: false
+      api: false
+      test: false
+    fields:
+      name: {}
+      email: {}
+
+  continue_plain:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - name:
+            primary: true
+    fields:
+      name: {}
+
+  continue_create_only:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: false
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - name:
+            primary: true
+    fields:
+      name: {}
+
+  continue_edit_only:
+    x-generate:
+      list: true
+      view: true
+      new: false
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - name:
+            primary: true
+    fields:
+      name: {}
