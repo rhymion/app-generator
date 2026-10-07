@@ -1,0 +1,90 @@
+'use server';
+
+// x-create-inline: another entity's form can create a {{ parent }} in a dialog.
+// These two server actions give that dialog what the /{{ parent }}/new page
+// gives its form: whether the user may create one at all, and the options for
+// the form's own selection fields. Saving goes through the same
+// upsert{{ parent_pascal }} action as the page (with __return_id), so
+// permission, validation and organisation checks are not repeated here.
+import { requirePermission } from '@/lib/authz';
+import { get{{ parent_pascal }}NewPageAccessCheck{% for oto in selector_oto_rels %}, getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pascal }}{% endfor %} } from './getters';
+{% for target in selection_targets %}
+{% if target == 'organization' %}
+import { searchAssociatedOrganizationOptions } from '@/lib/organization/getters_associated';
+{% else %}
+import { search{{ target | pascal_case }}Options } from '@/lib/{{ target }}/getters';
+{% endif %}
+{% endfor %}
+{% for oto in selector_oto_rels %}
+{% if oto.target == 'organization' %}
+import { searchAssociatedOrganizationOptions } from '@/lib/organization/getters_associated';
+{% else %}
+import { search{{ oto.target | pascal_case }}Options } from '@/lib/{{ oto.target }}/getters';
+{% endif %}
+{% endfor %}
+
+/**
+ * Whether the current user may create a {{ parent }}: the same decision the
+ * save action makes. A hint for showing the "Create new" control only; the
+ * save action stays the authority.
+ */
+export async function can{{ parent_pascal }}BeCreatedInline(): Promise<boolean> {
+  try {
+    await requirePermission('{{ parent }}', 'create');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Everything the {{ parent }} form needs to open in the dialog, read on the
+ * server so the permission-denied markers (which do not survive the trip to the
+ * client as properties of an array) become plain booleans.
+ * Rejects when the user has no create permission.
+ */
+export async function get{{ parent_pascal }}InlineCreateInit() {
+{% if selection_targets or selector_oto_rels %}
+  const [permissions, {% for target in selection_targets %}initial{{ target | pascal_case }}s{% if not loop.last or selector_oto_rels %}, {% endif %}{% endfor %}{% for oto in selector_oto_rels %}initialAvailable{{ oto.target | pascal_case }}s{% if not loop.last %}, {% endif %}{% endfor %}] = await Promise.all([
+    get{{ parent_pascal }}NewPageAccessCheck(),
+{% for target in selection_targets %}
+{% if target == 'organization' %}
+    searchAssociatedOrganizationOptions('', [], 50),
+{% elif target in list_child_attach_targets %}
+    search{{ target | pascal_case }}Options('', [], 50, { callerEntity: '{{ parent }}' }),
+{% else %}
+    search{{ target | pascal_case }}Options('', [], 50),
+{% endif %}
+{% endfor %}
+{% for oto in selector_oto_rels %}
+    getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pascal }}(),
+{% endfor %}
+  ]);
+{% else %}
+  const permissions = await get{{ parent_pascal }}NewPageAccessCheck();
+{% endif %}
+{% if required_relation_fields %}
+  // A required foreign key whose target the user cannot read can never be filled in, so
+  // the form would never save. The dialog explains that instead (same rule as the /new page).
+  const blockedRelationFieldKeys: string[] = [];
+{% for f in required_relation_fields %}
+  if (({{ f.init_var }} as { permissionDenied?: boolean } | undefined)?.permissionDenied) {
+    blockedRelationFieldKeys.push('{{ f.field_key }}');
+  }
+{% endfor %}
+{% endif %}
+  return {
+    permissions,
+{% for target in selection_targets %}
+    initial{{ target | pascal_case }}s: [...initial{{ target | pascal_case }}s],
+    initial{{ target | pascal_case }}sPermissionDenied: Boolean((initial{{ target | pascal_case }}s as { permissionDenied?: boolean }).permissionDenied),
+{% endfor %}
+{% for oto in selector_oto_rels %}
+    initial{{ oto.target | pascal_case }}s: [...initialAvailable{{ oto.target | pascal_case }}s],
+    initial{{ oto.target | pascal_case }}sPermissionDenied: Boolean((initialAvailable{{ oto.target | pascal_case }}s as { permissionDenied?: boolean }).permissionDenied),
+{% endfor %}
+{% if required_relation_fields %}
+    blockedRelationFieldKeys,
+{% endif %}
+  };
+}

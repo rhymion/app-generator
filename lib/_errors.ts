@@ -64,6 +64,10 @@ export class AppError extends Error {
 
 // Discriminated union for server action return values.
 export type ActionSuccess = { ok: true };
+// Returned instead of a redirect by a save action that was asked for the new
+// record's id (x-create-inline: another entity's form creates a record of this
+// entity in a dialog).
+export type ActionCreated = { ok: true; id: string };
 export type ActionFailure = {
   ok: false;
   errorCode: ErrorCode;

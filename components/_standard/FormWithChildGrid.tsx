@@ -29,6 +29,8 @@ interface FormWithChildGridProps {
   /** When set, a second submit button (value "continue") is shown beside Save. The form's onSubmit tells the two apart through the submitter. */
   continueButtonLabel?: string;
   error?: string | null;
+  /** The form is shown in the "Create new" dialog of a foreign-key field (x-create-inline): the back control is a plain cancel, with no "return to the list" confirmation. */
+  inDialog?: boolean;
 }
 
 export default function FormWithChildGrid({
@@ -43,6 +45,7 @@ export default function FormWithChildGrid({
   submitButtonLabel = 'Save',
   continueButtonLabel,
   error,
+  inDialog = false,
 }: FormWithChildGridProps) {
   const [openDeleteEntityDialog, setOpenDeleteEntityDialog] = useState(false);
   const [openInvalidateDialog, setOpenInvalidateDialog] = useState(false);
@@ -72,8 +75,8 @@ export default function FormWithChildGrid({
     <div>
       <div className="flex justify-between items-center mb-4">
         <h1>{title}</h1>
-        <Tooltip title="Back to List">
-          <IconButton onClick={() => setOpenBackDialog(true)} aria-label="Back to List">
+        <Tooltip title={inDialog ? tc('cancel') : 'Back to List'}>
+          <IconButton onClick={() => (inDialog ? onBack() : setOpenBackDialog(true))} aria-label={inDialog ? tc('cancel') : 'Back to List'}>
             <ArrowBackIcon />
           </IconButton>
         </Tooltip>

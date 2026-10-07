@@ -11,6 +11,8 @@
     "cancel": "キャンセル",
     "chart": "チャート",
     "close": "閉じる",
+    "createNew": "新規作成",
+    "createdInlineNotice": "{entity}を新規作成しました。このフォームを保存しなくても残ります。",
     "delete": "削除",
     "deleteDialogTitle": "{entity}を削除",
     "deleteMessage": "本当にこの{entity}を削除してもよろしいですか？削除されたデータは復元できません。",

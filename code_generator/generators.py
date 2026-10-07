@@ -1145,9 +1145,15 @@ def actions_context(ctx: dict) -> dict:
     # land on /edit/[id]. Mutually exclusive with x-payment (see
     # can_save_and_continue).
     can_continue = can_save_and_continue(ctx)
+    # x-create-inline: another entity's form saves a new record of this one
+    # through this same action, in a dialog, and needs the new id back (see
+    # actions.ts.jinja2). validate.py rejects an x-payment target, so the
+    # is_payment term is only a guard for callers that skip validation.
+    inline_create_target = bool(ctx.get('is_inline_create_target')) and can_create and not is_payment
+    _keeps_created_id = can_create and (can_continue or inline_create_target)
     _create_stmt = (
         f'_checkoutUrl = (await {_create_call_expr}).checkoutUrl;' if is_payment
-        else f'_createdId = (await {_create_call_expr}).id;' if (can_continue and can_create)
+        else f'_createdId = (await {_create_call_expr}).id;' if _keeps_created_id
         else f'await {_create_call_expr};'
     )
 
@@ -1325,14 +1331,25 @@ def actions_context(ctx: dict) -> dict:
     return {
         'service_imports': service_imports,
         'can_continue': can_continue,
+        'inline_create_target': inline_create_target,
         'upsert_body': (
             '  let _checkoutUrl: string | undefined;\n' if is_payment else ''
         ) + (
             # The mode is read before anything else so a failed save (which
             # returns early) never reaches the redirect below.
             "  const _continueEditing = data.get('__continue') === '1';\n"
-            + ('  let _createdId: string | undefined;\n' if can_create else '')
             if can_continue else ''
+        ) + (
+            # Return-id mode saves a NEW record only. An update would already
+            # have been written by the time the id is returned, so the mix is
+            # refused before anything runs.
+            "  const _returnId = data.get('__return_id') === '1';\n"
+            "  if (_returnId && data.get('id')) {\n"
+            "    return { ok: false, errorCode: 'VALIDATION' } satisfies ActionFailure;\n"
+            "  }\n"
+            if inline_create_target else ''
+        ) + (
+            '  let _createdId: string | undefined;\n' if _keeps_created_id else ''
         ) + _upsert_body(has_children),
     }
 
@@ -5152,6 +5169,22 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         )
         jsx_by_field[p] = _maybe_box_wrap(_mention_jsx, _mention_width_cols)
 
+    # x-create-inline: FK fields whose autocomplete also offers "Create new". Only
+    # fields that are actually rendered get the control (a field hidden by
+    # x-display.form has no autocomplete to attach it to).
+    inline_create_hooks: dict[str, str] = {}
+    inline_create_by_prop = {
+        r['prop_name']: {
+            'target': r['target'],
+            'target_pascal': to_pascal_case(r['target']),
+            'sn': safe_var_name(r['prop_name']),
+            'setter': _setter(safe_var_name(r['prop_name'])),
+            'label_fk': _tf(r['prop_name'].removesuffix('_id')),
+        }
+        for r in parent_rels_raw
+        if r.get('create_inline') and _displayed(r['prop_name'])
+    }
+
     def _autocomplete_rel_jsx(prop_name: str, target: str, required: bool) -> str:
         label_base    = prop_name.removesuffix('_id')
         label_fk      = _tf(label_base)
@@ -5162,6 +5195,20 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         initial_var   = f'{state_name}InitialOptions'
         current_var   = f'{state_name}CurrentOption'
         denied_var    = f'{state_name}PermissionDenied'
+        inline = inline_create_by_prop.get(prop_name)
+        if inline:
+            # The record created in the dialog is selected through its own option, which may
+            # be outside the initial list and the current search results. The notice stays
+            # even if the user then picks another record: the created record exists either way.
+            created_var = f"{state_name}CreatedOption"
+            current_expr = f"{created_var} && {created_var}.id === {state_name} ? {created_var} : {current_var}"
+            inline_props = (
+                f"        onCreateNew={{{state_name}CanCreate ? () => set{setter}CreateOpen(true) : undefined}}\n"
+                f"        createdNotice={{{created_var} ? tc('createdInlineNotice', {{ entity: tf('{label_fk}') }}) : null}}\n"
+            )
+        else:
+            current_expr = current_var
+            inline_props = ''
         return (
             f"      <AppFieldRelation\n"
             f"        label={{tf('{label_fk}')}}\n"
@@ -5169,10 +5216,11 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             f"        onChange={{(id) => set{setter}(id)}}\n"
             f"        searchAction={{{search_var}}}\n"
             f"        initialOptions={{{initial_var}}}\n"
-            f"        currentOption={{{current_var}}}\n"
+            f"        currentOption={{{current_expr}}}\n"
             f"        href={{{state_name} ? `/{target}/view/${{{state_name}}}` : null}}\n"
             f"        required={{{'true' if required else 'false'}}}\n"
             f"        permissionDenied={{{denied_var}}}\n"
+            f"{inline_props}"
             f"      />"
         )
 
@@ -5558,6 +5606,24 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"  ), [src.{rel_name}]);"
             )
 
+        # x-create-inline: state for the dialog, the record created through it, and a
+        # one-time check of the user's create permission on the target. The control is
+        # shown only once that check says yes; the server action stays the authority.
+        inline = inline_create_by_prop.get(prop_name)
+        if inline:
+            _isn, _ist = inline['sn'], inline['setter']
+            inline_create_hooks[prop_name] = (
+                f"  const [{_isn}CreateOpen, set{_ist}CreateOpen] = useState(false);\n"
+                f"  const [{_isn}CreatedOption, set{_ist}CreatedOption] = useState<EntityOption | null>(null);\n"
+                f"  const [{_isn}CanCreate, set{_ist}CanCreate] = useState(false);\n"
+                f"  useEffect(() => {{\n"
+                f"    let cancelled = false;\n"
+                f"    can{inline['target_pascal']}BeCreatedInline().then((ok) => {{ if (!cancelled) set{_ist}CanCreate(ok); }}).catch(() => {{}});\n"
+                f"    return () => {{ cancelled = true; }};\n"
+                f"  }}, []);"
+            )
+
+
     # Entity select fields (static options embedded in the file)
     entity_select_opt_setups = []
     entity_select_options = ctx.get('entity_select_options', [])
@@ -5630,6 +5696,41 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     else:
         _ordered_fields = [f for f in filtered_props if f in jsx_by_field]
     all_parent_fields_jsx = '\n'.join(jsx_by_field[f] for f in _ordered_fields)
+
+    # x-create-inline: only a field whose autocomplete was actually rendered with the create
+    # control keeps its state, imports and dialog (a field a later renderer replaced, such as a
+    # read-only one, shows no control, so nothing for it is emitted).
+    inline_create_used = {
+        prop: item for prop, item in inline_create_by_prop.items()
+        if f"onCreateNew={{{item['sn']}CanCreate" in all_parent_fields_jsx
+    }
+    rel_opt_setups.extend(inline_create_hooks[prop] for prop in inline_create_used if prop in inline_create_hooks)
+    inline_create_imports = '\n'.join(
+        ["import type { EntityOption } from '@/components/_standard/EntityAutocomplete';"] * bool(inline_create_used)
+        + [
+            line
+            for target in dict.fromkeys(i['target'] for i in inline_create_used.values())
+            for line in (
+                f"import {to_pascal_case(target)}InlineCreateDialog from '@/components/{target}/InlineCreateDialog';",
+                f"import {{ can{to_pascal_case(target)}BeCreatedInline }} from '@/lib/{target}/inline_create';",
+            )
+        ]
+    )
+    # Rendered beside the form, never inside it: the dialog holds its own <form>, and a
+    # React submit event bubbles through the portal to a parent form's onSubmit.
+    inline_create_dialogs_jsx = '\n'.join(
+        f"      <{i['target_pascal']}InlineCreateDialog\n"
+        f"        open={{{i['sn']}CreateOpen}}\n"
+        f"        onClose={{() => set{i['setter']}CreateOpen(false)}}\n"
+        f"        onCreated={{async (id) => {{\n"
+        f"          const rows = await {i['sn']}SearchAction('', [id]);\n"
+        f"          set{i['setter']}CreatedOption(rows.find((o) => o.id === id) ?? {{ id, label: id }});\n"
+        f"          set{i['setter']}(id);\n"
+        f"          set{i['setter']}CreateOpen(false);\n"
+        f"        }}}}\n"
+        f"      />"
+        for i in inline_create_used.values()
+    )
 
     if _bridge_child_ir:
         # Stage 2: bridge parent UI.
@@ -7067,7 +7168,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # cmd_830: only relations whose FK field declares x-autocomplete-context
     # get the live-refetch initialOptions treatment (see the rel_opt_setups
     # loop above), which is the only path that needs useEffect here.
-    uses_use_effect = any_ctx_fields
+    uses_use_effect = any_ctx_fields or bool(inline_create_used)
 
     return {
         'has_mention_fields':       bool(mention_props),
@@ -7088,6 +7189,9 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'enum_ns_hooks':           _all_enum_ns_hooks,
         'enum_opt_setups':          _all_enum_opt_setups,
         'rel_opt_setups':           '\n'.join(rel_opt_setups),
+        'inline_create_imports':    inline_create_imports,
+        'inline_create_dialogs_jsx': inline_create_dialogs_jsx,
+        'is_inline_create_target':  bool(ctx.get('is_inline_create_target')) and bool(ctx.get('can_create')) and not ctx.get('is_payment'),
         'child_entity_rel_opt':     child_entity_rel_option_setups,
         'validation_call':          validation_call,
         'exclusive_parent_error_fields': _exclusive_parent_error_fields(ctx, schema),

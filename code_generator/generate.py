@@ -1554,6 +1554,14 @@ def generate(schema_path: str, output_dir: str) -> None:
             val_ctx = {**ctx, **build_validation_context(ctx)}
             _write(components_dir / 'form_validation.ts', _render(env, 'form_validation.ts.jinja2', val_ctx))
 
+        # --- x-create-inline target: dialog + the server actions behind it ---
+        # Only for an entity some many-to-one field offers to create in place. The
+        # dialog needs the entity's own create form (can_new) and an update-free save
+        # path; validate.py has already rejected targets that cannot be created this way.
+        if ctx.get('is_inline_create_target') and can_new:
+            _write(lib_dir / 'inline_create.ts', _render(env, 'inline_create_actions.ts.jinja2', ctx))
+            _write(components_dir / 'InlineCreateDialog.tsx', _render(env, 'inline_create_dialog.tsx.jinja2', ctx))
+
         # --- FormView.tsx ---
         if can_view:
             fv_ctx = {**ctx, **form_view_context(ctx, schema)}
