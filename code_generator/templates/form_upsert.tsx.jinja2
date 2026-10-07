@@ -90,6 +90,12 @@ export default function FormUpsert({{ form_upsert_params }}) {
   const canDelete = permissions ? permissions.delete : true;
 {% endif %}
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
+{% if can_continue %}
+  // "Save and continue editing": an edit screen is only reachable with update
+  // permission; on /new the same permission is required for the record to be
+  // editable once it exists.
+  const canContinue = isEdit || Boolean(permissions?.update);
+{% endif %}
 {% if all_states %}
 
 {{ all_states }}
@@ -165,6 +171,12 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% endif %}
     const formData = new FormData();
     formData.set('id', src.id);
+{% if can_continue %}
+    const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    if (canContinue && submitter?.value === 'continue') {
+      formData.set('__continue', '1');
+    }
+{% endif %}
     if (isEdit) {
       formData.set('__src_snapshot', srcSnapshot);
     }
@@ -258,6 +270,9 @@ export default function FormUpsert({{ form_upsert_params }}) {
         onBack={handleBack}
         deleteEntityLabel={te('{{ parent_camel }}')}
         submitButtonLabel={tc('save')}
+{% if can_continue %}
+        continueButtonLabel={canContinue ? tc('saveAndContinue') : undefined}
+{% endif %}
         error={error}
       />
 {% if comment_children_jsx %}

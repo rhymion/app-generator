@@ -21,7 +21,8 @@
     "imageUrl": "画像URL",
     "nextPage": "次へ",
     "previousPage": "前へ",
-    "save": "保存"
+    "save": "保存",
+    "saveAndContinue": "保存して編集を続ける"
   },
   "Errors": {
     "capacityExhausted": "利用可能な容量がありません。別の選択肢をお試しください。",

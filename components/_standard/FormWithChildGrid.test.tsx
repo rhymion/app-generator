@@ -21,6 +21,35 @@ describe('FormWithChildGrid', () => {
     vi.clearAllMocks();
   });
 
+  describe('save and continue editing', () => {
+    it('renders exactly one submit button when continueButtonLabel is absent', () => {
+      const { container } = render(<FormWithChildGrid {...defaultProps} />);
+      expect(container.querySelectorAll('button[type="submit"]')).toHaveLength(1);
+      expect(screen.queryByLabelText('Save and continue editing')).not.toBeInTheDocument();
+    });
+
+    it('renders a second submit button with value "continue" when continueButtonLabel is given', () => {
+      const { container } = render(
+        <FormWithChildGrid {...defaultProps} continueButtonLabel="Save and continue editing" />,
+      );
+      expect(container.querySelectorAll('button[type="submit"]')).toHaveLength(2);
+      const continueButton = screen.getByLabelText('Save and continue editing');
+      expect(continueButton).toHaveAttribute('type', 'submit');
+      expect(continueButton).toHaveAttribute('value', 'continue');
+    });
+
+    it('keeps the plain Save button without a "continue" value', () => {
+      render(<FormWithChildGrid {...defaultProps} continueButtonLabel="Save and continue editing" />);
+      expect(screen.getByLabelText('Save').getAttribute('value')).not.toBe('continue');
+    });
+
+    it('submits the form through the continue button', async () => {
+      render(<FormWithChildGrid {...defaultProps} continueButtonLabel="Save and continue editing" />);
+      fireEvent.click(screen.getByLabelText('Save and continue editing'));
+      await waitFor(() => expect(defaultProps.onSubmit).toHaveBeenCalledTimes(1));
+    });
+  });
+
   describe('rendering', () => {
     it('renders title', () => {
       render(<FormWithChildGrid {...defaultProps} />);

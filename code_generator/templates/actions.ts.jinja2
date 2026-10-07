@@ -44,6 +44,24 @@ export async function upsert{{ parent_pascal }}(data: FormData) {
     redirect(_checkoutUrl);
   }
 {% endif %}
+{% if can_continue %}
+
+  // "Save and continue editing": stay on the record instead of going back to
+  // the list. After a create this lands on /edit/[id]; after an update it
+  // reloads the same screen. The changing `saved` value remounts the form so
+  // its state (including embedded child grids) is rebuilt from the saved
+  // record. A failed save returned above, so it never reaches this point.
+  if (_continueEditing) {
+{% if can_create %}
+    const _continueId = id || _createdId;
+{% else %}
+    const _continueId = id;
+{% endif %}
+    if (_continueId) {
+      redirect(id ? `/{{ parent }}/edit/${_continueId}?saved=${Date.now()}` : `/{{ parent }}/edit/${_continueId}`);
+    }
+  }
+{% endif %}
 
   redirect('/{{ parent }}');
 }

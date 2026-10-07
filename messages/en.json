@@ -21,7 +21,8 @@
     "imageUrl": "Image URL",
     "nextPage": "Next",
     "previousPage": "Previous",
-    "save": "Save"
+    "save": "Save",
+    "saveAndContinue": "Save and continue editing"
   },
   "Errors": {
     "capacityExhausted": "No capacity is available. Please try a different selection.",
