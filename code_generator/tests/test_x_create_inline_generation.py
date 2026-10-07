@@ -125,11 +125,15 @@ def test_target_gets_the_dialog_and_its_server_actions(out):
     assert '<InlineCreateProvider value={contextValue}>' in dialog
 
 
-def test_target_server_actions_probe_the_same_permission_as_the_save_action(out):
+def test_target_server_actions_probe_the_same_check_as_the_new_page(out):
     text = _server_actions(out, 'inline_topic').read_text()
     assert text.startswith("'use server';")
-    assert "await requirePermission('inline_topic', 'create');" in text
-    # The init action throws when the user may not create, like the /new page does.
+    # The dialog shows the /new form, so the hint is the /new page's own access check; the
+    # save action stays the authority on whether a record is created.
+    probe = text[text.index('export async function canInlineTopicBeCreatedInline'):text.index('export async function getInlineTopicInlineCreateInit')]
+    assert 'await getInlineTopicNewPageAccessCheck();' in probe
+    assert 'return false;' in probe
+    # The init action throws when the user may not open the form, like the /new page does.
     assert 'getInlineTopicNewPageAccessCheck()' in text
     # Permission-denied markers become plain booleans before crossing to the client.
     assert 'initialInlineCategorysPermissionDenied: Boolean(' in text

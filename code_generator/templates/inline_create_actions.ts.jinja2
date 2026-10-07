@@ -6,7 +6,6 @@
 // the form's own selection fields. Saving goes through the same
 // upsert{{ parent_pascal }} action as the page (with __return_id), so
 // permission, validation and organisation checks are not repeated here.
-import { requirePermission } from '@/lib/authz';
 import { get{{ parent_pascal }}NewPageAccessCheck{% for oto in selector_oto_rels %}, getAvailable{{ oto.target | pascal_case }}sFor{{ parent_pascal }}{% endfor %} } from './getters';
 {% for target in selection_targets %}
 {% if target == 'organization' %}
@@ -24,13 +23,14 @@ import { search{{ oto.target | pascal_case }}Options } from '@/lib/{{ oto.target
 {% endfor %}
 
 /**
- * Whether the current user may create a {{ parent }}: the same decision the
- * save action makes. A hint for showing the "Create new" control only; the
- * save action stays the authority.
+ * Whether the current user can open the {{ parent }} create form: the same check the
+ * /{{ parent }}/new page makes (the general role permission), because the dialog shows
+ * that form. A hint for showing the "Create new" control only; the save action
+ * stays the authority on whether a record is actually created.
  */
 export async function can{{ parent_pascal }}BeCreatedInline(): Promise<boolean> {
   try {
-    await requirePermission('{{ parent }}', 'create');
+    await get{{ parent_pascal }}NewPageAccessCheck();
     return true;
   } catch {
     return false;

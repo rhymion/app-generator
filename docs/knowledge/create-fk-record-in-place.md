@@ -48,20 +48,20 @@ For the declaring entity (`inline_note`):
   `AppFieldRelation` and renders the target's dialog **beside** the form, never inside it. The dialog
   holds its own `<form>`, and a React submit event bubbles through the dialog's portal to a parent
   form's `onSubmit`.
-- The control is shown only after `can<Target>BeCreatedInline()` says the user may create the target;
-  until then, and for a user who may not, only the existing records are offered. This is a hint: the
-  save action is the authority.
+- The control is shown only after `can<Target>BeCreatedInline()` says the user can open the target's
+  create form; until then, and for a user who cannot, only the existing records are offered. This is a
+  hint: the save action is the authority on whether a record is created.
 - The created record is selected through its own option. Its label is read back through the field's
   own search action (which returns the requested ids verbatim), so a record outside the initial
   options and the current search results still shows its label.
 
 For the target entity (`inline_topic`), generated only when some field declares the key:
 
-- `lib/inline_topic/inline_create.ts` (server actions): `can<Target>BeCreatedInline()` runs
-  `requirePermission('<target>', 'create')`, the same decision the save action makes;
-  `get<Target>InlineCreateInit()` loads what `/<target>/new` loads for its form (the create
-  permission check and the options of the form's own selection fields), on the server, so the
-  permission-denied markers become plain booleans before they cross to the client.
+- `lib/inline_topic/inline_create.ts` (server actions): `can<Target>BeCreatedInline()` runs the
+  access check the `/<target>/new` page makes (`get<Target>NewPageAccessCheck()`), because the
+  dialog shows that form; `get<Target>InlineCreateInit()` loads what `/<target>/new` loads for its
+  form (the same access check and the options of the form's own selection fields), on the server,
+  so the permission-denied markers become plain booleans before they cross to the client.
 - `components/inline_topic/InlineCreateDialog.tsx`: loads that on every opening and shows the
   target's own `FormUpsert`. A required foreign key of the target whose own target the user cannot
   read shows the same explanation as the target's `/new` page instead of a form that could never save.
