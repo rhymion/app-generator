@@ -5,6 +5,22 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Create the referenced record in place from a foreign-key field** (issue #846, stage 1). A
+  many-to-one FK field that declares the new `x-create-inline: true` key (on the field, beside
+  `x-relationship`) also offers *Create new* in its autocomplete. It opens the target entity's own
+  generated form in a dialog and selects the saved record in the field. The dialog saves through the
+  target's own `upsert` action, which gains a return-id mode (`__return_id`) that returns
+  `{ ok: true, id }` instead of redirecting and runs after the same permission check, validation and
+  organisation check as the target's own form. Schema validation rejects, naming the entity and
+  field: a field that is not many-to-one, a target with `x-approval`, `x-payment`, `x-self-only` or
+  `x-internal`, a target with no generated create form, a target that itself declares the key
+  (nesting depth is 1) and a non-boolean value. The created record stays if the parent form is never
+  saved, and the field says so (`Common.createdInlineNotice`); `Common.createNew` is the other new
+  message. Generated for a target only when some field offers it: `lib/<target>/inline_create.ts`,
+  `components/<target>/InlineCreateDialog.tsx`; `components/_standard/InlineCreate.tsx` is the
+  shared dialog context. Not covered yet: FK cells of an embedded child DataGrid, many-to-many fields
+  and the independent-children "add existing" list. See
+  `docs/knowledge/create-fk-record-in-place.md`.
 - **"Save and continue editing" button on generated forms** (issue #832). A second submit button
   beside Save saves the record and stays on it: after a create the URL moves from `/new` to
   `/edit/[id]`, so attachments and comments can be used straight away; after an update the same
@@ -44,6 +60,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   there and the app does not use it.
 
 ### Fixed
+- **`code-generation-custom-extensions.md` no longer shows `target: [new, ...]` for
+  `x-custom-components`.** The generator reads only `list`, `view` and `edit`; `new` was silently
+  ignored. The examples drop it, and the page now says which values `target` accepts and that an
+  `edit` component shows on `/new` too (the create page renders the same form).
 - **Matched the integer segment of a relation label in the generated autocomplete search**
   (issue #842). When a relation's `labelField` ends in an integer property (for example a step
   number), typing the label as displayed never found the option: the last token matched no

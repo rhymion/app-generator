@@ -863,6 +863,28 @@ There is no UI affordance today for telling a user which part of a composite/mix
 actually searchable — schema authors should keep this table in mind when choosing `labelField`
 for a relation likely to be searched by autocomplete.
 
+### `x-create-inline` — create the referenced record in place
+
+Add `x-create-inline: true` to a many-to-one FK field (beside `x-relationship`, not inside it) and
+its autocomplete also offers **Create new**: the target entity's own generated form opens in a
+dialog and the saved record is selected in the field.
+
+```yaml
+booking:
+  fields:
+    resource_id:
+      x-relationship:
+        labelField: name
+      x-create-inline: true
+```
+
+The dialog saves through the target's own `upsert` action, so the target's permissions, validation
+and organisation scoping apply unchanged. Supported only on a many-to-one field, one level deep, and
+not for a target with `x-approval`, `x-payment`, `x-self-only` or `x-internal`, or one with no
+generated create form; each is a validation error. Single FK fields on a form only: child DataGrid
+FK cells, many-to-many fields and the independent-children list do not offer it. Details:
+[create-fk-record-in-place.md](create-fk-record-in-place.md).
+
 ### Direct Attachment FK (`type: direct`) — a single file, not a selectable relation
 
 `x-relationship: { target: attachment, type: direct }` is a distinct marker from every other

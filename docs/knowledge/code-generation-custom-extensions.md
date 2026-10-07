@@ -98,8 +98,10 @@ and api_key straight through `GET /api/user/{id}`. Confirmed by curl
 ### Schema config
 
 Add `x-custom-components` to the `_detail` definition as a list. The `target` field on each
-entry controls which pages render it. Default (no `target`) is `[list]` for backward
-compatibility.
+entry controls which pages render it. It accepts `list`, `view` and `edit` only: the create page
+(`/new`) renders the same `FormUpsert` as the edit page, so an `edit` target shows on both, and a
+`new` value is not a target (it is silently ignored). Default (no `target`) is `[list]` for
+backward compatibility.
 
 ```yaml
 # Single component on the list page only (default / backward compat).
@@ -124,13 +126,13 @@ checkup_detail:
   x-custom-components:
     - name: AggregateScore
       path: "@/components/checkup/aggregate_score"
-      target: [new, edit, view]
+      target: [edit, view]
     - name: JudgeResult
       path: "@/components/checkup/judge_result"
-      target: [new, edit]
+      target: [edit]
     - name: CreatePDF
       path: "@/components/checkup/create_pdf"
-      target: [new, edit, view]
+      target: [edit, view]
   allOf: ...
 ```
 

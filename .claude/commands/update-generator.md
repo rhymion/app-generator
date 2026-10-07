@@ -358,8 +358,10 @@ parent's new and edit screens (UI, Server Action, service, REST route), FK label
 display and selection for the plain / composite / dotted / composite+dotted
 label forms against the parent's own model and another model, required vs
 nullable columns left empty, a child with its own writable pages staying
-read-only on the parent screens, and a read-only or independent sibling not
-removing the form props an editable child grid needs. ~8-10 min. CI runs it as
+read-only on the parent screens, a read-only or independent sibling not
+removing the form props an editable child grid needs, and the `x-create-inline`
+dialog (create the referenced record in place at desktop and phone width,
+including a save for another organisation refused). ~8-10 min. CI runs it as
 `child-datagrid-e2e-gate-fixture`, skipped for a docs-only diff exactly like
 `e2e-tests`; locally it always runs. See
 `scripts/check_child_datagrid_e2e_gate_fixture.sh`.
