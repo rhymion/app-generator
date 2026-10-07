@@ -298,10 +298,12 @@ cypress/e2e/*.cy.ts
 !cypress/e2e/error_message_delivery.cy.ts
 !cypress/e2e/datagrid_native_date_input_typing.cy.ts
 !cypress/e2e/list_filter_sort_relation_column.cy.ts
+!cypress/e2e/save_and_continue_editing.cy.ts
 cypress/e2e/mobile/*.cy.ts
 !cypress/e2e/mobile/layout.cy.ts
 !cypress/e2e/mobile/audit_log.cy.ts
 !cypress/e2e/mobile/approval_flow_crud.cy.ts
+!cypress/e2e/mobile/save_and_continue_editing.cy.ts
 cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/search.cy.ts
 !cypress/e2e/api/user_invalidate.cy.ts
