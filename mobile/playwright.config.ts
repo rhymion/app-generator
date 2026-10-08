@@ -9,6 +9,9 @@ import { defineConfig } from '@playwright/test';
 // EXPO_WEB_URL at the proxy port. See docs/knowledge/mobile-app.md.
 export default defineConfig({
   testDir: './e2e',
+  // scripts/run_mobile_entity_playwright.sh splits the suite: entity-crud.spec.ts needs the
+  // fixture entities, the other specs assume the default schema.
+  testIgnore: process.env.MOBILE_PW_IGNORE || undefined,
   use: {
     baseURL: process.env.EXPO_WEB_URL ?? 'http://localhost:8081',
   },

@@ -96,7 +96,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 
 - Internationalization (English and Japanese, next-intl v4)
 - Dark mode (system-aware, SSR-safe)
-- Expo (React Native) mobile app generated into `mobile/`, with footer tabs and drill-down lists built from the same `x-nav` / `x-nav-groups` as the desktop sidebar
+- Expo (React Native) mobile app generated into `mobile/`, with footer tabs and drill-down lists built from the same `x-nav` / `x-nav-groups` as the desktop sidebar, and native list, detail and form screens for entities without relations that share their form, validation and permission logic with the Web screens
 - 5 extension points for customization without overwriting generated code
 
 ---
@@ -570,7 +570,7 @@ All architectural documentation lives in `docs/knowledge/`:
 | [timezone-handling.md](docs/knowledge/timezone-handling.md) | Server/client timezone conventions |
 | [child-datagrid-reference-columns.md](docs/knowledge/child-datagrid-reference-columns.md) | Inline DataGrid children, reference column rendering |
 | [mobile-responsive-layout.md](docs/knowledge/mobile-responsive-layout.md) | Responsive layout conventions, search header icon, mobile account section |
-| [mobile-app.md](docs/knowledge/mobile-app.md) | Generated Expo mobile app: footer tabs and drill-down from `x-nav`, header, token authentication, Playwright checks |
+| [mobile-app.md](docs/knowledge/mobile-app.md) | Generated Expo mobile app: footer tabs and drill-down from `x-nav`, entity screens, header, token authentication, Playwright checks |
 | [search.md](docs/knowledge/search.md) | Cross-entity full-text search: schema opt-in, pg_bigm, authorization, generated API and UI |
 | [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | Approval flow system detail, post-approval event dispatch (`on_approved`) |
 | [appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) | Comment bridge system detail |

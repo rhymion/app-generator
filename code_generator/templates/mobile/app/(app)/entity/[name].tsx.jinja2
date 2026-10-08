@@ -1,13 +1,19 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { ENTITY_SCREENS } from '@/lib/entity-registry';
 
 /**
- * Entry point every navigation link opens. Entity list, detail and form
- * screens are not part of the mobile app yet; this screen says so instead of
- * leaving a dead link.
+ * Entry point every navigation link opens. An entity with native screens shows
+ * its list; any other entity says it is not available instead of leaving a
+ * dead link.
  */
 export default function EntityScreen() {
   const { name } = useLocalSearchParams<{ name: string }>();
+  const screens = ENTITY_SCREENS[name];
+  if (screens) {
+    const List = screens.List;
+    return <List />;
+  }
   return (
     <View style={styles.container} testID={`entity-${name}`}>
       <Text style={styles.title} testID="entity-title">

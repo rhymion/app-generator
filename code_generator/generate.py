@@ -26,6 +26,8 @@ from helpers.bridge_prisma import emit_bridge_model, emit_parent_bridge_fk, emit
 from helpers.schema_helpers import get_flatten_rels
 from generate_types import extract_entities, extract_named_constants
 from mobile_nav import build_mobile_nav
+from mobile_entities import build_mobile_entity_spec
+from helpers.naming import to_title_case
 from context import build_entity_context
 from build_context import (
     build_context, build_anonymize_user_context, _get_actual_type, set_prisma_models,
@@ -1049,6 +1051,10 @@ _MOBILE_STATIC_TEMPLATES = [
     ('lib/nav.ts.jinja2', 'lib/nav.ts'),
     ('lib/nav-tree.ts.jinja2', 'lib/nav-tree.ts'),
     ('lib/nav-context.tsx.jinja2', 'lib/nav-context.tsx'),
+    ('lib/_errors.ts.jinja2', 'lib/_errors.ts'),
+    ('lib/authz.ts.jinja2', 'lib/authz.ts'),
+    ('lib/entity-http.ts.jinja2', 'lib/entity-http.ts'),
+    ('components/native/FieldInput.tsx.jinja2', 'components/native/FieldInput.tsx'),
     ('components/NavIcon.tsx.jinja2', 'components/NavIcon.tsx'),
     ('components/FooterBar.tsx.jinja2', 'components/FooterBar.tsx'),
     ('components/Header.tsx.jinja2', 'components/Header.tsx'),
@@ -1058,7 +1064,61 @@ _MOBILE_STATIC_TEMPLATES = [
     ('app/(app)/index.tsx.jinja2', 'app/(app)/index.tsx'),
     ('app/(app)/section/[slug].tsx.jinja2', 'app/(app)/section/[slug].tsx'),
     ('app/(app)/entity/[name].tsx.jinja2', 'app/(app)/entity/[name].tsx'),
+    ('app/(app)/entity/[name]/new.tsx.jinja2', 'app/(app)/entity/[name]/new.tsx'),
+    ('app/(app)/entity/[name]/[id].tsx.jinja2', 'app/(app)/entity/[name]/[id].tsx'),
+    ('app/(app)/entity/[name]/[id]/edit.tsx.jinja2', 'app/(app)/entity/[name]/[id]/edit.tsx'),
 ]
+
+# Namespaces of messages/<locale>.json the native entity screens read.
+_MOBILE_MESSAGE_NAMESPACES = ('Common', 'Errors', 'ValidationMessages')
+
+
+def _mobile_messages_json(messages: dict) -> str:
+    picked = {
+        locale: {ns: bundle[ns] for ns in _MOBILE_MESSAGE_NAMESPACES if isinstance(bundle.get(ns), dict)}
+        for locale, bundle in messages.items()
+    }
+    return json.dumps(picked, indent=2, ensure_ascii=False)
+
+
+def generate_mobile_entity(spec: dict, ctx: dict, schema: dict, mobile_dir: Path, env: Environment) -> None:
+    """Render one entity's native screens under mobile/.
+
+    The shared hooks (use_entity_form, use_entity_capabilities) and the pure
+    form_validation module are rendered from the same templates and contexts the
+    Web screens use, so the mobile screens call the same logic.
+    """
+    name = spec['name']
+    has_form_hook = spec['can_new'] or spec['can_edit']
+    spec_ctx = {
+        **spec,
+        'const_name': name.upper(),
+        'fields_json': json.dumps(
+            [
+                {
+                    'key': f['key'], 'label': f['label'], 'kind': f['kind'], 'required': f['required'],
+                    'readonly': f['readonly'], 'options': f['options'], 'numericEnum': f.get('numeric_enum', False),
+                }
+                for f in spec['fields']
+            ],
+            indent=2,
+        ),
+        'list_keys_json': json.dumps(spec['list_keys']),
+        'has_form_hook': has_form_hook,
+    }
+    lib_dir = mobile_dir / 'lib' / name
+    components_dir = mobile_dir / 'components' / name
+    _write(lib_dir / 'use_entity_capabilities.ts', _render(env, 'use_entity_capabilities.ts.jinja2', ctx))
+    if has_form_hook:
+        ups_ctx = {**ctx, **form_upsert_context(ctx, schema)}
+        _write(lib_dir / 'use_entity_form.ts', _render(env, 'use_entity_form.ts.jinja2', ups_ctx))
+        val_ctx = {**ctx, **build_validation_context(ctx)}
+        _write(components_dir / 'form_validation.ts', _render(env, 'form_validation.ts.jinja2', val_ctx))
+        _write(components_dir / 'FormUpsert.tsx', _render(env, 'mobile/entity/FormUpsert.tsx.jinja2', spec_ctx))
+    _write(lib_dir / 'mobile_client.ts', _render(env, 'mobile/entity/mobile_client.ts.jinja2', spec_ctx))
+    _write(components_dir / 'List.tsx', _render(env, 'mobile/entity/List.tsx.jinja2', spec_ctx))
+    if spec['can_view']:
+        _write(components_dir / 'FormView.tsx', _render(env, 'mobile/entity/FormView.tsx.jinja2', spec_ctx))
 
 
 def _read_messages(output_dir: Path) -> dict:
@@ -1073,6 +1133,7 @@ def _read_messages(output_dir: Path) -> dict:
 
 def generate_mobile_target(
     entities: list, schema: dict, output_dir: Path, env: Environment, has_search: bool,
+    mobile_specs: list | None = None,
 ) -> None:
     """Render the Expo Router mobile/ project (footer tabs + drill-down)."""
     app_name = 'Generated App'
@@ -1088,6 +1149,8 @@ def generate_mobile_target(
         'tabs_json': json.dumps(nav['tabs'], indent=2, ensure_ascii=False),
         'search_tab_json': json.dumps(nav['search_tab'], indent=2, ensure_ascii=False) if has_search else 'null',
         'locales_json': json.dumps(locales),
+        'messages_json': _mobile_messages_json(messages),
+        'entities': mobile_specs or [],
     }
     mobile_dir = output_dir / 'mobile'
     search_out = mobile_dir / 'app' / '(app)' / 'search.tsx'
@@ -1097,7 +1160,10 @@ def generate_mobile_target(
         search_out.unlink()
     for tmpl_name, rel_out in _MOBILE_STATIC_TEMPLATES:
         _write(mobile_dir / rel_out, _render(env, f'mobile/{tmpl_name}', ctx))
-    print(f'  Mobile: {len(nav["tabs"])} footer tab(s) + search={has_search} → mobile/')
+    _write(mobile_dir / 'lib' / 'entity-registry.ts', _render(env, 'mobile/lib/entity-registry.ts.jinja2', ctx))
+    _write(mobile_dir / 'lib' / 'messages.ts', _render(env, 'mobile/lib/messages.ts.jinja2', ctx))
+    print(f'  Mobile: {len(nav["tabs"])} footer tab(s) + search={has_search}'
+          f' + {len(ctx["entities"])} entity screen set(s) → mobile/')
 
 
 # ---------------------------------------------------------------------------
@@ -1218,6 +1284,8 @@ def generate(schema_path: str, output_dir: str) -> None:
     # x-payment entities (Issue #775), collected across the loop for the shared
     # lib/payment/ files emitted after it.
     payment_entities: list[dict] = []
+    # Entities that get native list / detail / form screens in the Expo app.
+    mobile_specs: list[dict] = []
 
     for entity in entities:
         parent     = entity['parent']
@@ -1648,6 +1716,13 @@ def generate(schema_path: str, output_dir: str) -> None:
             if fv_ctx.get('has_approval_section'):
                 _write(lib_dir / 'use_entity_approval_actions.ts',
                        _render(env, 'use_entity_approval_actions.ts.jinja2', fv_ctx))
+
+        # --- native mobile screens (Expo): entities without relations ---
+        mobile_spec = build_mobile_entity_spec(ctx, build_validation_context(ctx), to_title_case)
+        if mobile_spec:
+            mobile_specs.append(mobile_spec)
+            generate_mobile_entity(mobile_spec, ctx, schema, out / 'mobile', env)
+            print(f'  Mobile screens → mobile/ ({parent})')
 
         # --- <Child>BridgeGrid.tsx (parent-embedded DataGrid, cmd_167 §4) ---
         # Emitted for bridge children (entities with new-form x-bridge); the
@@ -3210,7 +3285,7 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     # --- Expo mobile app (footer tabs + drill-down from the same nav source) ---
     print('\nGenerating mobile app...')
-    generate_mobile_target(entities, schema, out, env, has_search=bool(search_entities))
+    generate_mobile_target(entities, schema, out, env, has_search=bool(search_entities), mobile_specs=mobile_specs)
 
     # --- upload/route.ts (Vercel Blob, base default) ---
     # Always emitted so app/api/upload/route.ts is a full generated artifact

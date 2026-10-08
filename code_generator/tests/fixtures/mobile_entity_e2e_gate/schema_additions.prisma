@@ -1,0 +1,44 @@
+// Fixture models for scripts/run_mobile_entity_playwright.sh (appended to a COPY of
+// prisma/schema.prisma; the default schema is never edited). The relation back-fields the
+// default `user` model needs are listed in schema_relations.json.
+
+enum MobileNoteStatus {
+  open
+  closed
+}
+
+model mobile_note {
+  id         String           @id @default(cuid())
+  title      String
+  details    String?
+  status     MobileNoteStatus
+  priority   Int?
+  amount     Decimal?         @db.Decimal(10, 2)
+  is_done    Boolean
+  due_on     DateTime?
+  created_at DateTime         @default(now()) @db.Timestamptz(0)
+  updated_at DateTime         @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user             @relation("MobileNoteCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user             @relation("MobileNoteUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([status])
+  @@index([priority])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_log {
+  id         String   @id @default(cuid())
+  message    String
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("MobileLogCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("MobileLogUpdater", fields: [updater_id], references: [id])
+  @@index([message])
+  @@index([creator_id])
+  @@index([updater_id])
+}

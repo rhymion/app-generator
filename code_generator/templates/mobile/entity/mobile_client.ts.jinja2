@@ -1,0 +1,85 @@
+// Mobile data access for {{ pascal }}: the same function names the Web
+// getters / Server Actions have, implemented as REST calls against the routes
+// under /api/{{ name }}. Those routes call the same service functions the Web
+// Server Actions call, so no business logic lives here.
+import { apiFetch, ApiError } from '@/lib/api-base';
+import type { ActionCreated, ActionFailure } from '@/lib/_errors';
+import type { ModelPermissions } from '@/lib/authz';
+import {
+  buildQuery,
+  fetchPermissions,
+  formDataToBody,
+  toActionFailure,
+  type FieldSpec,
+  type PageOpts,
+  type PageResult,
+} from '@/lib/entity-http';
+
+export type {{ pascal }} = { id: string } & Record<string, unknown>;
+
+export const {{ const_name }}_FIELDS: FieldSpec[] = {{ fields_json }};
+
+/** Keys of the columns shown on a list row; the first is the row's title. */
+export const {{ const_name }}_LIST_KEYS: string[] = {{ list_keys_json }};
+
+export async function fetch{{ pascal }}Page(opts: PageOpts = {}): Promise<PageResult<{{ pascal }}>> {
+  return apiFetch<PageResult<{{ pascal }}>>(`/api/{{ name }}${buildQuery(opts)}`);
+}
+
+{% if can_view or can_edit %}
+export async function get{{ pascal }}Detail(id: string): Promise<{{ pascal }} | null> {
+  try {
+    return await apiFetch<{{ pascal }}>(`/api/{{ name }}/${id}`);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+{% endif %}
+{% if can_new or can_edit %}
+/**
+ * Creates the record, or updates it when `formData` carries an `id`. Resolves
+ * to `{ ok: true, id }` on success and to an ActionFailure otherwise; it never
+ * rejects.
+ */
+export async function upsert{{ pascal }}(formData: FormData): Promise<ActionFailure | ActionCreated> {
+  const body = formDataToBody(formData, {{ const_name }}_FIELDS);
+  const id = formData.get('id');
+  try {
+{% if can_edit %}
+    if (id) {
+      await apiFetch(`/api/{{ name }}/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+      return { ok: true, id: String(id) };
+    }
+{% endif %}
+{% if can_new %}
+    const created = await apiFetch<{ id: string }>('/api/{{ name }}', { method: 'POST', body: JSON.stringify(body) });
+    return { ok: true, id: created.id };
+{% else %}
+    return { ok: false, errorCode: 'PERMISSION_DENIED' };
+{% endif %}
+  } catch (err) {
+    return toActionFailure(err);
+  }
+}
+
+{% endif %}
+{% if can_delete %}
+/** Deletes the records. Resolves to an ActionFailure, or `{ ok: true }`; never rejects. */
+export async function remove{{ pascal }}(ids: string[]): Promise<ActionFailure | { ok: true }> {
+  try {
+    for (const id of ids) {
+      await apiFetch(`/api/{{ name }}/${id}`, { method: 'DELETE' });
+    }
+    return { ok: true };
+  } catch (err) {
+    return toActionFailure(err);
+  }
+}
+
+{% endif %}
+/** The caller's flags for this entity, overlaid with the row's own when an id is given. */
+export function get{{ pascal }}Permissions(id?: string): Promise<ModelPermissions> {
+  return fetchPermissions('{{ name }}', id);
+}
