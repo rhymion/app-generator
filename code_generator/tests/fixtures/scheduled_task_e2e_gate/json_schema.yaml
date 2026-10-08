@@ -1,0 +1,26 @@
+# Fixture for the scheduled-task-e2e-gate. ONLY what this gate needs:
+# scripts/check_scheduled_task_e2e_gate_fixture.sh merges it into a COPY of the
+# default code_generator/json_schema.yaml inside a disposable build directory
+# (scripts/compose_child_datagrid_e2e_fixture.py). The default schema, its
+# generated output and every other fixture stay untouched.
+#
+# The default schema declares no scheduled task, so its own e2e build never
+# generates the scheduled-task admin page or its REST routes
+# (/api/scheduled-task-runs). Three bulk tasks give the specs every state:
+#
+#   st_first   no predecessor, handler succeeds
+#   st_second  depends_on st_first, handler succeeds (blocked until st_first has succeeded)
+#   st_boom    no predecessor, handler always throws (a failed run to resolve, skip or rerun)
+#
+# The handlers are in scheduled_task_handlers/ and are copied over the write-once
+# stubs before generate-code runs.
+x-scheduled-tasks:
+  - task_id: st_first
+    handler: runFirst
+  - task_id: st_second
+    handler: runSecond
+    depends_on: [st_first]
+  - task_id: st_boom
+    handler: runBoom
+
+definitions: {}

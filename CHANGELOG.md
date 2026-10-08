@@ -5,6 +5,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **REST routes for the scheduled-task administration** (Issue #887). When the schema declares a scheduled task,
+  `GET /api/scheduled-task-runs` returns the admin page's overview (one row per task with its last-run status and the
+  open actions, plus failed or stuck runs of other dates) and `POST /api/scheduled-task-runs/{task}/{rerun|resolve|skip}`
+  runs the operator actions, so a client that cannot call Server Actions, such as the mobile app, can show and operate
+  them. The routes call the page's own loader and a new `performOperatorAction()` that the Server Actions now call too,
+  so validation, the run guard and the audit row are shared. They accept a mobile access token or an API key and answer
+  `403` without the `ScheduledTaskRunner` role. A new gate, `test:scheduled-task-e2e-gate`, runs their Cypress API specs
+  against a generated fixture app. See `docs/knowledge/scheduled-task-operations.md`.
 - **Documentation for the `x-autocomplete-context` schema key**: where it goes, what it changes in the generated form and split action, how it relates to `autocomplete_filter.ts`, and what validation rejects. See `docs/knowledge/x-autocomplete-context.md`. `docs/knowledge/relation-picker-rest-route.md` now compares the options route with the list API.
 - **REST route for relation pickers: `GET /api/{entity}/options`** (Issue #852). Every entity with a REST
   surface gets a route that searches (`q`, `limit`) or looks up by id (`ids`) the records a many-to-one,

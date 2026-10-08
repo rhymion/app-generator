@@ -88,7 +88,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 
 - **GCP Cloud Run**（`x-cloud` アノテーション、オプトイン） — マルチステージ `Dockerfile`、GCS バックエンドのアップロード（Signed URL アップロード + プロキシルート）、冪等な環境自動化スクリプト（`gcp-env.sh`、`gcp-setup.sh`、`gcp-deploy.sh`、`gcp-seed.sh`、`gcp-teardown.sh`）；`x-cloud` 未指定時は Vercel がデフォルトのまま
 
-- **スケジュールタスク**（`x-scheduled-task` / `x-scheduled-tasks`） — 任意の `depends_on` による実行順序、日次の完了記録、実行状況の確認と再実行・解決済み・スキップのための管理画面（`/scheduled_task_run`）、データベースに対して直接実行する `npm run task:run` / `task:run-all`（`gcp-task-runner.sh` による夜間 Cloud Run Job + Cloud Scheduler のプロビジョニング）；[docs/knowledge/scheduled-task-operations.md](docs/knowledge/scheduled-task-operations.md) を参照
+- **スケジュールタスク**（`x-scheduled-task` / `x-scheduled-tasks`） — 任意の `depends_on` による実行順序、日次の完了記録、実行状況の確認と再実行・解決済み・スキップのための管理画面（`/scheduled_task_run`）と REST ルート（`/api/scheduled-task-runs`）、データベースに対して直接実行する `npm run task:run` / `task:run-all`（`gcp-task-runner.sh` による夜間 Cloud Run Job + Cloud Scheduler のプロビジョニング）；[docs/knowledge/scheduled-task-operations.md](docs/knowledge/scheduled-task-operations.md) を参照
 
 ### 監査・コンプライアンス
 

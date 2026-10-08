@@ -84,7 +84,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 
 - **GCP Cloud Run** (`x-cloud` annotation, opt-in) — multi-stage `Dockerfile`, GCS-backed uploads (Signed URL upload + proxy routes), and idempotent environment automation scripts (`gcp-env.sh`, `gcp-setup.sh`, `gcp-deploy.sh`, `gcp-seed.sh`, `gcp-teardown.sh`); Vercel remains the default when `x-cloud` is not set
 
-- **Scheduled tasks** (`x-scheduled-task` / `x-scheduled-tasks`) — recurring handlers with optional `depends_on` ordering, per-day completion records, an admin page (`/scheduled_task_run`) for run status and rerun / resolve / skip, and `npm run task:run` / `task:run-all` for running them directly against the database (nightly Cloud Run Job + Cloud Scheduler provisioning via `gcp-task-runner.sh`); see [docs/knowledge/scheduled-task-operations.md](docs/knowledge/scheduled-task-operations.md)
+- **Scheduled tasks** (`x-scheduled-task` / `x-scheduled-tasks`) — recurring handlers with optional `depends_on` ordering, per-day completion records, an admin page (`/scheduled_task_run`) and REST routes (`/api/scheduled-task-runs`) for run status and rerun / resolve / skip, and `npm run task:run` / `task:run-all` for running them directly against the database (nightly Cloud Run Job + Cloud Scheduler provisioning via `gcp-task-runner.sh`); see [docs/knowledge/scheduled-task-operations.md](docs/knowledge/scheduled-task-operations.md)
 
 ### Audit & Compliance
 
