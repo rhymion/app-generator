@@ -75,7 +75,8 @@ export function filterAutocompleteOptions(context: AutocompleteFilterContext) {
 ```
 
 The stub returns `{}`. The same function serves the web picker and the REST route, so the narrowing is
-identical on both.
+identical on both. The list API has its own, separate `list_filter.ts`; see
+[relation-picker-rest-route.md](relation-picker-rest-route.md#why-not-the-list-api) for how the two differ.
 
 ## Validation
 
