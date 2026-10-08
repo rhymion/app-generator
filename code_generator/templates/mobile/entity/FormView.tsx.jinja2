@@ -16,7 +16,7 @@ import {
 {% if has_form_hook %}
 import { getEntityFormErrorMessage } from '@/lib/{{ name }}/use_entity_form';
 {% endif %}
-import { toDisplayText } from '@/components/native/FieldInput';
+import { toRecordDisplayText } from '@/components/native/FieldInput';
 
 export function {{ pascal }}FormView({ id }: { id: string }) {
   const { t, terr{% if has_form_hook %}, tmsg{% endif %} } = useMessages();
@@ -76,7 +76,7 @@ export function {{ pascal }}FormView({ id }: { id: string }) {
         <View key={spec.key} style={styles.field}>
           <Text style={styles.label}>{spec.label}</Text>
           <Text style={styles.value} testID={`view-field-${spec.key}`}>
-            {toDisplayText(spec, record[spec.key])}
+            {toRecordDisplayText(spec, record)}
           </Text>
         </View>
       ))}

@@ -4,8 +4,10 @@ Native entity screens in the generated Expo app (mobile_entities.py + templates/
 Runs the real build_user_schema.py -> generate.py pipeline on tests/fixtures/mobile_entity_gate
 and checks that:
 
-- an entity without relations gets the screens its own x-generate flags allow, and one that
-  declares a relation, a child, a custom component or similar gets none
+- an entity gets the screens its own x-generate flags allow; a many-to-one foreign key, a one-to-one
+  selector and a many-to-many declared with `x-outputType: list` are drawn as relation pickers, while an entity with a child grid,
+  a bridge, a custom component or similar gets none
+- the pickers read their candidates from the target's REST options route and filter nothing themselves
 - the screens call the generated hooks the Web screens call, and carry no validation, submit or
   permission logic of their own
 - the mobile hook copies are byte-identical to the Web ones (rendered from the same template)
@@ -95,10 +97,9 @@ def test_plain_context_is_eligible():
 
 
 @pytest.mark.parametrize('key,value', [
-    ('parent_rels_raw', [{'prop_name': 'org_id'}]),
-    ('selector_oto_rels', [{'prop_name': 'x'}]),
     ('direct_attachment_rels', [{'prop_name': 'x'}]),
     ('children_raw', [{'name': 'child'}]),
+    ('non_comment_ch', [{'name': 'child', 'property_name': 'kids', 'is_many_to_many': False}]),
     ('entity_view_components', [{'name': 'ApprovalSection'}]),
     ('has_commentable', True),
     ('is_payment', True),
@@ -114,6 +115,39 @@ def test_feature_beyond_plain_crud_is_ineligible(key, value):
 def test_field_without_a_native_widget_is_ineligible(category):
     ctx = _ctx(field_categories={'text': ['name'], category: ['x']})
     assert 'has a' in mobile_ineligible_reason(ctx)
+
+
+def _m2m_child(**overrides):
+    child = {
+        'name': 'tag', 'property_name': 'tags', 'child_var': 'tags', 'output_type': 'list',
+        'is_many_to_many': True, 'relationship': {'type': 'many-to-many', 'target': 'tag', 'label_field': 'name'},
+    }
+    child.update(overrides)
+    return child
+
+
+def test_foreign_key_selector_and_many_to_many_list_are_eligible():
+    rel = {'prop_name': 'group_id', 'target': 'group'}
+    child = _m2m_child()
+    ctx = _ctx(parent_rels_raw=[rel], selector_oto_rels=[{'prop_name': 'profile_id', 'target': 'profile'}],
+               children_raw=[child], non_comment_ch=[child])
+    assert mobile_ineligible_reason(ctx) is None
+    assert mobile_ineligible_reason(ctx, {'group', 'profile', 'tag'}) is None
+
+
+@pytest.mark.parametrize('overrides', [{'output_type': None}, {'output_type': 'comments'}, {'is_many_to_many': False}])
+def test_child_grid_is_ineligible_even_beside_a_picker(overrides):
+    child = _m2m_child(**overrides)
+    ctx = _ctx(children_raw=[child], non_comment_ch=[child])
+    assert mobile_ineligible_reason(ctx) is not None
+
+
+def test_relation_to_an_entity_without_rest_routes_is_ineligible():
+    ctx = _ctx(parent_rels_raw=[{'prop_name': 'group_id', 'target': 'group'}])
+    assert 'no REST routes' in mobile_ineligible_reason(ctx, {'other'})
+    child = _m2m_child()
+    ctx = _ctx(children_raw=[child], non_comment_ch=[child])
+    assert 'no REST routes' in mobile_ineligible_reason(ctx, {'group'})
 
 
 def test_entity_without_api_or_list_is_ineligible():
@@ -224,3 +258,89 @@ def test_expo_packages_share_one_sdk(out):
         if name.startswith('expo-') and name != 'expo-router':
             assert version.lstrip('~^').split('.')[0] == sdk, name
     assert deps['expo-router'].lstrip('~^').split('.')[0] == sdk
+
+
+# --- relation pickers -----------------------------------------------------------------------
+
+def _fields(out: Path, entity: str, const: str) -> list[dict]:
+    client = _read(out, f'lib/{entity}/mobile_client.ts')
+    return json.loads(re.search(rf'{const}_FIELDS: FieldSpec\[\] = (\[.*?\n\]);', client, re.S).group(1))
+
+
+def test_relation_entity_gets_every_screen_and_is_registered(out):
+    for rel in ('lib/mobile_task/mobile_client.ts', 'components/mobile_task/FormUpsert.tsx',
+                'components/mobile_task/FormView.tsx', 'components/mobile_task/List.tsx'):
+        assert (out / 'mobile' / rel).exists(), rel
+    assert 'mobile_task: {' in _read(out, 'lib/entity-registry.ts')
+
+
+def test_relation_fields_describe_target_label_and_request_key(out):
+    by_key = {f['key']: f for f in _fields(out, 'mobile_task', 'MOBILE_TASK')}
+    assert by_key['mobile_group_id']['kind'] == 'relation'
+    assert by_key['mobile_group_id']['required'] is True
+    assert by_key['mobile_group_id']['target'] == 'mobile_group'
+    assert by_key['mobile_group_id']['labelField'] == 'name'
+    assert by_key['mobile_group_id']['relationName'] == 'mobile_group'
+    assert by_key['mobile_profile_id']['kind'] == 'relation'
+    assert by_key['mobile_profile_id']['required'] is False
+    assert by_key['mobile_profile_id']['relationName'] == 'mobile_profile'
+    # the sibling field the label's autocomplete filter may narrow by
+    assert by_key['mobile_label_id']['contextFields'] == ['mobile_group_id']
+    assert by_key['mobile_label_id']['required'] is False
+    assert by_key['mobile_group_id']['contextFields'] == []
+    assert by_key['tags']['kind'] == 'relation_many'
+    assert by_key['tags']['target'] == 'mobile_tag'
+    # the key the generated REST routes read the selection from
+    assert by_key['tags']['bodyKey'] == 'tags_ids'
+    assert 'tags_ids' in (out / 'app/api/mobile_task/route.ts').read_text()
+    assert 'mobile_group_id: mobileGroupId' in (out / 'app/api/mobile_task/route.ts').read_text()
+
+
+def test_list_row_shows_scalar_columns_only(out):
+    client = _read(out, 'lib/mobile_task/mobile_client.ts')
+    assert 'MOBILE_TASK_LIST_KEYS: string[] = ["title"]' in client
+
+
+def test_relation_screens_still_use_the_shared_hooks_and_validation(out):
+    for name in ('use_entity_form.ts', 'use_entity_capabilities.ts'):
+        assert _read(out, f'lib/mobile_task/{name}') == (out / 'lib/mobile_task' / name).read_text()
+    # the required foreign key is checked by the same module the Web form uses
+    validation = _read(out, 'components/mobile_task/form_validation.ts')
+    assert validation == (out / 'components/mobile_task/form_validation.ts').read_text()
+    assert "key: 'mobile_group_id'" in validation
+    form = _read(out, 'components/mobile_task/FormUpsert.tsx')
+    assert 'validate(() => validateForm(' in form
+    assert 'useEntityForm(' in form and 'submit(formData' in form
+    assert 'caller="mobile_task"' in form
+
+
+def test_picker_reads_candidates_from_the_options_route_and_filters_nothing(out):
+    picker = _read(out, 'components/native/RelationPicker.tsx')
+    assert 'searchEntityOptions(' in picker
+    assert '.filter(' not in picker.replace('selected.filter(', '').replace('current !== id', '')
+    assert 'permissions' not in picker
+    http = _read(out, 'lib/entity-http.ts')
+    assert '/api/${entity}/options' in http
+    assert 'err.status === 403' in http
+
+
+def test_picker_is_disabled_without_read_on_the_target(out):
+    picker = _read(out, 'components/native/RelationPicker.tsx')
+    assert 'picker-denied-' in picker
+    assert 'fkPermissionDenied' in picker
+
+
+def test_many_to_many_is_sent_as_one_entry_per_id_and_clears_when_empty(out):
+    http = _read(out, 'lib/entity-http.ts')
+    assert "formData.getAll(key).map(String)" in http
+    form = _read(out, 'components/mobile_task/FormUpsert.tsx')
+    assert 'formData.append(spec.key, id)' in form
+    view = _read(out, 'components/native/FieldInput.tsx')
+    assert 'toRecordDisplayText' in view
+
+
+def test_picker_strings_exist_in_both_locales():
+    for locale in ('en', 'ja'):
+        common = json.loads((REPO / 'messages' / f'{locale}.json').read_text(encoding='utf-8'))['Common']
+        for key in ('select', 'clear', 'done', 'search', 'noOptions'):
+            assert common.get(key), (locale, key)

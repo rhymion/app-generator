@@ -1055,6 +1055,7 @@ _MOBILE_STATIC_TEMPLATES = [
     ('lib/authz.ts.jinja2', 'lib/authz.ts'),
     ('lib/entity-http.ts.jinja2', 'lib/entity-http.ts'),
     ('components/native/FieldInput.tsx.jinja2', 'components/native/FieldInput.tsx'),
+    ('components/native/RelationPicker.tsx.jinja2', 'components/native/RelationPicker.tsx'),
     ('components/NavIcon.tsx.jinja2', 'components/NavIcon.tsx'),
     ('components/FooterBar.tsx.jinja2', 'components/FooterBar.tsx'),
     ('components/Header.tsx.jinja2', 'components/Header.tsx'),
@@ -1098,6 +1099,13 @@ def generate_mobile_entity(spec: dict, ctx: dict, schema: dict, mobile_dir: Path
                 {
                     'key': f['key'], 'label': f['label'], 'kind': f['kind'], 'required': f['required'],
                     'readonly': f['readonly'], 'options': f['options'], 'numericEnum': f.get('numeric_enum', False),
+                    **(
+                        {
+                            'target': f['target'], 'labelField': f['label_field'], 'relationName': f['relation_name'],
+                            'bodyKey': f['body_key'], 'contextFields': f['context_fields'],
+                        }
+                        if 'target' in f else {}
+                    ),
                 }
                 for f in spec['fields']
             ],
@@ -1286,6 +1294,8 @@ def generate(schema_path: str, output_dir: str) -> None:
     payment_entities: list[dict] = []
     # Entities that get native list / detail / form screens in the Expo app.
     mobile_specs: list[dict] = []
+    # Entities with REST routes, hence an options route a mobile relation picker can call.
+    api_entities = {e['parent'] for e in entities if (e.get('generate_config') or {}).get('api')}
 
     for entity in entities:
         parent     = entity['parent']
@@ -1721,8 +1731,8 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _write(lib_dir / 'use_entity_approval_actions.ts',
                        _render(env, 'use_entity_approval_actions.ts.jinja2', fv_ctx))
 
-        # --- native mobile screens (Expo): entities without relations ---
-        mobile_spec = build_mobile_entity_spec(ctx, build_validation_context(ctx), to_title_case)
+        # --- native mobile screens (Expo): plain CRUD plus relation pickers ---
+        mobile_spec = build_mobile_entity_spec(ctx, build_validation_context(ctx), to_title_case, api_entities)
         if mobile_spec:
             mobile_specs.append(mobile_spec)
             generate_mobile_entity(mobile_spec, ctx, schema, out / 'mobile', env)

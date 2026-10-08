@@ -15,8 +15,8 @@ test.describe('Sub-level navigation on the main screen', () => {
   test('selecting an entity row opens that entity\'s screen', async ({ page }) => {
     await login(page);
     await page.getByTestId('footer-tab-administration').click();
-    await page.getByTestId('nav-row-role').click();
-    await expect(page.getByTestId('entity-role')).toBeVisible();
+    await page.getByTestId('nav-row-user').click();
+    await expect(page.getByTestId('entity-user')).toBeVisible();
     await page.getByTestId('entity-back').click();
     await expect(page.getByTestId('section-administration')).toBeVisible();
   });

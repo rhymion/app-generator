@@ -41,6 +41,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `scripts/run_mobile_entity_playwright.sh` runs the Playwright specs against a build with
   fixture entities (`mobile/e2e/entity-crud.spec.ts`) or the default schema. See
   `docs/knowledge/mobile-app.md`.
+- **Relation pickers in the Expo app's entity screens.** A many-to-one foreign key, a one-to-one
+  selector and a many-to-many declared with `x-outputType: list` are drawn as native pickers (search, select,
+  clear; chips for a set) whose candidates come from `GET /api/{entity}/options`, so an entity with
+  such fields now gets native list, detail and form screens (`code_generator/mobile_entities.py`;
+  in the default schema `role`, `organization` and `app_setting` now qualify). The shared form modules still do the work: the
+  required-foreign-key check is the Web form's `form_validation.ts`, and the picker forwards the hosting
+  entity and the form values a field names with `x-autocomplete-context`. A target the caller cannot read
+  shows the field disabled with the Web message; the detail screen shows related records by label.
+  `Common` gains `select`, `clear`, `done`, `search` and `noOptions` in both locales.
+  `mobile/e2e/relation-pickers.spec.ts` runs through `scripts/run_mobile_entity_playwright.sh`.
+  Creating a referenced record in place and the one-to-one bridge grid are not part of the app yet.
+  See `docs/knowledge/mobile-app.md`.
 - **Email/password token authentication for the mobile app.** `POST /api/mobile/auth/token`
   (password grant, MFA-aware, rate-limited), `POST /api/mobile/auth/refresh` (rotating refresh token
   with reuse detection), `DELETE /api/mobile/auth/token` and device-session routes under

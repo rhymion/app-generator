@@ -10,6 +10,7 @@
     "backMessage": "保存されていないメッセージはすべて失われます。本当にリストに戻りますか？",
     "cancel": "キャンセル",
     "chart": "チャート",
+    "clear": "クリア",
     "close": "閉じる",
     "createNew": "新規作成",
     "createdInlineNotice": "{entity}を新規作成しました。このフォームを保存しなくても残ります。",
@@ -17,14 +18,18 @@
     "deleteDialogTitle": "{entity}を削除",
     "deleteMessage": "本当にこの{entity}を削除してもよろしいですか？削除されたデータは復元できません。",
     "deletedUser": "[削除済みユーザー]",
+    "done": "完了",
     "edit": "編集",
     "editEntity": "{entity}を編集",
     "goBack": "戻る",
     "imageUrl": "画像URL",
     "nextPage": "次へ",
+    "noOptions": "該当するレコードがありません",
     "previousPage": "前へ",
     "save": "保存",
-    "saveAndContinue": "保存して編集を続ける"
+    "saveAndContinue": "保存して編集を続ける",
+    "search": "検索",
+    "select": "選択"
   },
   "Errors": {
     "capacityExhausted": "利用可能な容量がありません。別の選択肢をお試しください。",

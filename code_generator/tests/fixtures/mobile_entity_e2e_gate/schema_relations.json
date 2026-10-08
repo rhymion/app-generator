@@ -3,6 +3,19 @@
     "created_mobile_notes mobile_note[] @relation(\"MobileNoteCreator\")",
     "updated_mobile_notes mobile_note[] @relation(\"MobileNoteUpdater\")",
     "created_mobile_logs mobile_log[] @relation(\"MobileLogCreator\")",
-    "updated_mobile_logs mobile_log[] @relation(\"MobileLogUpdater\")"
+    "updated_mobile_logs mobile_log[] @relation(\"MobileLogUpdater\")",
+    "created_mobile_groups mobile_group[] @relation(\"MobileGroupCreator\")",
+    "updated_mobile_groups mobile_group[] @relation(\"MobileGroupUpdater\")",
+    "created_mobile_tags mobile_tag[] @relation(\"MobileTagCreator\")",
+    "updated_mobile_tags mobile_tag[] @relation(\"MobileTagUpdater\")",
+    "created_mobile_profiles mobile_profile[] @relation(\"MobileProfileCreator\")",
+    "updated_mobile_profiles mobile_profile[] @relation(\"MobileProfileUpdater\")",
+    "created_mobile_tasks mobile_task[] @relation(\"MobileTaskCreator\")",
+    "updated_mobile_tasks mobile_task[] @relation(\"MobileTaskUpdater\")",
+    "created_mobile_org_items mobile_org_item[] @relation(\"MobileOrgItemCreator\")",
+    "updated_mobile_org_items mobile_org_item[] @relation(\"MobileOrgItemUpdater\")"
+  ],
+  "organization": [
+    "mobile_org_items mobile_org_item[]"
   ]
 }

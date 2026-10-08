@@ -16,7 +16,8 @@
 # already in use fails the run.
 #
 # Two modes, because the footer specs assume the default schema's tabs:
-#   MODE=fixture (default)  fixture entities merged; runs mobile/e2e/entity-crud.spec.ts
+#   MODE=fixture (default)  fixture entities merged; runs mobile/e2e/entity-crud.spec.ts and
+#                           mobile/e2e/relation-pickers.spec.ts
 #   MODE=default            unmodified schema; runs every other spec in mobile/e2e/
 #
 # Usage: bash scripts/run_mobile_entity_playwright.sh
@@ -116,11 +117,28 @@ if [ "$MODE" = "fixture" ]; then
   echo "-- a record for the read-only entity (it has no create route) --"
   docker exec "${PROJECT}-postgres-test-1" psql -U postgres -d my_next_test -v ON_ERROR_STOP=1 -c \
     "INSERT INTO mobile_log (id, message, updated_at, creator_id, updater_id) SELECT 'log-seed-1', 'Seeded log entry', now(), id, id FROM \"user\" ORDER BY created_at LIMIT 1;" >/dev/null
-  PW_TARGET="entity-crud.spec.ts"
+  echo "-- records for the relation pickers --"
+  # Two organizations: only the first has the test user (admin@example.com) as a member.
+  docker exec -i "${PROJECT}-postgres-test-1" psql -U postgres -d my_next_test -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+WITH actor AS (SELECT id FROM "user" ORDER BY created_at LIMIT 1)
+INSERT INTO mobile_group (id, name, updated_at, creator_id, updater_id)
+SELECT v.id, v.name, now(), actor.id, actor.id FROM actor, (VALUES ('group-seed-1', 'Alpha Group'), ('group-seed-2', 'Beta Group')) AS v(id, name);
+WITH actor AS (SELECT id FROM "user" ORDER BY created_at LIMIT 1)
+INSERT INTO mobile_tag (id, name, updated_at, creator_id, updater_id)
+SELECT v.id, v.name, now(), actor.id, actor.id FROM actor, (VALUES ('tag-seed-1', 'Red'), ('tag-seed-2', 'Green'), ('tag-seed-3', 'Blue')) AS v(id, name);
+WITH actor AS (SELECT id FROM "user" ORDER BY created_at LIMIT 1)
+INSERT INTO mobile_profile (id, name, updated_at, creator_id, updater_id)
+SELECT v.id, v.name, now(), actor.id, actor.id FROM actor, (VALUES ('profile-seed-1', 'Profile One'), ('profile-seed-2', 'Profile Two'), ('profile-seed-3', 'Profile Three')) AS v(id, name);
+WITH actor AS (SELECT id FROM "user" ORDER BY created_at LIMIT 1)
+INSERT INTO organization (id, name, updated_at, creator_id, updater_id)
+SELECT v.id, v.name, now(), actor.id, actor.id FROM actor, (VALUES ('org-own', 'Mobile Own Org'), ('org-foreign', 'Mobile Foreign Org')) AS v(id, name);
+INSERT INTO "_UserOrganizations" ("A", "B") SELECT 'org-own', id FROM "user" WHERE email = 'admin@example.com';
+SQL
+  PW_TARGET="entity-crud.spec.ts relation-pickers.spec.ts"
   export MOBILE_PW_IGNORE=""
 else
   PW_TARGET=""
-  export MOBILE_PW_IGNORE="**/entity-crud.spec.ts"
+  export MOBILE_PW_IGNORE="**/{entity-crud,relation-pickers}.spec.ts"
 fi
 
 echo "-- installing the Expo dependencies --"

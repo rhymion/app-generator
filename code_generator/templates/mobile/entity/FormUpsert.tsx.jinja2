@@ -82,7 +82,11 @@ export function {{ pascal }}FormUpsert({ id }: { id?: string }) {
     const formData = new FormData();
     if (id) formData.append('id', id);
     for (const spec of FIELDS) {
-      if (!spec.readonly) formData.append(spec.key, String(values[spec.key]));
+      if (spec.readonly) continue;
+      const value = values[spec.key];
+      // A many-to-many travels as one entry per selected id.
+      if (Array.isArray(value)) value.forEach((id) => formData.append(spec.key, id));
+      else formData.append(spec.key, String(value));
     }
     submit(formData, (savedId) => {
 {% if can_view %}
@@ -118,6 +122,8 @@ export function {{ pascal }}FormUpsert({ id }: { id?: string }) {
           value={values[spec.key]}
           onChange={(next) => setValues((current) => ({ ...current, [spec.key]: next }))}
           disabled={busy}
+          caller="{{ name }}"
+          formValues={values}
         />
       ))}
       {validationError ? <Text style={styles.error} testID="form-validation-error">{validationError}</Text> : null}

@@ -79,9 +79,10 @@ not be allowed to open.
 
 ## Entity screens
 
-An entity without relations gets native list, detail and form screens. `code_generator/mobile_entities.py`
-decides which entities qualify and describes their fields; the templates are under
-`code_generator/templates/mobile/` (`entity/`, `components/native/`, `lib/`).
+An entity gets native list, detail and form screens when it needs nothing beyond plain fields and the
+[relation pickers](#relation-pickers). `code_generator/mobile_entities.py` decides which entities qualify
+and describes their fields; the templates are under `code_generator/templates/mobile/` (`entity/`,
+`components/native/`, `lib/`).
 
 | Screen | Route | Generated when |
 |---|---|---|
@@ -92,14 +93,40 @@ decides which entities qualify and describes their fields; the templates are und
 | Delete (one record, with a confirmation panel, from the detail screen) | | `x-generate.delete` |
 
 An entity is left on the placeholder screen when it has no REST routes or no list screen, declares a
-relation (many-to-one, one-to-one, direct attachment, children), a custom component, virtual columns,
-comments, attachments, `x-payment`, `x-splittable`, `x-create-inline`, a reservation, a state machine,
-edit/delete guards or `x-self-only`, or has a field with no native widget (image or file URI, entity
-select, custom upsert component). Selecting a foreign key or many-to-many value goes through the REST
-route `GET /api/<entity>/options` (`relation-picker-rest-route.md`), but the app has no picker screen
-yet, so those entities stay on the placeholder.
-The default schema has no such entity; the fixture schema in
-`code_generator/tests/fixtures/mobile_entity_gate/` does.
+child grid or a comment thread, a one-to-one bridge or a direct attachment, a custom component, virtual
+columns, comments, attachments, `x-payment`, `x-splittable`, a reservation, a state machine, edit/delete
+guards or `x-self-only`, is the target of an `x-create-inline` field, relates to an entity that has no
+REST routes, or has a field with no native widget (image or file URI, entity select, custom upsert
+component). In the default schema `role`, `organization` and `app_setting` qualify; `user` (a custom component) keeps
+the placeholder. The fixture schema in `code_generator/tests/fixtures/mobile_entity_gate/` covers the rest.
+
+### Relation pickers
+
+A many-to-one foreign key, a one-to-one selector and a many-to-many declared with `x-outputType: list`
+(the Web form's autocomplete list of existing records) are drawn by
+`components/native/RelationPicker.tsx`:
+
+| Relation | Control | Request body |
+|---|---|---|
+| Many-to-one foreign key | A button showing the selected record's label; *Select* opens a modal with a search box and the candidates. A tap selects and closes. An optional field has *Clear*. | `<column>: <id>` or `null` |
+| One-to-one selector | The same control. A record that is already linked elsewhere is rejected by the service and shown with the shared `fieldAlreadyLinked` message. | `<column>: <id>` or `null` |
+| Many-to-many | Chips for the selected records, each with a remove button; *Select* opens the modal, where a tap toggles a record and *Done* closes it. | `<name>_ids: [<id>, ...]`, an empty list when nothing is selected |
+
+The candidates come from `GET /api/<target>/options` through `searchEntityOptions()` in `lib/entity-http.ts`
+(`relation-picker-rest-route.md`). The request carries `q` (typed text, debounced), `ids` (the current
+selection, so a selected record is listed whatever the text), `caller` (the hosting entity) and `context`
+(the values of the form fields the field's `x-autocomplete-context` names, as JSON). The picker filters
+nothing itself: permission scope, organization isolation, invalidated records, list-child attachment and the
+target's `autocomplete_filter.ts` are the server's. A `403` from the options route (no `read` on the target)
+shows the field disabled with the `Errors.fkPermissionDenied` message the Web form uses. The target need not
+have native screens of its own.
+
+The detail screen names a relation by the label column (`labelField` of the relationship) of the record the
+REST detail embeds. A list row shows scalar columns only: the REST list does not embed related labels.
+
+A required foreign key is checked by the same `form_validation.ts` the Web form runs (`Mobile Group is
+required`), before any request. Form state, submit and error mapping stay in `use_entity_form.ts`; the picker
+is presentation plus the options request.
 
 ### Shared logic with the Web screens
 
@@ -188,12 +215,13 @@ own docker project and ports, and runs the specs in two modes (the footer specs 
 tabs, the entity specs need the fixture entities):
 
 ```bash
-bash scripts/run_mobile_entity_playwright.sh               # fixture schema: mobile/e2e/entity-crud.spec.ts
+bash scripts/run_mobile_entity_playwright.sh               # fixture schema: entity-crud.spec.ts, relation-pickers.spec.ts
 MODE=default bash scripts/run_mobile_entity_playwright.sh  # default schema: the other specs
 ```
 
 The fixture mode merges `code_generator/tests/fixtures/mobile_entity_e2e_gate/` (`mobile_note` with full
-CRUD, `mobile_log` list-and-view only) into the copy's schema, as `scripts/compose_child_datagrid_e2e_fixture.py`
+CRUD, `mobile_log` list-and-view only, `mobile_task` with a required foreign key, a many-to-many and a one-to-one
+selector to `mobile_group` / `mobile_tag` / `mobile_profile`, `mobile_org_item` with a foreign key to `organization`) into the copy's schema, as `scripts/compose_child_datagrid_e2e_fixture.py`
 does for the other end-to-end fixtures, and signs in as the seeded administrator. `mobile/scripts/serve-web-with-proxy.js`
 runs the Expo web server and the proxy as one process so the runner can stop both.
 
@@ -201,14 +229,20 @@ runs the Expo web server and the proxy as one process so the runner can stop bot
   validation (no request is sent for an invalid form), a server-side rejection, and every permission-hidden
   action (New, the form without `create`, Edit and Delete on a record the caller cannot change, a
   list-and-view-only entity).
+- `mobile/e2e/relation-pickers.spec.ts` covers the pickers: select, search with the current selection kept,
+  the hosting entity and form values sent with the search, the shared required-field check, edit, a
+  disabled field without read on the target, clear, a one-to-one already linked elsewhere, adding and
+  removing many-to-many records, an emptied set sent as an empty list, and the organization picker offering
+  only organizations the user belongs to. The fixture mode seeds the records it needs.
 - `mobile/e2e/*.spec.ts` are curated, hand-written specs, one per flow, not generated. A mobile change
   ships a spec for the flow it changes.
 - `mobile/scripts/real-browser-verify.js` is the reusable real-browser check. It selects a preset with
   `FLOW_TYPE` (`assert`, `drill`); a new need adds a preset instead of a new script. Never launch
   Chromium with `--disable-web-security` — it hides the CORS-class gaps this check exists to catch.
 - `code_generator/tests/test_mobile_nav.py` covers the tree built from the nav configuration.
-- `code_generator/tests/test_mobile_entities.py` covers which entities get screens, that the screens call the
-  shared modules, the REST client and the React version the shared hooks need.
+- `code_generator/tests/test_mobile_entities.py` covers which entities get screens, the relation field
+  descriptions, that the screens and pickers call the shared modules and the options route, the REST client
+  and the React version the shared hooks need.
 - `cypress/e2e/api/mobile_auth.cy.ts`, `mobile_nav.cy.ts` and `mobile_permissions.cy.ts` cover the REST routes.
 
 The suite runs the web bundle, not native rendering, so native-only behavior (secure storage prompts,
@@ -217,9 +251,9 @@ check and is not part of the mandatory gate.
 
 ## Not implemented yet
 
-- Entity screens for an entity with a relation, and with them every feature that lives on such a screen:
-  the REST route for selecting a foreign key or many-to-many value exists
-  (`relation-picker-rest-route.md`), but the picker screens that use it are not built. The same goes for
-  child grids, approval, comments, attachments and payment.
+- Entity screens for an entity that declares anything beyond plain fields and the relation pickers: child
+  grids, approval, comments, attachments and payment.
+- Creating the referenced record in place from a foreign-key field (`x-create-inline`) and the one-to-one
+  bridge grid (`x-bridge`).
 - Bulk delete, the native date pickers (dates are typed as text), CSV import and export.
 - Translated field labels.
