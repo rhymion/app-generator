@@ -4,7 +4,7 @@ import { requirePermission, getSessionUserId, type RichPermissions, type Operati
 import { TtlLruCache } from '@/lib/_ttl_lru';
 import { AppError, type ErrorCode } from '@/lib/_errors';
 import { SCHEDULED_TASK_ROLE_NAME } from '@/lib/scheduled-tasks/system-actor';
-import { enterRequestScope } from '@/lib/_request_scope';
+import { enterRequestScope, runAsActor } from '@/lib/_request_scope';
 import { isMobileJwt, verifyMobileAccessToken, MobileAuthError } from '@/lib/mobile-auth';
 
 export class ApiError extends Error {
@@ -192,6 +192,30 @@ export async function requireScheduledTaskRole(request: NextRequest): Promise<{ 
     throw new ApiError(403, `Scheduled task access requires the '${SCHEDULED_TASK_ROLE_NAME}' role.`);
   }
   return { userId };
+}
+
+/**
+ * Caller of a route that serves both the web session and token callers: a
+ * mobile access token or API key when the request carries a credential header
+ * (see {@link authenticate}), otherwise the NextAuth session cookie. Throws
+ * ApiError(401) when neither is present or valid.
+ */
+export async function requireCaller(request: NextRequest): Promise<{ userId: string }> {
+  if (request.headers.get('Authorization') || request.headers.get('X-API-Key')) {
+    return authenticate(request);
+  }
+  const userId = await getSessionUserId();
+  if (!userId) throw new ApiError(401, 'Authentication required. Sign in, or send a mobile access token or API key.');
+  return { userId };
+}
+
+/**
+ * Runs `fn` with the authenticated caller as the acting user, so a function that
+ * reads its identity from the session (a Server Action) can be reused by a REST
+ * route without a second implementation. See `runAsActor`.
+ */
+export function withActor<T>(userId: string, fn: () => Promise<T>): Promise<T> {
+  return runAsActor(userId, fn);
 }
 
 export async function requireApiPermission(

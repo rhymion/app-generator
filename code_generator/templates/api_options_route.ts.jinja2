@@ -1,0 +1,81 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { requireCaller, requireApiPermission, withActor, handleApiError } from '@/lib/api-auth';
+import { getRateLimiter } from '@/lib/rate-limit';
+{% if parent == 'organization' %}
+import { searchAssociatedOrganizationOptions } from '@/lib/organization/getters_associated';
+{% else %}
+import { search{{ parent_pascal }}Options } from '@/lib/{{ parent }}/getters';
+{% endif %}
+
+// Picker candidates for a relation that points at {{ parent }}: the REST side of the
+// autocomplete the web forms use. It calls the same function the web forms call
+// ({% if parent == 'organization' %}searchAssociatedOrganizationOptions{% else %}search{{ parent_pascal }}Options{% endif %}), run as the authenticated
+// caller, so read permission, organization scoping, the entity's autocomplete
+// filter and the returned row shape are the web's own, not a copy.
+//
+//   GET .../options?q=<text>&limit=<1-200>   search (substring match, as in the web picker)
+//   GET .../options?ids=<id>,<id>            look up specific records by id
+//   caller=<entity>                          the entity whose form hosts the picker
+//   context=<json object>                    that form's current values (narrowing only)
+
+const MAX_IDS = 200;
+const MAX_CONTEXT_LENGTH = 4096;
+const ENTITY_NAME = /^[a-z][a-z0-9_]{0,63}$/;
+
+function badRequest(message: string) {
+  return NextResponse.json({ error: message }, { status: 400 });
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const { userId: actorId } = await requireCaller(request);
+    const _rl = await getRateLimiter().check('api:read', actorId);
+    if (!_rl.allowed) {
+      return NextResponse.json(
+        { error: 'rate_limited', retryAfter: _rl.retryAfterSeconds },
+        { status: 429, headers: { 'Retry-After': String(_rl.retryAfterSeconds), 'X-RateLimit-Bucket': 'api:read' } },
+      );
+    }
+    await requireApiPermission(actorId, '{{ parent }}', 'read');
+
+    const params = request.nextUrl.searchParams;
+    const query = params.get('q') ?? '';
+    const ids = (params.get('ids') ?? '').split(',').map((id) => id.trim()).filter(Boolean);
+    if (ids.length > MAX_IDS) return badRequest(`ids exceeds maximum of ${MAX_IDS}`);
+    const rawLimit = params.get('limit');
+    let limit = 50;
+    if (rawLimit !== null) {
+      limit = Number(rawLimit);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+        return badRequest('limit must be an integer between 1 and 200');
+      }
+    }
+{% if parent == 'organization' %}
+    const rows = await withActor(actorId, () => searchAssociatedOrganizationOptions(query, ids, limit));
+{% else %}
+    const callerEntity = params.get('caller');
+    if (callerEntity !== null && !ENTITY_NAME.test(callerEntity)) return badRequest('caller is not a valid entity name');
+    let formValues: Record<string, unknown> | undefined;
+    const rawContext = params.get('context');
+    if (rawContext !== null) {
+      if (rawContext.length > MAX_CONTEXT_LENGTH) return badRequest('context is too large');
+      try {
+        const parsed: unknown = JSON.parse(rawContext);
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object');
+        formValues = parsed as Record<string, unknown>;
+      } catch {
+        return badRequest('context must be a JSON object');
+      }
+    }
+    const rows = await withActor(actorId, () =>
+      search{{ parent_pascal }}Options(query, ids, limit, {
+        ...(callerEntity ? { callerEntity } : {}),
+        ...(formValues ? { formValues } : {}),
+      }),
+    );
+{% endif %}
+    return NextResponse.json(Array.from(rows));
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

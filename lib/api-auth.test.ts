@@ -15,7 +15,7 @@ vi.mock('@/lib/authz', () => ({
   getSessionUserId,
 }));
 
-import { ApiError, authenticateApiKey, requireScheduledTaskRole } from './api-auth';
+import { ApiError, authenticateApiKey, requireCaller, requireScheduledTaskRole } from './api-auth';
 import { SCHEDULED_TASK_ROLE_NAME } from './scheduled-tasks/system-actor';
 
 function makeRequest(headers: Record<string, string> = {}) {
@@ -124,5 +124,24 @@ describe('authenticateApiKey', () => {
       statusCode: 401,
     } satisfies Partial<ApiError>);
     expect(userFindFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe('requireCaller', () => {
+  it('uses the session cookie when the request carries no credential header', async () => {
+    getSessionUserId.mockResolvedValue('cookie-user');
+    await expect(requireCaller(makeRequest())).resolves.toEqual({ userId: 'cookie-user' });
+  });
+
+  it('rejects with 401 when there is neither a credential header nor a session', async () => {
+    getSessionUserId.mockResolvedValue(null);
+    await expect(requireCaller(makeRequest())).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it('does not fall back to the session when a credential header is present but invalid', async () => {
+    getSessionUserId.mockResolvedValue('cookie-user');
+    userFindFirst.mockResolvedValue(null);
+    await expect(requireCaller(makeRequest({ 'X-API-Key': 'not-a-real-key' }))).rejects.toBeInstanceOf(ApiError);
+    expect(getSessionUserId).not.toHaveBeenCalled();
   });
 });

@@ -6,13 +6,22 @@ import { cache } from 'react';
 import { TtlLruCache } from '@/lib/_ttl_lru';
 import { SELF_ONLY_ADMIN_BYPASS_ENTITIES } from '@/lib/self_only_admin_bypass_entities';
 import { AppError } from '@/lib/_errors';
-import { enterRequestScope, memoizeInRequestScope } from '@/lib/_request_scope';
+import { enterRequestScope, getActorOverride, memoizeInRequestScope } from '@/lib/_request_scope';
 
-export const getSessionUserId = cache(async function getSessionUserId(): Promise<string | null> {
+const getCookieSessionUserId = cache(async function getCookieSessionUserId(): Promise<string | null> {
   enterRequestScope();
   const session = await auth();
   return session?.user?.id ?? null;
 });
+
+/**
+ * The signed-in user's id. Inside `runAsActor()` (lib/_request_scope.ts) this is
+ * the user a REST route already authenticated by another credential; everywhere
+ * else it is the session cookie's user.
+ */
+export async function getSessionUserId(): Promise<string | null> {
+  return getActorOverride() ?? getCookieSessionUserId();
+}
 
 export async function getSessionUserIdOrThrow(): Promise<string> {
   const userId = await getSessionUserId();

@@ -549,6 +549,38 @@ def build_entity_openapi(ctx: dict) -> dict:
     if bulk_item:
         paths[f'/api/{parent}/bulk'] = bulk_item
 
+    # Picker candidates (api_options_route.ts.jinja2): written for every
+    # entity with a REST surface, whatever its x-generate list/view flags.
+    _options_params = [
+        {'name': 'q', 'in': 'query', 'required': False, 'schema': {'type': 'string'},
+         'description': 'Substring to match, as in the web picker.'},
+        {'name': 'ids', 'in': 'query', 'required': False, 'schema': {'type': 'string'},
+         'description': 'Comma-separated record ids (at most 200) to look up.'},
+        {'name': 'limit', 'in': 'query', 'required': False,
+         'schema': {'type': 'integer', 'minimum': 1, 'maximum': 200, 'default': 50}},
+    ]
+    if parent != 'organization':
+        _options_params += [
+            {'name': 'caller', 'in': 'query', 'required': False, 'schema': {'type': 'string'},
+             'description': 'Entity whose form hosts the picker.'},
+            {'name': 'context', 'in': 'query', 'required': False, 'schema': {'type': 'string'},
+             'description': "JSON object with that form's current values; it can only narrow the candidates."},
+        ]
+    paths[f'/api/{parent}/options'] = {
+        'get': {
+            'tags': [tag],
+            'summary': f'Search or look up {parent} records for a relation picker',
+            'parameters': _options_params,
+            'responses': {
+                '200': {
+                    'description': 'Candidates the caller may read, in the shape the web picker uses.',
+                    'content': {'application/json': {'schema': {'type': 'array', 'items': record_ref}}},
+                },
+                **_std_responses(error_ref, permission='read', codes=[400, 401, 403, 429]),
+            },
+        },
+    }
+
     # gap 5: CSV export/import paths (generate.py's own gating conditions,
     # mirrored exactly -- `can_list and can_export` / `import_eligible`).
     # Neither route calls getRateLimiter() (api_export_route.ts.jinja2,
