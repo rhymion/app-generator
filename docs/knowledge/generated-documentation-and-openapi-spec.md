@@ -296,6 +296,12 @@ against a parallel agent API recreating a second, divergent code path):
   (`lib/approval_request/on_withdrawn_dispatch.ts`) plus the same
   requestor-only (`approvable.creator_id === actorId`) check the real
   withdraw route enforces -- all reused, none re-implemented.
+  The same `approval` object also lists `current_round_request_ids` (the
+  `approval_request` rows of the latest round) and `actionable_request_ids`
+  (the pending rows among them this caller may approve or reject right now:
+  role held and `assertApprovalOrder()` passes), so a client that cannot
+  evaluate the role rule itself (the mobile app) knows which row each button
+  acts on.
 
 Known coverage gap, disclosed rather than papered over: this repo's own
 `json_schema.yaml` declares no entity with the approvable bridge

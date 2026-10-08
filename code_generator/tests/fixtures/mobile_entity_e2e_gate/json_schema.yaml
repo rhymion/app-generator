@@ -189,3 +189,115 @@ definitions:
     required:
       - name
       - organization_id
+
+  # Approval: the detail screen shows the approval requests of the current round with approve / reject / withdraw.
+  mobile_request:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: false
+      invalidate: false
+      api: true
+      test: false
+    x-approval:
+      submit_on:
+        status: submitted
+      on_approved:
+        set_fields:
+          status: approved
+      on_rejected:
+        set_fields:
+          status: rejected
+      on_withdrawn:
+        set_fields:
+          status: draft
+    x-display:
+      table:
+        - title:
+            primary: true
+        - status: {}
+    x-custom-components:
+      - name: ApprovalSection
+        path: "@/components/_standard/ApprovalSection"
+        target:
+          - view
+    fields:
+      title: {}
+      status:
+        enum: ["draft", "submitted", "approved", "rejected"]
+      approvable_id:
+        x-relationship:
+          type: one-to-one_bridge
+          target: approvable
+          labelField: id
+    properties:
+      approvable:
+        $ref: "#/definitions/approvable"
+    required:
+      - title
+      - status
+      - approvable_id
+
+  # Split: the detail screen of an approval entity with x-splittable offers the split action. The
+  # parts redistribute the quantity and each names a group.
+  mobile_shipment:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: false
+      invalidate: false
+      api: true
+      test: false
+    x-approval:
+      submit_on:
+        status: pending
+      on_approved:
+        set_fields:
+          status: approved
+      on_rejected:
+        set_fields:
+          status: rejected
+      on_withdrawn:
+        set_fields:
+          status: draft
+    x-splittable:
+      quantityField: quantity
+      perPartRequired:
+        - mobile_group_id
+    x-display:
+      table:
+        - title:
+            primary: true
+        - quantity: {}
+        - status: {}
+    x-custom-components:
+      - name: ApprovalSection
+        path: "@/components/_standard/ApprovalSection"
+        target:
+          - view
+    fields:
+      title: {}
+      quantity: {}
+      status:
+        enum: ["draft", "pending", "approved", "rejected", "split"]
+      mobile_group_id:
+        x-relationship:
+          labelField: name
+      approvable_id:
+        x-relationship:
+          type: one-to-one_bridge
+          target: approvable
+          labelField: id
+    properties:
+      approvable:
+        $ref: "#/definitions/approvable"
+    required:
+      - title
+      - quantity
+      - status
+      - mobile_group_id
+      - approvable_id

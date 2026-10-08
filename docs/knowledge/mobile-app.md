@@ -93,9 +93,9 @@ and describes their fields; the templates are under `code_generator/templates/mo
 | Delete (one record, with a confirmation panel, from the detail screen) | | `x-generate.delete` |
 
 An entity is left on the placeholder screen when it has no REST routes or no list screen, declares a
-child grid or a comment thread, a one-to-one bridge or a direct attachment, a custom component, virtual
-columns, comments, attachments, `x-payment`, `x-splittable`, a reservation, a state machine, edit/delete
-guards or `x-self-only`, is the target of an `x-create-inline` field, relates to an entity that has no
+child grid or a comment thread, a one-to-one bridge other than the approval bridge or a direct attachment, a custom component other than `ApprovalSection`, virtual
+columns, comments, attachments, `x-payment`, `x-splittable` without the approval section, a reservation, a state machine, edit/delete
+guards without an approval or `x-self-only`, is the target of an `x-create-inline` field, relates to an entity that has no
 REST routes, or has a field with no native widget (image or file URI, entity select, custom upsert
 component). In the default schema `role`, `organization` and `app_setting` qualify; `user` (a custom component) keeps
 the placeholder. The fixture schema in `code_generator/tests/fixtures/mobile_entity_gate/` covers the rest.
@@ -127,6 +127,57 @@ REST detail embeds. A list row shows scalar columns only: the REST list does not
 A required foreign key is checked by the same `form_validation.ts` the Web form runs (`Mobile Group is
 required`), before any request. Form state, submit and error mapping stay in `use_entity_form.ts`; the picker
 is presentation plus the options request.
+
+### Approval
+
+An entity that declares `x-approval` (a one-to-one bridge to `approvable` and the `ApprovalSection` view
+component) gets the same screens plus an approval section on its detail screen
+(`components/native/ApprovalSection.tsx`). The section lists the requests of the current round: the approver
+role and the status, translated through `ApprovalRequestStatus`. The buttons follow the server's answer:
+
+| Button | Shown on | Call |
+|---|---|---|
+| Approve, Reject | a request whose id is in `approval.actionable_request_ids` | `POST /api/approval_request/<id>/approve` or `/reject` |
+| Withdraw | the section, when `approval.can_withdraw` is true and the entity declares `x-approval.on_withdrawn` (`HAS_ON_WITHDRAWN`) | `POST /api/approval_request/<id>/withdraw`, naming any pending request of the round (withdrawing closes the whole round) |
+
+Each action opens a dialog with the optional message; Reject also takes a reason kind (Customer or Internal) and a
+free-text reason. The call sends `{ message, reason, reason_kind }` and, on success, reloads the record, so the
+status the approval wrote (`on_approved`, `on_rejected`, `on_withdrawn`) is shown. A failure is shown through the
+entity's shared error mapping.
+
+The app evaluates none of the approval rules (approver role held, every preceding stage approved, requestor
+only). `GET /api/<entity>/<id>/capabilities` returns, next to the flags the Web section computes,
+`approval.current_round_request_ids` and `approval.actionable_request_ids`, derived by the checks the approve and
+reject routes run. The same answer carries `write_locks`; a record whose `edit_locked` or `delete_locked` is true
+hides Edit or Delete. The form does not offer a value only the approval workflow may write
+(`x-approval.on_approved` / `on_rejected` `set_fields`), as the Web form disables it.
+
+`lib/<entity>/use_entity_approval_actions.ts` and `lib/approval_request/submit_predicate.ts` are copied into
+`mobile/` unchanged; the screen reads `HAS_ON_WITHDRAWN` from the former.
+
+### Split
+
+An approval entity that declares `x-splittable` with a `quantityField` gets a split section on its detail
+screen (`components/native/SplitSection.tsx`), below the approval section. The entity's `<ENTITY>_SPLIT` constant
+in `lib/<entity>/mobile_client.ts` carries the quantity field and the fields every part names
+(`perPartRequired`); the generated `split<Entity>()` posts to the same route the Web section calls,
+`POST /api/<entity>/<id>/actions/split`, with `{ parts: [{ <quantityField>, <field>... }] }`.
+
+The section follows the Web section's rules:
+
+- It starts with two parts, each with a quantity and the required fields; a part can be added, and one can be removed
+  while more than two remain.
+- The section shows the quantity still unassigned (`Remaining`); the Split button is enabled only while it is zero.
+- A required field that is a foreign key of the entity is the relation picker the entity's form uses (same target, label column
+  and options route). A field named in `x-autocomplete-context` narrows the candidates by the record's stored value,
+  as the Web picker does. Any other required field is a text input.
+- The server re-checks the parts (at least two, quantities positive and summing to the record's, the fields named) and
+  which records may be split (not already approved, split or rejected, and submitted for approval when the entity has
+  `submit_on`). A refusal is shown with the server's own text and the section stays open. On success the record
+  reloads and shows the status the split wrote.
+
+The split route and its inventory handling are the Web ones; the app calls them and evaluates none of those rules.
+An approval entity that is splittable but has no `quantityField` has no split section on the Web either.
 
 ### Shared logic with the Web screens
 
@@ -221,7 +272,7 @@ MODE=default bash scripts/run_mobile_entity_playwright.sh  # default schema: the
 
 The fixture mode merges `code_generator/tests/fixtures/mobile_entity_e2e_gate/` (`mobile_note` with full
 CRUD, `mobile_log` list-and-view only, `mobile_task` with a required foreign key, a many-to-many and a one-to-one
-selector to `mobile_group` / `mobile_tag` / `mobile_profile`, `mobile_org_item` with a foreign key to `organization`) into the copy's schema, as `scripts/compose_child_datagrid_e2e_fixture.py`
+selector to `mobile_group` / `mobile_tag` / `mobile_profile`, `mobile_org_item` with a foreign key to `organization`, `mobile_request` with `x-approval`, `mobile_shipment` with `x-approval` and `x-splittable`) into the copy's schema, as `scripts/compose_child_datagrid_e2e_fixture.py`
 does for the other end-to-end fixtures, and signs in as the seeded administrator. `mobile/scripts/serve-web-with-proxy.js`
 runs the Expo web server and the proxy as one process so the runner can stop both.
 
@@ -234,6 +285,14 @@ runs the Expo web server and the proxy as one process so the runner can stop bot
   disabled field without read on the target, clear, a one-to-one already linked elsewhere, adding and
   removing many-to-many records, an emptied set sent as an empty list, and the organization picker offering
   only organizations the user belongs to. The fixture mode seeds the records it needs.
+- `mobile/e2e/approval-actions.spec.ts` covers the approval section on `mobile_request`: a request for another
+  role offers no action, approve (message sent, status and record locked), reject (message, reason and kind
+  sent), withdraw (dialog cancel, then the round closes and the record returns to its withdrawn value), a decided
+  request, a later stage that is not yet actionable, and the form leaving out the values only the approval may write.
+- `mobile/e2e/split-action.spec.ts` covers the split section on `mobile_shipment`: Split enabled only when the
+  parts add up to the quantity, adding and removing parts (never fewer than two), cancel, the server refusing a part
+  with no group and an already-approved record (its text shown), and a completed split sent with the
+  quantities and the groups picked, after which the record shows its split status.
 - `mobile/e2e/*.spec.ts` are curated, hand-written specs, one per flow, not generated. A mobile change
   ships a spec for the flow it changes.
 - `mobile/scripts/real-browser-verify.js` is the reusable real-browser check. It selects a preset with
@@ -251,8 +310,10 @@ check and is not part of the mandatory gate.
 
 ## Not implemented yet
 
-- Entity screens for an entity that declares anything beyond plain fields and the relation pickers: child
-  grids, approval, comments, attachments and payment.
+- Entity screens for an entity that declares anything beyond plain fields, the relation pickers and the approval
+  section: child grids, comments, attachments and payment.
+- Submitting a record for approval (the "(re)submit" button). Resubmitting is a Server Action
+  (`submit_for_approval.ts`) with no REST route, so the app has nothing to call.
 - Creating the referenced record in place from a foreign-key field (`x-create-inline`) and the one-to-one
   bridge grid (`x-bridge`).
 - Bulk delete, the native date pickers (dates are typed as text), CSV import and export.

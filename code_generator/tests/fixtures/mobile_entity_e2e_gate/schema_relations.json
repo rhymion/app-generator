@@ -13,9 +13,17 @@
     "created_mobile_tasks mobile_task[] @relation(\"MobileTaskCreator\")",
     "updated_mobile_tasks mobile_task[] @relation(\"MobileTaskUpdater\")",
     "created_mobile_org_items mobile_org_item[] @relation(\"MobileOrgItemCreator\")",
-    "updated_mobile_org_items mobile_org_item[] @relation(\"MobileOrgItemUpdater\")"
+    "updated_mobile_org_items mobile_org_item[] @relation(\"MobileOrgItemUpdater\")",
+    "created_mobile_requests mobile_request[] @relation(\"MobileRequestCreator\")",
+    "updated_mobile_requests mobile_request[] @relation(\"MobileRequestUpdater\")",
+    "created_mobile_shipments mobile_shipment[] @relation(\"MobileShipmentCreator\")",
+    "updated_mobile_shipments mobile_shipment[] @relation(\"MobileShipmentUpdater\")"
   ],
   "organization": [
     "mobile_org_items mobile_org_item[]"
+  ],
+  "approvable": [
+    "mobile_request mobile_request?",
+    "mobile_shipment mobile_shipment?"
   ]
 }

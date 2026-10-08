@@ -16,8 +16,9 @@
 # already in use fails the run.
 #
 # Two modes, because the footer specs assume the default schema's tabs:
-#   MODE=fixture (default)  fixture entities merged; runs mobile/e2e/entity-crud.spec.ts and
-#                           mobile/e2e/relation-pickers.spec.ts
+#   MODE=fixture (default)  fixture entities merged; runs mobile/e2e/entity-crud.spec.ts,
+#                           mobile/e2e/relation-pickers.spec.ts, mobile/e2e/approval-actions.spec.ts and
+#                           mobile/e2e/split-action.spec.ts
 #   MODE=default            unmodified schema; runs every other spec in mobile/e2e/
 #
 # Usage: bash scripts/run_mobile_entity_playwright.sh
@@ -134,11 +135,63 @@ INSERT INTO organization (id, name, updated_at, creator_id, updater_id)
 SELECT v.id, v.name, now(), actor.id, actor.id FROM actor, (VALUES ('org-own', 'Mobile Own Org'), ('org-foreign', 'Mobile Foreign Org')) AS v(id, name);
 INSERT INTO "_UserOrganizations" ("A", "B") SELECT 'org-own', id FROM "user" WHERE email = 'admin@example.com';
 SQL
-  PW_TARGET="entity-crud.spec.ts relation-pickers.spec.ts"
+  echo "-- records for the approval section --"
+  # Three roles: the test administrator holds "Mobile Approver" and "Mobile Second Approver", not the other one.
+  # flow-own is theirs to decide; flow-other is not; flow-second is theirs but comes after flow-other.
+  docker exec -i "${PROJECT}-postgres-test-1" psql -U postgres -d my_next_test -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+WITH actor AS (SELECT id FROM "user" WHERE email = 'admin@example.com')
+INSERT INTO role (id, name, updated_at, creator_id, updater_id)
+SELECT v.id, v.name, now(), actor.id, actor.id FROM actor, (VALUES ('role-approver', 'Mobile Approver'), ('role-second', 'Mobile Second Approver'), ('role-other', 'Mobile Other Approver')) AS v(id, name);
+INSERT INTO "_UserRoles" ("A", "B") SELECT r.id, u.id FROM "user" u, (VALUES ('role-approver'), ('role-second')) AS r(id) WHERE u.email = 'admin@example.com';
+WITH actor AS (SELECT id FROM "user" WHERE email = 'admin@example.com')
+INSERT INTO approval_flow (id, entity_name, approver_role_id, updated_at, creator_id, updater_id)
+SELECT v.id, 'mobile_request', v.role_id, now(), actor.id, actor.id FROM actor,
+  (VALUES ('flow-own', 'role-approver'), ('flow-other', 'role-other'), ('flow-second', 'role-second')) AS v(id, role_id);
+-- flow-second is preceded by flow-other (implicit many-to-many "_ApprovalFlowOrder": A = followed_by side, B = preceded_by side)
+INSERT INTO "_ApprovalFlowOrder" ("A", "B") VALUES ('flow-other', 'flow-second');
+-- (record id, title, record status, approvable creator is the administrator, [request id, flow, request status]...)
+WITH actor AS (SELECT id FROM "user" WHERE email = 'admin@example.com')
+INSERT INTO approvable (id, creator_id)
+SELECT v.id, CASE WHEN v.mine THEN actor.id END FROM actor,
+  (VALUES ('ap-approve', false), ('ap-reject', false), ('ap-withdraw', true), ('ap-stranger', false), ('ap-decided', false), ('ap-staged', false)) AS v(id, mine);
+INSERT INTO approval_request (id, approvable_id, approval_flow_id, status, round_id, updated_at) VALUES
+  ('ar-approve', 'ap-approve', 'flow-own', 'pending', 'round-approve', now()),
+  ('ar-reject', 'ap-reject', 'flow-own', 'pending', 'round-reject', now()),
+  ('ar-withdraw', 'ap-withdraw', 'flow-other', 'pending', 'round-withdraw', now()),
+  ('ar-stranger', 'ap-stranger', 'flow-other', 'pending', 'round-stranger', now()),
+  ('ar-decided', 'ap-decided', 'flow-own', 'approved', 'round-decided', now()),
+  ('ar-staged-1', 'ap-staged', 'flow-other', 'pending', 'round-staged', now()),
+  ('ar-staged-2', 'ap-staged', 'flow-second', 'pending', 'round-staged', now());
+WITH actor AS (SELECT id FROM "user" WHERE email = 'admin@example.com')
+INSERT INTO mobile_request (id, title, status, approvable_id, updated_at, creator_id, updater_id)
+SELECT v.id, v.title, v.status::"MobileRequestStatus", v.approvable_id, now(), actor.id, actor.id FROM actor,
+  (VALUES ('req-approve', 'Approve me', 'submitted', 'ap-approve'),
+          ('req-reject', 'Reject me', 'submitted', 'ap-reject'),
+          ('req-withdraw', 'Withdraw me', 'submitted', 'ap-withdraw'),
+          ('req-stranger', 'Not mine to decide', 'draft', 'ap-stranger'),
+          ('req-decided', 'Already decided', 'approved', 'ap-decided'),
+          ('req-staged', 'Two stages', 'submitted', 'ap-staged')) AS v(id, title, status, approvable_id);
+-- the split action: a flow for mobile_shipment (a role the administrator does not hold) and three shipments of 10
+WITH actor AS (SELECT id FROM "user" WHERE email = 'admin@example.com')
+INSERT INTO approval_flow (id, entity_name, approver_role_id, updated_at, creator_id, updater_id)
+SELECT 'flow-ship', 'mobile_shipment', 'role-other', now(), actor.id, actor.id FROM actor;
+INSERT INTO approvable (id, approved_at) VALUES ('ap-ship-rule', NULL), ('ap-ship-split', NULL), ('ap-ship-approved', now());
+INSERT INTO approval_request (id, approvable_id, approval_flow_id, status, round_id, updated_at) VALUES
+  ('ar-ship-rule', 'ap-ship-rule', 'flow-ship', 'pending', 'round-ship-rule', now()),
+  ('ar-ship-split', 'ap-ship-split', 'flow-ship', 'pending', 'round-ship-split', now()),
+  ('ar-ship-approved', 'ap-ship-approved', 'flow-ship', 'approved', 'round-ship-approved', now());
+WITH actor AS (SELECT id FROM "user" WHERE email = 'admin@example.com')
+INSERT INTO mobile_shipment (id, title, quantity, status, mobile_group_id, approvable_id, updated_at, creator_id, updater_id)
+SELECT v.id, v.title, 10, v.status::"MobileShipmentStatus", 'group-seed-1', v.approvable_id, now(), actor.id, actor.id FROM actor,
+  (VALUES ('ship-rule', 'Rule shipment', 'pending', 'ap-ship-rule'),
+          ('ship-split', 'Split shipment', 'pending', 'ap-ship-split'),
+          ('ship-approved', 'Approved shipment', 'approved', 'ap-ship-approved')) AS v(id, title, status, approvable_id);
+SQL
+  PW_TARGET="entity-crud.spec.ts relation-pickers.spec.ts approval-actions.spec.ts split-action.spec.ts"
   export MOBILE_PW_IGNORE=""
 else
   PW_TARGET=""
-  export MOBILE_PW_IGNORE="**/{entity-crud,relation-pickers}.spec.ts"
+  export MOBILE_PW_IGNORE="**/{entity-crud,relation-pickers,approval-actions,split-action}.spec.ts"
 fi
 
 echo "-- installing the Expo dependencies --"

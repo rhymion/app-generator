@@ -1,0 +1,186 @@
+import { useState } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useMessages } from '@/lib/messages';
+import type { ActionFailure } from '@/lib/_errors';
+import type { SplitConfig, SplitFailure } from '@/lib/entity-http';
+import { RelationPicker } from '@/components/native/RelationPicker';
+
+type Part = { quantity: string; values: Record<string, string> };
+
+type Props = {
+  entity: string;
+  /** Description of the entity's `x-splittable` declaration. */
+  config: SplitConfig;
+  /** The record being split. */
+  record: { id: string } & Record<string, unknown>;
+  /** Splits the record into the parts (`split<Entity>` of the entity's mobile client). */
+  split: (id: string, parts: Record<string, unknown>[]) => Promise<SplitFailure | { ok: true }>;
+  /** Maps a failed call that carries no server text to the user-facing text. */
+  describeError: (failure: ActionFailure) => string;
+  /** Called after the split succeeded, so the screen reloads the record. */
+  onChanged: () => void;
+};
+
+const emptyPart = (config: SplitConfig): Part => ({
+  quantity: '0',
+  values: Object.fromEntries(config.parts.map((field) => [field.key, ''])),
+});
+
+const toNumber = (text: string): number => {
+  const value = Number(text);
+  return Number.isFinite(value) ? value : 0;
+};
+
+/**
+ * The split section of the detail screen, with the Web section's rules: at least two parts, and the
+ * parts' quantities must add up to the record's before Split can be pressed. Each part names the
+ * fields the entity's `x-splittable.perPartRequired` lists (a picker for a relation, whose
+ * candidates are narrowed by the record's values like the Web picker). The call goes to the split
+ * REST route, which re-checks the parts and which records may still be split.
+ */
+export function SplitSection({ entity, config, record, split, describeError, onChanged }: Props) {
+  const { t } = useMessages();
+  const [open, setOpen] = useState(false);
+  const [parts, setParts] = useState<Part[]>(() => [emptyPart(config), emptyPart(config)]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const total = toNumber(String(record[config.quantityField] ?? '0'));
+  const remaining = total - parts.reduce((sum, part) => sum + toNumber(part.quantity), 0);
+
+  // The record's values the part pickers' autocomplete filter may narrow by.
+  const formValues: Record<string, string> = {};
+  for (const name of config.contextFields) {
+    const value = record[name];
+    if (value !== undefined && value !== null && value !== '') formValues[name] = String(value);
+  }
+
+  const updatePart = (index: number, change: (part: Part) => Part) =>
+    setParts((current) => current.map((part, i) => (i === index ? change(part) : part)));
+
+  const reset = () => {
+    setParts([emptyPart(config), emptyPart(config)]);
+    setError(null);
+  };
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    const result = await split(
+      record.id,
+      parts.map((part) => ({ [config.quantityField]: toNumber(part.quantity), ...part.values })),
+    );
+    setBusy(false);
+    if (result.ok) {
+      setOpen(false);
+      reset();
+      onChanged();
+      return;
+    }
+    setError(result.message ?? describeError(result));
+  };
+
+  if (!open) {
+    return (
+      <Pressable style={styles.open} onPress={() => setOpen(true)} testID="split-open">
+        <Text>Split</Text>
+      </Pressable>
+    );
+  }
+
+  return (
+    <View style={styles.container} testID="split-section">
+      <Text style={styles.heading}>{`Split (total: ${total})`}</Text>
+      <Text style={remaining === 0 ? styles.balanced : styles.unbalanced} testID="split-remaining">{`Remaining: ${remaining}`}</Text>
+      {error ? <Text style={styles.error} testID="split-error">{error}</Text> : null}
+      {parts.map((part, index) => (
+        <View key={index} style={styles.part} testID={`split-part-${index}`}>
+          <Text style={styles.label}>{config.quantityLabel}</Text>
+          <TextInput
+            style={styles.input}
+            value={part.quantity}
+            onChangeText={(text) => updatePart(index, (current) => ({ ...current, quantity: text }))}
+            keyboardType="numeric"
+            testID={`split-quantity-${index}`}
+          />
+          {config.parts.map((field) =>
+            field.kind === 'relation' ? (
+              <View key={field.key} testID={`split-field-${index}-${field.key}`}>
+                <RelationPicker
+                  spec={field}
+                  value={part.values[field.key] ?? ''}
+                  onChange={(value) =>
+                    updatePart(index, (current) => ({ ...current, values: { ...current.values, [field.key]: String(value) } }))
+                  }
+                  caller={entity}
+                  formValues={formValues}
+                />
+              </View>
+            ) : (
+              <View key={field.key}>
+                <Text style={styles.label}>{field.label}</Text>
+                <TextInput
+                  style={styles.input}
+                  value={part.values[field.key] ?? ''}
+                  onChangeText={(text) =>
+                    updatePart(index, (current) => ({ ...current, values: { ...current.values, [field.key]: text } }))
+                  }
+                  testID={`split-field-${index}-${field.key}`}
+                />
+              </View>
+            ),
+          )}
+          <Pressable
+            style={[styles.button, parts.length <= 2 ? styles.disabled : null]}
+            onPress={() => setParts((current) => current.filter((_, i) => i !== index))}
+            disabled={parts.length <= 2}
+            testID={`split-remove-${index}`}
+          >
+            <Text>{t('Common.delete')}</Text>
+          </Pressable>
+        </View>
+      ))}
+      <Pressable style={styles.button} onPress={() => setParts((current) => [...current, emptyPart(config)])} testID="split-add-part">
+        <Text>Add Part</Text>
+      </Pressable>
+      <View style={styles.actions}>
+        <Pressable
+          style={[styles.confirm, busy || remaining !== 0 ? styles.disabled : null]}
+          onPress={submit}
+          disabled={busy || remaining !== 0}
+          testID="split-confirm"
+        >
+          <Text style={styles.confirmText}>{busy ? 'Splitting...' : 'Split'}</Text>
+        </Pressable>
+        <Pressable
+          style={styles.button}
+          onPress={() => {
+            setOpen(false);
+            reset();
+          }}
+          disabled={busy}
+          testID="split-cancel"
+        >
+          <Text>{t('Common.cancel')}</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { marginTop: 20, gap: 8, borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, padding: 12 },
+  heading: { fontSize: 16, fontWeight: '700' },
+  balanced: { color: '#15803d' },
+  unbalanced: { color: '#6b7280' },
+  error: { color: '#b91c1c' },
+  part: { gap: 6, borderTopWidth: 1, borderTopColor: '#e5e7eb', paddingTop: 8 },
+  label: { fontSize: 13, fontWeight: '600', color: '#374151' },
+  input: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, padding: 8 },
+  open: { alignSelf: 'flex-start', marginTop: 12, borderWidth: 1, borderColor: '#6b7280', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 8 },
+  button: { alignSelf: 'flex-start', borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 8 },
+  actions: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  confirm: { backgroundColor: '#2563eb', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 8 },
+  confirmText: { color: '#ffffff', fontWeight: '600' },
+  disabled: { opacity: 0.4 },
+});
