@@ -13,9 +13,14 @@ test.describe('Footer navigation', () => {
     await expect(tabs).toHaveCount(2);
     await expect(tabs.nth(0)).toHaveAttribute('data-testid', 'footer-tab-administration');
     await expect(tabs.nth(1)).toHaveAttribute('data-testid', 'footer-tab-search');
-    // Icon first: each tab renders an icon glyph above its small label.
-    await expect(tabs.nth(0).locator('svg, [role="img"], span').first()).toBeVisible();
-    await expect(tabs.nth(0)).toContainText('Administration');
+    // Icon first: the tab's first child is the icon-font glyph, drawn above the small label.
+    const [icon, label] = await tabs.nth(0).locator('> div').all();
+    await expect(icon).toHaveCSS('font-family', /material/i);
+    await expect(label).toHaveText('Administration');
+    const iconBox = await icon.boundingBox();
+    const labelBox = await label.boundingBox();
+    expect(iconBox!.y).toBeLessThan(labelBox!.y);
+    expect(Number.parseFloat(await label.evaluate((el) => getComputedStyle(el).fontSize))).toBeLessThanOrEqual(12);
   });
 
   test('the footer scrolls horizontally so a tab past the visible width stays reachable', async ({ page }) => {
