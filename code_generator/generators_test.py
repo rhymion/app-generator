@@ -152,7 +152,7 @@ from helpers.label_field import (
 )
 from build_context import (
     _get_entity_options, _raw_def, is_forced_required_field, get_uri_kind,
-    _exclusive_parent_columns, _model_has_audit_fields,
+    _exclusive_parent_columns, _exclusive_parent_all_columns, _model_has_audit_fields,
 )
 from generate_types import extract_entities
 from generators import resolve_approval_submit_on
@@ -2321,6 +2321,27 @@ def _exclusive_owner_fields(fields: list, model_name: str, schema: dict) -> list
     return result
 
 
+def _exclusive_owner_fk_deps(target: str, fk_deps: list | None, schema: dict) -> list:
+    """`fk_deps` of a dependency row, reduced to one owner when `target` declares
+    `x-exclusive-parents`.
+
+    A dependency row (for example the parameter another entity's helper creates)
+    is written straight through Prisma, so it must already satisfy the rule the
+    save-time validator enforces: exactly one listed owner column. The owner is
+    the column of the first declared parent that is present in `fk_deps`; every
+    other listed owner column is dropped. A target without the declaration, or
+    with none of its owner columns in `fk_deps`, gets `fk_deps` back unchanged.
+    """
+    fk_deps = list(fk_deps or [])
+    by_parent = _exclusive_parent_columns(target, schema)
+    all_cols = {c for cols in by_parent.values() for c in cols}
+    present = {fk['prop_name'] for fk in fk_deps}
+    owner = next((c for cols in by_parent.values() for c in cols if c in present), None)
+    if owner is None:
+        return fk_deps
+    return [fk for fk in fk_deps if fk['prop_name'] not in all_cols - {owner}]
+
+
 def helper_context(
     parent: str,
     children: list,
@@ -2700,6 +2721,7 @@ def helper_context(
     }
     enriched_deps = []
     for dep in deps:
+        dep = {**dep, 'fk_deps': _exclusive_owner_fk_deps(dep['target'], dep.get('fk_deps'), schema)}
         # UA / self-ref / m2m deps are added directly (pre-set 'title'). A
         # prop-stem dep split off a multi-FK target is a regular FK dep that
         # merely carries a title, so it still qualifies for needs_second --
@@ -3166,7 +3188,13 @@ def helper_context(
         child_def = _raw_def(child_name, schema)
         has_fk_deps = False
         child_fields_prisma = []
+        # An x-exclusive-parents child is owned by the parent being populated alone:
+        # the other listed owner columns are not written (the validator counts them).
+        _excl_cols = set(_exclusive_parent_all_columns(child_name, schema))
+        _other_owners = _excl_cols - {child_meta['parent_fk_prop']} if child_meta['parent_fk_prop'] in _excl_cols else set()
         for f in child_meta['fields']:
+            if f['prop_name'] in _other_owners:
+                continue
             target = f.get('dep_target')
             if f['category'] == 'autocomplete' and target and target != 'user':
                 # A self-referencing FK on the datagrid child's OWN
