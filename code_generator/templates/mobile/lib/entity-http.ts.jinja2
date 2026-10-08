@@ -81,6 +81,8 @@ export type FieldSpec = {
   bodyKey?: string;
   /** Form fields forwarded to the target's autocomplete filter as the form's current values. */
   contextFields?: string[];
+  /** The field declares x-create-inline and its target has a native create form. */
+  createInline?: boolean;
 };
 
 /** Reads a FormData into the JSON body the REST routes take. */
