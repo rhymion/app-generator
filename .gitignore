@@ -191,6 +191,9 @@ lib/dashboard/catalog.ts
 lib/dashboard/getters.ts
 lib/dashboard/service.ts
 lib/dashboard/types.ts
+lib/dashboard/use_entity_form.ts
+lib/dashboard/use_entity_capabilities.ts
+lib/dashboard/use_entity_approval_actions.ts
 !lib/organization/getters_associated.ts
 !lib/approval_flow/autocomplete_filter.ts
 !lib/approval_flow/service_validation_custom.ts
