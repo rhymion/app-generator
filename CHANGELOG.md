@@ -5,6 +5,19 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **REST routes for comment writes and the @-mention user search** (Issue #885). An entity with a comment
+  thread gets `POST /api/{entity}/{id}/comments` and `PATCH` / `DELETE
+  /api/{entity}/{id}/comments/{commentId}`, and a schema with an `x-mention` field gets `GET
+  /api/mention/users?q=`, so a client that cannot call Server Actions, such as the mobile app, can post,
+  edit and delete comments and offer `@`-mention suggestions. The routes run the
+  `add/update/delete{Entity}Comment()` actions and `searchMentionUserOptions()` the web form calls, as the
+  authenticated caller (mobile access token or API key), so the stored message, the notifications, the
+  author-only edit and the delete rule are the web's own. Because the actions rely on the edit form for
+  access control, each comment route first requires `update` on the entity and finds the record through
+  `get{Entity}Detail()` (strict organization isolation); a comment of another record is `404`. The add
+  action now returns the id of the new comment. The OpenAPI document describes the routes. New
+  `npm run test:comment-rest-e2e-gate` builds and runs a fixture app with a commentable entity, because the
+  repository's own schema has none. See `docs/knowledge/comment-and-mention-rest-routes.md`.
 - **Documentation for the `x-autocomplete-context` schema key**: where it goes, what it changes in the generated form and split action, how it relates to `autocomplete_filter.ts`, and what validation rejects. See `docs/knowledge/x-autocomplete-context.md`. `docs/knowledge/relation-picker-rest-route.md` now compares the options route with the list API.
 - **REST route for relation pickers: `GET /api/{entity}/options`** (Issue #852). Every entity with a REST
   surface gets a route that searches (`q`, `limit`) or looks up by id (`ids`) the records a many-to-one,

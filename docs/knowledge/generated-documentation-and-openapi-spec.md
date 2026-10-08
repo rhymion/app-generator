@@ -167,6 +167,12 @@ Every `api: true` entity also declares `GET /api/{parent}/options`, the relation
 `context` query parameters; it returns an array of the entity's record schema and declares `400`, `401`,
 `403` and `429`.
 
+An entity with a comment thread (and `view`, and one of `new`/`edit`/`delete`/`invalidate`) also declares
+`POST /api/{parent}/{id}/comments` and `PATCH` / `DELETE /api/{parent}/{id}/comments/{commentId}`
+(`comment-and-mention-rest-routes.md`); `201`/`200`/`204` on success, `400`, `401`, `403`, `404` and `429`
+otherwise. When any field has `x-mention`, the document also declares `GET /api/mention/users` and the
+`MentionUserOption` schema, under a `mention` tag.
+
 CSV export/import get their own paths, mirroring `generate.py`'s own
 gating exactly: `GET /api/{parent}/export` when `can_list and
 can_export`, `POST /api/{parent}/import` when `import_eligible`. Neither

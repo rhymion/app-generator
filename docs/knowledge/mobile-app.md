@@ -253,6 +253,8 @@ check and is not part of the mandatory gate.
 
 - Entity screens for an entity that declares anything beyond plain fields and the relation pickers: child
   grids, approval, comments, attachments and payment.
+  The REST routes for adding, editing and deleting a comment and for searching `@`-mention candidates exist
+  (`comment-and-mention-rest-routes.md`); the screens that use them are not built.
 - Creating the referenced record in place from a foreign-key field (`x-create-inline`) and the one-to-one
   bridge grid (`x-bridge`).
 - Bulk delete, the native date pickers (dates are typed as text), CSV import and export.
