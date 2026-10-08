@@ -65,6 +65,13 @@ next-env.d.ts
 
 /app/generated/
 
+# mobile app (Expo/React Native) generated from code_generator/templates/mobile/;
+# the curated Playwright files are hand-written and tracked.
+/mobile/*
+!/mobile/e2e/
+!/mobile/playwright.config.ts
+!/mobile/scripts/
+
 # database
 /prisma/dev.db
 /prisma/dev.db-journal
@@ -269,6 +276,9 @@ app/api/approval_request/\[id\]/route.ts
 app/api/approval_request/bulk/route.ts
 !app/api/audit_log/
 !app/api/audit_log/**
+# Hand-written mobile token auth endpoints -- not generator output.
+!app/api/mobile/
+!app/api/mobile/**
 !app/api/openapi.json/
 !app/api/openapi.json/**
 
@@ -312,6 +322,7 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/user_import.cy.ts
 !cypress/e2e/api/import_batch2.cy.ts
 !cypress/e2e/api/round_trip.cy.ts
+!cypress/e2e/api/mobile_auth.cy.ts
 !cypress/e2e/api/fk_read_permission_graceful_degradation.cy.ts
 !cypress/e2e/api/approval_flow_crud.cy.ts
 !cypress/e2e/api/notification_approval.cy.ts
