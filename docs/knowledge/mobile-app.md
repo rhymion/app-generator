@@ -29,8 +29,8 @@ reachable however many there are; none is dropped or truncated. A fixed **Search
 the schema-driven tabs when the app generates a search route (`app/api/search`); it is not tied to any
 entity's `x-nav`.
 
-An entity opens `/entity/<name>`. Entity list, detail and form screens are not part of the mobile app
-yet, so that screen says "This screen is not available in the mobile app yet." The scheduled-task admin
+An entity opens `/entity/<name>`: its native list when the entity has [entity screens](#entity-screens),
+otherwise a screen saying "This screen is not available in the mobile app yet." The scheduled-task admin
 link of the desktop sidebar has no mobile counterpart and is not generated.
 
 ### Icons
@@ -77,6 +77,73 @@ lacks `read` on the entity — through the same `canAccess()`. The app prunes it
 drops groups left empty. If the request fails the app shows no entity tabs rather than links the user may
 not be allowed to open.
 
+## Entity screens
+
+An entity without relations gets native list, detail and form screens. `code_generator/mobile_entities.py`
+decides which entities qualify and describes their fields; the templates are under
+`code_generator/templates/mobile/` (`entity/`, `components/native/`, `lib/`).
+
+| Screen | Route | Generated when |
+|---|---|---|
+| List (paged, 20 rows) | `/entity/<name>` | the entity has a list screen and REST routes |
+| Detail | `/entity/<name>/<id>` | `x-generate.view` |
+| New | `/entity/<name>/new` | `x-generate.new` |
+| Edit | `/entity/<name>/<id>/edit` | `x-generate.edit` |
+| Delete (one record, with a confirmation panel, from the detail screen) | | `x-generate.delete` |
+
+An entity is left on the placeholder screen when it has no REST routes or no list screen, declares a
+relation (many-to-one, one-to-one, direct attachment, children), a custom component, virtual columns,
+comments, attachments, `x-payment`, `x-splittable`, `x-create-inline`, a reservation, a state machine,
+edit/delete guards or `x-self-only`, or has a field with no native widget (image or file URI, entity
+select, custom upsert component). Selecting a foreign key or many-to-many value needs a REST
+autocomplete endpoint, which does not exist (Issue #852), so those entities stay on the placeholder.
+The default schema has no such entity; the fixture schema in
+`code_generator/tests/fixtures/mobile_entity_gate/` does.
+
+### Shared logic with the Web screens
+
+The screens draw native controls and call the modules the Web screens call
+([shared-ui-hooks.md](shared-ui-hooks.md)). `generate-code` renders these from the same templates and
+contexts into `mobile/`, so each copy is identical to its Web counterpart:
+
+| Module | Used for |
+|---|---|
+| `lib/<entity>/use_entity_form.ts` | form state, validation recording, submit, error-message mapping |
+| `lib/<entity>/use_entity_capabilities.ts` | whether Edit and Delete are shown |
+| `components/<entity>/form_validation.ts` | required-field and decimal checks |
+
+`lib/_errors.ts` and `lib/authz.ts` in `mobile/` hold only the types those modules import.
+
+The hooks need React 19: `use_entity_form.ts` passes an async function to `startTransition`, which the React
+18 typings reject. The app therefore runs one Expo SDK's bundled set (Expo SDK 57: React 19.2,
+React Native 0.86, `expo-router` 57, `@expo/vector-icons` 15). The versions are pinned together in
+`templates/mobile/package.json.jinja2`; bump the whole set with `npx expo install --fix`, not one package.
+`@playwright/test` is not part of the SDK and is pinned separately. The screens' own saving flag wraps the
+transport call, so a save in flight is visible even where a transition does not track async work.
+
+### Data access
+
+`lib/<entity>/mobile_client.ts` has the same function names as the Web getters and Server Actions
+(`fetch<Entity>Page`, `get<Entity>Detail`, `upsert<Entity>`, `remove<Entity>`) implemented as `fetch()` calls
+to the entity's REST routes, which call the same service functions the Server Actions call. Pages are
+zero-based, like the REST list. A save resolves to `{ ok: true, id }` or to an `ActionFailure` built from the
+REST error body (`code`, `field`, `reason`, `messageKey`, `messageArgs`); it never rejects, because the form
+hook runs the save inside a transition. Date, date-time and time fields are typed as text in the
+`YYYY-MM-DD`, ISO and `HH:mm:ss` forms.
+
+Messages come from `messages/<locale>.json` (`Common`, `Errors`, `ValidationMessages`) through
+`mobile/lib/messages.ts`; field labels are the title-cased column names.
+
+### Permissions
+
+The "New" action needs a model-level answer before any record exists:
+
+`GET /api/mobile/permissions?entity=<name>` returns the caller's `{ create, read, update, delete, import }`
+for one entity, from the same `getModelPermissions()` as every other route (400 for a missing or malformed
+name; all `false` for an entity the caller holds nothing on). On a record, `update` and `delete` are
+overlaid with `operations` from `GET /api/<entity>/<id>/capabilities`. A form opened without `create`
+shows a permission message instead of fields.
+
 ## Authentication
 
 The mobile app signs in with email and password and holds an access/refresh token pair.
@@ -115,13 +182,33 @@ EXPO_PUBLIC_API_BASE_URL=http://localhost:8096 npx expo start --web --port 8095
 EXPO_WEB_URL=http://localhost:8096 npm run test:e2e:mobile:pw   # from the repository root
 ```
 
+`scripts/run_mobile_entity_playwright.sh` does all of this in a disposable copy of the working tree with its
+own docker project and ports, and runs the specs in two modes (the footer specs assume the default schema's
+tabs, the entity specs need the fixture entities):
+
+```bash
+bash scripts/run_mobile_entity_playwright.sh               # fixture schema: mobile/e2e/entity-crud.spec.ts
+MODE=default bash scripts/run_mobile_entity_playwright.sh  # default schema: the other specs
+```
+
+The fixture mode merges `code_generator/tests/fixtures/mobile_entity_e2e_gate/` (`mobile_note` with full
+CRUD, `mobile_log` list-and-view only) into the copy's schema, as `scripts/compose_child_datagrid_e2e_fixture.py`
+does for the other end-to-end fixtures, and signs in as the seeded administrator. `mobile/scripts/serve-web-with-proxy.js`
+runs the Expo web server and the proxy as one process so the runner can stop both.
+
+- `mobile/e2e/entity-crud.spec.ts` covers list paging, create, edit, delete with confirmation, the shared
+  validation (no request is sent for an invalid form), a server-side rejection, and every permission-hidden
+  action (New, the form without `create`, Edit and Delete on a record the caller cannot change, a
+  list-and-view-only entity).
 - `mobile/e2e/*.spec.ts` are curated, hand-written specs, one per flow, not generated. A mobile change
   ships a spec for the flow it changes.
 - `mobile/scripts/real-browser-verify.js` is the reusable real-browser check. It selects a preset with
   `FLOW_TYPE` (`assert`, `drill`); a new need adds a preset instead of a new script. Never launch
   Chromium with `--disable-web-security` — it hides the CORS-class gaps this check exists to catch.
 - `code_generator/tests/test_mobile_nav.py` covers the tree built from the nav configuration.
-- `cypress/e2e/api/mobile_auth.cy.ts` and `cypress/e2e/api/mobile_nav.cy.ts` cover the REST routes.
+- `code_generator/tests/test_mobile_entities.py` covers which entities get screens, that the screens call the
+  shared modules, the REST client and the React version the shared hooks need.
+- `cypress/e2e/api/mobile_auth.cy.ts`, `mobile_nav.cy.ts` and `mobile_permissions.cy.ts` cover the REST routes.
 
 The suite runs the web bundle, not native rendering, so native-only behavior (secure storage prompts,
 the biometric lock, native icon fonts) is not exercised by it. `npm run test:e2e:mobile:pw` is an optional
@@ -129,6 +216,8 @@ check and is not part of the mandatory gate.
 
 ## Not implemented yet
 
-Entity list/detail/form screens, and with them every feature that lives on an entity screen. Selecting a
-foreign key or many-to-many value needs a REST autocomplete endpoint, which does not exist (tracked in
-Issue #852).
+- Entity screens for an entity with a relation, and with them every feature that lives on such a screen:
+  selecting a foreign key or many-to-many value needs a REST autocomplete endpoint, which does not exist
+  (tracked in Issue #852). The same goes for child grids, approval, comments, attachments and payment.
+- Bulk delete, the native date pickers (dates are typed as text), CSV import and export.
+- Translated field labels.

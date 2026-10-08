@@ -1,0 +1,98 @@
+import { apiFetch, ApiError } from './api-base';
+import type { ActionFailure, ErrorCode, MessageArgs, ValidationReason } from './_errors';
+import type { ModelPermissions } from './authz';
+
+// `page` is zero-based, like the REST list routes.
+export type PageOpts = { page?: number; pageSize?: number };
+
+export type PageResult<T> = { rows: T[]; total: number; page: number; pageSize: number };
+
+export type RowCapabilities = { update: boolean; delete: boolean };
+
+const STATUS_CODE: Record<number, ErrorCode> = {
+  401: 'SESSION_EXPIRED',
+  403: 'PERMISSION_DENIED',
+  404: 'NOT_FOUND',
+  409: 'CONFLICT',
+  422: 'VALIDATION',
+};
+
+type ErrorBody = {
+  error?: string;
+  code?: ErrorCode;
+  field?: string;
+  reason?: ValidationReason;
+  messageKey?: string;
+  messageArgs?: MessageArgs;
+};
+
+/**
+ * Maps a failed REST call to the ActionFailure the entity hooks already map to
+ * user-facing text. The REST error body carries the same code / field / reason /
+ * messageKey fields the Server Action transport returns. A failure that never
+ * reached the server (no network) is UNKNOWN. Never throws: the form hook runs
+ * the save inside a transition, where a rejection would be unhandled.
+ */
+export function toActionFailure(err: unknown): ActionFailure {
+  if (!(err instanceof ApiError)) return { ok: false, errorCode: 'UNKNOWN' };
+  let body: ErrorBody = {};
+  try {
+    body = JSON.parse(err.message) as ErrorBody;
+  } catch {
+    // a non-JSON error body: fall back to the status alone
+  }
+  const failure: ActionFailure = { ok: false, errorCode: body.code ?? STATUS_CODE[err.status] ?? 'UNKNOWN' };
+  if (body.field) failure.field = body.field;
+  if (body.reason) failure.reason = body.reason;
+  if (body.messageKey) failure.messageKey = body.messageKey;
+  if (body.messageArgs) failure.messageArgs = body.messageArgs;
+  return failure;
+}
+
+export function buildQuery(opts: PageOpts = {}): string {
+  const params: string[] = [];
+  if (opts.page !== undefined) params.push(`page=${opts.page}`);
+  if (opts.pageSize) params.push(`pageSize=${opts.pageSize}`);
+  return params.length ? `?${params.join('&')}` : '';
+}
+
+export type FieldKind = 'text' | 'number' | 'decimal' | 'boolean' | 'enum' | 'date' | 'datetime' | 'time';
+
+/** One field of an entity's form, as described by the schema. */
+export type FieldSpec = {
+  key: string;
+  label: string;
+  kind: FieldKind;
+  required: boolean;
+  readonly: boolean;
+  options: string[];
+  numericEnum: boolean;
+};
+
+/** Reads a FormData into the JSON body the REST routes take. */
+export function formDataToBody(
+  formData: FormData,
+  fields: FieldSpec[],
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  for (const spec of fields) {
+    if (spec.readonly) continue;
+    const key = spec.key;
+    const raw = formData.get(key);
+    if (raw === null) continue;
+    const text = String(raw);
+    if (spec.kind === 'boolean') body[key] = text === 'true';
+    else if (text === '') body[key] = null;
+    else if (spec.kind === 'number' || (spec.kind === 'enum' && spec.numericEnum)) body[key] = Number(text);
+    else body[key] = text;
+  }
+  return body;
+}
+
+/** Model-level flags overlaid with the row-level answer when a record exists. */
+export async function fetchPermissions(entity: string, id?: string): Promise<ModelPermissions> {
+  const model = await apiFetch<ModelPermissions>(`/api/mobile/permissions?entity=${entity}`);
+  if (!id) return model;
+  const row = await apiFetch<{ operations: RowCapabilities }>(`/api/${entity}/${id}/capabilities`);
+  return { ...model, update: row.operations.update, delete: row.operations.delete };
+}

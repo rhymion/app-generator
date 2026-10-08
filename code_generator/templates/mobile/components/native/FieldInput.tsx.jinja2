@@ -1,0 +1,95 @@
+import { Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import type { FieldKind, FieldSpec } from '@/lib/entity-http';
+
+export type FieldValueState = string | boolean;
+
+const HINTS: Partial<Record<FieldKind, string>> = {
+  date: 'YYYY-MM-DD',
+  datetime: 'YYYY-MM-DDTHH:mm:ssZ',
+  time: 'HH:mm:ss',
+};
+
+/** Initial text a record's value is shown as in a form control. */
+export function toFieldState(spec: FieldSpec, value: unknown): FieldValueState {
+  if (spec.kind === 'boolean') return value === true;
+  if (value === null || value === undefined) return '';
+  if (spec.kind === 'date') return String(value).slice(0, 10);
+  return String(value);
+}
+
+/** Text a record's value is displayed as on a read-only screen. */
+export function toDisplayText(spec: FieldSpec, value: unknown): string {
+  if (spec.kind === 'boolean') return value === true ? 'Yes' : 'No';
+  if (value === null || value === undefined || value === '') return '-';
+  if (spec.kind === 'date') return String(value).slice(0, 10);
+  return String(value);
+}
+
+type Props = {
+  spec: FieldSpec;
+  value: FieldValueState;
+  onChange: (value: FieldValueState) => void;
+  disabled?: boolean;
+};
+
+/** Native control for one field. Holds no validation or submit logic. */
+export function FieldInput({ spec, value, onChange, disabled }: Props) {
+  const locked = disabled || spec.readonly;
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>
+        {spec.label}
+        {spec.required ? ' *' : ''}
+      </Text>
+      {spec.kind === 'boolean' ? (
+        <Switch
+          value={value === true}
+          onValueChange={(next) => onChange(next)}
+          disabled={locked}
+          testID={`field-${spec.key}`}
+        />
+      ) : spec.kind === 'enum' ? (
+        <View style={styles.chips} testID={`field-${spec.key}`}>
+          {spec.options.map((option) => {
+            const selected = value === option;
+            return (
+              <Pressable
+                key={option}
+                disabled={locked}
+                onPress={() => onChange(selected && !spec.required ? '' : option)}
+                style={[styles.chip, selected ? styles.chipSelected : null]}
+                testID={`field-${spec.key}-${option}`}
+                accessibilityState={ { selected } }
+              >
+                <Text style={selected ? styles.chipTextSelected : styles.chipText}>{option}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : (
+        <TextInput
+          style={[styles.input, locked ? styles.inputLocked : null]}
+          value={typeof value === 'string' ? value : ''}
+          onChangeText={onChange}
+          editable={!locked}
+          placeholder={HINTS[spec.kind]}
+          keyboardType={spec.kind === 'number' ? 'number-pad' : spec.kind === 'decimal' ? 'decimal-pad' : 'default'}
+          autoCapitalize="none"
+          testID={`field-${spec.key}`}
+        />
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  field: { gap: 6, marginBottom: 14 },
+  label: { fontSize: 13, fontWeight: '600', color: '#374151' },
+  input: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8, fontSize: 15 },
+  inputLocked: { backgroundColor: '#f3f4f6', color: '#6b7280' },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 },
+  chipSelected: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
+  chipText: { color: '#374151' },
+  chipTextSelected: { color: '#ffffff' },
+});

@@ -1,0 +1,29 @@
+// Generated: the entities that have native list / detail / form screens.
+import type { ComponentType } from 'react';
+{% for e in entities %}
+import { {{ e.pascal }}List } from '@/components/{{ e.name }}/List';
+{% if e.can_view %}
+import { {{ e.pascal }}FormView } from '@/components/{{ e.name }}/FormView';
+{% endif %}
+{% if e.can_new or e.can_edit %}
+import { {{ e.pascal }}FormUpsert } from '@/components/{{ e.name }}/FormUpsert';
+{% endif %}
+{% endfor %}
+
+export type EntityScreens = {
+  title: string;
+  List: ComponentType;
+  View: ComponentType<{ id: string }> | null;
+  Form: ComponentType<{ id?: string }> | null;
+};
+
+export const ENTITY_SCREENS: Record<string, EntityScreens> = {
+{% for e in entities %}
+  {{ e.name }}: {
+    title: {{ e.title | tojson }},
+    List: {{ e.pascal }}List,
+    View: {% if e.can_view %}{{ e.pascal }}FormView{% else %}null{% endif %},
+    Form: {% if e.can_new or e.can_edit %}{{ e.pascal }}FormUpsert{% else %}null{% endif %},
+  },
+{% endfor %}
+};

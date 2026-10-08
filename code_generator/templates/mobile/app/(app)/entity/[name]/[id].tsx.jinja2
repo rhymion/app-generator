@@ -1,0 +1,8 @@
+import { useLocalSearchParams } from 'expo-router';
+import { ENTITY_SCREENS } from '@/lib/entity-registry';
+
+export default function EntityViewScreen() {
+  const { name, id } = useLocalSearchParams<{ name: string; id: string }>();
+  const View = ENTITY_SCREENS[name]?.View;
+  return View ? <View id={id} /> : null;
+}

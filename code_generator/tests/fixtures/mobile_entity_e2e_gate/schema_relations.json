@@ -1,0 +1,8 @@
+{
+  "user": [
+    "created_mobile_notes mobile_note[] @relation(\"MobileNoteCreator\")",
+    "updated_mobile_notes mobile_note[] @relation(\"MobileNoteUpdater\")",
+    "created_mobile_logs mobile_log[] @relation(\"MobileLogCreator\")",
+    "updated_mobile_logs mobile_log[] @relation(\"MobileLogUpdater\")"
+  ]
+}

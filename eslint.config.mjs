@@ -107,6 +107,8 @@ const eslintConfig = defineConfig([
     ".generated-child-datagrid-e2e-gate/**",
     // Disposable app copy built by the list-child-e2e-gate script.
     ".generated-list-child-e2e-gate/**",
+    // Disposable app copy built by scripts/run_mobile_entity_playwright.sh.
+    ".generated-mobile-entity-pw/**",
     // Local Python virtualenv (code_generator/tests pytest deps) — never
     // part of the shipped product, and not every contributor even has one.
     ".venv/**",

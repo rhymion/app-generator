@@ -1,0 +1,149 @@
+import { useEffect, useState } from 'react';
+import { router } from 'expo-router';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useMessages } from '@/lib/messages';
+import type { ModelPermissions } from '@/lib/authz';
+import { validateForm } from '@/components/{{ name }}/form_validation';
+import { useEntityCapabilities } from '@/lib/{{ name }}/use_entity_capabilities';
+import { useEntityForm } from '@/lib/{{ name }}/use_entity_form';
+import {
+{% if can_edit %}
+  get{{ pascal }}Detail,
+{% endif %}
+  get{{ pascal }}Permissions,
+  upsert{{ pascal }},
+  {{ const_name }}_FIELDS as FIELDS,
+} from '@/lib/{{ name }}/mobile_client';
+import { FieldInput, toFieldState, type FieldValueState } from '@/components/native/FieldInput';
+
+/**
+ * Create (no id) and edit (id) form for {{ pascal }}. Form state, validation,
+ * submit and error-message mapping come from the generated hooks the Web form
+ * also calls; this component only draws native controls and wires them in.
+ */
+export function {{ pascal }}FormUpsert({ id }: { id?: string }) {
+  const isEdit = Boolean(id);
+  const { t, terr, tmsg } = useMessages();
+  const [values, setValues] = useState<Record<string, FieldValueState>>(() =>
+    Object.fromEntries(FIELDS.map((spec) => [spec.key, toFieldState(spec, null)])),
+  );
+  const [permissions, setPermissions] = useState<ModelPermissions | undefined>(undefined);
+  const [state, setState] = useState<'loading' | 'ready' | 'missing'>('loading');
+  const [busy, setBusy] = useState(false);
+
+  // React Native ships React 18, where a transition does not track an async
+  // callback, so the hook's isPending is not meaningful here: the in-flight
+  // flag wraps the transport call instead.
+  const save = async (formData: FormData) => {
+    setBusy(true);
+    try {
+      return await upsert{{ pascal }}(formData);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const { error, validationError, validate, submit } = useEntityForm({ translators: { terr, tmsg }, save });
+  const { canEdit } = useEntityCapabilities({ permissions, isEdit });
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const perms = await get{{ pascal }}Permissions(id);
+        setPermissions(perms);
+{% if can_edit %}
+        if (id) {
+          const record = await get{{ pascal }}Detail(id);
+          if (!record) {
+            setState('missing');
+            return;
+          }
+          setValues(Object.fromEntries(FIELDS.map((spec) => [spec.key, toFieldState(spec, record[spec.key])])));
+        }
+{% endif %}
+        setState('ready');
+      } catch {
+        setState('missing');
+      }
+    };
+    void load();
+  }, [id]);
+
+  const allowed = isEdit ? canEdit : Boolean(permissions?.create);
+
+  const onSave = () => {
+    const typed: Record<string, unknown> = {};
+    for (const spec of FIELDS) {
+      const value = values[spec.key];
+      if (spec.kind === 'boolean') typed[spec.key] = value === true;
+      else if (spec.kind === 'number') typed[spec.key] = value === '' ? null : Number(value);
+      else typed[spec.key] = value;
+    }
+    if (!validate(() => validateForm(typed))) return;
+    const formData = new FormData();
+    if (id) formData.append('id', id);
+    for (const spec of FIELDS) {
+      if (!spec.readonly) formData.append(spec.key, String(values[spec.key]));
+    }
+    submit(formData, (savedId) => {
+{% if can_view %}
+      router.replace(`/entity/{{ name }}/${savedId}` as never);
+{% else %}
+      router.replace('/entity/{{ name }}' as never);
+{% endif %}
+    });
+  };
+
+  if (state === 'loading') return <ActivityIndicator testID="form-loading" />;
+  if (state === 'missing') {
+    return (
+      <View style={styles.container} testID="form-missing">
+        <Text>{t('Errors.notFound')}</Text>
+      </View>
+    );
+  }
+  if (!allowed) {
+    return (
+      <View style={styles.container} testID="form-forbidden">
+        <Text>{t('Errors.permissionDenied')}</Text>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView style={styles.container} testID={isEdit ? 'form-edit-{{ name }}' : 'form-new-{{ name }}'}>
+      {FIELDS.map((spec) => (
+        <FieldInput
+          key={spec.key}
+          spec={spec}
+          value={values[spec.key]}
+          onChange={(next) => setValues((current) => ({ ...current, [spec.key]: next }))}
+          disabled={busy}
+        />
+      ))}
+      {validationError ? <Text style={styles.error} testID="form-validation-error">{validationError}</Text> : null}
+      {error ? <Text style={styles.error} testID="form-error">{error}</Text> : null}
+      <View style={styles.actions}>
+        <Pressable style={styles.primary} disabled={busy} onPress={onSave} testID="form-save">
+          <Text style={styles.primaryText}>{busy ? '...' : t('Common.save')}</Text>
+        </Pressable>
+        <Pressable
+          style={styles.secondary}
+          disabled={busy}
+          onPress={() => (router.canGoBack() ? router.back() : router.replace('/entity/{{ name }}' as never))}
+          testID="form-cancel"
+        >
+          <Text>{t('Common.cancel')}</Text>
+        </Pressable>
+      </View>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 16 },
+  error: { color: '#b91c1c', marginVertical: 8 },
+  actions: { flexDirection: 'row', gap: 12, marginTop: 8, marginBottom: 24 },
+  primary: { backgroundColor: '#2563eb', borderRadius: 6, paddingHorizontal: 14, paddingVertical: 10 },
+  primaryText: { color: '#ffffff', fontWeight: '600' },
+  secondary: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, paddingHorizontal: 14, paddingVertical: 10 },
+});

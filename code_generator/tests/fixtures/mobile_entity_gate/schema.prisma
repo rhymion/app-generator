@@ -1,0 +1,63 @@
+// Self-contained fixture Prisma schema for the mobile entity screens
+// (tests/test_mobile_entities.py). NOT the project's real prisma/schema.prisma.
+
+generator client {
+  provider = "prisma-client"
+  previewFeatures = ["relationJoins"]
+  output   = "./.generated-client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MobileNoteStatus {
+  open
+  closed
+}
+
+model user {
+  id       String @id @default(cuid())
+  name     String
+  email    String @unique
+  created_notes mobile_note[] @relation("MobileNoteCreator")
+  updated_notes mobile_note[] @relation("MobileNoteUpdater")
+  created_logs  mobile_log[]  @relation("MobileLogCreator")
+  updated_logs  mobile_log[]  @relation("MobileLogUpdater")
+}
+
+model mobile_note {
+  id         String           @id @default(cuid())
+  title      String
+  details    String?
+  status     MobileNoteStatus
+  priority   Int?
+  amount     Decimal?         @db.Decimal(10, 2)
+  is_done    Boolean
+  due_on     DateTime?
+  created_at DateTime         @default(now()) @db.Timestamptz(0)
+  updated_at DateTime         @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user             @relation("MobileNoteCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user             @relation("MobileNoteUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([status])
+  @@index([priority])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_log {
+  id         String   @id @default(cuid())
+  message    String
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("MobileLogCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("MobileLogUpdater", fields: [updater_id], references: [id])
+  @@index([message])
+  @@index([creator_id])
+  @@index([updater_id])
+}

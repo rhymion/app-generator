@@ -16,6 +16,21 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   the title, language switcher, notification bell and sign-out. `GET /api/mobile/nav` hides entity
   links the caller cannot read, using the desktop sidebar's rule. Entity screens are not part of the
   app yet. See `docs/knowledge/mobile-app.md`.
+- **Native entity screens in the Expo app for entities without relations.** `generate-code` renders a
+  paged list, a detail screen, a create/edit form and a single-record delete (with confirmation) for
+  every entity that has REST routes and no relation, child, custom component or similar feature
+  (`code_generator/mobile_entities.py`; other entities keep the placeholder screen). The screens draw
+  native controls and call the same generated modules the Web screens call —
+  `use_entity_form`, `use_entity_capabilities` and `form_validation` are rendered from the same
+  templates into `mobile/` — so state, validation, submit and permission-based show/hide are not
+  re-implemented. A per-entity `lib/<entity>/mobile_client.ts` has the Web function names and calls the
+  existing REST routes. New `GET /api/mobile/permissions?entity=<name>` returns the caller's
+  model-level flags so the app can hide "New" before any record exists. The Web screens and routes are
+  unchanged. The app moves to Expo SDK 57 (React 19.2, React Native 0.86, one pinned set)
+  because the shared form hook starts an async transition, which needs React 19.
+  `scripts/run_mobile_entity_playwright.sh` runs the Playwright specs against a build with
+  fixture entities (`mobile/e2e/entity-crud.spec.ts`) or the default schema. See
+  `docs/knowledge/mobile-app.md`.
 - **Email/password token authentication for the mobile app.** `POST /api/mobile/auth/token`
   (password grant, MFA-aware, rate-limited), `POST /api/mobile/auth/refresh` (rotating refresh token
   with reuse detection), `DELETE /api/mobile/auth/token` and device-session routes under

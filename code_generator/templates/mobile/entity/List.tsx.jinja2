@@ -1,0 +1,121 @@
+import { useCallback, useEffect, useState } from 'react';
+import { router } from 'expo-router';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useMessages } from '@/lib/messages';
+import {
+  fetch{{ pascal }}Page,
+  get{{ pascal }}Permissions,
+  {{ const_name }}_FIELDS,
+  {{ const_name }}_LIST_KEYS,
+  type {{ pascal }},
+} from '@/lib/{{ name }}/mobile_client';
+import { toDisplayText } from '@/components/native/FieldInput';
+
+const PAGE_SIZE = 20;
+
+export function {{ pascal }}List() {
+  const { t } = useMessages();
+  const [rows, setRows] = useState<{{ pascal }}[]>([]);
+  const [total, setTotal] = useState(0);
+  // The REST list is zero-based: page 0 is the first page.
+  const [page, setPage] = useState(0);
+  const [canCreate, setCanCreate] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+
+  const load = useCallback(async (target: number) => {
+    setLoading(true);
+    try {
+      const result = await fetch{{ pascal }}Page({ page: target, pageSize: PAGE_SIZE });
+      setRows(result.rows);
+      setTotal(result.total);
+      setPage(target);
+      setFailed(false);
+    } catch {
+      setFailed(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load(0);
+    get{{ pascal }}Permissions()
+      .then((permissions) => setCanCreate(permissions.create))
+      .catch(() => setCanCreate(false));
+  }, [load]);
+
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const keys = {{ const_name }}_LIST_KEYS;
+  const fieldOf = (key: string) => {{ const_name }}_FIELDS.find((f) => f.key === key);
+
+  return (
+    <View style={styles.container} testID="list-{{ name }}">
+      <View style={styles.titleRow}>
+        <Text style={styles.title} testID="list-title">
+          {{ title }}
+        </Text>
+{% if can_new %}
+        {canCreate ? (
+          <Pressable style={styles.primary} onPress={() => router.push('/entity/{{ name }}/new' as never)} testID="list-new">
+            <Text style={styles.primaryText}>{t('Common.createNew')}</Text>
+          </Pressable>
+        ) : null}
+{% endif %}
+      </View>
+      {loading && rows.length === 0 ? <ActivityIndicator testID="list-loading" /> : null}
+      {failed ? <Text style={styles.error} testID="list-error">{t('Errors.unknown')}</Text> : null}
+      <FlatList
+        data={rows}
+        keyExtractor={(row) => row.id}
+        renderItem={({ item }) => (
+          <Pressable
+            style={styles.row}
+{% if can_view %}
+            onPress={() => router.push(`/entity/{{ name }}/${item.id}` as never)}
+{% elif can_edit %}
+            onPress={() => router.push(`/entity/{{ name }}/${item.id}/edit` as never)}
+{% endif %}
+            testID={`list-row-${item.id}`}
+          >
+            {keys.map((key, index) => {
+              const spec = fieldOf(key);
+              const text = spec ? toDisplayText(spec, item[key]) : String(item[key] ?? '-');
+              return (
+                <Text key={key} style={index === 0 ? styles.rowTitle : styles.rowDetail} testID={`list-cell-${item.id}-${key}`}>
+                  {index === 0 ? text : `${spec?.label ?? key}: ${text}`}
+                </Text>
+              );
+            })}
+          </Pressable>
+        )}
+        ListEmptyComponent={!loading && !failed ? <Text style={styles.empty} testID="list-empty">-</Text> : null}
+      />
+      <View style={styles.pager}>
+        <Pressable disabled={page <= 0} onPress={() => load(page - 1)} testID="list-prev">
+          <Text style={page <= 0 ? styles.pagerDisabled : styles.pagerText}>{t('Common.previousPage')}</Text>
+        </Pressable>
+        <Text testID="list-page">{`${page + 1} / ${pageCount}`}</Text>
+        <Pressable disabled={page + 1 >= pageCount} onPress={() => load(page + 1)} testID="list-next">
+          <Text style={page + 1 >= pageCount ? styles.pagerDisabled : styles.pagerText}>{t('Common.nextPage')}</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 16 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  title: { fontSize: 20, fontWeight: '600' },
+  primary: { backgroundColor: '#2563eb', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 8 },
+  primaryText: { color: '#ffffff', fontWeight: '600' },
+  row: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e5e7eb', gap: 2 },
+  rowTitle: { fontSize: 16, fontWeight: '500' },
+  rowDetail: { fontSize: 13, color: '#6b7280' },
+  empty: { textAlign: 'center', color: '#9ca3af', marginTop: 24 },
+  error: { color: '#b91c1c', marginBottom: 8 },
+  pager: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12 },
+  pagerText: { color: '#2563eb' },
+  pagerDisabled: { color: '#9ca3af' },
+});

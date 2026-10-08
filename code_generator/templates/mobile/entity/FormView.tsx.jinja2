@@ -1,0 +1,133 @@
+import { useEffect, useState } from 'react';
+import { router } from 'expo-router';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useMessages } from '@/lib/messages';
+import type { ModelPermissions } from '@/lib/authz';
+import { useEntityCapabilities } from '@/lib/{{ name }}/use_entity_capabilities';
+import {
+  get{{ pascal }}Detail,
+  get{{ pascal }}Permissions,
+{% if can_delete %}
+  remove{{ pascal }},
+{% endif %}
+  {{ const_name }}_FIELDS as FIELDS,
+  type {{ pascal }},
+} from '@/lib/{{ name }}/mobile_client';
+{% if has_form_hook %}
+import { getEntityFormErrorMessage } from '@/lib/{{ name }}/use_entity_form';
+{% endif %}
+import { toDisplayText } from '@/components/native/FieldInput';
+
+export function {{ pascal }}FormView({ id }: { id: string }) {
+  const { t, terr{% if has_form_hook %}, tmsg{% endif %} } = useMessages();
+  const [record, setRecord] = useState<{{ pascal }} | null>(null);
+  const [permissions, setPermissions] = useState<ModelPermissions | undefined>(undefined);
+  const [state, setState] = useState<'loading' | 'ready' | 'missing'>('loading');
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    Promise.all([get{{ pascal }}Detail(id), get{{ pascal }}Permissions(id)])
+      .then(([detail, perms]) => {
+        setRecord(detail);
+        setPermissions(perms);
+        setState(detail ? 'ready' : 'missing');
+      })
+      .catch(() => setState('missing'));
+  }, [id]);
+
+  // Show / hide decisions come from the shared capabilities module, the same
+  // one the Web screens call.
+  const { canEdit, canDelete } = useEntityCapabilities({ permissions, isEdit: true });
+
+{% if can_delete %}
+  const confirmDelete = async () => {
+    const result = await remove{{ pascal }}([id]);
+    if (result.ok) {
+      router.replace('/entity/{{ name }}' as never);
+      return;
+    }
+    setConfirming(false);
+{% if has_form_hook %}
+    setError(getEntityFormErrorMessage(result, { terr, tmsg }));
+{% else %}
+    setError(terr('unknown'));
+{% endif %}
+  };
+
+{% endif %}
+  if (state === 'loading') return <ActivityIndicator testID="view-loading" />;
+  if (state === 'missing' || !record) {
+    return (
+      <View style={styles.container} testID="view-missing">
+        <Text>{t('Errors.notFound')}</Text>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView style={styles.container} testID="view-{{ name }}">
+      <View style={styles.titleRow}>
+        <Pressable onPress={() => router.replace('/entity/{{ name }}' as never)} testID="view-back">
+          <Text style={styles.link}>{t('Common.goBack')}</Text>
+        </Pressable>
+      </View>
+      {FIELDS.map((spec) => (
+        <View key={spec.key} style={styles.field}>
+          <Text style={styles.label}>{spec.label}</Text>
+          <Text style={styles.value} testID={`view-field-${spec.key}`}>
+            {toDisplayText(spec, record[spec.key])}
+          </Text>
+        </View>
+      ))}
+      {error ? <Text style={styles.error} testID="view-error">{error}</Text> : null}
+      <View style={styles.actions}>
+{% if can_edit %}
+        {canEdit ? (
+          <Pressable style={styles.primary} onPress={() => router.push(`/entity/{{ name }}/${id}/edit` as never)} testID="view-edit">
+            <Text style={styles.primaryText}>{t('Common.edit')}</Text>
+          </Pressable>
+        ) : null}
+{% endif %}
+{% if can_delete %}
+        {canDelete && !confirming ? (
+          <Pressable style={styles.danger} onPress={() => setConfirming(true)} testID="view-delete">
+            <Text style={styles.primaryText}>{t('Common.delete')}</Text>
+          </Pressable>
+        ) : null}
+{% endif %}
+      </View>
+{% if can_delete %}
+      {confirming ? (
+        <View style={styles.confirm} testID="view-delete-confirm">
+          <Text>{t('Common.deleteMessage', { entity: {{ title | tojson }} })}</Text>
+          <View style={styles.actions}>
+            <Pressable style={styles.danger} onPress={confirmDelete} testID="view-delete-confirm-yes">
+              <Text style={styles.primaryText}>{t('Common.delete')}</Text>
+            </Pressable>
+            <Pressable style={styles.secondary} onPress={() => setConfirming(false)} testID="view-delete-confirm-no">
+              <Text>{t('Common.cancel')}</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+{% endif %}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 16 },
+  titleRow: { marginBottom: 12 },
+  link: { color: '#2563eb' },
+  field: { marginBottom: 14, gap: 2 },
+  label: { fontSize: 13, fontWeight: '600', color: '#374151' },
+  value: { fontSize: 16 },
+  error: { color: '#b91c1c', marginVertical: 8 },
+  actions: { flexDirection: 'row', gap: 12, marginTop: 8 },
+  primary: { backgroundColor: '#2563eb', borderRadius: 6, paddingHorizontal: 14, paddingVertical: 10 },
+  danger: { backgroundColor: '#dc2626', borderRadius: 6, paddingHorizontal: 14, paddingVertical: 10 },
+  secondary: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, paddingHorizontal: 14, paddingVertical: 10 },
+  primaryText: { color: '#ffffff', fontWeight: '600' },
+  confirm: { marginTop: 16, gap: 12, padding: 12, borderWidth: 1, borderColor: '#fecaca', borderRadius: 6 },
+});
