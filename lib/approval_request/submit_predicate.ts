@@ -79,3 +79,40 @@ export function canWithdrawApproval(latestRoundRequests: RoundRequestStatus[]): 
   if (latestRoundRequests.length === 0) return false;
   return latestRoundRequests.some((r) => r.status === 'pending');
 }
+
+// Whether the current user may approve or reject one approval_request row.
+// All four conditions must hold: the row's round is still actionable (the
+// caller passes false for past rounds), the row itself is 'pending', the
+// current user holds the row's approver role, and every stage the row's flow
+// is preceded by has already been approved in this round.
+//
+// Pure function with no DOM, React or framework dependency, so every client
+// platform evaluates the same rule. `flowIdToStatus` maps an approval_flow id
+// to the status of that flow's row in the CURRENT round only.
+export type ActableRequest = {
+  status: string;
+  approval_flow?: {
+    approver_role_id?: string | null;
+    preceded_by?: { id: string }[];
+  } | null;
+};
+
+export function canActOnApprovalRequest(
+  request: ActableRequest,
+  actionable: boolean,
+  currentUserRoleIds: string[] | undefined,
+  flowIdToStatus: ReadonlyMap<string, string>,
+): boolean {
+  const approverRoleId = request.approval_flow?.approver_role_id;
+  const precedingFlowIds = request.approval_flow?.preceded_by?.map((f) => f.id) ?? [];
+  const precedingApproved = precedingFlowIds.every(
+    (fid) => flowIdToStatus.get(fid) === 'approved',
+  );
+  return Boolean(
+    actionable
+      && request.status === 'pending'
+      && approverRoleId
+      && currentUserRoleIds?.includes(approverRoleId)
+      && precedingApproved,
+  );
+}

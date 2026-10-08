@@ -35,9 +35,9 @@ KEY_SPREAD = "messageKey: m.messageKey, messageArgs: m.messageArgs"
 
 def _form_block() -> str:
     ctx = form_upsert_context(_build_ctx(), _schema())
-    rendered = _make_env().get_template('form_upsert.tsx.jinja2').render(**{**_build_ctx(), **ctx})
-    start = rendered.index('const getErrorMessage')
-    end = rendered.index('\n  };', start)
+    rendered = _make_env().get_template('use_entity_form.ts.jinja2').render(**{**_build_ctx(), **ctx})
+    start = rendered.index('export function getEntityFormErrorMessage')
+    end = rendered.index('\n}\n', start)
     return rendered[start:end]
 
 
@@ -75,8 +75,8 @@ class TestReturnLinesCarryOptionalKey:
 class TestFormUpsertKeyPath:
     def test_translated_path_emitted(self):
         block = _form_block()
-        assert 'tkey.has(messageKey)' in block
-        assert 'return tkey(messageKey, messageArgs)' in block
+        assert 'tmsg.has(messageKey)' in block
+        assert 'return tmsg(messageKey, messageArgs)' in block
 
     def test_only_allowed_namespaces_are_translated(self):
         assert '/^(ValidationMessages|Errors)\\./.test(messageKey)' in _form_block()
@@ -85,13 +85,13 @@ class TestFormUpsertKeyPath:
         block = _form_block()
         assert "err.reason === 'invalid' ? terr('fieldInvalid', { field: err.field }) : terr('fieldRequired', { field: err.field })" in block
         # The key branch returns before the fallback; the fallback never prints the key.
-        assert block.index('tkey.has(') < block.index("terr('fieldInvalid'")
+        assert block.index('tmsg.has(') < block.index("terr('fieldInvalid'")
         assert 'return messageKey' not in block
 
     def test_key_applies_to_validation_only(self):
         """NOT_FOUND / PERMISSION_DENIED stay masked: no key is read for them."""
         block = _form_block()
-        assert block.count('tkey.has(') == 1
+        assert block.count('tmsg.has(') == 1
         assert block.index("case 'NOT_FOUND':") < block.index("case 'VALIDATION'")
         assert "case 'NOT_FOUND':         return terr('notFound');" in block
 

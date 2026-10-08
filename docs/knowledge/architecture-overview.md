@@ -43,6 +43,9 @@ The `x-generate` block in the entity definition controls which outputs are activ
 | `components/{entity}/FormUpsert.tsx` | `form_upsert.tsx.jinja2` | Always |
 | `components/{entity}/form_validation.ts` | `form_validation.ts.jinja2` | Always |
 | `components/{entity}/FormView.tsx` | `form_view.tsx.jinja2` | Always |
+| `lib/{entity}/use_entity_form.ts` | `use_entity_form.ts.jinja2` | If `new: true` or `edit: true` |
+| `lib/{entity}/use_entity_capabilities.ts` | `use_entity_capabilities.ts.jinja2` | If `new`, `edit` or `view` is true |
+| `lib/{entity}/use_entity_approval_actions.ts` | `use_entity_approval_actions.ts.jinja2` | If the view renders `ApprovalSection` |
 | `components/{entity}/column_def.tsx` | `column_def.tsx.jinja2` | If parent has children |
 | `app/[locale]/{entity}/page.tsx` | `page_list.tsx.jinja2` | If `list: true` |
 | `app/[locale]/{entity}/new/page.tsx` | `page_new.tsx.jinja2` | If `new: true` |

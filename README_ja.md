@@ -17,6 +17,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 ### コード生成
 
 - **スキーマ駆動生成** — YAML スキーマ (`code_generator/json_schema.yaml`) + Prisma スキーマ → Python パイプラインによる TypeScript、React、Cypress ファイルの生成
+- **フレームワーク非依存の UI フック** — 各エンティティのフォーム状態・送信処理・エラーメッセージ変換・権限に基づく表示制御・承認連携を、Next.js・`next-intl`・DOM・UI ライブラリに依存しない `lib/{entity}/use_entity_*.ts` として生成し、Web 以外のクライアントからも再利用可能 — [`docs/knowledge/shared-ui-hooks.md`](docs/knowledge/shared-ui-hooks.md) 参照
 - **CRUD ページ一式** — エンティティごとに一覧、詳細、作成、編集、削除ページを生成
 - **ガントチャートビュー** — エンティティ単位でオプトインできるガントチャートページ
 - **REST API** — エンティティごとに API キー認証付き JSON エンドポイントを生成。加えて、その行について現在許される操作・書き込み・遷移を返す行単位の `GET /api/{entity}/[id]/capabilities` エンドポイントを生成

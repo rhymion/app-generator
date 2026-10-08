@@ -6,6 +6,8 @@ an extended dict with the generator-specific computed strings that templates
 need.  This keeps complex Python logic out of Jinja2.
 """
 
+import re
+
 from helpers.naming import (
     to_camel_case, to_pascal_case, to_pascal_case_from_var, to_title_case,
     safe_var_name, singularize,
@@ -4762,6 +4764,9 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         'uses_app_field_boolean': uses_app_field_boolean,
         'submit_for_approval_needed': submit_for_approval_needed,
         'has_on_withdrawn':       has_on_withdrawn,
+        'has_approval_section':   any(
+            c.get('name') == 'ApprovalSection' for c in ctx.get('entity_view_components') or []
+        ),
     }
 
 
@@ -7170,7 +7175,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     # loop above), which is the only path that needs useEffect here.
     uses_use_effect = any_ctx_fields or bool(inline_create_used)
 
-    return {
+    _upsert_ctx = {
         'has_mention_fields':       bool(mention_props),
         'parent_refs':              parent_refs,
         'all_states':               all_states_merged,
@@ -7247,6 +7252,16 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'uses_use_ref':             uses_use_ref,
         'uses_use_effect':          uses_use_effect,
     }
+    # useState is declared by many independent fragments (field states, the
+    # child grids, the inline-create dialogs...). The form's own error state
+    # now lives in useEntityForm, so the template's `react` import only needs
+    # useState when one of those fragments declares it -- same text-search
+    # approach as uses_use_ref above.
+    _upsert_ctx['uses_use_state'] = any(
+        isinstance(v, str) and re.search(r'\buseState\b', v)
+        for v in _upsert_ctx.values()
+    )
+    return _upsert_ctx
 
 
 # ---------------------------------------------------------------------------

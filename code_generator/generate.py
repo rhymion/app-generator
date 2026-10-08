@@ -1551,6 +1551,9 @@ def generate(schema_path: str, output_dir: str) -> None:
         if can_new or can_edit:
             ups_ctx = {**ctx, **form_upsert_context(ctx, schema)}
             _write(components_dir / 'FormUpsert.tsx', _render(env, 'form_upsert.tsx.jinja2', ups_ctx))
+            # Framework-neutral state / submit orchestration FormUpsert calls
+            # (and any other client rendering this form can call too).
+            _write(lib_dir / 'use_entity_form.ts', _render(env, 'use_entity_form.ts.jinja2', ups_ctx))
             val_ctx = {**ctx, **build_validation_context(ctx)}
             _write(components_dir / 'form_validation.ts', _render(env, 'form_validation.ts.jinja2', val_ctx))
 
@@ -1562,10 +1565,17 @@ def generate(schema_path: str, output_dir: str) -> None:
             _write(lib_dir / 'inline_create.ts', _render(env, 'inline_create_actions.ts.jinja2', ctx))
             _write(components_dir / 'InlineCreateDialog.tsx', _render(env, 'inline_create_dialog.tsx.jinja2', ctx))
 
+        # --- use_entity_capabilities.ts (shared by FormUpsert and FormView) ---
+        if can_new or can_edit or can_view:
+            _write(lib_dir / 'use_entity_capabilities.ts', _render(env, 'use_entity_capabilities.ts.jinja2', ctx))
+
         # --- FormView.tsx ---
         if can_view:
             fv_ctx = {**ctx, **form_view_context(ctx, schema)}
             _write(components_dir / 'FormView.tsx', _render(env, 'form_view.tsx.jinja2', fv_ctx))
+            if fv_ctx.get('has_approval_section'):
+                _write(lib_dir / 'use_entity_approval_actions.ts',
+                       _render(env, 'use_entity_approval_actions.ts.jinja2', fv_ctx))
 
         # --- <Child>BridgeGrid.tsx (parent-embedded DataGrid, cmd_167 §4) ---
         # Emitted for bridge children (entities with new-form x-bridge); the
