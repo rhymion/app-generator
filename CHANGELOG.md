@@ -5,6 +5,24 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Generated Expo mobile app with footer navigation from `x-nav`** (restart of the mobile line).
+  `generate-code` renders an Expo Router project into `mobile/`. Its footer tabs are the desktop
+  sidebar's root level — flat entity links, then top-level groups — built by the new
+  `code_generator/mobile_nav.py` from `build_nav_config()`, so no schema key is added. Tapping a group
+  tab lists its sub-groups and entity links on the main screen (one pushed screen per level, to the
+  maximum nesting depth); the bar scrolls horizontally past the visible width and a fixed Search tab
+  follows the schema tabs when the app has a search route. Group icons map to `@expo/vector-icons`;
+  `WorkOutlined`, `PeopleOutlined` and `SettingsOutlined` use similar `-outline` glyphs. The header keeps
+  the title, language switcher, notification bell and sign-out. `GET /api/mobile/nav` hides entity
+  links the caller cannot read, using the desktop sidebar's rule. Entity screens are not part of the
+  app yet. See `docs/knowledge/mobile-app.md`.
+- **Email/password token authentication for the mobile app.** `POST /api/mobile/auth/token`
+  (password grant, MFA-aware, rate-limited), `POST /api/mobile/auth/refresh` (rotating refresh token
+  with reuse detection), `DELETE /api/mobile/auth/token` and device-session routes under
+  `/api/mobile/auth/sessions`, backed by the new `mobile_session` table. Generated REST routes now call
+  `authenticate()`, which accepts a mobile access token or an API key; `GET /api/notifications` also
+  accepts the bearer token. Existing API-key callers are unchanged. The Playwright base for the mobile
+  web bundle lives in `mobile/e2e` and runs with `npm run test:e2e:mobile:pw`.
 - **Create the referenced record in place from a foreign-key field** (issue #846, stage 1). A
   many-to-one FK field that declares the new `x-create-inline: true` key (on the field, beside
   `x-relationship`) also offers *Create new* in its autocomplete. It opens the target entity's own

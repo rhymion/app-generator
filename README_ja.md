@@ -99,6 +99,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 
 - 国際化（英語・日本語、next-intl v4）
 - ダークモード（システム連動、SSR セーフ）
+- `mobile/` に生成される Expo（React Native）モバイルアプリ。デスクトップのサイドバーと同じ `x-nav` / `x-nav-groups` からフッターのタブと下位階層の一覧を構成
 - 生成コードを上書きせずにカスタマイズできる 5 つの拡張ポイント
 
 ---
@@ -548,6 +549,7 @@ app-generator/
 | [timezone-handling.md](docs/knowledge/timezone-handling.md) | サーバー/クライアントのタイムゾーン規約 |
 | [child-datagrid-reference-columns.md](docs/knowledge/child-datagrid-reference-columns.md) | インライン DataGrid 子エンティティ、参照列のレンダリング |
 | [mobile-responsive-layout.md](docs/knowledge/mobile-responsive-layout.md) | レスポンシブレイアウト規約、検索ヘッダーアイコン、モバイルアカウントセクション |
+| [mobile-app.md](docs/knowledge/mobile-app.md) | 生成される Expo モバイルアプリ：`x-nav` からのフッタータブと下位階層、ヘッダー、トークン認証、Playwright 検証 |
 | [search.md](docs/knowledge/search.md) | エンティティ横断全文検索：スキーマオプトイン・pg_bigm・認可・生成 API と UI |
 | [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | 承認フローシステムの詳細、承認後イベント発火（`on_approved`） |
 | [appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) | コメントブリッジシステムの詳細 |
