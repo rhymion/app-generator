@@ -94,9 +94,8 @@ and describes their fields; the templates are under `code_generator/templates/mo
 
 An entity is left on the placeholder screen when it has no REST routes or no list screen, declares a
 child grid or a comment thread, a one-to-one bridge or a direct attachment, a custom component, virtual
-columns, comments, attachments, `x-payment`, `x-splittable`, a reservation, a state machine, edit/delete
-guards or `x-self-only`, is the target of an `x-create-inline` field, relates to an entity that has no
-REST routes, or has a field with no native widget (image or file URI, entity select, custom upsert
+columns, comments, attachments, `x-splittable`, a reservation, a state machine, edit/delete
+guards or `x-self-only`, relates to an entity that has no REST routes, or has a field with no native widget (image or file URI, entity select, custom upsert
 component). In the default schema `role`, `organization` and `app_setting` qualify; `user` (a custom component) keeps
 the placeholder. The fixture schema in `code_generator/tests/fixtures/mobile_entity_gate/` covers the rest.
 
@@ -120,6 +119,43 @@ nothing itself: permission scope, organization isolation, invalidated records, l
 target's `autocomplete_filter.ts` are the server's. A `403` from the options route (no `read` on the target)
 shows the field disabled with the `Errors.fkPermissionDenied` message the Web form uses. The target need not
 have native screens of its own.
+
+### Create the referenced record in place (`x-create-inline`)
+
+A many-to-one foreign key that declares `x-create-inline: true` shows a *Create new* button beside *Select*
+(`picker-create-<field>`). It opens the target's own native create form in a modal over the hosting form,
+so the hosting form's unsaved values stay where they are. The target's form is the one it has anywhere
+else, so its validation, required fields and organization scoping apply; it saves through the target's
+REST create route and the shared `useEntityForm().submit(formData, onCreated)`. On success the modal
+closes, the new record is selected (its label is read back from the options route) and the field shows the
+`Common.createdInlineNotice` text: the record is already saved even if the hosting form never is. Cancel
+closes the modal and leaves the field unchanged.
+
+- The button appears only when `GET /api/mobile/permissions?entity=<target>` says the caller may create the
+  target; the create route stays the authority.
+- The control exists only when the target has native screens with a create form. A target that keeps the
+  placeholder screen (it has a child grid, for example) leaves the field a plain picker, and `generate-code`
+  prints which field. The Web form still offers its dialog.
+- The generated hosting `FormUpsert.tsx` imports the target's `FormUpsert` and hands it to the picker;
+  the target's `FormUpsert` takes optional `onCreated` and `onCancel` props and then reports the new id and
+  cancels through them instead of navigating. Nesting depth is 1 (validation rejects a target that declares the key itself).
+- Many-to-many fields and one-to-one selectors offer no control, as on the Web.
+
+### Payment checkout (`x-payment`)
+
+An `x-payment` entity has the same native screens. Creating a record is `POST /api/<entity>`, which answers
+`{ record, checkoutUrl }`. `upsert<Entity>()` returns the new id with the `checkoutUrl`, and the form opens
+that URL with `expo-web-browser` (`lib/checkout.ts`, generated, with the dependency, only when an entity
+declares `x-payment`; only `http(s)` URLs are opened). The app has no payment logic: the record is provisional
+until the payment provider's success page or webhook confirms it, and the provider's cancel page or the
+expiring session removes it (`stripe-payment-integration.md`).
+
+When the buyer returns to the app, the form reads the record back. A record that is gone (the checkout was
+cancelled or expired) keeps the form open with `Payment.cancelMessage`; a kept record opens the detail screen
+with the `Payment.returnedMessage` notice. The app does not show *paid* versus *waiting for confirmation*:
+no REST route exposes the `payable` status (the `payable` model is internal to `lib/payment/`), so that
+distinction needs a route first. The provider's success and cancel pages are Web pages in the in-app browser
+and need a signed-in Web session; the webhook is the dependable confirmation.
 
 The detail screen names a relation by the label column (`labelField` of the relationship) of the record the
 REST detail embeds. A list row shows scalar columns only: the REST list does not embed related labels.
@@ -215,13 +251,13 @@ own docker project and ports, and runs the specs in two modes (the footer specs 
 tabs, the entity specs need the fixture entities):
 
 ```bash
-bash scripts/run_mobile_entity_playwright.sh               # fixture schema: entity-crud.spec.ts, relation-pickers.spec.ts
+bash scripts/run_mobile_entity_playwright.sh               # fixture schema: entity-crud, relation-pickers and inline-create-checkout specs
 MODE=default bash scripts/run_mobile_entity_playwright.sh  # default schema: the other specs
 ```
 
 The fixture mode merges `code_generator/tests/fixtures/mobile_entity_e2e_gate/` (`mobile_note` with full
 CRUD, `mobile_log` list-and-view only, `mobile_task` with a required foreign key, a many-to-many and a one-to-one
-selector to `mobile_group` / `mobile_tag` / `mobile_profile`, `mobile_org_item` with a foreign key to `organization`) into the copy's schema, as `scripts/compose_child_datagrid_e2e_fixture.py`
+selector to `mobile_group` / `mobile_tag` / `mobile_profile`, `mobile_org_item` with a foreign key to `organization`, `mobile_ticket` with an `x-create-inline` foreign key to `mobile_category`, `mobile_order` with `x-payment`) into the copy's schema, as `scripts/compose_child_datagrid_e2e_fixture.py`
 does for the other end-to-end fixtures, and signs in as the seeded administrator. `mobile/scripts/serve-web-with-proxy.js`
 runs the Expo web server and the proxy as one process so the runner can stop both.
 
@@ -234,6 +270,10 @@ runs the Expo web server and the proxy as one process so the runner can stop bot
   disabled field without read on the target, clear, a one-to-one already linked elsewhere, adding and
   removing many-to-many records, an emptied set sent as an empty list, and the organization picker offering
   only organizations the user belongs to. The fixture mode seeds the records it needs.
+- `mobile/e2e/inline-create-checkout.spec.ts` covers *Create new* (the target form in a modal, the new record
+  selected, the hosting form's values kept, cancel, the target's validation, no control without the
+  server's create flag or without the key) and the checkout (the hosted URL opened after the save, the
+  returned notice on the detail screen), with the fake payment provider.
 - `mobile/e2e/*.spec.ts` are curated, hand-written specs, one per flow, not generated. A mobile change
   ships a spec for the flow it changes.
 - `mobile/scripts/real-browser-verify.js` is the reusable real-browser check. It selects a preset with
@@ -241,7 +281,7 @@ runs the Expo web server and the proxy as one process so the runner can stop bot
   Chromium with `--disable-web-security` — it hides the CORS-class gaps this check exists to catch.
 - `code_generator/tests/test_mobile_nav.py` covers the tree built from the nav configuration.
 - `code_generator/tests/test_mobile_entities.py` covers which entities get screens, the relation field
-  descriptions, that the screens and pickers call the shared modules and the options route, the REST client
+  descriptions, the *Create new* wiring and the checkout flow, that the screens and pickers call the shared modules and the options route, the REST client
   and the React version the shared hooks need.
 - `cypress/e2e/api/mobile_auth.cy.ts`, `mobile_nav.cy.ts` and `mobile_permissions.cy.ts` cover the REST routes.
 
@@ -252,8 +292,8 @@ check and is not part of the mandatory gate.
 ## Not implemented yet
 
 - Entity screens for an entity that declares anything beyond plain fields and the relation pickers: child
-  grids, approval, comments, attachments and payment.
-- Creating the referenced record in place from a foreign-key field (`x-create-inline`) and the one-to-one
-  bridge grid (`x-bridge`).
+  grids, approval, comments and attachments.
+- The one-to-one bridge grid (`x-bridge`).
+- The paid / waiting status of an `x-payment` record (no REST route exposes it).
 - Bulk delete, the native date pickers (dates are typed as text), CSV import and export.
 - Translated field labels.

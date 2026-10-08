@@ -17,7 +17,7 @@
 #
 # Two modes, because the footer specs assume the default schema's tabs:
 #   MODE=fixture (default)  fixture entities merged; runs mobile/e2e/entity-crud.spec.ts and
-#                           mobile/e2e/relation-pickers.spec.ts
+#                           mobile/e2e/relation-pickers.spec.ts and mobile/e2e/inline-create-checkout.spec.ts
 #   MODE=default            unmodified schema; runs every other spec in mobile/e2e/
 #
 # Usage: bash scripts/run_mobile_entity_playwright.sh
@@ -134,11 +134,11 @@ INSERT INTO organization (id, name, updated_at, creator_id, updater_id)
 SELECT v.id, v.name, now(), actor.id, actor.id FROM actor, (VALUES ('org-own', 'Mobile Own Org'), ('org-foreign', 'Mobile Foreign Org')) AS v(id, name);
 INSERT INTO "_UserOrganizations" ("A", "B") SELECT 'org-own', id FROM "user" WHERE email = 'admin@example.com';
 SQL
-  PW_TARGET="entity-crud.spec.ts relation-pickers.spec.ts"
+  PW_TARGET="entity-crud.spec.ts relation-pickers.spec.ts inline-create-checkout.spec.ts"
   export MOBILE_PW_IGNORE=""
 else
   PW_TARGET=""
-  export MOBILE_PW_IGNORE="**/{entity-crud,relation-pickers}.spec.ts"
+  export MOBILE_PW_IGNORE="**/{entity-crud,relation-pickers,inline-create-checkout}.spec.ts"
 fi
 
 echo "-- installing the Expo dependencies --"

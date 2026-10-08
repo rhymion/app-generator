@@ -9,6 +9,9 @@ This covers a single foreign-key field on a generated create or edit form. Forei
 embedded child DataGrid, many-to-many fields and the independent-children "add existing" list do not
 offer it.
 
+The generated Expo mobile app offers the same control in its native picker; see
+`mobile-app.md` ("Create the referenced record in place").
+
 ## Declaring it
 
 ```yaml
