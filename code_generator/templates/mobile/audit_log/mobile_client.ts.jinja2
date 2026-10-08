@@ -1,0 +1,37 @@
+// Mobile data access for the audit log: REST calls against /api/audit_log, the
+// routes the Web audit log page's getters sit behind. Read-only; the server
+// applies the read permission and answers 403 without it.
+import { apiFetch, ApiError } from '@/lib/api-base';
+import type { PageResult } from '@/lib/entity-http';
+
+export type AuditLogEntry = {
+  id: string;
+  target_table: string | null;
+  target_id: string | null;
+  action: string;
+  actor_user_id: string | null;
+  actor_user?: { name?: string | null } | null;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+};
+
+/** `page` is zero-based, like the REST list routes; newest entries first. */
+export async function fetchAuditLogPage(page: number, pageSize: number): Promise<PageResult<AuditLogEntry>> {
+  return apiFetch<PageResult<AuditLogEntry>>(
+    `/api/audit_log?page=${page}&pageSize=${pageSize}&sort=created_at:desc`,
+  );
+}
+
+export async function getAuditLogDetail(id: string): Promise<AuditLogEntry | null> {
+  try {
+    return await apiFetch<AuditLogEntry>(`/api/audit_log/${id}`);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+/** True when a failed request was refused for lack of the read permission. */
+export function isPermissionDenied(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 403;
+}
