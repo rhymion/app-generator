@@ -92,7 +92,7 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% if enum_ns_hooks %}
 {{ enum_ns_hooks }}
 {% endif %}
-  const { isPending, error, setError, validationError, validate, submit } = useEntityForm({
+  const { isPending, error, {% if uses_set_error %}setError, {% endif %}validationError, validate, submit } = useEntityForm({
     translators: {
       terr: terr as unknown as EntityFormTranslate,
       tmsg: tmsg as unknown as EntityFormTranslators['tmsg'],

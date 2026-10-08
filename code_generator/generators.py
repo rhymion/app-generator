@@ -7186,6 +7186,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'child_grid_setup':         child_grid_setup,
         'child_form_data_handling': child_form_data_handling,
         'child_validation_code':    _child_validation_code_merged,
+        'uses_set_error':           'setError(' in _child_validation_code_merged,
         'child_grid_components':    child_grid_components,
         'has_indep_list_children':  has_indep_list_children,
         'indep_list_readonly_jsx':  indep_list_readonly_jsx,

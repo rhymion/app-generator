@@ -158,3 +158,11 @@ def test_approval_hook_binds_the_submit_action_when_the_entity_can_submit():
     without_submit = template.render(parent='widget', submit_for_approval_needed=False, has_on_withdrawn=False)
     assert 'onSubmitForApproval' not in without_submit
     assert '@/lib/_errors' not in without_submit
+
+
+def test_form_takes_setError_from_the_hook_only_when_its_fragments_use_it(continue_out):
+    # No child grid or flatten section: nothing calls setError, so it is not
+    # destructured (an unused binding is a lint warning).
+    form = (continue_out / 'components' / 'continue_plain' / 'FormUpsert.tsx').read_text()
+    assert 'setError' not in form
+
