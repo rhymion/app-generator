@@ -60,6 +60,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   there and the app does not use it.
 
 ### Fixed
+- **Generated test data wrote several owner columns of an `x-exclusive-parents` entity** (issue #849).
+  Dependency rows of such an entity (for example the `parameter` and `step_placement` rows another
+  entity's helper creates) and the child rows added by `populate<Parent><Child>Data` set every owner
+  FK, a row the entity's own rule forbids; the generated API specs reuse the same rows. They now set
+  one owner: the first declared parent's column for a dependency row, the populated parent's column for
+  a child row. The generated specs and helpers skip the empty label segment and close the gap, and the
+  shared `selectAutocomplete` / `checkField` Cypress commands compare with whitespace collapsed. The
+  runtime label is unchanged.
 - **`code-generation-custom-extensions.md` no longer shows `target: [new, ...]` for
   `x-custom-components`.** The generator reads only `list`, `view` and `edit`; `new` was silently
   ignored. The examples drop it, and the page now says which values `target` accepts and that an
