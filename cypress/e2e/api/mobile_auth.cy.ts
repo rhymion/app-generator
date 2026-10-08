@@ -341,11 +341,12 @@ describe('API: Mobile Auth (mobile token auth)', () => {
       });
     });
 
-    it('(b) rejects a valid mobile access token at the session-cookie-only /api/user-account/api-key endpoint', () => {
+    it('(b) rejects a valid mobile access token at a session-cookie-only endpoint (/api/notifications/mark-read)', () => {
       login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password).then((loginRes) => {
         const pair = loginRes.body as TokenPair;
         cy.request({
-          url: '/api/user-account/api-key',
+          method: 'POST',
+          url: '/api/notifications/mark-read',
           headers: bearer(pair.access_token),
           failOnStatusCode: false,
         }).then((res) => {
