@@ -19,7 +19,7 @@ test.describe('Comment thread on the detail screen', () => {
     await openThread(page, 'thread-seed-1');
     await expect(page.getByTestId('comment-thread')).toBeVisible();
     await expect(page.getByTestId('comment-message-comment-seed-1')).toHaveText('First comment');
-    await expect(page.getByTestId('comment-meta-comment-seed-1')).toContainText('admin');
+    await expect(page.getByTestId('comment-meta-comment-seed-1')).toContainText('Test Admin');
     const ids = await page.locator('[data-testid^="comment-comment-seed-"]').evaluateAll((els) => els.map((el) => el.getAttribute('data-testid')));
     expect(ids).toEqual(['comment-comment-seed-1', 'comment-comment-seed-2']);
   });

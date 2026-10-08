@@ -50,7 +50,7 @@ function ReactionBar({ comment, types }: { comment: CommentRow; types: string[] 
             style={[styles.reaction, active ? styles.reactionActive : null]}
             onPress={() => toggle(type)}
             disabled={pending !== null}
-            accessibilityState={{ selected: active }}
+            aria-selected={active}
             testID={`reaction-${comment.id}-${type}`}
           >
             <Text style={active ? styles.reactionActiveText : undefined}>
