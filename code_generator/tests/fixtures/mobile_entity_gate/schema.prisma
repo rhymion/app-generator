@@ -24,6 +24,14 @@ model user {
   updated_notes mobile_note[] @relation("MobileNoteUpdater")
   created_logs  mobile_log[]  @relation("MobileLogCreator")
   updated_logs  mobile_log[]  @relation("MobileLogUpdater")
+  created_groups   mobile_group[]   @relation("MobileGroupCreator")
+  updated_groups   mobile_group[]   @relation("MobileGroupUpdater")
+  created_tags     mobile_tag[]     @relation("MobileTagCreator")
+  updated_tags     mobile_tag[]     @relation("MobileTagUpdater")
+  created_profiles mobile_profile[] @relation("MobileProfileCreator")
+  updated_profiles mobile_profile[] @relation("MobileProfileUpdater")
+  created_tasks    mobile_task[]    @relation("MobileTaskCreator")
+  updated_tasks    mobile_task[]    @relation("MobileTaskUpdater")
 }
 
 model mobile_note {
@@ -58,6 +66,75 @@ model mobile_log {
   updater_id String
   updater    user     @relation("MobileLogUpdater", fields: [updater_id], references: [id])
   @@index([message])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_group {
+  id         String   @id @default(cuid())
+  name       String
+  mobile_tasks mobile_task[]
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("MobileGroupCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("MobileGroupUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_tag {
+  id         String   @id @default(cuid())
+  name       String
+  mobile_tasks mobile_task[] @relation("MobileTaskTags")
+  label_tasks  mobile_task[] @relation("MobileTaskLabel")
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("MobileTagCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("MobileTagUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_profile {
+  id         String   @id @default(cuid())
+  name       String
+  mobile_task mobile_task?
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("MobileProfileCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("MobileProfileUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_task {
+  id                String          @id @default(cuid())
+  title             String
+  mobile_group_id   String
+  mobile_group      mobile_group    @relation(fields: [mobile_group_id], references: [id])
+  mobile_profile_id String?         @unique
+  mobile_profile    mobile_profile? @relation(fields: [mobile_profile_id], references: [id])
+  mobile_label_id   String?
+  mobile_label      mobile_tag?     @relation("MobileTaskLabel", fields: [mobile_label_id], references: [id])
+  tags              mobile_tag[]    @relation("MobileTaskTags")
+  created_at        DateTime        @default(now()) @db.Timestamptz(0)
+  updated_at        DateTime        @updatedAt @db.Timestamptz(0)
+  creator_id        String
+  creator           user            @relation("MobileTaskCreator", fields: [creator_id], references: [id])
+  updater_id        String
+  updater           user            @relation("MobileTaskUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([mobile_group_id])
+  @@index([mobile_label_id])
   @@index([creator_id])
   @@index([updater_id])
 }

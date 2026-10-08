@@ -158,7 +158,7 @@ test.describe('Native entity screens: permission-hidden actions', () => {
 
   test('an entity without native screens still says so', async ({ page }) => {
     await login(page);
-    await page.goto('/entity/role');
-    await expect(page.getByTestId('entity-role')).toBeVisible();
+    await page.goto('/entity/user');
+    await expect(page.getByTestId('entity-user')).toBeVisible();
   });
 });

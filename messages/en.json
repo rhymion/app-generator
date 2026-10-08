@@ -10,6 +10,7 @@
     "backMessage": "All unsaved messages will be lost. Are you sure you want to return to the list?",
     "cancel": "Cancel",
     "chart": "Chart",
+    "clear": "Clear",
     "close": "Close",
     "createNew": "Create new",
     "createdInlineNotice": "A new {entity} was created. It stays even if this form is not saved.",
@@ -17,14 +18,18 @@
     "deleteDialogTitle": "Delete {entity}",
     "deleteMessage": "Are you sure you want to delete this {entity}? Deleted data cannot be recovered.",
     "deletedUser": "[deleted user]",
+    "done": "Done",
     "edit": "Edit",
     "editEntity": "Edit {entity}",
     "goBack": "Go Back",
     "imageUrl": "Image URL",
     "nextPage": "Next",
+    "noOptions": "No matching records",
     "previousPage": "Previous",
     "save": "Save",
-    "saveAndContinue": "Save and continue editing"
+    "saveAndContinue": "Save and continue editing",
+    "search": "Search",
+    "select": "Select"
   },
   "Errors": {
     "capacityExhausted": "No capacity is available. Please try a different selection.",

@@ -6,6 +6,10 @@ format-version: 3.0
 #  - mobile_note: full CRUD, one field of every kind the native form draws.
 #  - mobile_log: read-only (list and view only), to prove the screens follow the
 #    entity's own x-generate flags.
+#  - mobile_group / mobile_tag / mobile_profile: plain targets for the relation pickers.
+#  - mobile_task: a required many-to-one foreign key (mobile_group_id), a many-to-many
+#    (tags, x-outputType: list) and a one-to-one selector (mobile_profile_id) -- the relation kinds the
+#    native pickers draw.
 # Used by tests/test_mobile_entities.py (generation + shape) and by the Expo
 # Playwright run described in docs/knowledge/mobile-app.md.
 
@@ -73,3 +77,107 @@ definitions:
       message: {}
     required:
       - message
+
+  mobile_group:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - name:
+            primary: true
+    fields:
+      name: {}
+    required:
+      - name
+
+  mobile_tag:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - name:
+            primary: true
+    fields:
+      name: {}
+    required:
+      - name
+
+  mobile_profile:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - name:
+            primary: true
+    fields:
+      name: {}
+    required:
+      - name
+
+  mobile_task:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - title:
+            primary: true
+        - mobile_group_id: {}
+    x-relationships:
+      tags:
+        type: many-to-many
+        target: mobile_tag
+        labelField: name
+    fields:
+      title: {}
+      mobile_group_id:
+        x-relationship:
+          labelField: name
+      mobile_profile_id:
+        x-relationship:
+          type: one-to-one
+          target: mobile_profile
+          labelField: name
+      mobile_label_id:
+        x-relationship:
+          labelField: name
+        # The picker forwards the group chosen in the same form to the target's autocomplete filter.
+        x-autocomplete-context: [mobile_group_id]
+    properties:
+      mobile_profile:
+        $ref: "#/definitions/mobile_profile"
+      tags:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/mobile_tag"
+    required:
+      - title
+      - mobile_group_id

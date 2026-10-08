@@ -1,4 +1,4 @@
-"""Mobile entity screens for entities without relations.
+"""Mobile entity screens.
 
 Decides which entities get native list / detail / form screens in the Expo app
 and derives the field description those screens render. The screens carry no
@@ -6,6 +6,11 @@ validation, submit or permission logic of their own: they call the same
 generated modules the Web screens call (`use_entity_form`,
 `use_entity_capabilities`, `form_validation`), so this module only describes the
 fields to draw.
+
+A many-to-one foreign key, a one-to-one selector and a many-to-many declared with
+`x-outputType: list` are drawn as relation pickers whose candidates come from `GET /api/{target}/options`.
+An entity with any other relation feature (children, bridges, attachments, ...)
+keeps the placeholder screen.
 """
 from __future__ import annotations
 
@@ -18,6 +23,9 @@ KIND_ENUM = 'enum'
 KIND_DATE = 'date'
 KIND_DATETIME = 'datetime'
 KIND_TIME = 'time'
+# A foreign key or one-to-one selector (one record) and a many-to-many (a set).
+KIND_RELATION = 'relation'
+KIND_RELATION_MANY = 'relation_many'
 
 # Keys of the field categories (build_context._categorize_form_fields) that the
 # mobile form can draw, mapped to the widget kind.
@@ -35,17 +43,14 @@ _CATEGORY_KIND = (
 # upload, entity picker, custom component); an entity with one is not eligible.
 _UNSUPPORTED_CATEGORIES = ('custom_upsert', 'image', 'file_uri', 'entity_select')
 
+
 # Context keys whose presence means the entity carries a feature that lives
 # beyond plain CRUD (relations, children, comments, attachments, ...).
 _FEATURE_KEYS = (
-    'parent_rels_raw',
-    'selector_oto_rels',
     'direct_attachment_rels',
     'one_to_one_rels',
     'reverse_oto_rels',
     'flatten_rels',
-    'children_raw',
-    'non_comment_ch',
     'entity_custom_components',
     'entity_view_components',
     'entity_edit_components',
@@ -71,8 +76,25 @@ _FEATURE_FLAGS = (
 MAX_LIST_COLUMNS = 3
 
 
-def mobile_ineligible_reason(ctx: dict) -> str | None:
-    """Return why the entity gets no mobile CRUD screens, or None when it does."""
+def _picker_children(ctx: dict) -> list[dict]:
+    """The many-to-many children that are drawn as pickers.
+
+    The Web form draws a many-to-many declared with `x-outputType: list` as an
+    autocomplete list of existing records; without it the child is an editable
+    grid of new rows, which the mobile form has no control for.
+    """
+    return [
+        c for c in (ctx.get('non_comment_ch') or [])
+        if c.get('is_many_to_many') and c.get('output_type') == 'list'
+    ]
+
+
+def mobile_ineligible_reason(ctx: dict, api_entities: set[str] | None = None) -> str | None:
+    """Return why the entity gets no mobile CRUD screens, or None when it does.
+
+    `api_entities` is the set of entities that have REST routes (and so an options
+    route); a relation to one outside it cannot be drawn. None skips that check.
+    """
     if not ctx.get('can_api'):
         return 'no REST routes (x-generate.api is off)'
     if not ctx.get('can_list'):
@@ -80,6 +102,15 @@ def mobile_ineligible_reason(ctx: dict) -> str | None:
     for key in _FEATURE_KEYS:
         if ctx.get(key):
             return f'declares {key}'
+    pickers = _picker_children(ctx)
+    if len(pickers) != len(ctx.get('children_raw') or []) or len(pickers) != len(ctx.get('non_comment_ch') or []):
+        return 'declares children_raw'
+    if api_entities is not None:
+        targets = [r['target'] for r in (ctx.get('parent_rels_raw') or []) + (ctx.get('selector_oto_rels') or [])]
+        targets += [c['relationship']['target'] for c in pickers]
+        for target in targets:
+            if target not in api_entities:
+                return f'relates to {target}, which has no REST routes'
     for key in _FEATURE_FLAGS:
         if ctx.get(key):
             return f'declares {key}'
@@ -110,12 +141,50 @@ def _date_kind(defn: dict) -> str:
     return {'date': KIND_DATE, 'date-time': KIND_DATETIME, 'time': KIND_TIME}[defn.get('format')]
 
 
-def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title) -> dict | None:
+def _relation_entry(rel: dict, ctx: dict, required: set[str], readonly: set[str], title,
+                    relation_name: str) -> dict:
+    """Field entry for a foreign key or one-to-one selector."""
+    name = rel['prop_name']
+    return {
+        'key': name,
+        'label': title(name[:-3] if name.endswith('_id') else name),
+        'kind': KIND_RELATION,
+        'required': name in required,
+        'readonly': name in readonly,
+        'options': [],
+        'target': rel['target'],
+        'label_field': rel.get('label_field') or 'name',
+        'relation_name': relation_name,
+        'body_key': name,
+        'context_fields': list(rel.get('autocomplete_context_fields') or []),
+    }
+
+
+def _relation_many_entry(child: dict, readonly: set[str], title) -> dict:
+    """Field entry for a many-to-many picker."""
+    name = child['property_name']
+    return {
+        'key': name,
+        'label': title(name),
+        'kind': KIND_RELATION_MANY,
+        'required': False,
+        'readonly': name in readonly,
+        'options': [],
+        'target': child['relationship']['target'],
+        'label_field': child['relationship'].get('label_field') or 'name',
+        'relation_name': name,
+        'body_key': f"{child['child_var']}_ids",
+        'context_fields': [],
+    }
+
+
+def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entities: set[str] | None = None) -> dict | None:
     """Field description for an eligible entity, or None.
 
-    `validation_ctx` is `build_validation_context(ctx)`; `title` is `to_title_case`.
+    `validation_ctx` is `build_validation_context(ctx)`; `title` is `to_title_case`;
+    `api_entities` is the set of entities with REST routes (see `mobile_ineligible_reason`).
     """
-    if mobile_ineligible_reason(ctx) is not None:
+    if mobile_ineligible_reason(ctx, api_entities) is not None:
         return None
     cats = ctx['field_categories']
     props = ctx['filtered_props']
@@ -134,12 +203,30 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title) -> dict | N
     declared = (ctx.get('model_def', {}).get('x-display') or {}).get('form')
     order = [n for n in declared if n in kind_by_field] if declared else [n for n in props if n in kind_by_field]
 
-    fields = [_field_entry(n, props[n], kind_by_field[n], ctx, required, readonly, title) for n in order]
+    entries = {n: _field_entry(n, props[n], kind_by_field[n], ctx, required, readonly, title) for n in order}
+    # Foreign keys and one-to-one selectors are columns of the entity, so they take
+    # their place among the scalar fields; the Prisma relation field the REST detail
+    # embeds is the column name without `_id` (a selector carries its own name).
+    for rel in ctx.get('parent_rels_raw') or []:
+        name = rel['prop_name']
+        entries[name] = _relation_entry(rel, ctx, required, readonly, title, name[:-3] if name.endswith('_id') else name)
+    for rel in ctx.get('selector_oto_rels') or []:
+        entries[rel['prop_name']] = _relation_entry(rel, ctx, required, readonly, title, rel['relation_name'])
+    for child in _picker_children(ctx):
+        entries[child['property_name']] = _relation_many_entry(child, readonly, title)
+    if declared:
+        names = [n for n in declared if n in entries]
+    else:
+        names = [n for n in props if n in entries] + [n for n in entries if n not in props]
+    fields = [entries[n] for n in names]
     if not fields:
         return None
 
     table = [next(iter(col)) for col in (ctx.get('xdisplay_table') or []) if isinstance(col, dict) and col]
-    list_keys = [k for k in table if k in kind_by_field] or [f['key'] for f in fields]
+    # A list row shows scalar columns only: a relation column holds an id, and the
+    # REST list does not embed the related record's label.
+    scalar_keys = [f['key'] for f in fields if f['kind'] not in (KIND_RELATION, KIND_RELATION_MANY)]
+    list_keys = [k for k in table if k in kind_by_field] or scalar_keys or [fields[0]['key']]
     list_keys = list_keys[:MAX_LIST_COLUMNS]
     return {
         'name': ctx['parent'],

@@ -1,0 +1,241 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useMessages } from '@/lib/messages';
+import { searchEntityOptions, type FieldSpec, type RelationRow } from '@/lib/entity-http';
+
+/** Name of a related record: its label column, or its id when that column is empty. */
+export function relationLabel(row: RelationRow, labelField: string): string {
+  const value = row[labelField];
+  return value === null || value === undefined || value === '' ? String(row.id) : String(value);
+}
+
+type Props = {
+  spec: FieldSpec;
+  value: string | string[];
+  onChange: (value: string | string[]) => void;
+  disabled?: boolean;
+  caller?: string;
+  formValues?: Record<string, string | boolean | string[]>;
+};
+
+const SEARCH_DELAY_MS = 250;
+
+/**
+ * Native picker for a relation field: a button that shows the current selection and a
+ * modal with a search box and the candidates. Candidates come from the target's options
+ * route, which applies the same access scope, organization isolation and autocomplete
+ * filter as the Web picker; nothing is filtered here.
+ */
+export function RelationPicker({ spec, value, onChange, disabled, caller, formValues }: Props) {
+  const { t, terr } = useMessages();
+  const many = spec.kind === 'relation_many';
+  const target = spec.target ?? '';
+  const labelField = spec.labelField ?? 'name';
+  const selected = many ? (value as string[]) : value ? [value as string] : [];
+  const selectedKey = selected.join(',');
+
+  const [labels, setLabels] = useState<Record<string, string>>({});
+  const [denied, setDenied] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [rows, setRows] = useState<RelationRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const request = useRef(0);
+  const valuesRef = useRef(formValues);
+  valuesRef.current = formValues;
+
+  // The form values the target's autocomplete filter may narrow by (those the field names).
+  const contextOf = useCallback((): Record<string, unknown> => {
+    const context: Record<string, unknown> = {};
+    for (const name of spec.contextFields ?? []) {
+      const current = valuesRef.current?.[name];
+      if (current !== undefined && current !== '') context[name] = current;
+    }
+    return context;
+  }, [spec.contextFields]);
+
+  const search = useCallback(
+    async (text: string) => {
+      const ticket = ++request.current;
+      setLoading(true);
+      try {
+        const result = await searchEntityOptions(target, {
+          q: text,
+          // With no text the route returns exactly the ids given, so the current selection is
+          // sent only beside a search: it then stays listed although it does not match.
+          ids: text.trim() && selectedKey ? selectedKey.split(',') : [],
+          caller,
+          context: contextOf(),
+        });
+        if (ticket !== request.current) return;
+        if (result.ok) {
+          setDenied(false);
+          setRows(result.rows);
+          setLabels((known) => ({ ...known, ...Object.fromEntries(result.rows.map((row) => [row.id, relationLabel(row, labelField)])) }));
+        } else {
+          setDenied(true);
+          setRows([]);
+        }
+      } catch {
+        if (ticket === request.current) setRows([]);
+      } finally {
+        if (ticket === request.current) setLoading(false);
+      }
+    },
+    [target, caller, labelField, selectedKey, contextOf],
+  );
+
+  // Name the current selection, and on the first run learn whether the target is readable at all.
+  const probed = useRef(false);
+  useEffect(() => {
+    const unknown = selected.filter((id) => labels[id] === undefined);
+    if (unknown.length === 0 && probed.current) return;
+    probed.current = true;
+    let live = true;
+    void searchEntityOptions(target, { ids: unknown, caller, limit: unknown.length ? undefined : 1 })
+      .then((result) => {
+        if (!live) return;
+        if (!result.ok) {
+          setDenied(true);
+          return;
+        }
+        setLabels((known) => ({ ...known, ...Object.fromEntries(result.rows.map((row) => [row.id, relationLabel(row, labelField)])) }));
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKey, target]);
+
+  // Re-query while the modal is open as the text changes.
+  useEffect(() => {
+    if (!open) return;
+    const timer = setTimeout(() => void search(query), query === '' ? 0 : SEARCH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [open, query, search]);
+
+  const toggle = (id: string) => {
+    if (many) {
+      onChange(selected.includes(id) ? selected.filter((current) => current !== id) : [...selected, id]);
+      return;
+    }
+    onChange(id);
+    setOpen(false);
+  };
+
+  const close = () => {
+    setOpen(false);
+    setQuery('');
+  };
+
+  const nameOf = (id: string) => labels[id] ?? id;
+
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>
+        {spec.label}
+        {spec.required ? ' *' : ''}
+      </Text>
+      {denied ? (
+        <View testID={`picker-denied-${spec.key}`}>
+          <Text style={styles.denied}>{terr('fkPermissionDenied', { entity: target })}</Text>
+          <Text style={styles.hint}>{terr('fkPermissionDeniedHint', { entity: target })}</Text>
+        </View>
+      ) : (
+        <View testID={`field-${spec.key}`} style={styles.box}>
+          {selected.length === 0 ? (
+            <Text style={styles.empty} testID={`picker-selected-${spec.key}`}>-</Text>
+          ) : many ? (
+            <View style={styles.chips}>
+              {selected.map((id) => (
+                <View key={id} style={styles.chip} testID={`picker-chip-${spec.key}-${id}`}>
+                  <Text style={styles.chipText}>{nameOf(id)}</Text>
+                  {disabled ? null : (
+                    <Pressable onPress={() => toggle(id)} testID={`picker-remove-${spec.key}-${id}`} accessibilityLabel={t('Common.delete')}>
+                      <Text style={styles.chipRemove}>×</Text>
+                    </Pressable>
+                  )}
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.value} testID={`picker-selected-${spec.key}`}>{nameOf(selected[0])}</Text>
+          )}
+          {disabled ? null : (
+            <View style={styles.row}>
+              <Pressable style={styles.button} onPress={() => setOpen(true)} testID={`picker-open-${spec.key}`}>
+                <Text>{t('Common.select')}</Text>
+              </Pressable>
+              {!many && selected.length > 0 && !spec.required ? (
+                <Pressable style={styles.button} onPress={() => onChange('')} testID={`picker-clear-${spec.key}`}>
+                  <Text>{t('Common.clear')}</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          )}
+        </View>
+      )}
+      <Modal visible={open && !denied} animationType="slide" onRequestClose={close}>
+        <View style={styles.modal} testID={`picker-modal-${spec.key}`}>
+          <Text style={styles.title}>{spec.label}</Text>
+          <TextInput
+            style={styles.input}
+            value={query}
+            onChangeText={setQuery}
+            placeholder={t('Common.search')}
+            autoCapitalize="none"
+            autoCorrect={false}
+            testID="picker-search"
+          />
+          {loading ? <ActivityIndicator testID="picker-loading" /> : null}
+          <FlatList
+            data={rows}
+            keyExtractor={(row) => row.id}
+            ListEmptyComponent={loading ? null : <Text style={styles.empty} testID="picker-empty">{t('Common.noOptions')}</Text>}
+            renderItem={({ item }) => {
+              const checked = selected.includes(item.id);
+              return (
+                <Pressable
+                  style={[styles.option, checked ? styles.optionSelected : null]}
+                  onPress={() => toggle(item.id)}
+                  testID={`picker-option-${item.id}`}
+                  accessibilityState={ { selected: checked } }
+                >
+                  <Text style={checked ? styles.optionTextSelected : null}>{relationLabel(item, labelField)}</Text>
+                </Pressable>
+              );
+            }}
+          />
+          <Pressable style={styles.done} onPress={close} testID="picker-done">
+            <Text style={styles.doneText}>{many ? t('Common.done') : t('Common.cancel')}</Text>
+          </Pressable>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  field: { gap: 6, marginBottom: 14 },
+  label: { fontSize: 13, fontWeight: '600', color: '#374151' },
+  box: { gap: 8 },
+  value: { fontSize: 15 },
+  empty: { color: '#6b7280', paddingVertical: 8 },
+  denied: { color: '#b91c1c' },
+  hint: { color: '#6b7280', fontSize: 12 },
+  row: { flexDirection: 'row', gap: 8 },
+  button: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: { flexDirection: 'row', gap: 6, alignItems: 'center', borderWidth: 1, borderColor: '#d1d5db', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 4 },
+  chipText: { color: '#374151' },
+  chipRemove: { color: '#6b7280', fontSize: 16 },
+  modal: { flex: 1, padding: 16, gap: 10 },
+  title: { fontSize: 18, fontWeight: '600' },
+  input: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8, fontSize: 15 },
+  option: { paddingVertical: 12, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+  optionSelected: { backgroundColor: '#2563eb' },
+  optionTextSelected: { color: '#ffffff' },
+  done: { backgroundColor: '#2563eb', borderRadius: 6, paddingVertical: 12, alignItems: 'center' },
+  doneText: { color: '#ffffff', fontWeight: '600' },
+});

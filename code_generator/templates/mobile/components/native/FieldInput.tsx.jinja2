@@ -1,7 +1,9 @@
 import { Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
-import type { FieldKind, FieldSpec } from '@/lib/entity-http';
+import type { FieldKind, FieldSpec, RelationRow } from '@/lib/entity-http';
+import { RelationPicker, relationLabel } from '@/components/native/RelationPicker';
 
-export type FieldValueState = string | boolean;
+// A relation field holds the selected id (many-to-one, one-to-one) or ids (many-to-many).
+export type FieldValueState = string | boolean | string[];
 
 const HINTS: Partial<Record<FieldKind, string>> = {
   date: 'YYYY-MM-DD',
@@ -12,6 +14,10 @@ const HINTS: Partial<Record<FieldKind, string>> = {
 /** Initial text a record's value is shown as in a form control. */
 export function toFieldState(spec: FieldSpec, value: unknown): FieldValueState {
   if (spec.kind === 'boolean') return value === true;
+  // A many-to-many arrives as the related rows; the form keeps their ids.
+  if (spec.kind === 'relation_many') {
+    return Array.isArray(value) ? value.map((row) => String((row as RelationRow).id)) : [];
+  }
   if (value === null || value === undefined) return '';
   if (spec.kind === 'date') return String(value).slice(0, 10);
   return String(value);
@@ -25,16 +31,47 @@ export function toDisplayText(spec: FieldSpec, value: unknown): string {
   return String(value);
 }
 
+/** Text a record's field is displayed as on a read-only screen; a relation shows the related record's label. */
+export function toRecordDisplayText(spec: FieldSpec, record: Record<string, unknown>): string {
+  const labelField = spec.labelField ?? 'name';
+  if (spec.kind === 'relation') {
+    const row = record[spec.relationName ?? spec.key];
+    return row && typeof row === 'object' ? relationLabel(row as RelationRow, labelField) : '-';
+  }
+  if (spec.kind === 'relation_many') {
+    const rows = record[spec.relationName ?? spec.key];
+    if (!Array.isArray(rows) || rows.length === 0) return '-';
+    return rows.map((row) => relationLabel(row as RelationRow, labelField)).join(', ');
+  }
+  return toDisplayText(spec, record[spec.key]);
+}
+
 type Props = {
   spec: FieldSpec;
   value: FieldValueState;
   onChange: (value: FieldValueState) => void;
   disabled?: boolean;
+  /** Entity whose form hosts the field; sent with a relation picker's search. */
+  caller?: string;
+  /** The form's current values; a relation picker forwards the ones its field names. */
+  formValues?: Record<string, FieldValueState>;
 };
 
 /** Native control for one field. Holds no validation or submit logic. */
-export function FieldInput({ spec, value, onChange, disabled }: Props) {
+export function FieldInput({ spec, value, onChange, disabled, caller, formValues }: Props) {
   const locked = disabled || spec.readonly;
+  if (spec.kind === 'relation' || spec.kind === 'relation_many') {
+    return (
+      <RelationPicker
+        spec={spec}
+        value={value as string | string[]}
+        onChange={onChange}
+        disabled={locked}
+        caller={caller}
+        formValues={formValues}
+      />
+    );
+  }
   return (
     <View style={styles.field}>
       <Text style={styles.label}>

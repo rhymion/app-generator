@@ -56,7 +56,10 @@ export function buildQuery(opts: PageOpts = {}): string {
   return params.length ? `?${params.join('&')}` : '';
 }
 
-export type FieldKind = 'text' | 'number' | 'decimal' | 'boolean' | 'enum' | 'date' | 'datetime' | 'time';
+export type FieldKind =
+  | 'text' | 'number' | 'decimal' | 'boolean' | 'enum' | 'date' | 'datetime' | 'time'
+  // A foreign key or one-to-one selector (one record) and a many-to-many (a set of records).
+  | 'relation' | 'relation_many';
 
 /** One field of an entity's form, as described by the schema. */
 export type FieldSpec = {
@@ -67,6 +70,17 @@ export type FieldSpec = {
   readonly: boolean;
   options: string[];
   numericEnum: boolean;
+  // The fields below are set on a relation field only.
+  /** Entity whose records are offered. */
+  target?: string;
+  /** Column of the target that names a record. */
+  labelField?: string;
+  /** Key under which the REST detail embeds the related record(s). */
+  relationName?: string;
+  /** Key the REST write routes read the selection from (an id, or a list of ids). */
+  bodyKey?: string;
+  /** Form fields forwarded to the target's autocomplete filter as the form's current values. */
+  contextFields?: string[];
 };
 
 /** Reads a FormData into the JSON body the REST routes take. */
@@ -78,10 +92,16 @@ export function formDataToBody(
   for (const spec of fields) {
     if (spec.readonly) continue;
     const key = spec.key;
+    if (spec.kind === 'relation_many') {
+      // An empty selection is sent as an empty list so an update clears the set.
+      body[spec.bodyKey ?? key] = formData.getAll(key).map(String);
+      continue;
+    }
     const raw = formData.get(key);
     if (raw === null) continue;
     const text = String(raw);
-    if (spec.kind === 'boolean') body[key] = text === 'true';
+    if (spec.kind === 'relation') body[spec.bodyKey ?? key] = text === '' ? null : text;
+    else if (spec.kind === 'boolean') body[key] = text === 'true';
     else if (text === '') body[key] = null;
     else if (spec.kind === 'number' || (spec.kind === 'enum' && spec.numericEnum)) body[key] = Number(text);
     else body[key] = text;
@@ -95,4 +115,46 @@ export async function fetchPermissions(entity: string, id?: string): Promise<Mod
   if (!id) return model;
   const row = await apiFetch<{ operations: RowCapabilities }>(`/api/${entity}/${id}/capabilities`);
   return { ...model, update: row.operations.update, delete: row.operations.delete };
+}
+
+/** A record offered by a relation picker: the related entity's own row. */
+export type RelationRow = { id: string } & Record<string, unknown>;
+
+export type RelationOptionsResult =
+  | { ok: true; rows: RelationRow[] }
+  // The caller cannot read the target: the picker is shown disabled (the Web does the same).
+  | { ok: false; permissionDenied: true };
+
+export type RelationOptionsQuery = {
+  q?: string;
+  /** Records that are returned even when they do not match `q` (the current selection). */
+  ids?: string[];
+  limit?: number;
+  /** Entity whose form hosts the picker. */
+  caller?: string;
+  /** The hosting form's current values, passed to the target's autocomplete filter. */
+  context?: Record<string, unknown>;
+};
+
+/**
+ * Candidates for a relation picker: `GET /api/<entity>/options`, the REST side of the
+ * `search<Entity>Options()` function the Web forms call. A 403 means the caller cannot read
+ * the target; any other failure rejects.
+ */
+export async function searchEntityOptions(entity: string, query: RelationOptionsQuery = {}): Promise<RelationOptionsResult> {
+  const params: string[] = [];
+  if (query.q) params.push(`q=${encodeURIComponent(query.q)}`);
+  if (query.ids && query.ids.length > 0) params.push(`ids=${query.ids.map(encodeURIComponent).join(',')}`);
+  if (query.limit) params.push(`limit=${query.limit}`);
+  if (query.caller) params.push(`caller=${encodeURIComponent(query.caller)}`);
+  if (query.context && Object.keys(query.context).length > 0) {
+    params.push(`context=${encodeURIComponent(JSON.stringify(query.context))}`);
+  }
+  try {
+    const rows = await apiFetch<RelationRow[]>(`/api/${entity}/options${params.length ? `?${params.join('&')}` : ''}`);
+    return { ok: true, rows };
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 403) return { ok: false, permissionDenied: true };
+    throw err;
+  }
 }
