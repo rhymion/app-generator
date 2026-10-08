@@ -1,0 +1,42 @@
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
+import { apiFetch } from './api-base';
+import { NAV_TABS } from './nav';
+import type { NavNode } from './nav';
+import { pruneHidden } from './nav-tree';
+
+type NavValue = {
+  /** Footer tabs after permission pruning; empty until the hidden set is known. */
+  tabs: NavNode[];
+  ready: boolean;
+};
+
+const NavContext = createContext<NavValue>({ tabs: [], ready: false });
+
+/**
+ * Loads the hrefs the caller may not open (GET /api/mobile/nav, the desktop
+ * sidebar's own rule) and prunes the static navigation tree with them.
+ */
+export function NavProvider({ children }: { children: ReactNode }) {
+  const [hidden, setHidden] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    apiFetch<{ hiddenHrefs: string[] }>('/api/mobile/nav')
+      .then((data) => setHidden(data.hiddenHrefs))
+      // Fail closed: if the permission lookup fails, show nothing rather than
+      // links the user may not be allowed to open.
+      .catch(() => setHidden(NAV_TABS.length > 0 ? ['*'] : []));
+  }, []);
+
+  const value = useMemo<NavValue>(() => {
+    if (hidden === null) return { tabs: [], ready: false };
+    if (hidden.includes('*')) return { tabs: [], ready: true };
+    return { tabs: pruneHidden(NAV_TABS, hidden), ready: true };
+  }, [hidden]);
+
+  return <NavContext.Provider value={value}>{children}</NavContext.Provider>;
+}
+
+export function useNav(): NavValue {
+  return useContext(NavContext);
+}

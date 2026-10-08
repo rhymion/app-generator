@@ -1,0 +1,64 @@
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
+import { NAV_LOCALES } from './nav';
+import { getPref, setPref } from './prefs';
+
+const LOCALE_PREF_KEY = 'app_locale';
+
+type LabelHolder = { label: string; labels: Record<string, string> };
+
+type LocaleValue = {
+  locale: string;
+  locales: string[];
+  cycleLocale: () => void;
+  labelOf: (node: LabelHolder) => string;
+};
+
+function deviceLocale(): string {
+  try {
+    const tag = Intl.DateTimeFormat().resolvedOptions().locale;
+    const language = tag.split('-')[0];
+    if (NAV_LOCALES.includes(language)) return language;
+  } catch {
+    // fall through to the default
+  }
+  return NAV_LOCALES[0] ?? 'en';
+}
+
+const LocaleContext = createContext<LocaleValue>({
+  locale: 'en',
+  locales: [],
+  cycleLocale: () => {},
+  labelOf: (node) => node.label,
+});
+
+export function LocaleProvider({ children }: { children: ReactNode }) {
+  const [locale, setLocale] = useState<string>(deviceLocale());
+
+  useEffect(() => {
+    getPref(LOCALE_PREF_KEY).then((saved) => {
+      if (saved && NAV_LOCALES.includes(saved)) setLocale(saved);
+    });
+  }, []);
+
+  const value = useMemo<LocaleValue>(
+    () => ({
+      locale,
+      locales: NAV_LOCALES,
+      cycleLocale: () => {
+        if (NAV_LOCALES.length < 2) return;
+        const next = NAV_LOCALES[(NAV_LOCALES.indexOf(locale) + 1) % NAV_LOCALES.length];
+        setLocale(next);
+        void setPref(LOCALE_PREF_KEY, next);
+      },
+      labelOf: (node) => node.labels[locale] ?? node.label,
+    }),
+    [locale],
+  );
+
+  return <LocaleContext.Provider value={value}>{children}</LocaleContext.Provider>;
+}
+
+export function useLocale(): LocaleValue {
+  return useContext(LocaleContext);
+}

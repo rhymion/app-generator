@@ -1,0 +1,10 @@
+import { Stack } from 'expo-router';
+import { LocaleProvider } from '@/lib/locale';
+
+export default function RootLayout() {
+  return (
+    <LocaleProvider>
+      <Stack screenOptions={ { headerShown: false } } />
+    </LocaleProvider>
+  );
+}

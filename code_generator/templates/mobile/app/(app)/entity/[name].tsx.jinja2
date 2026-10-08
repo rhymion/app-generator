@@ -1,0 +1,31 @@
+import { router, useLocalSearchParams } from 'expo-router';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+
+/**
+ * Entry point every navigation link opens. Entity list, detail and form
+ * screens are not part of the mobile app yet; this screen says so instead of
+ * leaving a dead link.
+ */
+export default function EntityScreen() {
+  const { name } = useLocalSearchParams<{ name: string }>();
+  return (
+    <View style={styles.container} testID={`entity-${name}`}>
+      <Text style={styles.title} testID="entity-title">
+        {name}
+      </Text>
+      <Text style={styles.body}>This screen is not available in the mobile app yet.</Text>
+      {router.canGoBack() ? (
+        <Pressable onPress={() => router.back()} testID="entity-back">
+          <Text style={styles.link}>Go back</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
+  title: { fontSize: 20, fontWeight: '600' },
+  body: { fontSize: 14, color: '#666', textAlign: 'center' },
+  link: { fontSize: 14, color: '#2563eb' },
+});
