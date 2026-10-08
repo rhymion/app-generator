@@ -325,6 +325,10 @@ def _seed_relation_label_value(
         parts = []
         for r in resolved:
             parts.append(_seed_path_part(target, r, schema, unique_index=unique_index, name_title=name_title))
+        if _exclusive_dropped_owner_columns(target, schema):
+            # A row of an x-exclusive-parents entity leaves the other owners empty:
+            # their label segments are skipped and the gap is closed.
+            parts = [p for p in parts if p]
         return ' '.join(parts)
 
     # Fallback for callers that pass a missing/unknown label_field — keep the
@@ -357,6 +361,11 @@ def _seed_path_part(
     """
     segments = resolved_path['segments']
     final_format = resolved_path['final_format']
+
+    # A relation through an owner column the generated row leaves empty (the
+    # other parents of an x-exclusive-parents entity) shows nothing.
+    if len(segments) > 1 and f'{segments[0]}_id' in _exclusive_dropped_owner_columns(target, schema):
+        return ''
 
     # Walk the relation chain FIRST — needed for nullable check below.
     cursor_entity = target
@@ -2321,6 +2330,18 @@ def _exclusive_owner_fields(fields: list, model_name: str, schema: dict) -> list
     return result
 
 
+def _exclusive_dropped_owner_columns(target: str, schema: dict) -> set[str]:
+    """Owner columns of an `x-exclusive-parents` entity that generated rows leave empty.
+
+    Every listed owner column except the first declared parent's. Empty for an
+    entity without the declaration.
+    """
+    by_parent = _exclusive_parent_columns(target, schema)
+    all_cols = {c for cols in by_parent.values() for c in cols}
+    owner = next((cols[0] for cols in by_parent.values() if cols), None)
+    return all_cols - {owner} if owner else set()
+
+
 def _exclusive_owner_fk_deps(target: str, fk_deps: list | None, schema: dict) -> list:
     """`fk_deps` of a dependency row, reduced to one owner when `target` declares
     `x-exclusive-parents`.
@@ -2795,6 +2816,16 @@ def helper_context(
             search_label_expression_second = build_string_only_label_expression(
                 f'{dep["var_name"]}2Record', label_field, dep['target'], schema,
             ) or label_expression_second
+        if _exclusive_dropped_owner_columns(dep['target'], schema):
+            # The row's other owner relations are empty, so their label segments are
+            # empty too; close the gap the join leaves, as the UI text is matched
+            # with collapsed whitespace.
+            def _close_gaps(expr: str) -> str:
+                return f"({expr}).replace(/\\s+/g, ' ').trim()" if expr else expr
+            label_expression = _close_gaps(label_expression)
+            label_expression_second = _close_gaps(label_expression_second)
+            search_label_expression = _close_gaps(search_label_expression)
+            search_label_expression_second = _close_gaps(search_label_expression_second)
         enriched_deps.append({
             **dep,
             'title': title_str,
