@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateApiKey, requireApiPermission, handleApiError, ApiError } from '@/lib/api-auth';
+import { authenticate, requireApiPermission, handleApiError, ApiError } from '@/lib/api-auth';
 import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
 import { resolvePermissions{% if has_approvable_bridge %}, getUserRoleIds{% endif %} } from '@/lib/authz';
 {% if has_edit_guard %}
@@ -33,7 +33,7 @@ type Params = { params: Promise<{ id: string }> };
 export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
-    const { userId: actorId } = await authenticateApiKey(request);
+    const { userId: actorId } = await authenticate(request);
     // Coarse, item-independent gate FIRST, before this route ever queries
     // the item table (cmd_1180): a caller with no possible access path at
     // all -- no general grant, and not a member of any role that could
