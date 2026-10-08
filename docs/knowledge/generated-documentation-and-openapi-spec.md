@@ -162,6 +162,11 @@ relation is left untouched. On create, an omitted field means an empty
 list. CSV import cannot express child rows at all, so its update path
 always passes the row's current value (create passes `[]`).
 
+Every `api: true` entity also declares `GET /api/{parent}/options`, the relation picker route
+(`relation-picker-rest-route.md`): `q`, `ids`, `limit`, and (not on `organization`) `caller` and
+`context` query parameters; it returns an array of the entity's record schema and declares `400`, `401`,
+`403` and `429`.
+
 CSV export/import get their own paths, mirroring `generate.py`'s own
 gating exactly: `GET /api/{parent}/export` when `can_list and
 can_export`, `POST /api/{parent}/import` when `import_eligible`. Neither

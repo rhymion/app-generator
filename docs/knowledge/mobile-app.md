@@ -95,8 +95,9 @@ An entity is left on the placeholder screen when it has no REST routes or no lis
 relation (many-to-one, one-to-one, direct attachment, children), a custom component, virtual columns,
 comments, attachments, `x-payment`, `x-splittable`, `x-create-inline`, a reservation, a state machine,
 edit/delete guards or `x-self-only`, or has a field with no native widget (image or file URI, entity
-select, custom upsert component). Selecting a foreign key or many-to-many value needs a REST
-autocomplete endpoint, which does not exist (Issue #852), so those entities stay on the placeholder.
+select, custom upsert component). Selecting a foreign key or many-to-many value goes through the REST
+route `GET /api/<entity>/options` (`relation-picker-rest-route.md`), but the app has no picker screen
+yet, so those entities stay on the placeholder.
 The default schema has no such entity; the fixture schema in
 `code_generator/tests/fixtures/mobile_entity_gate/` does.
 
@@ -217,7 +218,8 @@ check and is not part of the mandatory gate.
 ## Not implemented yet
 
 - Entity screens for an entity with a relation, and with them every feature that lives on such a screen:
-  selecting a foreign key or many-to-many value needs a REST autocomplete endpoint, which does not exist
-  (tracked in Issue #852). The same goes for child grids, approval, comments, attachments and payment.
+  the REST route for selecting a foreign key or many-to-many value exists
+  (`relation-picker-rest-route.md`), but the picker screens that use it are not built. The same goes for
+  child grids, approval, comments, attachments and payment.
 - Bulk delete, the native date pickers (dates are typed as text), CSV import and export.
 - Translated field labels.

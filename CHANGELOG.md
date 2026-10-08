@@ -5,6 +5,16 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **REST route for relation pickers: `GET /api/{entity}/options`** (Issue #852). Every entity with a REST
+  surface gets a route that searches (`q`, `limit`) or looks up by id (`ids`) the records a many-to-one,
+  one-to-one or many-to-many field can select, so a client that cannot call Server Actions, such as the
+  mobile app, can build the picker. The route calls the `search{Entity}Options()` function the web
+  forms call, as the authenticated caller, so read permission, strict organization isolation, the entity's
+  autocomplete filter and the row shape are the web's own; it accepts a mobile access token, an API key
+  or the session cookie and answers `403` without read on the entity. New `requireCaller()` and
+  `withActor()` in `lib/api-auth.ts` (with `runAsActor()` in `lib/_request_scope.ts`) let a route run a
+  session-based function as the caller it authenticated. The OpenAPI document describes the route. See
+  `docs/knowledge/relation-picker-rest-route.md`.
 - **Generated Expo mobile app with footer navigation from `x-nav`** (restart of the mobile line).
   `generate-code` renders an Expo Router project into `mobile/`. Its footer tabs are the desktop
   sidebar's root level — flat entity links, then top-level groups — built by the new

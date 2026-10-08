@@ -59,3 +59,26 @@ export function memoizeInRequestScope<T>(key: string, compute: () => Promise<T>)
   store.set(key, promise);
   return promise;
 }
+
+/**
+ * Caller identity for code that is normally reached through a Server Action
+ * (identity from the session cookie) but is invoked by a REST route whose
+ * caller was authenticated another way (mobile access token, API key).
+ *
+ * `runAsActor()` makes `getSessionUserId()` (lib/authz.ts) resolve to the given
+ * user for the duration of `fn` and every async continuation it starts, so the
+ * REST route calls the very same function the Server Action calls — permission
+ * checks, organization scoping and row mapping stay in one place. Only server
+ * code that imports this module can set the actor; a client cannot, because
+ * nothing here is a Server Action.
+ */
+const actorStorage = new AsyncLocalStorage<string>();
+
+export function runAsActor<T>(userId: string, fn: () => Promise<T>): Promise<T> {
+  return actorStorage.run(userId, fn);
+}
+
+/** The user id set by the enclosing `runAsActor()`, or undefined outside one. */
+export function getActorOverride(): string | undefined {
+  return actorStorage.getStore();
+}

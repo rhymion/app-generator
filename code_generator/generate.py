@@ -1651,6 +1651,10 @@ def generate(schema_path: str, output_dir: str) -> None:
                        _render(env, 'api_capabilities_route.ts.jinja2', ctx))
             if can_new or can_edit or can_delete:
                 _write(api_dir / 'bulk' / 'route.ts', _render(env, 'api_bulk_route.ts.jinja2', ctx))
+            # --- options route: REST side of the FK / relation autocomplete ---
+            # Every entity with a REST surface can be the target of a relation,
+            # and its getters.ts always carries search{Parent}Options.
+            _write(api_dir / 'options' / 'route.ts', _render(env, 'api_options_route.ts.jinja2', ctx))
             print(f'  API routes → app/api/{parent}/')
 
             # --- CSV Export route (Phase 1: can_api+can_list+can_export) ---
