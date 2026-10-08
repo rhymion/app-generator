@@ -151,10 +151,14 @@ def test_target_form_follows_the_dialog_context(out):
     assert 'const inlineCreate = useInlineCreate();' in form
     # Asks the action for the id, reports it, and cancels without navigating.
     assert "formData.set('__return_id', '1');" in form
-    assert 'await inlineCreate.onCreated(result.id);' in form
+    assert 'inlineCreate ? (id) => inlineCreate.onCreated(id) : undefined' in form
+    assert "'id' in result" in (out / 'lib' / 'inline_topic' / 'use_entity_form.ts').read_text()
     assert 'inlineCreate.onCancel();' in form
     # Not offered in a dialog: the dialog closes after the save.
-    assert 'const canContinue = !inlineCreate && (isEdit || Boolean(permissions?.update));' in form
+    assert 'inDialog: Boolean(inlineCreate)' in form
+    assert 'canContinue: !inDialog && (isEdit || Boolean(permissions?.update)),' in (
+        out / 'lib' / 'inline_topic' / 'use_entity_capabilities.ts'
+    ).read_text()
     assert 'inDialog={Boolean(inlineCreate)}' in form
 
 

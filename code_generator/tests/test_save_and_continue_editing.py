@@ -53,6 +53,10 @@ def _form(out: Path, entity: str) -> str:
     return (out / 'components' / entity / 'FormUpsert.tsx').read_text()
 
 
+def _capabilities(out: Path, entity: str) -> str:
+    return (out / 'lib' / entity / 'use_entity_capabilities.ts').read_text()
+
+
 def _actions(out: Path, entity: str) -> str:
     return (out / 'lib' / entity / 'actions.ts').read_text()
 
@@ -67,7 +71,8 @@ def test_save_continue_button_shown_with_create_and_update(tmp_path):
     assert CONTINUE_LABEL in form
     # The button follows the update permission the page passes to the form: an
     # edit screen already required it, /new needs it explicitly.
-    assert 'const canContinue = isEdit || Boolean(permissions?.update);' in form
+    assert 'canContinue: !inDialog && (isEdit || Boolean(permissions?.update)),' in _capabilities(out, 'continue_plain')
+    assert 'useEntityCapabilities' in form
     assert "formData.set('__continue', '1');" in form
     assert "submitter?.value === 'continue'" in form
     # The action lands on the new record after a create.
@@ -132,7 +137,7 @@ def test_save_continue_button_hidden_without_update_permission(tmp_path):
     # On /new the form is given the user's general permissions; a user without
     # update gets canContinue === false, so no label is passed and the shared
     # form wrapper renders no second button.
-    assert 'Boolean(permissions?.update)' in form
+    assert 'Boolean(permissions?.update)' in _capabilities(out, 'continue_plain')
     assert 'continueButtonLabel={canContinue ?' in form
 
 

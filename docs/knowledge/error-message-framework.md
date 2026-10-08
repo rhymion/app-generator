@@ -508,7 +508,7 @@ generator wraps every create/update Server Action call in) mapped `ReservationMu
 `errorCode: 'CONFLICT'`, the same field-less code `assertNotStale` produces — merging the two
 causes onto one wire code. Fixed by giving `ReservationMutationError` its own errorCode,
 `RESERVATION_LOCKED`, with its own `reservationLocked` i18n key (en/ja) and its own
-`getErrorMessage` branch in `form_upsert.tsx.jinja2` — see the `ErrorCode` union and the
+`getEntityFormErrorMessage` branch in `use_entity_form.ts.jinja2` — see the `ErrorCode` union and the
 Server Action / client transport code samples above. This is a template-level, generator-wide
 fix: it applies to every entity with `x-reservation` configured, not just one entity, since
 `_wrap_call_with_catch` is the single generic wrapper used for all create/update actions.
@@ -521,7 +521,7 @@ than assuming each throw site maps to a distinct, already-correct user-facing me
 **Second lesson, caught by the mandatory `test:e2e:build` type-check, not by inspection**: adding
 `RESERVATION_LOCKED` to the `ErrorCode` union broke `next build`'s TypeScript pass —
 `lib/api-auth.ts`'s `APP_ERROR_STATUS_MAP: Record<ErrorCode, number>` is an *exhaustive* mapping
-(TS2741, "Property is missing"), unlike `form_upsert.tsx.jinja2`'s `getErrorMessage` `switch`,
+(TS2741, "Property is missing"), unlike `use_entity_form.ts.jinja2`'s `getEntityFormErrorMessage` `switch`,
 which has a `default` case and would have silently fallen through to `unknown` with no compiler
 error at all. Any future addition to `ErrorCode` must grep for every `Record<ErrorCode, ...>` in
 the repo (currently just this one map), not only the `switch` statements — the two fail
@@ -535,7 +535,7 @@ because a *child* row (`shipment_line`) referenced by that shipment did not sati
 (missing `inventory_id`, wrong item, or — the new rule added at the same time — not yet marked
 `packed`). The rejection reached the client as `errorCode: 'VALIDATION'`, `field: undefined` —
 because the throw site had no field on the *shipment* form to blame; the actual problem lives on a
-different row of a different entity. `getErrorMessage`'s `VALIDATION` branch falls back to
+different row of a different entity. `getEntityFormErrorMessage`'s `VALIDATION` branch falls back to
 `terr('unknown')` whenever `field` is absent, so the user saw the same generic "An unexpected
 error occurred" text this whole framework exists to eliminate.
 

@@ -30,7 +30,7 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { Fragment } from 'react';
 import type { ModelPermissions } from '@/lib/authz';
 import { approveApprovalRequest, rejectApprovalRequest, withdrawApprovalRequest } from '@/lib/approval_request/actions';
-import { canSubmitForApproval, canWithdrawApproval } from '@/lib/approval_request/submit_predicate';
+import { canSubmitForApproval, canWithdrawApproval, canActOnApprovalRequest } from '@/lib/approval_request/submit_predicate';
 import { getErrorMessage, type ActionFailure } from '@/lib/_errors';
 
 const STATUS_LABELS = ['Pending', 'Approved', 'Rejected', 'TerminalRejected', 'Withdrawn'] as const;
@@ -218,16 +218,7 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
   };
 
   const renderRequestRow = (ar: ApprovalRequest, actionable: boolean) => {
-    const approverRoleId = ar.approval_flow?.approver_role_id;
-    const precedingFlowIds = ar.approval_flow?.preceded_by?.map((f) => f.id) ?? [];
-    const precedingApproved = precedingFlowIds.every(
-      (fid) => flowIdToStatus.get(fid) === 'approved',
-    );
-    const canAct = actionable
-      && ar.status === 'pending'
-      && approverRoleId
-      && currentUserRoleIds?.includes(approverRoleId)
-      && precedingApproved;
+    const canAct = canActOnApprovalRequest(ar, actionable, currentUserRoleIds, flowIdToStatus);
     const histories = ar.approval_histories ?? [];
     const isExpanded = expandedIds.has(ar.id);
 

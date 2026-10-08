@@ -1,8 +1,7 @@
 'use client';
 
-import { {% if uses_use_callback %}useCallback, {% endif %}{% if uses_use_effect %}useEffect, {% endif %}useMemo, {% if uses_use_ref %}useRef, {% endif %}useState } from 'react';
+import { {% if uses_use_callback %}useCallback, {% endif %}{% if uses_use_effect %}useEffect, {% endif %}useMemo{% if uses_use_ref %}, useRef{% endif %}{% if uses_use_state %}, useState{% endif %} } from 'react';
 import { useRouter } from '@/i18n/navigation';
-import { useTransition } from 'react';
 import { useTranslations } from 'next-intl';
 {% if has_child_entity_autocomplete %}
 import type { EntityAutocompleteCellConfig } from '@/components/_standard/EntityAutocompleteCellEditor';
@@ -24,7 +23,11 @@ import { upsert{{ parent_pascal }}{% if can_delete %}, remove{{ parent_pascal }}
 import { COMMENT_REACTION_TYPES } from '@/lib/reaction_constants';
 {% endif %}
 import type { FormUpsertProps{% if has_comment_children and named_constants %}, CommentReactionSummary{% endif %} } from '@/lib/{{ parent }}/types';
-import type { ActionFailure{% if is_inline_create_target %}, ActionCreated{% endif %} } from '@/lib/_errors';
+import { useEntityForm } from '@/lib/{{ parent }}/use_entity_form';
+import type { EntityFormSaveResult, EntityFormTranslate, EntityFormTranslators } from '@/lib/{{ parent }}/use_entity_form';
+{% if can_delete or can_invalidate or can_continue %}
+import { useEntityCapabilities } from '@/lib/{{ parent }}/use_entity_capabilities';
+{% endif %}
 {% if is_inline_create_target %}
 import { useInlineCreate } from '@/components/_standard/InlineCreate';
 {% endif %}
@@ -80,7 +83,6 @@ import { validateForm } from './form_validation';
 
 export default function FormUpsert({{ form_upsert_params }}) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
   const tf = useTranslations('Fields');
   const te = useTranslations('EntityLabel');
   const tc = useTranslations('Common');
@@ -90,26 +92,26 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% if enum_ns_hooks %}
 {{ enum_ns_hooks }}
 {% endif %}
-  const [error, setError] = useState<string | null>(null);
-  const [validationError, setValidationError] = useState<string | null>(null);
-{% if can_delete or can_invalidate %}
-  const canDelete = permissions ? permissions.delete : true;
-{% endif %}
+  const { isPending, error, {% if uses_set_error %}setError, {% endif %}validationError, validate, submit } = useEntityForm({
+    translators: {
+      terr: terr as unknown as EntityFormTranslate,
+      tmsg: tmsg as unknown as EntityFormTranslators['tmsg'],
+    },
+    save: async (formData) => (await upsert{{ parent_pascal }}(formData)) as EntityFormSaveResult,
+  });
   const srcSnapshot = useMemo(() => JSON.stringify(src), [src]);
 {% if is_inline_create_target %}
   // x-create-inline: set when another entity's form opened this form in a dialog.
   const inlineCreate = useInlineCreate();
 {% endif %}
-{% if can_continue %}
-  // "Save and continue editing": an edit screen is only reachable with update
-  // permission; on /new the same permission is required for the record to be
-  // editable once it exists.
+{% if can_delete or can_invalidate or can_continue %}
+  const { {% if can_delete or can_invalidate %}canDelete{% endif %}{% if (can_delete or can_invalidate) and can_continue %}, {% endif %}{% if can_continue %}canContinue{% endif %} } = useEntityCapabilities({
+    permissions,
+    isEdit,
 {% if is_inline_create_target %}
-  // Not offered in a dialog: the dialog closes after the save.
-  const canContinue = !inlineCreate && (isEdit || Boolean(permissions?.update));
-{% else %}
-  const canContinue = isEdit || Boolean(permissions?.update);
+    inDialog: Boolean(inlineCreate),
 {% endif %}
+  });
 {% endif %}
 {% if all_states %}
 
@@ -135,50 +137,11 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {% endif %}
 {{ validation_call }}
 
-  const getErrorMessage = (err: ActionFailure): string => {
-    switch (err.errorCode) {
-      case 'SESSION_EXPIRED':   return terr('sessionExpired');
-      case 'PERMISSION_DENIED': return terr('permissionDenied');
-      case 'NOT_FOUND':         return terr('notFound');
-      case 'VALIDATION': {
-        // A hand-written rejection may carry an i18n key. Only a key under an allowed
-        // namespace that exists in the loaded messages is shown; anything else falls
-        // back to the generic text below (never an exception, never the raw key).
-        const { messageKey, messageArgs } = err as { messageKey?: string; messageArgs?: Record<string, string | number> };
-        const tkey = tmsg as unknown as { has: (key: string) => boolean; (key: string, values?: Record<string, string | number>): string };
-        if (messageKey && /^(ValidationMessages|Errors)\./.test(messageKey) && tkey.has(messageKey)) {
-          return tkey(messageKey, messageArgs);
-        }
-{% if exclusive_parent_error_fields %}
-        // x-exclusive-parents: the error names the first listed FK column; show
-        // all of the listed columns instead of that one alone.
-        const exclusiveFields: Record<string, string> = {
-{% for first, label in exclusive_parent_error_fields.items() %}
-          '{{ first }}': '{{ label }}',
-{% endfor %}
-        };
-        const listed = err.field ? exclusiveFields[err.field] : undefined;
-        if (listed) return terr(err.reason === 'invalid' ? 'exclusiveParentsInvalid' : 'exclusiveParentsMissing', { fields: listed });
-{% endif %}
-        return err.field ? (err.reason === 'invalid' ? terr('fieldInvalid', { field: err.field }) : terr('fieldRequired', { field: err.field })) : terr('unknown');
-      }
-      case 'CONFLICT':          return err.field ? terr('fieldAlreadyLinked', { field: err.field }) : terr('staleMutation');
-      case 'RESERVATION_LOCKED': return terr('reservationLocked');
-      case 'RELATED_RECORD_INVALID': return terr('relatedRecordInvalid');
-      case 'CAPACITY':          return terr('capacityExhausted');
-      default:                  return terr('unknown');
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     if (isPending) return;
-    const validationMessage = getValidationError();
-    setValidationError(validationMessage);
-    if (validationMessage) {
-      return;
-    }
+    if (!validate(getValidationError)) return;
 
 {% if child_validation_code %}
 {{ child_validation_code }}
@@ -208,20 +171,7 @@ export default function FormUpsert({{ form_upsert_params }}) {
 {{ child_form_data_handling }}
 {% endif %}
 
-    try {
-      startTransition(async () => {
-        const result = (await upsert{{ parent_pascal }}(formData)) as ActionFailure{% if is_inline_create_target %} | ActionCreated{% endif %} | void;
-        if (result && !result.ok) {
-          setError(getErrorMessage(result));
-{% if is_inline_create_target %}
-        } else if (inlineCreate && result && 'id' in result) {
-          await inlineCreate.onCreated(result.id);
-{% endif %}
-        }
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    }
+    submit(formData{% if is_inline_create_target %}, inlineCreate ? (id) => inlineCreate.onCreated(id) : undefined{% endif %});
   };
 {% if can_delete %}
 

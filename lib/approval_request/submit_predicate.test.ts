@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canSubmitForApproval, canWithdrawApproval } from './submit_predicate';
+import { canSubmitForApproval, canWithdrawApproval, canActOnApprovalRequest } from './submit_predicate';
 
 // cmd_844: pins the round-based (array-of-rows) predicates that replaced
 // the single-row cmd_841 ruling_4 predicate -- see submit_predicate.ts's
@@ -79,5 +79,45 @@ describe('canWithdrawApproval', () => {
 
   it('7. withdrawn -> cannot withdraw again', () => {
     expect(canWithdrawApproval([{ status: 'approved' }, { status: 'withdrawn' }])).toBe(false);
+  });
+});
+
+describe('canActOnApprovalRequest', () => {
+  const pendingRow = {
+    status: 'pending',
+    approval_flow: { approver_role_id: 'role-a', preceded_by: [{ id: 'flow-1' }] },
+  };
+  const approvedPrev = new Map([['flow-1', 'approved']]);
+
+  it('allows a pending row when the user holds the approver role and preceding stages are approved', () => {
+    expect(canActOnApprovalRequest(pendingRow, true, ['role-a'], approvedPrev)).toBe(true);
+  });
+
+  it('denies a row of a non-actionable (past) round', () => {
+    expect(canActOnApprovalRequest(pendingRow, false, ['role-a'], approvedPrev)).toBe(false);
+  });
+
+  it('denies a row that is no longer pending', () => {
+    expect(canActOnApprovalRequest({ ...pendingRow, status: 'approved' }, true, ['role-a'], approvedPrev)).toBe(false);
+  });
+
+  it('denies a user without the approver role, or with no roles at all', () => {
+    expect(canActOnApprovalRequest(pendingRow, true, ['role-b'], approvedPrev)).toBe(false);
+    expect(canActOnApprovalRequest(pendingRow, true, undefined, approvedPrev)).toBe(false);
+  });
+
+  it('denies when a preceding stage is not approved yet', () => {
+    expect(canActOnApprovalRequest(pendingRow, true, ['role-a'], new Map([['flow-1', 'pending']]))).toBe(false);
+    expect(canActOnApprovalRequest(pendingRow, true, ['role-a'], new Map())).toBe(false);
+  });
+
+  it('denies a row whose flow has no approver role', () => {
+    expect(canActOnApprovalRequest({ status: 'pending', approval_flow: {} }, true, ['role-a'], new Map())).toBe(false);
+    expect(canActOnApprovalRequest({ status: 'pending' }, true, ['role-a'], new Map())).toBe(false);
+  });
+
+  it('allows a first-stage row with no preceding stages', () => {
+    const first = { status: 'pending', approval_flow: { approver_role_id: 'role-a', preceded_by: [] } };
+    expect(canActOnApprovalRequest(first, true, ['role-a'], new Map())).toBe(true);
   });
 });

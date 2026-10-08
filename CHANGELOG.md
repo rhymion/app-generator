@@ -51,6 +51,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/save-and-continue-editing.md`.
 
 ### Changed
+- **Generated entity screens call framework-neutral UI hooks.** The form state and submit
+  orchestration, error-message mapping, permission-derived show/hide decisions and approval wiring
+  that `FormUpsert.tsx` and `FormView.tsx` carried inline now live in `lib/<entity>/use_entity_form.ts`,
+  `use_entity_capabilities.ts` and (for entities that render `ApprovalSection`)
+  `use_entity_approval_actions.ts`, which import no Next.js, `next-intl`, DOM or UI-library module,
+  so another client can reuse them. `ApprovalSection`'s per-row approve/reject check is the exported
+  pure function `canActOnApprovalRequest` in `lib/approval_request/submit_predicate.ts`. Generated Web
+  behaviour is unchanged. See `docs/knowledge/shared-ui-hooks.md`.
 - **A list-view entity must declare an `x-display.table` column with `primary: true`**
   (issue #837). Schema validation now fails, naming the entity, when an entity that has a list page
   declares none; a shown column merely named `name` no longer stands in for it. Entities with
