@@ -234,3 +234,14 @@ def test_only_split_entities_get_the_split_client(out):
     assert 'SplitSection' not in _read(out, 'mobile/components/mobile_request/FormView.tsx')
     assert 'SplitSection' not in _read(out, 'mobile/components/mobile_note/FormView.tsx')
 
+
+
+def test_approval_and_split_routes_accept_the_mobile_access_token(out):
+    routes = [
+        (REPO / 'app' / 'api' / 'approval_request' / '[id]' / action / 'route.ts').read_text()
+        for action in ('approve', 'reject', 'withdraw')
+    ]
+    routes.append(_read(out, 'app/api/mobile_shipment/[id]/actions/split/route.ts'))
+    for route in routes:
+        assert 'requireCaller(' in route
+        assert 'requireDualAuth' not in route
