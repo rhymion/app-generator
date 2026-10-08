@@ -76,7 +76,9 @@ test.describe('Payment checkout (x-payment)', () => {
     const popup = page.waitForEvent('popup');
     await page.getByTestId('form-save').click();
     const checkout = await popup;
-    expect(checkout.url()).toContain('/payment/success?session_id=');
+    // The fake provider sends the buyer straight to the success URL; the Web session is not shared with
+    // the in-app browser, so the Web app answers with its sign-in page that names that URL.
+    expect(decodeURIComponent(checkout.url())).toContain('/payment/success?session_id=');
     await expect(page.getByTestId('view-mobile_order')).toBeVisible();
     await expect(page.getByTestId('view-payment-returned')).toBeVisible();
     await expect(page.getByTestId('view-field-name')).toHaveText('Paid order');
