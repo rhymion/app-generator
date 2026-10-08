@@ -298,6 +298,7 @@
     "successMessage": "Thank you. Your payment was completed and your order is being processed.",
     "cancelTitle": "Payment cancelled",
     "cancelMessage": "Your payment was cancelled and you have not been charged. You can try again whenever you are ready.",
-    "backToHome": "Back to home"
+    "backToHome": "Back to home",
+    "returnedMessage": "Returned from checkout. A paid record stays; one that was not paid is removed when the checkout expires."
   }
 }

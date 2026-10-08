@@ -13,7 +13,13 @@
     "created_mobile_tasks mobile_task[] @relation(\"MobileTaskCreator\")",
     "updated_mobile_tasks mobile_task[] @relation(\"MobileTaskUpdater\")",
     "created_mobile_org_items mobile_org_item[] @relation(\"MobileOrgItemCreator\")",
-    "updated_mobile_org_items mobile_org_item[] @relation(\"MobileOrgItemUpdater\")"
+    "updated_mobile_org_items mobile_org_item[] @relation(\"MobileOrgItemUpdater\")",
+    "created_mobile_categories mobile_category[] @relation(\"MobileCategoryCreator\")",
+    "updated_mobile_categories mobile_category[] @relation(\"MobileCategoryUpdater\")",
+    "created_mobile_tickets mobile_ticket[] @relation(\"MobileTicketCreator\")",
+    "updated_mobile_tickets mobile_ticket[] @relation(\"MobileTicketUpdater\")",
+    "created_mobile_orders mobile_order[] @relation(\"MobileOrderCreator\")",
+    "updated_mobile_orders mobile_order[] @relation(\"MobileOrderUpdater\")"
   ],
   "organization": [
     "mobile_org_items mobile_org_item[]"

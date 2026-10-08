@@ -1,0 +1,15 @@
+// Generated only when an entity declares x-payment. The create response of such an entity carries
+// the hosted checkout URL; the app opens it in the system's in-app browser and has no payment logic
+// of its own: the record is confirmed (or removed) by the server, through the payment provider's
+// success page and webhook.
+import * as WebBrowser from 'expo-web-browser';
+
+/** True for a web URL the in-app browser may open. */
+export function isCheckoutUrl(url: unknown): url is string {
+  return typeof url === 'string' && /^https?:\/\//i.test(url);
+}
+
+/** Opens the hosted checkout page and resolves when the buyer returns to the app. */
+export async function openCheckout(url: string): Promise<void> {
+  await WebBrowser.openBrowserAsync(url);
+}

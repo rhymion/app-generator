@@ -189,3 +189,74 @@ definitions:
     required:
       - name
       - organization_id
+
+  # x-create-inline: mobile_ticket's category field offers "Create new", which opens
+  # mobile_category's native create form over the ticket form. mobile_category declares no
+  # x-create-inline itself (nesting depth is 1).
+  mobile_category:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - name:
+            primary: true
+    fields:
+      name: {}
+    required:
+      - name
+
+  mobile_ticket:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - title:
+            primary: true
+    fields:
+      title: {}
+      mobile_category_id:
+        x-relationship:
+          type: many-to-one
+          target: mobile_category
+          labelField: name
+        x-create-inline: true
+    required:
+      - title
+      - mobile_category_id
+
+  # x-payment: creating a record answers with a hosted checkout URL, which the native form opens
+  # in the in-app browser. The Price is the entity's own stripe_price_id (a column default).
+  mobile_order:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-payment: true
+    x-display:
+      table:
+        - name:
+            primary: true
+    fields:
+      name: {}
+      stripe_price_id: {}
+    required:
+      - name

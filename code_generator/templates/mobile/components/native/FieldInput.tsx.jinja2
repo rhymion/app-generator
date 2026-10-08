@@ -1,6 +1,7 @@
+import type { ComponentType } from 'react';
 import { Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import type { FieldKind, FieldSpec, RelationRow } from '@/lib/entity-http';
-import { RelationPicker, relationLabel } from '@/components/native/RelationPicker';
+import { RelationPicker, relationLabel, type InlineCreateProps } from '@/components/native/RelationPicker';
 
 // A relation field holds the selected id (many-to-one, one-to-one) or ids (many-to-many).
 export type FieldValueState = string | boolean | string[];
@@ -55,10 +56,12 @@ type Props = {
   caller?: string;
   /** The form's current values; a relation picker forwards the ones its field names. */
   formValues?: Record<string, FieldValueState>;
+  /** The target's create form for a relation field that declares x-create-inline. */
+  createForm?: ComponentType<InlineCreateProps>;
 };
 
 /** Native control for one field. Holds no validation or submit logic. */
-export function FieldInput({ spec, value, onChange, disabled, caller, formValues }: Props) {
+export function FieldInput({ spec, value, onChange, disabled, caller, formValues, createForm }: Props) {
   const locked = disabled || spec.readonly;
   if (spec.kind === 'relation' || spec.kind === 'relation_many') {
     return (
@@ -69,6 +72,7 @@ export function FieldInput({ spec, value, onChange, disabled, caller, formValues
         disabled={locked}
         caller={caller}
         formValues={formValues}
+        createForm={createForm}
       />
     );
   }
