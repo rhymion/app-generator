@@ -5,6 +5,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Sort, filter, search and bulk delete on the Expo mobile list** (Issues #874, #856). The native list
+  gets a sort panel, a filter panel (text, number, decimal, boolean and enum fields) and a search box that
+  matches the row's title column, all through the REST list's `sort` and `f.<field>` parameters; a long press
+  starts a selection mode that deletes the selected records with `DELETE /api/{entity}/bulk`, with the single
+  delete's confirmation and error messages. New `Common.sort`, `Common.filter` and `Common.selectedCount`
+  messages. CSV export and import stay out until the export and import routes accept a mobile access token
+  (Issue #883). See `docs/knowledge/mobile-app.md`.
 - **Documentation for the `x-autocomplete-context` schema key**: where it goes, what it changes in the generated form and split action, how it relates to `autocomplete_filter.ts`, and what validation rejects. See `docs/knowledge/x-autocomplete-context.md`. `docs/knowledge/relation-picker-rest-route.md` now compares the options route with the list API.
 - **REST route for relation pickers: `GET /api/{entity}/options`** (Issue #852). Every entity with a REST
   surface gets a route that searches (`q`, `limit`) or looks up by id (`ids`) the records a many-to-one,

@@ -72,6 +72,10 @@ _FEATURE_FLAGS = (
     'write_locked_values',
 )
 
+# Kinds the list filter sheet can narrow by: the REST list's default clause for each is a
+# substring match (text), equality (number, decimal, boolean) or a member (enum).
+_FILTERABLE_KINDS = (KIND_TEXT, KIND_NUMBER, KIND_DECIMAL, KIND_BOOLEAN, KIND_ENUM)
+
 # At most this many columns appear on a list row.
 MAX_LIST_COLUMNS = 3
 
@@ -228,12 +232,21 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
     scalar_keys = [f['key'] for f in fields if f['kind'] not in (KIND_RELATION, KIND_RELATION_MANY)]
     list_keys = [k for k in table if k in kind_by_field] or scalar_keys or [fields[0]['key']]
     list_keys = list_keys[:MAX_LIST_COLUMNS]
+    # The REST list sorts and filters on scalar columns only (a relation column holds an id).
+    sort_keys = list(scalar_keys)
+    filter_keys = [f['key'] for f in fields if f['kind'] in _FILTERABLE_KINDS]
+    # The search box matches the first text column of the list row (else the first text field).
+    text_keys = [f['key'] for f in fields if f['kind'] == KIND_TEXT]
+    search_key = next((k for k in list_keys if k in text_keys), text_keys[0] if text_keys else None)
     return {
         'name': ctx['parent'],
         'pascal': ctx['parent_pascal'],
         'title': title(ctx['parent']),
         'fields': fields,
         'list_keys': list_keys,
+        'sort_keys': sort_keys,
+        'filter_keys': filter_keys,
+        'search_key': search_key,
         'can_new': bool(ctx.get('can_create')),
         'can_edit': bool(ctx.get('can_update')),
         'can_view': bool(ctx.get('can_view')),
