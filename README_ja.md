@@ -551,6 +551,7 @@ app-generator/
 | [child-datagrid-reference-columns.md](docs/knowledge/child-datagrid-reference-columns.md) | インライン DataGrid 子エンティティ、参照列のレンダリング |
 | [mobile-responsive-layout.md](docs/knowledge/mobile-responsive-layout.md) | レスポンシブレイアウト規約、検索ヘッダーアイコン、モバイルアカウントセクション |
 | [relation-picker-rest-route.md](docs/knowledge/relation-picker-rest-route.md) | `GET /api/{entity}/options`：リレーションピッカー用の REST 検索と ID 参照。Web のオートコンプリートと同じ関数を実行し、認証・権限・組織分離を共有 |
+| [x-autocomplete-context.md](docs/knowledge/x-autocomplete-context.md) | FK フィールドの `x-autocomplete-context`：対象の `autocomplete_filter.ts` に渡るフォーム値、生成されるフォームと分割アクションの経路、検証 |
 | [mobile-app.md](docs/knowledge/mobile-app.md) | 生成される Expo モバイルアプリ：`x-nav` からのフッタータブと下位階層、エンティティ画面、ヘッダー、トークン認証、Playwright 検証 |
 | [search.md](docs/knowledge/search.md) | エンティティ横断全文検索：スキーマオプトイン・pg_bigm・認可・生成 API と UI |
 | [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | 承認フローシステムの詳細、承認後イベント発火（`on_approved`） |

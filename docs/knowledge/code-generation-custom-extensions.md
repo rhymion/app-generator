@@ -273,7 +273,7 @@ the next regeneration.
 The actual **never-overwritten** extension point is
 `lib/{entity}/service_validation_custom.ts`
 (`service_validation_custom_stub.ts.jinja2`, written once via `_write_stub()`
-— same skip-if-exists convention as `autocomplete_filter.ts`). Both
+— same skip-if-exists convention as `autocomplete_filter.ts`, which a field's `x-autocomplete-context` feeds: see [x-autocomplete-context.md](x-autocomplete-context.md)). Both
 `validateOnAdd`/`validateOnUpdate` call its single export,
 `validateCustomRules`, unconditionally, after the generated schema-driven
 checks:

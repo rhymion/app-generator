@@ -16,7 +16,7 @@ not `false`), whatever its other `x-generate` flags. An entity with `api: false`
 | `ids` | Comma-separated record ids, at most 200, to look up. With no `q`, only those records are returned. |
 | `limit` | Integer from 1 to 200, default 50. Anything else is `400`. |
 | `caller` | Name of the entity whose form hosts the picker; lets the target narrow its candidates (an entity attached to a parent through a list child offers only unattached records). A value that is not a lowercase entity name is `400`. |
-| `context` | JSON object (at most 4096 characters) with the hosting form's current values, passed to the entity's `autocomplete_filter.ts`. It can only narrow the candidates. Anything but a JSON object is `400`. |
+| `context` | JSON object (at most 4096 characters) with the hosting form's current values, passed to the entity's `autocomplete_filter.ts`. It can only narrow the candidates. Anything but a JSON object is `400`. The route accepts it on every entity; which values a form sends is chosen by `x-autocomplete-context` (see [x-autocomplete-context.md](x-autocomplete-context.md)). |
 
 The response is a JSON array of the rows the web picker receives, in the same shape. The `organization`
 route takes only `q`, `ids` and `limit`.
@@ -34,7 +34,7 @@ REST route cannot diverge on:
   the caller belongs to, plus tenant-wide rows when the column is nullable; the `organization` picker
   returns only the caller's organizations);
 - invalidated records being left out;
-- the entity's `autocomplete_filter.ts`;
+- the entity's `autocomplete_filter.ts` (see [x-autocomplete-context.md](x-autocomplete-context.md) for the schema key that makes a web form send context to it);
 - the row mapping (including Decimal values as strings).
 
 ## Authentication and permission
