@@ -69,6 +69,7 @@
     "test:e2e:cy:api": "cross-env NODE_ENV=test PAYMENT_FAKE_STRIPE=1 node scripts/run-e2e.js test:e2e:start 'cypress run --browser chromium --spec \"cypress/e2e/api/**\"'",
     "pretest:e2e:cy:ui": "cross-env NODE_ENV=test run-s write-mock-oauth-sentinel",
     "test:e2e:cy:ui": "cross-env NODE_ENV=test PAYMENT_FAKE_STRIPE=1 node scripts/run-e2e.js test:e2e:start 'cypress run --browser chromium --spec \"cypress/e2e/*.cy.ts,cypress/e2e/mobile/*.cy.ts\"'",
+    "test:e2e:mobile:pw": "mobile/node_modules/.bin/playwright test --config mobile/playwright.config.ts",
     "pretest:e2e:cy:start": "cross-env NODE_ENV=test run-s write-mock-oauth-sentinel",
     "test:e2e:cy:start": "cross-env NODE_ENV=test PAYMENT_FAKE_STRIPE=1 node scripts/run-e2e.js test:e2e:start 'cypress run --browser chromium'",
     "test:flows": "vitest run --config vitest.flows.config.ts",

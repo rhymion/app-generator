@@ -323,6 +323,7 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/import_batch2.cy.ts
 !cypress/e2e/api/round_trip.cy.ts
 !cypress/e2e/api/mobile_auth.cy.ts
+!cypress/e2e/api/mobile_nav.cy.ts
 !cypress/e2e/api/fk_read_permission_graceful_degradation.cy.ts
 !cypress/e2e/api/approval_flow_crud.cy.ts
 !cypress/e2e/api/notification_approval.cy.ts

@@ -22,13 +22,14 @@ export async function resetTestDatabase() {
   // Delete all records in correct order to respect foreign key constraints
   // Delete child tables first, then parent tables
 
-  // Level 1: account, session, approval_history, audit_log, idempotency_key, mfa_recovery_code
+  // Level 1: account, session, approval_history, audit_log, idempotency_key, mfa_recovery_code, mobile_session
   await prisma.account.deleteMany();
   await prisma.session.deleteMany();
   await prisma.approval_history.deleteMany();
   await prisma.audit_log.deleteMany();
   await prisma.idempotency_key.deleteMany();
   await prisma.mfa_recovery_code.deleteMany();
+  await prisma.mobile_session.deleteMany();
 
   // Level 2: app_setting, approval_request, attachment, dashboard_widget, notification, permission, reaction
   await prisma.app_setting.deleteMany();
@@ -413,6 +414,7 @@ export const ALL_PRISMA_MODELS = [
   'audit_log',
   'idempotency_key',
   'mfa_recovery_code',
+  'mobile_session',
   'app_setting',
   'approval_request',
   'attachment',
