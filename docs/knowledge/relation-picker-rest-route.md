@@ -3,7 +3,7 @@
 A form that selects a related record (many-to-one foreign key, one-to-one, many-to-many) fills its
 picker with `search{Entity}Options()` from `lib/{entity}/getters.ts`, a Server Action. A client that
 can only call REST routes, such as the mobile app, reaches the same candidates through a generated
-route.
+route. It applies rules the list API does not; see [Why not the list API](#why-not-the-list-api).
 
 ## Route
 
@@ -16,7 +16,7 @@ not `false`), whatever its other `x-generate` flags. An entity with `api: false`
 | `ids` | Comma-separated record ids, at most 200, to look up. With no `q`, only those records are returned. |
 | `limit` | Integer from 1 to 200, default 50. Anything else is `400`. |
 | `caller` | Name of the entity whose form hosts the picker; lets the target narrow its candidates (an entity attached to a parent through a list child offers only unattached records). A value that is not a lowercase entity name is `400`. |
-| `context` | JSON object (at most 4096 characters) with the hosting form's current values, passed to the entity's `autocomplete_filter.ts`. It can only narrow the candidates. Anything but a JSON object is `400`. |
+| `context` | JSON object (at most 4096 characters) with the hosting form's current values, passed to the entity's `autocomplete_filter.ts`. It can only narrow the candidates. Anything but a JSON object is `400`. The route accepts it on every entity; which values a form sends is chosen by `x-autocomplete-context` (see [x-autocomplete-context.md](x-autocomplete-context.md)). |
 
 The response is a JSON array of the rows the web picker receives, in the same shape. The `organization`
 route takes only `q`, `ids` and `limit`.
@@ -34,8 +34,29 @@ REST route cannot diverge on:
   the caller belongs to, plus tenant-wide rows when the column is nullable; the `organization` picker
   returns only the caller's organizations);
 - invalidated records being left out;
-- the entity's `autocomplete_filter.ts`;
+- the entity's `autocomplete_filter.ts` (see [x-autocomplete-context.md](x-autocomplete-context.md) for the schema key that makes a web form send context to it);
 - the row mapping (including Decimal values as strings).
+
+## Why not the list API
+
+`GET /api/{entity}` returns a page of records for a table. It looks similar, but a picker needs rules
+the list does not apply. `search{Entity}Options()` (`code_generator/templates/getters.ts.jinja2`) applies
+them; the list API runs `get{Entity}Page()` in the same template.
+
+| Rule | List API `GET /api/{entity}` | Options route `GET /api/{entity}/options` |
+|------|------------------------------|-------------------------------------------|
+| Invalidated records (entities that can be invalidated) | Returned; `get{Entity}Page()` adds no `invalidated_at` condition. | Left out: `{ invalidated_at: null }` is part of the `where` in `search{Entity}Options()`. |
+| Narrowing by the hosting form's values | `lib/{entity}/list_filter.ts` (`filterListQuery()`) receives the `f.<column>` query parameters. | `lib/{entity}/autocomplete_filter.ts` (`filterAutocompleteOptions()`) receives `caller` and `context`; see [x-autocomplete-context.md](x-autocomplete-context.md). The two files are separate, so a rule in one does not reach the other. |
+| Record already attached to another parent as a list child; the record itself and its ancestors | Not applied. | Applied when `caller` names an entity that attaches this one through a nullable FK: `LIST_CHILD_ATTACH_FK` and, for a self-referencing child, the ancestor walk. A record already in `ids` stays. |
+| Text match | One condition per column: `f.<column>=value` is a partial match on that column (`buildFilter()` in `lib/_pagination.ts`), and a related-entity column is filtered by its one label field. Conditions are ANDed. | `q` is split on whitespace. Every word must match at least one of the entity's text columns, the label columns of related entities (including columns other entities show through a composite label), or, for an all-digit word, an integer column that other labels show (for example a step number). |
+| Records already selected | Not a concept; the page returns what matches. | The records in `ids` are returned even when they do not match `q`, so the current value of a field can always be shown. |
+| Result shape | `{ rows, total, page, pageSize }`, `page`/`pageSize` paging (at most 200 per page), `sort` and `f.<column>` parameters, default order by `id`. | A JSON array of at most `limit` rows (plus the `ids`), ordered by `name`, `code`, `created_at` or `id` (the first the entity has), loading only the relations the label needs. |
+| `organization` target | Scoped by the permission settings only; `organization` has no organization column, so the list is not limited to the caller's memberships. | Limited to organizations the caller is a member of (`searchAssociatedOrganizationOptions()`). `read` on `organization` is required on both sides. |
+
+Fetching the list API and filtering on the client is not an option. The rules above (access scope,
+invalidated records, the entity's autocomplete filter, attached records, multi-word search) would have
+to be written a second time on the client, once for the web and once for the mobile app, and the copies
+could drift apart. The options route keeps one implementation behind both.
 
 ## Authentication and permission
 

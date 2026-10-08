@@ -5,6 +5,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Documentation for the `x-autocomplete-context` schema key**: where it goes, what it changes in the generated form and split action, how it relates to `autocomplete_filter.ts`, and what validation rejects. See `docs/knowledge/x-autocomplete-context.md`. `docs/knowledge/relation-picker-rest-route.md` now compares the options route with the list API.
 - **REST route for relation pickers: `GET /api/{entity}/options`** (Issue #852). Every entity with a REST
   surface gets a route that searches (`q`, `limit`) or looks up by id (`ids`) the records a many-to-one,
   one-to-one or many-to-many field can select, so a client that cannot call Server Actions, such as the

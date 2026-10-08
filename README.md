@@ -571,6 +571,7 @@ All architectural documentation lives in `docs/knowledge/`:
 | [child-datagrid-reference-columns.md](docs/knowledge/child-datagrid-reference-columns.md) | Inline DataGrid children, reference column rendering |
 | [mobile-responsive-layout.md](docs/knowledge/mobile-responsive-layout.md) | Responsive layout conventions, search header icon, mobile account section |
 | [relation-picker-rest-route.md](docs/knowledge/relation-picker-rest-route.md) | `GET /api/{entity}/options`: REST search and id lookup for relation pickers, running the same function as the web autocomplete; authentication, permission and organization isolation |
+| [x-autocomplete-context.md](docs/knowledge/x-autocomplete-context.md) | `x-autocomplete-context` on an FK field: which form values reach the target's `autocomplete_filter.ts`, the generated form and split-action paths, validation |
 | [mobile-app.md](docs/knowledge/mobile-app.md) | Generated Expo mobile app: footer tabs and drill-down from `x-nav`, entity screens, header, token authentication, Playwright checks |
 | [search.md](docs/knowledge/search.md) | Cross-entity full-text search: schema opt-in, pg_bigm, authorization, generated API and UI |
 | [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | Approval flow system detail, post-approval event dispatch (`on_approved`) |

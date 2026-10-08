@@ -151,7 +151,7 @@ opt-in extension points, not just one — `form_validation_stub.ts.jinja2` (`com
 per-lifecycle hook stubs (`service_after_create_stub.ts.jinja2`, `..._after_update_stub`,
 `..._after_delete_stub`, `..._after_submit_stub`, `..._after_withdraw_stub`, `..._after_reject_stub`,
 `..._before_approve_stub`, `..._before_reject_stub`, `..._before_withdraw_stub`), the guard stubs
-(`autocomplete_filter_stub.ts.jinja2`, `list_filter_stub.ts.jinja2`, `invalidate_handler_stub.ts.jinja2`,
+(`autocomplete_filter_stub.ts.jinja2` — see [x-autocomplete-context.md](x-autocomplete-context.md), `list_filter_stub.ts.jinja2`, `invalidate_handler_stub.ts.jinja2`,
 `virtual_resolver.ts.jinja2`, `service_validation_delete_stub.ts.jinja2`), the scheduled-job stubs
 (`service_scheduled_handler_stub.ts.jinja2`, `..._scheduled_bulk_handler_stub`), and the Stripe
 integration stubs (`stripe_lib_stub.ts.jinja2`,

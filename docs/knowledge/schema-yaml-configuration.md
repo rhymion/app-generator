@@ -885,6 +885,12 @@ generated create form; each is a validation error. Single FK fields on a form on
 FK cells, many-to-many fields and the independent-children list do not offer it. Details:
 [create-fk-record-in-place.md](create-fk-record-in-place.md).
 
+### `x-autocomplete-context` — narrow an FK picker by other fields of the same form
+
+Add `x-autocomplete-context: [policy_id]` to a many-to-one FK field to send the current value of the listed
+fields of the same entity to the target's `autocomplete_filter.ts`. Each name must be a property of the
+declaring entity. Details: [x-autocomplete-context.md](x-autocomplete-context.md).
+
 ### Direct Attachment FK (`type: direct`) — a single file, not a selectable relation
 
 `x-relationship: { target: attachment, type: direct }` is a distinct marker from every other
