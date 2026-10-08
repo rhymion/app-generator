@@ -110,6 +110,8 @@ const eslintConfig = defineConfig([
     // Local Python virtualenv (code_generator/tests pytest deps) — never
     // part of the shipped product, and not every contributor even has one.
     ".venv/**",
+    // Expo mobile app (generated) and its Playwright specs: separate project.
+    "mobile/**",
   ]),
 ]);
 

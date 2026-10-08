@@ -3,7 +3,7 @@
 // at least one entity opts in via x-display.dashboard. Regenerated every run;
 // cleanup removes it only while this marker is present.
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateApiKey, requireApiPermission, handleApiError } from '@/lib/api-auth';
+import { authenticate, requireApiPermission, handleApiError } from '@/lib/api-auth';
 import { aggregateForWidgetCore } from '@/lib/dashboard/aggregate-core';
 import type { AggregateFilter, FilterCondition, BucketGranularity } from '@/lib/dashboard/aggregate-core';
 
@@ -22,7 +22,7 @@ function resolveBucket(raw: number | undefined): BucketGranularity | undefined {
 // Enforces API-key auth and read permission on the target entity.
 export async function POST(request: NextRequest) {
   try {
-    const { userId: actorId } = await authenticateApiKey(request);
+    const { userId: actorId } = await authenticate(request);
     const body = await request.json() as {
       entity_name?: string;
       group_by_field?: string;

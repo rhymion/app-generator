@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 {% set needs_resolve = can_view or (can_update and not is_self_only) or (can_delete and not is_self_only) %}
-import { authenticateApiKey, requireApiPermission, handleApiError{% if needs_resolve %}, ApiError{% endif %} } from '@/lib/api-auth';
+import { authenticate, requireApiPermission, handleApiError{% if needs_resolve %}, ApiError{% endif %} } from '@/lib/api-auth';
 import { getRateLimiter } from '@/lib/rate-limit';
 {% if needs_resolve %}
 import { resolvePermissions } from '@/lib/authz';
@@ -25,7 +25,7 @@ type Params = { params: Promise<{ id: string }> };
 export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
-    const { userId: actorId } = await authenticateApiKey(request);
+    const { userId: actorId } = await authenticate(request);
     const _rl = await getRateLimiter().check('api:read', actorId);
     if (!_rl.allowed) {
       return NextResponse.json(
@@ -101,7 +101,7 @@ export async function GET(request: NextRequest, { params }: Params) {
 export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
-    const { userId: actorId } = await authenticateApiKey(request);
+    const { userId: actorId } = await authenticate(request);
     const _rl = await getRateLimiter().check('api:write', actorId);
     if (!_rl.allowed) {
       return NextResponse.json(
@@ -185,7 +185,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
 export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
-    const { userId: actorId } = await authenticateApiKey(request);
+    const { userId: actorId } = await authenticate(request);
     const _rl = await getRateLimiter().check('api:write', actorId);
     if (!_rl.allowed) {
       return NextResponse.json(

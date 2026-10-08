@@ -16,6 +16,8 @@ export default defineConfig({
     },
     exclude: [
       "**/node_modules/**",
+      // Expo mobile app (generated) and its Playwright specs: separate project, own runner.
+      "mobile/**",
       "**/dist/**",
       "**/utils/templates/**",
       // dev-full.test.ts: CI integration test requiring full docker stack + generate-code run.

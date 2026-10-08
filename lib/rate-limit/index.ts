@@ -98,6 +98,12 @@ const PRODUCTION_BUCKETS: Record<string, RateLimitBucketConfig> = {
   // `auth:signin:credentials` already is.
   'api:read':                { limit: 300, windowMs: 60_000 },
   'api:write':               { limit: 60, windowMs: 60_000 },
+  // 5 attempts per (IP, email) per 15 minutes. Mobile password-grant login
+  // (POST /api/mobile/auth/token) has the same brute-force surface as
+  // `auth:signin:credentials`, but is keyed on IP+email so one attacker
+  // probing many accounts from one IP does not burn a single shared counter,
+  // and one account probed from many IPs is still caught.
+  'mobile:auth:token':       { limit: 5, windowMs: 15 * 60_000 },
 };
 
 // The Cypress UI suite intentionally logs in fresh for every `it()` (each
@@ -127,6 +133,9 @@ const credentialsLimitOverride = Number(process.env.RATE_LIMIT_AUTH_CREDENTIALS_
 // code change.
 const apiReadLimitOverride = Number(process.env.RATE_LIMIT_API_READ_LIMIT);
 const apiWriteLimitOverride = Number(process.env.RATE_LIMIT_API_WRITE_LIMIT);
+// Same mechanism for the mobile password-grant bucket: the Cypress API suite
+// legitimately logs the same seeded identity in several times per run.
+const mobileAuthTokenLimitOverride = Number(process.env.RATE_LIMIT_MOBILE_AUTH_TOKEN_LIMIT);
 
 export const DEFAULT_BUCKETS: Record<string, RateLimitBucketConfig> = {
   ...PRODUCTION_BUCKETS,
@@ -138,6 +147,9 @@ export const DEFAULT_BUCKETS: Record<string, RateLimitBucketConfig> = {
     : {}),
   ...(Number.isFinite(apiWriteLimitOverride) && apiWriteLimitOverride > 0
     ? { 'api:write': { limit: apiWriteLimitOverride, windowMs: 60_000 } }
+    : {}),
+  ...(Number.isFinite(mobileAuthTokenLimitOverride) && mobileAuthTokenLimitOverride > 0
+    ? { 'mobile:auth:token': { limit: mobileAuthTokenLimitOverride, windowMs: 15 * 60_000 } }
     : {}),
 };
 

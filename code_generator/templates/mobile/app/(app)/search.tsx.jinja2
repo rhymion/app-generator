@@ -1,0 +1,73 @@
+import { useState } from 'react';
+import { router } from 'expo-router';
+import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { apiFetch } from '@/lib/api-base';
+
+type SearchResult = { entity_type: string; id: string; snippet: string; rank: number };
+type SearchPage = { results: SearchResult[]; total: number };
+
+/** Cross-entity search (GET /api/search), reached from the fixed footer tab. */
+export default function SearchScreen() {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<SearchResult[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    const q = query.trim();
+    if (q.length < 2) {
+      setError('Type at least 2 characters.');
+      return;
+    }
+    setError(null);
+    try {
+      const page = await apiFetch<SearchPage>(`/api/search?q=${encodeURIComponent(q)}`);
+      setResults(page.results);
+    } catch {
+      setError('Search failed. Please try again.');
+    }
+  }
+
+  return (
+    <View style={styles.container} testID="search-screen">
+      <TextInput
+        style={styles.input}
+        value={query}
+        onChangeText={setQuery}
+        onSubmitEditing={run}
+        placeholder="Search"
+        returnKeyType="search"
+        autoCapitalize="none"
+        autoCorrect={false}
+        testID="search-input"
+      />
+      {error ? <Text style={styles.error} testID="search-error">{error}</Text> : null}
+      <FlatList
+        data={results ?? []}
+        keyExtractor={(item) => `${item.entity_type}:${item.id}`}
+        ListEmptyComponent={
+          results ? <Text style={styles.empty} testID="search-empty">No results.</Text> : null
+        }
+        renderItem={({ item }) => (
+          <Pressable
+            style={styles.row}
+            onPress={() => router.push(`/entity/${item.entity_type}` as never)}
+            testID={`search-result-${item.entity_type}`}
+          >
+            <Text style={styles.rowType}>{item.entity_type}</Text>
+            <Text style={styles.rowSnippet} numberOfLines={2}>{item.snippet}</Text>
+          </Pressable>
+        )}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  input: { margin: 12, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, fontSize: 16 },
+  error: { marginHorizontal: 12, color: '#b91c1c' },
+  empty: { textAlign: 'center', color: '#666', marginTop: 24 },
+  row: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee' },
+  rowType: { fontSize: 12, color: '#6b7280' },
+  rowSnippet: { fontSize: 15 },
+});

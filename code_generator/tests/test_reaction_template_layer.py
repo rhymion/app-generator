@@ -221,9 +221,9 @@ class TestCommentReactionsApiRouteTemplate:
         return tmpl.render()
 
     def test_route_template_uses_authenticate_api_key(self):
-        """API route must authenticate via authenticateApiKey."""
+        """API route must authenticate via the unified authenticate()."""
         output = self._render_route()
-        assert "authenticateApiKey" in output
+        assert "authenticate(request)" in output
 
     def test_route_template_has_post_toggle_handler(self):
         """API route must export POST handler for the toggle endpoint."""

@@ -1,0 +1,104 @@
+import { useCallback, useEffect, useState } from 'react';
+import { router } from 'expo-router';
+import { MaterialIcons } from '@expo/vector-icons';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { apiFetch } from '@/lib/api-base';
+import { APP_TITLE } from '@/lib/nav';
+import { useLocale } from '@/lib/locale';
+import { clearTokens, getRefreshToken } from '@/lib/token-storage';
+
+const POLL_MS = 60_000;
+
+/**
+ * App bar. Keeps what the desktop header offers that is not primary
+ * navigation: the title, the language switcher, the notification bell with
+ * its unread badge, and sign-out. The sidebar toggle has no counterpart
+ * (navigation is the footer), and search lives in the footer.
+ */
+export function Header() {
+  const { locale, locales, cycleLocale } = useLocale();
+  const [unread, setUnread] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      apiFetch<{ unread: number }>('/api/notifications')
+        .then((data) => {
+          if (!cancelled) setUnread(data.unread);
+        })
+        .catch(() => {});
+    };
+    load();
+    const timer = setInterval(load, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+
+  const signOut = useCallback(async () => {
+    const refreshToken = await getRefreshToken();
+    if (refreshToken) {
+      // Best effort: revoke the server-side session, then drop local tokens
+      // whatever the outcome.
+      await apiFetch(`/api/mobile/auth/token`, { method: 'DELETE' }).catch(() => {});
+    }
+    await clearTokens();
+    router.replace('/login');
+  }, []);
+
+  return (
+    <View style={styles.bar} testID="header-bar">
+      <Text style={styles.title} numberOfLines={1} testID="header-title">
+        {APP_TITLE}
+      </Text>
+      {locales.length > 1 ? (
+        <Pressable style={styles.action} onPress={cycleLocale} testID="header-locale">
+          <Text style={styles.actionText}>{locale.toUpperCase()}</Text>
+        </Pressable>
+      ) : null}
+      <View style={styles.action} testID="header-bell" accessibilityLabel="Notifications">
+        <MaterialIcons name="notifications" size={22} color="#374151" />
+        {unread > 0 ? (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText} testID="header-bell-unread">
+              {unread > 99 ? '99+' : String(unread)}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+      <Pressable style={styles.action} onPress={signOut} testID="header-signout" accessibilityLabel="Sign out">
+        <MaterialIcons name="logout" size={22} color="#374151" />
+      </Pressable>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  bar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+    backgroundColor: '#ffffff',
+    gap: 8,
+  },
+  title: { flex: 1, fontSize: 18, fontWeight: '600' },
+  action: { padding: 6, minWidth: 32, alignItems: 'center' },
+  actionText: { fontSize: 13, fontWeight: '600', color: '#374151' },
+  badge: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#dc2626',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  badgeText: { color: '#ffffff', fontSize: 10, fontWeight: '700' },
+});

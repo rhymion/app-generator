@@ -25,6 +25,7 @@ from helpers.bridge_direction import get_new_form_bridge
 from helpers.bridge_prisma import emit_bridge_model, emit_parent_bridge_fk, emit_child_bridge_fk
 from helpers.schema_helpers import get_flatten_rels
 from generate_types import extract_entities, extract_named_constants
+from mobile_nav import build_mobile_nav
 from context import build_entity_context
 from build_context import (
     build_context, build_anonymize_user_context, _get_actual_type, set_prisma_models,
@@ -1026,6 +1027,77 @@ def _validate_x_approval_combinations(
                 f"self-retriggering state machine behavior. Conflicting declarations: "
                 f"{{{field!r}: {value!r}}} appears in {sorted(clauses)}."
             )
+
+
+# ---------------------------------------------------------------------------
+# Mobile (Expo) target
+# ---------------------------------------------------------------------------
+# Renders the Expo Router project under <out>/mobile. Navigation (footer tabs
+# and the drill-down tree) is built from the same source as the desktop
+# sidebar -- see mobile_nav.py. Templates live under templates/mobile/.
+
+_MOBILE_STATIC_TEMPLATES = [
+    ('package.json.jinja2', 'package.json'),
+    ('app.json.jinja2', 'app.json'),
+    ('tsconfig.json.jinja2', 'tsconfig.json'),
+    ('babel.config.js.jinja2', 'babel.config.js'),
+    ('env.d.ts.jinja2', 'env.d.ts'),
+    ('lib/token-storage.ts.jinja2', 'lib/token-storage.ts'),
+    ('lib/api-base.ts.jinja2', 'lib/api-base.ts'),
+    ('lib/prefs.ts.jinja2', 'lib/prefs.ts'),
+    ('lib/locale.tsx.jinja2', 'lib/locale.tsx'),
+    ('lib/nav.ts.jinja2', 'lib/nav.ts'),
+    ('lib/nav-tree.ts.jinja2', 'lib/nav-tree.ts'),
+    ('lib/nav-context.tsx.jinja2', 'lib/nav-context.tsx'),
+    ('components/NavIcon.tsx.jinja2', 'components/NavIcon.tsx'),
+    ('components/FooterBar.tsx.jinja2', 'components/FooterBar.tsx'),
+    ('components/Header.tsx.jinja2', 'components/Header.tsx'),
+    ('app/_layout.tsx.jinja2', 'app/_layout.tsx'),
+    ('app/login.tsx.jinja2', 'app/login.tsx'),
+    ('app/(app)/_layout.tsx.jinja2', 'app/(app)/_layout.tsx'),
+    ('app/(app)/index.tsx.jinja2', 'app/(app)/index.tsx'),
+    ('app/(app)/section/[slug].tsx.jinja2', 'app/(app)/section/[slug].tsx'),
+    ('app/(app)/entity/[name].tsx.jinja2', 'app/(app)/entity/[name].tsx'),
+]
+
+
+def _read_messages(output_dir: Path) -> dict:
+    messages: dict = {}
+    for lang_file in sorted((output_dir / 'messages').glob('*.json')):
+        try:
+            messages[lang_file.stem] = json.loads(lang_file.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+    return messages
+
+
+def generate_mobile_target(
+    entities: list, schema: dict, output_dir: Path, env: Environment, has_search: bool,
+) -> None:
+    """Render the Expo Router mobile/ project (footer tabs + drill-down)."""
+    app_name = 'Generated App'
+    messages = _read_messages(output_dir)
+    nav = build_mobile_nav(entities, schema, messages)
+    locales = sorted(messages) or ['en']
+    if 'en' in locales:
+        locales = ['en'] + [loc for loc in locales if loc != 'en']
+    ctx = {
+        'app_name': app_name,
+        'app_slug': re.sub(r'[^a-z0-9]+', '-', app_name.lower()).strip('-'),
+        'app_title_json': json.dumps(app_name),
+        'tabs_json': json.dumps(nav['tabs'], indent=2, ensure_ascii=False),
+        'search_tab_json': json.dumps(nav['search_tab'], indent=2, ensure_ascii=False) if has_search else 'null',
+        'locales_json': json.dumps(locales),
+    }
+    mobile_dir = output_dir / 'mobile'
+    search_out = mobile_dir / 'app' / '(app)' / 'search.tsx'
+    if has_search:
+        _write(search_out, _render(env, 'mobile/app/(app)/search.tsx.jinja2', ctx))
+    elif search_out.exists():
+        search_out.unlink()
+    for tmpl_name, rel_out in _MOBILE_STATIC_TEMPLATES:
+        _write(mobile_dir / rel_out, _render(env, f'mobile/{tmpl_name}', ctx))
+    print(f'  Mobile: {len(nav["tabs"])} footer tab(s) + search={has_search} → mobile/')
 
 
 # ---------------------------------------------------------------------------
@@ -3125,6 +3197,10 @@ def generate(schema_path: str, output_dir: str) -> None:
     # --- i18n / config updates ---
     print('\nUpdating i18n and navigation config...')
     update_i18n_and_config(entities, schema, out)
+
+    # --- Expo mobile app (footer tabs + drill-down from the same nav source) ---
+    print('\nGenerating mobile app...')
+    generate_mobile_target(entities, schema, out, env, has_search=bool(search_entities))
 
     # --- upload/route.ts (Vercel Blob, base default) ---
     # Always emitted so app/api/upload/route.ts is a full generated artifact

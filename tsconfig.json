@@ -44,6 +44,7 @@
     "**/*.cy.tsx",
     "code_generator",
     "cypress", // Exclude the entire Cypress directory
-    "cypress.config.ts"
+    "cypress.config.ts",
+    "mobile" // Expo app: its own tsconfig and dependencies
   ],
 }

@@ -1,0 +1,126 @@
+import { useState } from 'react';
+import { router } from 'expo-router';
+import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
+import { setTokens } from '@/lib/token-storage';
+
+const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
+
+export default function LoginScreen() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
+  const [showMfaField, setShowMfaField] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit() {
+    if (!email.trim() || !password) {
+      setError('Please enter your email and password.');
+      return;
+    }
+    setError(null);
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${BASE_URL}/api/mobile/auth/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
+          mfa_code: showMfaField ? mfaCode.trim() : undefined,
+        }),
+      });
+
+      if (res.status === 403) {
+        const body = await res.json().catch(() => null);
+        if (body?.error === 'MFA_REQUIRED') {
+          setShowMfaField(true);
+          return;
+        }
+      }
+      if (res.status === 401) {
+        setError('Invalid email or password.');
+        return;
+      }
+      if (!res.ok) {
+        setError('Sign in failed. Please try again.');
+        return;
+      }
+
+      const data = await res.json();
+      await setTokens(data.access_token, data.refresh_token);
+      router.replace('/(app)');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>{{ app_name }}</Text>
+      <Text style={styles.label}>Email</Text>
+      <TextInput
+        style={styles.input}
+        value={email}
+        onChangeText={setEmail}
+        testID="login-email"
+        placeholder="you@example.com"
+        keyboardType="email-address"
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+      <Text style={styles.label}>Password</Text>
+      <TextInput
+        style={styles.input}
+        value={password}
+        onChangeText={setPassword}
+        testID="login-password"
+        placeholder="Password"
+        secureTextEntry
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+      {showMfaField && (
+        <>
+          <Text style={styles.label}>MFA Code</Text>
+          <TextInput
+            style={styles.input}
+            value={mfaCode}
+            onChangeText={setMfaCode}
+            testID="login-mfa"
+            placeholder="6-digit code"
+            keyboardType="number-pad"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </>
+      )}
+      {error ? <Text testID="login-error" style={styles.error}>{error}</Text> : null}
+      <Pressable testID="login-submit" style={styles.button} onPress={handleSubmit} disabled={submitting}>
+        <Text style={styles.buttonText}>{submitting ? 'Signing in…' : 'Sign In'}</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, justifyContent: 'center', padding: 24, gap: 12 },
+  title: { fontSize: 24, fontWeight: '600', marginBottom: 24, textAlign: 'center' },
+  label: { fontSize: 14, color: '#555' },
+  error: { color: '#b91c1c', fontSize: 14 },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+  },
+  button: {
+    backgroundColor: '#2563eb',
+    borderRadius: 8,
+    padding: 14,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+});
