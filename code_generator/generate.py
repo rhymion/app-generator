@@ -1071,12 +1071,21 @@ _MOBILE_STATIC_TEMPLATES = [
 ]
 
 # Namespaces of messages/<locale>.json the native entity screens read.
-_MOBILE_MESSAGE_NAMESPACES = ('Common', 'Errors', 'ValidationMessages')
+_MOBILE_MESSAGE_NAMESPACES = ('Common', 'Errors', 'ValidationMessages', 'ReactionType')
+
+# Single keys of a namespace too large to ship whole (`Fields` holds every field label).
+_MOBILE_MESSAGE_KEYS = {'Fields': ('comments',)}
 
 
 def _mobile_messages_json(messages: dict) -> str:
     picked = {
-        locale: {ns: bundle[ns] for ns in _MOBILE_MESSAGE_NAMESPACES if isinstance(bundle.get(ns), dict)}
+        locale: {
+            **{ns: bundle[ns] for ns in _MOBILE_MESSAGE_NAMESPACES if isinstance(bundle.get(ns), dict)},
+            **{
+                ns: {k: bundle[ns][k] for k in keys if k in bundle[ns]}
+                for ns, keys in _MOBILE_MESSAGE_KEYS.items() if isinstance(bundle.get(ns), dict)
+            },
+        }
         for locale, bundle in messages.items()
     }
     return json.dumps(picked, indent=2, ensure_ascii=False)
@@ -1112,6 +1121,7 @@ def generate_mobile_entity(spec: dict, ctx: dict, schema: dict, mobile_dir: Path
             indent=2,
         ),
         'list_keys_json': json.dumps(spec['list_keys']),
+        'reaction_types_json': json.dumps((spec.get('comments') or {}).get('reaction_types', [])),
         'has_form_hook': has_form_hook,
     }
     lib_dir = mobile_dir / 'lib' / name
@@ -1168,6 +1178,10 @@ def generate_mobile_target(
         search_out.unlink()
     for tmpl_name, rel_out in _MOBILE_STATIC_TEMPLATES:
         _write(mobile_dir / rel_out, _render(env, f'mobile/{tmpl_name}', ctx))
+    if any(e.get('comments') for e in ctx['entities']):
+        _write(mobile_dir / 'lib' / 'comment-http.ts', _render(env, 'mobile/lib/comment-http.ts.jinja2', ctx))
+        _write(mobile_dir / 'components' / 'native' / 'CommentThread.tsx',
+               _render(env, 'mobile/components/native/CommentThread.tsx.jinja2', ctx))
     _write(mobile_dir / 'lib' / 'entity-registry.ts', _render(env, 'mobile/lib/entity-registry.ts.jinja2', ctx))
     _write(mobile_dir / 'lib' / 'messages.ts', _render(env, 'mobile/lib/messages.ts.jinja2', ctx))
     print(f'  Mobile: {len(nav["tabs"])} footer tab(s) + search={has_search}'

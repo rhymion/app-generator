@@ -1,0 +1,101 @@
+{% raw %}
+import { useEffect, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useMessages } from '@/lib/messages';
+import { fetchCommentReactions, toggleCommentReaction, type ReactionSummary } from '@/lib/comment-http';
+
+/** A comment as the entity's REST detail embeds it (mentions are already decoded to names). */
+export type CommentRow = {
+  id: string;
+  message: string;
+  created_at?: string | null;
+  creator?: { id: string; name: string } | null;
+  reactionCounts?: Array<{ type: string; count: number }>;
+};
+
+function ReactionBar({ comment, types }: { comment: CommentRow; types: string[] }) {
+  const { t } = useMessages();
+  const [summary, setSummary] = useState<ReactionSummary>({ counts: comment.reactionCounts ?? [], myTypes: [] });
+  const [pending, setPending] = useState<string | null>(null);
+
+  // The REST detail carries the counts but not which ones are the caller's own.
+  useEffect(() => {
+    let alive = true;
+    fetchCommentReactions(comment.id).then((s) => alive && setSummary(s)).catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [comment.id]);
+
+  const toggle = async (type: string) => {
+    if (pending) return;
+    setPending(type);
+    try {
+      setSummary(await toggleCommentReaction(comment.id, type));
+    } catch {
+      // The previous counts stay on screen, as in the Web bar.
+    } finally {
+      setPending(null);
+    }
+  };
+
+  return (
+    <View style={styles.reactions}>
+      {types.map((type) => {
+        const active = summary.myTypes.includes(type);
+        const count = summary.counts.find((c) => c.type === type)?.count ?? 0;
+        return (
+          <Pressable
+            key={type}
+            style={[styles.reaction, active ? styles.reactionActive : null]}
+            onPress={() => toggle(type)}
+            disabled={pending !== null}
+            accessibilityState={{ selected: active }}
+            testID={`reaction-${comment.id}-${type}`}
+          >
+            <Text style={active ? styles.reactionActiveText : undefined}>
+              {t(`ReactionType.${type}`)}
+              {count > 0 ? ` ${count}` : ''}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * The comment thread of a record: the comments in the order the REST detail returns them, each
+ * with the reaction bar. Adding, editing and deleting comments are not drawn: the comment
+ * routes for them do not exist yet.
+ */
+export function CommentThread({ comments, reactionTypes }: { comments: CommentRow[]; reactionTypes: string[] }) {
+  const { t } = useMessages();
+  return (
+    <View style={styles.thread} testID="comment-thread">
+      <Text style={styles.heading}>{t('Fields.comments')}</Text>
+      {comments.map((comment) => (
+        <View key={comment.id} style={styles.comment} testID={`comment-${comment.id}`}>
+          <Text style={styles.meta} testID={`comment-meta-${comment.id}`}>
+            {comment.creator?.name ?? ''}
+            {comment.created_at ? ` · ${String(comment.created_at).replace('T', ' ').slice(0, 16)}` : ''}
+          </Text>
+          <Text testID={`comment-message-${comment.id}`}>{comment.message}</Text>
+          {reactionTypes.length > 0 ? <ReactionBar comment={comment} types={reactionTypes} /> : null}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  thread: { marginTop: 20, gap: 10 },
+  heading: { fontSize: 15, fontWeight: '700', color: '#374151' },
+  comment: { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 6, padding: 10, gap: 4 },
+  meta: { fontSize: 12, color: '#6b7280' },
+  reactions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 },
+  reaction: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 4 },
+  reactionActive: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
+  reactionActiveText: { color: '#ffffff' },
+});
+{% endraw %}

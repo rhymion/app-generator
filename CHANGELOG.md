@@ -5,6 +5,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Comment thread and reactions on the mobile detail screen** (Issue #863; the thread part of Issue #861
+  and the mention rendering of Issue #862). An entity that is commentable through the shared `commentable`
+  bridge keeps its native screens instead of the placeholder, and its detail screen lists the comments the
+  REST detail embeds (author, time, message, with an `@mention` shown as the user's name) and a reaction
+  bar per comment. The bar shows the counts and the reactions the signed-in user made, and adds or removes
+  one through `/api/comment/{id}/reactions/toggle`; the labels are the web's `ReactionType` messages. The
+  composer, editing and deleting a comment and the `@` user lookup are not part of it yet: there is no
+  REST route for them. See `docs/knowledge/mobile-app.md`.
 - **Documentation for the `x-autocomplete-context` schema key**: where it goes, what it changes in the generated form and split action, how it relates to `autocomplete_filter.ts`, and what validation rejects. See `docs/knowledge/x-autocomplete-context.md`. `docs/knowledge/relation-picker-rest-route.md` now compares the options route with the list API.
 - **REST route for relation pickers: `GET /api/{entity}/options`** (Issue #852). Every entity with a REST
   surface gets a route that searches (`q`, `limit`) or looks up by id (`ids`) the records a many-to-one,
