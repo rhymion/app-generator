@@ -30,3 +30,7 @@ export async function requireApiPermission(
 export function handleApiError(_error: unknown): NextResponse {
   throw new Error('fixture stub');
 }
+
+export function withActor<T>(_userId: string, fn: () => Promise<T>): Promise<T> {
+  return fn();
+}

@@ -363,7 +363,8 @@ check and is not part of the mandatory gate.
 
 - Entity screens for an entity that declares anything beyond plain fields, the relation pickers, the approval
   section and the comment thread: child grids, attachments and payment.
-- Adding, editing and deleting comments, and the `@` user lookup in a comment (no REST routes yet).
+- Adding, editing and deleting comments, and the `@` user lookup in a comment, in the app. The REST routes for
+  them exist (`comment-and-mention-rest-routes.md`); the screens that use them are not built.
 - Submitting a record for approval (the "(re)submit" button). Resubmitting is a Server Action
   (`submit_for_approval.ts`) with no REST route, so the app has nothing to call.
 - Creating the referenced record in place from a foreign-key field (`x-create-inline`) and the one-to-one

@@ -1,0 +1,70 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { authenticate, requireApiPermission, withActor, handleApiError, ApiError } from '@/lib/api-auth';
+import { getRateLimiter } from '@/lib/rate-limit';
+import { resolvePermissions } from '@/lib/authz';
+import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
+import { add{{ parent_pascal }}Comment } from '@/lib/{{ parent }}/actions';
+
+// POST /api/{{ parent }}/[id]/comments
+// Body: { message: string }  ->  201 { id }
+//
+// The REST side of the comment box on the {{ parent }} edit form. It runs the same
+// add{{ parent_pascal }}Comment Server Action the form calls, as the authenticated caller (mobile
+// access token or API key), so the stored message, the notifications to the record's creator and
+// assignee, the @-mention notifications and the revalidation are the web's own, not a copy.
+//
+// Access: the caller must be able to update the {{ parent }} record, which is what the web form
+// requires before it offers the comment box. The record is read through get{{ parent_pascal }}Detail,
+// so a record outside the caller's organizations (or, for a self-only entity, not the caller's own)
+// is "Not found".
+
+const MAX_MESSAGE_LENGTH = 10000;
+
+type Params = { params: Promise<{ id: string }> };
+
+export async function POST(request: NextRequest, { params }: Params) {
+  try {
+    const { id } = await params;
+    const { userId: actorId } = await authenticate(request);
+    const _rl = await getRateLimiter().check('api:write', actorId);
+    if (!_rl.allowed) {
+      return NextResponse.json(
+        { error: 'rate_limited', retryAfter: _rl.retryAfterSeconds },
+        { status: 429, headers: { 'Retry-After': String(_rl.retryAfterSeconds), 'X-RateLimit-Bucket': 'api:write' } },
+      );
+    }
+    // Coarse, item-independent gate before the record is read, so a caller with no access path at
+    // all never learns whether the record exists.
+    const basePerms = await requireApiPermission(actorId, '{{ parent }}', 'update');
+    const item = await get{{ parent_pascal }}Detail(id{% if should_filter_by_org or is_self_only %}, actorId{% endif %});
+    if (!item) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    const resolved = await resolvePermissions(basePerms, item, actorId);
+    if (!resolved.update) {
+      throw new ApiError(403, `Access denied: {{ parent }}.update`);
+    }
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Request body must be JSON' }, { status: 400 });
+    }
+    const rawMessage = (body as { message?: unknown } | null)?.message;
+    const message = typeof rawMessage === 'string' ? rawMessage.trim() : '';
+    if (!message) {
+      return NextResponse.json({ error: 'message is required' }, { status: 400 });
+    }
+    if (message.length > MAX_MESSAGE_LENGTH) {
+      return NextResponse.json({ error: `message exceeds maximum length of ${MAX_MESSAGE_LENGTH}` }, { status: 400 });
+    }
+
+    const created = await withActor(actorId, () =>
+      add{{ parent_pascal }}Comment({{ 'item.commentable_id' if has_commentable else 'id' }}, message),
+    );
+    return NextResponse.json({ id: created.id }, { status: 201 });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
