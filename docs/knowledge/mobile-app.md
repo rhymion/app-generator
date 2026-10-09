@@ -345,7 +345,8 @@ check and is not part of the mandatory gate.
 - Entity screens for an entity that declares anything beyond plain fields, the relation pickers, the
   comment thread, creating the referenced record in place and payment checkout: child grids, approval and
   attachments.
-- Adding, editing and deleting comments, and the `@` user lookup in a comment (no REST routes yet).
+- Adding, editing and deleting comments, and the `@` user lookup in a comment. The REST routes for them
+  exist (`comment-and-mention-rest-routes.md`); the screens that use them are not built.
 - The one-to-one bridge grid (`x-bridge`).
 - The paid / waiting status of an `x-payment` record (no REST route exposes it).
 - Bulk delete, the native date pickers (dates are typed as text), CSV import and export.

@@ -175,6 +175,10 @@ code_generator/.generated/
 # list-child-e2e-gate: disposable app copy built and run by
 # scripts/check_list_child_e2e_gate_fixture.sh (never committed).
 .generated-list-child-e2e-gate/
+
+# comment-rest-e2e-gate: disposable app copy built and run by
+# scripts/check_comment_rest_e2e_gate_fixture.sh (never committed).
+.generated-comment-rest-e2e-gate/
 .generated-mobile-entity-pw/
 
 # sample data

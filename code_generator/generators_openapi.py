@@ -581,6 +581,72 @@ def build_entity_openapi(ctx: dict) -> dict:
         },
     }
 
+    # Comment writes (api_comments_route.ts.jinja2 / api_comment_item_route.ts.jinja2):
+    # written for an entity with a comment thread, under the same condition as generate.py.
+    if (ctx.get('comment_actions_code') and ctx.get('can_view')
+            and (ctx.get('can_new') or ctx.get('can_edit') or ctx.get('can_delete') or ctx.get('can_invalidate'))):
+        _comment_body = {
+            'required': True,
+            'content': {'application/json': {'schema': {
+                'type': 'object',
+                'properties': {'message': {'type': 'string', 'minLength': 1, 'maxLength': 10000}},
+                'required': ['message'],
+            }}},
+        }
+        _comment_id_param = {'name': 'id', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}
+        _comment_item_params = [
+            _comment_id_param,
+            {'name': 'commentId', 'in': 'path', 'required': True, 'schema': {'type': 'string'}},
+        ]
+        _comment_codes = [400, 401, 403, 404, 429]
+        paths[f'/api/{parent}/{{id}}/comments'] = {
+            'post': {
+                'tags': [tag],
+                'summary': f'Add a comment to a {parent} record',
+                'parameters': [_comment_id_param],
+                'requestBody': _comment_body,
+                'responses': {
+                    '201': {
+                        'description': 'The comment was added.',
+                        'content': {'application/json': {'schema': {
+                            'type': 'object',
+                            'properties': {'id': {'type': 'string'}},
+                            'required': ['id'],
+                        }}},
+                    },
+                    **_std_responses(error_ref, permission='update', codes=_comment_codes),
+                },
+            },
+        }
+        paths[f'/api/{parent}/{{id}}/comments/{{commentId}}'] = {
+            'patch': {
+                'tags': [tag],
+                'summary': f'Edit a comment on a {parent} record (its author only)',
+                'parameters': _comment_item_params,
+                'requestBody': _comment_body,
+                'responses': {
+                    '200': {
+                        'description': 'The comment was changed.',
+                        'content': {'application/json': {'schema': {
+                            'type': 'object',
+                            'properties': {'success': {'type': 'boolean'}},
+                            'required': ['success'],
+                        }}},
+                    },
+                    **_std_responses(error_ref, permission='update', codes=_comment_codes),
+                },
+            },
+            'delete': {
+                'tags': [tag],
+                'summary': f'Delete a comment on a {parent} record (its author, or a caller who may delete {parent})',
+                'parameters': _comment_item_params,
+                'responses': {
+                    '204': {'description': 'The comment was deleted.'},
+                    **_std_responses(error_ref, permission='update', codes=[401, 403, 404, 429]),
+                },
+            },
+        }
+
     # gap 5: CSV export/import paths (generate.py's own gating conditions,
     # mirrored exactly -- `can_list and can_export` / `import_eligible`).
     # Neither route calls getRateLimiter() (api_export_route.ts.jinja2,
@@ -698,9 +764,11 @@ _IMPORT_RESULT_SCHEMA = {
 }
 
 
-def assemble_openapi_document(entity_specs: list[dict]) -> dict:
+def assemble_openapi_document(entity_specs: list[dict], *, mention_search: bool = False) -> dict:
     """Merge every entity's build_entity_openapi() output into one OpenAPI
     3.1 document. Entries that are `{}` (api:false entities) are skipped.
+    `mention_search` adds the schema-global @-mention candidate search
+    (mention_users_api_route.ts.jinja2), written whenever any field has x-mention.
     """
     schemas: dict = {
         'Error': {
@@ -746,6 +814,47 @@ def assemble_openapi_document(entity_specs: list[dict]) -> dict:
         paths.update(spec['paths'])
         if spec['tag'] not in tags:
             tags.append(spec['tag'])
+
+    if mention_search:
+        schemas['MentionUserOption'] = {
+            'type': 'object',
+            'properties': {
+                'id': {'type': 'string'},
+                'name': {'type': 'string'},
+                'email': {'type': 'string'},
+            },
+            'required': ['id', 'name', 'email'],
+        }
+        error_ref = {'$ref': '#/components/schemas/Error'}
+        paths['/api/mention/users'] = {
+            'get': {
+                'tags': ['mention'],
+                'summary': 'Search the users the caller may @-mention in a comment',
+                'parameters': [
+                    {'name': 'q', 'in': 'query', 'required': False,
+                     'schema': {'type': 'string', 'maxLength': 200},
+                     'description': 'Substring of the user name; empty returns the first users by name.'},
+                ],
+                'responses': {
+                    '200': {
+                        'description': (
+                            'At most 20 users in the caller\'s organizations, ordered by name. '
+                            'A caller who may not read users gets an empty list with permissionDenied true.'
+                        ),
+                        'content': {'application/json': {'schema': {
+                            'type': 'object',
+                            'properties': {
+                                'options': {'type': 'array', 'items': {'$ref': '#/components/schemas/MentionUserOption'}},
+                                'permissionDenied': {'type': 'boolean'},
+                            },
+                            'required': ['options', 'permissionDenied'],
+                        }}},
+                    },
+                    **_std_responses(error_ref, permission='read', codes=[400, 401, 429]),
+                },
+            },
+        }
+        tags.append('mention')
 
     return {
         'openapi': OPENAPI_VERSION,
