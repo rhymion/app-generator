@@ -10,8 +10,8 @@ format-version: 3.0
 #    many-to-one foreign key, a many-to-many and a one-to-one selector).
 #  - mobile_org_item: a foreign key to organization, which scopes the entity by organization
 #    membership, so the picker must offer only the caller's organizations.
-#  - mobile_thread: a commentable entity (list and view only): its detail screen draws the comment
-#    thread read-only and the reaction bar. The default schema supplies commentable / comment / reaction.
+#  - mobile_thread: a commentable entity (list, view, edit and delete): its detail screen draws the comment
+#    thread with the comment box, the @-mention lookup and the reaction bar. The default schema supplies commentable / comment / reaction.
 # Used by the Expo Playwright run described in docs/knowledge/mobile-app.md.
 
 definitions:
@@ -268,8 +268,8 @@ definitions:
       list: true
       view: true
       new: false
-      edit: false
-      delete: false
+      edit: true
+      delete: true
       invalidate: false
       api: true
       test: false

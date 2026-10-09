@@ -66,6 +66,13 @@ or an unknown id, is `404`. Then the Server Action's own rules apply:
   permissions.
 - Delete: the author, or a caller with `delete` on the entity. A caller with neither gets `403`.
 
+## The detail's comments
+
+`GET /api/{entity}/{id}` shows each comment's message with the `@[user_id:<id>]` markers decoded to `@Name`.
+It also lists the markers as `mentions` (`{ "id", "name" }` per marker, in order of appearance, a user
+mentioned twice listed twice), so a client that edits the decoded text can send the markers back; the
+mobile comment box does (`mobile-app.md`, Comments).
+
 ## Request validation
 
 The message is trimmed, as the web does. A body that is not JSON, a missing or non-string `message`, an

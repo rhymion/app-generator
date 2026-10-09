@@ -206,6 +206,21 @@ SELECT v.id, replace(v.message, '@ACTOR@', actor.id), 'thread-commentable-1', no
 FROM actor, (VALUES ('comment-seed-1', 'First comment'), ('comment-seed-2', 'Second comment, cc @[user_id:@ACTOR@] please look')) AS v(id, message);
 INSERT INTO reaction (id, type, user_id, comment_id, updated_at)
 SELECT 'reaction-seed-1', 'like', id, 'comment-seed-1', now() FROM "user" ORDER BY created_at LIMIT 1;
+-- a second member of the signed-in user's organization (a mention candidate and another comment author), and two
+-- threads for the specs that write: thread-seed-3 is empty, thread-seed-4 holds comments to edit and delete
+INSERT INTO "user" (id, name, email, updated_at, creator_id, updater_id)
+SELECT 'user-other', 'Other Author', 'other.author@example.com', now(), id, id FROM "user" ORDER BY created_at LIMIT 1;
+INSERT INTO "_UserOrganizations" ("A", "B") SELECT 'org-own', 'user-other' WHERE EXISTS (SELECT 1 FROM organization WHERE id = 'org-own');
+INSERT INTO commentable (id) VALUES ('thread-commentable-3'), ('thread-commentable-4');
+WITH actor AS (SELECT id FROM "user" ORDER BY created_at LIMIT 1)
+INSERT INTO mobile_thread (id, title, commentable_id, updated_at, creator_id, updater_id)
+SELECT v.id, v.title, v.commentable_id, now(), actor.id, actor.id
+FROM actor, (VALUES ('thread-seed-3', 'Thread to comment on', 'thread-commentable-3'), ('thread-seed-4', 'Thread to edit', 'thread-commentable-4')) AS v(id, title, commentable_id);
+WITH actor AS (SELECT id FROM "user" ORDER BY created_at LIMIT 1)
+INSERT INTO comment (id, message, commentable_id, updated_at, creator_id, created_at)
+SELECT v.id, v.message, 'thread-commentable-4', now(), CASE WHEN v.mine THEN actor.id ELSE 'user-other' END, now() + v.ord * interval '1 second'
+FROM actor, (VALUES ('comment-edit-1', 'Editable comment', true, 1), ('comment-edit-2', 'Look at this, @[user_id:user-other] please', true, 2),
+  ('comment-del-1', 'Delete me', true, 3), ('comment-del-2', 'Keep me', true, 4), ('comment-other', 'Written by someone else', false, 5)) AS v(id, message, mine, ord);
 SQL
   PW_TARGET="entity-crud.spec.ts relation-pickers.spec.ts list-capabilities.spec.ts inline-create-checkout.spec.ts comments.spec.ts approval-actions.spec.ts split-action.spec.ts"
   export MOBILE_PW_IGNORE=""

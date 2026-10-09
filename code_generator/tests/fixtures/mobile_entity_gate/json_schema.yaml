@@ -11,7 +11,8 @@ format-version: 3.0
 #    (tags, x-outputType: list) and a one-to-one selector (mobile_profile_id) -- the relation kinds the
 #    native pickers draw.
 #  - mobile_thread: a commentable entity (a one-to-one bridge to commentable) whose detail screen
-#    draws the comment thread read-only and the reaction bar. commentable / comment / reaction /
+#    draws the comment thread, the comment box and the reaction bar (it can be edited, so the comment write
+#    routes exist). commentable / comment / reaction /
 #    attachment are hand-copied from tests/fixtures/mention_gate (without x-mention) because a
 #    fixture does not pick up the repository's internal entities.
 # Used by tests/test_mobile_entities.py (generation + shape) and by the Expo
@@ -321,7 +322,7 @@ definitions:
       list: true
       view: true
       new: false
-      edit: false
+      edit: true
       delete: false
       invalidate: false
       api: true

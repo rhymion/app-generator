@@ -4,7 +4,7 @@
 import { TEST_API_KEY, TEST_CREDENTIALS } from '../../support/test-credentials';
 
 type Ticket = { id: string; organization_id: string; commentable_id: string };
-type Comment = { id: string; message: string; creator?: { id: string } | null };
+type Comment = { id: string; message: string; creator?: { id: string } | null; mentions?: { id: string; name: string }[] };
 
 const base = (ticketId: string) => `/api/cr_ticket/${ticketId}/comments`;
 const asKey = (key = TEST_API_KEY) => ({ 'X-API-Key': key });
@@ -94,6 +94,19 @@ describe('API: comment writes', () => {
           cy.task<unknown[]>('db:getNotificationsForUser', mentionedUserId).then((after) => {
             expect(after.length).to.eq(before.length + 1);
           });
+        });
+      });
+    });
+
+    it('lists the mentions of a comment in the detail, next to the decoded message', () => {
+      cy.task<{ record: Ticket; mentionedUserId: string }>('db:populateCrTicketWithMentionUser').then(({ record, mentionedUserId }) => {
+        addComment(record.id, `first @[user_id:${mentionedUserId}] then @[user_id:${mentionedUserId}] and plain`).its('status').should('eq', 201);
+        listComments(record.id).then((comments) => {
+          const [comment] = comments;
+          expect(comment.mentions).to.have.length(2);
+          expect(comment.mentions?.map((m) => m.id)).to.deep.equal([mentionedUserId, mentionedUserId]);
+          const name = comment.mentions![0].name;
+          expect(comment.message).to.equal(`first @${name} then @${name} and plain`);
         });
       });
     });

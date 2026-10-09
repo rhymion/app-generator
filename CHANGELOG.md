@@ -5,6 +5,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Mobile: write comments and mention users** (Issues #861, #862). On an entity that has the comment write
+  routes, the Expo detail screen's comment thread gets a comment box, Edit and Delete on comments, and, when
+  the schema has an `x-mention` field, a user lookup while typing `@`. It calls only
+  `POST` / `PATCH` / `DELETE /api/<entity>/<id>/comments` and `GET /api/mention/users`, so the server's
+  permission and organization checks apply. The REST detail now also lists each comment's `mentions` (`id` and
+  `name`, in order) so an edit keeps the mention markers. New `lib/comment-composer.ts` in `mobile/`; no schema
+  key is added and the Web screens are unchanged. See `docs/knowledge/mobile-app.md`.
 - **Mobile: create the referenced record in place, and payment checkout** (Issues #877, #872). A
   many-to-one foreign key that declares `x-create-inline` shows *Create new* in the native picker; it
   opens the target's native create form over the hosting form, saves through the target's REST create

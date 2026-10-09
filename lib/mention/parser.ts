@@ -68,6 +68,22 @@ export function decodeMentions(text: string, context: UserContext, deletedUserLa
 }
 
 /**
+ * The mentions of a stored text in the order they appear, one entry per marker (a user mentioned
+ * twice is listed twice), each with the name {@link decodeMentions} shows for it. A client that
+ * edits the decoded text uses this list to put the markers back.
+ */
+export function listMentions(
+  text: string,
+  context: UserContext,
+  deletedUserLabel: string,
+): Array<{ id: string; name: string }> {
+  return [...text.matchAll(MENTION_PATTERN)].map((match) => ({
+    id: match[1],
+    name: context[match[1]] ?? deletedUserLabel,
+  }));
+}
+
+/**
  * Extracts all mentioned user IDs from a text string.
  * Returns deduplicated list of user ids.
  */

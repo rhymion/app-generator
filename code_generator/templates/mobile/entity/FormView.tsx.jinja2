@@ -50,6 +50,8 @@ export function {{ pascal }}FormView({ id }: { id: string }) {
 {% endif %}
 {% if has_approval %}
   const [approval, setApproval] = useState<ApprovalState | null>(null);
+{% endif %}
+{% if has_approval or (comments and comments.write) %}
   const [reloads, setReloads] = useState(0);
 {% endif %}
 
@@ -64,7 +66,7 @@ export function {{ pascal }}FormView({ id }: { id: string }) {
         setState(detail ? 'ready' : 'missing');
       })
       .catch(() => setState('missing'));
-  }, [id{% if has_approval %}, reloads{% endif %}]);
+  }, [id{% if has_approval or (comments and comments.write) %}, reloads{% endif %}]);
 
   // Show / hide decisions come from the shared capabilities module, the same
   // one the Web screens call.
@@ -136,6 +138,15 @@ export function {{ pascal }}FormView({ id }: { id: string }) {
       <CommentThread
         comments={((record[{{ comments.rel_name | tojson }}] as { comments?: CommentRow[] } | null)?.comments) ?? []}
         reactionTypes={REACTION_TYPES}
+{% if comments.write %}
+        write={ {
+          entity: '{{ name }}',
+          recordId: id,
+          canComment: permissions?.update === true,
+          canDeleteAny: permissions?.delete === true,
+          onChanged: () => setReloads((n) => n + 1),
+        } }
+{% endif %}
       />
 {% endif %}
       {error ? <Text style={styles.error} testID="view-error">{error}</Text> : null}

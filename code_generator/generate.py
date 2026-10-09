@@ -1221,7 +1221,7 @@ def _read_messages(output_dir: Path) -> dict:
 
 def generate_mobile_target(
     entities: list, schema: dict, output_dir: Path, env: Environment, has_search: bool,
-    mobile_specs: list | None = None,
+    mobile_specs: list | None = None, has_mention: bool = False,
 ) -> None:
     """Render the Expo Router mobile/ project (footer tabs + drill-down)."""
     app_name = 'Generated App'
@@ -1244,6 +1244,8 @@ def generate_mobile_target(
         'entities': mobile_specs or [],
         'has_scheduled_tasks': has_scheduled_tasks,
         'has_payment': any(spec.get('is_payment') for spec in mobile_specs or []),
+        # The schema has an `x-mention` field, so the mention user search route exists.
+        'has_mention': has_mention,
     }
     mobile_dir = output_dir / 'mobile'
     search_out = mobile_dir / 'app' / '(app)' / 'search.tsx'
@@ -1266,6 +1268,7 @@ def generate_mobile_target(
             target.unlink()
     if any(e.get('comments') for e in ctx['entities']):
         _write(mobile_dir / 'lib' / 'comment-http.ts', _render(env, 'mobile/lib/comment-http.ts.jinja2', ctx))
+        _write(mobile_dir / 'lib' / 'comment-composer.ts', _render(env, 'mobile/lib/comment-composer.ts.jinja2', ctx))
         _write(mobile_dir / 'components' / 'native' / 'CommentThread.tsx',
                _render(env, 'mobile/components/native/CommentThread.tsx.jinja2', ctx))
     _write(mobile_dir / 'lib' / 'entity-registry.ts', _render(env, 'mobile/lib/entity-registry.ts.jinja2', ctx))
@@ -3425,7 +3428,8 @@ def generate(schema_path: str, output_dir: str) -> None:
     for mobile_spec in mobile_specs:
         generate_mobile_entity(mobile_spec, mobile_ctxs[mobile_spec['name']], schema, out / 'mobile', env)
         print(f'  Mobile screens → mobile/ ({mobile_spec["name"]})')
-    generate_mobile_target(entities, schema, out, env, has_search=bool(search_entities), mobile_specs=mobile_specs)
+    generate_mobile_target(entities, schema, out, env, has_search=bool(search_entities), mobile_specs=mobile_specs,
+                           has_mention=_has_any_mention)
 
     # --- upload/route.ts (Vercel Blob, base default) ---
     # Always emitted so app/api/upload/route.ts is a full generated artifact
