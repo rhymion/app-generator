@@ -1068,17 +1068,42 @@ _MOBILE_STATIC_TEMPLATES = [
     ('app/(app)/entity/[name]/new.tsx.jinja2', 'app/(app)/entity/[name]/new.tsx'),
     ('app/(app)/entity/[name]/[id].tsx.jinja2', 'app/(app)/entity/[name]/[id].tsx'),
     ('app/(app)/entity/[name]/[id]/edit.tsx.jinja2', 'app/(app)/entity/[name]/[id]/edit.tsx'),
+    # Built-in audit log screens (read-only; reached from the nav link mobile_nav adds).
+    ('audit_log/mobile_client.ts.jinja2', 'lib/audit_log/mobile_client.ts'),
+    ('audit_log/format.ts.jinja2', 'components/audit_log/format.ts'),
+    ('audit_log/List.tsx.jinja2', 'components/audit_log/List.tsx'),
+    ('audit_log/View.tsx.jinja2', 'components/audit_log/View.tsx'),
 ]
 
 # Namespaces of messages/<locale>.json the native entity screens read.
-_MOBILE_MESSAGE_NAMESPACES = ('Common', 'Errors', 'ValidationMessages')
+_MOBILE_MESSAGE_NAMESPACES = ('Common', 'Errors', 'ValidationMessages', 'ReactionType')
+
+# Single keys of a namespace too large to ship whole (`Fields` holds every field label).
+_MOBILE_MESSAGE_KEYS = {'Fields': ('comments',)}
+
+# Single keys the built-in audit log screens read from larger namespaces, so the
+# bundle does not carry the whole of `Fields` / `EntityLabel`.
+_MOBILE_MESSAGE_KEYS = {
+    'EntityLabel': ('auditLog',),
+    'Fields': ('action', 'actorUser', 'created_at', 'metadata', 'targetId', 'targetTable'),
+}
 
 
 def _mobile_messages_json(messages: dict) -> str:
     picked = {
-        locale: {ns: bundle[ns] for ns in _MOBILE_MESSAGE_NAMESPACES if isinstance(bundle.get(ns), dict)}
+        locale: {
+            **{ns: bundle[ns] for ns in _MOBILE_MESSAGE_NAMESPACES if isinstance(bundle.get(ns), dict)},
+            **{
+                ns: {k: bundle[ns][k] for k in keys if k in bundle[ns]}
+                for ns, keys in _MOBILE_MESSAGE_KEYS.items() if isinstance(bundle.get(ns), dict)
+            },
+        }
         for locale, bundle in messages.items()
     }
+    for locale, bundle in messages.items():
+        for ns, keys in _MOBILE_MESSAGE_KEYS.items():
+            if isinstance(bundle.get(ns), dict):
+                picked[locale][ns] = {k: bundle[ns][k] for k in keys if k in bundle[ns]}
     return json.dumps(picked, indent=2, ensure_ascii=False)
 
 
@@ -1112,6 +1137,7 @@ def generate_mobile_entity(spec: dict, ctx: dict, schema: dict, mobile_dir: Path
             indent=2,
         ),
         'list_keys_json': json.dumps(spec['list_keys']),
+        'reaction_types_json': json.dumps((spec.get('comments') or {}).get('reaction_types', [])),
         'has_form_hook': has_form_hook,
     }
     lib_dir = mobile_dir / 'lib' / name
@@ -1146,7 +1172,7 @@ def generate_mobile_target(
     """Render the Expo Router mobile/ project (footer tabs + drill-down)."""
     app_name = 'Generated App'
     messages = _read_messages(output_dir)
-    nav = build_mobile_nav(entities, schema, messages)
+    nav = build_mobile_nav(entities, schema, messages, include_audit_log=True)
     locales = sorted(messages) or ['en']
     if 'en' in locales:
         locales = ['en'] + [loc for loc in locales if loc != 'en']
@@ -1168,6 +1194,10 @@ def generate_mobile_target(
         search_out.unlink()
     for tmpl_name, rel_out in _MOBILE_STATIC_TEMPLATES:
         _write(mobile_dir / rel_out, _render(env, f'mobile/{tmpl_name}', ctx))
+    if any(e.get('comments') for e in ctx['entities']):
+        _write(mobile_dir / 'lib' / 'comment-http.ts', _render(env, 'mobile/lib/comment-http.ts.jinja2', ctx))
+        _write(mobile_dir / 'components' / 'native' / 'CommentThread.tsx',
+               _render(env, 'mobile/components/native/CommentThread.tsx.jinja2', ctx))
     _write(mobile_dir / 'lib' / 'entity-registry.ts', _render(env, 'mobile/lib/entity-registry.ts.jinja2', ctx))
     _write(mobile_dir / 'lib' / 'messages.ts', _render(env, 'mobile/lib/messages.ts.jinja2', ctx))
     print(f'  Mobile: {len(nav["tabs"])} footer tab(s) + search={has_search}'
