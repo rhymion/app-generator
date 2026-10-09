@@ -474,9 +474,18 @@ def test_a_bridge_to_commentable_without_the_comment_feature_stays_ineligible():
 
 def test_comment_thread_spec_carries_the_embed_key_and_reaction_values():
     from mobile_entities import comment_thread_spec
-    assert comment_thread_spec(_commentable_ctx()) == {'rel_name': 'commentable', 'reaction_types': ['like', 'love']}
+    assert comment_thread_spec(_commentable_ctx()) == {'rel_name': 'commentable', 'reaction_types': ['like', 'love'], 'write': False}
     assert comment_thread_spec(_commentable_ctx(can_view=False)) is None
     assert comment_thread_spec(_ctx()) is None
+
+
+def test_comment_thread_is_writable_only_where_the_comment_write_routes_are_written():
+    from mobile_entities import comment_thread_spec
+    # The routes need the comment actions and one of the write operations (the condition generate.py applies).
+    for flag in ('can_create', 'can_update', 'can_delete', 'can_invalidate'):
+        assert comment_thread_spec(_commentable_ctx(comment_actions_code='x', **{flag: True}))['write'] is True, flag
+    assert comment_thread_spec(_commentable_ctx(comment_actions_code='x'))['write'] is False
+    assert comment_thread_spec(_commentable_ctx(can_update=True))['write'] is False
 
 
 def test_detail_screen_draws_the_thread_and_reaction_bar_through_the_rest_seam(out):
@@ -485,14 +494,51 @@ def test_detail_screen_draws_the_thread_and_reaction_bar_through_the_rest_seam(o
     assert 'REACTION_TYPES: string[] = ["like", "love", "laugh", "surprised", "sad"]' in view
     assert 'record["commentable"]' in view
     thread = _read(out, 'components/native/CommentThread.tsx')
-    assert "fetchCommentReactions, toggleCommentReaction" in thread
+    assert "fetchCommentReactions," in thread and "toggleCommentReaction," in thread
     assert 'testID={`reaction-${comment.id}-${type}`}' in thread
     http = _read(out, 'lib/comment-http.ts')
     assert '/api/comment/${encodeURIComponent(commentId)}/reactions/toggle' in http
     assert "method: 'POST'" in http
-    # No composer, edit or delete control: the comment routes for them do not exist.
-    for forbidden in ('TextInput', 'addComment', 'updateComment', 'deleteComment', 'prisma'):
-        assert forbidden not in thread + http
+    # The thread writes through the comment routes only: no Server Action, no database access.
+    for forbidden in ('prisma', '/actions', 'use server'):
+        assert forbidden not in thread + http, forbidden
+
+
+def test_writable_thread_has_the_composer_edit_and_delete_through_the_comment_routes(out):
+    view = _read(out, 'components/mobile_thread/FormView.tsx')
+    assert "entity: 'mobile_thread'" in view
+    assert 'canComment: permissions?.update === true' in view
+    assert 'canDeleteAny: permissions?.delete === true' in view
+    assert 'setReloads' in view
+    thread = _read(out, 'components/native/CommentThread.tsx')
+    for needle in ('addComment(write.entity', 'updateComment(write.entity', 'deleteComment(write.entity',
+                   'testID={`${testIdPrefix}-input`}', 'comment-delete-confirm-'):
+        assert needle in thread, needle
+    http = _read(out, 'lib/comment-http.ts')
+    assert '/api/${encodeURIComponent(entity)}/${encodeURIComponent(recordId)}/comments' in http
+    for method in ("method: 'POST'", "method: 'PATCH'", "method: 'DELETE'"):
+        assert method in http, method
+    # A schema without an x-mention field has no mention search route, so no lookup is drawn.
+    assert 'searchMentionUsers' not in thread + http
+    assert '/api/mention/users' not in http
+
+
+def test_mention_lookup_is_wired_when_the_schema_has_a_mention_field():
+    from generate import _make_env, _render
+    env = _make_env()
+    http = _render(env, 'mobile/lib/comment-http.ts.jinja2', {'has_mention': True})
+    thread = _render(env, 'mobile/components/native/CommentThread.tsx.jinja2', {'has_mention': True})
+    assert '/api/mention/users?q=${encodeURIComponent(q)}' in http
+    assert 'search: searchMentionUsers' in thread
+    plain = _render(env, 'mobile/components/native/CommentThread.tsx.jinja2', {'has_mention': False})
+    assert 'searchMentionUsers' not in plain
+
+
+def test_composer_module_is_emitted_with_the_thread(out):
+    composer = _read(out, 'lib/comment-composer.ts')
+    # The markers are put back from the picked mentions; the search is passed in, not imported.
+    assert '@[user_id:${mentions[index].id}]' in composer
+    assert 'comment-http' not in composer.replace('./comment-http', '')
 
 
 def test_entities_without_comments_get_no_thread(out):

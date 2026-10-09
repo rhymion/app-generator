@@ -5,6 +5,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Mobile: write comments and mention users** (Issues #861, #862). On an entity that has the comment write
+  routes, the Expo detail screen's comment thread gets a comment box, Edit and Delete on comments, and, when
+  the schema has an `x-mention` field, a user lookup while typing `@`. It calls only
+  `POST` / `PATCH` / `DELETE /api/<entity>/<id>/comments` and `GET /api/mention/users`, so the server's
+  permission and organization checks apply. The REST detail now also lists each comment's `mentions` (`id` and
+  `name`, in order) so an edit keeps the mention markers. New `lib/comment-composer.ts` in `mobile/`; no schema
+  key is added and the Web screens are unchanged. See `docs/knowledge/mobile-app.md`.
 - **Search box, multi-column sort and multi-field filter on the Web entity lists** (Issue #899, Phase 1 of #898).
   The Desktop Web grid and the Mobile Web cards get one shared panel above the list: a search box that matches
   the list's title column, a sort panel that sorts by several columns in the order they are chosen (ascending,

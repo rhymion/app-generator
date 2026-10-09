@@ -23,8 +23,8 @@ entity's spec is known). An `x-payment` entity is created through the same form;
 
 An entity that is commentable through the shared `commentable` bridge keeps its screens: the detail screen
 lists the comment thread (read from the REST detail) and draws the reaction bar, which calls the comment
-reactions route. Adding, editing and deleting a comment, and @-mentions, have no REST route yet, so a
-thread is read-only on mobile.
+reactions route. When the entity has the comment write routes, the thread also has a composer, edit and
+delete controls and, when the schema has an `x-mention` field, the `@` user lookup; otherwise it is read-only.
 """
 from __future__ import annotations
 
@@ -142,6 +142,12 @@ def comment_thread_spec(ctx: dict) -> dict | None:
     return {
         'rel_name': ctx['commentable_rel_name'],
         'reaction_types': [i['value'] for i in reactions['items']] if reactions else [],
+        # The comment write routes are written under the condition generate.py applies; without
+        # them the thread stays read-only.
+        'write': bool(
+            ctx.get('comment_actions_code')
+            and (ctx.get('can_create') or ctx.get('can_update') or ctx.get('can_delete') or ctx.get('can_invalidate'))
+        ),
     }
 
 

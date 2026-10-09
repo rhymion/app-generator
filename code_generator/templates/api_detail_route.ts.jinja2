@@ -10,7 +10,7 @@ import { resolvePermissions } from '@/lib/authz';
 import { get{{ parent_pascal }}Detail } from '@/lib/{{ parent }}/getters';
 {% endif %}
 {% if can_view and comment_has_mention %}
-import { decodeMentions, extractMentionedUserIds, type UserContext } from '@/lib/mention/parser';
+import { decodeMentions, extractMentionedUserIds, listMentions, type UserContext } from '@/lib/mention/parser';
 import { getTranslations } from 'next-intl/server';
 {% endif %}
 {% if can_update or can_delete %}
@@ -74,7 +74,13 @@ export async function GET(request: NextRequest, { params }: Params) {
       : [];
     const _mentionUserContext: UserContext = Object.fromEntries(_mentionUsers.map((u) => [u.id, u.name]));
     const _tCommon = await getTranslations('Common');
-    const _decodeComment = <T extends { message: string }>(c: T) => ({ ...c, message: decodeMentions(c.message, _mentionUserContext, _tCommon('deletedUser')) });
+    // `mentions` lists the markers in the order they appear in the message, so a client that edits the
+    // decoded text can put them back (see docs/knowledge/mobile-app.md, Comments).
+    const _decodeComment = <T extends { message: string }>(c: T) => ({
+      ...c,
+      message: decodeMentions(c.message, _mentionUserContext, _tCommon('deletedUser')),
+      mentions: listMentions(c.message, _mentionUserContext, _tCommon('deletedUser')),
+    });
     const decodedItem = {
       ...item,
 {% if named_constants and has_commentable %}
