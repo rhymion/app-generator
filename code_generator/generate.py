@@ -1151,6 +1151,9 @@ def generate_mobile_entity(spec: dict, ctx: dict, schema: dict, mobile_dir: Path
             indent=2,
         ) if split else 'null',
         'list_keys_json': json.dumps(spec['list_keys']),
+        'sort_keys_json': json.dumps(spec['sort_keys']),
+        'filter_keys_json': json.dumps(spec['filter_keys']),
+        'search_key_json': json.dumps(spec['search_key']),
         'reaction_types_json': json.dumps((spec.get('comments') or {}).get('reaction_types', [])),
         'has_form_hook': has_form_hook,
     }
