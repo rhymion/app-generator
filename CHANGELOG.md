@@ -200,6 +200,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   there and the app does not use it.
 
 ### Fixed
+- **Comment Server Actions check permission and organization scope** (Issue #890). `add`, `update` and
+  `delete{Entity}Comment()` only checked that a session user existed (plus the author rule), so a Server
+  Action call that skipped the edit form could comment on, edit or delete a comment of a record the caller
+  could not update or that belongs to another organization. Each action now reads the parent record through
+  the caller's organization scope (and `x-self-only` / `x-filter-values`) and calls `requirePermission()` for
+  `update` on it, like `upsert{Entity}()`; delete by a non-author still needs `delete`. A caller who may
+  edit the record sees no change. See `docs/knowledge/comment-and-mention-rest-routes.md`.
 - **Generated test data wrote several owner columns of an `x-exclusive-parents` entity** (issue #849).
   Dependency rows of such an entity (for example the `parameter` and `step_placement` rows another
   entity's helper creates) and the child rows added by `populate<Parent><Child>Data` set every owner
