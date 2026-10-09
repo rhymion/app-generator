@@ -1186,6 +1186,7 @@ def generate_mobile_entity(spec: dict, ctx: dict, schema: dict, mobile_dir: Path
             indent=2,
         ) if split else 'null',
         'list_keys_json': json.dumps(spec['list_keys']),
+        'relation_columns_json': json.dumps([_mobile_field_json(f) for f in spec['relation_columns']], indent=2),
         'sort_keys_json': json.dumps(spec['sort_keys']),
         'filter_keys_json': json.dumps(spec['filter_keys']),
         'search_key_json': json.dumps(spec['search_key']),

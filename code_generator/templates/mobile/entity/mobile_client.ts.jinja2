@@ -39,6 +39,12 @@ export type CheckoutCreated = ActionCreated & { checkoutUrl?: string };
 
 export const {{ const_name }}_FIELDS: FieldSpec[] = {{ fields_json }};
 
+/**
+ * What the list's sort and filter panel can name: the fields plus the relation display columns
+ * (a foreign key sorts and filters by the related record's label), which the form does not draw.
+ */
+export const {{ const_name }}_QUERY_FIELDS: FieldSpec[] = [...{{ const_name }}_FIELDS, ...({{ relation_columns_json }} as FieldSpec[])];
+
 /** Keys of the columns shown on a list row; the first is the row's title. */
 export const {{ const_name }}_LIST_KEYS: string[] = {{ list_keys_json }};
 
