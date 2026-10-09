@@ -7,6 +7,13 @@ import { useEntityCapabilities } from '@/lib/{{ name }}/use_entity_capabilities'
 import {
   get{{ pascal }}Detail,
   get{{ pascal }}Permissions,
+{% if has_approval %}
+  get{{ pascal }}ApprovalState,
+{% endif %}
+{% if split %}
+  {{ const_name }}_SPLIT,
+  split{{ pascal }},
+{% endif %}
 {% if can_delete %}
   remove{{ pascal }},
 {% endif %}
@@ -17,6 +24,14 @@ import {
 import { getEntityFormErrorMessage } from '@/lib/{{ name }}/use_entity_form';
 {% endif %}
 import { toRecordDisplayText } from '@/components/native/FieldInput';
+{% if has_approval %}
+import { ApprovalSection, type ApprovalRequestRow } from '@/components/native/ApprovalSection';
+import { HAS_ON_WITHDRAWN } from '@/lib/{{ name }}/use_entity_approval_actions';
+import type { ApprovalState } from '@/lib/entity-http';
+{% endif %}
+{% if split %}
+import { SplitSection } from '@/components/native/SplitSection';
+{% endif %}
 {% if comments %}
 import { CommentThread, type CommentRow } from '@/components/native/CommentThread';
 
@@ -33,16 +48,23 @@ export function {{ pascal }}FormView({ id }: { id: string }) {
 {% if is_payment %}
   const { payment } = useLocalSearchParams<{ payment?: string }>();
 {% endif %}
+{% if has_approval %}
+  const [approval, setApproval] = useState<ApprovalState | null>(null);
+  const [reloads, setReloads] = useState(0);
+{% endif %}
 
   useEffect(() => {
-    Promise.all([get{{ pascal }}Detail(id), get{{ pascal }}Permissions(id)])
-      .then(([detail, perms]) => {
+    Promise.all([get{{ pascal }}Detail(id), get{{ pascal }}Permissions(id){% if has_approval %}, get{{ pascal }}ApprovalState(id){% endif %}])
+      .then(([detail, perms{% if has_approval %}, approvalState{% endif %}]) => {
         setRecord(detail);
         setPermissions(perms);
+{% if has_approval %}
+        setApproval(approvalState);
+{% endif %}
         setState(detail ? 'ready' : 'missing');
       })
       .catch(() => setState('missing'));
-  }, [id]);
+  }, [id{% if has_approval %}, reloads{% endif %}]);
 
   // Show / hide decisions come from the shared capabilities module, the same
   // one the Web screens call.
@@ -90,6 +112,25 @@ export function {{ pascal }}FormView({ id }: { id: string }) {
       ))}
 {% if is_payment %}
       {payment === 'returned' ? <Text style={styles.notice} testID="view-payment-returned">{t('Payment.returnedMessage')}</Text> : null}
+{% endif %}
+{% if has_approval %}
+      <ApprovalSection
+        requests={((record.approvable as { approval_requests?: ApprovalRequestRow[] } | null)?.approval_requests) ?? []}
+        state={approval}
+        hasOnWithdrawn={HAS_ON_WITHDRAWN}
+        describeError={(failure) => {% if has_form_hook %}getEntityFormErrorMessage(failure, { terr, tmsg }){% else %}terr('unknown'){% endif %}}
+        onChanged={() => setReloads((n) => n + 1)}
+      />
+{% endif %}
+{% if split %}
+      <SplitSection
+        entity="{{ name }}"
+        config={ {{ const_name }}_SPLIT }
+        record={record}
+        split={split{{ pascal }}}
+        describeError={(failure) => {% if has_form_hook %}getEntityFormErrorMessage(failure, { terr, tmsg }){% else %}terr('unknown'){% endif %}}
+        onChanged={() => setReloads((n) => n + 1)}
+      />
 {% endif %}
 {% if comments %}
       <CommentThread

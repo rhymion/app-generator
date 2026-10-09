@@ -111,12 +111,118 @@ export function formDataToBody(
   return body;
 }
 
-/** Model-level flags overlaid with the row-level answer when a record exists. */
+/** What the approval section needs from the row-level capabilities answer. */
+export type ApprovalState = {
+  can_submit: boolean;
+  can_withdraw: boolean;
+  can_approve: boolean;
+  can_reject: boolean;
+  round_status: string[];
+  /** The `approval_request` rows of the latest round. */
+  current_round_request_ids: string[];
+  /** The pending rows among them this caller may approve or reject right now. */
+  actionable_request_ids: string[];
+};
+
+type RowCapabilitiesBody = {
+  operations: RowCapabilities;
+  write_locks?: { edit_locked: boolean | null; delete_locked: boolean | null };
+  approval?: ApprovalState | null;
+};
+
+function fetchRowCapabilities(entity: string, id: string): Promise<RowCapabilitiesBody> {
+  return apiFetch<RowCapabilitiesBody>(`/api/${entity}/${id}/capabilities`);
+}
+
+/**
+ * Model-level flags overlaid with the row-level answer when a record exists. A row the server
+ * reports as locked (an approval has decided it) is neither editable nor deletable.
+ */
 export async function fetchPermissions(entity: string, id?: string): Promise<ModelPermissions> {
   const model = await apiFetch<ModelPermissions>(`/api/mobile/permissions?entity=${entity}`);
   if (!id) return model;
-  const row = await apiFetch<{ operations: RowCapabilities }>(`/api/${entity}/${id}/capabilities`);
-  return { ...model, update: row.operations.update, delete: row.operations.delete };
+  const row = await fetchRowCapabilities(entity, id);
+  return {
+    ...model,
+    update: row.operations.update && !row.write_locks?.edit_locked,
+    delete: row.operations.delete && !row.write_locks?.delete_locked,
+  };
+}
+
+/** The approval state of one record, or null when the entity has no approval. */
+export async function fetchApprovalState(entity: string, id: string): Promise<ApprovalState | null> {
+  return (await fetchRowCapabilities(entity, id)).approval ?? null;
+}
+
+export type ApprovalAction = 'approve' | 'reject' | 'withdraw';
+
+export type ApprovalActionBody = {
+  message?: string;
+  /** Free text, reject only. */
+  reason?: string;
+  /** 0 = customer, 1 = internal, reject only. */
+  reason_kind?: number;
+};
+
+/**
+ * Approves, rejects or withdraws through `POST /api/approval_request/<id>/<action>`. Withdraw closes
+ * the whole current round whichever of its rows is named. Resolves to an ActionFailure or
+ * `{ ok: true }`; never rejects.
+ */
+export async function postApprovalAction(
+  requestId: string,
+  action: ApprovalAction,
+  body: ApprovalActionBody = {},
+): Promise<ActionFailure | { ok: true }> {
+  try {
+    await apiFetch(`/api/approval_request/${requestId}/${action}`, { method: 'POST', body: JSON.stringify(body) });
+    return { ok: true };
+  } catch (err) {
+    return toActionFailure(err);
+  }
+}
+
+/** The split section of an entity (`x-splittable`): the quantity that is redistributed and the fields each part names. */
+export type SplitConfig = {
+  quantityField: string;
+  quantityLabel: string;
+  /** Fields every part must specify: a relation field is a picker, any other a text input. */
+  parts: FieldSpec[];
+  /** Fields of the record forwarded to the part pickers' autocomplete filter. */
+  contextFields: string[];
+};
+
+export type SplitFailure = ActionFailure & {
+  /** The server's own text for a rejected split (for example a total that does not match). */
+  message?: string;
+};
+
+/**
+ * Splits the record through `POST /api/<entity>/<id>/actions/split`. The server re-checks the parts
+ * (at least two, the quantities positive and summing to the record's, the required fields named, and
+ * that the record may still be split). Resolves to a failure carrying the server's text or `{ ok: true }`;
+ * never rejects.
+ */
+export async function postSplit(
+  entity: string,
+  id: string,
+  parts: Record<string, unknown>[],
+): Promise<SplitFailure | { ok: true }> {
+  try {
+    await apiFetch(`/api/${entity}/${id}/actions/split`, { method: 'POST', body: JSON.stringify({ parts }) });
+    return { ok: true };
+  } catch (err) {
+    const failure: SplitFailure = toActionFailure(err);
+    if (err instanceof ApiError) {
+      try {
+        const text = (JSON.parse(err.message) as ErrorBody).error;
+        if (text) failure.message = text;
+      } catch {
+        // a non-JSON error body: the status alone
+      }
+    }
+    return failure;
+  }
 }
 
 /** A record offered by a relation picker: the related entity's own row. */

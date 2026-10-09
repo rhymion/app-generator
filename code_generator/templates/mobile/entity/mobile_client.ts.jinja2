@@ -6,13 +6,26 @@ import { apiFetch, ApiError } from '@/lib/api-base';
 import type { ActionCreated, ActionFailure } from '@/lib/_errors';
 import type { ModelPermissions } from '@/lib/authz';
 import {
+{% if has_approval %}
+  fetchApprovalState,
+{% endif %}
   buildQuery,
   fetchPermissions,
   formDataToBody,
+{% if split %}
+  postSplit,
+{% endif %}
   toActionFailure,
+{% if has_approval %}
+  type ApprovalState,
+{% endif %}
   type FieldSpec,
   type PageOpts,
   type PageResult,
+{% if split %}
+  type SplitConfig,
+  type SplitFailure,
+{% endif %}
 } from '@/lib/entity-http';
 
 export type {{ pascal }} = { id: string } & Record<string, unknown>;
@@ -94,3 +107,19 @@ export async function remove{{ pascal }}(ids: string[]): Promise<ActionFailure |
 export function get{{ pascal }}Permissions(id?: string): Promise<ModelPermissions> {
   return fetchPermissions('{{ name }}', id);
 }
+{% if has_approval %}
+
+/** Who may approve, reject or withdraw this record's current round, as the server answers it. */
+export function get{{ pascal }}ApprovalState(id: string): Promise<ApprovalState | null> {
+  return fetchApprovalState('{{ name }}', id);
+}
+{% endif %}
+{% if split %}
+
+export const {{ const_name }}_SPLIT: SplitConfig = {{ split_json }};
+
+/** Splits the record into the given parts (`POST /api/{{ name }}/<id>/actions/split`). */
+export function split{{ pascal }}(id: string, parts: Record<string, unknown>[]): Promise<SplitFailure | { ok: true }> {
+  return postSplit('{{ name }}', id, parts);
+}
+{% endif %}

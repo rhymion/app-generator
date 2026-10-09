@@ -47,6 +47,7 @@ model mobile_group {
   id         String   @id @default(cuid())
   name       String
   mobile_tasks mobile_task[]
+  mobile_shipments mobile_shipment[]
   created_at DateTime @default(now()) @db.Timestamptz(0)
   updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
@@ -188,6 +189,62 @@ model mobile_thread {
   updater_id     String
   updater        user        @relation("MobileThreadUpdater", fields: [updater_id], references: [id])
   @@index([title])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+enum MobileRequestStatus {
+  draft
+  submitted
+  approved
+  rejected
+}
+
+model mobile_request {
+  id            String              @id @default(cuid())
+  title         String
+  status        MobileRequestStatus @default(draft)
+  approvable_id String              @unique
+  approvable    approvable          @relation(fields: [approvable_id], references: [id])
+  created_at    DateTime            @default(now()) @db.Timestamptz(0)
+  updated_at    DateTime            @updatedAt @db.Timestamptz(0)
+  creator_id    String
+  creator       user                @relation("MobileRequestCreator", fields: [creator_id], references: [id])
+  updater_id    String
+  updater       user                @relation("MobileRequestUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([status])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+enum MobileShipmentStatus {
+  draft
+  pending
+  approved
+  rejected
+  split
+}
+
+model mobile_shipment {
+  id              String                @id @default(cuid())
+  title           String
+  quantity        Int
+  status          MobileShipmentStatus  @default(draft)
+  mobile_group_id String
+  mobile_group    mobile_group          @relation(fields: [mobile_group_id], references: [id])
+  approvable_id   String                @unique
+  approvable      approvable            @relation(fields: [approvable_id], references: [id])
+  created_at      DateTime              @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime              @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user                  @relation("MobileShipmentCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user                  @relation("MobileShipmentUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([quantity])
+  @@index([status])
+  @@index([mobile_group_id])
   @@index([creator_id])
   @@index([updater_id])
 }
