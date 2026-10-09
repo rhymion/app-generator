@@ -22,14 +22,29 @@ function seedRoles() {
 }
 
 /** The text of every row (or card) of the list that carries "Panel", in display order. */
-function shownNames(layout: Layout) {
+function namesOf($rows: JQuery<HTMLElement>): string[] {
+  return $rows
+    .toArray()
+    .map((row) => (row.textContent ?? '').match(/(Alpha|Beta|Zeta) Panel/)?.[0])
+    .filter((name): name is string => Boolean(name));
+}
+
+/**
+ * Asserts the names shown, in order. The check is one retried `should` callback: a `.then` after
+ * `cy.get` is not retried, so it would read the rows once, before the list has answered.
+ */
+function expectNames(layout: Layout, expected: string[]) {
   const rows = layout === 'grid' ? '.MuiDataGrid-row' : '[data-testid="mobile-card-list"] .MuiCard-root';
-  return cy.get(rows).then(($rows) =>
-    $rows
-      .toArray()
-      .map((row) => (row.textContent ?? '').match(/(Alpha|Beta|Zeta) Panel/)?.[0])
-      .filter((name): name is string => Boolean(name)),
-  );
+  return cy.get(rows).should(($rows) => {
+    expect(namesOf($rows)).to.deep.equal(expected);
+  });
+}
+
+function expectCount(layout: Layout, count: number) {
+  const rows = layout === 'grid' ? '.MuiDataGrid-row' : '[data-testid="mobile-card-list"] .MuiCard-root';
+  return cy.get(rows).should(($rows) => {
+    expect(namesOf($rows)).to.have.length(count);
+  });
 }
 
 export function describeListQueryPanel(label: string, viewport: { width: number; height: number }, layout: Layout) {
@@ -64,21 +79,21 @@ export function describeListQueryPanel(label: string, viewport: { width: number;
 
     it('searches the name column', () => {
       cy.get('[data-testid="list-search"]').type('beta');
-      shownNames(layout).should('deep.equal', ['Beta Panel']);
+      expectNames(layout, ['Beta Panel']);
       cy.get('[data-testid="list-search"]').clear();
-      shownNames(layout).should('have.length', 3);
+      expectCount(layout, 3);
     });
 
     it('filters on several fields at once', () => {
       cy.get('[data-testid="list-filter-toggle"]').click();
       cy.get('[data-testid="list-filter-name"]').type('Panel');
       cy.get('[data-testid="list-filter-description"]').type('common');
-      shownNames(layout).should('have.length', 2);
+      expectCount(layout, 2);
       cy.get('[data-testid="list-filter-toggle"]').should('contain.text', 'Filter (2)');
       cy.get('[data-testid="list-filter-description"]').clear().type('unique');
-      shownNames(layout).should('deep.equal', ['Beta Panel']);
+      expectNames(layout, ['Beta Panel']);
       cy.get('[data-testid="list-filter-clear"]').click();
-      shownNames(layout).should('have.length', 3);
+      expectCount(layout, 3);
     });
 
     it('sorts by several columns, each ascending or descending', () => {
@@ -89,11 +104,11 @@ export function describeListQueryPanel(label: string, viewport: { width: number;
       cy.get('[data-testid="list-sort-name"]').click();
       cy.get('[data-testid="list-sort-name"]').click();
       cy.get('[data-testid="list-sort-name"]').should('contain.text', '↓ 2');
-      shownNames(layout).should('deep.equal', ['Zeta Panel', 'Alpha Panel', 'Beta Panel']);
+      expectNames(layout, ['Zeta Panel', 'Alpha Panel', 'Beta Panel']);
       cy.get('[data-testid="list-sort-description"]').click();
-      shownNames(layout).should('deep.equal', ['Beta Panel', 'Zeta Panel', 'Alpha Panel']);
+      expectNames(layout, ['Beta Panel', 'Zeta Panel', 'Alpha Panel']);
       cy.get('[data-testid="list-sort-clear"]').click();
-      shownNames(layout).should('have.length', 3);
+      expectCount(layout, 3);
     });
 
     if (layout === 'grid') {
@@ -107,9 +122,9 @@ export function describeListQueryPanel(label: string, viewport: { width: number;
         cy.get('[data-testid="list-sort-toggle"]').should('contain.text', 'Sort: Description ↑ +1');
         cy.get('.MuiDataGrid-columnHeader[data-field="name"] .MuiDataGrid-columnHeaderTitle').click();
         cy.get('[data-testid="list-sort-toggle"]').should('have.text', 'Sort: Name ↑');
-        shownNames(layout).should('deep.equal', ['Alpha Panel', 'Beta Panel', 'Zeta Panel']);
+        expectNames(layout, ['Alpha Panel', 'Beta Panel', 'Zeta Panel']);
         cy.get('.MuiDataGrid-columnHeader[data-field="name"] .MuiDataGrid-columnHeaderTitle').click();
-        shownNames(layout).should('deep.equal', ['Zeta Panel', 'Beta Panel', 'Alpha Panel']);
+        expectNames(layout, ['Zeta Panel', 'Beta Panel', 'Alpha Panel']);
       });
     }
 
@@ -119,9 +134,9 @@ export function describeListQueryPanel(label: string, viewport: { width: number;
       cy.get('[data-testid="list-filter-description"]').type('common');
       cy.get('[data-testid="list-sort-toggle"]').click();
       cy.get('[data-testid="list-sort-name"]').click();
-      shownNames(layout).should('deep.equal', ['Alpha Panel', 'Zeta Panel']);
+      expectNames(layout, ['Alpha Panel', 'Zeta Panel']);
       cy.get('[data-testid="list-sort-name"]').click();
-      shownNames(layout).should('deep.equal', ['Zeta Panel', 'Alpha Panel']);
+      expectNames(layout, ['Zeta Panel', 'Alpha Panel']);
     });
   });
 }
