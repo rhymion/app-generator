@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState{% if create_fields %}, type ComponentType{% endif %} } from 'react';
 import { router } from 'expo-router';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useMessages } from '@/lib/messages';
@@ -15,13 +15,39 @@ import {
   {{ const_name }}_FIELDS as FIELDS,
 } from '@/lib/{{ name }}/mobile_client';
 import { FieldInput, toFieldState, type FieldValueState } from '@/components/native/FieldInput';
+{% if create_fields %}
+import type { InlineCreateProps } from '@/components/native/RelationPicker';
+{% for f in create_fields %}
+import { {{ f.create_form.pascal }}FormUpsert } from '@/components/{{ f.create_form.name }}/FormUpsert';
+{% endfor %}
+{% endif %}
+{% if is_payment %}
+import { isCheckoutUrl, openCheckout } from '@/lib/checkout';
+{% endif %}
+{% if create_fields %}
+
+// x-create-inline: the create form of each field's target, opened over this form by the field's picker.
+const CREATE_FORMS: Record<string, ComponentType<InlineCreateProps>> = {
+{% for f in create_fields %}
+  {{ f.key }}: {{ f.create_form.pascal }}FormUpsert,
+{% endfor %}
+};
+{% endif %}
+
+type Props = {
+  id?: string;
+  /** Set when the form is shown over another form (x-create-inline): called instead of navigating after a create. */
+  onCreated?: (id: string) => void;
+  /** Set with `onCreated`: called instead of navigating back. */
+  onCancel?: () => void;
+};
 
 /**
  * Create (no id) and edit (id) form for {{ pascal }}. Form state, validation,
  * submit and error-message mapping come from the generated hooks the Web form
  * also calls; this component only draws native controls and wires them in.
  */
-export function {{ pascal }}FormUpsert({ id }: { id?: string }) {
+export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
   const isEdit = Boolean(id);
   const { t, terr, tmsg } = useMessages();
   const [values, setValues] = useState<Record<string, FieldValueState>>(() =>
@@ -30,6 +56,10 @@ export function {{ pascal }}FormUpsert({ id }: { id?: string }) {
   const [permissions, setPermissions] = useState<ModelPermissions | undefined>(undefined);
   const [state, setState] = useState<'loading' | 'ready' | 'missing'>('loading');
   const [busy, setBusy] = useState(false);
+{% if is_payment %}
+  const checkoutUrl = useRef<string | null>(null);
+  const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
+{% endif %}
 
   // React Native ships React 18, where a transition does not track an async
   // callback, so the hook's isPending is not meaningful here: the in-flight
@@ -37,7 +67,14 @@ export function {{ pascal }}FormUpsert({ id }: { id?: string }) {
   const save = async (formData: FormData) => {
     setBusy(true);
     try {
+{% if is_payment %}
+      const result = await upsert{{ pascal }}(formData);
+      // x-payment: the create response carries the hosted checkout URL.
+      checkoutUrl.current = result.ok && 'checkoutUrl' in result && isCheckoutUrl(result.checkoutUrl) ? result.checkoutUrl : null;
+      return result;
+{% else %}
       return await upsert{{ pascal }}(formData);
+{% endif %}
     } finally {
       setBusy(false);
     }
@@ -88,7 +125,33 @@ export function {{ pascal }}FormUpsert({ id }: { id?: string }) {
       if (Array.isArray(value)) value.forEach((id) => formData.append(spec.key, id));
       else formData.append(spec.key, String(value));
     }
-    submit(formData, (savedId) => {
+    submit(formData, async (savedId) => {
+      if (onCreated) {
+        onCreated(savedId);
+        return;
+      }
+{% if is_payment %}
+      const url = checkoutUrl.current;
+      checkoutUrl.current = null;
+      if (url) {
+        await openCheckout(url);
+{% if can_view or can_edit %}
+        // The buyer is back. A record whose checkout was cancelled or expired has been removed by the
+        // server; one that is kept is either paid or still waiting for the provider's confirmation.
+        const kept = await get{{ pascal }}Detail(savedId).catch(() => undefined);
+        if (kept === null) {
+          setCheckoutNotice(t('Payment.cancelMessage'));
+          return;
+        }
+{% endif %}
+{% if can_view %}
+        router.replace(`/entity/{{ name }}/${savedId}?payment=returned` as never);
+{% else %}
+        router.replace('/entity/{{ name }}' as never);
+{% endif %}
+        return;
+      }
+{% endif %}
 {% if can_view %}
       router.replace(`/entity/{{ name }}/${savedId}` as never);
 {% else %}
@@ -102,6 +165,7 @@ export function {{ pascal }}FormUpsert({ id }: { id?: string }) {
     return (
       <View style={styles.container} testID="form-missing">
         <Text>{t('Errors.notFound')}</Text>
+        {onCancel ? <Pressable onPress={onCancel} testID="form-cancel"><Text>{t('Common.cancel')}</Text></Pressable> : null}
       </View>
     );
   }
@@ -109,6 +173,7 @@ export function {{ pascal }}FormUpsert({ id }: { id?: string }) {
     return (
       <View style={styles.container} testID="form-forbidden">
         <Text>{t('Errors.permissionDenied')}</Text>
+        {onCancel ? <Pressable onPress={onCancel} testID="form-cancel"><Text>{t('Common.cancel')}</Text></Pressable> : null}
       </View>
     );
   }
@@ -124,10 +189,16 @@ export function {{ pascal }}FormUpsert({ id }: { id?: string }) {
           disabled={busy}
           caller="{{ name }}"
           formValues={values}
+{% if create_fields %}
+          createForm={CREATE_FORMS[spec.key]}
+{% endif %}
         />
       ))}
       {validationError ? <Text style={styles.error} testID="form-validation-error">{validationError}</Text> : null}
       {error ? <Text style={styles.error} testID="form-error">{error}</Text> : null}
+{% if is_payment %}
+      {checkoutNotice ? <Text style={styles.error} testID="form-checkout-notice">{checkoutNotice}</Text> : null}
+{% endif %}
       <View style={styles.actions}>
         <Pressable style={styles.primary} disabled={busy} onPress={onSave} testID="form-save">
           <Text style={styles.primaryText}>{busy ? '...' : t('Common.save')}</Text>
@@ -135,7 +206,7 @@ export function {{ pascal }}FormUpsert({ id }: { id?: string }) {
         <Pressable
           style={styles.secondary}
           disabled={busy}
-          onPress={() => (router.canGoBack() ? router.back() : router.replace('/entity/{{ name }}' as never))}
+          onPress={() => (onCancel ? onCancel() : router.canGoBack() ? router.back() : router.replace('/entity/{{ name }}' as never))}
           testID="form-cancel"
         >
           <Text>{t('Common.cancel')}</Text>

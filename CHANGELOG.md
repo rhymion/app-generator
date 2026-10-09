@@ -5,6 +5,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Mobile: create the referenced record in place, and payment checkout** (Issues #877, #872). A
+  many-to-one foreign key that declares `x-create-inline` shows *Create new* in the native picker; it
+  opens the target's native create form over the hosting form, saves through the target's REST create
+  route and selects the new record. An `x-payment` entity now has native screens: saving opens the
+  create response's `checkoutUrl` in the in-app browser (`expo-web-browser`, added only for apps with an
+  `x-payment` entity) and the detail screen shows a returned notice. New `Payment.returnedMessage`
+  text. See `docs/knowledge/mobile-app.md`.
 - **Sort, filter, search and bulk delete on the Expo mobile list** (Issues #874, #856). The native list
   gets a sort panel, a filter panel (text, number, decimal, boolean and enum fields) and a search box that
   matches the row's title column, all through the REST list's `sort` and `f.<field>` parameters; a long press
