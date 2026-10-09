@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import dayjs from 'dayjs';
 import Box from '@mui/material/Box';
@@ -118,11 +118,15 @@ export default function CardListClient<T extends BaseEntity>({
 
   const [query, setQuery] = useState<ListQueryState>(EMPTY_LIST_QUERY);
 
+  // The latest load; an answer to an earlier one must not overwrite the rows of a later request.
+  const latestLoad = useRef(0);
   const loadPage = (newPage: number, forQuery: ListQueryState = query) => {
     if (!fetchPage) return;
     const panelQuery = listQuery ? toListQuery(forQuery, listQuery) : {};
+    const thisLoad = ++latestLoad.current;
     startTransition(async () => {
       const result = await fetchPage({ page: newPage, pageSize, ...panelQuery });
+      if (thisLoad !== latestLoad.current) return;
       setItems(result.rows as T[]);
       setRowCount(result.total);
       setPage(newPage);

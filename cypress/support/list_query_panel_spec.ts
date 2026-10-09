@@ -47,7 +47,14 @@ export function describeListQueryPanel(label: string, viewport: { width: number;
       cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
       seedRoles();
       cy.visit('/en/role');
+      // Wait for the layout of the viewport to be the one on screen (the list first renders as a grid
+      // and swaps to cards on a phone), then for the panel to be hydrated: React marks a node it has
+      // attached handlers to with a `__reactProps$` key, and a click or key press before that is lost.
+      cy.get(layout === 'grid' ? '.MuiDataGrid-root' : '[data-testid="mobile-card-list"]').should('be.visible');
       cy.get('[data-testid="list-query-panel"]').should('be.visible');
+      cy.get('[data-testid="list-search"]').should(($input) => {
+        expect(Object.keys($input[0]).some((key) => key.startsWith('__reactProps$'))).to.eq(true);
+      });
     });
 
     it('lays the list out for the viewport', () => {
@@ -79,7 +86,8 @@ export function describeListQueryPanel(label: string, viewport: { width: number;
       cy.get('[data-testid="list-sort-toggle"]').click();
       // description ascending first (common < unique), then name descending within a description.
       cy.get('[data-testid="list-sort-description"]').click();
-      cy.get('[data-testid="list-sort-name"]').click().click();
+      cy.get('[data-testid="list-sort-name"]').click();
+      cy.get('[data-testid="list-sort-name"]').click();
       cy.get('[data-testid="list-sort-name"]').should('contain.text', '↓ 2');
       shownNames(layout).should('deep.equal', ['Zeta Panel', 'Alpha Panel', 'Beta Panel']);
       cy.get('[data-testid="list-sort-description"]').click();

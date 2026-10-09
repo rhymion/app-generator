@@ -1,5 +1,5 @@
 'use client';
-import { useState, useTransition, useCallback } from 'react';
+import { useState, useTransition, useCallback, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { formatLabelValue } from '@/lib/_format';
 import {
@@ -145,9 +145,13 @@ export default function DataGridClient<T extends BaseEntity>({
   const tf = useTranslations('Fields');
   const terr = useTranslations('Errors');
 
+  // The latest reload; an answer to an earlier one (typing, a filter and a sort change in quick
+  // succession) must not overwrite the rows of a later request.
+  const latestReload = useRef(0);
   const reload = useCallback((p: GridPaginationModel, s: GridSortModel, f: GridFilterModel, q: ListQueryState) => {
     if (!fetchPage) return;
     const panelQuery = listQuery ? toListQuery(q, listQuery) : null;
+    const thisReload = ++latestReload.current;
     startTransition(async () => {
       const result = await fetchPage({
         page: p.page,
@@ -164,6 +168,7 @@ export default function DataGridClient<T extends BaseEntity>({
           ),
         },
       });
+      if (thisReload !== latestReload.current) return;
       setItems(result.rows as T[]);
       setRowCount(result.total);
     });

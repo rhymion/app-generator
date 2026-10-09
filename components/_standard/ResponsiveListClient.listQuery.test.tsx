@@ -111,6 +111,28 @@ describe.each([
     );
   });
 
+  it('keeps the rows of the latest query when an earlier one answers last', async () => {
+    const slow = { rows: [{ id: 'slow', name: 'Slow answer', qty: 1, status: 'open' }], total: 1, page: 0, pageSize: 50 };
+    const fast = { rows: [{ id: 'fast', name: 'Fast answer', qty: 1, status: 'open' }], total: 1, page: 0, pageSize: 50 };
+    let releaseSlow: () => void = () => {};
+    fetchPage.mockImplementation(async (opts: PageOpts) => {
+      if (opts.sort?.length === 1) {
+        await new Promise<void>((resolve) => { releaseSlow = resolve; });
+        return slow as never;
+      }
+      return fast as never;
+    });
+    renderList(fetchPage);
+    await userEvent.click(screen.getByTestId('list-sort-toggle'));
+    await userEvent.click(screen.getByTestId('list-sort-name'));
+    await userEvent.click(screen.getByTestId('list-sort-qty'));
+    await waitFor(() => expect(screen.getAllByText('Fast answer').length).toBeGreaterThan(0));
+    releaseSlow();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText('Slow answer')).toBeNull();
+    expect(screen.getAllByText('Fast answer').length).toBeGreaterThan(0);
+  });
+
   it('queries by several filtered fields at once', async () => {
     renderList(fetchPage);
     await userEvent.click(screen.getByTestId('list-filter-toggle'));
