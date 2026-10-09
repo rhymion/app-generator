@@ -1078,14 +1078,11 @@ _MOBILE_STATIC_TEMPLATES = [
 # Namespaces of messages/<locale>.json the native entity screens read.
 _MOBILE_MESSAGE_NAMESPACES = ('Common', 'Errors', 'ValidationMessages', 'ReactionType')
 
-# Single keys of a namespace too large to ship whole (`Fields` holds every field label).
-_MOBILE_MESSAGE_KEYS = {'Fields': ('comments',)}
-
-# Single keys the built-in audit log screens read from larger namespaces, so the
-# bundle does not carry the whole of `Fields` / `EntityLabel`.
+# Single keys of namespaces too large to ship whole (`Fields` holds every field
+# label): the comment thread heading, plus the keys the built-in audit log screens read.
 _MOBILE_MESSAGE_KEYS = {
     'EntityLabel': ('auditLog',),
-    'Fields': ('action', 'actorUser', 'created_at', 'metadata', 'targetId', 'targetTable'),
+    'Fields': ('comments', 'action', 'actorUser', 'created_at', 'metadata', 'targetId', 'targetTable'),
 }
 
 

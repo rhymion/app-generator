@@ -436,5 +436,7 @@ def test_reaction_labels_and_thread_heading_reach_the_message_bundle():
     en = json.loads((REPO / 'messages' / 'en.json').read_text(encoding='utf-8'))
     bundle = json.loads(_mobile_messages_json({'en': en}))['en']
     assert bundle['ReactionType'] == en['ReactionType']
-    # Only the thread heading of the (large) Fields namespace is shipped.
-    assert bundle['Fields'] == {'comments': en['Fields']['comments']}
+    # Only the thread heading and the audit log labels of the (large) Fields namespace are shipped.
+    assert 'comments' in bundle['Fields']
+    assert bundle['Fields']['comments'] == en['Fields']['comments']
+    assert set(bundle['Fields']) <= {'comments', 'action', 'actorUser', 'created_at', 'metadata', 'targetId', 'targetTable'}
