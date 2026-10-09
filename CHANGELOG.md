@@ -5,6 +5,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Mobile access tokens are accepted by the dual-auth routes** (Issue #883). `resolveActorId()` and
+  `requireDualAuth()` in `lib/api-auth.ts` dispatch an `Authorization: Bearer` token by shape, the same way
+  `requireCaller()` does, so CSV export and import, `GET /api/openapi.json` and the
+  scheduled-task routes accept a mobile access token. `X-API-Key`, API-key bearer tokens and the session
+  cookie behave as before; permission and organization checks are unchanged. See
+  `docs/knowledge/multi-tenancy-and-permissions.md`.
 - **Mobile: create the referenced record in place, and payment checkout** (Issues #877, #872). A
   many-to-one foreign key that declares `x-create-inline` shows *Create new* in the native picker; it
   opens the target's native create form over the hosting form, saves through the target's REST create

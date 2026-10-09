@@ -464,6 +464,7 @@ check and is not part of the mandatory gate.
 - The one-to-one bridge grid (`x-bridge`).
 - The paid / waiting status of an `x-payment` record (no REST route exposes it).
 - The native date pickers (dates are typed as text).
-- CSV export and import: the export and import routes accept a session cookie or an API key but not a mobile
-  access token (`resolveActorId()` in `lib/api-auth.ts`), so the screens cannot call them yet (Issue #883).
+- CSV export and import: the export and import routes accept a mobile access token (`resolveActorId()` in
+  `lib/api-auth.ts` dispatches a bearer token by shape), but the app has no CSV screens. Bulk import and export
+  stay in the Web admin screens.
 - Translated field labels.
