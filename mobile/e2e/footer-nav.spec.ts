@@ -28,11 +28,15 @@ test.describe('Footer navigation', () => {
     await page.setViewportSize({ width: 120, height: 700 });
     await login(page);
     const scroller = page.getByTestId('footer-bar').locator('div').filter({ has: page.getByTestId('footer-tab-search') }).first();
-    const scrollable = await page.getByTestId('footer-bar').evaluate((bar) => {
-      const nodes = Array.from(bar.querySelectorAll('div')) as HTMLElement[];
-      return nodes.some((el) => el.scrollWidth > el.clientWidth + 1);
-    });
-    expect(scrollable).toBe(true);
+    // Measure once layout has settled: the first paint after login can precede the footer's final width.
+    await expect
+      .poll(() =>
+        page.getByTestId('footer-bar').evaluate((bar) => {
+          const nodes = Array.from(bar.querySelectorAll('div')) as HTMLElement[];
+          return nodes.some((el) => el.scrollWidth > el.clientWidth + 1);
+        }),
+      )
+      .toBe(true);
     await scroller.getByTestId('footer-tab-search').click();
     await expect(page.getByTestId('search-screen')).toBeVisible();
   });
