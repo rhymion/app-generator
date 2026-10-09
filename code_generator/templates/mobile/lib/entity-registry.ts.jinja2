@@ -2,6 +2,9 @@
 import type { ComponentType } from 'react';
 import { AuditLogList } from '@/components/audit_log/List';
 import { AuditLogView } from '@/components/audit_log/View';
+{% if has_scheduled_tasks %}
+import { ScheduledTaskRunList } from '@/components/scheduled_task_run/List';
+{% endif %}
 {% for e in entities %}
 import { {{ e.pascal }}List } from '@/components/{{ e.name }}/List';
 {% if e.can_view %}
@@ -27,6 +30,15 @@ export const ENTITY_SCREENS: Record<string, EntityScreens> = {
     View: AuditLogView,
     Form: null,
   },
+{% if has_scheduled_tasks %}
+  // Built-in (not a schema entity), present when the schema declares a scheduled task.
+  scheduled_task_run: {
+    title: 'Scheduled tasks',
+    List: ScheduledTaskRunList,
+    View: null,
+    Form: null,
+  },
+{% endif %}
 {% for e in entities %}
   {{ e.name }}: {
     title: {{ e.title | tojson }},

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from helpers.naming import to_camel_case, to_title_case
 from nav_config import (
+    EXTRA_NAV_PARENT,
     NAV_ICON_ALLOWLIST,
     build_nav_config,
     nav_list_entities,
@@ -82,6 +83,11 @@ AUDIT_LOG_ENTITY = 'audit_log'
 AUDIT_LOG_GROUP = 'administration'
 AUDIT_LOG_ORDER = 80
 
+# The scheduled-task admin screen is built-in too (nav_config.EXTRA_NAV_PARENT) and
+# present only when the schema declares a task. It sits in the same group as the audit log.
+SCHEDULED_TASK_ENTITY = EXTRA_NAV_PARENT
+SCHEDULED_TASK_ORDER = 85
+
 
 def _icon(pair: tuple[str, str]) -> dict:
     return {'family': pair[0], 'name': pair[1]}
@@ -115,7 +121,7 @@ def _sort_key(node: dict) -> tuple:
 
 def build_mobile_nav(
     entities: list, schema: dict, messages: dict[str, dict] | None = None,
-    include_audit_log: bool = False,
+    include_audit_log: bool = False, include_scheduled_tasks: bool = False,
 ) -> dict:
     """
     Build the mobile navigation data from the desktop sidebar's own source.
@@ -139,7 +145,8 @@ def build_mobile_nav(
     `Nav.groups.<slug>` for groups and `Nav.<camelCase(entity)>` for entities.
     Absent keys fall back to the label the sidebar derives from the name.
 
-    `include_audit_log` adds the built-in audit log link (see AUDIT_LOG_GROUP).
+    `include_audit_log` adds the built-in audit log link (see AUDIT_LOG_GROUP);
+    `include_scheduled_tasks` adds the scheduled-task admin link beside it.
     """
     messages = messages or {}
     nav_config = build_nav_config(entities, schema)
@@ -171,6 +178,20 @@ def build_mobile_nav(
             'label': to_title_case(AUDIT_LOG_ENTITY),
             'labels': _locale_labels(messages, ('Nav', to_camel_case(AUDIT_LOG_ENTITY))),
             'order': AUDIT_LOG_ORDER,
+            'icon': _icon(DEFAULT_ENTITY_ICON),
+            'group': AUDIT_LOG_GROUP if AUDIT_LOG_GROUP in group_slugs else None,
+        })
+
+    if include_scheduled_tasks and not any(n['entity'] == SCHEDULED_TASK_ENTITY for n in link_nodes):
+        group_slugs = {g['slug'] for g in nav_config['groups']}
+        link_nodes.append({
+            'kind': 'link',
+            'key': f'/{SCHEDULED_TASK_ENTITY}',
+            'href': f'/{SCHEDULED_TASK_ENTITY}',
+            'entity': SCHEDULED_TASK_ENTITY,
+            'label': to_title_case(SCHEDULED_TASK_ENTITY),
+            'labels': _locale_labels(messages, ('Nav', to_camel_case(SCHEDULED_TASK_ENTITY))),
+            'order': SCHEDULED_TASK_ORDER,
             'icon': _icon(DEFAULT_ENTITY_ICON),
             'group': AUDIT_LOG_GROUP if AUDIT_LOG_GROUP in group_slugs else None,
         })

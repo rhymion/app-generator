@@ -26,6 +26,7 @@ from helpers.bridge_prisma import emit_bridge_model, emit_parent_bridge_fk, emit
 from helpers.schema_helpers import get_flatten_rels
 from generate_types import extract_entities, extract_named_constants
 from mobile_nav import build_mobile_nav
+from nav_config import schema_declares_scheduled_tasks
 from mobile_entities import build_mobile_entity_spec
 from helpers.naming import to_title_case
 from context import build_entity_context
@@ -1078,8 +1079,14 @@ _MOBILE_STATIC_TEMPLATES = [
     ('audit_log/View.tsx.jinja2', 'components/audit_log/View.tsx'),
 ]
 
+# Scheduled task administration screens: written only when the schema declares a task.
+_MOBILE_SCHEDULED_TASK_TEMPLATES = [
+    ('scheduled_task_run/mobile_client.ts.jinja2', 'lib/scheduled_task_run/mobile_client.ts'),
+    ('scheduled_task_run/List.tsx.jinja2', 'components/scheduled_task_run/List.tsx'),
+]
+
 # Namespaces of messages/<locale>.json the native entity screens read.
-_MOBILE_MESSAGE_NAMESPACES = ('Common', 'Errors', 'ValidationMessages', 'ReactionType')
+_MOBILE_MESSAGE_NAMESPACES = ('Common', 'Errors', 'ValidationMessages', 'ReactionType', 'ScheduledTaskRun')
 
 # Single keys of the larger namespaces the native screens read, so the bundle does
 # not carry the whole of `Fields` (every field label) / `EntityLabel`: the thread
@@ -1173,7 +1180,10 @@ def generate_mobile_target(
     """Render the Expo Router mobile/ project (footer tabs + drill-down)."""
     app_name = 'Generated App'
     messages = _read_messages(output_dir)
-    nav = build_mobile_nav(entities, schema, messages, include_audit_log=True)
+    has_scheduled_tasks = schema_declares_scheduled_tasks(schema)
+    nav = build_mobile_nav(
+        entities, schema, messages, include_audit_log=True, include_scheduled_tasks=has_scheduled_tasks,
+    )
     locales = sorted(messages) or ['en']
     if 'en' in locales:
         locales = ['en'] + [loc for loc in locales if loc != 'en']
@@ -1186,6 +1196,7 @@ def generate_mobile_target(
         'locales_json': json.dumps(locales),
         'messages_json': _mobile_messages_json(messages),
         'entities': mobile_specs or [],
+        'has_scheduled_tasks': has_scheduled_tasks,
     }
     mobile_dir = output_dir / 'mobile'
     search_out = mobile_dir / 'app' / '(app)' / 'search.tsx'
@@ -1195,6 +1206,12 @@ def generate_mobile_target(
         search_out.unlink()
     for tmpl_name, rel_out in _MOBILE_STATIC_TEMPLATES:
         _write(mobile_dir / rel_out, _render(env, f'mobile/{tmpl_name}', ctx))
+    for tmpl_name, rel_out in _MOBILE_SCHEDULED_TASK_TEMPLATES:
+        target = mobile_dir / rel_out
+        if has_scheduled_tasks:
+            _write(target, _render(env, f'mobile/{tmpl_name}', ctx))
+        elif target.exists():
+            target.unlink()
     if any(e.get('comments') for e in ctx['entities']):
         _write(mobile_dir / 'lib' / 'comment-http.ts', _render(env, 'mobile/lib/comment-http.ts.jinja2', ctx))
         _write(mobile_dir / 'components' / 'native' / 'CommentThread.tsx',

@@ -5,6 +5,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Scheduled task administration screen in the Expo mobile app** (Issue #867). When the schema declares a
+  scheduled task, `generate-code` renders an overview screen into `mobile/` that reads
+  `GET /api/scheduled-task-runs` (status, times, message and the reason a task did not run, for a chosen business
+  date, plus failed or stuck runs of other dates) and offers rerun, mark resolved and skip through
+  `POST /api/scheduled-task-runs/<task>/<action>`. Only the actions the server marks open are shown, and the role
+  check stays on the server: the nav link is hidden by `GET /api/mobile/nav`, and a `403` is shown as the server's
+  answer. No schema key is added and the Web admin page is unchanged. `build_mobile_nav()` takes
+  `include_scheduled_tasks`. See `docs/knowledge/mobile-app.md`.
 - **REST routes for the scheduled-task administration** (Issue #887). When the schema declares a scheduled task,
   `GET /api/scheduled-task-runs` returns the admin page's overview (one row per task with its last-run status and the
   open actions, plus failed or stuck runs of other dates) and `POST /api/scheduled-task-runs/{task}/{rerun|resolve|skip}`
