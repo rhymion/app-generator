@@ -1,3 +1,5 @@
+import { isValidDateValue, type DateValueFormat } from '@/lib/_date_value';
+
 const REQUIRED_FIELDS = [
 {% for field in client_required_fields %}
   { key: '{{ field.key }}', label: '{{ field.label }}' },
@@ -13,6 +15,12 @@ const REQUIRED_FIELDS = [
 const DECIMAL_FIELDS: { key: string; label: string }[] = [
 {% for field in decimal_fields %}
   { key: '{{ field.key }}', label: '{{ field.label }}' },
+{% endfor %}
+];
+
+const DATE_FIELDS: { key: string; label: string; format: DateValueFormat }[] = [
+{% for field in date_fields %}
+  { key: '{{ field.key }}', label: '{{ field.label }}', format: '{{ field.format }}' },
 {% endfor %}
 ];
 
@@ -50,6 +58,11 @@ export function validateForm(values: Record<string, unknown>): string | null {
   for (const field of DECIMAL_FIELDS) {
     if (isInvalidDecimal(values[field.key])) {
       return `${field.label} must be a valid decimal number`;
+    }
+  }
+  for (const field of DATE_FIELDS) {
+    if (!isValidDateValue(field.format, values[field.key])) {
+      return `${field.label} must be a valid ${field.format === 'date' ? 'date' : field.format === 'time' ? 'time' : 'date and time'}`;
     }
   }
   return null;

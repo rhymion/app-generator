@@ -16,6 +16,8 @@ model mobile_note {
   amount     Decimal?         @db.Decimal(10, 2)
   is_done    Boolean
   due_on     DateTime?
+  remind_at  DateTime?        @db.Timestamptz(0)
+  remind_time DateTime?       @db.Timetz(0)
   created_at DateTime         @default(now()) @db.Timestamptz(0)
   updated_at DateTime         @updatedAt @db.Timestamptz(0)
   creator_id String

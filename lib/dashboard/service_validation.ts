@@ -1,6 +1,7 @@
 import prisma from '@/lib/prisma';
 import { validateCustomRules } from '@/lib/dashboard/service_validation_custom';
 import { AppError } from '@/lib/_errors';
+import { isValidDateValue, type DateValueFormat } from '@/lib/_date_value';
 
 type TransactionClient = Pick<typeof prisma, 'dashboard'>;
 type RequiredField = { key: string; label: string };
@@ -24,6 +25,9 @@ function isInvalidDecimal(value: unknown): boolean {
   if (typeof value !== 'string' || value.trim() === '') return false;
   return !DECIMAL_PATTERN.test(value.trim());
 }
+
+const DATE_FIELDS: (RequiredField & { format: DateValueFormat })[] = [
+] ;
 
 const ONE_TO_ONE_RELATIONS: OneToOneRelation[] = [
 ] ;
@@ -83,6 +87,13 @@ async function validateSchemaRules(tx: TransactionClient, data: Record<string, u
   for (const field of DECIMAL_FIELDS) {
     if (isInvalidDecimal(data[field.key])) {
       throw new AppError('VALIDATION', `${field.label} must be a valid decimal number`, field.key, 'invalid');
+    }
+  }
+
+  // An unparseable date / time would reach Prisma and fail as a 500.
+  for (const field of DATE_FIELDS) {
+    if (!isValidDateValue(field.format, data[field.key])) {
+      throw new AppError('VALIDATION', `${field.label} must be a valid ${field.format === 'date' ? 'date' : field.format === 'time' ? 'time' : 'date and time'}`, field.key, 'invalid');
     }
   }
 
