@@ -1,5 +1,7 @@
 // Generated: the entities that have native list / detail / form screens.
 import type { ComponentType } from 'react';
+import { AuditLogList } from '@/components/audit_log/List';
+import { AuditLogView } from '@/components/audit_log/View';
 {% for e in entities %}
 import { {{ e.pascal }}List } from '@/components/{{ e.name }}/List';
 {% if e.can_view %}
@@ -18,6 +20,13 @@ export type EntityScreens = {
 };
 
 export const ENTITY_SCREENS: Record<string, EntityScreens> = {
+  // Built-in, read-only (not a schema entity): the audit log.
+  audit_log: {
+    title: 'Audit Log',
+    List: AuditLogList,
+    View: AuditLogView,
+    Form: null,
+  },
 {% for e in entities %}
   {{ e.name }}: {
     title: {{ e.title | tojson }},
