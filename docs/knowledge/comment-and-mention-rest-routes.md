@@ -44,9 +44,10 @@ id of the new comment, which the route passes on.
 
 ## What the routes check
 
-The Server Actions do not check the caller's access to the record themselves: the web reaches them from
-the edit form, which is shown only to a user who may edit the record. A REST route has no such page in
-front of it, so each comment route checks access first, the same way `PUT /api/{entity}/{id}` does:
+The Server Actions check the caller's access to the record themselves (see below), so a call that
+skips the UI and the REST routes is refused the same way. A REST route has no edit page in front of it
+and answers earlier, with the status codes a REST client expects, so each comment route checks access
+first, the same way `PUT /api/{entity}/{id}` does:
 
 1. `update` on the entity (`requireApiPermission`), before the record is read, so a caller with no access
    path at all learns nothing about whether the record exists (`403`).
@@ -65,6 +66,25 @@ or an unknown id, is `404`. Then the Server Action's own rules apply:
 - Edit: only the author. Anyone else gets `403` (`Not authorized to edit this comment`), whatever their
   permissions.
 - Delete: the author, or a caller with `delete` on the entity. A caller with neither gets `403`.
+
+## What the Server Actions check
+
+`add{Entity}Comment()`, `update{Entity}Comment()` and `delete{Entity}Comment()` are callable endpoints
+independent of the UI, so each one applies the checks `upsert{Entity}()` applies before it writes:
+
+1. The parent record is read through the caller's organization scope (`getAssociatedOrganizations()`,
+   admitting organization-less rows only when the entity's organization relation is optional), narrowed to
+   the caller's own records for an `x-self-only` entity and to the `x-filter-values` view when declared. A
+   record outside that scope, or missing, is `NOT_FOUND`.
+2. `requirePermission('{entity}', 'update', parentRow, userId)` resolves the caller's permission on that
+   concrete record (Creator and Assignee grants count); without it the action throws `PERMISSION_DENIED`.
+3. Then the comment's own rule: edit is author-only; delete is the author, or a caller who also has
+   `delete` on the record.
+
+Add, edit and delete all need `update` on the record, the permission the web form requires before it
+shows the comment box. The notifications use the record read in step 1. The routes above run these
+actions after their own checks, so their results are the actions' results. The reaction toggle has its
+own, separate `read` check.
 
 ## Request validation
 
@@ -89,6 +109,9 @@ includes `/api/mention/users` and the `MentionUserOption` schema when the search
 
 ## Tests
 
+- `code_generator/tests/test_comment_write_action_access.py`: both comment shapes (the shared commentable
+  bridge and a per-entity comment table) read the parent through the organization, `x-self-only` and
+  `x-filter-values` scope and call `requirePermission()` before writing; the checks precede the write.
 - `code_generator/tests/test_comment_mention_rest_routes.py`: the routes are written for a commentable
   entity and not otherwise, run the Server Actions after the permission and record checks, hold no write
   of their own, validate the message; the OpenAPI paths.
@@ -100,4 +123,8 @@ includes `/api/mention/users` and the `MentionUserOption` schema when the search
   entity with a comment thread. Its Cypress spec covers authentication with an API key and a mobile
   access token, add, edit and delete, the mention notifications, `403` without `update` and for a
   non-author, `404` for a record or comment of another organization or record, message validation, and
-  the search's organization scope, the 20-user limit and the `permissionDenied` result.
+  the search's organization scope, the 20-user limit and the `permissionDenied` result. A test-only probe
+  route (`probe_routes/action_probe_route.ts`, copied into the disposable app only) calls the Server Actions
+  directly, without the REST pre-gates, to show that a caller without `update`, a non-author without
+  `delete` and a caller outside the record's organization are refused by the actions themselves while a
+  same-organization caller with `update` can add, edit and delete.

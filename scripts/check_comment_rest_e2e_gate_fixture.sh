@@ -8,7 +8,8 @@
 # comment box and the @-mention picker, which the default schema (no entity with a
 # comment thread) cannot exercise: adding, editing and deleting a comment through
 # /api/<entity>/{id}/comments with an API key and a mobile access token, the permission
-# and organization checks, the author-only edit and delete rules, the mention
+# and organization checks (also on the Server Actions themselves, through a test-only probe
+# route that skips the REST pre-gates), the author-only edit and delete rules, the mention
 # notifications, and GET /api/mention/users.
 #
 # Isolation (the repository's own schema, generated output, database and other
@@ -97,6 +98,9 @@ echo "-- merging the fixture schema into the copy --"
 python3 scripts/compose_child_datagrid_e2e_fixture.py "$FIXTURE_DIR" "$BUILD_DIR"
 mkdir -p "$BUILD_DIR/cypress/e2e/comment_rest_e2e_gate"
 cp -r "$FIXTURE_DIR/cypress/e2e/." "$BUILD_DIR/cypress/e2e/comment_rest_e2e_gate/"
+# Test-only route that calls the comment Server Actions without the REST pre-gates.
+mkdir -p "$BUILD_DIR/app/api/cr_ticket/[id]/action_probe"
+cp "$FIXTURE_DIR/probe_routes/action_probe_route.ts" "$BUILD_DIR/app/api/cr_ticket/[id]/action_probe/route.ts"
 
 echo "-- writing the copy's own environment --"
 python3 - "$BUILD_DIR/.env.test" "$PROJECT" "$APP_PORT" "$POSTGRES_PORT" "$REDIS_PORT" <<'PY'

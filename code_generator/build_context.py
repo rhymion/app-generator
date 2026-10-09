@@ -1297,9 +1297,48 @@ def _build_child_assignee_notify_update_code(children_data: list[dict], parent: 
     return '\n'.join(blocks)
 
 
-def _build_comment_actions(comment_children: list[dict], parent: str, model: str, has_assignee_id: bool, comment_has_mention: bool = False) -> str:
+def _comment_parent_access_block(parent: str, model: str, key_where: str, op: str,
+                                 item_select: str, scope: dict) -> str:
+    """Server-side access check shared by the comment add / edit / delete actions.
+
+    A comment write is a write on its parent record, so it runs the same gates the parent's own
+    update action runs: the parent row is read through the caller's organization scope (and the
+    x-self-only / x-filter-values scope, when declared), an out-of-scope or missing row is
+    NOT_FOUND, and requirePermission() then resolves the caller's permission for ``op`` against
+    that concrete row. Hiding the composer in the UI is not an enforcement boundary -- a Server
+    Action is callable on its own. Assumes ``userId`` is already declared in the enclosing scope.
+    """
+    where = [key_where]
+    prelude = ''
+    if scope.get('should_filter_by_org'):
+        prelude = (
+            "  const _assocOrgs = await getAssociatedOrganizations(userId);\n"
+            "  const _assocOrgIds = _assocOrgs.map((o) => o.id);\n"
+        )
+        where.append(
+            "OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }]"
+            if scope.get('org_relationship_optional')
+            else "organization_id: { in: _assocOrgIds }"
+        )
+    if scope.get('is_self_only'):
+        where.append("creator_id: userId")
+    for field, values in sorted((scope.get('filter_values') or {}).items()):
+        where.append(f"{field}: {{ in: {json.dumps(list(values))} }}")
+    return (
+        prelude
+        + f"  const parentRow = await prisma.{model}.findFirst({{\n"
+        f"    where: {{ {', '.join(where)} }},\n"
+        f"    select: {item_select},\n"
+        f"  }});\n"
+        f"  if (!parentRow) throw new AppError('NOT_FOUND', 'Not found');\n"
+        f"  await requirePermission('{parent}', '{op}', parentRow, userId);\n"
+    )
+
+
+def _build_comment_actions(comment_children: list[dict], parent: str, model: str, has_assignee_id: bool, comment_has_mention: bool = False,
+                           item_select: str = '{ id: true, creator_id: true }', scope: dict | None = None) -> str:
+    scope = scope or {}
     parent_pascal = to_pascal_case(parent)
-    assignee_select = ", assignee_id: true" if has_assignee_id else ""
     recipient_list = (
         "[parentRow.creator_id, parentRow.assignee_id]"
         if has_assignee_id else "[parentRow.creator_id]"
@@ -1308,24 +1347,26 @@ def _build_comment_actions(comment_children: list[dict], parent: str, model: str
     for c in comment_children:
         child_model   = c['name']
         parent_id_prop = f'{model}_id'
+        add_access = _comment_parent_access_block(parent, model, f"id: {parent_id_prop}", 'update', item_select, scope)
+        comment_access = _comment_parent_access_block(parent, model, f"id: comment.{parent_id_prop}", 'update', item_select, scope)
         # Mention notifications (cmd_522): encodeMentions() retired from the save
         # path — the client-side picker inserts @[user_id:<id>] markers directly,
         # so the stored message is always the raw client text. Self-mentions are
         # excluded; on update, only newly-added mentions (vs. the prior message)
         # are notified.
         mention_notify_add = (
-            f"\n    const mentionedIds = extractMentionedUserIds(message).filter((mid) => mid !== userId);"
-            f"\n    for (const mentionedId of new Set(mentionedIds)) {{"
-            f"\n      notify(mentionedId, 'mentioned_in_comment', {{"
-            f"\n        title: 'You were mentioned in a {parent_pascal} comment',"
-            f"\n        href: `/{parent}/view/${{parentRow.id}}`,"
-            f"\n        commentSnippet: message.slice(0, 80),"
-            f"\n      }});"
-            f"\n    }}"
+            f"\n  const mentionedIds = extractMentionedUserIds(message).filter((mid) => mid !== userId);"
+            f"\n  for (const mentionedId of new Set(mentionedIds)) {{"
+            f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
+            f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
+            f"\n      href: `/{parent}/view/${{parentRow.id}}`,"
+            f"\n      commentSnippet: message.slice(0, 80),"
+            f"\n    }});"
+            f"\n  }}"
         ) if comment_has_mention else ""
         update_select = (
             "{ creator_id: true, message: true, " + parent_id_prop + ": true }"
-            if comment_has_mention else "{ creator_id: true }"
+            if comment_has_mention else "{ creator_id: true, " + parent_id_prop + ": true }"
         )
         mention_notify_update = (
             f"\n  const oldIds = new Set(extractMentionedUserIds(comment.message));"
@@ -1342,28 +1383,22 @@ def _build_comment_actions(comment_children: list[dict], parent: str, model: str
         lines.append(f"""
 export async function add{parent_pascal}Comment({parent_id_prop}: string, message: string): Promise<{{ id: string }}> {{
   const userId = await getSessionUserIdOrThrow();
-  const created = await prisma.{child_model}.create({{
+{add_access}  const created = await prisma.{child_model}.create({{
     data: {{ message, {parent_id_prop}, creator_id: userId }},
     select: {{ id: true }},
   }});
   // Trigger #4 (notification design 2026-05-11): notify the entity creator
   // and (if present) assignee; never the commenter themselves.
-  const parentRow = await prisma.{model}.findUnique({{
-    where: {{ id: {parent_id_prop} }},
-    select: {{ id: true, creator_id: true{assignee_select} }},
-  }});
-  if (parentRow) {{
-    const recipients = new Set<string>(
-      {recipient_list}.filter((id): id is string => Boolean(id) && id !== userId)
-    );
-    for (const recipientId of recipients) {{
-      notify(recipientId, 'comment_created', {{
-        title: 'New comment on {parent_pascal}',
-        href: `/{parent}/view/${{parentRow.id}}`,
-        commentSnippet: message.slice(0, 80),
-      }});
-    }}{mention_notify_add}
-  }}
+  const recipients = new Set<string>(
+    {recipient_list}.filter((id): id is string => Boolean(id) && id !== userId)
+  );
+  for (const recipientId of recipients) {{
+    notify(recipientId, 'comment_created', {{
+      title: 'New comment on {parent_pascal}',
+      href: `/{parent}/view/${{parentRow.id}}`,
+      commentSnippet: message.slice(0, 80),
+    }});
+  }}{mention_notify_add}
   revalidatePath('/{parent}');
   return {{ id: created.id }};
 }}
@@ -1374,27 +1409,29 @@ export async function update{parent_pascal}Comment(commentId: string, message: s
   if (!comment || comment.creator_id !== userId) {{
     throw new Error('Not authorized to edit this comment');
   }}
-  await prisma.{child_model}.update({{ where: {{ id: commentId }}, data: {{ message }} }});{mention_notify_update}
+{comment_access}  await prisma.{child_model}.update({{ where: {{ id: commentId }}, data: {{ message }} }});{mention_notify_update}
   revalidatePath('/{parent}');
 }}
 
 export async function delete{parent_pascal}Comment(commentId: string): Promise<void> {{
   const userId = await getSessionUserIdOrThrow();
-  const comment = await prisma.{child_model}.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true }} }});
+  const comment = await prisma.{child_model}.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true, {parent_id_prop}: true }} }});
   if (!comment) return;
-  if (comment.creator_id !== userId) {{
-    await requirePermission('{parent}', 'delete');
+{comment_access}  if (comment.creator_id !== userId) {{
+    await requirePermission('{parent}', 'delete', parentRow, userId);
   }}
   await prisma.{child_model}.delete({{ where: {{ id: commentId }} }});
   revalidatePath('/{parent}');
 }}""")
+
     return '\n'.join(lines)
 
 
-def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool, comment_has_mention: bool = False) -> str:
+def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool, comment_has_mention: bool = False,
+                                  item_select: str = '{ id: true, creator_id: true }', scope: dict | None = None) -> str:
     """Generate comment actions using the shared commentable bridge (single comment table)."""
+    scope = scope or {}
     parent_pascal = to_pascal_case(parent)
-    assignee_select = ", assignee_id: true" if has_assignee_id else ""
     recipient_list = (
         "[parentRow.creator_id, parentRow.assignee_id]"
         if has_assignee_id else "[parentRow.creator_id]"
@@ -1402,64 +1439,51 @@ def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool
     # Mention notifications (cmd_522): encodeMentions() retired from the save
     # path — see _build_comment_actions for the rationale. The bridge variant
     # has no direct parent FK on the comment row (only commentable_id), so the
-    # update path re-resolves the parent row for the href, and only pays for
-    # that extra query when there are fresh mentions to notify.
+    # update path resolves the parent row (through the access check) for the href.
     mention_notify_add = (
-        f"\n    const mentionedIds = extractMentionedUserIds(message).filter((mid) => mid !== userId);"
-        f"\n    for (const mentionedId of new Set(mentionedIds)) {{"
-        f"\n      notify(mentionedId, 'mentioned_in_comment', {{"
-        f"\n        title: 'You were mentioned in a {parent_pascal} comment',"
-        f"\n        href: `/{parent}/view/${{parentRow.id}}`,"
-        f"\n        commentSnippet: message.slice(0, 80),"
-        f"\n      }});"
-        f"\n    }}"
+        f"\n  const mentionedIds = extractMentionedUserIds(message).filter((mid) => mid !== userId);"
+        f"\n  for (const mentionedId of new Set(mentionedIds)) {{"
+        f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
+        f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
+        f"\n      href: `/{parent}/view/${{parentRow.id}}`,"
+        f"\n      commentSnippet: message.slice(0, 80),"
+        f"\n    }});"
+        f"\n  }}"
     ) if comment_has_mention else ""
     update_select = (
         "{ creator_id: true, message: true, commentable_id: true }"
-        if comment_has_mention else "{ creator_id: true }"
+        if comment_has_mention else "{ creator_id: true, commentable_id: true }"
     )
     mention_notify_update = (
         f"\n  const oldIds = new Set(extractMentionedUserIds(comment.message));"
         f"\n  const newIds = extractMentionedUserIds(message);"
         f"\n  const freshMentions = newIds.filter((mid) => !oldIds.has(mid) && mid !== userId);"
-        f"\n  if (freshMentions.length > 0) {{"
-        f"\n    const mentionParentRow = await prisma.{model}.findFirst({{"
-        f"\n      where: {{ commentable_id: comment.commentable_id }},"
-        f"\n      select: {{ id: true }},"
+        f"\n  for (const mentionedId of freshMentions) {{"
+        f"\n    notify(mentionedId, 'mentioned_in_comment', {{"
+        f"\n      title: 'You were mentioned in a {parent_pascal} comment',"
+        f"\n      href: `/{parent}/view/${{parentRow.id}}`,"
+        f"\n      commentSnippet: message.slice(0, 80),"
         f"\n    }});"
-        f"\n    if (mentionParentRow) {{"
-        f"\n      for (const mentionedId of freshMentions) {{"
-        f"\n        notify(mentionedId, 'mentioned_in_comment', {{"
-        f"\n          title: 'You were mentioned in a {parent_pascal} comment',"
-        f"\n          href: `/{parent}/view/${{mentionParentRow.id}}`,"
-        f"\n          commentSnippet: message.slice(0, 80),"
-        f"\n        }});"
-        f"\n      }}"
-        f"\n    }}"
         f"\n  }}"
     ) if comment_has_mention else ""
+    add_access = _comment_parent_access_block(parent, model, "commentable_id", 'update', item_select, scope)
+    comment_access = _comment_parent_access_block(parent, model, "commentable_id: comment.commentable_id", 'update', item_select, scope)
     return f"""
 export async function add{parent_pascal}Comment(commentable_id: string, message: string): Promise<{{ id: string }}> {{
   const userId = await getSessionUserIdOrThrow();
-  const created = await createComment({{ message, commentable_id, creator_id: userId }});
+{add_access}  const created = await createComment({{ message, commentable_id, creator_id: userId }});
   // Trigger #4 (notification design 2026-05-11): notify the entity creator
   // and (if present) assignee; never the commenter themselves.
-  const parentRow = await prisma.{model}.findFirst({{
-    where: {{ commentable_id }},
-    select: {{ id: true, creator_id: true{assignee_select} }},
-  }});
-  if (parentRow) {{
-    const recipients = new Set<string>(
-      {recipient_list}.filter((id): id is string => Boolean(id) && id !== userId)
-    );
-    for (const recipientId of recipients) {{
-      notify(recipientId, 'comment_created', {{
-        title: 'New comment on {parent_pascal}',
-        href: `/{parent}/view/${{parentRow.id}}`,
-        commentSnippet: message.slice(0, 80),
-      }});
-    }}{mention_notify_add}
-  }}
+  const recipients = new Set<string>(
+    {recipient_list}.filter((id): id is string => Boolean(id) && id !== userId)
+  );
+  for (const recipientId of recipients) {{
+    notify(recipientId, 'comment_created', {{
+      title: 'New comment on {parent_pascal}',
+      href: `/{parent}/view/${{parentRow.id}}`,
+      commentSnippet: message.slice(0, 80),
+    }});
+  }}{mention_notify_add}
   revalidatePath('/{parent}');
   return {{ id: created.id }};
 }}
@@ -1470,16 +1494,16 @@ export async function update{parent_pascal}Comment(commentId: string, message: s
   if (!comment || comment.creator_id !== userId) {{
     throw new Error('Not authorized to edit this comment');
   }}
-  await updateComment(commentId, {{ message }});{mention_notify_update}
+{comment_access}  await updateComment(commentId, {{ message }});{mention_notify_update}
   revalidatePath('/{parent}');
 }}
 
 export async function delete{parent_pascal}Comment(commentId: string): Promise<void> {{
   const userId = await getSessionUserIdOrThrow();
-  const comment = await prisma.comment.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true }} }});
+  const comment = await prisma.comment.findUnique({{ where: {{ id: commentId }}, select: {{ creator_id: true, commentable_id: true }} }});
   if (!comment) return;
-  if (comment.creator_id !== userId) {{
-    await requirePermission('{parent}', 'delete');
+{comment_access}  if (comment.creator_id !== userId) {{
+    await requirePermission('{parent}', 'delete', parentRow, userId);
   }}
   await deleteComment(commentId);
   revalidatePath('/{parent}');
@@ -3467,11 +3491,21 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         for fp in (_comment_def.get('properties') or {}).values()
     )
 
-    # Comment actions code
+    # Comment actions code. The write actions run the parent entity's own access gates
+    # (organization scope, x-self-only, x-filter-values, requirePermission) -- see
+    # _comment_parent_access_block.
+    _comment_scope = {
+        'should_filter_by_org': should_filter_by_org,
+        'org_relationship_optional': org_relationship_optional,
+        'is_self_only': is_self_only,
+        'filter_values': filter_values,
+    }
     if commentable_rel:
-        comment_actions_code = _build_comment_actions_bridge(parent, model, has_assignee_id, comment_has_mention)
+        comment_actions_code = _build_comment_actions_bridge(
+            parent, model, has_assignee_id, comment_has_mention, item_context_select, _comment_scope)
     else:
-        comment_actions_code = _build_comment_actions(comment_children, parent, model, has_assignee_id, comment_has_mention)
+        comment_actions_code = _build_comment_actions(
+            comment_children, parent, model, has_assignee_id, comment_has_mention, item_context_select, _comment_scope)
 
     # Snapshot child mappings (for service). Uses write_ch, not embedded_ch:
     # an independent child is never touched by update{{parent}}'s own write,

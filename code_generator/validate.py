@@ -951,6 +951,42 @@ def _create_inline_errors(schema: dict) -> list[str]:
     return errors
 
 
+_MOBILE_GENERATOR_KEYS = frozenset({'enabled'})
+
+
+def mobile_generation_enabled(schema: dict) -> bool:
+    """True when the schema opts in to generating the Expo app under mobile/.
+
+    Reads `x-generator.mobile.enabled`; absent means false (opt-in, default off).
+    """
+    gen = schema.get('x-generator')
+    mobile = gen.get('mobile') if isinstance(gen, dict) else None
+    return isinstance(mobile, dict) and mobile.get('enabled') is True
+
+
+def validate_generator_config(schema: dict) -> None:
+    """Validate the `x-generator.mobile` block (bool `enabled` only, no unknown keys)."""
+    gen = schema.get('x-generator')
+    if not isinstance(gen, dict) or 'mobile' not in gen:
+        return
+    mobile = gen['mobile']
+    where = "x-generator.mobile"
+    if not isinstance(mobile, dict):
+        raise SchemaValidationError(f"{where} must be a mapping (e.g. `enabled: true`).")
+    errors: list[str] = []
+    unknown = sorted(str(k) for k in mobile if k not in _MOBILE_GENERATOR_KEYS)
+    if unknown:
+        errors.append(
+            f"{where} has unknown key(s) {unknown}; supported: {sorted(_MOBILE_GENERATOR_KEYS)}."
+        )
+    if 'enabled' in mobile and not isinstance(mobile['enabled'], bool):
+        errors.append(
+            f"{where}.enabled must be a boolean (true/false), got {mobile['enabled']!r}."
+        )
+    if errors:
+        raise SchemaValidationError("\n".join(errors))
+
+
 def validate_schema(schema: dict) -> None:
     """Validate *schema* and raise SchemaValidationError listing all problems."""
     defs = schema.get('definitions', {})

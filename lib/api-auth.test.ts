@@ -1,9 +1,16 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const { userFindFirst, roleCount, getSessionUserId } = vi.hoisted(() => ({
+const { userFindFirst, roleCount, getSessionUserId, verifyMobileAccessToken } = vi.hoisted(() => ({
   userFindFirst: vi.fn(),
   roleCount: vi.fn(),
   getSessionUserId: vi.fn(),
+  verifyMobileAccessToken: vi.fn(),
+}));
+
+vi.mock('@/lib/mobile-auth', () => ({
+  isMobileJwt: (token: string) => token.split('.').length === 3,
+  verifyMobileAccessToken,
+  MobileAuthError: class MobileAuthError extends Error {},
 }));
 
 vi.mock('@/lib/prisma', () => ({
@@ -15,7 +22,7 @@ vi.mock('@/lib/authz', () => ({
   getSessionUserId,
 }));
 
-import { ApiError, authenticateApiKey, requireCaller, requireScheduledTaskRole } from './api-auth';
+import { ApiError, authenticateApiKey, requireCaller, requireDualAuth, requireScheduledTaskRole, resolveActorId } from './api-auth';
 import { SCHEDULED_TASK_ROLE_NAME } from './scheduled-tasks/system-actor';
 
 function makeRequest(headers: Record<string, string> = {}) {
@@ -26,6 +33,7 @@ beforeEach(() => {
   userFindFirst.mockReset();
   roleCount.mockReset();
   getSessionUserId.mockReset();
+  verifyMobileAccessToken.mockReset();
 });
 
 describe('requireScheduledTaskRole', () => {
@@ -143,5 +151,82 @@ describe('requireCaller', () => {
     userFindFirst.mockResolvedValue(null);
     await expect(requireCaller(makeRequest({ 'X-API-Key': 'not-a-real-key' }))).rejects.toBeInstanceOf(ApiError);
     expect(getSessionUserId).not.toHaveBeenCalled();
+  });
+});
+
+const MOBILE_JWT = 'header.payload.signature';
+
+describe('resolveActorId', () => {
+  it('resolves a mobile access token sent as a bearer credential', async () => {
+    verifyMobileAccessToken.mockResolvedValue({ userId: 'mobile-user', sessionId: 's1' });
+    await expect(resolveActorId(makeRequest({ Authorization: `Bearer ${MOBILE_JWT}` }))).resolves.toBe('mobile-user');
+    expect(verifyMobileAccessToken).toHaveBeenCalledWith(MOBILE_JWT);
+    expect(userFindFirst).not.toHaveBeenCalled();
+    expect(getSessionUserId).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid mobile access token with 401 and does not fall back to the session', async () => {
+    verifyMobileAccessToken.mockRejectedValue(new Error('bad signature'));
+    getSessionUserId.mockResolvedValue('cookie-user');
+    await expect(resolveActorId(makeRequest({ Authorization: `Bearer ${MOBILE_JWT}` }))).rejects.toMatchObject({
+      statusCode: 401,
+    });
+    expect(getSessionUserId).not.toHaveBeenCalled();
+  });
+
+  it('still resolves an API key sent as a bearer credential', async () => {
+    userFindFirst.mockResolvedValue({ id: 'key-user', api_key_expires_at: null });
+    await expect(resolveActorId(makeRequest({ Authorization: 'Bearer mk_test' }))).resolves.toBe('key-user');
+    expect(verifyMobileAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('still resolves X-API-Key as an API key, even next to a bearer token', async () => {
+    userFindFirst.mockResolvedValue({ id: 'key-user', api_key_expires_at: null });
+    await expect(
+      resolveActorId(makeRequest({ 'X-API-Key': 'mk_test', Authorization: `Bearer ${MOBILE_JWT}` })),
+    ).resolves.toBe('key-user');
+    expect(verifyMobileAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown API key with 401', async () => {
+    userFindFirst.mockResolvedValue(null);
+    await expect(resolveActorId(makeRequest({ 'X-API-Key': 'nope' }))).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it('falls back to the session cookie without a credential header, and returns null without one', async () => {
+    getSessionUserId.mockResolvedValueOnce('cookie-user');
+    await expect(resolveActorId(makeRequest())).resolves.toBe('cookie-user');
+    getSessionUserId.mockResolvedValueOnce(null);
+    await expect(resolveActorId(makeRequest())).resolves.toBeNull();
+  });
+});
+
+describe('requireDualAuth and requireScheduledTaskRole with a mobile access token', () => {
+  it('requireDualAuth accepts a mobile access token', async () => {
+    verifyMobileAccessToken.mockResolvedValue({ userId: 'mobile-user', sessionId: 's1' });
+    await expect(requireDualAuth(makeRequest({ Authorization: `Bearer ${MOBILE_JWT}` }))).resolves.toEqual({
+      userId: 'mobile-user',
+    });
+  });
+
+  it('requireDualAuth throws 401 with no credential and no session', async () => {
+    getSessionUserId.mockResolvedValue(null);
+    await expect(requireDualAuth(makeRequest())).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it('requireScheduledTaskRole accepts a mobile token holding the role', async () => {
+    verifyMobileAccessToken.mockResolvedValue({ userId: 'mobile-user', sessionId: 's1' });
+    roleCount.mockResolvedValue(1);
+    await expect(requireScheduledTaskRole(makeRequest({ Authorization: `Bearer ${MOBILE_JWT}` }))).resolves.toEqual({
+      userId: 'mobile-user',
+    });
+  });
+
+  it('requireScheduledTaskRole answers 403 for a mobile token without the role', async () => {
+    verifyMobileAccessToken.mockResolvedValue({ userId: 'mobile-user', sessionId: 's1' });
+    roleCount.mockResolvedValue(0);
+    await expect(
+      requireScheduledTaskRole(makeRequest({ Authorization: `Bearer ${MOBILE_JWT}` })),
+    ).rejects.toMatchObject({ statusCode: 403 });
   });
 });

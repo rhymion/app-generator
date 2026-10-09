@@ -1,10 +1,37 @@
 # Mobile App (Expo)
 
-`generate-code` also renders an Expo (React Native) project into `mobile/`. Its navigation is built from
-the **same source as the desktop sidebar** — `x-nav` on entities and `x-nav-groups` at the top level,
-resolved by `code_generator/nav_config.py` — so a schema needs no mobile-specific key. `mobile/` is
-generated output: it is git-ignored, except for the hand-written Playwright files in `mobile/e2e/`,
-`mobile/playwright.config.ts` and `mobile/scripts/`.
+With the opt-in below, `generate-code` also renders an Expo (React Native) project into `mobile/`. Its
+navigation is built from the **same source as the desktop sidebar** — `x-nav` on entities and
+`x-nav-groups` at the top level, resolved by `code_generator/nav_config.py` — so the screens need no
+further mobile-specific key. `mobile/` is generated output: it is git-ignored, except for the hand-written
+Playwright files in `mobile/e2e/`, `mobile/playwright.config.ts` and `mobile/scripts/`.
+
+## Turning generation on
+
+The Expo app is **off by default**. Set `x-generator.mobile.enabled: true` in the schema to generate it:
+
+```yaml
+x-generator:
+  mobile:
+    enabled: true
+```
+
+- The key is read by `generate.py` at generation time (`validate.mobile_generation_enabled`). Absent or
+  `false` means no `mobile/` output at all: no entity screens, no nav, no Expo dependencies.
+- `validate_generator_config` rejects a non-boolean `enabled`, a non-mapping `mobile` and any other
+  sub-key under `x-generator.mobile`.
+- This repository's own schema leaves the flag off. The mobile tests and fixtures
+  (`mobile_entity_gate`, `mobile_entity_e2e_gate`) set it, and `scripts/run_mobile_entity_playwright.sh`
+  sets it in every mode and refuses to run when `mobile/` was not generated.
+- Turning the flag from `true` to `false` stops generating `mobile/`; files from earlier runs are removed by
+  `npm run cleanup` (manifest-tracked, hash-guarded) as for any other generated file. The hand-written
+  `mobile/e2e/`, `mobile/playwright.config.ts` and `mobile/scripts/` stay.
+- The flag gates generated output only. The hand-written server side is always present: the token routes
+  under `app/api/mobile/` (`auth/*`, `nav`, `permissions`), `lib/mobile-auth.ts`, and the mobile JWT branch of
+  `lib/api-auth.ts`. The web mobile-viewport Cypress specs (`cypress/e2e/mobile/`) are Web output and are
+  not gated either.
+- A project that regenerates from this generator and wants to keep `mobile/` must set the flag in its own
+  schema.
 
 This is not the responsive web layout described in
 [mobile-responsive-layout.md](mobile-responsive-layout.md); that document covers the Next.js app at a
@@ -468,6 +495,7 @@ check and is not part of the mandatory gate.
 - The one-to-one bridge grid (`x-bridge`).
 - The paid / waiting status of an `x-payment` record (no REST route exposes it).
 - The native date pickers (dates are typed as text).
-- CSV export and import: the export and import routes accept a session cookie or an API key but not a mobile
-  access token (`resolveActorId()` in `lib/api-auth.ts`), so the screens cannot call them yet (Issue #883).
+- CSV export and import: the export and import routes accept a mobile access token (`resolveActorId()` in
+  `lib/api-auth.ts` dispatches a bearer token by shape), but the app has no CSV screens. Bulk import and export
+  stay in the Web admin screens.
 - Translated field labels.
