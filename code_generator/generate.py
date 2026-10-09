@@ -1088,7 +1088,7 @@ _MOBILE_SCHEDULED_TASK_TEMPLATES = [
 ]
 
 # Namespaces of messages/<locale>.json the native entity screens read.
-_MOBILE_MESSAGE_NAMESPACES = ('Common', 'Errors', 'ValidationMessages', 'ReactionType', 'ApprovalRequestStatus', 'ScheduledTaskRun')
+_MOBILE_MESSAGE_NAMESPACES = ('Common', 'Errors', 'ValidationMessages', 'Payment', 'ReactionType', 'ApprovalRequestStatus', 'ScheduledTaskRun')
 
 # Single keys of the namespaces too large to ship whole (`Fields` holds every field label, `EntityLabel`
 # every entity name): the comment thread, the approval section and the built-in audit log screens read these.
@@ -1119,6 +1119,26 @@ def _mobile_messages_json(messages: dict) -> str:
     return json.dumps(picked, indent=2, ensure_ascii=False)
 
 
+def resolve_mobile_create_forms(mobile_specs: list[dict]) -> None:
+    """Attach the target's create form to every `x-create-inline` field that can open one.
+
+    The "Create new" control opens the target's own native form, so it exists only when the
+    target has native screens with a create form; a field whose target keeps the placeholder
+    screen stays a plain picker (the Web form still offers the dialog).
+    """
+    by_name = {spec['name']: spec for spec in mobile_specs}
+    for spec in mobile_specs:
+        for field in spec['fields']:
+            if not field.get('create_inline'):
+                continue
+            target = by_name.get(field['target'])
+            if target and target['can_new']:
+                field['create_form'] = {'name': target['name'], 'pascal': target['pascal']}
+            else:
+                print(f"  Mobile: {spec['name']}.{field['key']} declares x-create-inline but "
+                      f"{field['target']} has no native create form; the picker offers no \"Create new\"")
+
+
 def _mobile_field_json(f: dict) -> dict:
     """A field entry of the mobile spec as the `FieldSpec` the app reads."""
     return {
@@ -1131,6 +1151,7 @@ def _mobile_field_json(f: dict) -> dict:
             }
             if 'target' in f else {}
         ),
+        **({'createInline': True} if f.get('create_form') else {}),
     }
 
 
@@ -1163,6 +1184,8 @@ def generate_mobile_entity(spec: dict, ctx: dict, schema: dict, mobile_dir: Path
         'search_key_json': json.dumps(spec['search_key']),
         'reaction_types_json': json.dumps((spec.get('comments') or {}).get('reaction_types', [])),
         'has_form_hook': has_form_hook,
+        # Fields whose picker offers "Create new" (x-create-inline), each with its target's create form.
+        'create_fields': [f for f in spec['fields'] if f.get('create_form')],
     }
     lib_dir = mobile_dir / 'lib' / name
     components_dir = mobile_dir / 'components' / name
@@ -1220,6 +1243,7 @@ def generate_mobile_target(
         'messages_json': _mobile_messages_json(messages),
         'entities': mobile_specs or [],
         'has_scheduled_tasks': has_scheduled_tasks,
+        'has_payment': any(spec.get('is_payment') for spec in mobile_specs or []),
     }
     mobile_dir = output_dir / 'mobile'
     search_out = mobile_dir / 'app' / '(app)' / 'search.tsx'
@@ -1227,6 +1251,11 @@ def generate_mobile_target(
         _write(search_out, _render(env, 'mobile/app/(app)/search.tsx.jinja2', ctx))
     elif search_out.exists():
         search_out.unlink()
+    checkout_out = mobile_dir / 'lib' / 'checkout.ts'
+    if ctx['has_payment']:
+        _write(checkout_out, _render(env, 'mobile/lib/checkout.ts.jinja2', ctx))
+    elif checkout_out.exists():
+        checkout_out.unlink()
     for tmpl_name, rel_out in _MOBILE_STATIC_TEMPLATES:
         _write(mobile_dir / rel_out, _render(env, f'mobile/{tmpl_name}', ctx))
     for tmpl_name, rel_out in _MOBILE_SCHEDULED_TASK_TEMPLATES:
@@ -1365,6 +1394,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     payment_entities: list[dict] = []
     # Entities that get native list / detail / form screens in the Expo app.
     mobile_specs: list[dict] = []
+    mobile_ctxs: dict[str, dict] = {}
     # Entities with REST routes, hence an options route a mobile relation picker can call.
     api_entities = {e['parent'] for e in entities if (e.get('generate_config') or {}).get('api')}
 
@@ -1819,11 +1849,11 @@ def generate(schema_path: str, output_dir: str) -> None:
                        _render(env, 'use_entity_approval_actions.ts.jinja2', fv_ctx))
 
         # --- native mobile screens (Expo): plain CRUD plus relation pickers ---
+        # Rendered after the loop: a "Create new" control needs the target's own spec.
         mobile_spec = build_mobile_entity_spec(ctx, build_validation_context(ctx), to_title_case, api_entities)
         if mobile_spec:
             mobile_specs.append(mobile_spec)
-            generate_mobile_entity(mobile_spec, ctx, schema, out / 'mobile', env)
-            print(f'  Mobile screens → mobile/ ({parent})')
+            mobile_ctxs[parent] = ctx
 
         # --- <Child>BridgeGrid.tsx (parent-embedded DataGrid, cmd_167 §4) ---
         # Emitted for bridge children (entities with new-form x-bridge); the
@@ -3391,6 +3421,10 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     # --- Expo mobile app (footer tabs + drill-down from the same nav source) ---
     print('\nGenerating mobile app...')
+    resolve_mobile_create_forms(mobile_specs)
+    for mobile_spec in mobile_specs:
+        generate_mobile_entity(mobile_spec, mobile_ctxs[mobile_spec['name']], schema, out / 'mobile', env)
+        print(f'  Mobile screens → mobile/ ({mobile_spec["name"]})')
     generate_mobile_target(entities, schema, out, env, has_search=bool(search_entities), mobile_specs=mobile_specs)
 
     # --- upload/route.ts (Vercel Blob, base default) ---

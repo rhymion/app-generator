@@ -32,6 +32,12 @@ model user {
   updated_profiles mobile_profile[] @relation("MobileProfileUpdater")
   created_tasks    mobile_task[]    @relation("MobileTaskCreator")
   updated_tasks    mobile_task[]    @relation("MobileTaskUpdater")
+  created_mobile_categories mobile_category[] @relation("MobileCategoryCreator")
+  updated_mobile_categories mobile_category[] @relation("MobileCategoryUpdater")
+  created_mobile_tickets mobile_ticket[] @relation("MobileTicketCreator")
+  updated_mobile_tickets mobile_ticket[] @relation("MobileTicketUpdater")
+  created_mobile_orders mobile_order[] @relation("MobileOrderCreator")
+  updated_mobile_orders mobile_order[] @relation("MobileOrderUpdater")
   image_id  String?     @unique
   image     attachment? @relation("UserImage", fields: [image_id], references: [id], onDelete: SetNull)
   comments  comment[]  @relation("CommentCreator")
@@ -141,6 +147,53 @@ model mobile_task {
   @@index([title])
   @@index([mobile_group_id])
   @@index([mobile_label_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_category {
+  id         String   @id @default(cuid())
+  name       String
+  mobile_tickets mobile_ticket[]
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("MobileCategoryCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("MobileCategoryUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_ticket {
+  id                 String          @id @default(cuid())
+  title              String
+  mobile_category_id String
+  mobile_category    mobile_category @relation(fields: [mobile_category_id], references: [id])
+  created_at         DateTime        @default(now()) @db.Timestamptz(0)
+  updated_at         DateTime        @updatedAt @db.Timestamptz(0)
+  creator_id         String
+  creator            user            @relation("MobileTicketCreator", fields: [creator_id], references: [id])
+  updater_id         String
+  updater            user            @relation("MobileTicketUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([mobile_category_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_order {
+  id              String   @id @default(cuid())
+  name            String
+  stripe_price_id String   @default("price_mobile_order_fixed")
+  created_at      DateTime @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user     @relation("MobileOrderCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user     @relation("MobileOrderUpdater", fields: [updater_id], references: [id])
+  @@index([name])
   @@index([creator_id])
   @@index([updater_id])
 }
