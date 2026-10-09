@@ -1261,6 +1261,10 @@ def generate_mobile_target(
         checkout_out.unlink()
     for tmpl_name, rel_out in _MOBILE_STATIC_TEMPLATES:
         _write(mobile_dir / rel_out, _render(env, f'mobile/{tmpl_name}', ctx))
+    # The list panel's state and query logic is the Web's own module, copied unchanged so the
+    # Web and Expo lists cannot disagree on what a sort, a filter or the search box means.
+    _write(mobile_dir / 'lib' / '_list_query.ts',
+           (Path(__file__).resolve().parent.parent / 'lib' / '_list_query.ts').read_text(encoding='utf-8'))
     for tmpl_name, rel_out in _MOBILE_SCHEDULED_TASK_TEMPLATES:
         target = mobile_dir / rel_out
         if has_scheduled_tasks:

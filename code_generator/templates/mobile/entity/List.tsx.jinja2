@@ -3,6 +3,15 @@ import { router } from 'expo-router';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useMessages } from '@/lib/messages';
 import type { PageOpts, SortItem } from '@/lib/entity-http';
+import {
+  countActiveFilters,
+  cycleSort,
+  filterChoices,
+  setFilterValue,
+  sortArrow,
+  toListQuery,
+  type ListQuerySpec,
+} from '@/lib/_list_query';
 {% if can_delete %}
 import type { ModelPermissions } from '@/lib/authz';
 import type { ActionFailure } from '@/lib/_errors';
@@ -28,6 +37,14 @@ import { toDisplayText } from '@/components/native/FieldInput';
 
 const PAGE_SIZE = 20;
 
+// What the panel offers; the sort, filter and search logic is lib/_list_query.ts, shared with the Web list.
+const LIST_QUERY_SPEC: ListQuerySpec = {
+  fields: {{ const_name }}_FIELDS,
+  sortKeys: {{ const_name }}_SORT_KEYS,
+  filterKeys: {{ const_name }}_FILTER_KEYS,
+  searchKey: {{ const_name }}_SEARCH_KEY,
+};
+
 export function {{ pascal }}List() {
   const { t, terr{% if can_delete and has_form_hook %}, tmsg{% endif %} } = useMessages();
   const [rows, setRows] = useState<{{ pascal }}[]>([]);
@@ -50,11 +67,7 @@ export function {{ pascal }}List() {
 {% endif %}
 
   // The search box narrows by the list's title column, through the same `f.<field>` parameter a filter uses.
-  const queryOf = useCallback((): Pick<PageOpts, 'sort' | 'filter'> => {
-    const filter: Record<string, string> = { ...filters };
-    if ({{ const_name }}_SEARCH_KEY && search.trim() !== '') filter[{{ const_name }}_SEARCH_KEY] = search.trim();
-    return { sort, filter };
-  }, [filters, search, sort]);
+  const queryOf = useCallback((): Pick<PageOpts, 'sort' | 'filter'> => toListQuery({ search, sort, filters }, LIST_QUERY_SPEC), [filters, search, sort]);
 
   const load = useCallback(async (target: number) => {
     // A slower, older response must not replace a newer one.
@@ -95,12 +108,10 @@ export function {{ pascal }}List() {
       });
   }, []);
 
-  const cycleSort = (key: string) => {
-    const current = sort.find((item) => item.field === key);
-    setSort(!current ? [{ field: key, dir: 'asc' }] : current.dir === 'asc' ? [{ field: key, dir: 'desc' }] : []);
-  };
-  const setFilter = (key: string, value: string) => setFilters((prev) => ({ ...prev, [key]: value }));
-  const activeFilters = Object.values(filters).filter((value) => value !== '').length;
+  // The native list sorts by one column at a time; the Web list lets the sort span several.
+  const cycleSortKey = (key: string) => setSort((prev) => cycleSort(prev, key, false));
+  const setFilter = (key: string, value: string) => setFilters((prev) => setFilterValue(prev, key, value));
+  const activeFilters = countActiveFilters(filters);
 {% if can_delete %}
 
   // Show / hide decisions come from the shared capabilities module; the server checks each record.
@@ -173,7 +184,7 @@ export function {{ pascal }}List() {
       <View style={styles.toolbar}>
         { {{ const_name }}_SORT_KEYS.length > 0 ? (
           <Pressable style={styles.tool} onPress={() => setPanel(panel === 'sort' ? null : 'sort')} testID="list-sort-toggle">
-            <Text style={styles.toolText}>{sort.length > 0 ? `${t('Common.sort')}: ${fieldOf(sort[0].field)?.label ?? sort[0].field} ${sort[0].dir === 'asc' ? '\u2191' : '\u2193'}` : t('Common.sort')}</Text>
+            <Text style={styles.toolText}>{sort.length > 0 ? `${t('Common.sort')}: ${fieldOf(sort[0].field)?.label ?? sort[0].field} ${sortArrow(sort[0].dir)}` : t('Common.sort')}</Text>
           </Pressable>
         ) : null}
         { {{ const_name }}_FILTER_KEYS.length > 0 ? (
@@ -187,9 +198,9 @@ export function {{ pascal }}List() {
           { {{ const_name }}_SORT_KEYS.map((key) => {
             const current = sort.find((item) => item.field === key);
             return (
-              <Pressable key={key} style={styles.panelRow} onPress={() => cycleSort(key)} testID={`list-sort-${key}`}>
+              <Pressable key={key} style={styles.panelRow} onPress={() => cycleSortKey(key)} testID={`list-sort-${key}`}>
                 <Text style={current ? styles.panelActive : styles.panelText}>
-                  {`${fieldOf(key)?.label ?? key}${current ? (current.dir === 'asc' ? ' \u2191' : ' \u2193') : ''}`}
+                  {`${fieldOf(key)?.label ?? key}${current ? ` ${sortArrow(current.dir)}` : ''}`}
                 </Text>
               </Pressable>
             );
@@ -201,22 +212,22 @@ export function {{ pascal }}List() {
           { {{ const_name }}_FILTER_KEYS.map((key) => {
             const spec = fieldOf(key);
             if (!spec) return null;
-            const choices = spec.kind === 'enum' ? spec.options : spec.kind === 'boolean' ? ['true', 'false'] : null;
+            const choices = filterChoices(spec, (value) => toDisplayText(spec, value));
             return (
               <View key={key} style={styles.filterField}>
                 <Text style={styles.panelText}>{spec.label}</Text>
                 {choices ? (
                   <View style={styles.chips}>
                     {choices.map((choice) => {
-                      const on = filters[key] === choice;
+                      const on = filters[key] === choice.value;
                       return (
                         <Pressable
-                          key={choice}
+                          key={choice.value}
                           style={[styles.chip, on ? styles.chipOn : null]}
-                          onPress={() => setFilter(key, on ? '' : choice)}
-                          testID={`list-filter-${key}-${choice}`}
+                          onPress={() => setFilter(key, on ? '' : choice.value)}
+                          testID={`list-filter-${key}-${choice.value}`}
                         >
-                          <Text style={on ? styles.chipTextOn : styles.panelText}>{spec.kind === 'boolean' ? toDisplayText(spec, choice === 'true') : choice}</Text>
+                          <Text style={on ? styles.chipTextOn : styles.panelText}>{choice.label}</Text>
                         </Pressable>
                       );
                     })}
