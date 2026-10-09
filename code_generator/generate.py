@@ -1218,6 +1218,10 @@ def generate_mobile_target(
         search_out.unlink()
     for tmpl_name, rel_out in _MOBILE_STATIC_TEMPLATES:
         _write(mobile_dir / rel_out, _render(env, f'mobile/{tmpl_name}', ctx))
+    # The list panel's state and query logic is the Web's own module, copied unchanged so the
+    # Web and Expo lists cannot disagree on what a sort, a filter or the search box means.
+    _write(mobile_dir / 'lib' / '_list_query.ts',
+           (Path(__file__).resolve().parent.parent / 'lib' / '_list_query.ts').read_text(encoding='utf-8'))
     if any(e.get('comments') for e in ctx['entities']):
         _write(mobile_dir / 'lib' / 'comment-http.ts', _render(env, 'mobile/lib/comment-http.ts.jinja2', ctx))
         _write(mobile_dir / 'components' / 'native' / 'CommentThread.tsx',

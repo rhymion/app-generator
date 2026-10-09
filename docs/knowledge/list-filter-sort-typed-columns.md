@@ -12,6 +12,10 @@ one fixed clause shape per column kind. See
 per-column clause-shape kind (`FIELD_KINDS`) and relation-labelField
 filtering this builds on.
 
+This is the grid's own header menu, which filters and sorts one column at a
+time. The multi-column sort, multi-field filter and search box above the list
+are a separate panel; see `docs/knowledge/list-search-panel.md`.
+
 ## Client side: `GridColDef.type` / `valueOptions`
 
 `page_list_context()`'s `xdisplay_table` loop (`generators.py`) emits, per

@@ -30,6 +30,8 @@ import type { PageOpts, PageResult } from '@/lib/_pagination';
 import type { ActionFailure } from '@/lib/_errors';
 import { errorMessageKey } from '@/lib/_errors';
 import { AppAlert } from '@/components/ui';
+import ListQueryPanel from './ListQueryPanel';
+import { EMPTY_LIST_QUERY, toListQuery, type ListQuerySpec, type ListQueryState, type SortItem } from '@/lib/_list_query';
 
 interface BaseEntity {
   id: string;
@@ -88,6 +90,14 @@ interface DataGridClientProps<T extends BaseEntity> {
    * without this, a role granted `update` (e.g. via grant-all-permissions.ts) sees an
    * edit icon that 404s when clicked. */
   allowEdit?: boolean;
+  /**
+   * What the list's multi-column sort / multi-field filter / search panel offers (server mode
+   * only). When set, the panel is shown above the grid and owns the sort: a click on a column
+   * header replaces the panel's sort with that one column. Filters from the panel and from the
+   * grid's own filter menu apply together; on a field both filter, the grid's filter wins.
+   * Unset, the grid sorts and filters one column at a time, as before.
+   */
+  listQuery?: ListQuerySpec;
 }
 
 export default function DataGridClient<T extends BaseEntity>({
@@ -107,6 +117,7 @@ export default function DataGridClient<T extends BaseEntity>({
   openLinksInNewTab,
   allowCreate = true,
   allowEdit = true,
+  listQuery,
 }: DataGridClientProps<T>) {
   const serverMode = typeof fetchPage === 'function';
   const initialItems: T[] = (serverMode ? initialRows : src) ?? [];
@@ -121,6 +132,7 @@ export default function DataGridClient<T extends BaseEntity>({
     page: serverMode ? (initialPage ?? 0) : 0,
   });
   const [sortModel, setSortModel] = useState<GridSortModel>([]);
+  const [query, setQuery] = useState<ListQueryState>(EMPTY_LIST_QUERY);
   const [filterModel, setFilterModel] = useState<GridFilterModel>({ items: [] });
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [openInvalidateDialog, setOpenInvalidateDialog] = useState(false);
@@ -133,23 +145,37 @@ export default function DataGridClient<T extends BaseEntity>({
   const tf = useTranslations('Fields');
   const terr = useTranslations('Errors');
 
-  const reload = useCallback((p: GridPaginationModel, s: GridSortModel, f: GridFilterModel) => {
+  const reload = useCallback((p: GridPaginationModel, s: GridSortModel, f: GridFilterModel, q: ListQueryState) => {
     if (!fetchPage) return;
+    const panelQuery = listQuery ? toListQuery(q, listQuery) : null;
     startTransition(async () => {
       const result = await fetchPage({
         page: p.page,
         pageSize: p.pageSize,
-        sort: s.map(x => ({ field: x.field, dir: x.sort === 'desc' ? 'desc' : 'asc' })),
-        filter: Object.fromEntries(
-          f.items
-            .filter(i => i.value !== undefined && i.value !== null && i.value !== '')
-            .map(i => [i.field, { operator: i.operator, value: i.value }]),
-        ),
+        sort: panelQuery
+          ? panelQuery.sort
+          : s.map((x): SortItem => ({ field: x.field, dir: x.sort === 'desc' ? 'desc' : 'asc' })),
+        filter: {
+          ...(panelQuery?.filter ?? {}),
+          ...Object.fromEntries(
+            f.items
+              .filter(i => i.value !== undefined && i.value !== null && i.value !== '')
+              .map(i => [i.field, { operator: i.operator, value: i.value }]),
+          ),
+        },
       });
       setItems(result.rows as T[]);
       setRowCount(result.total);
     });
-  }, [fetchPage]);
+  }, [fetchPage, listQuery]);
+
+  const onQueryChange = (next: ListQueryState) => {
+    setQuery(next);
+    // A new search, sort or filter starts from the first page.
+    const first = { ...paginationModel, page: 0 };
+    setPaginationModel(first);
+    reload(first, sortModel, filterModel, next);
+  };
 
   const deleteSelected = () => {
     // Capture IDs now — before the Dialog opens and its focus trap causes
@@ -333,6 +359,13 @@ export default function DataGridClient<T extends BaseEntity>({
     },
   );
 
+  // The grid shows one sort column. With the panel, that is the first of the panel's sort columns
+  // the grid has a column for (the grid drops a sort model entry it cannot match to a column).
+  const gridColumnFields = new Set(columns.map(column => column.field));
+  const gridSortModel: GridSortModel = listQuery
+    ? query.sort.filter(item => gridColumnFields.has(item.field)).slice(0, 1).map(item => ({ field: item.field, sort: item.dir }))
+    : sortModel;
+
   return (
     <div>
       {deleteError && (
@@ -364,6 +397,9 @@ export default function DataGridClient<T extends BaseEntity>({
         </Tooltip>
         )}
       </div>
+      {listQuery && serverMode && (
+        <ListQueryPanel spec={listQuery} value={query} onChange={onQueryChange} />
+      )}
       <Paper sx={{ height: 500, width: '100%' }}>
         <DataGrid
           apiRef={apiRef}
@@ -376,22 +412,32 @@ export default function DataGridClient<T extends BaseEntity>({
                 paginationMode: 'server' as const,
                 sortingMode: 'server' as const,
                 filterMode: 'server' as const,
-                sortModel,
+                sortModel: gridSortModel,
                 onSortModelChange: (m: GridSortModel) => {
+                  if (listQuery) {
+                    // The grid reports the model it was just given (the panel's primary sort) back
+                    // as a change; only a header click, which differs from it, is the user's.
+                    if (m.length === gridSortModel.length && m.every((x, i) => x.field === gridSortModel[i].field && x.sort === gridSortModel[i].sort)) return;
+                    // A header click sorts by that one column and replaces the panel's sort.
+                    const next = { ...query, sort: m.map((x): SortItem => ({ field: x.field, dir: x.sort === 'desc' ? 'desc' : 'asc' })) };
+                    setQuery(next);
+                    reload(paginationModel, m, filterModel, next);
+                    return;
+                  }
                   setSortModel(m);
-                  reload(paginationModel, m, filterModel);
+                  reload(paginationModel, m, filterModel, query);
                 },
                 filterModel,
                 onFilterModelChange: (m: GridFilterModel) => {
                   setFilterModel(m);
-                  reload(paginationModel, sortModel, m);
+                  reload(paginationModel, sortModel, m, query);
                 },
               }
             : {})}
           paginationModel={paginationModel}
           onPaginationModelChange={(m) => {
             setPaginationModel(m);
-            if (serverMode) reload(m, sortModel, filterModel);
+            if (serverMode) reload(m, sortModel, filterModel, query);
           }}
           onRowSelectionModelChange={setSelectedRowIds}
           pageSizeOptions={[10, 20, 50]}

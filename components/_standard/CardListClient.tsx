@@ -26,6 +26,8 @@ import type { PageOpts, PageResult } from '@/lib/_pagination';
 import type { ActionFailure } from '@/lib/_errors';
 import { errorMessageKey } from '@/lib/_errors';
 import { AppAlert } from '@/components/ui';
+import ListQueryPanel from './ListQueryPanel';
+import { EMPTY_LIST_QUERY, toListQuery, type ListQuerySpec, type ListQueryState } from '@/lib/_list_query';
 
 interface BaseEntity {
   id: string;
@@ -72,6 +74,8 @@ interface CardListClientProps<T extends BaseEntity> {
   /** When false, the edit icon is hidden even if the user has update permission.
    * Used for entities whose x-generate.edit is false (no /edit page exists to link to). */
   allowEdit?: boolean;
+  /** What the list's multi-column sort / multi-field filter / search panel offers (server mode only). Unset, the cards are not sorted or filtered. */
+  listQuery?: ListQuerySpec;
 }
 
 function formatValue<T>(item: T, field: keyof T, format?: 'date-time' | 'date' | 'time', showSeconds?: boolean): string {
@@ -101,6 +105,7 @@ export default function CardListClient<T extends BaseEntity>({
   primaryField = 'name' as keyof T,
   allowCreate = true,
   allowEdit = true,
+  listQuery,
 }: CardListClientProps<T>) {
   const [items, setItems] = useState<T[]>(initialRows ?? src ?? []);
   const [page, setPage] = useState<number>(initialPage ?? 0);
@@ -111,14 +116,23 @@ export default function CardListClient<T extends BaseEntity>({
   const hasPrev = page > 0;
   const hasNext = (page + 1) * pageSize < rowCount;
 
-  const loadPage = (newPage: number) => {
+  const [query, setQuery] = useState<ListQueryState>(EMPTY_LIST_QUERY);
+
+  const loadPage = (newPage: number, forQuery: ListQueryState = query) => {
     if (!fetchPage) return;
+    const panelQuery = listQuery ? toListQuery(forQuery, listQuery) : {};
     startTransition(async () => {
-      const result = await fetchPage({ page: newPage, pageSize });
+      const result = await fetchPage({ page: newPage, pageSize, ...panelQuery });
       setItems(result.rows as T[]);
       setRowCount(result.total);
       setPage(newPage);
     });
+  };
+
+  const onQueryChange = (next: ListQueryState) => {
+    setQuery(next);
+    // A new search, sort or filter starts from the first page.
+    loadPage(0, next);
   };
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -188,6 +202,10 @@ export default function CardListClient<T extends BaseEntity>({
           </Tooltip>
         )}
       </Box>
+
+      {listQuery && fetchPage && (
+        <ListQueryPanel spec={listQuery} value={query} onChange={onQueryChange} />
+      )}
 
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         {items.length === 0 ? (

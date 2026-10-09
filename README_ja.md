@@ -554,6 +554,7 @@ app-generator/
 | [comment-and-mention-rest-routes.md](docs/knowledge/comment-and-mention-rest-routes.md) | コメントの追加・編集・削除と `@` メンション候補検索の REST ルート。編集フォームと同じアクションを認証済み呼び出し元として実行。アクセス検査・入力検証・テスト |
 | [x-autocomplete-context.md](docs/knowledge/x-autocomplete-context.md) | FK フィールドの `x-autocomplete-context`：対象の `autocomplete_filter.ts` に渡るフォーム値、生成されるフォームと分割アクションの経路、検証 |
 | [mobile-app.md](docs/knowledge/mobile-app.md) | 生成される Expo モバイルアプリ：`x-nav` からのフッタータブと下位階層、エンティティ画面、ヘッダー、トークン認証、Playwright 検証 |
+| [list-search-panel.md](docs/knowledge/list-search-panel.md) | デスクトップ／モバイル Web の一覧の検索ボックス・複数列ソート・複数項目フィルタ：一覧ページが渡す仕様、Expo 一覧と共有するロジック（`lib/_list_query.ts`）、グリッド自身のヘッダ操作との併用、テスト |
 | [search.md](docs/knowledge/search.md) | エンティティ横断全文検索：スキーマオプトイン・pg_bigm・認可・生成 API と UI |
 | [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | 承認フローシステムの詳細、承認後イベント発火（`on_approved`） |
 | [appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) | コメントブリッジシステムの詳細 |

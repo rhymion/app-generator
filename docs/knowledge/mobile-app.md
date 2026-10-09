@@ -105,9 +105,13 @@ the placeholder. The fixture schema in `code_generator/tests/fixtures/mobile_ent
 
 The list screen passes the REST list's own parameters, so the rules are the server's, the same as the Web
 list's: `sort=<field>:<asc|desc>` and `f.<field>=<value>` (`lib/_pagination.ts`, `parsePageOpts()`).
+The state and the request it produces are `lib/_list_query.ts`, copied into `mobile/lib/` unchanged and used by
+the Web list panel too, so the two cannot disagree on what a sort, a filter or the search box means; see
+[list-search-panel.md](list-search-panel.md).
 
 - **Sort.** *Sort* opens a panel with every scalar column of the form; a tap cycles ascending, descending and
-  none. One column is sorted at a time.
+  none. One column is sorted at a time (the Web list sorts several; `cycleSort(sort, key, multi)` takes the
+  difference).
 - **Filter.** *Filter* opens a panel with a control for each text, number, decimal, boolean and enum field: a text
   box (substring match for text, equality for numbers), or a chip per member (enum) or *Yes* / *No* (boolean).
   Date, date-time and time fields can be sorted but not filtered, and a relation column holds an id, so it does

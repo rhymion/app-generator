@@ -5,6 +5,17 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Search box, multi-column sort and multi-field filter on the Web entity lists** (Issue #899, Phase 1 of #898).
+  The Desktop Web grid and the Mobile Web cards get one shared panel above the list: a search box that matches
+  the list's title column, a sort panel that sorts by several columns in the order they are chosen (ascending,
+  descending, off), and a filter panel with a control for every text, number, decimal, boolean and enum column
+  (and each relation display column), all applied together. Until now the grid sorted and filtered one column at a
+  time (`@mui/x-data-grid`'s MIT build forces that) and the card list had no sort or filter at all. The panel is
+  `components/_standard/ListQueryPanel.tsx`, driven by a `listQuery` spec each generated list page builds from the
+  REST list's own allow-list (the same data `SORTABLE_FIELDS`, `FILTERABLE_FIELDS` and `FIELD_KINDS` render from); a
+  list without the spec is unchanged. The state and the request logic are `lib/_list_query.ts`, which the Expo list
+  now uses too (copied into `mobile/lib/` unchanged; the native list still sorts one column at a time). The REST
+  list's accepted columns are unchanged and no `x-*` key is added. See `docs/knowledge/list-search-panel.md`.
 - **Sort, filter, search and bulk delete on the Expo mobile list** (Issues #874, #856). The native list
   gets a sort panel, a filter panel (text, number, decimal, boolean and enum fields) and a search box that
   matches the row's title column, all through the REST list's `sort` and `f.<field>` parameters; a long press
