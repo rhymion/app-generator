@@ -1271,6 +1271,9 @@ def generate_mobile_target(
     # Web and Expo lists cannot disagree on what a sort, a filter or the search box means.
     _write(mobile_dir / 'lib' / '_list_query.ts',
            (Path(__file__).resolve().parent.parent / 'lib' / '_list_query.ts').read_text(encoding='utf-8'))
+    # The time zone enum's IANA mapping is likewise the Web's own module, copied unchanged.
+    _write(mobile_dir / 'lib' / '_timezone.ts',
+           (Path(__file__).resolve().parent.parent / 'lib' / '_timezone.ts').read_text(encoding='utf-8'))
     for tmpl_name, rel_out in _MOBILE_SCHEDULED_TASK_TEMPLATES:
         target = mobile_dir / rel_out
         if has_scheduled_tasks:
@@ -1282,7 +1285,6 @@ def generate_mobile_target(
         _write(mobile_dir / 'lib' / 'comment-composer.ts', _render(env, 'mobile/lib/comment-composer.ts.jinja2', ctx))
         _write(mobile_dir / 'components' / 'native' / 'CommentThread.tsx',
                _render(env, 'mobile/components/native/CommentThread.tsx.jinja2', ctx))
-    _write(mobile_dir / 'lib' / '_timezone.ts', _render_timezone_ts(env))
     _write(mobile_dir / 'lib' / 'entity-registry.ts', _render(env, 'mobile/lib/entity-registry.ts.jinja2', ctx))
     _write(mobile_dir / 'lib' / 'messages.ts', _render(env, 'mobile/lib/messages.ts.jinja2', ctx))
     print(f'  Mobile: {len(nav["tabs"])} footer tab(s) + search={has_search}'

@@ -154,7 +154,7 @@ def test_the_upsert_form_renders_the_time_zone_select_not_a_text_field(default_o
 
 
 def test_the_mobile_copy_is_byte_identical_to_the_web_file(mobile_out):
-    assert (mobile_out / 'mobile' / 'lib' / '_timezone.ts').read_bytes() == (mobile_out / 'lib' / '_timezone.ts').read_bytes()
+    assert (mobile_out / 'mobile' / 'lib' / '_timezone.ts').read_bytes() == (REPO / 'lib' / '_timezone.ts').read_bytes()
 
 
 # --- the one-time data migration (statically; the SQL itself is run by scripts/check_timezone_migration.sh) ---
