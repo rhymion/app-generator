@@ -567,7 +567,7 @@ All architectural documentation lives in `docs/knowledge/`:
 | [troubleshooting.md](docs/knowledge/troubleshooting.md) | Common build, test, code generation, and database failure patterns with step-by-step fixes |
 | [i18n-locale-routing.md](docs/knowledge/i18n-locale-routing.md) | next-intl v4 setup, locale routing, translation file conventions |
 | [dark-mode-and-hydration.md](docs/knowledge/dark-mode-and-hydration.md) | System-aware dark mode, SSR-safe theme initialization |
-| [timezone-handling.md](docs/knowledge/timezone-handling.md) | Server/client timezone conventions |
+| [timezone-handling.md](docs/knowledge/timezone-handling.md) | Server/client timezone conventions, the `Timezone` enum behind `app_setting.timezone` |
 | [child-datagrid-reference-columns.md](docs/knowledge/child-datagrid-reference-columns.md) | Inline DataGrid children, reference column rendering |
 | [mobile-responsive-layout.md](docs/knowledge/mobile-responsive-layout.md) | Responsive layout conventions, search header icon, mobile account section |
 | [relation-picker-rest-route.md](docs/knowledge/relation-picker-rest-route.md) | `GET /api/{entity}/options`: REST search and id lookup for relation pickers, running the same function as the web autocomplete; authentication, permission and organization isolation |

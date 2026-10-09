@@ -38,6 +38,7 @@ from helpers.label_field import build_label_expression
 from helpers.schema_helpers import derive_text_fields as _derive_text_fields
 from helpers.schema_helpers import get_splittable_bridge_field
 from helpers.schema_helpers import resolve_ledger_domain
+from helpers.timezones import TIMEZONES, DEFAULT_MEMBER
 from helpers.schema_helpers import get_entity_properties
 from helpers.schema_helpers import get_self_only_flags
 from helpers.schema_helpers import get_parent_relationships
@@ -1102,6 +1103,11 @@ _MOBILE_MESSAGE_KEYS = {
 }
 
 
+def _render_timezone_ts(env: Environment) -> str:
+    """lib/_timezone.ts: the Timezone enum values and their IANA names (shared by Web and mobile)."""
+    return _render(env, 'timezone.ts.jinja2', {'timezones': TIMEZONES, 'default_member': DEFAULT_MEMBER})
+
+
 def _mobile_messages_json(messages: dict) -> str:
     picked = {
         locale: {
@@ -1269,6 +1275,7 @@ def generate_mobile_target(
         _write(mobile_dir / 'lib' / 'comment-http.ts', _render(env, 'mobile/lib/comment-http.ts.jinja2', ctx))
         _write(mobile_dir / 'components' / 'native' / 'CommentThread.tsx',
                _render(env, 'mobile/components/native/CommentThread.tsx.jinja2', ctx))
+    _write(mobile_dir / 'lib' / '_timezone.ts', _render_timezone_ts(env))
     _write(mobile_dir / 'lib' / 'entity-registry.ts', _render(env, 'mobile/lib/entity-registry.ts.jinja2', ctx))
     _write(mobile_dir / 'lib' / 'messages.ts', _render(env, 'mobile/lib/messages.ts.jinja2', ctx))
     print(f'  Mobile: {len(nav["tabs"])} footer tab(s) + search={has_search}'
@@ -2288,6 +2295,12 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'reaction_constants.ts.jinja2', {'named_constants': named_constants}),
         )
         print(f'  Named constants → lib/reaction_constants.ts ({len(named_constants)} constant(s))')
+
+    # --- Time zone enum mapping (lib/_timezone.ts) ---
+    # Always written: the `Timezone` Prisma enum ships with the base schema, and the IANA spelling
+    # of each member exists only in this generated map.
+    _write(out / 'lib' / '_timezone.ts', _render_timezone_ts(env))
+    print(f'  Time zone mapping → lib/_timezone.ts ({len(TIMEZONES)} zones)')
 
     # --- Self-only admin-bypass entity list (lib/self_only_admin_bypass_entities.ts) ---
     # x-self-only entities with admin_bypass:true (cmd_536) — the privileged

@@ -547,7 +547,7 @@ app-generator/
 | [troubleshooting.md](docs/knowledge/troubleshooting.md) | ビルド、テスト、コード生成、データベースの一般的な障害パターンと段階的な修正手順 |
 | [i18n-locale-routing.md](docs/knowledge/i18n-locale-routing.md) | next-intl v4 セットアップ、ロケールルーティング、翻訳ファイル規約 |
 | [dark-mode-and-hydration.md](docs/knowledge/dark-mode-and-hydration.md) | システム連動ダークモード、SSR セーフなテーマ初期化 |
-| [timezone-handling.md](docs/knowledge/timezone-handling.md) | サーバー/クライアントのタイムゾーン規約 |
+| [timezone-handling.md](docs/knowledge/timezone-handling.md) | サーバー/クライアントのタイムゾーン規約、`app_setting.timezone` の `Timezone` enum |
 | [child-datagrid-reference-columns.md](docs/knowledge/child-datagrid-reference-columns.md) | インライン DataGrid 子エンティティ、参照列のレンダリング |
 | [mobile-responsive-layout.md](docs/knowledge/mobile-responsive-layout.md) | レスポンシブレイアウト規約、検索ヘッダーアイコン、モバイルアカウントセクション |
 | [relation-picker-rest-route.md](docs/knowledge/relation-picker-rest-route.md) | `GET /api/{entity}/options`：リレーションピッカー用の REST 検索と ID 参照。Web のオートコンプリートと同じ関数を実行し、認証・権限・組織分離を共有 |
