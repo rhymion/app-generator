@@ -1,0 +1,96 @@
+import { useCallback, useEffect, useState } from 'react';
+import { router } from 'expo-router';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useMessages } from '@/lib/messages';
+import { fetchAuditLogPage, isPermissionDenied, type AuditLogEntry } from '@/lib/audit_log/mobile_client';
+import { formatAuditTimestamp } from '@/components/audit_log/format';
+
+const PAGE_SIZE = 20;
+
+/** Read-only, paged list of audit entries, newest first (GET /api/audit_log). */
+export function AuditLogList() {
+  const { t } = useMessages();
+  const [rows, setRows] = useState<AuditLogEntry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [failure, setFailure] = useState<'denied' | 'unknown' | null>(null);
+
+  const load = useCallback(async (target: number) => {
+    setLoading(true);
+    try {
+      const result = await fetchAuditLogPage(target, PAGE_SIZE);
+      setRows(result.rows);
+      setTotal(result.total);
+      setPage(target);
+      setFailure(null);
+    } catch (err) {
+      setFailure(isPermissionDenied(err) ? 'denied' : 'unknown');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load(0);
+  }, [load]);
+
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  return (
+    <View style={styles.container} testID="list-audit_log">
+      <Text style={styles.title} testID="list-title">{t('EntityLabel.auditLog')}</Text>
+      {loading && rows.length === 0 ? <ActivityIndicator testID="list-loading" /> : null}
+      {failure ? (
+        <Text style={styles.error} testID="list-error">
+          {failure === 'denied' ? t('Errors.permissionDenied') : t('Errors.unknown')}
+        </Text>
+      ) : null}
+      <FlatList
+        data={rows}
+        keyExtractor={(row) => row.id}
+        renderItem={({ item }) => (
+          <Pressable
+            style={styles.row}
+            onPress={() => router.push(`/entity/audit_log/${item.id}` as never)}
+            testID={`list-row-${item.id}`}
+          >
+            <Text style={styles.rowTitle} testID={`list-cell-${item.id}-action`}>{item.action}</Text>
+            <Text style={styles.rowDetail} testID={`list-cell-${item.id}-target`}>
+              {`${t('Fields.targetTable')}: ${item.target_table ?? '-'}`}
+            </Text>
+            <Text style={styles.rowDetail} testID={`list-cell-${item.id}-actor`}>
+              {`${t('Fields.actorUser')}: ${item.actor_user?.name ?? '-'}`}
+            </Text>
+            <Text style={styles.rowDetail} testID={`list-cell-${item.id}-created_at`}>
+              {formatAuditTimestamp(item.created_at)}
+            </Text>
+          </Pressable>
+        )}
+        ListEmptyComponent={!loading && !failure ? <Text style={styles.empty} testID="list-empty">-</Text> : null}
+      />
+      <View style={styles.pager}>
+        <Pressable disabled={page <= 0} onPress={() => load(page - 1)} testID="list-prev">
+          <Text style={page <= 0 ? styles.pagerDisabled : styles.pagerText}>{t('Common.previousPage')}</Text>
+        </Pressable>
+        <Text testID="list-page">{`${page + 1} / ${pageCount}`}</Text>
+        <Pressable disabled={page + 1 >= pageCount} onPress={() => load(page + 1)} testID="list-next">
+          <Text style={page + 1 >= pageCount ? styles.pagerDisabled : styles.pagerText}>{t('Common.nextPage')}</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 16 },
+  title: { fontSize: 20, fontWeight: '600', marginBottom: 12 },
+  row: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e5e7eb', gap: 2 },
+  rowTitle: { fontSize: 16, fontWeight: '500' },
+  rowDetail: { fontSize: 13, color: '#6b7280' },
+  empty: { textAlign: 'center', color: '#9ca3af', marginTop: 24 },
+  error: { color: '#b91c1c', marginBottom: 8 },
+  pager: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12 },
+  pagerText: { color: '#2563eb' },
+  pagerDisabled: { color: '#9ca3af' },
+});

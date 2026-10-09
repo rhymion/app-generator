@@ -192,6 +192,27 @@ name; all `false` for an entity the caller holds nothing on). On a record, `upda
 overlaid with `operations` from `GET /api/<entity>/<id>/capabilities`. A form opened without `create`
 shows a permission message instead of fields.
 
+## Audit log
+
+The audit log is a built-in feature, not a schema entity, so it is not among the entity screens. The app has
+a read-only list and detail for it, reached from an **Audit Log** link that `mobile_nav.build_mobile_nav()`
+adds (`include_audit_log=True`, as `generate_mobile_target()` passes it). The link sits where the desktop
+sidebar puts it: in the `administration` group when the schema declares that group, as a flat footer tab
+when it does not.
+
+| Screen | Route | Reads |
+|---|---|---|
+| List (paged, 20 rows, newest first) | `/entity/audit_log` | `GET /api/audit_log?page=<n>&pageSize=20&sort=created_at:desc` |
+| Detail (action, target table and id, actor, time, metadata as formatted JSON) | `/entity/audit_log/<id>` | `GET /api/audit_log/<id>` |
+
+Both screens are registered in `lib/entity-registry.ts` under `audit_log` with no form, and are rendered from
+`templates/mobile/audit_log/`. They send no write request. Permission is the server's: the link is hidden when
+`GET /api/mobile/nav` lists `/audit_log` (the caller lacks `read` on `audit_log`, the rule the desktop sidebar
+applies), and a list request that is refused with `403` shows the shared `Errors.permissionDenied` message. The
+strings come from `EntityLabel.auditLog`, `Fields` (`action`, `actorUser`, `created_at`, `metadata`,
+`targetId`, `targetTable`) and the `Common` / `Errors` namespaces; only those `EntityLabel` and `Fields` keys are
+bundled.
+
 ## Authentication
 
 The mobile app signs in with email and password and holds an access/refresh token pair.
@@ -263,7 +284,13 @@ runs the Expo web server and the proxy as one process so the runner can stop bot
 - `mobile/scripts/real-browser-verify.js` is the reusable real-browser check. It selects a preset with
   `FLOW_TYPE` (`assert`, `drill`); a new need adds a preset instead of a new script. Never launch
   Chromium with `--disable-web-security` — it hides the CORS-class gaps this check exists to catch.
-- `code_generator/tests/test_mobile_nav.py` covers the tree built from the nav configuration.
+- `mobile/e2e/audit-log.spec.ts` (default schema) covers the Audit Log link under Administration, the real
+  list route, paging with the newest-first sort, the detail with its metadata and no edit or delete action,
+  a missing entry, a link hidden by the nav route and a refused request.
+- `code_generator/tests/test_mobile_nav.py` covers the tree built from the nav configuration, including the
+  audit log link.
+- `code_generator/tests/test_mobile_audit_log.py` covers the generated audit log screens: registered, REST
+  read-only, no permission logic of their own, linked in the nav tree and bundled strings.
 - `code_generator/tests/test_mobile_entities.py` covers which entities get screens, the relation field
   descriptions, that the screens and pickers call the shared modules and the options route, the REST client
   and the React version the shared hooks need.
@@ -281,4 +308,8 @@ check and is not part of the mandatory gate.
 - Creating the referenced record in place from a foreign-key field (`x-create-inline`) and the one-to-one
   bridge grid (`x-bridge`).
 - Bulk delete, the native date pickers (dates are typed as text), CSV import and export.
+- Scheduled task administration (the task list, each task's last run, run now). The list and the last-run
+  status are read only by the Web admin page's Server Component (`loadAdminOverview()`), and the rerun,
+  resolve and skip actions are Server Actions; the one REST route, `/api/scheduled-tasks/<task>`, starts a
+  run but lists nothing, so a client has no route to build the screen on.
 - Translated field labels.

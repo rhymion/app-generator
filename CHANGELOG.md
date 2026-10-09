@@ -5,6 +5,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Read-only audit log screens in the Expo mobile app** (Issue #866). `generate-code` renders a paged list
+  (newest first) and a detail screen for the built-in audit log into `mobile/`, reading the existing
+  `GET /api/audit_log` and `GET /api/audit_log/<id>` routes only. The navigation gets an **Audit Log** link
+  in the `administration` group (a flat tab when the schema declares no such group), matching the desktop
+  sidebar; the link is hidden for a caller without `read` on `audit_log` (the existing `GET /api/mobile/nav`
+  rule), and a refused list request shows the shared permission message. No schema key is added and the Web
+  screens are unchanged. `build_mobile_nav()` takes `include_audit_log` for the new link. See
+  `docs/knowledge/mobile-app.md`. Scheduled task administration (#867) is not part of this change: the task
+  list and last-run status have no REST route for a client to call.
 - **Comment thread and reactions on the mobile detail screen** (Issue #863; the thread part of Issue #861
   and the mention rendering of Issue #862). An entity that is commentable through the shared `commentable`
   bridge keeps its native screens instead of the placeholder, and its detail screen lists the comments the
