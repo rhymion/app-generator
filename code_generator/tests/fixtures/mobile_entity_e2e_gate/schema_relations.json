@@ -13,9 +13,14 @@
     "created_mobile_tasks mobile_task[] @relation(\"MobileTaskCreator\")",
     "updated_mobile_tasks mobile_task[] @relation(\"MobileTaskUpdater\")",
     "created_mobile_org_items mobile_org_item[] @relation(\"MobileOrgItemCreator\")",
-    "updated_mobile_org_items mobile_org_item[] @relation(\"MobileOrgItemUpdater\")"
+    "updated_mobile_org_items mobile_org_item[] @relation(\"MobileOrgItemUpdater\")",
+    "created_mobile_threads mobile_thread[] @relation(\"MobileThreadCreator\")",
+    "updated_mobile_threads mobile_thread[] @relation(\"MobileThreadUpdater\")"
   ],
   "organization": [
     "mobile_org_items mobile_org_item[]"
+  ],
+  "commentable": [
+    "mobile_thread mobile_thread?"
   ]
 }
