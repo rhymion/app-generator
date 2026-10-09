@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ResponsiveListClient from './ResponsiveListClient';
@@ -67,13 +67,14 @@ function renderList(fetchPage: (opts: PageOpts) => Promise<PageResult<Row>>) {
   );
 }
 
-const lastOpts = (fetchPage: ReturnType<typeof vi.fn>): PageOpts => fetchPage.mock.calls.at(-1)![0];
+type FetchMock = Mock<(opts: PageOpts) => Promise<PageResult<Row>>>;
+const lastOpts = (fetchPage: FetchMock): PageOpts => fetchPage.mock.calls.at(-1)![0];
 
 describe.each([
   { viewport: 'desktop', mobile: false, grid: 'grid' },
   { viewport: 'mobile web', mobile: true, grid: 'cards' },
 ])('list search panel on a $viewport viewport', ({ mobile, grid }) => {
-  let fetchPage: ReturnType<typeof vi.fn>;
+  let fetchPage: FetchMock;
 
   beforeEach(() => {
     setViewport(mobile);
