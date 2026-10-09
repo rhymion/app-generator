@@ -31,6 +31,11 @@ import {
 } from '@/lib/entity-http';
 
 export type {{ pascal }} = { id: string } & Record<string, unknown>;
+{% if is_payment %}
+
+/** A created record, with the hosted checkout URL the buyer is sent to. */
+export type CheckoutCreated = ActionCreated & { checkoutUrl?: string };
+{% endif %}
 
 export const {{ const_name }}_FIELDS: FieldSpec[] = {{ fields_json }};
 
@@ -63,7 +68,7 @@ export async function get{{ pascal }}Detail(id: string): Promise<{{ pascal }} | 
  * to `{ ok: true, id }` on success and to an ActionFailure otherwise; it never
  * rejects.
  */
-export async function upsert{{ pascal }}(formData: FormData): Promise<ActionFailure | ActionCreated> {
+export async function upsert{{ pascal }}(formData: FormData): Promise<ActionFailure | {{ 'CheckoutCreated' if is_payment else 'ActionCreated' }}> {
   const body = formDataToBody(formData, {{ const_name }}_FIELDS);
   const id = formData.get('id');
   try {
@@ -74,8 +79,14 @@ export async function upsert{{ pascal }}(formData: FormData): Promise<ActionFail
     }
 {% endif %}
 {% if can_new %}
+{% if is_payment %}
+    // x-payment: the create route answers { record, checkoutUrl }.
+    const created = await apiFetch<{ record: { id: string }; checkoutUrl?: string }>('/api/{{ name }}', { method: 'POST', body: JSON.stringify(body) });
+    return { ok: true, id: created.record.id, checkoutUrl: created.checkoutUrl };
+{% else %}
     const created = await apiFetch<{ id: string }>('/api/{{ name }}', { method: 'POST', body: JSON.stringify(body) });
     return { ok: true, id: created.id };
+{% endif %}
 {% else %}
     return { ok: false, errorCode: 'PERMISSION_DENIED' };
 {% endif %}

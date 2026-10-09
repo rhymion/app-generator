@@ -102,7 +102,6 @@ def test_plain_context_is_eligible():
     ('non_comment_ch', [{'name': 'child', 'property_name': 'kids', 'is_many_to_many': False}]),
     ('entity_view_components', [{'name': 'ApprovalSection'}]),
     ('has_attachable', True),
-    ('is_payment', True),
     ('reservation_config', {'mode': 'count'}),
     ('state_machine_transitions', [{'field': 'status'}]),
     ('is_self_only', True),
@@ -318,7 +317,9 @@ def test_picker_reads_candidates_from_the_options_route_and_filters_nothing(out)
     picker = _read(out, 'components/native/RelationPicker.tsx')
     assert 'searchEntityOptions(' in picker
     assert '.filter(' not in picker.replace('selected.filter(', '').replace('current !== id', '')
-    assert 'permissions' not in picker
+    # Candidates are never gated here; only the "Create new" control reads the server's create flag.
+    assert 'permissions.view' not in picker and 'permissions.read' not in picker
+    assert 'permissions.create' in picker
     http = _read(out, 'lib/entity-http.ts')
     assert '/api/${entity}/options' in http
     assert 'err.status === 403' in http
@@ -345,6 +346,73 @@ def test_picker_strings_exist_in_both_locales():
         for key in ('select', 'clear', 'done', 'search', 'noOptions'):
             assert common.get(key), (locale, key)
 
+
+# --- create the referenced record in place (x-create-inline) --------------------------------
+
+def test_inline_create_target_is_no_longer_ineligible():
+    assert mobile_ineligible_reason(_ctx(is_inline_create_target=True)) is None
+    assert mobile_ineligible_reason(_ctx(is_payment=True)) is None
+
+
+def test_field_declares_create_inline_and_target_form_is_wired(out):
+    by_key = {f['key']: f for f in _fields(out, 'mobile_ticket', 'MOBILE_TICKET')}
+    assert by_key['mobile_category_id']['createInline'] is True
+    # a plain foreign key declares nothing
+    assert 'createInline' not in {f['key']: f for f in _fields(out, 'mobile_task', 'MOBILE_TASK')}['mobile_group_id']
+    form = _read(out, 'components/mobile_ticket/FormUpsert.tsx')
+    assert "import { MobileCategoryFormUpsert } from '@/components/mobile_category/FormUpsert'" in form
+    assert 'mobile_category_id: MobileCategoryFormUpsert' in form
+    assert 'createForm={CREATE_FORMS[spec.key]}' in form
+    # a form with no create-inline field imports no other entity's form
+    assert 'CREATE_FORMS' not in _read(out, 'components/mobile_task/FormUpsert.tsx')
+
+
+def test_target_form_can_be_hosted_without_navigating(out):
+    form = _read(out, 'components/mobile_category/FormUpsert.tsx')
+    assert 'onCreated, onCancel' in form
+    assert 'if (onCreated) {' in form
+    assert 'onCancel ? onCancel()' in form
+
+
+def test_picker_creates_through_the_target_form_and_selects_the_new_record(out):
+    picker = _read(out, 'components/native/RelationPicker.tsx')
+    assert 'createForm: CreateForm' in picker
+    assert 'fetchPermissions(target)' in picker
+    assert 'picker-create-${spec.key}' in picker
+    assert 'onChange(id)' in picker
+    # the save goes through the target's own form (shared hook and REST create), not the picker
+    assert 'upsert' not in picker
+
+
+# --- payment checkout (x-payment) -------------------------------------------------------------
+
+def test_payment_entity_gets_screens_and_reads_the_create_response(out):
+    client = _read(out, 'lib/mobile_order/mobile_client.ts')
+    assert 'export type CheckoutCreated = ActionCreated & { checkoutUrl?: string }' in client
+    assert 'created.record.id' in client and 'checkoutUrl: created.checkoutUrl' in client
+    # an entity without x-payment keeps the bare record
+    plain = _read(out, 'lib/mobile_note/mobile_client.ts')
+    assert 'CheckoutCreated' not in plain and 'created.record' not in plain
+
+
+def test_payment_form_opens_the_checkout_url_in_the_in_app_browser(out):
+    form = _read(out, 'components/mobile_order/FormUpsert.tsx')
+    assert "from '@/lib/checkout'" in form
+    assert 'isCheckoutUrl(result.checkoutUrl)' in form
+    assert 'await openCheckout(url)' in form
+    assert "payment=returned" in form
+    assert 'checkout' not in _read(out, 'components/mobile_note/FormUpsert.tsx').lower()
+    helper = _read(out, 'lib/checkout.ts')
+    assert "from 'expo-web-browser'" in helper
+    assert 'openBrowserAsync(url)' in helper
+    assert 'payment=returned' not in helper
+
+
+def test_payment_dependency_and_helper_exist_only_with_a_payment_entity(out):
+    assert json.loads(_read(out, 'package.json'))['dependencies']['expo-web-browser'].startswith('~57.')
+    view = _read(out, 'components/mobile_order/FormView.tsx')
+    assert 'view-payment-returned' in view
+    assert 'view-payment-returned' not in _read(out, 'components/mobile_note/FormView.tsx')
 
 # --- list: sort, filter, search, bulk delete -----------------------------------------------
 

@@ -1,13 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react';
 import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useMessages } from '@/lib/messages';
-import { searchEntityOptions, type FieldSpec, type RelationRow } from '@/lib/entity-http';
+import { fetchPermissions, searchEntityOptions, type FieldSpec, type RelationRow } from '@/lib/entity-http';
 
 /** Name of a related record: its label column, or its id when that column is empty. */
 export function relationLabel(row: RelationRow, labelField: string): string {
   const value = row[labelField];
   return value === null || value === undefined || value === '' ? String(row.id) : String(value);
 }
+
+/** What the target's create form is given when it is opened from a picker (x-create-inline). */
+export type InlineCreateProps = {
+  /** Called with the new record's id once it is saved. */
+  onCreated: (id: string) => void;
+  /** Called when the user leaves the form without saving. */
+  onCancel: () => void;
+};
 
 type Props = {
   spec: FieldSpec;
@@ -16,6 +24,8 @@ type Props = {
   disabled?: boolean;
   caller?: string;
   formValues?: Record<string, string | boolean | string[]>;
+  /** The target's native create form; set only for a field that declares x-create-inline. */
+  createForm?: ComponentType<InlineCreateProps>;
 };
 
 const SEARCH_DELAY_MS = 250;
@@ -26,7 +36,7 @@ const SEARCH_DELAY_MS = 250;
  * route, which applies the same access scope, organization isolation and autocomplete
  * filter as the Web picker; nothing is filtered here.
  */
-export function RelationPicker({ spec, value, onChange, disabled, caller, formValues }: Props) {
+export function RelationPicker({ spec, value, onChange, disabled, caller, formValues, createForm: CreateForm }: Props) {
   const { t, terr } = useMessages();
   const many = spec.kind === 'relation_many';
   const target = spec.target ?? '';
@@ -37,6 +47,10 @@ export function RelationPicker({ spec, value, onChange, disabled, caller, formVa
   const [labels, setLabels] = useState<Record<string, string>>({});
   const [denied, setDenied] = useState(false);
   const [open, setOpen] = useState(false);
+  // x-create-inline: the target's create form is shown over this form, so the form's values are kept.
+  const [creating, setCreating] = useState(false);
+  const [canCreate, setCanCreate] = useState(false);
+  const [created, setCreated] = useState(false);
   const [query, setQuery] = useState('');
   const [rows, setRows] = useState<RelationRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -108,6 +122,18 @@ export function RelationPicker({ spec, value, onChange, disabled, caller, formVa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey, target]);
 
+  // The control is a hint, like the Web's: shown once the server says the caller may create the target.
+  useEffect(() => {
+    if (!CreateForm) return;
+    let live = true;
+    void fetchPermissions(target)
+      .then((permissions) => live && setCanCreate(Boolean(permissions.create)))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [CreateForm, target]);
+
   // Re-query while the modal is open as the text changes.
   useEffect(() => {
     if (!open) return;
@@ -127,6 +153,15 @@ export function RelationPicker({ spec, value, onChange, disabled, caller, formVa
   const close = () => {
     setOpen(false);
     setQuery('');
+  };
+
+  const onCreated = (id: string) => {
+    setCreating(false);
+    setCreated(true);
+    // The new record is selected through the same path as a picked one; its label is read back by the
+    // effect above, which asks the options route for the ids it does not know.
+    if (many) onChange([...selected, id]);
+    else onChange(id);
   };
 
   const nameOf = (id: string) => labels[id] ?? id;
@@ -167,6 +202,11 @@ export function RelationPicker({ spec, value, onChange, disabled, caller, formVa
               <Pressable style={styles.button} onPress={() => setOpen(true)} testID={`picker-open-${spec.key}`}>
                 <Text>{t('Common.select')}</Text>
               </Pressable>
+              {CreateForm && canCreate ? (
+                <Pressable style={styles.button} onPress={() => setCreating(true)} testID={`picker-create-${spec.key}`}>
+                  <Text>{t('Common.createNew')}</Text>
+                </Pressable>
+              ) : null}
               {!many && selected.length > 0 && !spec.required ? (
                 <Pressable style={styles.button} onPress={() => onChange('')} testID={`picker-clear-${spec.key}`}>
                   <Text>{t('Common.clear')}</Text>
@@ -176,6 +216,16 @@ export function RelationPicker({ spec, value, onChange, disabled, caller, formVa
           )}
         </View>
       )}
+      {created ? (
+        <Text style={styles.hint} testID={`picker-created-${spec.key}`}>{t('Common.createdInlineNotice', { entity: target })}</Text>
+      ) : null}
+      {CreateForm ? (
+        <Modal visible={creating} animationType="slide" onRequestClose={() => setCreating(false)}>
+          <View style={styles.modal} testID={`picker-create-modal-${spec.key}`}>
+            {creating ? <CreateForm onCreated={onCreated} onCancel={() => setCreating(false)} /> : null}
+          </View>
+        </Modal>
+      ) : null}
       <Modal visible={open && !denied} animationType="slide" onRequestClose={close}>
         <View style={styles.modal} testID={`picker-modal-${spec.key}`}>
           <Text style={styles.title}>{spec.label}</Text>

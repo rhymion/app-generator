@@ -16,6 +16,11 @@ An entity that declares `x-approval` (a one-to-one bridge to `approvable` and th
 component) gets the same screens plus the approval section, whose approve / reject /
 withdraw buttons call the approval REST routes.
 
+A many-to-one foreign key that declares `x-create-inline` also offers "Create new": the target's own
+native create form opens over the hosting form (see `generate.py`, which resolves the target once every
+entity's spec is known). An `x-payment` entity is created through the same form; the create response's
+`checkoutUrl` is opened in an in-app browser.
+
 An entity that is commentable through the shared `commentable` bridge keeps its screens: the detail screen
 lists the comment thread (read from the REST detail) and draws the reaction bar, which calls the comment
 reactions route. Adding, editing and deleting a comment, and @-mentions, have no REST route yet, so a
@@ -73,8 +78,6 @@ _COMMENTABLE_TARGET = 'commentable'
 
 _FEATURE_FLAGS = (
     'has_attachable',
-    'is_payment',
-    'is_inline_create_target',
     'reservation_config',
     'state_machine_transitions',
     'is_self_only',
@@ -216,7 +219,7 @@ def _date_kind(defn: dict) -> str:
 
 
 def _relation_entry(rel: dict, ctx: dict, required: set[str], readonly: set[str], title,
-                    relation_name: str) -> dict:
+                    relation_name: str, many_to_one: bool = False) -> dict:
     """Field entry for a foreign key or one-to-one selector."""
     name = rel['prop_name']
     return {
@@ -231,6 +234,9 @@ def _relation_entry(rel: dict, ctx: dict, required: set[str], readonly: set[str]
         'relation_name': relation_name,
         'body_key': name,
         'context_fields': list(rel.get('autocomplete_context_fields') or []),
+        # x-create-inline on a many-to-one foreign key; generate.py keeps it only when the target has a
+        # native create form (`create_form`), so a field whose target has none stays a plain picker.
+        'create_inline': many_to_one and bool(rel.get('create_inline')),
     }
 
 
@@ -312,7 +318,8 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
     # embeds is the column name without `_id` (a selector carries its own name).
     for rel in ctx.get('parent_rels_raw') or []:
         name = rel['prop_name']
-        entries[name] = _relation_entry(rel, ctx, required, readonly, title, name[:-3] if name.endswith('_id') else name)
+        entries[name] = _relation_entry(rel, ctx, required, readonly, title, name[:-3] if name.endswith('_id') else name,
+                                        many_to_one=True)
     for rel in ctx.get('selector_oto_rels') or []:
         entries[rel['prop_name']] = _relation_entry(rel, ctx, required, readonly, title, rel['relation_name'])
     for child in _picker_children(ctx):
@@ -350,6 +357,8 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
         'can_edit': bool(ctx.get('can_update')),
         'can_view': bool(ctx.get('can_view')),
         'can_delete': bool(ctx.get('can_delete')),
+        # x-payment: creating a record answers with a hosted checkout URL.
+        'is_payment': bool(ctx.get('is_payment')) and bool(ctx.get('can_create')),
         'has_approval': has_approval_section(ctx),
         'split': _split_entry(ctx, entries, required, title) if ctx.get('can_view') else None,
         'comments': comment_thread_spec(ctx),
