@@ -154,18 +154,24 @@ export async function requireSession(): Promise<{ userId: string }> {
 }
 
 /**
- * Resolve the caller's user id via X-API-Key/Authorization header when
- * present, falling back to the NextAuth session cookie otherwise. Mirrors
- * the dual-auth pattern in app/api/search/route.ts. Returns null when
- * neither credential is present; throws ApiError(401) when an API key
- * header is present but the key itself is invalid.
+ * Resolve the caller's user id from a credential header when present, falling
+ * back to the NextAuth session cookie otherwise. Mirrors the dual-auth pattern
+ * in app/api/search/route.ts.
+ *
+ * A bearer token is dispatched by shape, the same way {@link authenticate}
+ * does: a mobile access JWT is verified as such, anything else is looked up as
+ * an API key. `X-API-Key` is always an API key. Returns null when no
+ * credential is present; throws ApiError(401) when a credential header is
+ * present but invalid. Authorization is unchanged: the caller still passes
+ * through the route's own permission and organization checks.
  */
 export async function resolveActorId(request: NextRequest): Promise<string | null> {
-  const apiKey =
-    request.headers.get('X-API-Key') ||
-    request.headers.get('Authorization')?.replace('Bearer ', '');
-  if (apiKey) {
+  if (request.headers.get('X-API-Key')) {
     const { userId } = await authenticateApiKey(request);
+    return userId;
+  }
+  if (request.headers.get('Authorization')?.replace('Bearer ', '')) {
+    const { userId } = await authenticate(request);
     return userId;
   }
   return getSessionUserId();
