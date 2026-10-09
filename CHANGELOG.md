@@ -12,6 +12,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   create response's `checkoutUrl` in the in-app browser (`expo-web-browser`, added only for apps with an
   `x-payment` entity) and the detail screen shows a returned notice. New `Payment.returnedMessage`
   text. See `docs/knowledge/mobile-app.md`.
+- **Scheduled task administration screen in the Expo mobile app** (Issue #867). When the schema declares a
+  scheduled task, `generate-code` renders an overview screen into `mobile/` that reads
+  `GET /api/scheduled-task-runs` (status, times, message and the reason a task did not run, for a chosen business
+  date, plus failed or stuck runs of other dates) and offers rerun, mark resolved and skip through
+  `POST /api/scheduled-task-runs/<task>/<action>`. Only the actions the server marks open are shown, and the role
+  check stays on the server: the nav link is hidden by `GET /api/mobile/nav`, and a `403` is shown as the server's
+  answer. No schema key is added and the Web admin page is unchanged. `build_mobile_nav()` takes
+  `include_scheduled_tasks`. See `docs/knowledge/mobile-app.md`.
 - **Sort, filter, search and bulk delete on the Expo mobile list** (Issues #874, #856). The native list
   gets a sort panel, a filter panel (text, number, decimal, boolean and enum fields) and a search box that
   matches the row's title column, all through the REST list's `sort` and `f.<field>` parameters; a long press

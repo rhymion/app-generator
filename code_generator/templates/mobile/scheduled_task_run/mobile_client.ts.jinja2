@@ -1,0 +1,73 @@
+// Mobile data access for scheduled task administration: REST calls against
+// /api/scheduled-task-runs, the routes the Web admin page's loader and Server
+// Actions sit behind. The server applies the ScheduledTaskRunner role and answers
+// 403 without it; nothing here decides who may act.
+import { apiFetch, ApiError } from '@/lib/api-base';
+
+export type RunStatus = 'running' | 'succeeded' | 'failed' | 'not_due' | 'stuck' | 'blocked' | 'pending';
+
+export type OperatorActionKind = 'rerun' | 'resolve' | 'skip';
+
+export type TaskRunRow = {
+  task_id: string;
+  business_date: string;
+  status: RunStatus;
+  started_at: string | null;
+  finished_at: string | null;
+  message: string | null;
+  blocked_by: string[];
+  interval: string | null;
+  actions: Record<OperatorActionKind, boolean>;
+};
+
+export type Overview = {
+  business_date: string;
+  settings: { stuck_after_minutes: number; predecessor_recheck_minutes: number };
+  rows: TaskRunRow[];
+  attention: TaskRunRow[];
+};
+
+/** `date` is YYYY-MM-DD; the server's current business date when omitted. */
+export async function fetchOverview(date?: string): Promise<Overview> {
+  const query = date ? `?date=${encodeURIComponent(date)}` : '';
+  return apiFetch<Overview>(`/api/scheduled-task-runs${query}`);
+}
+
+export type ActionResult = { ok: true } | { ok: false; code: string; detail?: string };
+
+/**
+ * Runs an operator action. A refusal the server explains ({ ok: false, code }) comes back
+ * as a result; a refusal without that body (403 for a caller without the role) comes back
+ * as FORBIDDEN. Any other failure throws.
+ */
+export async function runOperatorAction(
+  task: string,
+  action: OperatorActionKind,
+  businessDate: string,
+  reason?: string,
+): Promise<ActionResult> {
+  try {
+    await apiFetch<unknown>(`/api/scheduled-task-runs/${encodeURIComponent(task)}/${action}`, {
+      method: 'POST',
+      body: JSON.stringify({ business_date: businessDate, ...(reason ? { reason } : {}) }),
+    });
+    return { ok: true };
+  } catch (err) {
+    if (!(err instanceof ApiError)) throw err;
+    try {
+      const body = JSON.parse(err.message) as { ok?: boolean; code?: string; detail?: string };
+      if (body.ok === false && typeof body.code === 'string') {
+        return { ok: false, code: body.code, ...(body.detail ? { detail: body.detail } : {}) };
+      }
+    } catch {
+      // not a JSON body: fall back to the status
+    }
+    if (err.status === 403) return { ok: false, code: 'FORBIDDEN' };
+    throw err;
+  }
+}
+
+/** True when a failed request was refused because the caller lacks the operator role. */
+export function isPermissionDenied(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 403;
+}

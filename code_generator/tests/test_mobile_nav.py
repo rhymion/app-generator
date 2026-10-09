@@ -220,3 +220,25 @@ def test_audit_log_label_comes_from_the_messages_files():
 def test_audit_log_link_is_not_added_twice():
     nav = build_mobile_nav([_entity('audit_log')], _schema({'audit_log': {}}), include_audit_log=True)
     assert _keys(nav['tabs']) == ['/audit_log']
+
+
+def test_scheduled_task_link_is_absent_unless_requested():
+    nav = build_mobile_nav([_entity('role')], _schema({'role': {}}), include_audit_log=True)
+    assert '/scheduled_task_run' not in _keys(nav['tabs'])
+
+
+def test_scheduled_task_link_follows_the_audit_log_in_the_administration_group():
+    entities = [_entity('role')]
+    schema = _schema({'role': {'x-nav': {'parent': 'administration', 'order': 20}}}, {'administration': {'icon': 'Settings'}})
+    nav = build_mobile_nav(entities, schema, include_audit_log=True, include_scheduled_tasks=True)
+    children = nav['tabs'][0]['children']
+    assert _keys(children) == ['/role', '/audit_log', '/scheduled_task_run']
+    link = children[2]
+    assert link['entity'] == 'scheduled_task_run'
+    assert link['href'] == '/scheduled_task_run'
+    assert link['label'] == 'Scheduled Task Run'
+
+
+def test_scheduled_task_link_is_a_flat_tab_without_an_administration_group():
+    nav = build_mobile_nav([_entity('role')], _schema({'role': {}}), include_scheduled_tasks=True)
+    assert _keys(nav['tabs']) == ['/role', '/scheduled_task_run']

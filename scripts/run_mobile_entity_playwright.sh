@@ -15,12 +15,14 @@
 # AUTH_SECRET. Cleanup is `docker compose -p <that project> down -v`. A port
 # already in use fails the run.
 #
-# Two modes, because the footer specs assume the default schema's tabs:
+# Three modes, because the footer specs assume the default schema's tabs:
 #   MODE=fixture (default)  fixture entities merged; runs mobile/e2e/entity-crud.spec.ts,
 #                           mobile/e2e/relation-pickers.spec.ts, mobile/e2e/inline-create-checkout.spec.ts,
-#                           mobile/e2e/comments.spec.ts, mobile/e2e/approval-actions.spec.ts and
-#                           mobile/e2e/split-action.spec.ts
+#                           mobile/e2e/list-capabilities.spec.ts, mobile/e2e/comments.spec.ts,
+#                           mobile/e2e/approval-actions.spec.ts and mobile/e2e/split-action.spec.ts
 #   MODE=default            unmodified schema; runs every other spec in mobile/e2e/
+#   MODE=scheduled          the scheduled-task-e2e-gate fixture (three scheduled tasks) merged and the
+#                           test user made a ScheduledTaskRunner; runs mobile/e2e/scheduled-task.spec.ts
 #
 # Usage: bash scripts/run_mobile_entity_playwright.sh
 # Environment: GATE_KEEP_BUILD_DIR=1 keeps the copy; PORT_SLOT=<0-899> picks another port set; PW_ARGS='<playwright args>'
@@ -78,6 +80,9 @@ ln -s "$REPO_ROOT/node_modules" "$BUILD_DIR/node_modules"
 if [ "$MODE" = "fixture" ]; then
   echo "-- merging the fixture schema into the copy --"
   python3 scripts/compose_child_datagrid_e2e_fixture.py "$FIXTURE_DIR" "$BUILD_DIR"
+elif [ "$MODE" = "scheduled" ]; then
+  echo "-- merging the scheduled-task fixture schema into the copy --"
+  python3 scripts/compose_child_datagrid_e2e_fixture.py code_generator/tests/fixtures/scheduled_task_e2e_gate "$BUILD_DIR"
 fi
 
 echo "-- writing the copy's own environment --"
@@ -204,9 +209,18 @@ SELECT 'reaction-seed-1', 'like', id, 'comment-seed-1', now() FROM "user" ORDER 
 SQL
   PW_TARGET="entity-crud.spec.ts relation-pickers.spec.ts list-capabilities.spec.ts inline-create-checkout.spec.ts comments.spec.ts approval-actions.spec.ts split-action.spec.ts"
   export MOBILE_PW_IGNORE=""
+elif [ "$MODE" = "scheduled" ]; then
+  echo "-- the test user holds the ScheduledTaskRunner role --"
+  docker exec -i "${PROJECT}-postgres-test-1" psql -U postgres -d my_next_test -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+INSERT INTO role (id, name, updated_at, creator_id, updater_id)
+SELECT 'role-scheduled-runner', 'ScheduledTaskRunner', now(), id, id FROM "user" ORDER BY created_at LIMIT 1;
+INSERT INTO "_UserRoles" ("A", "B") SELECT 'role-scheduled-runner', id FROM "user" WHERE email = 'admin@example.com';
+SQL
+  PW_TARGET="scheduled-task.spec.ts"
+  export MOBILE_PW_IGNORE=""
 else
   PW_TARGET=""
-  export MOBILE_PW_IGNORE="**/{entity-crud,relation-pickers,list-capabilities,inline-create-checkout,comments,approval-actions,split-action}.spec.ts"
+  export MOBILE_PW_IGNORE="**/{entity-crud,relation-pickers,list-capabilities,inline-create-checkout,comments,approval-actions,split-action,scheduled-task}.spec.ts"
 fi
 
 echo "-- installing the Expo dependencies --"
