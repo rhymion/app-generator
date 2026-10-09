@@ -171,6 +171,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/save-and-continue-editing.md`.
 
 ### Changed
+- **Mobile app generation is opt-in** (Issue #915). `generate-code` no longer renders the Expo app into
+  `mobile/` unless the schema sets `x-generator.mobile.enabled: true` (default `false`); the key is
+  validated (boolean only, unknown sub-keys rejected). A project that wants to keep `mobile/` must set the
+  key in its own schema. The hand-written mobile token routes under `app/api/mobile/` stay in place. After
+  switching the key to `false`, run `npm run cleanup` to remove the previously generated `mobile/` files.
+  `scripts/run_mobile_entity_playwright.sh` enables the key in every mode and fails if `mobile/` is absent.
+  See `docs/knowledge/mobile-app.md`.
 - **Generated entity screens call framework-neutral UI hooks.** The form state and submit
   orchestration, error-message mapping, permission-derived show/hide decisions and approval wiring
   that `FormUpsert.tsx` and `FormView.tsx` carried inline now live in `lib/<entity>/use_entity_form.ts`,

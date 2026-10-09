@@ -27,6 +27,7 @@
 # Usage: bash scripts/run_mobile_entity_playwright.sh
 # Environment: GATE_KEEP_BUILD_DIR=1 keeps the copy; PORT_SLOT=<0-899> picks another port set; PW_ARGS='<playwright args>'
 #              narrows the run (for example PW_ARGS='entity-crud.spec.ts').
+# Every mode sets x-generator.mobile.enabled: true in the copy and fails closed if mobile/ is not generated.
 # This is an optional check, not part of the mandatory gate.
 set -euo pipefail
 
@@ -85,6 +86,19 @@ elif [ "$MODE" = "scheduled" ]; then
   python3 scripts/compose_child_datagrid_e2e_fixture.py code_generator/tests/fixtures/scheduled_task_e2e_gate "$BUILD_DIR"
 fi
 
+echo "-- opting the copy's schema in to mobile generation (x-generator.mobile.enabled) --"
+# The default schema leaves the Expo app off and the fixture merge adds entities only, so every mode needs this.
+python3 - "$BUILD_DIR/code_generator/json_schema.yaml" <<'PY'
+import sys
+
+path = sys.argv[1]
+text = open(path, encoding="utf-8").read()
+if "x-generator:\n" not in text:
+    sys.exit("mobile-entity-playwright: no top-level x-generator block to enable mobile in")
+text = text.replace("x-generator:\n", "x-generator:\n  mobile:\n    enabled: true\n", 1)
+open(path, "w", encoding="utf-8").write(text)
+PY
+
 echo "-- writing the copy's own environment --"
 python3 - "$BUILD_DIR/.env.test" "$PROJECT" "$APP_PORT" "$POSTGRES_PORT" "$REDIS_PORT" <<'PY'
 import re
@@ -118,6 +132,11 @@ cd "$BUILD_DIR"
 
 echo "-- npm run test:e2e:build (docker up, generate-code, db:push, seed, next build) --"
 NODE_ENV=test npm run test:e2e:build
+# Fail closed: without mobile/ every spec would fail confusingly or be skipped.
+if [ ! -f mobile/lib/entity-registry.ts ]; then
+  echo "mobile-entity-playwright: mobile/ was not generated (is x-generator.mobile.enabled true?); refusing to run." >&2
+  exit 1
+fi
 NODE_ENV=test npm run db:grant-all-permissions
 
 if [ "$MODE" = "fixture" ]; then
