@@ -16,6 +16,11 @@ A many-to-one foreign key that declares `x-create-inline` also offers "Create ne
 native create form opens over the hosting form (see `generate.py`, which resolves the target once every
 entity's spec is known). An `x-payment` entity is created through the same form; the create response's
 `checkoutUrl` is opened in an in-app browser.
+
+An entity that is commentable through the shared `commentable` bridge keeps its screens: the detail screen
+lists the comment thread (read from the REST detail) and draws the reaction bar, which calls the comment
+reactions route. Adding, editing and deleting a comment, and @-mentions, have no REST route yet, so a
+thread is read-only on mobile.
 """
 from __future__ import annotations
 
@@ -63,8 +68,11 @@ _FEATURE_KEYS = (
     'mention_fields',
 )
 
+# The relation features that are served by something other than a form field. The
+# bridge to `commentable` is one of them: it is the comment thread, not a relation to draw.
+_COMMENTABLE_TARGET = 'commentable'
+
 _FEATURE_FLAGS = (
-    'has_commentable',
     'has_attachable',
     'is_splittable',
     'reservation_config',
@@ -92,6 +100,26 @@ def _picker_children(ctx: dict) -> list[dict]:
     ]
 
 
+def _is_comment_bridge(rel: dict, ctx: dict) -> bool:
+    """True for the one-to-one bridge to the shared `commentable` row of a commentable entity."""
+    return bool(ctx.get('has_commentable')) and rel.get('target') == _COMMENTABLE_TARGET
+
+
+def comment_thread_spec(ctx: dict) -> dict | None:
+    """The comment thread the detail screen draws, or None.
+
+    `rel_name` is the key under which the REST detail embeds the `commentable` row (its `comments`
+    array is the thread); `reaction_types` are the values the comment reactions route accepts.
+    """
+    if not (ctx.get('has_commentable') and ctx.get('can_view') and ctx.get('commentable_rel_name')):
+        return None
+    reactions = next((c for c in ctx.get('named_constants') or [] if c.get('const_name') == 'COMMENT_REACTION_TYPES'), None)
+    return {
+        'rel_name': ctx['commentable_rel_name'],
+        'reaction_types': [i['value'] for i in reactions['items']] if reactions else [],
+    }
+
+
 def mobile_ineligible_reason(ctx: dict, api_entities: set[str] | None = None) -> str | None:
     """Return why the entity gets no mobile CRUD screens, or None when it does.
 
@@ -103,7 +131,10 @@ def mobile_ineligible_reason(ctx: dict, api_entities: set[str] | None = None) ->
     if not ctx.get('can_list'):
         return 'no list screen'
     for key in _FEATURE_KEYS:
-        if ctx.get(key):
+        if key == 'one_to_one_rels':
+            if [r for r in ctx.get(key) or [] if not _is_comment_bridge(r, ctx)]:
+                return f'declares {key}'
+        elif ctx.get(key):
             return f'declares {key}'
     pickers = _picker_children(ctx)
     if len(pickers) != len(ctx.get('children_raw') or []) or len(pickers) != len(ctx.get('non_comment_ch') or []):
@@ -247,4 +278,5 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
         'can_delete': bool(ctx.get('can_delete')),
         # x-payment: creating a record answers with a hosted checkout URL.
         'is_payment': bool(ctx.get('is_payment')) and bool(ctx.get('can_create')),
+        'comments': comment_thread_spec(ctx),
     }

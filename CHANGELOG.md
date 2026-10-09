@@ -12,6 +12,23 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   create response's `checkoutUrl` in the in-app browser (`expo-web-browser`, added only for apps with an
   `x-payment` entity) and the detail screen shows a returned notice. New `Payment.returnedMessage`
   text. See `docs/knowledge/mobile-app.md`.
+- **Read-only audit log screens in the Expo mobile app** (Issue #866). `generate-code` renders a paged list
+  (newest first) and a detail screen for the built-in audit log into `mobile/`, reading the existing
+  `GET /api/audit_log` and `GET /api/audit_log/<id>` routes only. The navigation gets an **Audit Log** link
+  in the `administration` group (a flat tab when the schema declares no such group), matching the desktop
+  sidebar; the link is hidden for a caller without `read` on `audit_log` (the existing `GET /api/mobile/nav`
+  rule), and a refused list request shows the shared permission message. No schema key is added and the Web
+  screens are unchanged. `build_mobile_nav()` takes `include_audit_log` for the new link. See
+  `docs/knowledge/mobile-app.md`. Scheduled task administration (#867) is not part of this change: the task
+  list and last-run status have no REST route for a client to call.
+- **Comment thread and reactions on the mobile detail screen** (Issue #863; the thread part of Issue #861
+  and the mention rendering of Issue #862). An entity that is commentable through the shared `commentable`
+  bridge keeps its native screens instead of the placeholder, and its detail screen lists the comments the
+  REST detail embeds (author, time, message, with an `@mention` shown as the user's name) and a reaction
+  bar per comment. The bar shows the counts and the reactions the signed-in user made, and adds or removes
+  one through `/api/comment/{id}/reactions/toggle`; the labels are the web's `ReactionType` messages. The
+  composer, editing and deleting a comment and the `@` user lookup are not part of it yet: there is no
+  REST route for them. See `docs/knowledge/mobile-app.md`.
 - **Documentation for the `x-autocomplete-context` schema key**: where it goes, what it changes in the generated form and split action, how it relates to `autocomplete_filter.ts`, and what validation rejects. See `docs/knowledge/x-autocomplete-context.md`. `docs/knowledge/relation-picker-rest-route.md` now compares the options route with the list API.
 - **REST route for relation pickers: `GET /api/{entity}/options`** (Issue #852). Every entity with a REST
   surface gets a route that searches (`q`, `limit`) or looks up by id (`ids`) the records a many-to-one,

@@ -74,6 +74,14 @@ SUBSTITUTED_ICONS = sorted(
 
 _DEFAULT_ORDER = 999
 
+# The audit log is a built-in feature, not a schema entity, so the schema-driven
+# links never include it. The desktop sidebar lists it under the "administration"
+# group (lib/site-config.ts) at this order; the mobile link takes the same place
+# when the schema declares that group, and is a flat tab when it does not.
+AUDIT_LOG_ENTITY = 'audit_log'
+AUDIT_LOG_GROUP = 'administration'
+AUDIT_LOG_ORDER = 80
+
 
 def _icon(pair: tuple[str, str]) -> dict:
     return {'family': pair[0], 'name': pair[1]}
@@ -105,7 +113,10 @@ def _sort_key(node: dict) -> tuple:
     return (node['order'], node['key'])
 
 
-def build_mobile_nav(entities: list, schema: dict, messages: dict[str, dict] | None = None) -> dict:
+def build_mobile_nav(
+    entities: list, schema: dict, messages: dict[str, dict] | None = None,
+    include_audit_log: bool = False,
+) -> dict:
     """
     Build the mobile navigation data from the desktop sidebar's own source.
 
@@ -127,6 +138,8 @@ def build_mobile_nav(entities: list, schema: dict, messages: dict[str, dict] | N
     `messages` ({locale: parsed messages json}) supplies per-locale labels:
     `Nav.groups.<slug>` for groups and `Nav.<camelCase(entity)>` for entities.
     Absent keys fall back to the label the sidebar derives from the name.
+
+    `include_audit_log` adds the built-in audit log link (see AUDIT_LOG_GROUP).
     """
     messages = messages or {}
     nav_config = build_nav_config(entities, schema)
@@ -146,6 +159,20 @@ def build_mobile_nav(entities: list, schema: dict, messages: dict[str, dict] | N
             'order': info['order'] if info else _DEFAULT_ORDER,
             'icon': _icon(DEFAULT_ENTITY_ICON),
             'group': info['group'] if info else None,
+        })
+
+    if include_audit_log and not any(n['entity'] == AUDIT_LOG_ENTITY for n in link_nodes):
+        group_slugs = {g['slug'] for g in nav_config['groups']}
+        link_nodes.append({
+            'kind': 'link',
+            'key': f'/{AUDIT_LOG_ENTITY}',
+            'href': f'/{AUDIT_LOG_ENTITY}',
+            'entity': AUDIT_LOG_ENTITY,
+            'label': to_title_case(AUDIT_LOG_ENTITY),
+            'labels': _locale_labels(messages, ('Nav', to_camel_case(AUDIT_LOG_ENTITY))),
+            'order': AUDIT_LOG_ORDER,
+            'icon': _icon(DEFAULT_ENTITY_ICON),
+            'group': AUDIT_LOG_GROUP if AUDIT_LOG_GROUP in group_slugs else None,
         })
 
     def group_children(parent_slug: str) -> list[dict]:

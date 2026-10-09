@@ -184,3 +184,39 @@ def test_search_and_icon_substitution_report_are_present():
     nav = build_mobile_nav([], _schema({}))
     assert nav['tabs'] == []
     assert nav['icon_substitutions'] == SUBSTITUTED_ICONS
+
+
+def test_audit_log_link_is_absent_unless_requested():
+    nav = build_mobile_nav([_entity('role')], _schema({'role': {}}))
+    assert _keys(nav['tabs']) == ['/role']
+
+
+def test_audit_log_joins_the_administration_group_when_the_schema_declares_it():
+    """Desktop parity: lib/site-config.ts lists the audit log under "administration"."""
+    entities = [_entity('role')]
+    schema = _schema({'role': {'x-nav': {'parent': 'administration', 'order': 20}}}, {'administration': {'icon': 'Settings'}})
+    nav = build_mobile_nav(entities, schema, include_audit_log=True)
+    assert _keys(nav['tabs']) == ['administration']
+    children = nav['tabs'][0]['children']
+    assert _keys(children) == ['/role', '/audit_log']
+    audit = children[1]
+    assert audit['kind'] == 'link'
+    assert audit['entity'] == 'audit_log'
+    assert audit['href'] == '/audit_log'
+    assert audit['label'] == 'Audit Log'
+
+
+def test_audit_log_is_a_flat_tab_without_an_administration_group():
+    nav = build_mobile_nav([_entity('role')], _schema({'role': {}}), include_audit_log=True)
+    assert _keys(nav['tabs']) == ['/role', '/audit_log']
+
+
+def test_audit_log_label_comes_from_the_messages_files():
+    messages = {'en': {'Nav': {'auditLog': 'Audit trail'}}, 'ja': {'Nav': {'auditLog': '監査ログ'}}}
+    nav = build_mobile_nav([], _schema({}), messages, include_audit_log=True)
+    assert nav['tabs'][0]['labels'] == {'en': 'Audit trail', 'ja': '監査ログ'}
+
+
+def test_audit_log_link_is_not_added_twice():
+    nav = build_mobile_nav([_entity('audit_log')], _schema({'audit_log': {}}), include_audit_log=True)
+    assert _keys(nav['tabs']) == ['/audit_log']

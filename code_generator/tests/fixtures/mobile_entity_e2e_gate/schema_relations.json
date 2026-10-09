@@ -19,9 +19,14 @@
     "created_mobile_tickets mobile_ticket[] @relation(\"MobileTicketCreator\")",
     "updated_mobile_tickets mobile_ticket[] @relation(\"MobileTicketUpdater\")",
     "created_mobile_orders mobile_order[] @relation(\"MobileOrderCreator\")",
-    "updated_mobile_orders mobile_order[] @relation(\"MobileOrderUpdater\")"
+    "updated_mobile_orders mobile_order[] @relation(\"MobileOrderUpdater\")",
+    "created_mobile_threads mobile_thread[] @relation(\"MobileThreadCreator\")",
+    "updated_mobile_threads mobile_thread[] @relation(\"MobileThreadUpdater\")"
   ],
   "organization": [
     "mobile_org_items mobile_org_item[]"
+  ],
+  "commentable": [
+    "mobile_thread mobile_thread?"
   ]
 }

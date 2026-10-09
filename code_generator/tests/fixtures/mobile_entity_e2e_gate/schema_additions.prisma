@@ -175,3 +175,19 @@ model mobile_order {
   @@index([creator_id])
   @@index([updater_id])
 }
+
+model mobile_thread {
+  id             String      @id @default(cuid())
+  title          String
+  commentable_id String      @unique
+  commentable    commentable @relation(fields: [commentable_id], references: [id], onDelete: Cascade)
+  created_at     DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user        @relation("MobileThreadCreator", fields: [creator_id], references: [id])
+  updater_id     String
+  updater        user        @relation("MobileThreadUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([creator_id])
+  @@index([updater_id])
+}
