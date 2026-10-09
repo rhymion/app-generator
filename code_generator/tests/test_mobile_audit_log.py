@@ -98,6 +98,9 @@ def test_audit_log_strings_are_bundled_for_every_locale(out):
             assert bundle[locale]['Errors'][key], (locale, key)
         for key in ('goBack', 'nextPage', 'previousPage'):
             assert bundle[locale]['Common'][key], (locale, key)
-    # Only the keys the screens read are carried from the larger namespaces.
+    # Only the keys the screens read (audit log, comment thread, approval section) are carried from the larger namespaces.
     assert set(bundle['en']['EntityLabel']) == {'auditLog'}
-    assert set(bundle['en']['Fields']) == {'action', 'actorUser', 'created_at', 'metadata', 'targetId', 'targetTable'}
+    assert set(bundle['en']['Fields']) == {
+        'action', 'actorUser', 'created_at', 'metadata', 'targetId', 'targetTable',
+        'comments', 'approvalRequests', 'approve', 'reject', 'withdraw', 'message',
+    }
