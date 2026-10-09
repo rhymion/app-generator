@@ -31,7 +31,8 @@ entity's `x-nav`.
 
 An entity opens `/entity/<name>`: its native list when the entity has [entity screens](#entity-screens),
 otherwise a screen saying "This screen is not available in the mobile app yet." The scheduled-task admin
-link of the desktop sidebar has no mobile counterpart and is not generated.
+link of the desktop sidebar has a mobile counterpart when the schema declares a task (see
+[Scheduled task administration](#scheduled-task-administration)).
 
 ### Icons
 
@@ -327,6 +328,31 @@ strings come from `EntityLabel.auditLog`, `Fields` (`action`, `actorUser`, `crea
 `targetId`, `targetTable`) and the `Common` / `Errors` namespaces; only those `EntityLabel` and `Fields` keys are
 bundled.
 
+## Scheduled task administration
+
+When the schema declares a scheduled task (a top-level `x-scheduled-tasks` entry or an entity-level
+`x-scheduled-task`), the app has a **Scheduled Task Run** screen for the same operators as the Web admin page. The
+link is added by `mobile_nav.build_mobile_nav()` (`include_scheduled_tasks`, as `generate_mobile_target()` passes
+it) in the `administration` group when the schema declares that group, as a flat footer tab when it does not. Without a
+declared task nothing is generated: no screen, no registry entry, no link, no strings.
+
+| Screen | Route | Calls |
+|---|---|---|
+| Overview for a business date: one row per task with its status, start and finish, message, why it did not run, the task's `interval`, then the failed or stuck runs of other dates | `/entity/scheduled_task_run` | `GET /api/scheduled-task-runs[?date=YYYY-MM-DD]` |
+| Rerun, mark resolved, skip (a reason field is shown beside resolve and skip) | same screen | `POST /api/scheduled-task-runs/<task>/<rerun\|resolve\|skip>` with `{ business_date, reason? }` |
+
+The previous and next buttons move the business date by one day. The screen is rendered from
+`templates/mobile/scheduled_task_run/` and registered in `lib/entity-registry.ts` under `scheduled_task_run` with no
+detail and no form.
+
+The screen decides nothing about who may act. The buttons shown for a row are exactly the `actions` flags the server
+returns for it, and the server re-checks the `ScheduledTaskRunner` role on every call: `GET /api/mobile/nav` lists
+`/scheduled_task_run` in `hiddenHrefs` for a caller without the role (the link is hidden), a refused overview shows
+`ScheduledTaskRun.forbidden`, and an action answered `403` shows `ScheduledTaskRun.resultForbidden`. Every other
+refusal (`NOT_ALLOWED`, `BLOCKED`, `RUNNING`, `REASON_REQUIRED`, `FAILED`, ...) is the `{ ok: false, code }` body of the
+route, mapped to the matching `ScheduledTaskRun.result*` string; the rows are reloaded after each action. The strings
+are the whole `ScheduledTaskRun` namespace. The routes themselves are described in `scheduled-task-operations.md`.
+
 ## Authentication
 
 The mobile app signs in with email and password and holds an access/refresh token pair.
@@ -372,6 +398,7 @@ tabs, the entity specs need the fixture entities):
 ```bash
 bash scripts/run_mobile_entity_playwright.sh               # fixture schema: entity-crud, relation-pickers, inline-create-checkout and comments specs
 MODE=default bash scripts/run_mobile_entity_playwright.sh  # default schema: the other specs
+MODE=scheduled bash scripts/run_mobile_entity_playwright.sh  # scheduled-task fixture, user holds the ScheduledTaskRunner role: scheduled-task.spec.ts
 ```
 
 The fixture mode merges `code_generator/tests/fixtures/mobile_entity_e2e_gate/` (`mobile_note` with full
@@ -443,8 +470,4 @@ check and is not part of the mandatory gate.
 - The native date pickers (dates are typed as text).
 - CSV export and import: the export and import routes accept a session cookie or an API key but not a mobile
   access token (`resolveActorId()` in `lib/api-auth.ts`), so the screens cannot call them yet (Issue #883).
-- Scheduled task administration (the task list, each task's last run, run now). The list and the last-run
-  status are read only by the Web admin page's Server Component (`loadAdminOverview()`), and the rerun,
-  resolve and skip actions are Server Actions; the one REST route, `/api/scheduled-tasks/<task>`, starts a
-  run but lists nothing, so a client has no route to build the screen on.
 - Translated field labels.
