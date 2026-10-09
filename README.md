@@ -574,6 +574,7 @@ All architectural documentation lives in `docs/knowledge/`:
 | [comment-and-mention-rest-routes.md](docs/knowledge/comment-and-mention-rest-routes.md) | REST routes for adding, editing and deleting a comment and for searching `@`-mention candidates; they run the edit form's actions as the authenticated caller; access checks, validation, tests |
 | [x-autocomplete-context.md](docs/knowledge/x-autocomplete-context.md) | `x-autocomplete-context` on an FK field: which form values reach the target's `autocomplete_filter.ts`, the generated form and split-action paths, validation |
 | [mobile-app.md](docs/knowledge/mobile-app.md) | Generated Expo mobile app: footer tabs and drill-down from `x-nav`, entity screens, header, token authentication, Playwright checks |
+| [list-search-panel.md](docs/knowledge/list-search-panel.md) | The list's search box, multi-column sort and multi-field filter panel on Desktop and Mobile Web: the spec each list page passes, the logic shared with the Expo list (`lib/_list_query.ts`), how it combines with the grid's own header controls, tests |
 | [search.md](docs/knowledge/search.md) | Cross-entity full-text search: schema opt-in, pg_bigm, authorization, generated API and UI |
 | [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | Approval flow system detail, post-approval event dispatch (`on_approved`) |
 | [appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) | Comment bridge system detail |
