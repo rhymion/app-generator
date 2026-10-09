@@ -5,6 +5,22 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Approval section and split action on the mobile detail screen** (Issues #858 and #859).
+  An entity that declares `x-approval` (the `approvable` bridge and the `ApprovalSection` view component)
+  now gets native screens in the Expo app. Its detail screen lists the current round's approval requests
+  with their status and shows approve, reject (with a reason and its kind) and withdraw under the same
+  conditions as the Web section; each action calls the existing `POST /api/approval_request/{id}/approve|reject|withdraw`
+  route. The app evaluates no role, order or ownership rule: `GET /api/{entity}/{id}/capabilities` now also
+  lists `approval.current_round_request_ids` and `approval.actionable_request_ids`, computed by the checks
+  the approval routes already run, and the buttons follow them. A row the server reports as locked
+  (`write_locks.edit_locked` / `delete_locked`) hides Edit and Delete, and values only the approval workflow
+  may write are not offered by the form. The shared `use_entity_approval_actions.ts` and
+  `submit_predicate.ts` are copied into `mobile/` unchanged. An approval entity with `x-splittable` and a
+  `quantityField` also gets a split section: parts with a quantity and the `perPartRequired` fields (relation
+  pickers for foreign keys), Split enabled only while the parts add up to the record's quantity, posted to
+  the existing `POST /api/{entity}/{id}/actions/split` route, whose refusal text is shown. The
+  Playwright proxy no longer exits on a reset browser socket. Submitting for approval from the app is not
+  implemented yet. See `docs/knowledge/mobile-app.md`.
 - **REST routes for the scheduled-task administration** (Issue #887). When the schema declares a scheduled task,
   `GET /api/scheduled-task-runs` returns the admin page's overview (one row per task with its last-run status and the
   open actions, plus failed or stuck runs of other dates) and `POST /api/scheduled-task-runs/{task}/{rerun|resolve|skip}`

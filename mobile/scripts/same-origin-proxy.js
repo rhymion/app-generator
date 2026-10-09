@@ -53,6 +53,9 @@ server.on('upgrade', (req, clientSocket, head) => {
     clientSocket.pipe(proxySocket);
   });
   proxySocket.on('error', () => clientSocket.destroy());
+  // A browser that navigates away drops its hot-reload socket; without a handler the reset is an
+  // unhandled 'error' event that ends the whole proxy process.
+  clientSocket.on('error', () => proxySocket.destroy());
 });
 
 server.listen(httpProxyPort, () => {

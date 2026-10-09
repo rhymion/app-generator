@@ -1059,6 +1059,8 @@ _MOBILE_STATIC_TEMPLATES = [
     ('lib/entity-http.ts.jinja2', 'lib/entity-http.ts'),
     ('components/native/FieldInput.tsx.jinja2', 'components/native/FieldInput.tsx'),
     ('components/native/RelationPicker.tsx.jinja2', 'components/native/RelationPicker.tsx'),
+    ('components/native/ApprovalSection.tsx.jinja2', 'components/native/ApprovalSection.tsx'),
+    ('components/native/SplitSection.tsx.jinja2', 'components/native/SplitSection.tsx'),
     ('components/NavIcon.tsx.jinja2', 'components/NavIcon.tsx'),
     ('components/FooterBar.tsx.jinja2', 'components/FooterBar.tsx'),
     ('components/Header.tsx.jinja2', 'components/Header.tsx'),
@@ -1079,14 +1081,16 @@ _MOBILE_STATIC_TEMPLATES = [
 ]
 
 # Namespaces of messages/<locale>.json the native entity screens read.
-_MOBILE_MESSAGE_NAMESPACES = ('Common', 'Errors', 'ValidationMessages', 'ReactionType')
+_MOBILE_MESSAGE_NAMESPACES = ('Common', 'Errors', 'ValidationMessages', 'ReactionType', 'ApprovalRequestStatus')
 
-# Single keys of the larger namespaces the native screens read, so the bundle does
-# not carry the whole of `Fields` (every field label) / `EntityLabel`: the thread
-# heading of the comment screens and the labels of the built-in audit log screens.
+# Single keys of the namespaces too large to ship whole (`Fields` holds every field label, `EntityLabel`
+# every entity name): the comment thread, the approval section and the built-in audit log screens read these.
 _MOBILE_MESSAGE_KEYS = {
     'EntityLabel': ('auditLog',),
-    'Fields': ('comments', 'action', 'actorUser', 'created_at', 'metadata', 'targetId', 'targetTable'),
+    'Fields': (
+        'comments', 'approvalRequests', 'approve', 'reject', 'withdraw', 'message',
+        'action', 'actorUser', 'created_at', 'metadata', 'targetId', 'targetTable',
+    ),
 }
 
 
@@ -1108,6 +1112,21 @@ def _mobile_messages_json(messages: dict) -> str:
     return json.dumps(picked, indent=2, ensure_ascii=False)
 
 
+def _mobile_field_json(f: dict) -> dict:
+    """A field entry of the mobile spec as the `FieldSpec` the app reads."""
+    return {
+        'key': f['key'], 'label': f['label'], 'kind': f['kind'], 'required': f['required'],
+        'readonly': f['readonly'], 'options': f['options'], 'numericEnum': f.get('numeric_enum', False),
+        **(
+            {
+                'target': f['target'], 'labelField': f['label_field'], 'relationName': f['relation_name'],
+                'bodyKey': f['body_key'], 'contextFields': f['context_fields'],
+            }
+            if 'target' in f else {}
+        ),
+    }
+
+
 def generate_mobile_entity(spec: dict, ctx: dict, schema: dict, mobile_dir: Path, env: Environment) -> None:
     """Render one entity's native screens under mobile/.
 
@@ -1117,26 +1136,20 @@ def generate_mobile_entity(spec: dict, ctx: dict, schema: dict, mobile_dir: Path
     """
     name = spec['name']
     has_form_hook = spec['can_new'] or spec['can_edit']
+    split = spec.get('split')
     spec_ctx = {
         **spec,
         'const_name': name.upper(),
-        'fields_json': json.dumps(
-            [
-                {
-                    'key': f['key'], 'label': f['label'], 'kind': f['kind'], 'required': f['required'],
-                    'readonly': f['readonly'], 'options': f['options'], 'numericEnum': f.get('numeric_enum', False),
-                    **(
-                        {
-                            'target': f['target'], 'labelField': f['label_field'], 'relationName': f['relation_name'],
-                            'bodyKey': f['body_key'], 'contextFields': f['context_fields'],
-                        }
-                        if 'target' in f else {}
-                    ),
-                }
-                for f in spec['fields']
-            ],
+        'fields_json': json.dumps([_mobile_field_json(f) for f in spec['fields']], indent=2),
+        'split_json': json.dumps(
+            {
+                'quantityField': split['quantity_field'],
+                'quantityLabel': split['quantity_label'],
+                'parts': [_mobile_field_json(f) for f in split['parts']],
+                'contextFields': split['context_fields'],
+            },
             indent=2,
-        ),
+        ) if split else 'null',
         'list_keys_json': json.dumps(spec['list_keys']),
         'reaction_types_json': json.dumps((spec.get('comments') or {}).get('reaction_types', [])),
         'has_form_hook': has_form_hook,
@@ -1151,6 +1164,13 @@ def generate_mobile_entity(spec: dict, ctx: dict, schema: dict, mobile_dir: Path
         _write(components_dir / 'form_validation.ts', _render(env, 'form_validation.ts.jinja2', val_ctx))
         _write(components_dir / 'FormUpsert.tsx', _render(env, 'mobile/entity/FormUpsert.tsx.jinja2', spec_ctx))
     _write(lib_dir / 'mobile_client.ts', _render(env, 'mobile/entity/mobile_client.ts.jinja2', spec_ctx))
+    if spec['has_approval'] and spec['can_view']:
+        # The approval wiring and predicates the Web view calls, rendered / copied unchanged.
+        fv_ctx = {**ctx, **form_view_context(ctx, schema)}
+        _write(lib_dir / 'use_entity_approval_actions.ts',
+               _render(env, 'use_entity_approval_actions.ts.jinja2', fv_ctx))
+        predicate = (Path(__file__).resolve().parent.parent / 'lib' / 'approval_request' / 'submit_predicate.ts').read_text(encoding='utf-8')
+        _write(mobile_dir / 'lib' / 'approval_request' / 'submit_predicate.ts', predicate)
     _write(components_dir / 'List.tsx', _render(env, 'mobile/entity/List.tsx.jinja2', spec_ctx))
     if spec['can_view']:
         _write(components_dir / 'FormView.tsx', _render(env, 'mobile/entity/FormView.tsx.jinja2', spec_ctx))

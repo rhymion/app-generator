@@ -68,6 +68,11 @@ currentUserRoleIds, flowIdToStatus)` decides whether the current user may approv
 request row: the row belongs to the current round, it is pending, the user holds the approver
 role and every preceding stage is approved in this round. `ApprovalSection` calls it for each row.
 
+The Expo app copies this module and `submit_predicate.ts` into `mobile/` unchanged and reads `HAS_ON_WITHDRAWN`
+from it. It cannot read the caller's role ids, so its approval section does not call `canActOnApprovalRequest`;
+it follows `approval.actionable_request_ids` of the capabilities route, which the server computes with the checks
+the approve and reject routes run (see [mobile-app.md](mobile-app.md#approval)).
+
 ## Tests
 
 - `code_generator/tests/test_shared_ui_hooks.py` checks where each module is generated, that none
