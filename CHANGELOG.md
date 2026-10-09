@@ -5,6 +5,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **REST routes for the scheduled-task administration** (Issue #887). When the schema declares a scheduled task,
+  `GET /api/scheduled-task-runs` returns the admin page's overview (one row per task with its last-run status and the
+  open actions, plus failed or stuck runs of other dates) and `POST /api/scheduled-task-runs/{task}/{rerun|resolve|skip}`
+  runs the operator actions, so a client that cannot call Server Actions, such as the mobile app, can show and operate
+  them. The routes call the page's own loader and a new `performOperatorAction()` that the Server Actions now call too,
+  so validation, the run guard and the audit row are shared. They accept a mobile access token or an API key and answer
+  `403` without the `ScheduledTaskRunner` role. A new gate, `test:scheduled-task-e2e-gate`, runs their Cypress API specs
+  against a generated fixture app. See `docs/knowledge/scheduled-task-operations.md`.
 - **REST routes for comment writes and the @-mention user search** (Issue #885). An entity with a comment
   thread gets `POST /api/{entity}/{id}/comments` and `PATCH` / `DELETE
   /api/{entity}/{id}/comments/{commentId}`, and a schema with an `x-mention` field gets `GET

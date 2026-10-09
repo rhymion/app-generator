@@ -17,6 +17,7 @@ import {
   DEFAULT_STUCK_AFTER_MINUTES,
   buildTaskRows,
   isStuck,
+  parseBusinessDate,
   positiveIntOr,
   type RunRecord,
   type TaskRunRow,
@@ -228,4 +229,33 @@ export async function skipTask(operatorId: string, taskId: string, businessDate:
     reason: note,
   });
   return { ok: true };
+}
+
+export type OperatorActionKind = 'rerun' | 'resolve' | 'skip';
+
+export type OperatorActionResult = AdminActionResult | { ok: false; code: 'BAD_INPUT' };
+
+/**
+ * The one entry point behind both the Server Actions (app/[locale]/scheduled_task_run/actions.ts)
+ * and the REST routes (app/api/scheduled-task-runs): validates the task id and
+ * the `YYYY-MM-DD` business date, then runs `kind` as `operatorId`. The caller
+ * has already checked that `operatorId` holds the ScheduledTaskRunner role.
+ */
+export async function performOperatorAction(
+  operatorId: string,
+  kind: OperatorActionKind,
+  taskId: string,
+  businessDate: string,
+  reason?: string,
+): Promise<OperatorActionResult> {
+  const date = parseBusinessDate(businessDate);
+  if (typeof taskId !== 'string' || !taskId || !date) return { ok: false, code: 'BAD_INPUT' };
+  switch (kind) {
+    case 'rerun':
+      return rerunTask(operatorId, taskId, date);
+    case 'resolve':
+      return markResolved(operatorId, taskId, date, String(reason ?? ''));
+    case 'skip':
+      return skipTask(operatorId, taskId, date, String(reason ?? ''));
+  }
 }
