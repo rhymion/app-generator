@@ -1,0 +1,59 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { handleApiError } from '@/lib/api-auth';
+import { requireScheduledTaskOperator } from '@/lib/scheduled-tasks/access';
+import { performOperatorAction, type OperatorActionKind } from '@/lib/scheduled-tasks/admin';
+import { httpStatusForActionCode } from '@/lib/scheduled-tasks/admin-view';
+
+// GENERATED — do not edit (regenerated on every `generate-code` run).
+// REST form of the scheduled-task admin page's operator actions
+// (app/[locale]/scheduled_task_run/actions.ts). Both call `performOperatorAction`
+// (lib/scheduled-tasks/admin.ts), so validation, the guard that a rerun still goes
+// through, and the audit_log row are the same code, not a copy.
+//
+// POST /api/scheduled-task-runs/[task]/[action]   with action one of rerun | resolve | skip
+//   body: { "business_date": "YYYY-MM-DD", "reason": "..." }   (`reason` is required for skip)
+//   200 { ok: true, outcome? }
+//   400 BAD_INPUT (task id, business_date or body) | REASON_REQUIRED
+//   401 no or invalid credential;  403 the caller does not hold the ScheduledTaskRunner role
+//   404 UNKNOWN_TASK, or an action other than the three above
+//   409 NOT_ALLOWED (the record's state does not allow it) | BLOCKED | RUNNING
+//   500 FAILED (the handler threw, `detail` carries its message) | NO_ACTOR
+// A refusal is { ok: false, code, detail? } with the same codes as the Server Actions.
+//
+// Auth: `authenticate()` (mobile access token or X-API-Key) plus the ScheduledTaskRunner role.
+const ACTIONS: readonly OperatorActionKind[] = ['rerun', 'resolve', 'skip'];
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ task: string; action: string }> },
+) {
+  try {
+    const operatorId = await requireScheduledTaskOperator(request);
+
+    const { task, action } = await params;
+    const kind = ACTIONS.find((candidate) => candidate === action);
+    if (!kind) {
+      return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 404 });
+    }
+
+    const body: unknown = await request.json().catch(() => null);
+    const { business_date: businessDate, reason } = (body && typeof body === 'object' ? body : {}) as {
+      business_date?: unknown;
+      reason?: unknown;
+    };
+    if (typeof businessDate !== 'string') {
+      return NextResponse.json({ ok: false, code: 'BAD_INPUT' }, { status: 400 });
+    }
+
+    const result = await performOperatorAction(
+      operatorId,
+      kind,
+      task,
+      businessDate,
+      typeof reason === 'string' ? reason : undefined,
+    );
+    return NextResponse.json(result, { status: result.ok ? 200 : httpStatusForActionCode(result.code) });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

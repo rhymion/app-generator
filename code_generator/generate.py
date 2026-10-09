@@ -263,6 +263,9 @@ _SCHEDULED_TASK_ADMIN_FILES = [
     ('scheduled_task_admin_actions.ts.jinja2', 'app/[locale]/scheduled_task_run/actions.ts'),
     ('scheduled_task_admin_page.tsx.jinja2', 'app/[locale]/scheduled_task_run/page.tsx'),
     ('scheduled_task_admin_table.tsx.jinja2', 'components/scheduled_task_run/ScheduledTaskRunTable.tsx'),
+    # REST form of the same overview and actions, for the native clients.
+    ('scheduled_task_runs_route.ts.jinja2', 'app/api/scheduled-task-runs/route.ts'),
+    ('scheduled_task_run_action_route.ts.jinja2', 'app/api/scheduled-task-runs/[task]/[action]/route.ts'),
 ]
 
 _SCHEDULED_TASK_RUN_PRISMA = """// Scheduled-task completion records (generated when the schema declares any
@@ -1078,8 +1081,9 @@ _MOBILE_STATIC_TEMPLATES = [
 # Namespaces of messages/<locale>.json the native entity screens read.
 _MOBILE_MESSAGE_NAMESPACES = ('Common', 'Errors', 'ValidationMessages', 'ReactionType')
 
-# Single keys of namespaces too large to ship whole (`Fields` holds every field
-# label): the comment thread heading, plus the keys the built-in audit log screens read.
+# Single keys of the larger namespaces the native screens read, so the bundle does
+# not carry the whole of `Fields` (every field label) / `EntityLabel`: the thread
+# heading of the comment screens and the labels of the built-in audit log screens.
 _MOBILE_MESSAGE_KEYS = {
     'EntityLabel': ('auditLog',),
     'Fields': ('comments', 'action', 'actorUser', 'created_at', 'metadata', 'targetId', 'targetTable'),

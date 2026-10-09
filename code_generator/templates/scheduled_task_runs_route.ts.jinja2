@@ -1,0 +1,45 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { handleApiError } from '@/lib/api-auth';
+import { requireScheduledTaskOperator } from '@/lib/scheduled-tasks/access';
+import { loadAdminOverview } from '@/lib/scheduled-tasks/admin';
+import { formatBusinessDate, parseBusinessDate, toRunRowJson } from '@/lib/scheduled-tasks/admin-view';
+import { businessDateOf } from '@/lib/scheduled-tasks/run-guard';
+
+// GENERATED — do not edit (regenerated on every `generate-code` run).
+// REST view of the scheduled-task admin page (app/[locale]/scheduled_task_run):
+// the same overview, from the same loader (`loadAdminOverview`), for a native
+// client.
+//
+// GET /api/scheduled-task-runs[?date=YYYY-MM-DD]
+//   200 { business_date, settings: { stuck_after_minutes, predecessor_recheck_minutes },
+//         rows: [one per declared task], attention: [failed / stuck runs of other dates] }
+//   400 `date` is not a YYYY-MM-DD date;  401 no or invalid credential;
+//   403 the caller does not hold the ScheduledTaskRunner role.
+//
+// Auth: `authenticate()` (mobile access token or X-API-Key) plus the
+// ScheduledTaskRunner role, the same role that gates the admin page and its
+// Server Actions. The operator actions are POST /api/scheduled-task-runs/[task]/[action].
+export async function GET(request: NextRequest) {
+  try {
+    await requireScheduledTaskOperator(request);
+
+    const rawDate = request.nextUrl.searchParams.get('date');
+    const businessDate = rawDate === null ? businessDateOf() : parseBusinessDate(rawDate);
+    if (!businessDate) {
+      return NextResponse.json({ error: "Query parameter 'date' must be a YYYY-MM-DD date." }, { status: 400 });
+    }
+
+    const overview = await loadAdminOverview(businessDate);
+    return NextResponse.json({
+      business_date: formatBusinessDate(overview.businessDate),
+      settings: {
+        stuck_after_minutes: overview.settings.stuckAfterMinutes,
+        predecessor_recheck_minutes: overview.settings.predecessorRecheckMinutes,
+      },
+      rows: overview.rows.map(toRunRowJson),
+      attention: overview.attention.map(toRunRowJson),
+    });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

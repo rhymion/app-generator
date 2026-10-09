@@ -392,6 +392,39 @@ jobs:
       - run: pip install -r requirements.txt
       - run: npm run test:comment-rest-e2e-gate
 
+  scheduled-task-e2e-gate-fixture:
+    name: Scheduled Task E2E Gate Fixture Check
+    # Builds and runs a whole app generated from the default schema plus the
+    # dedicated fixture schema in code_generator/tests/fixtures/scheduled_task_e2e_gate/
+    # (three scheduled tasks) and runs its Cypress API specs for the scheduled-task
+    # admin REST routes: the overview, rerun / resolve / skip, refusal without the
+    # ScheduledTaskRunner role. Same shape and cost class as
+    # list-child-e2e-gate-fixture above, so it is gated on detect-changes the same
+    # way; the local gate (npm run test:scheduled-task-e2e-gate, step 14d of
+    # .claude/commands/update-generator.md) runs it without that exemption.
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - name: Cache Cypress binary
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:scheduled-task-e2e-gate
+
   pytest:
     name: Python Generator Tests
     runs-on: ubuntu-latest
