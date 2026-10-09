@@ -44,7 +44,7 @@ declare the key, generates the same code as before.
 
 The REST route `GET /api/{target}/options` accepts a `context` parameter for every entity, whether or not
 any schema declares the key (see [relation-picker-rest-route.md](relation-picker-rest-route.md)). The key
-is not read by the route and changes nothing in it. The generated mobile app does not send `context`.
+is not read by the route and changes nothing in it. The generated mobile app's relation pickers send it, built from the fields the key names: the form's current values on a create or edit screen, and the record's stored values in the split section.
 
 The create and edit pages (`page_new`, `page_edit`) still fetch the first candidate list with
 `{ callerEntity }` only; the form then replaces it as described above.

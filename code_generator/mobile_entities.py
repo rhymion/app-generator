@@ -10,7 +10,11 @@ fields to draw.
 A many-to-one foreign key, a one-to-one selector and a many-to-many declared with
 `x-outputType: list` are drawn as relation pickers whose candidates come from `GET /api/{target}/options`.
 An entity with any other relation feature (children, bridges, attachments, ...)
-keeps the placeholder screen.
+keeps the placeholder screen. The exceptions are the approval bridge and the comment bridge.
+
+An entity that declares `x-approval` (a one-to-one bridge to `approvable` and the `ApprovalSection` view
+component) gets the same screens plus the approval section, whose approve / reject /
+withdraw buttons call the approval REST routes.
 
 An entity that is commentable through the shared `commentable` bridge keeps its screens: the detail screen
 lists the comment thread (read from the REST detail) and draws the reaction bar, which calls the comment
@@ -53,15 +57,15 @@ _UNSUPPORTED_CATEGORIES = ('custom_upsert', 'image', 'file_uri', 'entity_select'
 # beyond plain CRUD (relations, children, comments, attachments, ...).
 _FEATURE_KEYS = (
     'direct_attachment_rels',
-    'one_to_one_rels',
     'reverse_oto_rels',
     'flatten_rels',
     'entity_custom_components',
-    'entity_view_components',
-    'entity_edit_components',
     'virtual_columns',
     'mention_fields',
 )
+
+# The component an approval entity mounts on its view screen.
+APPROVAL_SECTION = 'ApprovalSection'
 
 # The relation features that are served by something other than a form field. The
 # bridge to `commentable` is one of them: it is the comment thread, not a relation to draw.
@@ -70,19 +74,19 @@ _COMMENTABLE_TARGET = 'commentable'
 _FEATURE_FLAGS = (
     'has_attachable',
     'is_payment',
-    'is_splittable',
     'is_inline_create_target',
     'reservation_config',
     'state_machine_transitions',
-    'has_edit_guard',
-    'has_delete_guard',
     'is_self_only',
-    'write_locked_values',
 )
 
 # Kinds the list filter sheet can narrow by: the REST list's default clause for each is a
 # substring match (text), equality (number, decimal, boolean) or a member (enum).
 _FILTERABLE_KINDS = (KIND_TEXT, KIND_NUMBER, KIND_DECIMAL, KIND_BOOLEAN, KIND_ENUM)
+# Flags the approval lock-down sets on an entity that declares `x-approval`. The server enforces
+# them (edit / delete are refused once the approval has decided), so the screens only need the
+# row's answer; an entity that has them without an approval keeps the placeholder.
+_APPROVAL_LOCKDOWN_FLAGS = ('has_edit_guard', 'has_delete_guard', 'write_locked_values')
 
 # At most this many columns appear on a list row.
 MAX_LIST_COLUMNS = 3
@@ -99,6 +103,23 @@ def _picker_children(ctx: dict) -> list[dict]:
         c for c in (ctx.get('non_comment_ch') or [])
         if c.get('is_many_to_many') and c.get('output_type') == 'list'
     ]
+
+
+def has_approval_section(ctx: dict) -> bool:
+    """Whether the entity mounts the approval section: a bridge to `approvable` plus `ApprovalSection`."""
+    return any(c.get('name') == APPROVAL_SECTION for c in ctx.get('entity_view_components') or [])
+
+
+def _other_one_to_one(ctx: dict) -> list[dict]:
+    """One-to-one relations other than the approval and comment bridges (those keep the placeholder)."""
+    return [
+        r for r in (ctx.get('one_to_one_rels') or [])
+        if r.get('target') != 'approvable' and not _is_comment_bridge(r, ctx)
+    ]
+
+
+def _non_approval_components(ctx: dict, key: str) -> list[dict]:
+    return [c for c in (ctx.get(key) or []) if c.get('name') != APPROVAL_SECTION]
 
 
 def _is_comment_bridge(rel: dict, ctx: dict) -> bool:
@@ -132,11 +153,19 @@ def mobile_ineligible_reason(ctx: dict, api_entities: set[str] | None = None) ->
     if not ctx.get('can_list'):
         return 'no list screen'
     for key in _FEATURE_KEYS:
-        if key == 'one_to_one_rels':
-            if [r for r in ctx.get(key) or [] if not _is_comment_bridge(r, ctx)]:
-                return f'declares {key}'
-        elif ctx.get(key):
+        if ctx.get(key):
             return f'declares {key}'
+    # A one-to-one bridge is served by something other than a form field only for the approval
+    # section and the comment thread; any other keeps the placeholder.
+    if _other_one_to_one(ctx):
+        return 'declares one_to_one_rels'
+    for key in ('entity_view_components', 'entity_edit_components'):
+        if _non_approval_components(ctx, key):
+            return f'declares {key}'
+    # The approval bridge and its section come together; one without the other is not the approval shape.
+    has_approval_bridge = any(r.get('target') == 'approvable' for r in ctx.get('one_to_one_rels') or [])
+    if has_approval_bridge != has_approval_section(ctx):
+        return 'declares one_to_one_rels' if has_approval_bridge else 'declares entity_view_components'
     pickers = _picker_children(ctx)
     if len(pickers) != len(ctx.get('children_raw') or []) or len(pickers) != len(ctx.get('non_comment_ch') or []):
         return 'declares children_raw'
@@ -149,6 +178,14 @@ def mobile_ineligible_reason(ctx: dict, api_entities: set[str] | None = None) ->
     for key in _FEATURE_FLAGS:
         if ctx.get(key):
             return f'declares {key}'
+    if not has_approval_section(ctx):
+        for key in _APPROVAL_LOCKDOWN_FLAGS:
+            if ctx.get(key):
+                return f'declares {key}'
+    # The split action is offered on the detail screen next to the approval section; a splittable
+    # entity without one keeps the placeholder.
+    if ctx.get('is_splittable') and not has_approval_section(ctx):
+        return 'declares is_splittable'
     cats = ctx.get('field_categories') or {}
     for key in _UNSUPPORTED_CATEGORIES:
         if cats.get(key):
@@ -167,7 +204,9 @@ def _field_entry(name: str, defn: dict, kind: str, ctx: dict, required: set[str]
         'options': [],
     }
     if kind == KIND_ENUM:
-        entry['options'] = [str(v) for v in defn.get('enum', [])]
+        # A value only the approval workflow may write is not offered, as the Web form disables it.
+        locked = {str(v) for v in ((ctx.get('write_locked_values') or {}).get(name) or [])}
+        entry['options'] = [str(v) for v in defn.get('enum', []) if str(v) not in locked]
         entry['numeric_enum'] = defn.get('type') in ('integer', 'number')
     return entry
 
@@ -210,6 +249,35 @@ def _relation_many_entry(child: dict, readonly: set[str], title) -> dict:
         'relation_name': name,
         'body_key': f"{child['child_var']}_ids",
         'context_fields': [],
+    }
+
+
+def _split_entry(ctx: dict, entries: dict[str, dict], required: set[str], title) -> dict | None:
+    """Description of the split section: the quantity field and the fields each part must specify.
+
+    A part field that is a foreign key of the entity is drawn as the relation picker the form uses
+    (same target, label column and autocomplete context); any other part field is a text input, as
+    on the Web section.
+    """
+    if not ctx.get('is_splittable') or not ctx.get('split_config'):
+        return None
+    config = (ctx.get('model_def') or {}).get('x-splittable') or {}
+    quantity = ctx['split_config']['quantity_field']
+    parts = []
+    for name in config.get('perPartRequired') or []:
+        entry = entries.get(name)
+        if entry is not None and entry['kind'] == KIND_RELATION:
+            parts.append({**entry, 'required': True, 'readonly': False})
+        else:
+            parts.append({
+                'key': name, 'label': title(name), 'kind': KIND_TEXT, 'required': name in required,
+                'readonly': False, 'options': [],
+            })
+    return {
+        'quantity_field': quantity,
+        'quantity_label': title(quantity),
+        'parts': parts,
+        'context_fields': list(ctx['split_config'].get('context_fields') or []),
     }
 
 
@@ -282,5 +350,7 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
         'can_edit': bool(ctx.get('can_update')),
         'can_view': bool(ctx.get('can_view')),
         'can_delete': bool(ctx.get('can_delete')),
+        'has_approval': has_approval_section(ctx),
+        'split': _split_entry(ctx, entries, required, title) if ctx.get('can_view') else None,
         'comments': comment_thread_spec(ctx),
     }

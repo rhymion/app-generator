@@ -98,6 +98,8 @@ export async function GET(request: NextRequest, { params }: Params) {
       can_approve: boolean;
       can_reject: boolean;
       round_status: string[];
+      current_round_request_ids: string[];
+      actionable_request_ids: string[];
     } | null = null;
     const _approvableId = _item.{{ approvable_fk }} as string | null | undefined;
     if (_approvableId) {
@@ -141,6 +143,12 @@ export async function GET(request: NextRequest, { params }: Params) {
         _actionableRequests.map((_req) => assertApprovalOrder(_req.id)),
       );
       const _canApprove = _orderResults.some((r) => r.status === 'fulfilled');
+      // The rows of the current round, and the ones among them this caller may approve or reject
+      // right now (role held and every preceding stage approved). A client that cannot evaluate the
+      // role rule itself (the mobile app) offers its approve / reject buttons on exactly these rows.
+      const _actionableRequestIds = _actionableRequests
+        .filter((_req, _i) => _orderResults[_i].status === 'fulfilled')
+        .map((_req) => _req.id);
       const _canReject = _canApprove;
       const _approvable = await prisma.approvable.findUnique({
         where: { id: _approvableId },
@@ -157,6 +165,8 @@ export async function GET(request: NextRequest, { params }: Params) {
         can_approve: _canApprove,
         can_reject: _canReject,
         round_status: _latestRoundRequests.map((r) => r.status),
+        current_round_request_ids: _latestRoundRequests.map((r) => r.id),
+        actionable_request_ids: _actionableRequestIds,
       };
     }
 {% endif %}
