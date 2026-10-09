@@ -1340,10 +1340,11 @@ def _build_comment_actions(comment_children: list[dict], parent: str, model: str
             f"\n  }}"
         ) if comment_has_mention else ""
         lines.append(f"""
-export async function add{parent_pascal}Comment({parent_id_prop}: string, message: string): Promise<void> {{
+export async function add{parent_pascal}Comment({parent_id_prop}: string, message: string): Promise<{{ id: string }}> {{
   const userId = await getSessionUserIdOrThrow();
-  await prisma.{child_model}.create({{
+  const created = await prisma.{child_model}.create({{
     data: {{ message, {parent_id_prop}, creator_id: userId }},
+    select: {{ id: true }},
   }});
   // Trigger #4 (notification design 2026-05-11): notify the entity creator
   // and (if present) assignee; never the commenter themselves.
@@ -1364,6 +1365,7 @@ export async function add{parent_pascal}Comment({parent_id_prop}: string, messag
     }}{mention_notify_add}
   }}
   revalidatePath('/{parent}');
+  return {{ id: created.id }};
 }}
 
 export async function update{parent_pascal}Comment(commentId: string, message: string): Promise<void> {{
@@ -1437,9 +1439,9 @@ def _build_comment_actions_bridge(parent: str, model: str, has_assignee_id: bool
         f"\n  }}"
     ) if comment_has_mention else ""
     return f"""
-export async function add{parent_pascal}Comment(commentable_id: string, message: string): Promise<void> {{
+export async function add{parent_pascal}Comment(commentable_id: string, message: string): Promise<{{ id: string }}> {{
   const userId = await getSessionUserIdOrThrow();
-  await createComment({{ message, commentable_id, creator_id: userId }});
+  const created = await createComment({{ message, commentable_id, creator_id: userId }});
   // Trigger #4 (notification design 2026-05-11): notify the entity creator
   // and (if present) assignee; never the commenter themselves.
   const parentRow = await prisma.{model}.findFirst({{
@@ -1459,6 +1461,7 @@ export async function add{parent_pascal}Comment(commentable_id: string, message:
     }}{mention_notify_add}
   }}
   revalidatePath('/{parent}');
+  return {{ id: created.id }};
 }}
 
 export async function update{parent_pascal}Comment(commentId: string, message: string): Promise<void> {{

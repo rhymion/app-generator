@@ -1,0 +1,42 @@
+# Fixture entity for the comment-rest-e2e-gate. ONLY the entity this gate needs:
+# scripts/check_comment_rest_e2e_gate_fixture.sh merges it into a COPY of the default
+# code_generator/json_schema.yaml inside a disposable build directory. The default schema
+# (which has no entity with a comment thread), its generated output and every other fixture
+# stay untouched.
+#
+#   cr_ticket   a commentable entity (one-to-one_bridge to `commentable`) with a foreign key to
+#               organization, so its records are scoped by organization membership. `api: true`
+#               generates the comment routes under /api/cr_ticket/{id}/comments; `test: true`
+#               puts the entity in the generated test helpers' permission grant, which
+#               `db:grantAllPermissions` uses (the generated entity specs themselves are not run).
+definitions:
+  cr_ticket:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-display:
+      table:
+        - title:
+            primary: true
+    fields:
+      title: {}
+      organization_id:
+        x-relationship:
+          labelField: name
+      commentable_id:
+        x-relationship:
+          type: one-to-one_bridge
+          target: commentable
+          labelField: id
+    required:
+      - title
+      - organization_id
+    properties:
+      commentable:
+        $ref: "#/definitions/commentable"
