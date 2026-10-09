@@ -4,6 +4,12 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- **Mobile: the Audit Log screen no longer shows "An unexpected error occurred"** (Issue #926). `GET /api/audit_log`
+  and `GET /api/audit_log/<id>` authenticated with `authenticateApiKey()`, which does not understand the mobile
+  access token, so the app's `Authorization: Bearer <jwt>` request was answered `401 Invalid API key.`. Both routes
+  now use `authenticate()` like every generated entity route (mobile access token or API key); permission checks
+  and the service API key path are unchanged.
 ### Added
 - **Mobile: write comments and mention users** (Issues #861, #862). On an entity that has the comment write
   routes, the Expo detail screen's comment thread gets a comment box, Edit and Delete on comments, and, when
