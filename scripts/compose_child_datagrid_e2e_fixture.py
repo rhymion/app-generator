@@ -14,6 +14,9 @@ copy it is pointed at and never on the repository's own schema files:
     before generate-code so the write-once stub is not written over it, and
   * cypress/support/<entity>/helper_custom.ts <- custom_helper/<entity>.ts, placed
     before generate-code so the write-once test-helper hook stub is not written over it, and
+  * lib/scheduled-tasks/<task_id>/service_scheduled_handler.ts <- scheduled_task_handlers/<task_id>.ts,
+    placed before generate-code so the write-once handler stub is not written over it, and
+    a top-level x-scheduled-tasks list (added to the default schema when it declares none), and
   * messages/{en,ja}.json            <- messages_validation.json (a consumer
     namespace, as prj_sync would merge it).
 
@@ -36,6 +39,13 @@ def compose_json_schema(fixture_dir: Path, app_dir: Path) -> None:
         default = yaml.load(f)
     with (fixture_dir / "json_schema.yaml").open(encoding="utf-8") as f:
         fixture = yaml.load(f)
+
+    # Optional top-level lists a fixture may add (the scheduled-task-e2e-gate declares tasks).
+    for key in ("x-scheduled-tasks",):
+        if key in fixture:
+            if default.get(key):
+                sys.exit(f"fixture declares {key}, which the default schema already has")
+            default[key] = fixture[key]
 
     definitions = default["definitions"]
     clash = sorted(set(fixture["definitions"]) & set(definitions))
@@ -95,6 +105,15 @@ def compose_custom_helper(fixture_dir: Path, app_dir: Path) -> None:
         target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
 
 
+def compose_scheduled_task_handlers(fixture_dir: Path, app_dir: Path) -> None:
+    # Optional: scheduled_task_handlers/<task_id>.ts replaces the write-once handler stub of that
+    # task, placed before generate-code so the stub is not written over it.
+    for source in sorted((fixture_dir / "scheduled_task_handlers").glob("*.ts")):
+        target = app_dir / "lib" / "scheduled-tasks" / source.stem / "service_scheduled_handler.ts"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 3:
         print(__doc__, file=sys.stderr)
@@ -104,6 +123,7 @@ def main(argv: list[str]) -> int:
     compose_prisma(fixture_dir, app_dir)
     compose_custom_validation(fixture_dir, app_dir)
     compose_custom_helper(fixture_dir, app_dir)
+    compose_scheduled_task_handlers(fixture_dir, app_dir)
     return 0
 
 

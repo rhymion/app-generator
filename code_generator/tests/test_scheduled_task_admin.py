@@ -22,6 +22,8 @@ ADMIN_FILES = [
     'app/[locale]/scheduled_task_run/actions.ts',
     'app/[locale]/scheduled_task_run/page.tsx',
     'components/scheduled_task_run/ScheduledTaskRunTable.tsx',
+    'app/api/scheduled-task-runs/route.ts',
+    'app/api/scheduled-task-runs/[task]/[action]/route.ts',
 ]
 
 
@@ -58,6 +60,29 @@ def test_actions_are_role_gated_and_audited(tmp_path):
     admin = (out / 'lib/scheduled-tasks/admin.ts').read_text()
     for action in ('scheduled_task_run.rerun', 'scheduled_task_run.resolve', 'scheduled_task_run.skip'):
         assert f"'{action}'" in admin
+
+
+def test_rest_routes_share_the_server_action_logic(tmp_path):
+    """The REST routes authenticate with `requireScheduledTaskOperator` (mobile token or API
+    key plus the ScheduledTaskRunner role) and run the actions through the same
+    `performOperatorAction` as the Server Actions, instead of a second implementation."""
+    out = _run(FIXTURE_DIR, tmp_path)
+    overview = (out / 'app/api/scheduled-task-runs/route.ts').read_text()
+    action = (out / 'app/api/scheduled-task-runs/[task]/[action]/route.ts').read_text()
+    actions = (out / 'app/[locale]/scheduled_task_run/actions.ts').read_text()
+    page = (out / 'app/[locale]/scheduled_task_run/page.tsx').read_text()
+    assert 'loadAdminOverview' in overview and 'loadAdminOverview' in page
+    assert 'export async function GET' in overview
+    assert 'export async function POST' in action
+    for source in (overview, action):
+        assert 'requireScheduledTaskOperator(request)' in source
+        assert 'resolveActorId' not in source and 'requireDualAuth' not in source
+    assert 'performOperatorAction' in action and 'performOperatorAction' in actions
+    assert "['rerun', 'resolve', 'skip']" in action
+    access = (REPO_ROOT / 'lib/scheduled-tasks/access.ts').read_text()
+    assert 'await authenticate(request)' in access
+    admin = (out / 'lib/scheduled-tasks/admin.ts').read_text()
+    assert 'export async function performOperatorAction' in admin
 
 
 def test_guard_accepts_a_business_date_override(tmp_path):
