@@ -1,0 +1,22 @@
+// Fixture model for the comment-rest-e2e-gate (appended to a COPY of prisma/schema.prisma by
+// scripts/check_comment_rest_e2e_gate_fixture.sh; the default schema is never edited). The back-fields the
+// default `user`, `organization` and `commentable` models need are listed in schema_relations.json
+// and inserted into the copy by the same script.
+model cr_ticket {
+  id              String       @id @default(cuid())
+  title           String
+  organization_id String
+  organization    organization @relation(fields: [organization_id], references: [id])
+  commentable_id  String       @unique
+  commentable     commentable  @relation(fields: [commentable_id], references: [id], onDelete: Cascade)
+  created_at      DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime     @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user         @relation("CrTicketCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user         @relation("CrTicketUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([organization_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}

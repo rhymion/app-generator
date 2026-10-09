@@ -46,7 +46,8 @@ Run in this order:
 14. `npm run test:filter-sort-gate` — single entity carrying every ColumnFilterKind (enum/boolean/number/decimal/date/date-time/time/string) fixture generate-code → tsc check (see below)
 14a. `npm run test:child-datagrid-e2e-gate` — builds and RUNS a fixture app (default schema + the dedicated fixture schema) and runs its Cypress specs: embedded child DataGrid written from the parent screens (see below)
 14b. `npm run test:list-child-e2e-gate` — builds and RUNS a fixture app (default schema + the dedicated fixture schema) and runs its Cypress specs: a child embedded with `x-outputType: list` shown on the parent's screens, and association add / remove from the parent screen (see below)
-14c. `npm run test:scheduled-task-e2e-gate` — builds and RUNS a fixture app (default schema + three scheduled tasks) and runs its Cypress API specs: the scheduled-task admin REST routes `/api/scheduled-task-runs` (see below)
+14c. `npm run test:comment-rest-e2e-gate` — builds and RUNS a fixture app (default schema + a commentable entity scoped by organization) and runs its Cypress specs: the REST routes for adding, editing and deleting a comment, and the @-mention user search (see below)
+14d. `npm run test:scheduled-task-e2e-gate` — builds and RUNS a fixture app (default schema + three scheduled tasks) and runs its Cypress API specs: the scheduled-task admin REST routes `/api/scheduled-task-runs` (see below)
 15. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
 16. `npm run check:generated`  — generated code matches templates/schema
 17. `npm run test:e2e:cy:api`  — API Cypress specs only
@@ -385,7 +386,23 @@ it as `list-child-e2e-gate-fixture`, skipped for a docs-only diff exactly like
 `e2e-tests`; locally it always runs. See
 `scripts/check_list_child_e2e_gate_fixture.sh`.
 
-**Step 14c (`test:scheduled-task-e2e-gate`)**: same machinery as steps 14a and
+**Step 14c (`test:comment-rest-e2e-gate`)**: same machinery as steps 14a and 14b.
+`scripts/check_comment_rest_e2e_gate_fixture.sh` copies the working tree into a
+disposable `.generated-comment-rest-e2e-gate/`, merges the entity of
+`code_generator/tests/fixtures/comment_rest_e2e_gate/` (a commentable entity with
+a foreign key to organization) into the copy's schema, builds the copy and runs
+only that fixture's Cypress specs, with its own docker compose project, ports and
+`AUTH_SECRET`. The repository's own schema has no entity with a comment thread,
+so this is the only run that exercises `POST /api/<entity>/{id}/comments`,
+`PATCH` / `DELETE .../comments/{commentId}` and `GET /api/mention/users` against
+a real database: an API key and a mobile access token, the update-permission and
+organization checks, the author-only edit and the delete rule, the mention
+notifications, and the candidate search's organization scope. CI runs it as
+`comment-rest-e2e-gate-fixture`, skipped for a docs-only diff exactly like
+`e2e-tests`; locally it always runs. See
+`scripts/check_comment_rest_e2e_gate_fixture.sh`.
+
+**Step 14d (`test:scheduled-task-e2e-gate`)**: same machinery as steps 14a and
 14b. `scripts/check_scheduled_task_e2e_gate_fixture.sh` copies the working tree
 into a disposable `.generated-scheduled-task-e2e-gate/`, merges
 `code_generator/tests/fixtures/scheduled_task_e2e_gate/` into the copy

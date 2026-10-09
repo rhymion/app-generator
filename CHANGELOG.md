@@ -13,6 +13,19 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   so validation, the run guard and the audit row are shared. They accept a mobile access token or an API key and answer
   `403` without the `ScheduledTaskRunner` role. A new gate, `test:scheduled-task-e2e-gate`, runs their Cypress API specs
   against a generated fixture app. See `docs/knowledge/scheduled-task-operations.md`.
+- **REST routes for comment writes and the @-mention user search** (Issue #885). An entity with a comment
+  thread gets `POST /api/{entity}/{id}/comments` and `PATCH` / `DELETE
+  /api/{entity}/{id}/comments/{commentId}`, and a schema with an `x-mention` field gets `GET
+  /api/mention/users?q=`, so a client that cannot call Server Actions, such as the mobile app, can post,
+  edit and delete comments and offer `@`-mention suggestions. The routes run the
+  `add/update/delete{Entity}Comment()` actions and `searchMentionUserOptions()` the web form calls, as the
+  authenticated caller (mobile access token or API key), so the stored message, the notifications, the
+  author-only edit and the delete rule are the web's own. Because the actions rely on the edit form for
+  access control, each comment route first requires `update` on the entity and finds the record through
+  `get{Entity}Detail()` (strict organization isolation); a comment of another record is `404`. The add
+  action now returns the id of the new comment. The OpenAPI document describes the routes. New
+  `npm run test:comment-rest-e2e-gate` builds and runs a fixture app with a commentable entity, because the
+  repository's own schema has none. See `docs/knowledge/comment-and-mention-rest-routes.md`.
 - **Read-only audit log screens in the Expo mobile app** (Issue #866). `generate-code` renders a paged list
   (newest first) and a detail screen for the built-in audit log into `mobile/`, reading the existing
   `GET /api/audit_log` and `GET /api/audit_log/<id>` routes only. The navigation gets an **Audit Log** link

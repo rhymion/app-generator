@@ -1698,6 +1698,22 @@ def generate(schema_path: str, output_dir: str) -> None:
             # Every entity with a REST surface can be the target of a relation,
             # and its getters.ts always carries search{Parent}Options.
             _write(api_dir / 'options' / 'route.ts', _render(env, 'api_options_route.ts.jinja2', ctx))
+            # --- comment write routes: REST side of the comment box ---
+            # Gated like the add/update/delete{Parent}Comment Server Actions they run
+            # (emitted into actions.ts) and on the detail getter they read the record with.
+            if (ctx.get('comment_actions_code') and can_view
+                    and (can_new or can_edit or can_delete or can_invalidate)):
+                _comment_children = ctx.get('comment_children') or []
+                _comment_ctx = {
+                    **ctx,
+                    'comment_model': 'comment' if ctx.get('has_commentable') else _comment_children[0]['name'],
+                    'comment_parent_fk': 'commentable_id' if ctx.get('has_commentable') else f"{ctx['model']}_id",
+                }
+                _write(api_dir / '[id]' / 'comments' / 'route.ts',
+                       _render(env, 'api_comments_route.ts.jinja2', _comment_ctx))
+                _write(api_dir / '[id]' / 'comments' / '[commentId]' / 'route.ts',
+                       _render(env, 'api_comment_item_route.ts.jinja2', _comment_ctx))
+                print(f'  Comment routes → app/api/{parent}/[id]/comments/')
             print(f'  API routes → app/api/{parent}/')
 
             # --- CSV Export route (Phase 1: can_api+can_list+can_export) ---
@@ -2273,6 +2289,11 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'mention_search.ts.jinja2', {}),
         )
         print('  Mention candidate search → lib/mention/search.ts')
+        _write(
+            out / 'app' / 'api' / 'mention' / 'users' / 'route.ts',
+            _render(env, 'mention_users_api_route.ts.jinja2', {}),
+        )
+        print('  Mention candidate search route → app/api/mention/users/route.ts')
 
     # --- Stripe payment integration write-once stubs (cmd_706) ---
     # Emitted when at least one entity in any schema definition declares
@@ -3191,7 +3212,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     # a deployed app by default. Written via the same _write() helper (and
     # therefore tracked in the same generate-code manifest) as every other
     # generated file, not a bespoke file-write path.
-    openapi_document = assemble_openapi_document(openapi_entity_specs)
+    openapi_document = assemble_openapi_document(openapi_entity_specs, mention_search=_has_any_mention)
     _write(
         doc_dir / 'openapi.json',
         json.dumps(openapi_document, indent=2, sort_keys=True) + '\n',

@@ -22,6 +22,7 @@
       "@/lib/prisma": ["./lib/prisma.ts"],
       "@/lib/authz": ["./lib/authz.ts"],
       "@/lib/api-auth": ["./lib/api-auth.ts"],
+      "@/lib/rate-limit": ["./lib/rate-limit.ts"],
       "@/lib/_notifier": ["./lib/_notifier.ts"],
       "@/lib/organization/getters_associated": ["./lib/organization/getters_associated.ts"],
       "@/app/generated/prisma/client": ["./prisma/.generated-client/client"],
@@ -31,6 +32,9 @@
   "include": [
     "lib/mention_gate_item/getters.ts",
     "app/api/mention_gate_item/[id]/route.ts",
+    "app/api/mention_gate_item/[id]/comments/route.ts",
+    "app/api/mention_gate_item/[id]/comments/[commentId]/route.ts",
+    "app/api/mention/users/route.ts",
     "components/mention_gate_item/FormUpsert.tsx",
     "app/[locale]/mention_gate_item/edit/[id]/page.tsx"
   ],
