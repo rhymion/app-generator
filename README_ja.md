@@ -20,7 +20,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - **フレームワーク非依存の UI フック** — 各エンティティのフォーム状態・送信処理・エラーメッセージ変換・権限に基づく表示制御・承認連携を、Next.js・`next-intl`・DOM・UI ライブラリに依存しない `lib/{entity}/use_entity_*.ts` として生成し、Web 以外のクライアントからも再利用可能 — [`docs/knowledge/shared-ui-hooks.md`](docs/knowledge/shared-ui-hooks.md) 参照
 - **CRUD ページ一式** — エンティティごとに一覧、詳細、作成、編集、削除ページを生成
 - **ガントチャートビュー** — エンティティ単位でオプトインできるガントチャートページ
-- **REST API** — エンティティごとに API キー認証付き JSON エンドポイントを生成。加えて、その行について現在許される操作・書き込み・遷移を返す行単位の `GET /api/{entity}/[id]/capabilities` エンドポイントを生成。リレーション項目で選択できるレコードを検索・ID 参照する `GET /api/{entity}/options` エンドポイントも生成（Web のピッカーの REST 版で、権限と組織の範囲は同一）
+- **REST API** — エンティティごとに API キー認証付き JSON エンドポイントを生成。加えて、その行について現在許される操作・書き込み・遷移を返す行単位の `GET /api/{entity}/[id]/capabilities` エンドポイントを生成。リレーション項目で選択できるレコードを検索・ID 参照する `GET /api/{entity}/options` エンドポイントも生成（Web のピッカーの REST 版で、権限と組織の範囲は同一）。コメントスレッドを持つエンティティには、コメントの追加・編集・削除の `POST` / `PATCH` / `DELETE` ルートと、`@` メンション候補を検索する `GET /api/mention/users` も生成（コメント欄の REST 版で、同じアクションを実行）— 詳細は [`docs/knowledge/comment-and-mention-rest-routes.md`](docs/knowledge/comment-and-mention-rest-routes.md) を参照
 - **API 冪等性キー + API キー単位の流量制限** — 単一レコード作成エンドポイントで任意の `Idempotency-Key` ヘッダーを送ると、`POST` の再送が安全になる（同じキー＋同じ本文なら元の結果を再送、同じキー＋異なる本文なら競合として拒否）。保持期間1日のDBテーブルに、対象レコードと同一トランザクションで書き込む。加えて `authenticateApiKey()` のみで認証する REST route はすべて、呼び出し元ごとの `api:read`/`api:write` 流量制限（いずれも環境変数で上書き可）を強制する — 詳細は [`docs/knowledge/api-idempotency-and-rate-limiting.md`](docs/knowledge/api-idempotency-and-rate-limiting.md) を参照
 - **API キーの有効期限** — 任意設定のnullable列 `user.api_key_expires_at`（`null` は無期限、既存の全キーの挙動を変えない）を、唯一の共通検証点 `authenticateApiKey()` でチェックする。期限切れのキーによるリクエストは `401 API key expired.` で拒否される — 詳細は [`docs/knowledge/api-key-expiry.md`](docs/knowledge/api-key-expiry.md) を参照
 - **生成ドキュメント + OpenAPI 3.1 仕様** — エンティティごとの人間可読ドキュメント（`docs/generated/{entity}.md`、`/en/docs` 配下にも反映）。承認フロー・書き込みロックを持つエンティティには「Constraints」節を含む。加えて機械可読な統合仕様 `docs/generated/openapi.json` をビルド成果物として生成し、`GET /api/openapi.json`（APIキーまたはセッション必須、全環境）で配信。`SWAGGER_UI_ENABLED` で有効化する対話的な `/swagger` 画面も用意（開発・ステージング限定、本番では有効化しない）— 詳細は [`docs/knowledge/generated-documentation-and-openapi-spec.md`](docs/knowledge/generated-documentation-and-openapi-spec.md) を参照
@@ -551,6 +551,7 @@ app-generator/
 | [child-datagrid-reference-columns.md](docs/knowledge/child-datagrid-reference-columns.md) | インライン DataGrid 子エンティティ、参照列のレンダリング |
 | [mobile-responsive-layout.md](docs/knowledge/mobile-responsive-layout.md) | レスポンシブレイアウト規約、検索ヘッダーアイコン、モバイルアカウントセクション |
 | [relation-picker-rest-route.md](docs/knowledge/relation-picker-rest-route.md) | `GET /api/{entity}/options`：リレーションピッカー用の REST 検索と ID 参照。Web のオートコンプリートと同じ関数を実行し、認証・権限・組織分離を共有 |
+| [comment-and-mention-rest-routes.md](docs/knowledge/comment-and-mention-rest-routes.md) | コメントの追加・編集・削除と `@` メンション候補検索の REST ルート。編集フォームと同じアクションを認証済み呼び出し元として実行。アクセス検査・入力検証・テスト |
 | [x-autocomplete-context.md](docs/knowledge/x-autocomplete-context.md) | FK フィールドの `x-autocomplete-context`：対象の `autocomplete_filter.ts` に渡るフォーム値、生成されるフォームと分割アクションの経路、検証 |
 | [mobile-app.md](docs/knowledge/mobile-app.md) | 生成される Expo モバイルアプリ：`x-nav` からのフッタータブと下位階層、エンティティ画面、ヘッダー、トークン認証、Playwright 検証 |
 | [search.md](docs/knowledge/search.md) | エンティティ横断全文検索：スキーマオプトイン・pg_bigm・認可・生成 API と UI |
