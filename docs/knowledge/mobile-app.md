@@ -92,6 +92,7 @@ and describes their fields; the templates are under `code_generator/templates/mo
 | New | `/entity/<name>/new` | `x-generate.new` |
 | Edit | `/entity/<name>/<id>/edit` | `x-generate.edit` |
 | Delete (one record, with a confirmation panel, from the detail screen) | | `x-generate.delete` |
+| Delete several records (selection mode on the list) | | `x-generate.delete` and the `delete` permission |
 
 An entity is left on the placeholder screen when it has no REST routes or no list screen, declares a
 child grid, a one-to-one bridge other than the ones to `approvable` (with `ApprovalSection`) and `commentable`, a direct attachment, a custom component other than `ApprovalSection`, virtual
@@ -100,6 +101,27 @@ guards without an approval or `x-self-only`, is the target of an `x-create-inlin
 REST routes, or has a field with no native widget (image or file URI, entity select, custom upsert
 component). In the default schema `role`, `organization` and `app_setting` qualify; `user` (a custom component) keeps
 the placeholder. The fixture schema in `code_generator/tests/fixtures/mobile_entity_gate/` covers the rest.
+
+### List: sort, filter, search and bulk delete
+
+The list screen passes the REST list's own parameters, so the rules are the server's, the same as the Web
+list's: `sort=<field>:<asc|desc>` and `f.<field>=<value>` (`lib/_pagination.ts`, `parsePageOpts()`).
+
+- **Sort.** *Sort* opens a panel with every scalar column of the form; a tap cycles ascending, descending and
+  none. One column is sorted at a time.
+- **Filter.** *Filter* opens a panel with a control for each text, number, decimal, boolean and enum field: a text
+  box (substring match for text, equality for numbers), or a chip per member (enum) or *Yes* / *No* (boolean).
+  Date, date-time and time fields can be sorted but not filtered, and a relation column holds an id, so it does
+  neither. *Clear* resets the filters.
+- **Search.** The search box above the list matches the row's title column (the first text column of the row,
+  else the first text field) through the same `f.<field>` parameter; an entity with no text field has no box.
+- Changing the sort, a filter or the search text restarts from the first page after a short pause; an older
+  response never replaces a newer one.
+- **Bulk delete.** A long press on a row starts a selection mode (a checkbox on each row, a count, *Delete* and
+  *Cancel*) when the caller may delete (`useEntityCapabilities`, the module the detail screen uses). *Delete*
+  shows the single delete's confirmation text and calls `DELETE /api/<entity>/bulk`, which checks permission and
+  existence for each record. A refused record stays selected and the list shows the single delete's message for
+  its reason (`getEntityFormErrorMessage`); the other records are removed.
 
 ### Relation pickers
 
@@ -348,6 +370,9 @@ runs the Expo web server and the proxy as one process so the runner can stop bot
   validation (no request is sent for an invalid form), a server-side rejection, and every permission-hidden
   action (New, the form without `create`, Edit and Delete on a record the caller cannot change, a
   list-and-view-only entity).
+- `mobile/e2e/list-capabilities.spec.ts` covers sorting (the request parameter and the row order), a filter and
+  its clearing, the search box, the selection mode with its confirmation, the bulk route call, a refused record and
+  the missing `delete` permission.
 - `mobile/e2e/relation-pickers.spec.ts` covers the pickers: select, search with the current selection kept,
   the hosting entity and form values sent with the search, the shared required-field check, edit, a
   disabled field without read on the target, clear, a one-to-one already linked elsewhere, adding and
@@ -396,5 +421,7 @@ check and is not part of the mandatory gate.
   (`submit_for_approval.ts`) with no REST route, so the app has nothing to call.
 - Creating the referenced record in place from a foreign-key field (`x-create-inline`) and the one-to-one
   bridge grid (`x-bridge`).
-- Bulk delete, the native date pickers (dates are typed as text), CSV import and export.
+- The native date pickers (dates are typed as text).
+- CSV export and import: the export and import routes accept a session cookie or an API key but not a mobile
+  access token (`resolveActorId()` in `lib/api-auth.ts`), so the screens cannot call them yet (Issue #883).
 - Translated field labels.

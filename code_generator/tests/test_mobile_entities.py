@@ -346,6 +346,40 @@ def test_picker_strings_exist_in_both_locales():
             assert common.get(key), (locale, key)
 
 
+# --- list: sort, filter, search, bulk delete -----------------------------------------------
+
+def test_list_sort_filter_and_search_use_the_rest_list_parameters(out):
+    http = _read(out, 'lib/entity-http.ts')
+    assert "sort=${opts.sort.map" in http and ':${item.dir}' in http
+    assert 'f.${encodeURIComponent(field)}' in http
+    client = _read(out, 'lib/mobile_note/mobile_client.ts')
+    assert "MOBILE_NOTE_SORT_KEYS: string[] = " in client
+    assert 'MOBILE_NOTE_SEARCH_KEY: string | null = "title"' in client
+    keys = json.loads(re.search(r'MOBILE_NOTE_FILTER_KEYS: string\[\] = (\[.*?\]);', client, re.S).group(1))
+    assert 'status' in keys and 'is_done' in keys and 'due_on' not in keys
+    lst = _read(out, 'components/mobile_note/List.tsx')
+    for test_id in ('list-search', 'list-sort-toggle', 'list-filter-toggle', 'list-filter-clear'):
+        assert test_id in lst
+    assert 'fetchMobileNotePage({ page: target, pageSize: PAGE_SIZE, ...queryOf() })' in lst
+
+
+def test_bulk_delete_goes_through_the_bulk_route_and_shared_capabilities(out):
+    http = _read(out, 'lib/entity-http.ts')
+    assert "`/api/${entity}/bulk`" in http and "method: 'DELETE'" in http
+    lst = _read(out, 'components/mobile_note/List.tsx')
+    assert 'bulkRemoveMobileNote' in lst and 'useEntityCapabilities' in lst
+    assert 'getEntityFormErrorMessage' in lst  # the single delete's error mapping
+    log = _read(out, 'components/mobile_log/List.tsx')
+    assert 'bulkRemove' not in log and 'list-bulk-delete' not in log  # list-and-view entity: no delete
+
+
+def test_list_strings_exist_in_both_locales():
+    for locale in ('en', 'ja'):
+        common = json.loads((REPO / 'messages' / f'{locale}.json').read_text())['Common']
+        for key in ('sort', 'filter', 'selectedCount', 'search', 'clear', 'deleteMessage'):
+            assert key in common, (locale, key)
+
+
 # --- comment thread and reactions ------------------------------------------------------------
 
 def _commentable_ctx(**overrides):

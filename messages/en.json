@@ -21,6 +21,7 @@
     "done": "Done",
     "edit": "Edit",
     "editEntity": "Edit {entity}",
+    "filter": "Filter",
     "goBack": "Go Back",
     "imageUrl": "Image URL",
     "nextPage": "Next",
@@ -29,7 +30,9 @@
     "save": "Save",
     "saveAndContinue": "Save and continue editing",
     "search": "Search",
-    "select": "Select"
+    "select": "Select",
+    "selectedCount": "{count} selected",
+    "sort": "Sort"
   },
   "Errors": {
     "capacityExhausted": "No capacity is available. Please try a different selection.",

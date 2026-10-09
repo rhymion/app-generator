@@ -17,7 +17,7 @@
 #
 # Three modes, because the footer specs assume the default schema's tabs:
 #   MODE=fixture (default)  fixture entities merged; runs mobile/e2e/entity-crud.spec.ts,
-#                           mobile/e2e/relation-pickers.spec.ts, mobile/e2e/comments.spec.ts,
+#                           mobile/e2e/relation-pickers.spec.ts, mobile/e2e/list-capabilities.spec.ts, mobile/e2e/comments.spec.ts,
 #                           mobile/e2e/approval-actions.spec.ts and mobile/e2e/split-action.spec.ts
 #   MODE=default            unmodified schema; runs every other spec in mobile/e2e/
 #   MODE=scheduled          the scheduled-task-e2e-gate fixture (three scheduled tasks) merged and the
@@ -206,7 +206,7 @@ FROM actor, (VALUES ('comment-seed-1', 'First comment'), ('comment-seed-2', 'Sec
 INSERT INTO reaction (id, type, user_id, comment_id, updated_at)
 SELECT 'reaction-seed-1', 'like', id, 'comment-seed-1', now() FROM "user" ORDER BY created_at LIMIT 1;
 SQL
-  PW_TARGET="entity-crud.spec.ts relation-pickers.spec.ts comments.spec.ts approval-actions.spec.ts split-action.spec.ts"
+  PW_TARGET="entity-crud.spec.ts relation-pickers.spec.ts list-capabilities.spec.ts comments.spec.ts approval-actions.spec.ts split-action.spec.ts"
   export MOBILE_PW_IGNORE=""
 elif [ "$MODE" = "scheduled" ]; then
   echo "-- the test user holds the ScheduledTaskRunner role --"
@@ -219,7 +219,7 @@ SQL
   export MOBILE_PW_IGNORE=""
 else
   PW_TARGET=""
-  export MOBILE_PW_IGNORE="**/{entity-crud,relation-pickers,comments,approval-actions,split-action,scheduled-task}.spec.ts"
+  export MOBILE_PW_IGNORE="**/{entity-crud,relation-pickers,list-capabilities,comments,approval-actions,split-action,scheduled-task}.spec.ts"
 fi
 
 echo "-- installing the Expo dependencies --"
