@@ -27,7 +27,9 @@ from helpers.schema_helpers import get_flatten_rels
 from generate_types import extract_entities, extract_named_constants
 from mobile_nav import build_mobile_nav
 from nav_config import schema_declares_scheduled_tasks
-from mobile_entities import build_mobile_entity_spec
+from mobile_entities import (
+    build_mobile_entity_spec, ineligible_log_lines, ineligible_note, mobile_ineligible_reason,
+)
 from helpers.naming import to_title_case
 from context import build_entity_context
 from build_context import (
@@ -1406,6 +1408,8 @@ def generate(schema_path: str, output_dir: str) -> None:
     # Entities that get native list / detail / form screens in the Expo app.
     mobile_specs: list[dict] = []
     mobile_ctxs: dict[str, dict] = {}
+    # (entity, reason) for each entity that keeps the placeholder screen, reported once the loop ends.
+    mobile_ineligible: list[tuple[str, str]] = []
     # Entities with REST routes, hence an options route a mobile relation picker can call.
     api_entities = {e['parent'] for e in entities if (e.get('generate_config') or {}).get('api')}
 
@@ -1868,6 +1872,8 @@ def generate(schema_path: str, output_dir: str) -> None:
         if mobile_spec:
             mobile_specs.append(mobile_spec)
             mobile_ctxs[parent] = ctx
+        elif mobile_enabled:
+            mobile_ineligible.append((parent, mobile_ineligible_reason(ctx, api_entities)))
 
         # --- <Child>BridgeGrid.tsx (parent-embedded DataGrid, cmd_167 §4) ---
         # Emitted for bridge children (entities with new-form x-bridge); the
@@ -3442,6 +3448,9 @@ def generate(schema_path: str, output_dir: str) -> None:
             print(f'  Mobile screens → mobile/ ({mobile_spec["name"]})')
         generate_mobile_target(entities, schema, out, env, has_search=bool(search_entities), mobile_specs=mobile_specs,
                                has_mention=_has_any_mention)
+        for line in ineligible_log_lines(mobile_ineligible):
+            print(line)
+        _write(out / 'mobile' / 'MOBILE_ENTITIES.md', ineligible_note(mobile_ineligible))
     else:
         print('\nSkipping mobile app (x-generator.mobile.enabled is not true)')
 

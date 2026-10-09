@@ -5,6 +5,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Report which entities are left out of the mobile app** (Issue #925). `generate-code` prints the entities that
+  keep the "not available in the mobile app yet" placeholder, grouped by reason, and writes the same list to
+  `mobile/MOBILE_ENTITIES.md`. Only generated `mobile/` output gains that one file (and only when
+  `x-generator.mobile.enabled` is true); no screen, schema key or Web file changes. See `docs/knowledge/mobile-app.md`.
 - **Mobile: write comments and mention users** (Issues #861, #862). On an entity that has the comment write
   routes, the Expo detail screen's comment thread gets a comment box, Edit and Delete on comments, and, when
   the schema has an `x-mention` field, a user lookup while typing `@`. It calls only
