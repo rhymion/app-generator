@@ -4693,6 +4693,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         sort_filter_fields=_scalar_props,
         sort_filter_field_kinds=_field_kinds,
         sort_filter_relation_fields=_relation_filter_fields,
+        sort_filter_enum_members=_enum_members,
         enum_members_quoted=enum_members_quoted,
         decimal_scales_quoted=decimal_scales_quoted,
         searchable_text_fields=searchable_text_fields,

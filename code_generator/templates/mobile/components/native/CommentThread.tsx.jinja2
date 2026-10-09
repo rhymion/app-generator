@@ -1,8 +1,22 @@
 {% raw %}
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useMessages } from '@/lib/messages';
-import { fetchCommentReactions, toggleCommentReaction, type ReactionSummary } from '@/lib/comment-http';
+import { getAccessTokenSync } from '@/lib/token-storage';
+import {
+  addComment,
+  currentUserIdFromToken,
+  deleteComment,
+  fetchCommentReactions,
+{% endraw %}{% if has_mention %}{% raw %}
+  searchMentionUsers,
+{% endraw %}{% endif %}{% raw %}
+  toggleCommentReaction,
+  updateComment,
+  type CommentWriteResult,
+  type ReactionSummary,
+} from '@/lib/comment-http';
+import { useCommentComposer, type PickedMention } from '@/lib/comment-composer';
 
 /** A comment as the entity's REST detail embeds it (mentions are already decoded to names). */
 export type CommentRow = {
@@ -11,6 +25,20 @@ export type CommentRow = {
   created_at?: string | null;
   creator?: { id: string; name: string } | null;
   reactionCounts?: Array<{ type: string; count: number }>;
+  /** The mentions of the message in order: the REST detail decodes them to `@Name` in `message`. */
+  mentions?: PickedMention[];
+};
+
+/** What the thread needs to write: the record it belongs to and what the caller may do on it. */
+export type CommentWriteConfig = {
+  entity: string;
+  recordId: string;
+  /** The caller may update the record, which is what the comment routes require to add a comment. */
+  canComment: boolean;
+  /** The caller has `delete` on the entity, which lets them delete a comment they did not write. */
+  canDeleteAny: boolean;
+  /** Called after a comment was added, changed or deleted, so the screen reloads the record. */
+  onChanged: () => void;
 };
 
 function ReactionBar({ comment, types }: { comment: CommentRow; types: string[] }) {
@@ -64,13 +92,191 @@ function ReactionBar({ comment, types }: { comment: CommentRow; types: string[] 
   );
 }
 
+function failureText(t: (key: string) => string, failure: Extract<CommentWriteResult, { ok: false }>): string {
+  if (failure.errorCode === 'PERMISSION_DENIED') return t('Errors.permissionDenied');
+  if (failure.errorCode === 'NOT_FOUND') return t('Errors.notFound');
+  if (failure.errorCode === 'SESSION_EXPIRED') return t('Errors.sessionExpired');
+  return t('Errors.unknown');
+}
+
+/**
+ * A comment box: the text input, the `@` candidates when the schema has a mention field, and the
+ * submit and cancel buttons. Used for a new comment and for the edit of one.
+ */
+function CommentComposer({
+  testIdPrefix,
+  initialText,
+  initialMentions,
+  submitLabel,
+  onSubmit,
+  onCancel,
+}: {
+  testIdPrefix: string;
+  initialText?: string;
+  initialMentions?: PickedMention[];
+  submitLabel: string;
+  onSubmit: (message: string) => Promise<CommentWriteResult>;
+  onCancel?: () => void;
+}) {
+  const { t } = useMessages();
+  const composer = useCommentComposer({
+    initialText,
+    initialMentions,
+{% endraw %}{% if has_mention %}{% raw %}
+    search: searchMentionUsers,
+{% endraw %}{% endif %}{% raw %}
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { suggestions } = composer;
+
+  const submit = async () => {
+    if (saving || !composer.message) return;
+    setSaving(true);
+    setError(null);
+    const result = await onSubmit(composer.message);
+    setSaving(false);
+    if (result.ok) composer.reset();
+    else setError(failureText(t, result));
+  };
+
+  return (
+    <View style={styles.composer} testID={`${testIdPrefix}-composer`}>
+      <TextInput
+        style={styles.input}
+        multiline
+        value={composer.text}
+        onChangeText={composer.setText}
+        onSelectionChange={(event) => composer.setCaret(event.nativeEvent.selection.start)}
+        editable={!saving}
+        accessibilityLabel={t('Fields.comments')}
+        testID={`${testIdPrefix}-input`}
+      />
+      {suggestions.open && (suggestions.loading || suggestions.denied || suggestions.options.length > 0) ? (
+        <View style={styles.suggestions} testID={`${testIdPrefix}-mentions`}>
+          {suggestions.denied ? (
+            <Text style={styles.meta} testID={`${testIdPrefix}-mentions-denied`}>{t('Errors.permissionDenied')}</Text>
+          ) : suggestions.loading && suggestions.options.length === 0 ? (
+            <ActivityIndicator testID={`${testIdPrefix}-mentions-loading`} />
+          ) : (
+            suggestions.options.map((option) => (
+              <Pressable
+                key={option.id}
+                style={styles.suggestion}
+                onPress={() => composer.pick(option)}
+                testID={`${testIdPrefix}-mention-${option.id}`}
+              >
+                <Text>{option.name}</Text>
+                {option.email ? <Text style={styles.meta}>{option.email}</Text> : null}
+              </Pressable>
+            ))
+          )}
+        </View>
+      ) : null}
+      {error ? <Text style={styles.error} testID={`${testIdPrefix}-error`}>{error}</Text> : null}
+      <View style={styles.row}>
+        <Pressable
+          style={[styles.primary, !composer.message || saving ? styles.disabled : null]}
+          onPress={submit}
+          disabled={!composer.message || saving}
+          accessibilityRole="button"
+          testID={`${testIdPrefix}-submit`}
+        >
+          <Text style={styles.primaryText}>{submitLabel}</Text>
+        </Pressable>
+        {onCancel ? (
+          <Pressable style={styles.secondary} onPress={onCancel} disabled={saving} testID={`${testIdPrefix}-cancel`}>
+            <Text>{t('Common.cancel')}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+function CommentActions({ comment, write, isAuthor }: { comment: CommentRow; write: CommentWriteConfig; isAuthor: boolean }) {
+  const { t } = useMessages();
+  const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // The server decides again on every write: only the author edits, and the author or a caller
+  // with `delete` on the entity deletes.
+  const canEdit = isAuthor;
+  const canDelete = isAuthor || write.canDeleteAny;
+
+  const remove = async () => {
+    const result = await deleteComment(write.entity, write.recordId, comment.id);
+    setConfirming(false);
+    if (result.ok) write.onChanged();
+    else setError(failureText(t, result));
+  };
+
+  if (editing) {
+    return (
+      <CommentComposer
+        testIdPrefix={`comment-edit-${comment.id}`}
+        initialText={comment.message}
+        initialMentions={comment.mentions ?? []}
+        submitLabel={t('Common.save')}
+        onSubmit={async (message) => {
+          const result = await updateComment(write.entity, write.recordId, comment.id, message);
+          if (result.ok) {
+            setEditing(false);
+            write.onChanged();
+          }
+          return result;
+        }}
+        onCancel={() => setEditing(false)}
+      />
+    );
+  }
+  if (!canEdit && !canDelete) return null;
+  return (
+    <View>
+      <View style={styles.row}>
+        {canEdit ? (
+          <Pressable style={styles.secondary} onPress={() => setEditing(true)} testID={`comment-edit-${comment.id}`}>
+            <Text>{t('Common.edit')}</Text>
+          </Pressable>
+        ) : null}
+        {canDelete && !confirming ? (
+          <Pressable style={styles.secondary} onPress={() => setConfirming(true)} testID={`comment-delete-${comment.id}`}>
+            <Text>{t('Common.delete')}</Text>
+          </Pressable>
+        ) : null}
+        {canDelete && confirming ? (
+          <>
+            <Pressable style={styles.danger} onPress={remove} testID={`comment-delete-confirm-${comment.id}`}>
+              <Text style={styles.primaryText}>{t('Common.delete')}</Text>
+            </Pressable>
+            <Pressable style={styles.secondary} onPress={() => setConfirming(false)} testID={`comment-delete-cancel-${comment.id}`}>
+              <Text>{t('Common.cancel')}</Text>
+            </Pressable>
+          </>
+        ) : null}
+      </View>
+      {error ? <Text style={styles.error} testID={`comment-action-error-${comment.id}`}>{error}</Text> : null}
+    </View>
+  );
+}
+
 /**
  * The comment thread of a record: the comments in the order the REST detail returns them, each
- * with the reaction bar. Adding, editing and deleting comments are not drawn: the comment
- * routes for them do not exist yet.
+ * with the reaction bar. With `write`, the thread also has the comment box (when the caller may
+ * update the record) and Edit / Delete on the comments the caller may change; the comment routes
+ * check all of it again.
  */
-export function CommentThread({ comments, reactionTypes }: { comments: CommentRow[]; reactionTypes: string[] }) {
+export function CommentThread({
+  comments,
+  reactionTypes,
+  write,
+}: {
+  comments: CommentRow[];
+  reactionTypes: string[];
+  write?: CommentWriteConfig;
+}) {
   const { t } = useMessages();
+  const currentUserId = write ? currentUserIdFromToken(getAccessTokenSync()) : null;
   return (
     <View style={styles.thread} testID="comment-thread">
       <Text style={styles.heading}>{t('Fields.comments')}</Text>
@@ -82,8 +288,22 @@ export function CommentThread({ comments, reactionTypes }: { comments: CommentRo
           </Text>
           <Text testID={`comment-message-${comment.id}`}>{comment.message}</Text>
           {reactionTypes.length > 0 ? <ReactionBar comment={comment} types={reactionTypes} /> : null}
+          {write ? (
+            <CommentActions comment={comment} write={write} isAuthor={!!currentUserId && comment.creator?.id === currentUserId} />
+          ) : null}
         </View>
       ))}
+      {write?.canComment ? (
+        <CommentComposer
+          testIdPrefix="comment-new"
+          submitLabel={t('Common.add')}
+          onSubmit={async (message) => {
+            const result = await addComment(write.entity, write.recordId, message);
+            if (result.ok) write.onChanged();
+            return result;
+          }}
+        />
+      ) : null}
     </View>
   );
 }
@@ -97,5 +317,16 @@ const styles = StyleSheet.create({
   reaction: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 4 },
   reactionActive: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
   reactionActiveText: { color: '#ffffff' },
+  composer: { gap: 6 },
+  input: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, padding: 8, minHeight: 60 },
+  suggestions: { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 6, padding: 4 },
+  suggestion: { paddingVertical: 6, paddingHorizontal: 8 },
+  row: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  primary: { backgroundColor: '#2563eb', borderRadius: 6, paddingHorizontal: 14, paddingVertical: 8 },
+  primaryText: { color: '#ffffff' },
+  secondary: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, paddingHorizontal: 14, paddingVertical: 8 },
+  danger: { backgroundColor: '#dc2626', borderRadius: 6, paddingHorizontal: 14, paddingVertical: 8 },
+  disabled: { opacity: 0.5 },
+  error: { color: '#b91c1c' },
 });
 {% endraw %}

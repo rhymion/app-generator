@@ -1,8 +1,12 @@
 {% raw %}
-// REST access for comment reactions: the comment reactions route
-// (/api/comment/<id>/reactions/toggle) that the Web reaction bar's Server Action
-// shares its service functions with. No reaction logic lives here.
+// REST access for comments: the reactions route (/api/comment/<id>/reactions/toggle) and the
+// comment write routes (/api/<entity>/<id>/comments) that the Web comment box's Server Actions
+// share their service functions with (and the @-mention user search, when the schema has an x-mention
+// field). No comment, reaction or mention
+// logic lives here.
 import { apiFetch } from './api-base';
+import { toActionFailure } from './entity-http';
+import type { ActionFailure } from './_errors';
 
 export type ReactionCount = { type: string; count: number };
 
@@ -24,5 +28,85 @@ export async function toggleCommentReaction(commentId: string, type: string): Pr
     body: JSON.stringify({ type }),
   });
   return { counts: body.counts ?? [], myTypes: body.myTypes ?? [] };
+}
+
+/** Outcome of a comment write: success (with the new comment's id on an add) or the mapped failure. */
+export type CommentWriteResult = { ok: true; id?: string } | ActionFailure;
+
+const commentsBase = (entity: string, recordId: string) =>
+  `/api/${encodeURIComponent(entity)}/${encodeURIComponent(recordId)}/comments`;
+
+/**
+ * `POST /api/<entity>/<id>/comments`: adds a comment. The message carries any `@[user_id:<id>]`
+ * markers as the Web box stores them. Never rejects: a refusal (no `update` on the record, a
+ * record of another organization, an empty message) comes back as an ActionFailure.
+ */
+export async function addComment(entity: string, recordId: string, message: string): Promise<CommentWriteResult> {
+  try {
+    const body = await apiFetch<{ id?: string }>(commentsBase(entity, recordId), {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    });
+    return { ok: true, id: body?.id };
+  } catch (err) {
+    return toActionFailure(err);
+  }
+}
+
+/** `PATCH .../comments/<commentId>`: changes the message; the server allows the author only. */
+export async function updateComment(
+  entity: string,
+  recordId: string,
+  commentId: string,
+  message: string,
+): Promise<CommentWriteResult> {
+  try {
+    await apiFetch(`${commentsBase(entity, recordId)}/${encodeURIComponent(commentId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ message }),
+    });
+    return { ok: true };
+  } catch (err) {
+    return toActionFailure(err);
+  }
+}
+
+/** `DELETE .../comments/<commentId>`: the server allows the author, or a caller with `delete` on the entity. */
+export async function deleteComment(entity: string, recordId: string, commentId: string): Promise<CommentWriteResult> {
+  try {
+    await apiFetch(`${commentsBase(entity, recordId)}/${encodeURIComponent(commentId)}`, { method: 'DELETE' });
+    return { ok: true };
+  } catch (err) {
+    return toActionFailure(err);
+  }
+}
+{% endraw %}{% if has_mention %}{% raw %}
+
+/** A user the caller may mention. */
+export type MentionUserOption = { id: string; name: string; email: string };
+
+/** The candidates for `q`, or `permissionDenied` when the caller may not read users. */
+export type MentionSearchResult = { options: MentionUserOption[]; permissionDenied: boolean };
+
+/** `GET /api/mention/users?q=`: the same search the Web picker runs (`searchMentionUserOptions`). */
+export async function searchMentionUsers(q: string): Promise<MentionSearchResult> {
+  const body = await apiFetch<Partial<MentionSearchResult>>(`/api/mention/users?q=${encodeURIComponent(q)}`);
+  return { options: body.options ?? [], permissionDenied: body.permissionDenied === true };
+}
+{% endraw %}{% endif %}{% raw %}
+
+/**
+ * The signed-in user's id: the `sub` claim of the access token. It only decides which comments
+ * offer Edit (the author's); the server checks the author again on every write.
+ */
+export function currentUserIdFromToken(token: string | null): string | null {
+  if (!token) return null;
+  try {
+    const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const claims = JSON.parse(atob(payload)) as { sub?: unknown };
+    return typeof claims.sub === 'string' ? claims.sub : null;
+  } catch {
+    return null;
+  }
 }
 {% endraw %}

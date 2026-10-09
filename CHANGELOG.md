@@ -15,6 +15,24 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `scripts/migrations/04_app_setting_timezone_enum.sql` once (it records every coerced value in
   `"_app_setting_timezone_coerced"`); `bash scripts/check_timezone_migration.sh` exercises it. See
   `docs/knowledge/timezone-handling.md`.
+- **Mobile: write comments and mention users** (Issues #861, #862). On an entity that has the comment write
+  routes, the Expo detail screen's comment thread gets a comment box, Edit and Delete on comments, and, when
+  the schema has an `x-mention` field, a user lookup while typing `@`. It calls only
+  `POST` / `PATCH` / `DELETE /api/<entity>/<id>/comments` and `GET /api/mention/users`, so the server's
+  permission and organization checks apply. The REST detail now also lists each comment's `mentions` (`id` and
+  `name`, in order) so an edit keeps the mention markers. New `lib/comment-composer.ts` in `mobile/`; no schema
+  key is added and the Web screens are unchanged. See `docs/knowledge/mobile-app.md`.
+- **Search box, multi-column sort and multi-field filter on the Web entity lists** (Issue #899, Phase 1 of #898).
+  The Desktop Web grid and the Mobile Web cards get one shared panel above the list: a search box that matches
+  the list's title column, a sort panel that sorts by several columns in the order they are chosen (ascending,
+  descending, off), and a filter panel with a control for every text, number, decimal, boolean and enum column
+  (and each relation display column), all applied together. Until now the grid sorted and filtered one column at a
+  time (`@mui/x-data-grid`'s MIT build forces that) and the card list had no sort or filter at all. The panel is
+  `components/_standard/ListQueryPanel.tsx`, driven by a `listQuery` spec each generated list page builds from the
+  REST list's own allow-list (the same data `SORTABLE_FIELDS`, `FILTERABLE_FIELDS` and `FIELD_KINDS` render from); a
+  list without the spec is unchanged. The state and the request logic are `lib/_list_query.ts`, which the Expo list
+  now uses too (copied into `mobile/lib/` unchanged; the native list still sorts one column at a time). The REST
+  list's accepted columns are unchanged and no `x-*` key is added. See `docs/knowledge/list-search-panel.md`.
 - **Mobile access tokens are accepted by the dual-auth routes** (Issue #883). `resolveActorId()` and
   `requireDualAuth()` in `lib/api-auth.ts` dispatch an `Authorization: Bearer` token by shape, the same way
   `requireCaller()` does, so CSV export and import, `GET /api/openapi.json` and the

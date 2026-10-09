@@ -1,10 +1,11 @@
 import { apiFetch, ApiError } from './api-base';
 import type { ActionFailure, ErrorCode, MessageArgs, ValidationReason } from './_errors';
 import type { ModelPermissions } from './authz';
+import type { SortItem } from './_list_query';
+
+export type { SortItem };
 
 // `page` is zero-based, like the REST list routes.
-export type SortItem = { field: string; dir: 'asc' | 'desc' };
-
 // `sort` and `filter` use the REST list's own parameters: `sort=<field>:<dir>,...` and `f.<field>=<value>`.
 export type PageOpts = { page?: number; pageSize?: number; sort?: SortItem[]; filter?: Record<string, string> };
 

@@ -6,6 +6,7 @@ import CardListClient from './CardListClient';
 import type { ModelPermissions } from '@/lib/authz';
 import type { PageOpts, PageResult } from '@/lib/_pagination';
 import type { ActionFailure } from '@/lib/_errors';
+import type { ListQuerySpec } from '@/lib/_list_query';
 
 interface BaseEntity {
   id: string;
@@ -57,6 +58,8 @@ interface ResponsiveListClientProps<T extends BaseEntity> {
   /** When false, the edit icon is hidden even if the user has update permission.
    * Used for entities whose x-generate.edit is false (no /edit page exists to link to). */
   allowEdit?: boolean;
+  /** What the multi-column sort / multi-field filter / search panel offers; shown above the grid or the cards. */
+  listQuery?: ListQuerySpec;
 }
 
 export default function ResponsiveListClient<T extends BaseEntity>({
@@ -77,6 +80,7 @@ export default function ResponsiveListClient<T extends BaseEntity>({
   openLinksInNewTab,
   allowCreate,
   allowEdit,
+  listQuery,
 }: ResponsiveListClientProps<T>) {
   const isMobile = useMediaQuery(`(max-width: ${mobileBreakpoint}px)`);
 
@@ -97,6 +101,7 @@ export default function ResponsiveListClient<T extends BaseEntity>({
         primaryField={primaryField}
         allowCreate={allowCreate}
         allowEdit={allowEdit}
+        listQuery={listQuery}
       />
     );
   }
@@ -119,6 +124,7 @@ export default function ResponsiveListClient<T extends BaseEntity>({
       openLinksInNewTab={openLinksInNewTab}
       allowCreate={allowCreate}
       allowEdit={allowEdit}
+      listQuery={listQuery}
     />
   );
 }

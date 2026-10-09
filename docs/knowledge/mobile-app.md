@@ -133,9 +133,13 @@ the placeholder. The fixture schema in `code_generator/tests/fixtures/mobile_ent
 
 The list screen passes the REST list's own parameters, so the rules are the server's, the same as the Web
 list's: `sort=<field>:<asc|desc>` and `f.<field>=<value>` (`lib/_pagination.ts`, `parsePageOpts()`).
+The state and the request it produces are `lib/_list_query.ts`, copied into `mobile/lib/` unchanged and used by
+the Web list panel too, so the two cannot disagree on what a sort, a filter or the search box means; see
+[list-search-panel.md](list-search-panel.md).
 
 - **Sort.** *Sort* opens a panel with every scalar column of the form; a tap cycles ascending, descending and
-  none. One column is sorted at a time.
+  none. One column is sorted at a time (the Web list sorts several; `cycleSort(sort, key, multi)` takes the
+  difference).
 - **Filter.** *Filter* opens a panel with a control for each text, number, decimal, boolean and enum field: a text
   box (substring match for text, equality for numbers), or a chip per member (enum) or *Yes* / *No* (boolean).
   Date, date-time and time fields can be sorted but not filtered, and a relation column holds an id, so it does
@@ -281,10 +285,39 @@ carry. A tap sends `POST` to the same route, which adds the reaction or removes 
 counts and the caller's reactions it returns; a failed request leaves the previous state. Both calls are in
 `lib/comment-http.ts`.
 
-The thread is read-only. Adding, editing and deleting a comment and the user lookup behind `@` have no
-REST route (the Web calls Server Actions and `lib/mention/search.ts` directly), so the composer and the
-mention picker are not drawn. An entity that declares an `x-mention` field of its own is still left on the
-placeholder screen.
+An entity that declares an `x-mention` field of its own is still left on the placeholder screen.
+
+#### Writing comments
+
+On an entity that has the comment write routes (`comment-and-mention-rest-routes.md`), the thread also writes;
+an entity without them keeps a read-only thread. Every write goes through `lib/comment-http.ts`, which calls
+`POST /api/<entity>/<id>/comments`, `PATCH .../comments/<commentId>` and `DELETE .../comments/<commentId>`; the
+routes run the Web's own add, edit and delete functions after their permission and organization checks, and a
+refusal is shown as the server's answer (`Errors.permissionDenied` for a `403`). The screen decides only what to
+offer, and the server decides again on every write:
+
+| Control | Offered when | The server requires |
+|---|---|---|
+| Comment box | The record's capabilities allow `update` | `update` on the record |
+| Edit | The signed-in user wrote the comment (the `sub` claim of the access token) | The author |
+| Delete (asks for confirmation) | The user wrote the comment, or has `delete` on the entity | The author, or `delete` on the entity |
+
+The Web box offers Edit and Delete to the author only, and only when the user also has `delete`; the mobile screen
+follows the routes' own rule, which is the wider one.
+
+After a write the record reloads, so the thread shows what the server stored. A failed write keeps the text in the box.
+
+#### Mentions
+
+When the schema has an `x-mention` field, typing `@` followed by text (the `@` at the start or after whitespace, so
+an e-mail address does not count) searches `GET /api/mention/users?q=` after 250 ms and lists the candidates; a
+caller who may not read users gets `Errors.permissionDenied` in place of the list. Picking a candidate inserts
+`@Name ` into the box. The shared logic is in `lib/comment-composer.ts`: the box shows names, and
+`encodeMessage()` puts back `@[user_id:<id>]` for each picked mention when the message is sent, matching the
+picked mentions in order so two users with the same name keep their own ids. A hand-typed `@Name` that was not
+picked stays plain text, as on the Web. To edit a comment, the REST detail lists its `mentions` (`id` and `name`
+per marker, in order of appearance, next to the decoded `message`), which the box starts with, so editing the
+text around a mention keeps the mention.
 
 ### Shared logic with the Web screens
 
@@ -447,9 +480,12 @@ runs the Expo web server and the proxy as one process so the runner can stop bot
   server's create flag or without the key) and the checkout (the hosted URL opened after the save, the
   returned notice on the detail screen), with the fake payment provider.
 - `mobile/e2e/comments.spec.ts` covers the thread of a commentable entity (`mobile_thread`): the comments in
-  order with their author, a mention shown as a name, an empty thread, no composer, the counts and the
-  caller's own reaction, adding and removing a reaction through the route, and a reaction that is still set
-  after the screen is reopened.
+  order with their author, a mention shown as a name, an empty thread, the counts and the caller's own reaction,
+  adding and removing a reaction through the route, and a reaction that is still set after the screen is
+  reopened; adding a comment (the request sent, a blank box, a refusal shown with the text kept, no box without
+  `update`); the `@` lookup (the search request, the marker sent, an unpicked name sent as text, an e-mail
+  address, suggestions unavailable); and editing and deleting (the author's comment, mentions kept as markers,
+  cancel, a comment by another user deletable but not editable, the delete confirmation and a refused delete).
 - `mobile/e2e/approval-actions.spec.ts` covers the approval section on `mobile_request`: a request for another
   role offers no action, approve (message sent, status and record locked), reject (message, reason and kind
   sent), withdraw (dialog cancel, then the round closes and the record returns to its withdrawn value), a decided
@@ -482,10 +518,8 @@ check and is not part of the mandatory gate.
 ## Not implemented yet
 
 - Entity screens for an entity that declares anything beyond plain fields, the relation pickers, the approval
-  section, the comment thread, creating the referenced record in place and payment checkout: child grids and
+  section, the comment thread with its comment box and mentions, creating the referenced record in place and payment checkout: child grids and
   attachments.
-- Adding, editing and deleting comments, and the `@` user lookup in a comment, in the app. The REST routes for
-  them exist (`comment-and-mention-rest-routes.md`); the screens that use them are not built.
 - Submitting a record for approval (the "(re)submit" button). Resubmitting is a Server Action
   (`submit_for_approval.ts`) with no REST route, so the app has nothing to call.
 - The one-to-one bridge grid (`x-bridge`).

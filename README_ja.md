@@ -100,7 +100,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 
 - 国際化（英語・日本語、next-intl v4）
 - ダークモード（システム連動、SSR セーフ）
-- スキーマで `x-generator.mobile.enabled: true` を設定したときに `mobile/` へ生成される Expo（React Native）モバイルアプリ（既定は無効）。デスクトップのサイドバーと同じ `x-nav` / `x-nav-groups` からフッターのタブと下位階層の一覧を構成。外部キー・1対1セレクタ・多対多にはネイティブのピッカーを（参照先レコードのその場作成と決済チェックアウトにも対応）、承認対象のエンティティには承認・却下・取り下げのボタンと分割操作を、コメント可能なエンティティには読み取り専用のコメントスレッドとリアクションを備え、フォーム・検証・権限のロジックを Web 画面と共有するネイティブの一覧（並べ替え・絞り込み・検索・一括削除）・詳細・フォーム画面を生成。読み取り専用の監査ログの一覧・詳細と、定期タスクの管理画面も生成
+- スキーマで `x-generator.mobile.enabled: true` を設定したときに `mobile/` へ生成される Expo（React Native）モバイルアプリ（既定は無効）。デスクトップのサイドバーと同じ `x-nav` / `x-nav-groups` からフッターのタブと下位階層の一覧を構成。外部キー・1対1セレクタ・多対多にはネイティブのピッカーを（参照先レコードのその場作成と決済チェックアウトにも対応）、承認対象のエンティティには承認・却下・取り下げのボタンと分割操作を、コメント可能なエンティティにはコメントスレッド・リアクション・コメント欄（`@` メンション候補検索付き）・コメントの編集と削除を備え、フォーム・検証・権限のロジックを Web 画面と共有するネイティブの一覧（並べ替え・絞り込み・検索・一括削除）・詳細・フォーム画面を生成。読み取り専用の監査ログの一覧・詳細と、定期タスクの管理画面も生成
 - 生成コードを上書きせずにカスタマイズできる 5 つの拡張ポイント
 
 ---
@@ -554,6 +554,7 @@ app-generator/
 | [comment-and-mention-rest-routes.md](docs/knowledge/comment-and-mention-rest-routes.md) | コメントの追加・編集・削除と `@` メンション候補検索の REST ルート。編集フォームと同じアクションを認証済み呼び出し元として実行。アクセス検査・入力検証・テスト |
 | [x-autocomplete-context.md](docs/knowledge/x-autocomplete-context.md) | FK フィールドの `x-autocomplete-context`：対象の `autocomplete_filter.ts` に渡るフォーム値、生成されるフォームと分割アクションの経路、検証 |
 | [mobile-app.md](docs/knowledge/mobile-app.md) | 生成される Expo モバイルアプリ：`x-nav` からのフッタータブと下位階層、エンティティ画面、ヘッダー、トークン認証、Playwright 検証 |
+| [list-search-panel.md](docs/knowledge/list-search-panel.md) | デスクトップ／モバイル Web の一覧の検索ボックス・複数列ソート・複数項目フィルタ：一覧ページが渡す仕様、Expo 一覧と共有するロジック（`lib/_list_query.ts`）、グリッド自身のヘッダ操作との併用、テスト |
 | [search.md](docs/knowledge/search.md) | エンティティ横断全文検索：スキーマオプトイン・pg_bigm・認可・生成 API と UI |
 | [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | 承認フローシステムの詳細、承認後イベント発火（`on_approved`） |
 | [appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) | コメントブリッジシステムの詳細 |

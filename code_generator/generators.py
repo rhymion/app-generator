@@ -650,6 +650,85 @@ def chart_context(ctx: dict, schema: dict) -> dict:
 # page_list
 # ---------------------------------------------------------------------------
 
+# Kinds of the REST list's per-column clause shapes (build_context._column_filter_kind) the panel
+# offers a filter control for, and the panel's name for each. A `date` column is sort-only.
+_LIST_QUERY_KINDS = {
+    'string': 'text', 'enum': 'enum', 'boolean': 'boolean',
+    'number': 'number', 'decimal': 'decimal', 'date': 'date',
+}
+_LIST_QUERY_FILTER_KINDS = ('text', 'number', 'decimal', 'boolean', 'enum')
+# Columns that hold a record id: never a useful thing to search or sort by in the panel.
+_LIST_QUERY_ID_COLUMNS = frozenset({'id', 'creator_id', 'assignee_id'})
+
+
+def _list_query_code(ctx: dict, primary_field: str, enum_ns_list: list[dict]) -> str:
+    """The object literal of the list's `listQuery` prop (lib/_list_query.ts `ListQuerySpec`).
+
+    Built from the same allow-list the REST list reads (`sort_filter_fields`, the per-column kinds
+    and the relation display columns of `getters.ts`), so the panel offers exactly what the list
+    accepts. Foreign-key id columns are left out in favor of their relation display column.
+    Labels come from the `Fields` namespace at render time, falling back to the title-cased name.
+    """
+    kinds: dict = ctx.get('sort_filter_field_kinds') or {}
+    enum_members: dict = ctx.get('sort_filter_enum_members') or {}
+    fk_columns = {
+        r['prop_name']
+        for r in list(ctx.get('parent_rels_raw', [])) + list(ctx.get('selector_oto_rels', []))
+    }
+    skipped = fk_columns | _LIST_QUERY_ID_COLUMNS
+
+    panel_fields: list[tuple[str, str]] = []  # (key, kind)
+    for column in ctx.get('sort_filter_fields') or []:
+        if column in skipped:
+            continue
+        panel_fields.append((column, _LIST_QUERY_KINDS.get(kinds.get(column, 'string'), 'text')))
+    for relation, _label_column in ctx.get('sort_filter_relation_fields') or []:
+        panel_fields.append((relation, 'text'))
+    if not panel_fields:
+        return ''
+
+    enum_label_vars = {
+        e['var_name']: e for e in enum_ns_list if e.get('is_native_enum')
+    }
+    displayed = [list(item.keys())[0] for item in (ctx.get('xdisplay_table') or [])]
+    text_keys = [key for key, kind in panel_fields if kind == 'text']
+    # The search box matches the list's title column: the primary column, else the first displayed
+    # text column, else the first text column.
+    search_key = next(
+        (k for k in [primary_field, *displayed] if k and k in text_keys),
+        text_keys[0] if text_keys else None,
+    )
+
+    def fields_code() -> str:
+        lines = []
+        for key, kind in panel_fields:
+            camel = to_camel_case(key)
+            label = f"tf.has('{camel}') ? tf('{camel}') : {to_title_case(key)!r}"
+            extra = ''
+            if kind == 'enum' and key in enum_members:
+                options = ', '.join(repr(str(v)) for v in enum_members[key])
+                extra = f", options: [{options}]"
+                var_name = f'{camel}Labels'
+                if var_name in enum_label_vars:
+                    extra += f", optionLabels: {var_name}"
+            lines.append(f"            {{ key: '{key}', label: {label}, kind: '{kind}'{extra} }}")
+        return ',\n'.join(lines)
+
+    def keys_code(keys: list[str]) -> str:
+        return '[' + ', '.join(f"'{k}'" for k in keys) + ']'
+
+    sort_keys = [key for key, _kind in panel_fields]
+    filter_keys = [key for key, kind in panel_fields if kind in _LIST_QUERY_FILTER_KINDS]
+    return (
+        "{\n"
+        f"          fields: [\n{fields_code()},\n          ],\n"
+        f"          sortKeys: {keys_code(sort_keys)},\n"
+        f"          filterKeys: {keys_code(filter_keys)},\n"
+        f"          searchKey: {repr(search_key) if search_key else 'null'},\n"
+        "        }"
+    )
+
+
 def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
     parent     = ctx['parent']
     model_def  = ctx['model_def']
@@ -847,6 +926,8 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
             elif actual == 'string' and prop.get('x-decimal-scale') is not None:
                 add_formatting(field_name, _decimal_expr_for(field_name, prop['x-decimal-scale']))
 
+    list_query_code = _list_query_code(ctx, primary_field, enum_ns_list)
+
     needs_formatting = bool(formatting_entries)
     formatted_var    = f'formatted{parent_pascal}s'
     src_var          = formatted_var if needs_formatting else f'{parent_camel}s'
@@ -863,6 +944,7 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
         'enum_ns_list':       enum_ns_list,
         'src_var':            src_var,
         'needs_tf':           bool(xdisplay_table),
+        'list_query_code':    list_query_code,
         'needs_tc':           has_chart,
         'list_uses_format_label_value': list_uses_format_label_value,
         'list_uses_decimal_format': list_uses_decimal_format,

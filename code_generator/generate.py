@@ -1228,7 +1228,7 @@ def _read_messages(output_dir: Path) -> dict:
 
 def generate_mobile_target(
     entities: list, schema: dict, output_dir: Path, env: Environment, has_search: bool,
-    mobile_specs: list | None = None,
+    mobile_specs: list | None = None, has_mention: bool = False,
 ) -> None:
     """Render the Expo Router mobile/ project (footer tabs + drill-down)."""
     app_name = 'Generated App'
@@ -1251,6 +1251,8 @@ def generate_mobile_target(
         'entities': mobile_specs or [],
         'has_scheduled_tasks': has_scheduled_tasks,
         'has_payment': any(spec.get('is_payment') for spec in mobile_specs or []),
+        # The schema has an `x-mention` field, so the mention user search route exists.
+        'has_mention': has_mention,
     }
     mobile_dir = output_dir / 'mobile'
     search_out = mobile_dir / 'app' / '(app)' / 'search.tsx'
@@ -1265,6 +1267,10 @@ def generate_mobile_target(
         checkout_out.unlink()
     for tmpl_name, rel_out in _MOBILE_STATIC_TEMPLATES:
         _write(mobile_dir / rel_out, _render(env, f'mobile/{tmpl_name}', ctx))
+    # The list panel's state and query logic is the Web's own module, copied unchanged so the
+    # Web and Expo lists cannot disagree on what a sort, a filter or the search box means.
+    _write(mobile_dir / 'lib' / '_list_query.ts',
+           (Path(__file__).resolve().parent.parent / 'lib' / '_list_query.ts').read_text(encoding='utf-8'))
     for tmpl_name, rel_out in _MOBILE_SCHEDULED_TASK_TEMPLATES:
         target = mobile_dir / rel_out
         if has_scheduled_tasks:
@@ -1273,6 +1279,7 @@ def generate_mobile_target(
             target.unlink()
     if any(e.get('comments') for e in ctx['entities']):
         _write(mobile_dir / 'lib' / 'comment-http.ts', _render(env, 'mobile/lib/comment-http.ts.jinja2', ctx))
+        _write(mobile_dir / 'lib' / 'comment-composer.ts', _render(env, 'mobile/lib/comment-composer.ts.jinja2', ctx))
         _write(mobile_dir / 'components' / 'native' / 'CommentThread.tsx',
                _render(env, 'mobile/components/native/CommentThread.tsx.jinja2', ctx))
     _write(mobile_dir / 'lib' / '_timezone.ts', _render_timezone_ts(env))
@@ -3446,7 +3453,8 @@ def generate(schema_path: str, output_dir: str) -> None:
         for mobile_spec in mobile_specs:
             generate_mobile_entity(mobile_spec, mobile_ctxs[mobile_spec['name']], schema, out / 'mobile', env)
             print(f'  Mobile screens → mobile/ ({mobile_spec["name"]})')
-        generate_mobile_target(entities, schema, out, env, has_search=bool(search_entities), mobile_specs=mobile_specs)
+        generate_mobile_target(entities, schema, out, env, has_search=bool(search_entities), mobile_specs=mobile_specs,
+                               has_mention=_has_any_mention)
     else:
         print('\nSkipping mobile app (x-generator.mobile.enabled is not true)')
 

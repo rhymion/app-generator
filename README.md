@@ -96,7 +96,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 
 - Internationalization (English and Japanese, next-intl v4)
 - Dark mode (system-aware, SSR-safe)
-- Expo (React Native) mobile app generated into `mobile/` when `x-generator.mobile.enabled: true` is set in the schema (off by default), with footer tabs and drill-down lists built from the same `x-nav` / `x-nav-groups` as the desktop sidebar, and native list (with sort, filter, search and bulk delete), detail and form screens (with native pickers for foreign keys, one-to-one selectors and many-to-many fields, creating the referenced record in place, payment checkout, approve / reject / withdraw buttons and the split action on approval entities, and a read-only comment thread with reactions on commentable entities) that share their form, validation and permission logic with the Web screens, and a read-only audit log list and detail, and scheduled task administration
+- Expo (React Native) mobile app generated into `mobile/` when `x-generator.mobile.enabled: true` is set in the schema (off by default), with footer tabs and drill-down lists built from the same `x-nav` / `x-nav-groups` as the desktop sidebar, and native list (with sort, filter, search and bulk delete), detail and form screens (with native pickers for foreign keys, one-to-one selectors and many-to-many fields, creating the referenced record in place, payment checkout, approve / reject / withdraw buttons and the split action on approval entities, and the comment thread with reactions, a comment box with `@`-mention lookup, and edit and delete of comments on commentable entities) that share their form, validation and permission logic with the Web screens, and a read-only audit log list and detail, and scheduled task administration
 - 5 extension points for customization without overwriting generated code
 
 ---
@@ -574,6 +574,7 @@ All architectural documentation lives in `docs/knowledge/`:
 | [comment-and-mention-rest-routes.md](docs/knowledge/comment-and-mention-rest-routes.md) | REST routes for adding, editing and deleting a comment and for searching `@`-mention candidates; they run the edit form's actions as the authenticated caller; access checks, validation, tests |
 | [x-autocomplete-context.md](docs/knowledge/x-autocomplete-context.md) | `x-autocomplete-context` on an FK field: which form values reach the target's `autocomplete_filter.ts`, the generated form and split-action paths, validation |
 | [mobile-app.md](docs/knowledge/mobile-app.md) | Generated Expo mobile app: footer tabs and drill-down from `x-nav`, entity screens, header, token authentication, Playwright checks |
+| [list-search-panel.md](docs/knowledge/list-search-panel.md) | The list's search box, multi-column sort and multi-field filter panel on Desktop and Mobile Web: the spec each list page passes, the logic shared with the Expo list (`lib/_list_query.ts`), how it combines with the grid's own header controls, tests |
 | [search.md](docs/knowledge/search.md) | Cross-entity full-text search: schema opt-in, pg_bigm, authorization, generated API and UI |
 | [appendix/approval-flow.md](docs/knowledge/appendix/approval-flow.md) | Approval flow system detail, post-approval event dispatch (`on_approved`) |
 | [appendix/comment-bridge.md](docs/knowledge/appendix/comment-bridge.md) | Comment bridge system detail |

@@ -1,0 +1,140 @@
+{% raw %}
+// State and text rules of a comment box (a new comment, or an edit), shared by the add and edit
+// forms. The box shows `@Name` for a mention; the stored message carries `@[user_id:<id>]`
+// markers, which are put back when the message is sent. No mention search or comment write logic
+// lives here: the search is passed in and the writes are in ./comment-http.
+import { useEffect, useMemo, useRef, useState } from 'react';
+
+export type MentionOption = { id: string; name: string; email?: string };
+/** A mention the box holds: the user and the name shown for it. */
+export type PickedMention = { id: string; name: string };
+export type MentionSearch = (query: string) => Promise<{ options: MentionOption[]; permissionDenied: boolean }>;
+
+const DEBOUNCE_MS = 250;
+
+/**
+ * The "@query" span right before the caret, if any. The "@" must start the text or follow
+ * whitespace and the query holds no whitespace, so an e-mail address never opens the search.
+ * Same rule as the Web box.
+ */
+export function findMentionTrigger(text: string, caret: number): { start: number; query: string } | null {
+  const match = text.slice(0, caret).match(/(?:^|\s)@([^\s@]*)$/);
+  if (!match) return null;
+  return { start: caret - match[1].length - 1, query: match[1] };
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Turns the text of the box into the message to send: each `@Name` that was picked (or came
+ * with the comment being edited) becomes `@[user_id:<id>]`. The picked mentions are matched in
+ * order, so two users with the same name keep their own ids. A hand-typed `@Name` that was never
+ * picked stays literal text, as on the Web.
+ */
+export function encodeMessage(text: string, mentions: PickedMention[]): string {
+  const names = [...new Set(mentions.map((m) => m.name))].filter((n) => n.length > 0).sort((a, b) => b.length - a.length);
+  if (names.length === 0) return text;
+  const pattern = new RegExp(`@(${names.map(escapeRegExp).join('|')})(?!\\w)`, 'gu');
+  const used = new Set<number>();
+  return text.replace(pattern, (match, name: string) => {
+    const index = mentions.findIndex((m, i) => m.name === name && !used.has(i));
+    if (index < 0) return match;
+    used.add(index);
+    return `@[user_id:${mentions[index].id}]`;
+  });
+}
+
+/** Inserts a picked mention in place of the "@query" span; returns the new text and caret. */
+export function insertMention(
+  text: string,
+  trigger: { start: number; query: string },
+  option: MentionOption,
+): { text: string; caret: number } {
+  const inserted = `@${option.name} `;
+  return {
+    text: text.slice(0, trigger.start) + inserted + text.slice(trigger.start + trigger.query.length + 1),
+    caret: trigger.start + inserted.length,
+  };
+}
+
+export function useCommentComposer(opts: { initialText?: string; initialMentions?: PickedMention[]; search?: MentionSearch }) {
+  const { search } = opts;
+  const [text, setTextState] = useState(opts.initialText ?? '');
+  const [mentions, setMentions] = useState<PickedMention[]>(opts.initialMentions ?? []);
+  const [caret, setCaret] = useState((opts.initialText ?? '').length);
+  const [options, setOptions] = useState<MentionOption[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [denied, setDenied] = useState(false);
+  const [dismissed, setDismissed] = useState<number | null>(null);
+  const seq = useRef(0);
+
+  const trigger = useMemo(() => (search ? findMentionTrigger(text, caret) : null), [search, text, caret]);
+  const open = trigger !== null && dismissed !== trigger.start;
+  const query = trigger?.query;
+
+  useEffect(() => {
+    if (!open || !search || query === undefined) {
+      setOptions([]);
+      setDenied(false);
+      setLoading(false);
+      return;
+    }
+    const mine = ++seq.current;
+    setLoading(true);
+    const handle = setTimeout(() => {
+      search(query)
+        .then((result) => {
+          if (mine !== seq.current) return;
+          setDenied(result.permissionDenied);
+          setOptions(result.permissionDenied ? [] : result.options);
+        })
+        .catch(() => {
+          if (mine !== seq.current) return;
+          setDenied(false);
+          setOptions([]);
+        })
+        .finally(() => {
+          if (mine === seq.current) setLoading(false);
+        });
+    }, DEBOUNCE_MS);
+    return () => clearTimeout(handle);
+  }, [open, query, search]);
+
+  const setText = (next: string) => {
+    setTextState(next);
+    // The caret moves with the typing; a following selection event corrects it when it is not at the end.
+    setCaret(next.length);
+    setDismissed(null);
+  };
+
+  const pick = (option: MentionOption) => {
+    if (!trigger) return;
+    const next = insertMention(text, trigger, option);
+    setTextState(next.text);
+    setCaret(next.caret);
+    setMentions((current) => [...current, { id: option.id, name: option.name }]);
+    setOptions([]);
+  };
+
+  return {
+    text,
+    setText,
+    setCaret,
+    /** The candidates for the "@query" before the caret, when the box is searching. */
+    suggestions: { open, loading, denied, options },
+    dismiss: () => {
+      if (trigger) setDismissed(trigger.start);
+    },
+    pick,
+    /** The text with the picked mentions as markers, trimmed: what the comment routes take. */
+    message: encodeMessage(text, mentions).trim(),
+    reset: () => {
+      setTextState('');
+      setMentions([]);
+      setCaret(0);
+    },
+  };
+}
+{% endraw %}
