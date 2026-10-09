@@ -256,6 +256,8 @@ test.describe('List: sort and filter by a relation column', () => {
     });
     await page.getByTestId('list-sort-toggle').click();
     await page.getByTestId('list-sort-mobile_group').click();
+    // The list refetches after a debounce, so wait for the ascending request before the next click.
+    await expect.poll(() => sorts).toContain('mobile_group:asc');
     await expect(titles.first()).toHaveText('Rel zeta'); // Alpha Group first
     await page.getByTestId('list-sort-mobile_group').click();
     await expect(titles.first()).toHaveText('Rel eta'); // Beta Group first
