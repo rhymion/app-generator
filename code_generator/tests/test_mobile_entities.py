@@ -101,7 +101,7 @@ def test_plain_context_is_eligible():
     ('children_raw', [{'name': 'child'}]),
     ('non_comment_ch', [{'name': 'child', 'property_name': 'kids', 'is_many_to_many': False}]),
     ('entity_view_components', [{'name': 'ApprovalSection'}]),
-    ('has_commentable', True),
+    ('has_attachable', True),
     ('is_payment', True),
     ('reservation_config', {'mode': 'count'}),
     ('state_machine_transitions', [{'field': 'status'}]),
@@ -378,3 +378,63 @@ def test_list_strings_exist_in_both_locales():
         common = json.loads((REPO / 'messages' / f'{locale}.json').read_text())['Common']
         for key in ('sort', 'filter', 'selectedCount', 'search', 'clear', 'deleteMessage'):
             assert key in common, (locale, key)
+
+
+# --- comment thread and reactions ------------------------------------------------------------
+
+def _commentable_ctx(**overrides):
+    ctx = _ctx(has_commentable=True, can_view=True, commentable_rel_name='commentable',
+               one_to_one_rels=[{'prop_name': 'commentable_id', 'target': 'commentable', 'relation_name': 'commentable'}],
+               named_constants=[{'const_name': 'COMMENT_REACTION_TYPES', 'items': [{'value': 'like'}, {'value': 'love'}]}])
+    ctx.update(overrides)
+    return ctx
+
+
+def test_commentable_entity_is_eligible_through_its_comment_bridge():
+    assert mobile_ineligible_reason(_commentable_ctx()) is None
+
+
+def test_other_one_to_one_bridge_beside_the_comments_is_ineligible():
+    other = {'prop_name': 'x_id', 'target': 'other', 'relation_name': 'x'}
+    ctx = _commentable_ctx(one_to_one_rels=_commentable_ctx()['one_to_one_rels'] + [other])
+    assert mobile_ineligible_reason(ctx) == 'declares one_to_one_rels'
+
+
+def test_a_bridge_to_commentable_without_the_comment_feature_stays_ineligible():
+    assert mobile_ineligible_reason(_commentable_ctx(has_commentable=False)) == 'declares one_to_one_rels'
+
+
+def test_comment_thread_spec_carries_the_embed_key_and_reaction_values():
+    from mobile_entities import comment_thread_spec
+    assert comment_thread_spec(_commentable_ctx()) == {'rel_name': 'commentable', 'reaction_types': ['like', 'love']}
+    assert comment_thread_spec(_commentable_ctx(can_view=False)) is None
+    assert comment_thread_spec(_ctx()) is None
+
+
+def test_detail_screen_draws_the_thread_and_reaction_bar_through_the_rest_seam(out):
+    view = _read(out, 'components/mobile_thread/FormView.tsx')
+    assert "import { CommentThread" in view
+    assert 'REACTION_TYPES: string[] = ["like", "love", "laugh", "surprised", "sad"]' in view
+    assert 'record["commentable"]' in view
+    thread = _read(out, 'components/native/CommentThread.tsx')
+    assert "fetchCommentReactions, toggleCommentReaction" in thread
+    assert 'testID={`reaction-${comment.id}-${type}`}' in thread
+    http = _read(out, 'lib/comment-http.ts')
+    assert '/api/comment/${encodeURIComponent(commentId)}/reactions/toggle' in http
+    assert "method: 'POST'" in http
+    # No composer, edit or delete control: the comment routes for them do not exist.
+    for forbidden in ('TextInput', 'addComment', 'updateComment', 'deleteComment', 'prisma'):
+        assert forbidden not in thread + http
+
+
+def test_entities_without_comments_get_no_thread(out):
+    assert 'CommentThread' not in _read(out, 'components/mobile_note/FormView.tsx')
+
+
+def test_reaction_labels_and_thread_heading_reach_the_message_bundle():
+    from generate import _mobile_messages_json
+    en = json.loads((REPO / 'messages' / 'en.json').read_text(encoding='utf-8'))
+    bundle = json.loads(_mobile_messages_json({'en': en}))['en']
+    assert bundle['ReactionType'] == en['ReactionType']
+    # Only the thread heading of the (large) Fields namespace is shipped.
+    assert bundle['Fields'] == {'comments': en['Fields']['comments']}
