@@ -21,6 +21,7 @@
     "done": "完了",
     "edit": "編集",
     "editEntity": "{entity}を編集",
+    "filter": "絞り込み",
     "goBack": "戻る",
     "imageUrl": "画像URL",
     "nextPage": "次へ",
@@ -29,7 +30,9 @@
     "save": "保存",
     "saveAndContinue": "保存して編集を続ける",
     "search": "検索",
-    "select": "選択"
+    "select": "選択",
+    "selectedCount": "{count}件選択中",
+    "sort": "並べ替え"
   },
   "Errors": {
     "capacityExhausted": "利用可能な容量がありません。別の選択肢をお試しください。",

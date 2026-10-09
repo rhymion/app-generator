@@ -3,7 +3,10 @@ import type { ActionFailure, ErrorCode, MessageArgs, ValidationReason } from './
 import type { ModelPermissions } from './authz';
 
 // `page` is zero-based, like the REST list routes.
-export type PageOpts = { page?: number; pageSize?: number };
+export type SortItem = { field: string; dir: 'asc' | 'desc' };
+
+// `sort` and `filter` use the REST list's own parameters: `sort=<field>:<dir>,...` and `f.<field>=<value>`.
+export type PageOpts = { page?: number; pageSize?: number; sort?: SortItem[]; filter?: Record<string, string> };
 
 export type PageResult<T> = { rows: T[]; total: number; page: number; pageSize: number };
 
@@ -53,7 +56,50 @@ export function buildQuery(opts: PageOpts = {}): string {
   const params: string[] = [];
   if (opts.page !== undefined) params.push(`page=${opts.page}`);
   if (opts.pageSize) params.push(`pageSize=${opts.pageSize}`);
+  if (opts.sort && opts.sort.length > 0) {
+    params.push(`sort=${opts.sort.map((item) => `${encodeURIComponent(item.field)}:${item.dir}`).join(',')}`);
+  }
+  for (const [field, value] of Object.entries(opts.filter ?? {})) {
+    if (value !== '') params.push(`f.${encodeURIComponent(field)}=${encodeURIComponent(value)}`);
+  }
   return params.length ? `?${params.join('&')}` : '';
+}
+
+/** Outcome of a bulk delete: the ids removed, and a failure for each id the server refused. */
+export type BulkDeleteResult =
+  | { ok: true; deleted: string[]; failed: { id: string; failure: ActionFailure }[] }
+  | ActionFailure;
+
+type BulkResponse = { results: { index: number; success: boolean; error?: string }[] };
+
+/**
+ * `DELETE /api/<entity>/bulk`: the REST side of the Web list's multi-select delete. The route
+ * answers per record (permission and existence are checked for each); a failure of the whole
+ * call is mapped like any other REST failure. Never rejects.
+ */
+export async function bulkDelete(entity: string, ids: string[]): Promise<BulkDeleteResult> {
+  try {
+    const response = await apiFetch<BulkResponse>(`/api/${entity}/bulk`, {
+      method: 'DELETE',
+      body: JSON.stringify(ids.map((id) => ({ id }))),
+    });
+    const deleted: string[] = [];
+    const failed: { id: string; failure: ActionFailure }[] = [];
+    for (const result of response.results) {
+      const id = ids[result.index];
+      if (result.success) deleted.push(id);
+      else {
+        const message = result.error ?? '';
+        const errorCode: ErrorCode = message.startsWith('Access denied')
+          ? 'PERMISSION_DENIED'
+          : message.startsWith('Not found') ? 'NOT_FOUND' : 'UNKNOWN';
+        failed.push({ id, failure: { ok: false, errorCode } });
+      }
+    }
+    return { ok: true, deleted, failed };
+  } catch (err) {
+    return toActionFailure(err);
+  }
 }
 
 export type FieldKind =

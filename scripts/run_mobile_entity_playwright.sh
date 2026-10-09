@@ -202,11 +202,11 @@ FROM actor, (VALUES ('comment-seed-1', 'First comment'), ('comment-seed-2', 'Sec
 INSERT INTO reaction (id, type, user_id, comment_id, updated_at)
 SELECT 'reaction-seed-1', 'like', id, 'comment-seed-1', now() FROM "user" ORDER BY created_at LIMIT 1;
 SQL
-  PW_TARGET="entity-crud.spec.ts relation-pickers.spec.ts inline-create-checkout.spec.ts comments.spec.ts approval-actions.spec.ts split-action.spec.ts"
+  PW_TARGET="entity-crud.spec.ts relation-pickers.spec.ts list-capabilities.spec.ts inline-create-checkout.spec.ts comments.spec.ts approval-actions.spec.ts split-action.spec.ts"
   export MOBILE_PW_IGNORE=""
 else
   PW_TARGET=""
-  export MOBILE_PW_IGNORE="**/{entity-crud,relation-pickers,inline-create-checkout,comments,approval-actions,split-action}.spec.ts"
+  export MOBILE_PW_IGNORE="**/{entity-crud,relation-pickers,list-capabilities,inline-create-checkout,comments,approval-actions,split-action}.spec.ts"
 fi
 
 echo "-- installing the Expo dependencies --"

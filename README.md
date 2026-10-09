@@ -96,7 +96,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 
 - Internationalization (English and Japanese, next-intl v4)
 - Dark mode (system-aware, SSR-safe)
-- Expo (React Native) mobile app generated into `mobile/`, with footer tabs and drill-down lists built from the same `x-nav` / `x-nav-groups` as the desktop sidebar, and native list, detail and form screens (with native pickers for foreign keys, one-to-one selectors and many-to-many fields, creating the referenced record in place, payment checkout, approve / reject / withdraw buttons and the split action on approval entities, and a read-only comment thread with reactions on commentable entities) that share their form, validation and permission logic with the Web screens, and a read-only audit log list and detail
+- Expo (React Native) mobile app generated into `mobile/`, with footer tabs and drill-down lists built from the same `x-nav` / `x-nav-groups` as the desktop sidebar, and native list (with sort, filter, search and bulk delete), detail and form screens (with native pickers for foreign keys, one-to-one selectors and many-to-many fields, creating the referenced record in place, payment checkout, approve / reject / withdraw buttons and the split action on approval entities, and a read-only comment thread with reactions on commentable entities) that share their form, validation and permission logic with the Web screens, and a read-only audit log list and detail
 - 5 extension points for customization without overwriting generated code
 
 ---

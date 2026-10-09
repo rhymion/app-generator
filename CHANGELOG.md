@@ -12,6 +12,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   create response's `checkoutUrl` in the in-app browser (`expo-web-browser`, added only for apps with an
   `x-payment` entity) and the detail screen shows a returned notice. New `Payment.returnedMessage`
   text. See `docs/knowledge/mobile-app.md`.
+- **Sort, filter, search and bulk delete on the Expo mobile list** (Issues #874, #856). The native list
+  gets a sort panel, a filter panel (text, number, decimal, boolean and enum fields) and a search box that
+  matches the row's title column, all through the REST list's `sort` and `f.<field>` parameters; a long press
+  starts a selection mode that deletes the selected records with `DELETE /api/{entity}/bulk`, with the single
+  delete's confirmation and error messages. New `Common.sort`, `Common.filter` and `Common.selectedCount`
+  messages. CSV export and import stay out until the export and import routes accept a mobile access token
+  (Issue #883). See `docs/knowledge/mobile-app.md`.
 - **Approval section and split action on the mobile detail screen** (Issues #858 and #859).
   An entity that declares `x-approval` (the `approvable` bridge and the `ApprovalSection` view component)
   now gets native screens in the Expo app. Its detail screen lists the current round's approval requests

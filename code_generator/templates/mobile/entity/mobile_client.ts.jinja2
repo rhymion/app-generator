@@ -10,12 +10,14 @@ import {
   fetchApprovalState,
 {% endif %}
   buildQuery,
+  bulkDelete,
   fetchPermissions,
   formDataToBody,
 {% if split %}
   postSplit,
 {% endif %}
   toActionFailure,
+  type BulkDeleteResult,
 {% if has_approval %}
   type ApprovalState,
 {% endif %}
@@ -39,6 +41,11 @@ export const {{ const_name }}_FIELDS: FieldSpec[] = {{ fields_json }};
 
 /** Keys of the columns shown on a list row; the first is the row's title. */
 export const {{ const_name }}_LIST_KEYS: string[] = {{ list_keys_json }};
+
+/** Keys the REST list can sort on, filter on, and the one the search box matches. */
+export const {{ const_name }}_SORT_KEYS: string[] = {{ sort_keys_json }};
+export const {{ const_name }}_FILTER_KEYS: string[] = {{ filter_keys_json }};
+export const {{ const_name }}_SEARCH_KEY: string | null = {{ search_key_json }};
 
 export async function fetch{{ pascal }}Page(opts: PageOpts = {}): Promise<PageResult<{{ pascal }}>> {
   return apiFetch<PageResult<{{ pascal }}>>(`/api/{{ name }}${buildQuery(opts)}`);
@@ -100,6 +107,12 @@ export async function remove{{ pascal }}(ids: string[]): Promise<ActionFailure |
   } catch (err) {
     return toActionFailure(err);
   }
+}
+
+
+/** Deletes several records in one call; the result lists the ids removed and a failure per refused id. */
+export function bulkRemove{{ pascal }}(ids: string[]): Promise<BulkDeleteResult> {
+  return bulkDelete('{{ name }}', ids);
 }
 
 {% endif %}
