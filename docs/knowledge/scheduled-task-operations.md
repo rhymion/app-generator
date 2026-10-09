@@ -247,7 +247,10 @@ page at `/scheduled_task_run` (sidebar entry "Scheduled Task Run") over the
 
 - `app/[locale]/scheduled_task_run/page.tsx`, `actions.ts` and
   `components/scheduled_task_run/ScheduledTaskRunTable.tsx`;
-- `lib/scheduled-tasks/admin.ts`, the data access and the three actions.
+- `lib/scheduled-tasks/admin.ts`, the data access and the three actions;
+- `app/api/scheduled-task-runs/route.ts` and
+  `app/api/scheduled-task-runs/[task]/[action]/route.ts`, the REST form of the
+  same overview and actions (see "REST routes" below).
 
 Without a declared task none of these exist, like the table itself.
 
@@ -286,6 +289,47 @@ Administrator included. The Server Actions re-check the role themselves.
 Nothing is offered for a `succeeded` or a fresh `running` record. Mark resolved
 and skip both make the record `succeeded`; they differ in that skip also
 covers a task with no record, and requires a reason.
+
+**REST routes.** A native client reads the same overview and runs the same
+actions over HTTP. The routes are thin: the overview comes from the page's own
+loader (`loadAdminOverview`) and every action goes through
+`performOperatorAction` in `lib/scheduled-tasks/admin.ts`, the function the
+Server Actions call, so input validation, the guard a rerun passes through and
+the `audit_log` row are the same code. Web behavior is unchanged.
+
+| Route | Purpose |
+|---|---|
+| `GET /api/scheduled-task-runs[?date=YYYY-MM-DD]` | The overview for a business date (default: today, UTC) |
+| `POST /api/scheduled-task-runs/{task}/rerun` | Rerun, body `{ "business_date": "YYYY-MM-DD" }` |
+| `POST /api/scheduled-task-runs/{task}/resolve` | Mark resolved, body `{ "business_date": "...", "reason": "..." }` (reason optional) |
+| `POST /api/scheduled-task-runs/{task}/skip` | Skip, body `{ "business_date": "...", "reason": "..." }` (reason required) |
+
+The overview response is `{ business_date, settings: { stuck_after_minutes,
+predecessor_recheck_minutes }, rows, attention }`. Each row in `rows` (one per
+declared task) and in `attention` (failed or stuck runs of other dates) is
+`{ task_id, business_date, status, started_at, finished_at, message,
+blocked_by, interval, actions: { rerun, resolve, skip } }`, with `status` one of
+`running`, `succeeded`, `failed`, `not_due`, `stuck`, `blocked`, `pending` (the
+table above), and `actions` the buttons the page would offer.
+
+Authentication is `authenticate()`: a mobile access token or an `X-API-Key`
+(not a session cookie). The caller must also hold the `ScheduledTaskRunner`
+role, the same check as the page and the Server Actions; an Administrator
+without the role is refused. An action returns `{ ok: true, outcome? }` or
+`{ ok: false, code, detail? }` with the codes of the Server Actions:
+
+| HTTP status | Meaning |
+|---|---|
+| 200 | Done |
+| 400 | `BAD_INPUT` (missing or invalid `business_date`, or an invalid `date` query on the overview) or `REASON_REQUIRED` |
+| 401 | No or invalid credential |
+| 403 | Authenticated, but without the `ScheduledTaskRunner` role |
+| 404 | `UNKNOWN_TASK`, or an action other than `rerun`, `resolve`, `skip` |
+| 409 | `NOT_ALLOWED` (the record's state does not allow it), `BLOCKED` (a predecessor has not succeeded) or `RUNNING` |
+| 500 | `FAILED` (the handler threw; `detail` carries its message) or `NO_ACTOR` |
+
+The routes sit beside, not under, `/api/scheduled-tasks/{task}`: that route
+starts a run (cron or an operator) and keeps its own authentication.
 
 **Operational settings.** Two nullable columns on the tenant-wide default
 `app_setting` row (`organization_id` NULL), edited through the App Setting UI

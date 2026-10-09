@@ -3,9 +3,11 @@ import {
   allowedActions,
   buildTaskRows,
   formatBusinessDate,
+  httpStatusForActionCode,
   isStuck,
   parseBusinessDate,
   positiveIntOr,
+  toRunRowJson,
   type RunRecord,
 } from './admin-view';
 
@@ -104,5 +106,69 @@ describe('isStuck / positiveIntOr / date helpers', () => {
     expect(parseBusinessDate('2026-09-30')).toEqual(d('2026-09-30'));
     for (const bad of [undefined, '', '2026-9-30', '2026-02-30', 'tomorrow']) expect(parseBusinessDate(bad)).toBeNull();
     expect(formatBusinessDate(d('2026-09-30'))).toBe('2026-09-30');
+  });
+});
+
+describe('toRunRowJson', () => {
+  it('serializes a row with snake_case keys and ISO timestamps', () => {
+    const [row] = buildTaskRows({
+      dependencies: { a: [] },
+      intervals: { a: '0 3 * * *' },
+      records: [
+        {
+          id: 'r1',
+          task_id: 'a',
+          business_date: d('2026-09-30'),
+          status: 'failed',
+          started_at: new Date('2026-09-30T03:00:00.000Z'),
+          finished_at: new Date('2026-09-30T03:00:05.000Z'),
+          error_message: 'boom',
+        },
+      ],
+      businessDate: d('2026-09-30'),
+      now: new Date('2026-09-30T12:00:00.000Z'),
+      stuckAfterMinutes: 60,
+    });
+    expect(toRunRowJson(row)).toEqual({
+      task_id: 'a',
+      business_date: '2026-09-30',
+      status: 'failed',
+      started_at: '2026-09-30T03:00:00.000Z',
+      finished_at: '2026-09-30T03:00:05.000Z',
+      message: 'boom',
+      blocked_by: [],
+      interval: '0 3 * * *',
+      actions: { rerun: true, resolve: true, skip: true },
+    });
+  });
+  it('serializes a task with no record with null times and message', () => {
+    const [row] = buildTaskRows({
+      dependencies: { a: ['b'], b: [] },
+      intervals: { a: null, b: null },
+      records: [],
+      businessDate: d('2026-09-30'),
+      now: new Date('2026-09-30T12:00:00.000Z'),
+      stuckAfterMinutes: 60,
+    });
+    expect(toRunRowJson(row)).toMatchObject({
+      task_id: 'a',
+      status: 'blocked',
+      started_at: null,
+      finished_at: null,
+      message: null,
+      blocked_by: ['b'],
+      interval: null,
+    });
+  });
+});
+
+describe('httpStatusForActionCode', () => {
+  it('maps every action result code to a status', () => {
+    expect(httpStatusForActionCode('FORBIDDEN')).toBe(403);
+    expect(httpStatusForActionCode('BAD_INPUT')).toBe(400);
+    expect(httpStatusForActionCode('REASON_REQUIRED')).toBe(400);
+    expect(httpStatusForActionCode('UNKNOWN_TASK')).toBe(404);
+    for (const code of ['NOT_ALLOWED', 'BLOCKED', 'RUNNING']) expect(httpStatusForActionCode(code)).toBe(409);
+    for (const code of ['FAILED', 'NO_ACTOR']) expect(httpStatusForActionCode(code)).toBe(500);
   });
 });

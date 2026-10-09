@@ -152,3 +152,50 @@ export function parseBusinessDate(value: string | undefined): Date | null {
 export function formatBusinessDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
+
+/** One row as the REST routes return it (see `toRunRowJson`). */
+export interface TaskRunRowJson {
+  task_id: string;
+  business_date: string;
+  status: DisplayStatus;
+  started_at: string | null;
+  finished_at: string | null;
+  message: string | null;
+  blocked_by: string[];
+  interval: string | null;
+  actions: OperatorActions;
+}
+
+/** A {@link TaskRunRow} in the JSON shape of the REST routes: snake_case keys, ISO timestamps. */
+export function toRunRowJson(row: TaskRunRow): TaskRunRowJson {
+  return {
+    task_id: row.taskId,
+    business_date: formatBusinessDate(row.businessDate),
+    status: row.status,
+    started_at: row.startedAt?.toISOString() ?? null,
+    finished_at: row.finishedAt?.toISOString() ?? null,
+    message: row.errorMessage,
+    blocked_by: row.blockedBy,
+    interval: row.interval,
+    actions: row.actions,
+  };
+}
+
+/** HTTP status for a refused operator action (the `code` of a `{ ok: false }` result). */
+export function httpStatusForActionCode(code: string): number {
+  switch (code) {
+    case 'FORBIDDEN':
+      return 403;
+    case 'BAD_INPUT':
+    case 'REASON_REQUIRED':
+      return 400;
+    case 'UNKNOWN_TASK':
+      return 404;
+    case 'NOT_ALLOWED':
+    case 'BLOCKED':
+    case 'RUNNING':
+      return 409;
+    default:
+      return 500; // FAILED, NO_ACTOR
+  }
+}
