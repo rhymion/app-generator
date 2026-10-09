@@ -74,7 +74,7 @@ test.describe.serial('Scheduled task administration screen', () => {
     await expect(page.getByTestId('nav-row-scheduled_task_run')).toHaveCount(0);
 
     // Reached anyway (a stale link), the server's 403 is what the screen reports.
-    await page.route('**/api/scheduled-task-runs?*', (route) => route.fulfill({ status: 403, json: { error: 'Forbidden' } }));
+    await page.route('**/api/scheduled-task-runs*', (route) => route.fulfill({ status: 403, json: { error: 'Forbidden' } }));
     const origin = page.url().split('/').slice(0, 3).join('/');
     await page.goto(`${origin}/entity/scheduled_task_run`);
     await expect(page.getByTestId('list-error')).toContainText('ScheduledTaskRunner');
