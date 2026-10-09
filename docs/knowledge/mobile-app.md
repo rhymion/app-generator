@@ -93,8 +93,8 @@ and describes their fields; the templates are under `code_generator/templates/mo
 | Delete (one record, with a confirmation panel, from the detail screen) | | `x-generate.delete` |
 
 An entity is left on the placeholder screen when it has no REST routes or no list screen, declares a
-child grid or a comment thread, a one-to-one bridge other than the approval bridge or a direct attachment, a custom component other than `ApprovalSection`, virtual
-columns, comments, attachments, `x-payment`, `x-splittable` without the approval section, a reservation, a state machine, edit/delete
+child grid, a one-to-one bridge other than the ones to `approvable` (with `ApprovalSection`) and `commentable`, a direct attachment, a custom component other than `ApprovalSection`, virtual
+columns, attachments, `x-payment`, `x-splittable` without the approval section, a reservation, a state machine, edit/delete
 guards without an approval or `x-self-only`, is the target of an `x-create-inline` field, relates to an entity that has no
 REST routes, or has a field with no native widget (image or file URI, entity select, custom upsert
 component). In the default schema `role`, `organization` and `app_setting` qualify; `user` (a custom component) keeps
@@ -179,6 +179,26 @@ The section follows the Web section's rules:
 The split route and its inventory handling are the Web ones; the app calls them and evaluates none of those rules.
 An approval entity that is splittable but has no `quantityField` has no split section on the Web either.
 
+### Comments
+
+An entity that is commentable through the shared `commentable` bridge keeps its native screens, and its
+detail screen ends with the comment thread (`components/native/CommentThread.tsx`). The comments are the
+`comments` the REST detail embeds under the `commentable` key, in the order it returns them; the REST
+detail already decodes an `@mention` to the user's name, so the thread shows `@Name` as plain text (the Web
+links the name to the profile). The heading is `Fields.comments`.
+
+Each comment has a reaction bar with one button per reaction type the comment reactions route accepts
+(`COMMENT_REACTION_TYPES`; the labels are the `ReactionType` messages). The counts come from the detail; the
+reactions the signed-in user made come from `GET /api/comment/<id>/reactions/toggle`, which the detail does not
+carry. A tap sends `POST` to the same route, which adds the reaction or removes it, and the bar shows the
+counts and the caller's reactions it returns; a failed request leaves the previous state. Both calls are in
+`lib/comment-http.ts`.
+
+The thread is read-only. Adding, editing and deleting a comment and the user lookup behind `@` have no
+REST route (the Web calls Server Actions and `lib/mention/search.ts` directly), so the composer and the
+mention picker are not drawn. An entity that declares an `x-mention` field of its own is still left on the
+placeholder screen.
+
 ### Shared logic with the Web screens
 
 The screens draw native controls and call the modules the Web screens call
@@ -223,6 +243,27 @@ name; all `false` for an entity the caller holds nothing on). On a record, `upda
 overlaid with `operations` from `GET /api/<entity>/<id>/capabilities`. A form opened without `create`
 shows a permission message instead of fields.
 
+## Audit log
+
+The audit log is a built-in feature, not a schema entity, so it is not among the entity screens. The app has
+a read-only list and detail for it, reached from an **Audit Log** link that `mobile_nav.build_mobile_nav()`
+adds (`include_audit_log=True`, as `generate_mobile_target()` passes it). The link sits where the desktop
+sidebar puts it: in the `administration` group when the schema declares that group, as a flat footer tab
+when it does not.
+
+| Screen | Route | Reads |
+|---|---|---|
+| List (paged, 20 rows, newest first) | `/entity/audit_log` | `GET /api/audit_log?page=<n>&pageSize=20&sort=created_at:desc` |
+| Detail (action, target table and id, actor, time, metadata as formatted JSON) | `/entity/audit_log/<id>` | `GET /api/audit_log/<id>` |
+
+Both screens are registered in `lib/entity-registry.ts` under `audit_log` with no form, and are rendered from
+`templates/mobile/audit_log/`. They send no write request. Permission is the server's: the link is hidden when
+`GET /api/mobile/nav` lists `/audit_log` (the caller lacks `read` on `audit_log`, the rule the desktop sidebar
+applies), and a list request that is refused with `403` shows the shared `Errors.permissionDenied` message. The
+strings come from `EntityLabel.auditLog`, `Fields` (`action`, `actorUser`, `created_at`, `metadata`,
+`targetId`, `targetTable`) and the `Common` / `Errors` namespaces; only those `EntityLabel` and `Fields` keys are
+bundled.
+
 ## Authentication
 
 The mobile app signs in with email and password and holds an access/refresh token pair.
@@ -266,13 +307,13 @@ own docker project and ports, and runs the specs in two modes (the footer specs 
 tabs, the entity specs need the fixture entities):
 
 ```bash
-bash scripts/run_mobile_entity_playwright.sh               # fixture schema: entity-crud.spec.ts, relation-pickers.spec.ts
+bash scripts/run_mobile_entity_playwright.sh               # fixture schema: entity-crud.spec.ts, relation-pickers.spec.ts, comments.spec.ts
 MODE=default bash scripts/run_mobile_entity_playwright.sh  # default schema: the other specs
 ```
 
 The fixture mode merges `code_generator/tests/fixtures/mobile_entity_e2e_gate/` (`mobile_note` with full
 CRUD, `mobile_log` list-and-view only, `mobile_task` with a required foreign key, a many-to-many and a one-to-one
-selector to `mobile_group` / `mobile_tag` / `mobile_profile`, `mobile_org_item` with a foreign key to `organization`, `mobile_request` with `x-approval`, `mobile_shipment` with `x-approval` and `x-splittable`) into the copy's schema, as `scripts/compose_child_datagrid_e2e_fixture.py`
+selector to `mobile_group` / `mobile_tag` / `mobile_profile`, `mobile_org_item` with a foreign key to `organization`, `mobile_request` with `x-approval`, `mobile_shipment` with `x-approval` and `x-splittable`, `mobile_thread` commentable and list-and-view only) into the copy's schema, as `scripts/compose_child_datagrid_e2e_fixture.py`
 does for the other end-to-end fixtures, and signs in as the seeded administrator. `mobile/scripts/serve-web-with-proxy.js`
 runs the Expo web server and the proxy as one process so the runner can stop both.
 
@@ -285,6 +326,10 @@ runs the Expo web server and the proxy as one process so the runner can stop bot
   disabled field without read on the target, clear, a one-to-one already linked elsewhere, adding and
   removing many-to-many records, an emptied set sent as an empty list, and the organization picker offering
   only organizations the user belongs to. The fixture mode seeds the records it needs.
+- `mobile/e2e/comments.spec.ts` covers the thread of a commentable entity (`mobile_thread`): the comments in
+  order with their author, a mention shown as a name, an empty thread, no composer, the counts and the
+  caller's own reaction, adding and removing a reaction through the route, and a reaction that is still set
+  after the screen is reopened.
 - `mobile/e2e/approval-actions.spec.ts` covers the approval section on `mobile_request`: a request for another
   role offers no action, approve (message sent, status and record locked), reject (message, reason and kind
   sent), withdraw (dialog cancel, then the round closes and the record returns to its withdrawn value), a decided
@@ -298,7 +343,13 @@ runs the Expo web server and the proxy as one process so the runner can stop bot
 - `mobile/scripts/real-browser-verify.js` is the reusable real-browser check. It selects a preset with
   `FLOW_TYPE` (`assert`, `drill`); a new need adds a preset instead of a new script. Never launch
   Chromium with `--disable-web-security` — it hides the CORS-class gaps this check exists to catch.
-- `code_generator/tests/test_mobile_nav.py` covers the tree built from the nav configuration.
+- `mobile/e2e/audit-log.spec.ts` (default schema) covers the Audit Log link under Administration, the real
+  list route, paging with the newest-first sort, the detail with its metadata and no edit or delete action,
+  a missing entry, a link hidden by the nav route and a refused request.
+- `code_generator/tests/test_mobile_nav.py` covers the tree built from the nav configuration, including the
+  audit log link.
+- `code_generator/tests/test_mobile_audit_log.py` covers the generated audit log screens: registered, REST
+  read-only, no permission logic of their own, linked in the nav tree and bundled strings.
 - `code_generator/tests/test_mobile_entities.py` covers which entities get screens, the relation field
   descriptions, that the screens and pickers call the shared modules and the options route, the REST client
   and the React version the shared hooks need.
@@ -310,11 +361,16 @@ check and is not part of the mandatory gate.
 
 ## Not implemented yet
 
-- Entity screens for an entity that declares anything beyond plain fields, the relation pickers and the approval
-  section: child grids, comments, attachments and payment.
+- Entity screens for an entity that declares anything beyond plain fields, the relation pickers, the approval
+  section and the comment thread: child grids, attachments and payment.
+- Adding, editing and deleting comments, and the `@` user lookup in a comment (no REST routes yet).
 - Submitting a record for approval (the "(re)submit" button). Resubmitting is a Server Action
   (`submit_for_approval.ts`) with no REST route, so the app has nothing to call.
 - Creating the referenced record in place from a foreign-key field (`x-create-inline`) and the one-to-one
   bridge grid (`x-bridge`).
 - Bulk delete, the native date pickers (dates are typed as text), CSV import and export.
+- Scheduled task administration (the task list, each task's last run, run now). The list and the last-run
+  status are read only by the Web admin page's Server Component (`loadAdminOverview()`), and the rerun,
+  resolve and skip actions are Server Actions; the one REST route, `/api/scheduled-tasks/<task>`, starts a
+  run but lists nothing, so a client has no route to build the screen on.
 - Translated field labels.

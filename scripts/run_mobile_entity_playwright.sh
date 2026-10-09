@@ -17,8 +17,8 @@
 #
 # Two modes, because the footer specs assume the default schema's tabs:
 #   MODE=fixture (default)  fixture entities merged; runs mobile/e2e/entity-crud.spec.ts,
-#                           mobile/e2e/relation-pickers.spec.ts, mobile/e2e/approval-actions.spec.ts and
-#                           mobile/e2e/split-action.spec.ts
+#                           mobile/e2e/relation-pickers.spec.ts, mobile/e2e/comments.spec.ts,
+#                           mobile/e2e/approval-actions.spec.ts and mobile/e2e/split-action.spec.ts
 #   MODE=default            unmodified schema; runs every other spec in mobile/e2e/
 #
 # Usage: bash scripts/run_mobile_entity_playwright.sh
@@ -187,11 +187,25 @@ SELECT v.id, v.title, 10, v.status::"MobileShipmentStatus", 'group-seed-1', v.ap
           ('ship-split', 'Split shipment', 'pending', 'ap-ship-split'),
           ('ship-approved', 'Approved shipment', 'approved', 'ap-ship-approved')) AS v(id, title, status, approvable_id);
 SQL
-  PW_TARGET="entity-crud.spec.ts relation-pickers.spec.ts approval-actions.spec.ts split-action.spec.ts"
+  echo "-- a commentable record with comments, a mention and a reaction --"
+  docker exec -i "${PROJECT}-postgres-test-1" psql -U postgres -d my_next_test -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+INSERT INTO commentable (id) VALUES ('thread-commentable-1'), ('thread-commentable-2');
+WITH actor AS (SELECT id FROM "user" ORDER BY created_at LIMIT 1)
+INSERT INTO mobile_thread (id, title, commentable_id, updated_at, creator_id, updater_id)
+SELECT v.id, v.title, v.commentable_id, now(), actor.id, actor.id
+FROM actor, (VALUES ('thread-seed-1', 'Thread with comments', 'thread-commentable-1'), ('thread-seed-2', 'Thread without comments', 'thread-commentable-2')) AS v(id, title, commentable_id);
+WITH actor AS (SELECT id FROM "user" ORDER BY created_at LIMIT 1)
+INSERT INTO comment (id, message, commentable_id, updated_at, creator_id)
+SELECT v.id, replace(v.message, '@ACTOR@', actor.id), 'thread-commentable-1', now(), actor.id
+FROM actor, (VALUES ('comment-seed-1', 'First comment'), ('comment-seed-2', 'Second comment, cc @[user_id:@ACTOR@] please look')) AS v(id, message);
+INSERT INTO reaction (id, type, user_id, comment_id, updated_at)
+SELECT 'reaction-seed-1', 'like', id, 'comment-seed-1', now() FROM "user" ORDER BY created_at LIMIT 1;
+SQL
+  PW_TARGET="entity-crud.spec.ts relation-pickers.spec.ts comments.spec.ts approval-actions.spec.ts split-action.spec.ts"
   export MOBILE_PW_IGNORE=""
 else
   PW_TARGET=""
-  export MOBILE_PW_IGNORE="**/{entity-crud,relation-pickers,approval-actions,split-action}.spec.ts"
+  export MOBILE_PW_IGNORE="**/{entity-crud,relation-pickers,comments,approval-actions,split-action}.spec.ts"
 fi
 
 echo "-- installing the Expo dependencies --"

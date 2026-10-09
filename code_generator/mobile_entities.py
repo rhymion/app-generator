@@ -10,10 +10,16 @@ fields to draw.
 A many-to-one foreign key, a one-to-one selector and a many-to-many declared with
 `x-outputType: list` are drawn as relation pickers whose candidates come from `GET /api/{target}/options`.
 An entity with any other relation feature (children, bridges, attachments, ...)
-keeps the placeholder screen. The one exception is the approval bridge: an entity that
-declares `x-approval` (a one-to-one bridge to `approvable` and the `ApprovalSection` view
+keeps the placeholder screen. The exceptions are the approval bridge and the comment bridge.
+
+An entity that declares `x-approval` (a one-to-one bridge to `approvable` and the `ApprovalSection` view
 component) gets the same screens plus the approval section, whose approve / reject /
 withdraw buttons call the approval REST routes.
+
+An entity that is commentable through the shared `commentable` bridge keeps its screens: the detail screen
+lists the comment thread (read from the REST detail) and draws the reaction bar, which calls the comment
+reactions route. Adding, editing and deleting a comment, and @-mentions, have no REST route yet, so a
+thread is read-only on mobile.
 """
 from __future__ import annotations
 
@@ -61,8 +67,11 @@ _FEATURE_KEYS = (
 # The component an approval entity mounts on its view screen.
 APPROVAL_SECTION = 'ApprovalSection'
 
+# The relation features that are served by something other than a form field. The
+# bridge to `commentable` is one of them: it is the comment thread, not a relation to draw.
+_COMMENTABLE_TARGET = 'commentable'
+
 _FEATURE_FLAGS = (
-    'has_commentable',
     'has_attachable',
     'is_payment',
     'is_inline_create_target',
@@ -98,13 +107,36 @@ def has_approval_section(ctx: dict) -> bool:
     return any(c.get('name') == APPROVAL_SECTION for c in ctx.get('entity_view_components') or [])
 
 
-def _non_approval_one_to_one(ctx: dict) -> list[dict]:
-    """One-to-one relations other than the approval bridge (those keep the placeholder)."""
-    return [r for r in (ctx.get('one_to_one_rels') or []) if r.get('target') != 'approvable']
+def _other_one_to_one(ctx: dict) -> list[dict]:
+    """One-to-one relations other than the approval and comment bridges (those keep the placeholder)."""
+    return [
+        r for r in (ctx.get('one_to_one_rels') or [])
+        if r.get('target') != 'approvable' and not _is_comment_bridge(r, ctx)
+    ]
 
 
 def _non_approval_components(ctx: dict, key: str) -> list[dict]:
     return [c for c in (ctx.get(key) or []) if c.get('name') != APPROVAL_SECTION]
+
+
+def _is_comment_bridge(rel: dict, ctx: dict) -> bool:
+    """True for the one-to-one bridge to the shared `commentable` row of a commentable entity."""
+    return bool(ctx.get('has_commentable')) and rel.get('target') == _COMMENTABLE_TARGET
+
+
+def comment_thread_spec(ctx: dict) -> dict | None:
+    """The comment thread the detail screen draws, or None.
+
+    `rel_name` is the key under which the REST detail embeds the `commentable` row (its `comments`
+    array is the thread); `reaction_types` are the values the comment reactions route accepts.
+    """
+    if not (ctx.get('has_commentable') and ctx.get('can_view') and ctx.get('commentable_rel_name')):
+        return None
+    reactions = next((c for c in ctx.get('named_constants') or [] if c.get('const_name') == 'COMMENT_REACTION_TYPES'), None)
+    return {
+        'rel_name': ctx['commentable_rel_name'],
+        'reaction_types': [i['value'] for i in reactions['items']] if reactions else [],
+    }
 
 
 def mobile_ineligible_reason(ctx: dict, api_entities: set[str] | None = None) -> str | None:
@@ -120,14 +152,17 @@ def mobile_ineligible_reason(ctx: dict, api_entities: set[str] | None = None) ->
     for key in _FEATURE_KEYS:
         if ctx.get(key):
             return f'declares {key}'
-    if _non_approval_one_to_one(ctx):
+    # A one-to-one bridge is served by something other than a form field only for the approval
+    # section and the comment thread; any other keeps the placeholder.
+    if _other_one_to_one(ctx):
         return 'declares one_to_one_rels'
     for key in ('entity_view_components', 'entity_edit_components'):
         if _non_approval_components(ctx, key):
             return f'declares {key}'
     # The approval bridge and its section come together; one without the other is not the approval shape.
-    if bool(ctx.get('one_to_one_rels')) != has_approval_section(ctx):
-        return 'declares one_to_one_rels' if ctx.get('one_to_one_rels') else 'declares entity_view_components'
+    has_approval_bridge = any(r.get('target') == 'approvable' for r in ctx.get('one_to_one_rels') or [])
+    if has_approval_bridge != has_approval_section(ctx):
+        return 'declares one_to_one_rels' if has_approval_bridge else 'declares entity_view_components'
     pickers = _picker_children(ctx)
     if len(pickers) != len(ctx.get('children_raw') or []) or len(pickers) != len(ctx.get('non_comment_ch') or []):
         return 'declares children_raw'
@@ -305,4 +340,5 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
         'can_delete': bool(ctx.get('can_delete')),
         'has_approval': has_approval_section(ctx),
         'split': _split_entry(ctx, entries, required, title) if ctx.get('can_view') else None,
+        'comments': comment_thread_spec(ctx),
     }

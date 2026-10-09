@@ -17,7 +17,9 @@
     "created_mobile_requests mobile_request[] @relation(\"MobileRequestCreator\")",
     "updated_mobile_requests mobile_request[] @relation(\"MobileRequestUpdater\")",
     "created_mobile_shipments mobile_shipment[] @relation(\"MobileShipmentCreator\")",
-    "updated_mobile_shipments mobile_shipment[] @relation(\"MobileShipmentUpdater\")"
+    "updated_mobile_shipments mobile_shipment[] @relation(\"MobileShipmentUpdater\")",
+    "created_mobile_threads mobile_thread[] @relation(\"MobileThreadCreator\")",
+    "updated_mobile_threads mobile_thread[] @relation(\"MobileThreadUpdater\")"
   ],
   "organization": [
     "mobile_org_items mobile_org_item[]"
@@ -25,5 +27,8 @@
   "approvable": [
     "mobile_request mobile_request?",
     "mobile_shipment mobile_shipment?"
+  ],
+  "commentable": [
+    "mobile_thread mobile_thread?"
   ]
 }

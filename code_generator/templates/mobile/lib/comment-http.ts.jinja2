@@ -1,0 +1,28 @@
+{% raw %}
+// REST access for comment reactions: the comment reactions route
+// (/api/comment/<id>/reactions/toggle) that the Web reaction bar's Server Action
+// shares its service functions with. No reaction logic lives here.
+import { apiFetch } from './api-base';
+
+export type ReactionCount = { type: string; count: number };
+
+/** Counts per reaction type and the caller's own reaction types for one comment. */
+export type ReactionSummary = { counts: ReactionCount[]; myTypes: string[] };
+
+const base = (commentId: string) => `/api/comment/${encodeURIComponent(commentId)}/reactions/toggle`;
+
+/** `GET`: the counts and the caller's active reaction types. */
+export async function fetchCommentReactions(commentId: string): Promise<ReactionSummary> {
+  const body = await apiFetch<Partial<ReactionSummary>>(base(commentId));
+  return { counts: body.counts ?? [], myTypes: body.myTypes ?? [] };
+}
+
+/** `POST`: adds the reaction when the caller has none of this type, removes it otherwise. */
+export async function toggleCommentReaction(commentId: string, type: string): Promise<ReactionSummary> {
+  const body = await apiFetch<Partial<ReactionSummary>>(base(commentId), {
+    method: 'POST',
+    body: JSON.stringify({ type }),
+  });
+  return { counts: body.counts ?? [], myTypes: body.myTypes ?? [] };
+}
+{% endraw %}

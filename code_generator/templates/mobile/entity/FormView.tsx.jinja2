@@ -32,6 +32,11 @@ import type { ApprovalState } from '@/lib/entity-http';
 {% if split %}
 import { SplitSection } from '@/components/native/SplitSection';
 {% endif %}
+{% if comments %}
+import { CommentThread, type CommentRow } from '@/components/native/CommentThread';
+
+const REACTION_TYPES: string[] = {{ reaction_types_json }};
+{% endif %}
 
 export function {{ pascal }}FormView({ id }: { id: string }) {
   const { t, terr{% if has_form_hook %}, tmsg{% endif %} } = useMessages();
@@ -119,6 +124,12 @@ export function {{ pascal }}FormView({ id }: { id: string }) {
         split={split{{ pascal }}}
         describeError={(failure) => {% if has_form_hook %}getEntityFormErrorMessage(failure, { terr, tmsg }){% else %}terr('unknown'){% endif %}}
         onChanged={() => setReloads((n) => n + 1)}
+      />
+{% endif %}
+{% if comments %}
+      <CommentThread
+        comments={((record[{{ comments.rel_name | tojson }}] as { comments?: CommentRow[] } | null)?.comments) ?? []}
+        reactionTypes={REACTION_TYPES}
       />
 {% endif %}
       {error ? <Text style={styles.error} testID="view-error">{error}</Text> : null}
