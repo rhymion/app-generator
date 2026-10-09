@@ -84,6 +84,7 @@ from validate import (
     validate_direct_attachment_prerequisite,
     validate_direct_attachment_reverse_fields,
     validate_write_once_stub_asymmetry,
+    validate_generator_config, mobile_generation_enabled,
     SchemaValidationError,
 )
 from generators_doc import build_doc_entity_context, build_doc_index_context, convert_md_to_mdx
@@ -1295,6 +1296,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     cloud_provider = x_cloud.get('provider', '') if x_cloud else ''
 
     try:
+        validate_generator_config(schema)
         validate_schema(schema)
         validate_prisma_indexes(Path(output_dir) / 'prisma' / 'schema.prisma', schema)
         validate_self_only_creator_id_columns(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
@@ -1395,6 +1397,8 @@ def generate(schema_path: str, output_dir: str) -> None:
     # x-payment entities (Issue #775), collected across the loop for the shared
     # lib/payment/ files emitted after it.
     payment_entities: list[dict] = []
+    # x-generator.mobile.enabled (default false): the Expo app under mobile/ is opt-in.
+    mobile_enabled = mobile_generation_enabled(schema)
     # Entities that get native list / detail / form screens in the Expo app.
     mobile_specs: list[dict] = []
     mobile_ctxs: dict[str, dict] = {}
@@ -1853,7 +1857,10 @@ def generate(schema_path: str, output_dir: str) -> None:
 
         # --- native mobile screens (Expo): plain CRUD plus relation pickers ---
         # Rendered after the loop: a "Create new" control needs the target's own spec.
-        mobile_spec = build_mobile_entity_spec(ctx, build_validation_context(ctx), to_title_case, api_entities)
+        mobile_spec = (
+            build_mobile_entity_spec(ctx, build_validation_context(ctx), to_title_case, api_entities)
+            if mobile_enabled else None
+        )
         if mobile_spec:
             mobile_specs.append(mobile_spec)
             mobile_ctxs[parent] = ctx
@@ -3423,13 +3430,16 @@ def generate(schema_path: str, output_dir: str) -> None:
     update_i18n_and_config(entities, schema, out)
 
     # --- Expo mobile app (footer tabs + drill-down from the same nav source) ---
-    print('\nGenerating mobile app...')
-    resolve_mobile_create_forms(mobile_specs)
-    for mobile_spec in mobile_specs:
-        generate_mobile_entity(mobile_spec, mobile_ctxs[mobile_spec['name']], schema, out / 'mobile', env)
-        print(f'  Mobile screens → mobile/ ({mobile_spec["name"]})')
-    generate_mobile_target(entities, schema, out, env, has_search=bool(search_entities), mobile_specs=mobile_specs,
-                           has_mention=_has_any_mention)
+    if mobile_enabled:
+        print('\nGenerating mobile app...')
+        resolve_mobile_create_forms(mobile_specs)
+        for mobile_spec in mobile_specs:
+            generate_mobile_entity(mobile_spec, mobile_ctxs[mobile_spec['name']], schema, out / 'mobile', env)
+            print(f'  Mobile screens → mobile/ ({mobile_spec["name"]})')
+        generate_mobile_target(entities, schema, out, env, has_search=bool(search_entities), mobile_specs=mobile_specs,
+                               has_mention=_has_any_mention)
+    else:
+        print('\nSkipping mobile app (x-generator.mobile.enabled is not true)')
 
     # --- upload/route.ts (Vercel Blob, base default) ---
     # Always emitted so app/api/upload/route.ts is a full generated artifact

@@ -44,6 +44,11 @@ def out(tmp_path_factory):
     shutil.copytree(REPO / 'messages', app / 'messages')
     result = subprocess.run([sys.executable, str(COMPOSE), str(FIXTURE), str(app)], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+    # The compose script merges entities only; the default schema keeps mobile generation off.
+    schema_path = app / 'code_generator' / 'json_schema.yaml'
+    schema_text = schema_path.read_text()
+    assert 'x-generator:\n' in schema_text
+    schema_path.write_text(schema_text.replace('x-generator:\n', 'x-generator:\n  mobile:\n    enabled: true\n', 1))
     intermediate = app / 'generated_json_schema.yaml'
     build_user_schema(app / 'code_generator' / 'json_schema.yaml', app / 'prisma' / 'schema.prisma', intermediate)
     generate(str(intermediate), str(app))

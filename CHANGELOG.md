@@ -12,6 +12,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   permission and organization checks apply. The REST detail now also lists each comment's `mentions` (`id` and
   `name`, in order) so an edit keeps the mention markers. New `lib/comment-composer.ts` in `mobile/`; no schema
   key is added and the Web screens are unchanged. See `docs/knowledge/mobile-app.md`.
+- **Mobile access tokens are accepted by the dual-auth routes** (Issue #883). `resolveActorId()` and
+  `requireDualAuth()` in `lib/api-auth.ts` dispatch an `Authorization: Bearer` token by shape, the same way
+  `requireCaller()` does, so CSV export and import, `GET /api/openapi.json` and the
+  scheduled-task routes accept a mobile access token. `X-API-Key`, API-key bearer tokens and the session
+  cookie behave as before; permission and organization checks are unchanged. See
+  `docs/knowledge/multi-tenancy-and-permissions.md`.
 - **Mobile: create the referenced record in place, and payment checkout** (Issues #877, #872). A
   many-to-one foreign key that declares `x-create-inline` shows *Create new* in the native picker; it
   opens the target's native create form over the hosting form, saves through the target's REST create
@@ -172,6 +178,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `docs/knowledge/save-and-continue-editing.md`.
 
 ### Changed
+- **Mobile app generation is opt-in** (Issue #915). `generate-code` no longer renders the Expo app into
+  `mobile/` unless the schema sets `x-generator.mobile.enabled: true` (default `false`); the key is
+  validated (boolean only, unknown sub-keys rejected). A project that wants to keep `mobile/` must set the
+  key in its own schema. The hand-written mobile token routes under `app/api/mobile/` stay in place. After
+  switching the key to `false`, run `npm run cleanup` to remove the previously generated `mobile/` files.
+  `scripts/run_mobile_entity_playwright.sh` enables the key in every mode and fails if `mobile/` is absent.
+  See `docs/knowledge/mobile-app.md`.
 - **Generated entity screens call framework-neutral UI hooks.** The form state and submit
   orchestration, error-message mapping, permission-derived show/hide decisions and approval wiring
   that `FormUpsert.tsx` and `FormView.tsx` carried inline now live in `lib/<entity>/use_entity_form.ts`,
@@ -207,6 +220,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   there and the app does not use it.
 
 ### Fixed
+- **Comment Server Actions check permission and organization scope** (Issue #890). `add`, `update` and
+  `delete{Entity}Comment()` only checked that a session user existed (plus the author rule), so a Server
+  Action call that skipped the edit form could comment on, edit or delete a comment of a record the caller
+  could not update or that belongs to another organization. Each action now reads the parent record through
+  the caller's organization scope (and `x-self-only` / `x-filter-values`) and calls `requirePermission()` for
+  `update` on it, like `upsert{Entity}()`; delete by a non-author still needs `delete`. A caller who may
+  edit the record sees no change. See `docs/knowledge/comment-and-mention-rest-routes.md`.
 - **Generated test data wrote several owner columns of an `x-exclusive-parents` entity** (issue #849).
   Dependency rows of such an entity (for example the `parameter` and `step_placement` rows another
   entity's helper creates) and the child rows added by `populate<Parent><Child>Data` set every owner

@@ -69,13 +69,14 @@ def test_bridge_mention_true_retires_encode_mentions():
 
 def test_bridge_mention_true_selects_commentable_id_for_parent_resolution():
     # The update path has no direct parent FK on the comment row (only
-    # commentable_id) — it must select commentable_id so it can re-resolve
-    # the parent row's id for the notification href.
+    # commentable_id) — it must select commentable_id so the access check can
+    # resolve the parent row, whose id is the notification href.
     out = _build_comment_actions_bridge(
         parent='ticket', model='ticket', has_assignee_id=False, comment_has_mention=True,
     )
     assert 'select: { creator_id: true, message: true, commentable_id: true }' in out
-    assert 'mentionParentRow' in out
+    assert 'href: `/ticket/view/${parentRow.id}`' in out
+    assert 'mentionParentRow' not in out
 
 
 def test_bridge_mention_false_omits_all_mention_code():
@@ -85,7 +86,7 @@ def test_bridge_mention_false_omits_all_mention_code():
     for token in ('oldIds', 'newIds', 'freshMentions', 'extractMentionedUserIds',
                   'mentioned_in_comment', 'encodeMentions', 'userLookup', 'storedMessage'):
         assert token not in out
-    assert 'select: { creator_id: true }' in out
+    assert 'select: { creator_id: true, commentable_id: true }' in out
 
 
 # ---------------------------------------------------------------------------
@@ -132,4 +133,4 @@ def test_child_mention_false_omits_all_mention_code():
     for token in ('oldIds', 'newIds', 'freshMentions', 'extractMentionedUserIds',
                   'mentioned_in_comment', 'encodeMentions', 'userLookup', 'storedMessage'):
         assert token not in out
-    assert 'select: { creator_id: true }' in out
+    assert 'select: { creator_id: true, ticket_id: true }' in out

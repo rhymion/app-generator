@@ -191,6 +191,82 @@ describe('API: comment writes', () => {
     });
   });
 
+  // The Server Actions run the same permission and organization checks themselves. The test-only
+  // probe route (probe_routes/action_probe_route.ts) calls them directly, skipping the REST pre-gates, so
+  // these specs fail if an action stops checking even though the REST routes still would.
+  describe('Server Actions on their own (no REST pre-gates)', () => {
+    const probe = (ticketId: string, body: { op: 'add' | 'update' | 'delete'; commentId?: string; message?: string }, key = TEST_API_KEY) =>
+      cy.request({ method: 'POST', url: `/api/cr_ticket/${ticketId}/action_probe`, headers: asKey(key), body, failOnStatusCode: false });
+
+    it('denies add and delete to a caller without update permission and writes nothing', () => {
+      cy.task<Ticket[]>('db:populateCrTicket', 1).then(([ticket]) => {
+        addComment(ticket.id, 'seeded by the admin').then((seeded) => {
+          const seededId = (seeded.body as { id: string }).id;
+          cy.task<string>('db:createApiUserWithPermission', {
+            entityName: 'cr_ticket',
+            flags: { read: true, delete: true },
+            label: 'actionnoupdate',
+            organizationId: ticket.organization_id,
+          }).then((key) => {
+            probe(ticket.id, { op: 'add', message: 'not allowed' }, key).its('status').should('eq', 403);
+            probe(ticket.id, { op: 'delete', commentId: seededId }, key).its('status').should('eq', 403);
+            listComments(ticket.id).then((comments) => expect(comments.map((c) => c.id)).to.deep.equal([seededId]));
+          });
+        });
+      });
+    });
+
+    it('denies a non-author who has update but not delete permission from deleting', () => {
+      cy.task<Ticket[]>('db:populateCrTicket', 1).then(([ticket]) => {
+        addComment(ticket.id, 'by the admin').then((seeded) => {
+          const seededId = (seeded.body as { id: string }).id;
+          cy.task<string>('db:createApiUserWithPermission', {
+            entityName: 'cr_ticket',
+            flags: { read: true, update: true },
+            label: 'actionnodelete',
+            organizationId: ticket.organization_id,
+          }).then((key) => {
+            probe(ticket.id, { op: 'delete', commentId: seededId }, key).its('status').should('eq', 403);
+            listComments(ticket.id).then((comments) => expect(comments.map((c) => c.id)).to.include(seededId));
+          });
+        });
+      });
+    });
+
+    it('lets a same-organization caller with update permission add, edit and delete', () => {
+      cy.task<Ticket[]>('db:populateCrTicket', 1).then(([ticket]) => {
+        cy.task<string>('db:createApiUserWithPermission', {
+          entityName: 'cr_ticket',
+          flags: { read: true, update: true },
+          label: 'actionupdater',
+          organizationId: ticket.organization_id,
+        }).then((key) => {
+          probe(ticket.id, { op: 'add', message: 'via the action' }, key).then((added) => {
+            expect(added.status).to.eq(200);
+            const id = (added.body as { result: { id: string } }).result.id;
+            probe(ticket.id, { op: 'update', commentId: id, message: 'edited' }, key).its('status').should('eq', 200);
+            listComments(ticket.id).then((comments) => expect(comments.find((c) => c.id === id)?.message).to.eq('edited'));
+            probe(ticket.id, { op: 'delete', commentId: id }, key).its('status').should('eq', 200);
+            listComments(ticket.id).then((comments) => expect(comments).to.have.length(0));
+          });
+        });
+      });
+    });
+
+    it('answers not found for add, edit and delete once the record is outside the caller\'s organizations', () => {
+      cy.task<Ticket[]>('db:populateCrTicket', 1).then(([ticket]) => {
+        addComment(ticket.id, 'before the move').then((seeded) => {
+          const seededId = (seeded.body as { id: string }).id;
+          cy.task('db:createCrossOrgScenario', { entityName: 'cr_ticket', entityId: ticket.id }).then(() => {
+            probe(ticket.id, { op: 'add', message: 'from outside' }).its('status').should('eq', 404);
+            probe(ticket.id, { op: 'update', commentId: seededId, message: 'changed' }).its('status').should('eq', 404);
+            probe(ticket.id, { op: 'delete', commentId: seededId }).its('status').should('eq', 404);
+          });
+        });
+      });
+    });
+  });
+
   describe('edit', () => {
     it('lets the author change the message and answers 404 for a comment of another record or none', () => {
       cy.task<Ticket[]>('db:populateCrTicket', 2).then(([ticket, other]) => {
