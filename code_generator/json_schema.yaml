@@ -491,7 +491,6 @@ definitions:
           - grouped
           - stacked
           - standardized
-      series_field: {}
       group_by_bucket:
         enum:
           - day
@@ -559,6 +558,7 @@ definitions:
           - pacific_apia
           - pacific_kiritimati
         default: utc
+      series_field: {}
       filter_field: {}
       filter_value: {}
       order:
