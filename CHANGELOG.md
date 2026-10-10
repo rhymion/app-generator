@@ -255,6 +255,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   there and the app does not use it.
 
 ### Fixed
+- **Date, date-time and time values are validated; the mobile inputs check them** (Issue #924, sub-issue of #140).
+  A date-time field on the Expo form was a plain text box: typing `test` passed the client check and the server
+  failed with an HTTP 500 from Prisma. A date / date-time / time column is now checked by one module,
+  `lib/_date_value.ts`, in the Web form validation, in the server write guard (`service_validation.ts`; the REST
+  routes and Server Actions now return a `VALIDATION` error, HTTP 400, instead of a 500) and in the new mobile
+  `DateValueInput`, which normalizes typed text to the shared value shape, shows a field error and offers a
+  *Today* / *Now* button. The module is copied into `mobile/lib/` unchanged. No `x-*` key is added. See
+  `docs/knowledge/mobile-app.md`.
 - **Comment Server Actions check permission and organization scope** (Issue #890). `add`, `update` and
   `delete{Entity}Comment()` only checked that a session user existed (plus the author rule), so a Server
   Action call that skipped the edit form could comment on, edit or delete a comment of a record the caller

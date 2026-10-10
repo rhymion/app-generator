@@ -2,6 +2,7 @@ import { apiFetch, ApiError } from './api-base';
 import type { ActionFailure, ErrorCode, MessageArgs, ValidationReason } from './_errors';
 import type { ModelPermissions } from './authz';
 import type { SortItem } from './_list_query';
+import { timeOfDayToInstant } from './_date_value';
 
 export type { SortItem };
 
@@ -152,6 +153,9 @@ export function formDataToBody(
     if (spec.kind === 'relation') body[spec.bodyKey ?? key] = text === '' ? null : text;
     else if (spec.kind === 'boolean') body[key] = text === 'true';
     else if (text === '') body[key] = null;
+    else if (spec.kind === 'time') body[key] = timeOfDayToInstant(text) ?? text;
+    // The API hands the value to Prisma, which wants a full instant; the Web form reads a date as UTC midnight.
+    else if (spec.kind === 'date') body[key] = /^\d{4}-\d{2}-\d{2}$/.test(text) ? `${text}T00:00:00.000Z` : text;
     else if (spec.kind === 'number' || (spec.kind === 'enum' && spec.numericEnum)) body[key] = Number(text);
     else body[key] = text;
   }

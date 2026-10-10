@@ -45,6 +45,10 @@ definitions:
       is_done: {}
       due_on:
         format: date
+      remind_at:
+        format: date-time
+      remind_time:
+        format: time
     required:
       - title
       - status
