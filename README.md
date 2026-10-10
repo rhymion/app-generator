@@ -96,7 +96,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 
 - Internationalization (English and Japanese, next-intl v4)
 - Dark mode (system-aware, SSR-safe)
-- Expo (React Native) mobile app generated into `mobile/` when `x-generator.mobile.enabled: true` is set in the schema (off by default), with footer tabs and drill-down lists built from the same `x-nav` / `x-nav-groups` as the desktop sidebar, and native list (with sort, filter, search and bulk delete), detail and form screens (with native pickers for foreign keys, one-to-one selectors and many-to-many fields, creating the referenced record in place, payment checkout, approve / reject / withdraw buttons and the split action on approval entities, and the comment thread with reactions, a comment box with `@`-mention lookup, and edit and delete of comments on commentable entities) that share their form, validation and permission logic with the Web screens, and a read-only audit log list and detail, and scheduled task administration
+- Expo (React Native) mobile app generated into `mobile/` when `x-generator.mobile.enabled: true` is set in the schema (off by default), with footer tabs and drill-down lists built from the same `x-nav` / `x-nav-groups` as the desktop sidebar, and native list (with sort, filter, search and bulk delete), detail and form screens (with native pickers for foreign keys, one-to-one selectors and many-to-many fields, creating the referenced record in place, payment checkout, approve / reject / withdraw buttons and the split action on approval entities, and the comment thread with reactions, a comment box with `@`-mention lookup, and edit and delete of comments on commentable entities) that share their form, validation and permission logic with the Web screens, and a read-only audit log list and detail, and scheduled task administration; entities left on the placeholder screen are listed, with the reason, in the generation log and in `mobile/MOBILE_ENTITIES.md`
 - 5 extension points for customization without overwriting generated code
 
 ---
@@ -567,7 +567,7 @@ All architectural documentation lives in `docs/knowledge/`:
 | [troubleshooting.md](docs/knowledge/troubleshooting.md) | Common build, test, code generation, and database failure patterns with step-by-step fixes |
 | [i18n-locale-routing.md](docs/knowledge/i18n-locale-routing.md) | next-intl v4 setup, locale routing, translation file conventions |
 | [dark-mode-and-hydration.md](docs/knowledge/dark-mode-and-hydration.md) | System-aware dark mode, SSR-safe theme initialization |
-| [timezone-handling.md](docs/knowledge/timezone-handling.md) | Server/client timezone conventions |
+| [timezone-handling.md](docs/knowledge/timezone-handling.md) | Server/client timezone conventions, the `Timezone` enum behind `app_setting.timezone` |
 | [child-datagrid-reference-columns.md](docs/knowledge/child-datagrid-reference-columns.md) | Inline DataGrid children, reference column rendering |
 | [mobile-responsive-layout.md](docs/knowledge/mobile-responsive-layout.md) | Responsive layout conventions, search header icon, mobile account section |
 | [relation-picker-rest-route.md](docs/knowledge/relation-picker-rest-route.md) | `GET /api/{entity}/options`: REST search and id lookup for relation pickers, running the same function as the web autocomplete; authentication, permission and organization isolation |

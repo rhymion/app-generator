@@ -26,7 +26,10 @@ import pytest
 
 from build_user_schema import build_user_schema
 from generate import generate
-from mobile_entities import build_mobile_entity_spec, mobile_ineligible_reason
+from mobile_entities import (
+    build_mobile_entity_spec, group_ineligible_by_reason, ineligible_log_lines, ineligible_note,
+    mobile_ineligible_reason,
+)
 
 FIXTURE = Path(__file__).resolve().parent / 'fixtures' / 'mobile_entity_gate'
 REPO = Path(__file__).resolve().parents[2]
@@ -553,3 +556,54 @@ def test_reaction_labels_and_thread_heading_reach_the_message_bundle():
     # Only the keys the screens read of the (large) Fields namespace are shipped, the thread heading among them.
     assert bundle['Fields']['comments'] == en['Fields']['comments']
     assert set(bundle['Fields']) < set(en['Fields'])
+
+
+# --- the list of entities left out of the mobile app ------------------------------------------
+
+def _generate_fixture_with(tmp_path: Path, mutate=None) -> Path:
+    """Run the pipeline on the fixture (optionally edited by `mutate(schema)`) and return its output dir."""
+    import yaml
+    schema = yaml.safe_load((FIXTURE / 'json_schema.yaml').read_text())
+    if mutate:
+        mutate(schema)
+    src = tmp_path / 'json_schema.yaml'
+    src.write_text(yaml.safe_dump(schema, sort_keys=False))
+    (tmp_path / 'prisma').mkdir()
+    shutil.copy(FIXTURE / 'schema.prisma', tmp_path / 'prisma' / 'schema.prisma')
+    intermediate = tmp_path / 'generated_json_schema.yaml'
+    build_user_schema(src, FIXTURE / 'schema.prisma', intermediate)
+    generate(str(intermediate), str(tmp_path))
+    return tmp_path
+
+
+def test_nothing_is_listed_when_every_entity_has_a_mobile_screen(out):
+    assert 'Every entity has a mobile screen.' in _read(out, 'MOBILE_ENTITIES.md')
+    assert '- ' not in _read(out, 'MOBILE_ENTITIES.md')
+    assert ineligible_log_lines([]) == []
+
+
+def test_log_and_note_list_exactly_the_ineligible_entities_with_their_reasons(tmp_path, capsys):
+    def edit(schema):
+        # No REST routes -> mobile_log is left out; the other entities keep their screens.
+        schema['definitions']['mobile_log']['x-generate']['api'] = False
+    out = _generate_fixture_with(tmp_path, edit)
+    log = capsys.readouterr().out
+    reason = 'no REST routes (x-generate.api is off)'
+    assert '1 entity left out of the mobile app' in log
+    assert f'{reason}: mobile_log' in log
+    note = _read(out, 'MOBILE_ENTITIES.md')
+    assert f'## {reason}\n\n- mobile_log\n' in note
+    assert note.count('\n- ') == 1
+    assert 'mobile_note' not in note
+    registry = _read(out, 'lib/entity-registry.ts')
+    assert 'mobile_log: {' not in registry and 'mobile_note: {' in registry
+
+
+def test_report_groups_entities_by_reason_in_a_stable_order():
+    pairs = [('b', 'declares children_raw'), ('c', 'no list screen'), ('a', 'declares children_raw')]
+    assert group_ineligible_by_reason(pairs) == {'declares children_raw': ['a', 'b'], 'no list screen': ['c']}
+    lines = ineligible_log_lines(pairs)
+    assert lines[0].startswith('  3 entities left out')
+    assert lines[1:] == ['    declares children_raw: a, b', '    no list screen: c']
+    note = ineligible_note(pairs)
+    assert '## declares children_raw\n\n- a\n- b\n\n## no list screen\n\n- c\n' in note

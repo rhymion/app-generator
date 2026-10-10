@@ -1,0 +1,21 @@
+// Auto-generated — do not edit manually.
+// Source: code_generator/helpers/timezones.py
+//
+// The stored `Timezone` enum value is an identifier (`asia_tokyo`); this map is the only place its
+// IANA spelling is written. Pass `TIMEZONE_IANA_NAME[value]` to Intl.DateTimeFormat or dayjs.tz.
+// Display labels live in messages/*.json under the `Timezone` namespace, never here.
+export const TIMEZONE_VALUES = [
+{% for member, _iana, _offset in timezones %}
+  '{{ member }}',
+{% endfor %}
+] as const;
+
+export type Timezone = (typeof TIMEZONE_VALUES)[number];
+
+export const DEFAULT_TIMEZONE: Timezone = '{{ default_member }}';
+
+export const TIMEZONE_IANA_NAME: Record<Timezone, string> = {
+{% for member, iana, _offset in timezones %}
+  {{ member }}: '{{ iana }}',
+{% endfor %}
+};

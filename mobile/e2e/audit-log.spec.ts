@@ -24,8 +24,12 @@ async function openAuditLog(page: Page) {
 
 test.describe('Audit log screens', () => {
   test('the administration section lists the audit log and opens the read-only list from the real route', async ({ page }) => {
+    // The request carries the mobile access token; the real route must accept it (no mocked response here).
+    const listResponse = page.waitForResponse((res) => new URL(res.url()).pathname === '/api/audit_log');
     await openAuditLog(page);
+    expect((await listResponse).status()).toBe(200);
     await expect(page.getByTestId('list-title')).toHaveText('Audit Log');
+    await expect(page.getByTestId('list-loading')).toHaveCount(0);
     await expect(page.getByTestId('list-error')).toHaveCount(0);
     await expect(page.getByTestId('list-new')).toHaveCount(0);
   });

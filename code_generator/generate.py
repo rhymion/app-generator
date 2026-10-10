@@ -27,7 +27,9 @@ from helpers.schema_helpers import get_flatten_rels
 from generate_types import extract_entities, extract_named_constants
 from mobile_nav import build_mobile_nav
 from nav_config import schema_declares_scheduled_tasks
-from mobile_entities import build_mobile_entity_spec
+from mobile_entities import (
+    build_mobile_entity_spec, ineligible_log_lines, ineligible_note, mobile_ineligible_reason,
+)
 from helpers.naming import to_title_case
 from context import build_entity_context
 from build_context import (
@@ -38,6 +40,7 @@ from helpers.label_field import build_label_expression
 from helpers.schema_helpers import derive_text_fields as _derive_text_fields
 from helpers.schema_helpers import get_splittable_bridge_field
 from helpers.schema_helpers import resolve_ledger_domain
+from helpers.timezones import TIMEZONES, DEFAULT_MEMBER
 from helpers.schema_helpers import get_entity_properties
 from helpers.schema_helpers import get_self_only_flags
 from helpers.schema_helpers import get_parent_relationships
@@ -1102,6 +1105,11 @@ _MOBILE_MESSAGE_KEYS = {
 }
 
 
+def _render_timezone_ts(env: Environment) -> str:
+    """lib/_timezone.ts: the Timezone enum values and their IANA names (shared by Web and mobile)."""
+    return _render(env, 'timezone.ts.jinja2', {'timezones': TIMEZONES, 'default_member': DEFAULT_MEMBER})
+
+
 def _mobile_messages_json(messages: dict) -> str:
     picked = {
         locale: {
@@ -1269,6 +1277,9 @@ def generate_mobile_target(
     # module, so the mobile inputs and the API agree on what a valid value is.
     _write(mobile_dir / 'lib' / '_date_value.ts',
            (Path(__file__).resolve().parent.parent / 'lib' / '_date_value.ts').read_text(encoding='utf-8'))
+    # The time zone enum's IANA mapping is likewise the Web's own module, copied unchanged.
+    _write(mobile_dir / 'lib' / '_timezone.ts',
+           (Path(__file__).resolve().parent.parent / 'lib' / '_timezone.ts').read_text(encoding='utf-8'))
     for tmpl_name, rel_out in _MOBILE_SCHEDULED_TASK_TEMPLATES:
         target = mobile_dir / rel_out
         if has_scheduled_tasks:
@@ -1410,6 +1421,8 @@ def generate(schema_path: str, output_dir: str) -> None:
     # Entities that get native list / detail / form screens in the Expo app.
     mobile_specs: list[dict] = []
     mobile_ctxs: dict[str, dict] = {}
+    # (entity, reason) for each entity that keeps the placeholder screen, reported once the loop ends.
+    mobile_ineligible: list[tuple[str, str]] = []
     # Entities with REST routes, hence an options route a mobile relation picker can call.
     api_entities = {e['parent'] for e in entities if (e.get('generate_config') or {}).get('api')}
 
@@ -1872,6 +1885,8 @@ def generate(schema_path: str, output_dir: str) -> None:
         if mobile_spec:
             mobile_specs.append(mobile_spec)
             mobile_ctxs[parent] = ctx
+        elif mobile_enabled:
+            mobile_ineligible.append((parent, mobile_ineligible_reason(ctx, api_entities)))
 
         # --- <Child>BridgeGrid.tsx (parent-embedded DataGrid, cmd_167 §4) ---
         # Emitted for bridge children (entities with new-form x-bridge); the
@@ -2299,6 +2314,12 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'reaction_constants.ts.jinja2', {'named_constants': named_constants}),
         )
         print(f'  Named constants → lib/reaction_constants.ts ({len(named_constants)} constant(s))')
+
+    # --- Time zone enum mapping (lib/_timezone.ts) ---
+    # Always written: the `Timezone` Prisma enum ships with the base schema, and the IANA spelling
+    # of each member exists only in this generated map.
+    _write(out / 'lib' / '_timezone.ts', _render_timezone_ts(env))
+    print(f'  Time zone mapping → lib/_timezone.ts ({len(TIMEZONES)} zones)')
 
     # --- Self-only admin-bypass entity list (lib/self_only_admin_bypass_entities.ts) ---
     # x-self-only entities with admin_bypass:true (cmd_536) — the privileged
@@ -3446,6 +3467,9 @@ def generate(schema_path: str, output_dir: str) -> None:
             print(f'  Mobile screens → mobile/ ({mobile_spec["name"]})')
         generate_mobile_target(entities, schema, out, env, has_search=bool(search_entities), mobile_specs=mobile_specs,
                                has_mention=_has_any_mention)
+        for line in ineligible_log_lines(mobile_ineligible):
+            print(line)
+        _write(out / 'mobile' / 'MOBILE_ENTITIES.md', ineligible_note(mobile_ineligible))
     else:
         print('\nSkipping mobile app (x-generator.mobile.enabled is not true)')
 

@@ -100,7 +100,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 
 - 国際化（英語・日本語、next-intl v4）
 - ダークモード（システム連動、SSR セーフ）
-- スキーマで `x-generator.mobile.enabled: true` を設定したときに `mobile/` へ生成される Expo（React Native）モバイルアプリ（既定は無効）。デスクトップのサイドバーと同じ `x-nav` / `x-nav-groups` からフッターのタブと下位階層の一覧を構成。外部キー・1対1セレクタ・多対多にはネイティブのピッカーを（参照先レコードのその場作成と決済チェックアウトにも対応）、承認対象のエンティティには承認・却下・取り下げのボタンと分割操作を、コメント可能なエンティティにはコメントスレッド・リアクション・コメント欄（`@` メンション候補検索付き）・コメントの編集と削除を備え、フォーム・検証・権限のロジックを Web 画面と共有するネイティブの一覧（並べ替え・絞り込み・検索・一括削除）・詳細・フォーム画面を生成。読み取り専用の監査ログの一覧・詳細と、定期タスクの管理画面も生成
+- スキーマで `x-generator.mobile.enabled: true` を設定したときに `mobile/` へ生成される Expo（React Native）モバイルアプリ（既定は無効）。デスクトップのサイドバーと同じ `x-nav` / `x-nav-groups` からフッターのタブと下位階層の一覧を構成。外部キー・1対1セレクタ・多対多にはネイティブのピッカーを（参照先レコードのその場作成と決済チェックアウトにも対応）、承認対象のエンティティには承認・却下・取り下げのボタンと分割操作を、コメント可能なエンティティにはコメントスレッド・リアクション・コメント欄（`@` メンション候補検索付き）・コメントの編集と削除を備え、フォーム・検証・権限のロジックを Web 画面と共有するネイティブの一覧（並べ替え・絞り込み・検索・一括削除）・詳細・フォーム画面を生成。読み取り専用の監査ログの一覧・詳細と、定期タスクの管理画面も生成。未対応のままのエンティティは理由付きで生成ログと `mobile/MOBILE_ENTITIES.md` に列挙
 - 生成コードを上書きせずにカスタマイズできる 5 つの拡張ポイント
 
 ---
@@ -547,7 +547,7 @@ app-generator/
 | [troubleshooting.md](docs/knowledge/troubleshooting.md) | ビルド、テスト、コード生成、データベースの一般的な障害パターンと段階的な修正手順 |
 | [i18n-locale-routing.md](docs/knowledge/i18n-locale-routing.md) | next-intl v4 セットアップ、ロケールルーティング、翻訳ファイル規約 |
 | [dark-mode-and-hydration.md](docs/knowledge/dark-mode-and-hydration.md) | システム連動ダークモード、SSR セーフなテーマ初期化 |
-| [timezone-handling.md](docs/knowledge/timezone-handling.md) | サーバー/クライアントのタイムゾーン規約 |
+| [timezone-handling.md](docs/knowledge/timezone-handling.md) | サーバー/クライアントのタイムゾーン規約、`app_setting.timezone` の `Timezone` enum |
 | [child-datagrid-reference-columns.md](docs/knowledge/child-datagrid-reference-columns.md) | インライン DataGrid 子エンティティ、参照列のレンダリング |
 | [mobile-responsive-layout.md](docs/knowledge/mobile-responsive-layout.md) | レスポンシブレイアウト規約、検索ヘッダーアイコン、モバイルアカウントセクション |
 | [relation-picker-rest-route.md](docs/knowledge/relation-picker-rest-route.md) | `GET /api/{entity}/options`：リレーションピッカー用の REST 検索と ID 参照。Web のオートコンプリートと同じ関数を実行し、認証・権限・組織分離を共有 |
