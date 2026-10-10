@@ -99,7 +99,7 @@ describe('API: direct attachment upload and row creation accept a mobile access 
               method: 'PUT',
               url: `/api/user/${userId}`,
               headers,
-              body: { image_id: attachmentId },
+              body: { name: TEST_CREDENTIALS.name, image_id: attachmentId },
               failOnStatusCode: false,
             }).its('status').should('eq', 200);
             cy.request({ url: `/api/user/${userId}`, headers }).then((detail) => {
