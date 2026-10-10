@@ -107,7 +107,9 @@ export async function bulkDelete(entity: string, ids: string[]): Promise<BulkDel
 export type FieldKind =
   | 'text' | 'number' | 'decimal' | 'boolean' | 'enum' | 'date' | 'datetime' | 'time'
   // A foreign key or one-to-one selector (one record) and a many-to-many (a set of records).
-  | 'relation' | 'relation_many';
+  | 'relation' | 'relation_many'
+  // A direct attachment: the form holds the id of an `attachment` row created for an uploaded file.
+  | 'attachment';
 
 /** One field of an entity's form, as described by the schema. */
 export type FieldSpec = {
@@ -118,7 +120,7 @@ export type FieldSpec = {
   readonly: boolean;
   options: string[];
   numericEnum: boolean;
-  // The fields below are set on a relation field only.
+  // The fields below are set on a relation field only (`relationName` and `bodyKey` also on an attachment field).
   /** Entity whose records are offered. */
   target?: string;
   /** Column of the target that names a record. */
@@ -150,7 +152,7 @@ export function formDataToBody(
     const raw = formData.get(key);
     if (raw === null) continue;
     const text = String(raw);
-    if (spec.kind === 'relation') body[spec.bodyKey ?? key] = text === '' ? null : text;
+    if (spec.kind === 'relation' || spec.kind === 'attachment') body[spec.bodyKey ?? key] = text === '' ? null : text;
     else if (spec.kind === 'boolean') body[key] = text === 'true';
     else if (text === '') body[key] = null;
     else if (spec.kind === 'time') body[key] = timeOfDayToInstant(text) ?? text;

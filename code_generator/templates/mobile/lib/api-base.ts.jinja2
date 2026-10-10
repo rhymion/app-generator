@@ -48,8 +48,15 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshInFlight;
 }
 
-function buildHeaders(accessToken: string | null): Record<string, string> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+/** Absolute URL of a server path (a relative attachment path from the REST detail, for example). */
+export function resolveApiUrl(path: string): string {
+  return /^https?:\/\//.test(path) ? path : `${BASE_URL}${path}`;
+}
+
+// A multipart body (a file upload) carries its own Content-Type with the boundary; every other body is JSON.
+function buildHeaders(accessToken: string | null, init: RequestInit): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (!(typeof FormData !== 'undefined' && init.body instanceof FormData)) headers['Content-Type'] = 'application/json';
   if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
   return headers;
 }
@@ -58,7 +65,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   const accessToken = getAccessTokenSync();
   let res = await fetch(`${BASE_URL}${path}`, {
     ...init,
-    headers: { ...buildHeaders(accessToken), ...(init.headers ?? {}) },
+    headers: { ...buildHeaders(accessToken, init), ...(init.headers ?? {}) },
   });
 
   if (res.status === 401) {
@@ -71,7 +78,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
     // Retry exactly once with the freshly-rotated token.
     res = await fetch(`${BASE_URL}${path}`, {
       ...init,
-      headers: { ...buildHeaders(newAccessToken), ...(init.headers ?? {}) },
+      headers: { ...buildHeaders(newAccessToken, init), ...(init.headers ?? {}) },
     });
   }
 

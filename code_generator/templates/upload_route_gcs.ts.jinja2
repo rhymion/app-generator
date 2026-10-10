@@ -1,15 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Storage } from '@google-cloud/storage';
-import { auth } from '@/auth';
+import { requireCaller, ApiError } from '@/lib/api-auth';
 
 const storage = new Storage();
 const bucketName = process.env.GCS_BUCKET_NAME!;
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // Any authenticated caller: the browser session, or a mobile access token / API key.
+    // Authorization is unchanged (a signed-in user, no finer-grained permission).
+    try {
+      await requireCaller(request);
+    } catch (authError) {
+      if (authError instanceof ApiError) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+      throw authError;
     }
 
     const formData = await request.formData();

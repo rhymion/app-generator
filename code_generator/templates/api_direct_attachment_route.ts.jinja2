@@ -1,0 +1,53 @@
+// AUTO-GENERATED - DO NOT EDIT
+// REST side of the direct-attachment FK path (x-relationship type:direct): creates the standalone
+// `attachment` row for a file already stored through POST /api/upload. The Web form reaches the same
+// function as a Server Action (lib/attachment/direct_actions.ts); this route serves callers that carry
+// a mobile access token or API key instead of a browser session.
+//
+// Authorization is the Server Action's own: any authenticated user may create the row (it is not yet
+// linked to any entity). The entity's create/update permission and organization checks run when the
+// returned id is submitted with the entity form, exactly as for the Web form.
+import { NextRequest, NextResponse } from 'next/server';
+import { requireCaller, withActor, handleApiError, ApiError } from '@/lib/api-auth';
+import { createDirectAttachment } from '@/lib/attachment/direct_actions';
+
+{% if type_values %}
+const ATTACHMENT_TYPES: readonly string[] = {{ type_values | tojson }};
+{% endif %}
+
+export async function POST(request: NextRequest) {
+  try {
+    const { userId } = await requireCaller(request);
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      throw new ApiError(400, 'Request body must be JSON.');
+    }
+    const { name, path, type } = (body ?? {}) as Record<string, unknown>;
+    if (typeof name !== 'string' || name.trim() === '' || name.length > 255) {
+      throw new ApiError(400, 'name must be a non-empty string of at most 255 characters.');
+    }
+    // /api/upload answers with a site-relative path (local disk, GCS proxy) or an absolute http(s) blob URL.
+    if (typeof path !== 'string' || !/^(\/(?!\/)|https?:\/\/)/.test(path)) {
+      throw new ApiError(400, 'path must be the URL returned by /api/upload.');
+    }
+{% if type_values %}
+    if (typeof type !== 'string' || !ATTACHMENT_TYPES.includes(type)) {
+      throw new ApiError(400, `type must be one of: ${ATTACHMENT_TYPES.join(', ')}.`);
+    }
+{% else %}
+    if (typeof type !== 'number' || !Number.isInteger(type)) {
+      throw new ApiError(400, 'type must be an integer.');
+    }
+{% endif %}
+
+    const attachment = await withActor(userId, () =>
+      createDirectAttachment(name, path, type as {{ type_ts }}),
+    );
+    return NextResponse.json(attachment, { status: 201 });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

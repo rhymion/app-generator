@@ -3,6 +3,10 @@ import { Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-nati
 import type { FieldKind, FieldSpec, RelationRow } from '@/lib/entity-http';
 import { DATE_VALUE_HINTS, instantToTimeOfDay, currentDateValue, isValidDateValue, normalizeDateValue, type DateValueFormat } from '@/lib/_date_value';
 import { RelationPicker, relationLabel, type InlineCreateProps } from '@/components/native/RelationPicker';
+{% if has_attachment %}
+import { AttachmentInput } from '@/components/native/AttachmentInput';
+import type { AttachmentRow } from '@/lib/attachment-http';
+{% endif %}
 
 // A relation field holds the selected id (many-to-one, one-to-one) or ids (many-to-many).
 export type FieldValueState = string | boolean | string[];
@@ -94,6 +98,11 @@ export function toDisplayText(spec: FieldSpec, value: unknown): string {
 /** Text a record's field is displayed as on a read-only screen; a relation shows the related record's label. */
 export function toRecordDisplayText(spec: FieldSpec, record: Record<string, unknown>): string {
   const labelField = spec.labelField ?? 'name';
+  // A direct attachment shows the attached file's name, from the row the REST detail embeds.
+  if (spec.kind === 'attachment') {
+    const row = record[spec.relationName ?? spec.key];
+    return row && typeof row === 'object' && typeof (row as { name?: unknown }).name === 'string' ? (row as { name: string }).name : '-';
+  }
   if (spec.kind === 'relation') {
     const row = record[spec.relationName ?? spec.key];
     return row && typeof row === 'object' ? relationLabel(row as RelationRow, labelField) : '-';
@@ -117,11 +126,31 @@ type Props = {
   formValues?: Record<string, FieldValueState>;
   /** The target's create form for a relation field that declares x-create-inline. */
   createForm?: ComponentType<InlineCreateProps>;
+{% if has_attachment %}
+  /** The attachment row a direct attachment field currently holds; its id is the field's value. */
+  attachment?: AttachmentRow | null;
+  onAttachmentChange?: (row: AttachmentRow | null) => void;
+{% endif %}
 };
 
 /** Native control for one field. Holds no validation or submit logic. */
-export function FieldInput({ spec, value, onChange, disabled, caller, formValues, createForm }: Props) {
+export function FieldInput({ spec, value, onChange, disabled, caller, formValues, createForm{% if has_attachment %}, attachment, onAttachmentChange{% endif %} }: Props) {
   const locked = disabled || spec.readonly;
+{% if has_attachment %}
+  if (spec.kind === 'attachment') {
+    return (
+      <AttachmentInput
+        spec={spec}
+        row={attachment ?? null}
+        onChange={(row) => {
+          onChange(row ? row.id : '');
+          onAttachmentChange?.(row);
+        }}
+        disabled={locked}
+      />
+    );
+  }
+{% endif %}
   if (spec.kind === 'relation' || spec.kind === 'relation_many') {
     return (
       <RelationPicker

@@ -9,7 +9,10 @@ fields to draw.
 
 A many-to-one foreign key, a one-to-one selector and a many-to-many declared with
 `x-outputType: list` are drawn as relation pickers whose candidates come from `GET /api/{target}/options`.
-An entity with any other relation feature (children, bridges, attachments, ...)
+A direct attachment field (`x-relationship: {target: attachment, type: direct}`) is drawn as a file
+input: the chosen file is uploaded, an `attachment` row is created for it, and the form submits that
+row's id, as the Web form does.
+An entity with any other relation feature (children, bridges, polymorphic attachments, ...)
 keeps the placeholder screen. The exceptions are the approval bridge and the comment bridge.
 
 An entity that declares `x-approval` (a one-to-one bridge to `approvable` and the `ApprovalSection` view
@@ -40,6 +43,8 @@ KIND_TIME = 'time'
 # A foreign key or one-to-one selector (one record) and a many-to-many (a set).
 KIND_RELATION = 'relation'
 KIND_RELATION_MANY = 'relation_many'
+# A direct attachment field: one `attachment` row the form uploads a file for.
+KIND_ATTACHMENT = 'attachment'
 
 # Keys of the field categories (build_context._categorize_form_fields) that the
 # mobile form can draw, mapped to the widget kind.
@@ -61,7 +66,6 @@ _UNSUPPORTED_CATEGORIES = ('custom_upsert', 'image', 'file_uri', 'entity_select'
 # Context keys whose presence means the entity carries a feature that lives
 # beyond plain CRUD (relations, children, comments, attachments, ...).
 _FEATURE_KEYS = (
-    'direct_attachment_rels',
     'reverse_oto_rels',
     'flatten_rels',
     'entity_custom_components',
@@ -285,6 +289,25 @@ def _relation_entry(rel: dict, ctx: dict, required: set[str], readonly: set[str]
     }
 
 
+def _attachment_entry(rel: dict, required: set[str], readonly: set[str], title) -> dict:
+    """Field entry for a direct attachment field.
+
+    The form submits the attachment row's id under the column name; the REST detail embeds the
+    row (name, path, type) under the relation name, which is the column name without `_id`.
+    """
+    name = rel['prop_name']
+    return {
+        'key': name,
+        'label': title(rel['relation_name']),
+        'kind': KIND_ATTACHMENT,
+        'required': name in required or bool(rel.get('required')),
+        'readonly': name in readonly,
+        'options': [],
+        'relation_name': rel['relation_name'],
+        'body_key': name,
+    }
+
+
 def _relation_many_entry(child: dict, readonly: set[str], title) -> dict:
     """Field entry for a many-to-many picker."""
     name = child['property_name']
@@ -369,6 +392,8 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
         entries[rel['prop_name']] = _relation_entry(rel, ctx, required, readonly, title, rel['relation_name'])
     for child in _picker_children(ctx):
         entries[child['property_name']] = _relation_many_entry(child, readonly, title)
+    for rel in ctx.get('direct_attachment_rels') or []:
+        entries[rel['prop_name']] = _attachment_entry(rel, required, readonly, title)
     if declared:
         names = [n for n in declared if n in entries]
     else:
@@ -380,7 +405,7 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
     table = [next(iter(col)) for col in (ctx.get('xdisplay_table') or []) if isinstance(col, dict) and col]
     # A list row shows scalar columns only: a relation column holds an id, and the
     # REST list does not embed the related record's label.
-    scalar_keys = [f['key'] for f in fields if f['kind'] not in (KIND_RELATION, KIND_RELATION_MANY)]
+    scalar_keys = [f['key'] for f in fields if f['kind'] not in (KIND_RELATION, KIND_RELATION_MANY, KIND_ATTACHMENT)]
     list_keys = [k for k in table if k in kind_by_field] or scalar_keys or [fields[0]['key']]
     list_keys = list_keys[:MAX_LIST_COLUMNS]
     # The REST list sorts and filters on scalar columns only (a relation column holds an id).

@@ -465,6 +465,18 @@ def attachment_type_ts(schema: dict) -> str:
     return get_ts_type(prop)
 
 
+def attachment_type_values(schema: dict) -> list[str] | None:
+    """The string members of `attachment.type` when it is an enum, else None (a plain number).
+
+    The direct-attachment REST route checks the request's `type` against these before it reaches Prisma.
+    """
+    prop = (_raw_def('attachment', schema).get('properties') or {}).get('type') or {}
+    values = prop.get('enum')
+    if isinstance(values, list) and values and all(isinstance(v, str) for v in values):
+        return list(values)
+    return None
+
+
 def reaction_type_ts(schema: dict) -> str:
     """TS type for the `type` param threaded through the comment-reactions
     feature (toggle server action, toggle API route, CommentReactionSummary /
