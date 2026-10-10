@@ -498,6 +498,66 @@ definitions:
           - month
           - quarter
           - year
+      # Native enum `Timezone` shared with app_setting.timezone (prisma/schema.prisma). Bucket boundaries of a
+      # date-time group-by field are computed in this zone; the IANA spelling comes only from lib/_timezone.ts.
+      # Default utc keeps the former always-UTC behavior.
+      timezone:
+        enum:
+          - pacific_pago_pago
+          - pacific_honolulu
+          - pacific_marquesas
+          - america_anchorage
+          - america_los_angeles
+          - america_denver
+          - america_chicago
+          - america_mexico_city
+          - america_new_york
+          - america_toronto
+          - america_bogota
+          - america_caracas
+          - america_st_johns
+          - america_sao_paulo
+          - america_nuuk
+          - atlantic_azores
+          - utc
+          - europe_london
+          - europe_madrid
+          - europe_paris
+          - europe_berlin
+          - europe_rome
+          - africa_lagos
+          - africa_cairo
+          - africa_johannesburg
+          - asia_jerusalem
+          - europe_istanbul
+          - europe_moscow
+          - asia_tehran
+          - asia_dubai
+          - asia_kabul
+          - asia_karachi
+          - asia_kolkata
+          - asia_kathmandu
+          - asia_dhaka
+          - asia_yangon
+          - asia_bangkok
+          - asia_jakarta
+          - asia_shanghai
+          - asia_hong_kong
+          - asia_singapore
+          - asia_manila
+          - australia_perth
+          - australia_eucla
+          - asia_seoul
+          - asia_tokyo
+          - australia_adelaide
+          - australia_sydney
+          - australia_lord_howe
+          - pacific_noumea
+          - pacific_auckland
+          - pacific_chatham
+          - pacific_apia
+          - pacific_kiritimati
+        default: utc
       group_by_field: {}
       filter_field: {}
       filter_value: {}

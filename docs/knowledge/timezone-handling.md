@@ -321,6 +321,30 @@ against the version that introduces the enum:
 - `bash scripts/check_timezone_migration.sh` (`npm run test:timezone-migration`) runs the script against a
   scratch database on the test Postgres server with rows of each kind and checks the result and the record.
 
+### Dashboard widget time zone
+
+`dashboard_widget.timezone` is a `Timezone` column (default `utc`). It decides where the day, week
+(Monday start), month, quarter and year boundaries of a time-bucketed chart fall.
+
+- **Date-only fields** (`format: date`) are always bucketed on their stored calendar date, which is UTC
+  midnight. Converting that instant to a zone west of UTC would move it to the previous day, so a record
+  dated 2026-10-01 would be counted under 2026-09-30.
+- **Date-time fields** (`format: date-time`, including the audit columns `created_at` and `updated_at`,
+  which every dashboardable entity's catalog lists) are bucketed in the widget's zone. The bucket key is the
+  calendar date of the instant in that zone, so a day that is 23 or 25 hours long at a DST change is still
+  one bucket. The zone is resolved only through `TIMEZONE_IANA_NAME`; no IANA spelling is stored on the
+  widget.
+- The widget editor is the generic child grid of `dashboard`, which has no per-row conditional columns, so the
+  `timezone` column is always listed. The rule is enforced when the chart is computed: a non-`utc` zone on a
+  group-by field that is not a date-time is answered with `400` (a saved widget with that combination renders
+  the error instead of a chart). Saving cannot reject it because the validation hook does not receive child rows.
+- A zone other than `utc` is named in the widget's subheader, so a chart is never ambiguous.
+- `POST /api/dashboard/aggregate` accepts `timezone` as the enum's string literal (for example `asia_tokyo`).
+  It is optional and defaults to `utc`; an unknown value, including an IANA spelling, returns `400`.
+- Existing databases run `scripts/migrations/05_dashboard_widget_timezone.sql` once, after
+  `04_app_setting_timezone_enum.sql` (which creates the enum type). Existing widgets get `utc`, the zone
+  every bucket used before, so their numbers do not change.
+
 ---
 
 ## Future Considerations

@@ -6,6 +6,7 @@ import CardHeader from '@mui/material/CardHeader';
 import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
 import Skeleton from '@mui/material/Skeleton';
+import { useTranslations } from 'next-intl';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -29,6 +30,8 @@ export type WidgetConfig = {
   stack_mode?: StackMode | null;
   series_field?: string | null;        // required when stack_mode is set
   group_by_bucket?: BucketGranularity | null;
+  // Timezone enum member (e.g. 'asia_tokyo'); only meaningful for a date-time group_by_field.
+  timezone?: string | null;
 };
 
 // chart_type/stack_mode/group_by_bucket are Prisma nativeEnum columns (cmd_446 Class A) —
@@ -111,6 +114,7 @@ function conditionsKey(conditions: FilterCondition[] | null | undefined): string
 }
 
 export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
+  const tz = useTranslations('Timezone');
   const [{ output, error, loading }, dispatch] = useReducer(reducer, { output: EMPTY_OUTPUT, error: null, loading: true });
 
   const validationError = validateConfig(widget);
@@ -138,13 +142,14 @@ export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
       seriesField,
       activeConditions ?? undefined,
       groupByBucket,
+      widget.timezone ?? undefined,
     )
       .then((result) => { if (!cancelled) dispatch({ type: 'success', output: result }); })
       .catch((e: unknown) => {
         if (!cancelled) dispatch({ type: 'error', message: e instanceof Error ? e.message : 'Failed to load' });
       });
     return () => { cancelled = true; };
-  }, [widget.entity_name, widget.group_by_field, widget.filter_field, widget.filter_value, widget.stack_mode, widget.series_field, widget.group_by_bucket, validationError, condKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [widget.entity_name, widget.group_by_field, widget.filter_field, widget.filter_value, widget.stack_mode, widget.series_field, widget.group_by_bucket, widget.timezone, validationError, condKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const chartType = normalizeChartType(widget.chart_type);
   const stackMode = normalizeStackMode(widget.stack_mode);
@@ -178,7 +183,8 @@ export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
     <Card variant="outlined" sx={{ width: '100%' }}>
       <CardHeader
         title={widget.name}
-        subheader={`${widget.entity_name} grouped by ${widget.group_by_field}`}
+        // A non-UTC zone is named in the subheader so the buckets are never ambiguous.
+        subheader={`${widget.entity_name} grouped by ${widget.group_by_field}${!loading && !error && output.timezone ? ` (${tz(output.timezone)})` : ''}`}
         titleTypographyProps={{ variant: 'subtitle1' }}
         subheaderTypographyProps={{ variant: 'caption' }}
         action={

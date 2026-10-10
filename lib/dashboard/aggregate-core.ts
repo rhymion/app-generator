@@ -4,6 +4,7 @@
 import prisma from '@/lib/prisma';
 import { ApiError } from '@/lib/api-auth';
 import { findDashboardEntity, findDashboardField, DashboardField } from './catalog';
+import { TIMEZONE_VALUES, TIMEZONE_IANA_NAME, DEFAULT_TIMEZONE, type Timezone } from '@/lib/_timezone';
 
 // Type definitions live here to avoid circular imports with aggregate.ts.
 export type AggregateBucket = { label: string; count: number };
@@ -20,9 +21,11 @@ export type FilterCondition = {
   values: (string | number | boolean)[];
 };
 
+// `timezone` is set only when time buckets were computed in a zone other than UTC, so the caller
+// can label the chart with the zone's translated name.
 export type AggregateOutput =
-  | { kind: 'single'; data: AggregateBucket[] }
-  | { kind: 'multi'; categories: string[]; series: { label: string; data: number[] }[] };
+  | { kind: 'single'; data: AggregateBucket[]; timezone?: Timezone }
+  | { kind: 'multi'; categories: string[]; series: { label: string; data: number[] }[]; timezone?: Timezone };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyPrismaModel = { groupBy: (args: any) => Promise<any[]>; findMany: (args: any) => Promise<any[]> };
@@ -113,26 +116,49 @@ function applyLabel(labelMap: Map<string, string>, raw: unknown): string {
   return labelMap.get(String(raw)) ?? String(raw);
 }
 
-// Returns ISO-based bucket key for app-side grouping (no DB date_trunc).
-function truncateToBucket(date: Date, bucket: BucketGranularity): string {
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+const zoneFormatters = new Map<Timezone, Intl.DateTimeFormat>();
+
+// Calendar year/month/day of an instant in the zone. The zone is resolved only through
+// TIMEZONE_IANA_NAME, so no IANA spelling lives anywhere else.
+function civilDateInZone(date: Date, zone: Timezone): { y: number; m: number; d: number } {
+  let fmt = zoneFormatters.get(zone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: TIMEZONE_IANA_NAME[zone],
+      calendar: 'gregory',
+      numberingSystem: 'latn',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    zoneFormatters.set(zone, fmt);
+  }
+  const parts = fmt.formatToParts(date);
+  const pick = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return { y: pick('year'), m: pick('month'), d: pick('day') };
+}
+
+// Returns ISO-based bucket key for app-side grouping (no DB date_trunc). Boundaries are the zone's
+// calendar day / Monday-start week / month / quarter / year, so they follow DST changes.
+export function truncateToBucket(date: Date, bucket: BucketGranularity, zone: Timezone = DEFAULT_TIMEZONE): string {
+  const { y, m, d } = civilDateInZone(date, zone);
   switch (bucket) {
     case 'day':
-      return date.toISOString().slice(0, 10);
+      return `${String(y).padStart(4, '0')}-${pad2(m)}-${pad2(d)}`;
     case 'week': {
-      const d = new Date(date);
-      // Shift to Monday (day 0 = Sunday → offset = (day + 6) % 7)
-      d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
-      return d.toISOString().slice(0, 10);
+      // Civil-date arithmetic on a UTC date, so DST never enters the calculation.
+      const monday = new Date(Date.UTC(y, m - 1, d));
+      monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+      return monday.toISOString().slice(0, 10);
     }
     case 'month':
-      return date.toISOString().slice(0, 7);
-    case 'quarter': {
-      const d = new Date(date);
-      const quarterMonth = Math.floor(d.getUTCMonth() / 3) * 3;
-      return `${d.getUTCFullYear()}-${String(quarterMonth + 1).padStart(2, '0')}`;
-    }
+      return `${String(y).padStart(4, '0')}-${pad2(m)}`;
+    case 'quarter':
+      return `${String(y).padStart(4, '0')}-${pad2(Math.floor((m - 1) / 3) * 3 + 1)}`;
     case 'year':
-      return date.toISOString().slice(0, 4);
+      return String(y).padStart(4, '0');
   }
 }
 
@@ -153,7 +179,8 @@ async function aggregateBucketSingle(
   field: DashboardField,
   bucket: BucketGranularity,
   conditions: FilterCondition[],
-): Promise<{ kind: 'single'; data: AggregateBucket[] }> {
+  zone: Timezone,
+): Promise<{ kind: 'single'; data: AggregateBucket[]; timezone?: Timezone }> {
   const where = buildConditionsWhere(conditions);
   const rows = await getModelClient(entityName).findMany({
     select: { [field.name]: true },
@@ -163,8 +190,8 @@ async function aggregateBucketSingle(
   const counts = new Map<string, number>();
   for (const row of rows) {
     const val = row[field.name];
-    const key = val instanceof Date ? truncateToBucket(val, bucket)
-      : (typeof val === 'string' && val) ? truncateToBucket(new Date(val), bucket)
+    const key = val instanceof Date ? truncateToBucket(val, bucket, zone)
+      : (typeof val === 'string' && val) ? truncateToBucket(new Date(val), bucket, zone)
       : '(unspecified)';
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
@@ -176,6 +203,7 @@ async function aggregateBucketSingle(
       label: key === '(unspecified)' ? key : formatBucketKey(key, bucket),
       count,
     })),
+    ...(zone !== DEFAULT_TIMEZONE ? { timezone: zone } : {}),
   };
 }
 
@@ -186,7 +214,8 @@ async function aggregateBucketMultiSeries(
   serField: DashboardField,
   bucket: BucketGranularity,
   conditions: FilterCondition[],
-): Promise<{ kind: 'multi'; categories: string[]; series: { label: string; data: number[] }[] }> {
+  zone: Timezone,
+): Promise<{ kind: 'multi'; categories: string[]; series: { label: string; data: number[] }[]; timezone?: Timezone }> {
   const where = buildConditionsWhere(conditions);
   const rows = await getModelClient(entityName).findMany({
     select: { [catField.name]: true, [serField.name]: true },
@@ -200,8 +229,8 @@ async function aggregateBucketMultiSeries(
 
   for (const row of rows) {
     const tsVal = row[catField.name];
-    const bucketKey = tsVal instanceof Date ? truncateToBucket(tsVal, bucket)
-      : (typeof tsVal === 'string' && tsVal) ? truncateToBucket(new Date(tsVal), bucket)
+    const bucketKey = tsVal instanceof Date ? truncateToBucket(tsVal, bucket, zone)
+      : (typeof tsVal === 'string' && tsVal) ? truncateToBucket(new Date(tsVal), bucket, zone)
       : '(unspecified)';
     const serVal = row[serField.name];
     const serKey = String(serVal ?? '');
@@ -225,7 +254,7 @@ async function aggregateBucketMultiSeries(
     data: bucketOrder.map((bk) => counts.get(bk)?.get(String(sv ?? '')) ?? 0),
   }));
 
-  return { kind: 'multi', categories, series };
+  return { kind: 'multi', categories, series, ...(zone !== DEFAULT_TIMEZONE ? { timezone: zone } : {}) };
 }
 
 async function aggregateMultiSeries(
@@ -268,6 +297,15 @@ async function aggregateMultiSeries(
   return { kind: 'multi', categories, series };
 }
 
+// A missing time zone means UTC; an unknown value is a client error, never silently coerced.
+function resolveTimezone(raw: string | null | undefined): Timezone {
+  if (raw == null || raw === '') return DEFAULT_TIMEZONE;
+  if (!(TIMEZONE_VALUES as readonly string[]).includes(raw)) {
+    throw new ApiError(400, `Unknown timezone: ${raw}`);
+  }
+  return raw as Timezone;
+}
+
 // Core aggregation without auth — called by both the session-auth Server Action
 // and the API-key-auth REST route. Validates entity/fields via catalog.
 export async function aggregateForWidgetCore(
@@ -277,6 +315,7 @@ export async function aggregateForWidgetCore(
   seriesField?: string,
   conditions?: FilterCondition[],
   groupByBucket?: BucketGranularity,
+  timezone?: string | null,
 ): Promise<AggregateOutput> {
   const entity = findDashboardEntity(entityName);
   if (!entity) throw new ApiError(400, `Entity '${entityName}' is not dashboardable`);
@@ -297,6 +336,13 @@ export async function aggregateForWidgetCore(
     }
   }
 
+  const zone = resolveTimezone(timezone);
+  // Date-only fields keep the calendar date as stored (UTC); a time zone only applies to date-times.
+  const zoneApplies = field.kind === 'datetime' && field.datetime_format === 'date-time';
+  if (zone !== DEFAULT_TIMEZONE && !zoneApplies) {
+    throw new ApiError(400, `timezone '${zone}' requires a date-time group_by_field; '${groupByField}' is not a date-time field`);
+  }
+
   if (groupByBucket) {
     if (field.kind !== 'datetime') {
       throw new ApiError(400, `group_by_bucket requires a datetime field; '${groupByField}' is '${field.kind}'`);
@@ -304,9 +350,9 @@ export async function aggregateForWidgetCore(
     if (seriesField) {
       const serField = findDashboardField(entityName, seriesField);
       if (!serField) throw new ApiError(400, `Unknown series_field: ${seriesField}`);
-      return aggregateBucketMultiSeries(entityName, field, serField, groupByBucket, activeConditions);
+      return aggregateBucketMultiSeries(entityName, field, serField, groupByBucket, activeConditions, zone);
     }
-    return aggregateBucketSingle(entityName, field, groupByBucket, activeConditions);
+    return aggregateBucketSingle(entityName, field, groupByBucket, activeConditions, zone);
   }
 
   const where: Record<string, unknown> | undefined =

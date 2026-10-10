@@ -25,7 +25,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - **API キーの有効期限** — 任意設定のnullable列 `user.api_key_expires_at`（`null` は無期限、既存の全キーの挙動を変えない）を、唯一の共通検証点 `authenticateApiKey()` でチェックする。期限切れのキーによるリクエストは `401 API key expired.` で拒否される — 詳細は [`docs/knowledge/api-key-expiry.md`](docs/knowledge/api-key-expiry.md) を参照
 - **生成ドキュメント + OpenAPI 3.1 仕様** — エンティティごとの人間可読ドキュメント（`docs/generated/{entity}.md`、`/en/docs` 配下にも反映）。承認フロー・書き込みロックを持つエンティティには「Constraints」節を含む。加えて機械可読な統合仕様 `docs/generated/openapi.json` をビルド成果物として生成し、`GET /api/openapi.json`（APIキーまたはセッション必須、全環境）で配信。`SWAGGER_UI_ENABLED` で有効化する対話的な `/swagger` 画面も用意（開発・ステージング限定、本番では有効化しない）— 詳細は [`docs/knowledge/generated-documentation-and-openapi-spec.md`](docs/knowledge/generated-documentation-and-openapi-spec.md) を参照
 - **Cypress テスト生成** — アプリケーションコードと並行して UI および API テストスイートを生成
-- **ダッシュボードチャート** (`x-display.dashboard: true`) — カラム・バー・ライン・パイチャートのレンダリングを生成；スタッキングモード・タイムスタンプバケット・型付きフィルター・CSV/Excel エクスポート・REST アグリゲートエンドポイント（`/api/{entity}/aggregate`）をエンティティごとに生成
+- **ダッシュボードチャート** (`x-display.dashboard: true`) — カラム・バー・ライン・パイチャートのレンダリングを生成；スタッキングモード・タイムスタンプバケット（タイムゾーン選択可）・型付きフィルター・CSV/Excel エクスポート・REST アグリゲートエンドポイント（`/api/{entity}/aggregate`）をエンティティごとに生成
 - **インベントリ予約** (`x-reservation`) — 容量・在庫管理のためのスキーマレベルのオプトイン；`count` モードは数値カウンターカラムを条件付き UPDATE で予約し、`item` モードは `inventory_allocation` ブリッジテーブルで行ロックを実施
 - **ラッパーコンポーネントアーキテクチャ** — エンティティごとに生成されたコンポーネントが `components/_standard/` の共有ラッパーを使用（静的提供；`generate-code` 再実行で上書きされない）、生成コンポーネントは `@mui/*` の代わりに `components/ui/` の共有 `App*` ラッパーを import するため、自動生成コードが MUI に直接依存しなくなりました（プロバイダー設定を除く）
 - **エンティティ横断全文検索** (`x-generate.search: true`) — 検索可能なエンティティが存在する場合に `GET /api/search` REST エンドポイントとグローバル検索 UI ページ（`app/[locale]/search/page.tsx`）を生成；オプトインしたエンティティ全体への UNION ALL クエリで、エンティティごとにテナント・権限フィルターを適用；pg_bigm による日本語 2-gram 検索；ファセット（エンティティタイプ別ヒット件数）と XSS セーフなスニペットハイライト
@@ -62,7 +62,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 - **インベントリ予約** — スキーマレベルの `x-reservation` による容量・在庫管理（count モードと item モード）；予約元エンティティのライフサイクル遷移は独自の予約ライフサイクル機構ではなく承認フローシステムの承認/（terminal）却下を経由
 - **インベントリ台帳**（`x-ledger-source`） — スキーマにledgerトップレベル宣言がある場合に生成される `inventory_transaction` 台帳エンティティと `transactionable` ブリッジ；入荷伝票や請求明細エンティティに `x-ledger-source` を付与すると write/adjust/move のスタブテンプレートを生成
 - **分割アクション**（`x-splittable`） — エンティティに付与すると、一覧・編集ページからロット単位の分割操作を行う分割アクション UI セクションと API ルートを生成
-- **ダッシュボードチャート** — スキーマから生成されるエンティティごとのチャートウィジェット（カラム・バー・ライン・パイ）；スタッキング・時間バケット・型付きフィルター・CSV/Excel エクスポート・REST アグリゲートエンドポイント
+- **ダッシュボードチャート** — スキーマから生成されるエンティティごとのチャートウィジェット（カラム・バー・ライン・パイ）；スタッキング・時間バケット（タイムゾーン選択可）・型付きフィルター・CSV/Excel エクスポート・REST アグリゲートエンドポイント
 - **エンティティ横断検索** — オプトインしたエンティティへの UNION ALL による `GET /api/search`；ファセット・ハイライト・日本語 pg_bigm 対応；ヘッダー検索アイコンと検索ページを生成
 - **承認後イベント発火** — `x-approval.on_approved.set_fields`（フィールド更新）および `x-approval.on_approved.emit_hook`（生成 `service_after_approve.ts` による カスタムロジック）；`approvable.approved_at` による冪等性保証。`x-approval-lines` は承認明細エンティティをインベントリ台帳操作に接続する作成前後のヘルパーを生成
 - **宣言的な書き込みロック値**（`x-write-locked-values`） — エンティティに `{field_name: [value, ...]}` 形式で注釈すると、通常の作成・更新がその値を直接書き込もうとした際に拒否される（画面・REST API・Server Action・CSV インポートすべてで強制）。値自体は選択肢として表示されたまま選択不可（disabled）になり、非表示にはならない；`x-approval` 由来のロック値との和集合として合成されるため、両方の仕組みが依存関係なく同一フィールドを同時に保護できる。詳細は [`docs/knowledge/x-write-locked-values-field-lockdown.md`](docs/knowledge/x-write-locked-values-field-lockdown.md) を参照してください

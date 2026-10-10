@@ -20,6 +20,7 @@ type WidgetConfigInput = {
   stack_mode?: StackMode | null;
   series_field?: string | null;
   group_by_bucket?: BucketGranularity | null;
+  timezone?: string | null;
   [key: string]: unknown;
 };
 
