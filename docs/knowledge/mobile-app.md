@@ -377,7 +377,7 @@ when it does not.
 | Detail (action, target table and id, actor, time, metadata as formatted JSON) | `/entity/audit_log/<id>` | `GET /api/audit_log/<id>` |
 
 Both screens are registered in `lib/entity-registry.ts` under `audit_log` with no form, and are rendered from
-`templates/mobile/audit_log/`. They send no write request. Permission is the server's: the link is hidden when
+`templates/mobile/audit_log/`. They send no write request. Both routes authenticate with `authenticate()` (the mobile access token or a service API key), like the entity routes. Permission is the server's: the link is hidden when
 `GET /api/mobile/nav` lists `/audit_log` (the caller lacks `read` on `audit_log`, the rule the desktop sidebar
 applies), and a list request that is refused with `403` shows the shared `Errors.permissionDenied` message. The
 strings come from `EntityLabel.auditLog`, `Fields` (`action`, `actorUser`, `created_at`, `metadata`,
@@ -500,7 +500,7 @@ runs the Expo web server and the proxy as one process so the runner can stop bot
   `FLOW_TYPE` (`assert`, `drill`); a new need adds a preset instead of a new script. Never launch
   Chromium with `--disable-web-security` — it hides the CORS-class gaps this check exists to catch.
 - `mobile/e2e/audit-log.spec.ts` (default schema) covers the Audit Log link under Administration, the real
-  list route, paging with the newest-first sort, the detail with its metadata and no edit or delete action,
+  list route answering 200 to the mobile access token, paging with the newest-first sort, the detail with its metadata and no edit or delete action,
   a missing entry, a link hidden by the nav route and a refused request.
 - `code_generator/tests/test_mobile_nav.py` covers the tree built from the nav configuration, including the
   audit log link.

@@ -4,6 +4,12 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- **Mobile: the Audit Log screen no longer shows "An unexpected error occurred"** (Issue #926). `GET /api/audit_log`
+  and `GET /api/audit_log/<id>` authenticated with `authenticateApiKey()`, which does not understand the mobile
+  access token, so the app's `Authorization: Bearer <jwt>` request was answered `401 Invalid API key.`. Both routes
+  now use `authenticate()` like every generated entity route (mobile access token or API key); permission checks
+  and the service API key path are unchanged.
 ### Added
 - **`app_setting.timezone` is a native `Timezone` enum** (Issue #921). The column was a free `String`; any
   text could be stored through the form, REST, CSV import and the seed. It is now a Prisma enum of 54 zones
