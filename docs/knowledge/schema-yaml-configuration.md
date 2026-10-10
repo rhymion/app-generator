@@ -971,6 +971,11 @@ never asked to touch the `attachment` model (subtask_788b; the file used to be e
 unconditionally and broke every consumer's `tsc` build regardless of whether they used the
 feature, see CHANGELOG).
 
+The same condition emits `app/api/attachment/direct/route.ts`, the REST form of the upload server action
+(`POST /api/attachment/direct`), and `POST /api/upload` accepts a mobile access token or API key as well as the
+browser session. The generated Expo app uses both to draw the field as a file input
+(`docs/knowledge/mobile-app.md`, "Direct attachment fields"); the Web form is unchanged.
+
 Implementation-internals notes from when this feature was built (why the generator's TS-type
 resolution for `attachment.type` must read the raw entity definition rather than the plain
 entity properties, the encrypted-filename decrypt/strip pass the generated getter applies

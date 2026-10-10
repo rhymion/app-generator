@@ -11,6 +11,19 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   now use `authenticate()` like every generated entity route (mobile access token or API key); permission checks
   and the service API key path are unchanged.
 ### Added
+- **Mobile: direct attachment fields** (Issue #931). An entity with an `x-relationship: {target: attachment,
+  type: direct}` field (for example `leave_request.medical_certificate_id`) is no longer left on the
+  "not available in the mobile app yet" placeholder. The Expo form picks a file with the system document picker
+  (`expo-document-picker`, added to `mobile/package.json` only when some entity has such a field), uploads it
+  through `POST /api/upload`, creates the `attachment` row through the new `POST /api/attachment/direct`, and
+  submits the row's id with the entity, as the Web form does; the detail screen shows the file name and opens the
+  file. `POST /api/upload` now accepts a mobile access token or API key in addition to the browser session (a
+  caller with no valid credential still gets `401 {"error": "Unauthorized"}`); `POST /api/attachment/direct` runs the
+  existing `createDirectAttachment` action as the authenticated caller, so permissions and organization
+  checks are unchanged: any authenticated user may store a file and create the unlinked row, and the entity's own
+  `create` / `update` permission decides whether the link is saved. Entities that also declare polymorphic
+  attachments, virtual columns or another unsupported feature keep the placeholder; the generation log still names
+  the reason. See `docs/knowledge/mobile-app.md`.
 - **Report which entities are left out of the mobile app** (Issue #925). `generate-code` prints the entities that
   keep the "not available in the mobile app yet" placeholder, grouped by reason, and writes the same list to
   `mobile/MOBILE_ENTITIES.md`. Only generated `mobile/` output gains that one file (and only when

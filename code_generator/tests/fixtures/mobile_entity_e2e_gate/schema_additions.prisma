@@ -250,3 +250,21 @@ model mobile_shipment {
   @@index([creator_id])
   @@index([updater_id])
 }
+
+model mobile_document {
+  id          String      @id @default(cuid())
+  title       String
+  file_id     String?     @unique
+  file        attachment? @relation("MobileDocumentFile", fields: [file_id], references: [id], onDelete: SetNull)
+  contract_id String      @unique
+  contract    attachment  @relation("MobileDocumentContract", fields: [contract_id], references: [id])
+  created_at  DateTime    @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime    @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user        @relation("MobileDocumentCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user        @relation("MobileDocumentUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([creator_id])
+  @@index([updater_id])
+}

@@ -25,7 +25,9 @@
     "created_mobile_shipments mobile_shipment[] @relation(\"MobileShipmentCreator\")",
     "updated_mobile_shipments mobile_shipment[] @relation(\"MobileShipmentUpdater\")",
     "created_mobile_threads mobile_thread[] @relation(\"MobileThreadCreator\")",
-    "updated_mobile_threads mobile_thread[] @relation(\"MobileThreadUpdater\")"
+    "updated_mobile_threads mobile_thread[] @relation(\"MobileThreadUpdater\")",
+    "created_mobile_documents mobile_document[] @relation(\"MobileDocumentCreator\")",
+    "updated_mobile_documents mobile_document[] @relation(\"MobileDocumentUpdater\")"
   ],
   "organization": [
     "mobile_org_items mobile_org_item[]"
@@ -36,5 +38,9 @@
   ],
   "commentable": [
     "mobile_thread mobile_thread?"
+  ],
+  "attachment": [
+    "mobile_document_file mobile_document? @relation(\"MobileDocumentFile\")",
+    "mobile_document_contract mobile_document? @relation(\"MobileDocumentContract\")"
   ]
 }

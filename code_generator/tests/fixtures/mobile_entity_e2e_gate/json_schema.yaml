@@ -16,6 +16,8 @@ x-generator:
 #    membership, so the picker must offer only the caller's organizations.
 #  - mobile_thread: a commentable entity (list, view, edit and delete): its detail screen draws the comment
 #    thread with the comment box, the @-mention lookup and the reaction bar. The default schema supplies commentable / comment / reaction.
+#  - mobile_document: two direct attachment fields (x-relationship type: direct), `file` optional and
+#    `contract` required: the form picks a file, uploads it, and submits the created attachment row's id.
 # Used by the Expo Playwright run described in docs/knowledge/mobile-app.md.
 
 definitions:
@@ -199,6 +201,34 @@ definitions:
     required:
       - name
       - organization_id
+
+  mobile_document:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - title:
+            primary: true
+    fields:
+      title: {}
+      file_id:
+        x-relationship:
+          target: attachment
+          type: direct
+      contract_id:
+        x-relationship:
+          target: attachment
+          type: direct
+    required:
+      - title
+      - contract_id
 
   # x-create-inline: mobile_ticket's category field offers "Create new", which opens
   # mobile_category's native create form over the ticket form. mobile_category declares no
