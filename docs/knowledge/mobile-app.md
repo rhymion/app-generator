@@ -129,6 +129,11 @@ REST routes, or has a field with no native widget (image or file URI, entity sel
 component). In the default schema `role`, `organization` and `app_setting` qualify; `user` (a custom component) keeps
 the placeholder. The fixture schema in `code_generator/tests/fixtures/mobile_entity_gate/` covers the rest.
 
+`generate-code` reports which entities were left on the placeholder screen and why. It prints them at the end of the
+mobile step, grouped by reason (the first failing check of `mobile_ineligible_reason()`), and writes the same list to
+`mobile/MOBILE_ENTITIES.md`, so it can be read without rerunning the generator. When every entity has a screen the log
+prints nothing and the note says so. The report changes no screen.
+
 ### List: sort, filter, search and bulk delete
 
 The list screen passes the REST list's own parameters, so the rules are the server's, the same as the Web
