@@ -4,6 +4,13 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
+### Changed
+- **Auth code no longer writes email addresses to `audit_log` or to auth `console.info` lines** (Issue #935). `auth:signIn`
+  and `auth:createUser` rows drop `metadata.email`; the `email_in_use_by_credentials` rejection drops it too and now
+  records the existing user's id as `target_id` (`actor_user_id` stays null); `domain_not_allowed` keeps only `reason`
+  and `provider`. The matching `[auth:*]` log lines no longer carry `email` / `oauthEmail`. The redaction step in
+  `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
+  See `docs/knowledge/authentication.md`.
 ### Fixed
 - **Mobile: the Audit Log screen no longer shows "An unexpected error occurred"** (Issue #926). `GET /api/audit_log`
   and `GET /api/audit_log/<id>` authenticated with `authenticateApiKey()`, which does not understand the mobile
