@@ -56,6 +56,7 @@
     "test:list-child-e2e-gate": "bash scripts/check_list_child_e2e_gate_fixture.sh",
     "test:comment-rest-e2e-gate": "bash scripts/check_comment_rest_e2e_gate_fixture.sh",
     "test:scheduled-task-e2e-gate": "bash scripts/check_scheduled_task_e2e_gate_fixture.sh",
+    "test:timezone-migration": "bash scripts/check_timezone_migration.sh",
     "start": "node scripts/run-next-start.js",
     "test": "vitest",
     "test:coverage": "vitest --coverage",

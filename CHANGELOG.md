@@ -4,11 +4,27 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- **Mobile: the Audit Log screen no longer shows "An unexpected error occurred"** (Issue #926). `GET /api/audit_log`
+  and `GET /api/audit_log/<id>` authenticated with `authenticateApiKey()`, which does not understand the mobile
+  access token, so the app's `Authorization: Bearer <jwt>` request was answered `401 Invalid API key.`. Both routes
+  now use `authenticate()` like every generated entity route (mobile access token or API key); permission checks
+  and the service API key path are unchanged.
 ### Added
 - **Report which entities are left out of the mobile app** (Issue #925). `generate-code` prints the entities that
   keep the "not available in the mobile app yet" placeholder, grouped by reason, and writes the same list to
   `mobile/MOBILE_ENTITIES.md`. Only generated `mobile/` output gains that one file (and only when
   `x-generator.mobile.enabled` is true); no screen, schema key or Web file changes. See `docs/knowledge/mobile-app.md`.
+- **`app_setting.timezone` is a native `Timezone` enum** (Issue #921). The column was a free `String`; any
+  text could be stored through the form, REST, CSV import and the seed. It is now a Prisma enum of 54 zones
+  covering every standard-time UTC offset, with snake_case members (`asia_tokyo`) that are never renamed. The
+  IANA spelling (`Asia/Tokyo`) is written only in the generated `lib/_timezone.ts`
+  (`TIMEZONE_IANA_NAME`, also copied to `mobile/lib/`); display names come from the `Timezone` namespace of
+  `messages/*.json`. `TimeZoneSelect` lists the enum members and their labels, and the generated New/Edit form
+  now renders it for the field. **Consumers with existing `app_setting` rows** run
+  `scripts/migrations/04_app_setting_timezone_enum.sql` once (it records every coerced value in
+  `"_app_setting_timezone_coerced"`); `bash scripts/check_timezone_migration.sh` exercises it. See
+  `docs/knowledge/timezone-handling.md`.
 - **Mobile: write comments and mention users** (Issues #861, #862). On an entity that has the comment write
   routes, the Expo detail screen's comment thread gets a comment box, Edit and Delete on comments, and, when
   the schema has an `x-mention` field, a user lookup while typing `@`. It calls only
