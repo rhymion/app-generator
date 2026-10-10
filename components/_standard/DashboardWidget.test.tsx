@@ -4,6 +4,10 @@ import { vi, describe, it, expect, beforeEach } from 'vitest';
 import DashboardWidget from './DashboardWidget';
 import type { WidgetConfig } from './DashboardWidget';
 
+vi.mock('next-intl', () => ({
+  useTranslations: (ns: string) => (key: string) => `${ns}:${key}`,
+}));
+
 vi.mock('@/lib/dashboard/aggregate', () => ({
   aggregateForWidget: vi.fn(),
 }));
@@ -94,7 +98,8 @@ describe('DashboardWidget', () => {
         { field: 'priority', value: 'high' },
         undefined,
         undefined,
-        undefined
+        undefined,
+        undefined,
       );
     });
   });
@@ -103,7 +108,25 @@ describe('DashboardWidget', () => {
     mockAggregate.mockResolvedValue({ kind: 'single', data: [] });
     render(<DashboardWidget widget={widget} />);
     await waitFor(() => {
-      expect(mockAggregate).toHaveBeenCalledWith('task', 'status', null, undefined, undefined, undefined);
+      expect(mockAggregate).toHaveBeenCalledWith('task', 'status', null, undefined, undefined, undefined, undefined);
     });
+  });
+
+  it('passes the stored time zone to the aggregation and names a non-UTC zone in the subheader', async () => {
+    mockAggregate.mockResolvedValue({ kind: 'single', data: [], timezone: 'asia_tokyo' });
+    render(
+      <DashboardWidget
+        widget={{ ...widget, group_by_field: 'created_at', chart_type: 'line', group_by_bucket: 'day', timezone: 'asia_tokyo' }}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText('task grouped by created_at (Timezone:asia_tokyo)')).toBeInTheDocument());
+    expect(mockAggregate).toHaveBeenCalledWith('task', 'created_at', null, undefined, undefined, 'day', 'asia_tokyo');
+  });
+
+  it('shows no zone for a UTC widget', async () => {
+    mockAggregate.mockResolvedValue({ kind: 'single', data: [] });
+    render(<DashboardWidget widget={{ ...widget, timezone: 'utc' }} />);
+    await waitFor(() => expect(mockAggregate).toHaveBeenCalled());
+    expect(screen.getByText('task grouped by status')).toBeInTheDocument();
   });
 });

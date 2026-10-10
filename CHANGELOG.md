@@ -11,6 +11,16 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   now use `authenticate()` like every generated entity route (mobile access token or API key); permission checks
   and the service API key path are unchanged.
 ### Added
+- **Dashboard widget time zone and `created_at` / `updated_at` buckets** (Issue #911). `dashboard_widget` has a
+  new `timezone` column of the shared `Timezone` enum (default `utc`, the zone every bucket used before). Day,
+  week (Monday start), month, quarter and year boundaries of a date-time group-by field are computed in that
+  zone, following DST changes; date-only fields keep their stored calendar date (UTC), and a non-`utc` zone on
+  a field that is not a date-time is answered with `400` when the chart is computed. The zone is resolved only
+  through `TIMEZONE_IANA_NAME`. A non-UTC zone is named in the widget subheader. `POST /api/dashboard/aggregate`
+  accepts an optional `timezone` (the enum literal, for example `asia_tokyo`); an unknown value returns `400`.
+  Every dashboardable entity's catalog now lists `created_at` and `updated_at` as date-time fields, so they can
+  be time-bucketed. **Consumers with existing data** run `scripts/migrations/05_dashboard_widget_timezone.sql`
+  once, after `04_app_setting_timezone_enum.sql`. See `docs/knowledge/timezone-handling.md`.
 - **Report which entities are left out of the mobile app** (Issue #925). `generate-code` prints the entities that
   keep the "not available in the mobile app yet" placeholder, grouped by reason, and writes the same list to
   `mobile/MOBILE_ENTITIES.md`. Only generated `mobile/` output gains that one file (and only when

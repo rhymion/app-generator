@@ -23,6 +23,7 @@ from helpers.timezones import DEFAULT_MEMBER, TIMEZONES, timezone_iana_names, ti
 REPO = Path(__file__).resolve().parents[2]
 FIXTURE = Path(__file__).resolve().parent / 'fixtures' / 'mobile_entity_gate'
 MIGRATION = REPO / 'scripts' / 'migrations' / '04_app_setting_timezone_enum.sql'
+WIDGET_MIGRATION = REPO / 'scripts' / 'migrations' / '05_dashboard_widget_timezone.sql'
 
 
 def _prisma_enum_members(schema_text: str, name: str) -> list[str]:
@@ -170,3 +171,33 @@ def test_migration_maps_every_iana_name_to_its_member_and_records_coerced_rows()
     for member, iana, _offset in TIMEZONES:
         assert f"('{iana}', '{member}')" in sql
     assert '"_app_setting_timezone_coerced"' in sql
+
+
+# --- dashboard_widget.timezone (Issue #911) -------------------------------------------------------
+
+def test_the_dashboard_widget_column_is_typed_as_the_enum_with_the_utc_default():
+    prisma = (REPO / 'prisma' / 'schema.prisma').read_text()
+    model = re.search(r'^model dashboard_widget \{\n(.*?)^\}', prisma, re.S | re.M).group(1)
+    assert re.search(r'^\s+timezone\s+Timezone\s+@default\(utc\)', model, re.M)
+
+
+def test_the_dashboard_widget_schema_lists_the_same_members_as_the_enum():
+    schema = yaml.safe_load((REPO / 'code_generator' / 'json_schema.yaml').read_text())
+    prop = schema['definitions']['dashboard_widget']['fields']['timezone']
+    assert prop['enum'] == timezone_members()
+    assert prop['default'] == DEFAULT_MEMBER
+
+
+def test_the_dashboard_widget_migration_adds_a_non_null_utc_default_column():
+    sql = WIDGET_MIGRATION.read_text()
+    assert re.search(r'ADD COLUMN IF NOT EXISTS "timezone" "Timezone" NOT NULL DEFAULT \'utc\'', sql)
+    assert 'CREATE TYPE' not in sql
+
+
+def test_the_dashboard_catalog_lists_the_audit_timestamps_as_date_time_fields(default_out):
+    catalog = (default_out / 'lib' / 'dashboard' / 'catalog.ts').read_text()
+    for entity in re.findall(r"^    name: '(\w+)',", catalog, re.M):
+        block = catalog.split(f"    name: '{entity}',", 1)[1].split('\n  },', 1)[0]
+        assert "name: 'created_at', label: 'Created At', kind: 'datetime', datetime_format: 'date-time'" in block
+        assert "name: 'updated_at', label: 'Updated At', kind: 'datetime', datetime_format: 'date-time'" in block
+        assert "name: 'id'" not in block

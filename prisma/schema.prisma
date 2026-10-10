@@ -576,6 +576,7 @@ model dashboard_widget {
   stack_mode      DashboardWidgetStackMode?
   series_field    String?
   group_by_bucket DashboardWidgetGroupByBucket?
+  timezone        Timezone  @default(utc)
   filter_field    String?
   filter_value    String?
   order          Int       @default(0)

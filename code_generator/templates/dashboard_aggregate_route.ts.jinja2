@@ -16,8 +16,10 @@ function resolveBucket(raw: number | undefined): BucketGranularity | undefined {
 }
 
 // POST /api/dashboard/aggregate
-// Body: { entity_name, group_by_field, filter?, conditions?, series_field?, group_by_bucket? }
+// Body: { entity_name, group_by_field, filter?, conditions?, series_field?, group_by_bucket?, timezone? }
 // group_by_bucket accepts integer enum (0-4).
+// timezone is the Timezone enum's string literal (e.g. 'asia_tokyo'); optional, defaults to 'utc'.
+// An unknown value returns 400, as does a non-utc zone on a field that is not a date-time.
 // Returns AggregateOutput (single-series or multi-series).
 // Enforces API-key auth and read permission on the target entity.
 export async function POST(request: NextRequest) {
@@ -30,8 +32,9 @@ export async function POST(request: NextRequest) {
       conditions?: FilterCondition[];
       series_field?: string;
       group_by_bucket?: number;
+      timezone?: string | null;
     };
-    const { entity_name, group_by_field, filter, conditions, series_field, group_by_bucket } = body;
+    const { entity_name, group_by_field, filter, conditions, series_field, group_by_bucket, timezone } = body;
     if (!entity_name || !group_by_field) {
       return NextResponse.json(
         { error: 'entity_name and group_by_field are required' },
@@ -46,6 +49,7 @@ export async function POST(request: NextRequest) {
       series_field,
       conditions,
       resolveBucket(group_by_bucket),
+      timezone,
     );
     return NextResponse.json(result);
   } catch (error) {

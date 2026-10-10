@@ -325,7 +325,8 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
         covers both legacy int-enum and Prisma nativeEnum string fields);
       - a boolean (Yes / No);
       - an integer or number without enum (numeric filter range);
-      - a string with format 'date' or 'date-time' (datetime range filter).
+      - a string with format 'date' or 'date-time' (datetime range filter);
+      - the audit timestamps `created_at` / `updated_at` (date-time). `id` stays excluded.
 
     Entities with no groupable field are dropped — there is nothing
     meaningful to chart, and exposing them would surface an empty picker.
@@ -385,11 +386,14 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
                     'kind': 'datetime',
                     'datetime_format': prop['format'],
                 })
-        # creator_id/updater_id are Prisma-only audit fields (not in json_schema.yaml),
-        # so they must be appended explicitly for all dashboardable entities.
+        # created_at/updated_at/creator_id/updater_id are Prisma-only audit fields (not in
+        # json_schema.yaml), so they must be appended explicitly for all dashboardable entities.
+        # The timestamps are date-time fields: they can be time-bucketed in a selectable time zone.
         groupable.extend([
             {'name': 'creator_id', 'label': 'Creator', 'kind': 'fk', 'fk_target': 'user', 'fk_label_field': 'name'},
             {'name': 'updater_id', 'label': 'Updater', 'kind': 'fk', 'fk_target': 'user', 'fk_label_field': 'name'},
+            {'name': 'created_at', 'label': 'Created At', 'kind': 'datetime', 'datetime_format': 'date-time'},
+            {'name': 'updated_at', 'label': 'Updated At', 'kind': 'datetime', 'datetime_format': 'date-time'},
         ])
         if not groupable:
             continue
