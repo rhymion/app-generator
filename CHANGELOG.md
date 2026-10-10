@@ -24,6 +24,16 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `create` / `update` permission decides whether the link is saved. Entities that also declare polymorphic
   attachments, virtual columns or another unsupported feature keep the placeholder; the generation log still names
   the reason. See `docs/knowledge/mobile-app.md`.
+- **Dashboard widget time zone and `created_at` / `updated_at` buckets** (Issue #911). `dashboard_widget` has a
+  new `timezone` column of the shared `Timezone` enum (default `utc`, the zone every bucket used before). Day,
+  week (Monday start), month, quarter and year boundaries of a date-time group-by field are computed in that
+  zone, following DST changes; date-only fields keep their stored calendar date (UTC), and a non-`utc` zone on
+  a field that is not a date-time is answered with `400` when the chart is computed. The zone is resolved only
+  through `TIMEZONE_IANA_NAME`. A non-UTC zone is named in the widget subheader. `POST /api/dashboard/aggregate`
+  accepts an optional `timezone` (the enum literal, for example `asia_tokyo`); an unknown value returns `400`.
+  Every dashboardable entity's catalog now lists `created_at` and `updated_at` as date-time fields, so they can
+  be time-bucketed. **Consumers with existing data** run `scripts/migrations/05_dashboard_widget_timezone.sql`
+  once, after `04_app_setting_timezone_enum.sql`. See `docs/knowledge/timezone-handling.md`.
 - **Report which entities are left out of the mobile app** (Issue #925). `generate-code` prints the entities that
   keep the "not available in the mobile app yet" placeholder, grouped by reason, and writes the same list to
   `mobile/MOBILE_ENTITIES.md`. Only generated `mobile/` output gains that one file (and only when
@@ -38,6 +48,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `scripts/migrations/04_app_setting_timezone_enum.sql` once (it records every coerced value in
   `"_app_setting_timezone_coerced"`); `bash scripts/check_timezone_migration.sh` exercises it. See
   `docs/knowledge/timezone-handling.md`.
+- **Mobile: sort and filter a list by a relation column** (Issue #923, sub-issue of #140). The Expo list's sort
+  and filter panel now offers the relation display columns the REST list already supports (for example Room >
+  Room Type), derived from the same `sort_filter_relation_fields` as the Web list. The Web list is unchanged.
+  See `docs/knowledge/mobile-app.md`.
 - **Mobile: write comments and mention users** (Issues #861, #862). On an entity that has the comment write
   routes, the Expo detail screen's comment thread gets a comment box, Edit and Delete on comments, and, when
   the schema has an `x-mention` field, a user lookup while typing `@`. It calls only

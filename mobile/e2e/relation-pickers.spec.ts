@@ -225,3 +225,48 @@ test.describe('Relation pickers: organization isolation', () => {
     await expect(page.getByTestId('view-field-organization_id')).toHaveText('Mobile Own Org');
   });
 });
+
+test.describe('List: sort and filter by a relation column', () => {
+  async function createTask(page: Page, title: string, groupId: string) {
+    await page.getByTestId('list-new').click();
+    await page.getByTestId('field-title').fill(title);
+    await pick(page, 'mobile_group_id', groupId);
+    await page.getByTestId('form-save').click();
+    await expect(page.getByTestId('view-mobile_task')).toBeVisible();
+    await page.getByTestId('view-back').click();
+    await expect(page.getByTestId('list-mobile_task')).toBeVisible();
+  }
+
+  test('the list sorts and filters by the related record label', async ({ page }) => {
+    await login(page);
+    await page.getByTestId('footer-tab-mobile_task').click();
+    await expect(page.getByTestId('list-mobile_task')).toBeVisible();
+    await createTask(page, 'Rel zeta', 'group-seed-1');
+    await createTask(page, 'Rel eta', 'group-seed-2');
+    await page.getByTestId('list-search').fill('Rel ');
+    const titles = page.locator('[data-testid^="list-cell-"][data-testid$="-title"]');
+    await expect(titles).toHaveCount(2);
+    const sorts: string[] = [];
+    const filters: string[] = [];
+    page.on('request', (request) => {
+      if (!request.url().includes('/api/mobile_task?')) return;
+      const params = new URL(request.url()).searchParams;
+      sorts.push(params.get('sort') ?? '');
+      filters.push(params.get('f.mobile_group') ?? '');
+    });
+    await page.getByTestId('list-sort-toggle').click();
+    await page.getByTestId('list-sort-mobile_group').click();
+    // The list refetches after a debounce, so wait for the ascending request before the next click.
+    await expect.poll(() => sorts).toContain('mobile_group:asc');
+    await expect(titles.first()).toHaveText('Rel zeta'); // Alpha Group first
+    await page.getByTestId('list-sort-mobile_group').click();
+    await expect(titles.first()).toHaveText('Rel eta'); // Beta Group first
+    expect(sorts).toContain('mobile_group:asc');
+    expect(sorts).toContain('mobile_group:desc');
+    await page.getByTestId('list-filter-toggle').click();
+    await page.getByTestId('list-filter-mobile_group').fill('Beta');
+    await expect(titles).toHaveCount(1);
+    await expect(titles.first()).toHaveText('Rel eta');
+    expect(filters).toContain('Beta');
+  });
+});

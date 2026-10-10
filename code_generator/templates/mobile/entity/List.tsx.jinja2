@@ -23,7 +23,7 @@ import {
 {% if can_delete %}
   bulkRemove{{ pascal }},
 {% endif %}
-  {{ const_name }}_FIELDS,
+  {{ const_name }}_QUERY_FIELDS,
   {{ const_name }}_FILTER_KEYS,
   {{ const_name }}_SEARCH_KEY,
   {{ const_name }}_SORT_KEYS,
@@ -39,7 +39,7 @@ const PAGE_SIZE = 20;
 
 // What the panel offers; the sort, filter and search logic is lib/_list_query.ts, shared with the Web list.
 const LIST_QUERY_SPEC: ListQuerySpec = {
-  fields: {{ const_name }}_FIELDS,
+  fields: {{ const_name }}_QUERY_FIELDS,
   sortKeys: {{ const_name }}_SORT_KEYS,
   filterKeys: {{ const_name }}_FILTER_KEYS,
   searchKey: {{ const_name }}_SEARCH_KEY,
@@ -155,7 +155,7 @@ export function {{ pascal }}List() {
     router.push(`/entity/{{ name }}/${id}/edit` as never);
 {% endif %}
   };
-  const fieldOf = (key: string) => {{ const_name }}_FIELDS.find((f) => f.key === key);
+  const fieldOf = (key: string) => {{ const_name }}_QUERY_FIELDS.find((f) => f.key === key);
 
   return (
     <View style={styles.container} testID="list-{{ name }}">

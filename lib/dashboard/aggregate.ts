@@ -26,7 +26,8 @@ export async function aggregateForWidget(
   seriesField?: string,
   conditions?: FilterCondition[],
   groupByBucket?: BucketGranularity,
+  timezone?: string | null,
 ): Promise<AggregateOutput> {
   await getSessionUserIdOrThrow();
-  return aggregateForWidgetCore(entityName, groupByField, filter, seriesField, conditions, groupByBucket);
+  return aggregateForWidgetCore(entityName, groupByField, filter, seriesField, conditions, groupByBucket, timezone);
 }

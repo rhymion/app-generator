@@ -155,9 +155,10 @@ def test_view_and_input_variants_excluded():
     assert catalog[0]['name'] == 'task'
 
 
-def test_system_fields_excluded():
-    """id, created_at, updated_at are excluded from groupable fields.
-    creator_id/updater_id appear as audit FK entries (explicitly appended, not from schema props).
+def test_id_is_excluded_and_audit_fields_are_appended_once():
+    """`id` is never groupable. created_at/updated_at are appended as date-time fields (so a chart
+    can be bucketed by when records were created or last updated) and creator_id/updater_id as
+    audit FK entries, each exactly once even if the schema also declares them as properties.
     """
     schema = _schema({
         '__task': _entity({
@@ -169,16 +170,33 @@ def test_system_fields_excluded():
         }),
     })
     catalog = build_dashboard_catalog(schema)
-    field_names = [f['name'] for f in catalog[0]['groupable_fields']]
-    assert 'created_at' not in field_names
-    assert 'updated_at' not in field_names
-    assert 'is_done' in field_names
-    # Audit FK fields appear exactly once (appended explicitly, not from schema props).
-    assert field_names.count('creator_id') == 1
-    assert field_names.count('updater_id') == 1
-    fk_fields = {f['name']: f for f in catalog[0]['groupable_fields']}
-    assert fk_fields['creator_id']['kind'] == 'fk'
-    assert fk_fields['creator_id']['fk_target'] == 'user'
+    fields = {f['name']: f for f in catalog[0]['groupable_fields']}
+    names = [f['name'] for f in catalog[0]['groupable_fields']]
+    assert 'id' not in names
+    assert 'is_done' in names
+    for audit in ('created_at', 'updated_at', 'creator_id', 'updater_id'):
+        assert names.count(audit) == 1
+    assert fields['created_at']['kind'] == 'datetime'
+    assert fields['created_at']['datetime_format'] == 'date-time'
+    assert fields['created_at']['label'] == 'Created At'
+    assert fields['updated_at']['kind'] == 'datetime'
+    assert fields['updated_at']['datetime_format'] == 'date-time'
+    assert fields['creator_id']['kind'] == 'fk'
+    assert fields['creator_id']['fk_target'] == 'user'
+
+
+def test_every_dashboardable_entity_gets_the_audit_timestamps():
+    """Even an entity with no other groupable field is catalogued, with created_at/updated_at."""
+    schema = _schema({
+        '__note': _entity({'body': {'type': 'string'}}),
+        '__task': _entity({'is_done': {'type': 'boolean'}}),
+    })
+    catalog = build_dashboard_catalog(schema)
+    assert {e['name'] for e in catalog} == {'note', 'task'}
+    for entity in catalog:
+        by_name = {f['name']: f for f in entity['groupable_fields']}
+        assert by_name['created_at']['datetime_format'] == 'date-time'
+        assert by_name['updated_at']['datetime_format'] == 'date-time'
 
 
 # ---------------------------------------------------------------------------
@@ -306,3 +324,11 @@ def test_aggregate_route_handles_401_403():
     # requireApiPermission raises ApiError(403) for insufficient permissions.
     assert 'authenticate(request)' in result
     assert 'requireApiPermission' in result
+
+
+def test_aggregate_route_accepts_the_timezone_enum_literal_and_passes_it_through():
+    env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)))
+    result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
+    assert 'timezone?: string | null;' in result
+    assert 'group_by_bucket, timezone } = body;' in result
+    assert 'resolveBucket(group_by_bucket),\n      timezone,' in result
