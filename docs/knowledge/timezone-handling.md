@@ -259,15 +259,79 @@ This was replaced by passing the raw value to the client with `format: 'date-tim
 
 ---
 
+## Stored Time Zone: the `Timezone` Enum
+
+A stored time zone is the Prisma enum `Timezone`, never a free string. `app_setting.timezone` is the
+one persisted time zone value in the base schema: `timezone Timezone @default(utc)`. The
+generated form, the REST routes, CSV import and the seed all go through the enum, so a value that is
+not a member is rejected instead of stored.
+
+### Identifier, IANA name and display name are three different things
+
+| What | Where | Example |
+|---|---|---|
+| Enum member (the stored value) | `prisma/schema.prisma`, `code_generator/json_schema.yaml` | `asia_tokyo` |
+| IANA name (used to compute) | generated `lib/_timezone.ts`, `TIMEZONE_IANA_NAME[member]` only | `Asia/Tokyo` |
+| Display name (shown to people) | `messages/<locale>.json`, namespace `Timezone` | `Tokyo` / `東京` |
+
+- Members are lowercase snake_case (`docs/knowledge/enum-member-naming.md`). A member is never
+  renamed once released: when IANA renames a zone (for example `Europe/Kiev` to `Europe/Kyiv`) only
+  the value in `TIMEZONE_IANA_NAME` changes, and no consumer database changes.
+- Code that computes with a zone reads the IANA name through the constant and never through the
+  dictionary: `new Intl.DateTimeFormat('en', { timeZone: TIMEZONE_IANA_NAME[setting.timezone] })`.
+  The dictionary is display-only.
+- `lib/_timezone.ts` also exports `TIMEZONE_VALUES`, the `Timezone` type and `DEFAULT_TIMEZONE`. It is
+  generated from `code_generator/helpers/timezones.py` (the single list of member, IANA name and
+  standard-time UTC offset) and is copied unchanged to `mobile/lib/_timezone.ts` when the mobile app is generated.
+- The dictionary entries ride the generic native-enum mechanism: `generate-code` adds a placeholder
+  label per member to every language file and never overwrites an existing one, so a curated label
+  survives regeneration. The enum field must list its members in `json_schema.yaml` (`enum:`), as every
+  native enum field does.
+
+### The list
+
+54 zones that cover every standard-time UTC offset in current tzdata (37 offsets, `-11:00` to `+14:00`,
+including `+05:45`, `+08:45` and `+12:45`) with at least one zone each, and several recognisable
+cities at the busiest offsets. `code_generator/tests/test_timezone_enum.py` pins the list: 54 unique
+snake_case members, each IANA name accepted by `Intl.DateTimeFormat`, each declared offset equal to the zone's
+real standard-time offset, and the Prisma enum, the schema `enum:` and the mapping agreeing member for member
+and in order.
+
+Adding a zone later is additive:
+
+1. Confirm `new Intl.DateTimeFormat('en', { timeZone: '<name>' })` accepts the name (do not rely on
+   `Intl.supportedValuesOf('timeZone')`, which omits some valid names and lists others under their older spelling).
+2. Pick a snake_case member (permanent from the moment it ships).
+3. Add it to `TIMEZONES` in `code_generator/helpers/timezones.py`, to the `Timezone` enum in
+   `prisma/schema.prisma` and to `enum:` in `json_schema.yaml`; ship `ALTER TYPE "Timezone" ADD VALUE '<member>';`.
+4. Run `generate-code`, then curate the placeholder label in `messages/en.json` and `messages/ja.json`.
+
+PostgreSQL has `ALTER TYPE ... ADD VALUE` but no way to drop a value, so the list only grows after release.
+
+### Migrating an existing database
+
+A database created with `prisma db push` (test and dev) needs nothing. A database that holds the former
+`String` column runs `scripts/migrations/04_app_setting_timezone_enum.sql` once, before regenerating
+against the version that introduces the enum:
+
+- `'UTC'` and every listed IANA name map to their member; a value already spelled like a member is kept.
+- Every other value (an unlisted zone, a legacy alias such as `Asia/Calcutta`, a different case, an empty
+  string) becomes `utc`, and each such row is written to `"_app_setting_timezone_coerced"`
+  (`app_setting_id`, `original_value`, `coerced_to`, `migrated_at`). Review that table, then drop it.
+- `bash scripts/check_timezone_migration.sh` (`npm run test:timezone-migration`) runs the script against a
+  scratch database on the test Postgres server with rows of each kind and checks the result and the record.
+
+---
+
 ## Future Considerations
 
 ### Explicit timezone selection
 
-If an explicit timezone selector is added to the UI (e.g., for admins managing shifts across regions):
-- A `TimeZoneSelect` component already exists at `components/_standard/TimeZoneSelect.tsx`
-- It uses `Intl.supportedValuesOf('timeZone')` with a static fallback list
-- The `copyShiftTemplatesToShifts` server action already accepts a `timeZone` parameter
-- The `ShiftGanttChart` client component can accept a `timeZone` prop (currently auto-detects)
+`components/_standard/TimeZoneSelect.tsx` is the time zone picker. It lists the `Timezone` enum
+members (see "Stored Time Zone" above) with their dictionary labels, and the generated New/Edit form
+renders it for every field typed as the `Timezone` enum. The `copyShiftTemplatesToShifts` server
+action accepts a `timeZone` parameter, and the `ShiftGanttChart` client component accepts a
+`timeZone` prop (it auto-detects when none is passed).
 
 Note: `shift`/`shift_template`, `copy-shifts.ts`, `localTimeIn()`, `copyShiftTemplatesToShifts`,
 and `ShiftGanttChart` are a downstream consumer's shift-scheduling domain, illustrating this

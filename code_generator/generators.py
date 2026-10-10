@@ -12,6 +12,7 @@ from helpers.naming import (
     to_camel_case, to_pascal_case, to_pascal_case_from_var, to_title_case,
     safe_var_name, singularize,
 )
+from helpers.timezones import TIMEZONE_ENUM_NAMESPACE
 from helpers.type_mapping import get_ts_type
 from helpers.schema_helpers import (
     get_parent_relationships,
@@ -5523,6 +5524,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         )
         jsx_by_field[p] = _maybe_box_wrap(_enum_int_jsx, _enum_int_width_cols)
 
+    timezone_select_props: list[str] = []
     # Enum string fields (string discriminator with fixed enum values)
     for p in enum_str_props:
         prop      = filtered_props[p]
@@ -5537,6 +5539,30 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         req       = p in (model_def.get('required') or []) or not _is_nullable(prop)
         native_ns = _native_enum_ns(prop)
         _locked_vals = set(write_locked_values.get(p) or [])
+
+        if native_ns == TIMEZONE_ENUM_NAMESPACE:
+            # The time zone picker owns its options and labels (enum members + the Timezone
+            # dictionary namespace), so no option array or translation hook is emitted here.
+            if _displayed(p):
+                timezone_select_props.append(p)
+            _tz_on_change = (
+                f"onChange={{(newValue) => set{setter}(newValue)}}"
+                if _is_nullable(prop)
+                else f"onChange={{(newValue) => set{setter}(newValue ?? '')}}"
+            )
+            _tz_width_cols = _ui_width_cols(prop)
+            if _tz_width_cols:
+                has_box_import = True
+            _tz_jsx = (
+                f"      <TimeZoneSelect\n"
+                f"        value={{{sn}}}\n"
+                f"        {_tz_on_change}\n"
+                f"        label={{tf('{fk}')}}\n"
+                f"        {'required' if req else ''}\n"
+                f"      />"
+            )
+            jsx_by_field[p] = _maybe_box_wrap(_tz_jsx, _tz_width_cols)
+            continue
 
         if native_ns:
             if _displayed(p) and native_ns not in enum_ns_set:
@@ -7289,7 +7315,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         'has_children':             has_children,
         'has_comment_children':     has_comment_children,
         'has_many_to_one':          has_many_to_one or bool(enum_int_props) or bool(enum_str_props) or bool(entity_select_props) or flatten_needs_autocomplete,
-        'has_field_select':         bool(enum_int_props) or bool(enum_str_props) or bool(entity_select_props) or flatten_needs_autocomplete,
+        'has_field_select':         bool(enum_int_props) or bool([p for p in enum_str_props if _native_enum_ns(filtered_props[p]) != TIMEZONE_ENUM_NAMESPACE]) or bool(entity_select_props) or flatten_needs_autocomplete,
+        'uses_timezone_select':     bool(timezone_select_props),
         'has_entity_autocomplete':  bool(parent_rels_raw) or bool(selector_oto_rels) or uses_app_field_relation,
         'uses_image_display':       uses_image_display,
         'has_child_entity_autocomplete': bool(child_entity_rel_opt),

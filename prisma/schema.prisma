@@ -245,13 +245,70 @@ model organization {
 // a `<name>` relation field derived by stripping the `_id` suffix) and is
 // the literal column name code_generator/validate.py's
 // `_REQUIRED_INDEX_COLUMNS` requires an index on.
+enum Timezone {
+  pacific_pago_pago
+  pacific_honolulu
+  pacific_marquesas
+  america_anchorage
+  america_los_angeles
+  america_denver
+  america_chicago
+  america_mexico_city
+  america_new_york
+  america_toronto
+  america_bogota
+  america_caracas
+  america_st_johns
+  america_sao_paulo
+  america_nuuk
+  atlantic_azores
+  utc
+  europe_london
+  europe_madrid
+  europe_paris
+  europe_berlin
+  europe_rome
+  africa_lagos
+  africa_cairo
+  africa_johannesburg
+  asia_jerusalem
+  europe_istanbul
+  europe_moscow
+  asia_tehran
+  asia_dubai
+  asia_kabul
+  asia_karachi
+  asia_kolkata
+  asia_kathmandu
+  asia_dhaka
+  asia_yangon
+  asia_bangkok
+  asia_jakarta
+  asia_shanghai
+  asia_hong_kong
+  asia_singapore
+  asia_manila
+  australia_perth
+  australia_eucla
+  asia_seoul
+  asia_tokyo
+  australia_adelaide
+  australia_sydney
+  australia_lord_howe
+  pacific_noumea
+  pacific_auckland
+  pacific_chatham
+  pacific_apia
+  pacific_kiritimati
+}
+
 model app_setting {
   id            String        @id @default(cuid())
   organization_id String?
   organization  organization? @relation(fields: [organization_id], references: [id])
   business_date String
   is_pinned     Boolean       @default(false)
-  timezone      String        @default("UTC")
+  timezone      Timezone      @default(utc)
   // Scheduled-task operations (NULL = built-in default; see lib/scheduled-tasks/admin-view.ts):
   // minutes a `running` record may stay open before the admin page calls it stuck, and
   // minutes between predecessor rechecks for a task waiting on one.

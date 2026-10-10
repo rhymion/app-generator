@@ -272,7 +272,7 @@ async function main() {
         organization_id: null,
         business_date: new Date().toISOString().slice(0, 10),
         is_pinned: false,
-        timezone: 'UTC',
+        timezone: 'utc',
         creator_id: admin.id,
         updater_id: admin.id,
       },

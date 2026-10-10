@@ -111,6 +111,8 @@ HANDWRITTEN_ALLOWLIST: frozenset[str] = frozenset([
     "lib/mention/search.ts",
     # reaction feature named constants (conditional on reaction fields existing)
     "lib/reaction_constants.ts",
+    # Timezone enum mapping (always generated; the enum is part of the base schema)
+    "lib/_timezone.ts",
     # x-self-only admin-bypass allowlist (imported unconditionally by lib/authz.ts)
     "lib/self_only_admin_bypass_entities.ts",
     # seed script scaffold, always generated
