@@ -11,6 +11,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   now use `authenticate()` like every generated entity route (mobile access token or API key); permission checks
   and the service API key path are unchanged.
 ### Added
+- **Report which entities are left out of the mobile app** (Issue #925). `generate-code` prints the entities that
+  keep the "not available in the mobile app yet" placeholder, grouped by reason, and writes the same list to
+  `mobile/MOBILE_ENTITIES.md`. Only generated `mobile/` output gains that one file (and only when
+  `x-generator.mobile.enabled` is true); no screen, schema key or Web file changes. See `docs/knowledge/mobile-app.md`.
 - **`app_setting.timezone` is a native `Timezone` enum** (Issue #921). The column was a free `String`; any
   text could be stored through the form, REST, CSV import and the seed. It is now a Prisma enum of 54 zones
   covering every standard-time UTC offset, with snake_case members (`asia_tokyo`) that are never renamed. The
