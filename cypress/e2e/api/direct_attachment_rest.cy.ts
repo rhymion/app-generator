@@ -50,7 +50,8 @@ function sessionUserId(): Cypress.Chainable<string> {
   return cy
     .request({ url: '/api/user', headers: { 'X-API-Key': TEST_API_KEY } })
     .then((res) => {
-      const row = (res.body.rows as { id: string; email: string }[]).find((u) => u.email === TEST_CREDENTIALS.email);
+      // The user list does not expose email, so the seeded user is found by its (unique) name.
+      const row = (res.body.rows as { id: string; name: string }[]).find((u) => u.name === TEST_CREDENTIALS.name);
       expect(row, 'test user').to.exist;
       return row!.id;
     });
