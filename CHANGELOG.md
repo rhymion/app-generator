@@ -35,6 +35,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `scripts/migrations/04_app_setting_timezone_enum.sql` once (it records every coerced value in
   `"_app_setting_timezone_coerced"`); `bash scripts/check_timezone_migration.sh` exercises it. See
   `docs/knowledge/timezone-handling.md`.
+- **Mobile: sort and filter a list by a relation column** (Issue #923, sub-issue of #140). The Expo list's sort
+  and filter panel now offers the relation display columns the REST list already supports (for example Room >
+  Room Type), derived from the same `sort_filter_relation_fields` as the Web list. The Web list is unchanged.
+  See `docs/knowledge/mobile-app.md`.
 - **Mobile: write comments and mention users** (Issues #861, #862). On an entity that has the comment write
   routes, the Expo detail screen's comment thread gets a comment box, Edit and Delete on comments, and, when
   the schema has an `x-mention` field, a user lookup while typing `@`. It calls only

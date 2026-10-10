@@ -162,7 +162,7 @@ definitions:
       table:
         - title:
             primary: true
-        - mobile_group_id: {}
+        - mobile_group: {}
     x-relationships:
       tags:
         type: many-to-many

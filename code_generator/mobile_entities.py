@@ -383,9 +383,24 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
     scalar_keys = [f['key'] for f in fields if f['kind'] not in (KIND_RELATION, KIND_RELATION_MANY)]
     list_keys = [k for k in table if k in kind_by_field] or scalar_keys or [fields[0]['key']]
     list_keys = list_keys[:MAX_LIST_COLUMNS]
-    # The REST list sorts and filters on scalar columns only (a relation column holds an id).
+    # The REST list sorts and filters on scalar columns, and on the relation display columns
+    # of getters.ts (`sort_filter_relation_fields`): a foreign key shown in x-display.table whose
+    # target has a single-column labelField sorts and filters by the related record's label, keyed by
+    # the relation name (`room_type`, not `room_type_id`). Those columns are list-only entries that
+    # the form never draws, and they take the same text control the Web list panel gives them.
     sort_keys = list(scalar_keys)
     filter_keys = [f['key'] for f in fields if f['kind'] in _FILTERABLE_KINDS]
+    fk_names = {f['key'] for f in fields if f['kind'] == KIND_RELATION}
+    relation_columns = []
+    for relation, _label_column in ctx.get('sort_filter_relation_fields') or []:
+        if f'{relation}_id' not in fk_names:
+            continue
+        relation_columns.append({
+            'key': relation, 'label': title(relation), 'kind': KIND_TEXT, 'required': False,
+            'readonly': True, 'options': [],
+        })
+        sort_keys.append(relation)
+        filter_keys.append(relation)
     # The search box matches the first text column of the list row (else the first text field).
     text_keys = [f['key'] for f in fields if f['kind'] == KIND_TEXT]
     search_key = next((k for k in list_keys if k in text_keys), text_keys[0] if text_keys else None)
@@ -395,6 +410,7 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
         'title': title(ctx['parent']),
         'fields': fields,
         'list_keys': list_keys,
+        'relation_columns': relation_columns,
         'sort_keys': sort_keys,
         'filter_keys': filter_keys,
         'search_key': search_key,

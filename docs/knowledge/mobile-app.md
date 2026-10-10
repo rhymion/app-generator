@@ -142,13 +142,18 @@ The state and the request it produces are `lib/_list_query.ts`, copied into `mob
 the Web list panel too, so the two cannot disagree on what a sort, a filter or the search box means; see
 [list-search-panel.md](list-search-panel.md).
 
-- **Sort.** *Sort* opens a panel with every scalar column of the form; a tap cycles ascending, descending and
+- **Sort.** *Sort* opens a panel with every scalar column of the form and every relation display column (below); a tap cycles ascending, descending and
   none. One column is sorted at a time (the Web list sorts several; `cycleSort(sort, key, multi)` takes the
   difference).
 - **Filter.** *Filter* opens a panel with a control for each text, number, decimal, boolean and enum field: a text
   box (substring match for text, equality for numbers), or a chip per member (enum) or *Yes* / *No* (boolean).
-  Date, date-time and time fields can be sorted but not filtered, and a relation column holds an id, so it does
-  neither. *Clear* resets the filters.
+  Date, date-time and time fields can be sorted but not filtered. *Clear* resets the filters.
+- **Relation columns.** A foreign key shown in `x-display.table` whose target has a single-column label field is
+  sorted and filtered by the related record's label, keyed by the relation name (`room_type`, not
+  `room_type_id`). The keys come from the same `sort_filter_relation_fields` that fills `RELATION_FILTER_FIELDS`
+  in `getters.ts`, so the mobile and Web lists cannot disagree; the filter is a text box (substring match on the
+  label), and the server's permission and organization checks apply as for any list request. The column is
+  offered by the panel only (`<ENTITY>_QUERY_FIELDS`); the form does not draw it.
 - **Search.** The search box above the list matches the row's title column (the first text column of the row,
   else the first text field) through the same `f.<field>` parameter; an entity with no text field has no box.
 - Changing the sort, a filter or the search text restarts from the first page after a short pause; an older

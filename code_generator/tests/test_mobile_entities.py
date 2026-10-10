@@ -434,6 +434,30 @@ def test_list_sort_filter_and_search_use_the_rest_list_parameters(out):
     assert 'fetchMobileNotePage({ page: target, pageSize: PAGE_SIZE, ...queryOf() })' in lst
 
 
+def test_list_sorts_and_filters_by_a_relation_display_column_like_the_web_list(out):
+    # mobile_task shows its mobile_group foreign key in x-display.table, so the REST list's
+    # relation display column `mobile_group` (sorted and filtered by the group's name) is offered.
+    getters = (out / 'lib' / 'mobile_task' / 'getters.ts').read_text()
+    assert "RELATION_FILTER_FIELDS: RelationFilterMap = { 'mobile_group': { field: 'name' } }" in getters
+    client = _read(out, 'lib/mobile_task/mobile_client.ts')
+    sort_keys = json.loads(re.search(r'MOBILE_TASK_SORT_KEYS: string\[\] = (\[.*?\]);', client, re.S).group(1))
+    filter_keys = json.loads(re.search(r'MOBILE_TASK_FILTER_KEYS: string\[\] = (\[.*?\]);', client, re.S).group(1))
+    assert 'mobile_group' in sort_keys and 'mobile_group' in filter_keys
+    assert 'mobile_group_id' not in sort_keys and 'mobile_group_id' not in filter_keys  # the id is not the column
+    assert 'MOBILE_TASK_QUERY_FIELDS: FieldSpec[] = [...MOBILE_TASK_FIELDS' in client
+    assert '"key": "mobile_group",' in client.split('MOBILE_TASK_QUERY_FIELDS')[1]
+    lst = _read(out, 'components/mobile_task/List.tsx')
+    assert 'fields: MOBILE_TASK_QUERY_FIELDS' in lst
+    # The form still draws only the entity's own fields.
+    assert 'MOBILE_TASK_QUERY_FIELDS' not in _read(out, 'components/mobile_task/FormUpsert.tsx')
+
+
+def test_a_relation_column_outside_the_list_table_is_not_offered(out):
+    # mobile_note has no foreign key; mobile_group has none either: no relation column appears.
+    client = _read(out, 'lib/mobile_note/mobile_client.ts')
+    assert 'MOBILE_NOTE_QUERY_FIELDS: FieldSpec[] = [...MOBILE_NOTE_FIELDS, ...([] as FieldSpec[])]' in client
+
+
 def test_bulk_delete_goes_through_the_bulk_route_and_shared_capabilities(out):
     http = _read(out, 'lib/entity-http.ts')
     assert "`/api/${entity}/bulk`" in http and "method: 'DELETE'" in http
