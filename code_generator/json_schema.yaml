@@ -498,6 +498,9 @@ definitions:
           - month
           - quarter
           - year
+      group_by_field: {}
+      filter_field: {}
+      filter_value: {}
       # Native enum `Timezone` shared with app_setting.timezone (prisma/schema.prisma). Bucket boundaries of a
       # date-time group-by field are computed in this zone; the IANA spelling comes only from lib/_timezone.ts.
       # Default utc keeps the former always-UTC behavior.
@@ -558,9 +561,6 @@ definitions:
           - pacific_apia
           - pacific_kiritimati
         default: utc
-      group_by_field: {}
-      filter_field: {}
-      filter_value: {}
       order:
         default: 0
   dashboard:
