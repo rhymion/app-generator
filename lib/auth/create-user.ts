@@ -71,7 +71,6 @@ export async function createTenantBoundUser(
     JSON.stringify({
       at: new Date().toISOString(),
       userId: created.id,
-      email: created.email,
       tenantId: created.tenant_id,
     }),
   );
@@ -80,7 +79,7 @@ export async function createTenantBoundUser(
     actor_user_id: created.id,
     target_table: "user",
     target_id: created.id,
-    metadata: { email: created.email, tenant_id: created.tenant_id },
+    metadata: { tenant_id: created.tenant_id },
   });
   return {
     id: created.id,

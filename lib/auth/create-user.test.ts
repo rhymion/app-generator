@@ -107,5 +107,7 @@ describe("createTenantBoundUser (1.2 adapter shim)", () => {
     expect(event.metadata).toEqual(
       expect.objectContaining({ tenant_id: DEFAULT_TENANT_ID }),
     );
+    expect(event.metadata).not.toHaveProperty("email");
+    expect(JSON.stringify(event)).not.toContain("audited@example.com");
   });
 });

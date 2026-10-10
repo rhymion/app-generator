@@ -271,13 +271,12 @@ export const authConfig: NextAuthConfig = {
               at: new Date().toISOString(),
               reason: "domain_not_allowed",
               provider: account.provider,
-              email,
             }),
           );
           await recordAuditEvent({
             action: "auth:signIn.reject",
             actor_user_id: null,
-            metadata: { reason: "domain_not_allowed", provider: account.provider, email },
+            metadata: { reason: "domain_not_allowed", provider: account.provider },
           });
           return false;
         }
@@ -305,7 +304,6 @@ export const authConfig: NextAuthConfig = {
               at: new Date().toISOString(),
               reason: "linking_email_mismatch",
               provider: account.provider,
-              oauthEmail: email,
             }),
           );
           await recordAuditEvent({
@@ -343,7 +341,7 @@ export const authConfig: NextAuthConfig = {
       // rejection.
       const existing = await prisma.user.findUnique({
         where: { email },
-        select: { password: true },
+        select: { id: true, password: true },
       });
       if (existing && existing.password !== null) {
         console.info(
@@ -352,13 +350,16 @@ export const authConfig: NextAuthConfig = {
             at: new Date().toISOString(),
             reason: "email_in_use_by_credentials",
             provider: account.provider,
-            email,
           }),
         );
         await recordAuditEvent({
           action: "auth:signIn.reject",
+          // The attempt was not made by the existing user, so they are the
+          // target, never the actor.
           actor_user_id: null,
-          metadata: { reason: "email_in_use_by_credentials", provider: account.provider, email },
+          target_table: "user",
+          target_id: existing.id,
+          metadata: { reason: "email_in_use_by_credentials", provider: account.provider },
         });
         return false;
       }
@@ -458,7 +459,6 @@ export const authConfig: NextAuthConfig = {
           at: new Date().toISOString(),
           provider,
           userId: user.id,
-          email: user.email,
           // With the adapter in place, `isNewUser` is true on first OAuth
           // sign-in. Credentials flows still report it as undefined.
           isNewUser: isNewUser ?? null,
@@ -469,7 +469,7 @@ export const authConfig: NextAuthConfig = {
         actor_user_id: user.id ?? null,
         target_table: "user",
         target_id: user.id ?? null,
-        metadata: { provider, email: user.email ?? null, isNewUser: isNewUser ?? null },
+        metadata: { provider, isNewUser: isNewUser ?? null },
       });
     },
     async signOut(message) {

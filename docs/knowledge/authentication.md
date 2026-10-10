@@ -395,6 +395,29 @@ gate was.
 
 ---
 
+## Audit and log records carry no email address
+
+The generator's own auth code never writes an email address into
+`audit_log.metadata` or into the `[auth:*]` `console.info` lines (which
+end up in hosting runtime logs). A user is identified by id only:
+
+| Event | `audit_log` row |
+|---|---|
+| `auth:signIn` | `actor_user_id` and `target_id` = the user; `metadata` = `{ provider, isNewUser }` |
+| `auth:createUser` | `actor_user_id` and `target_id` = the new user; `metadata` = `{ tenant_id }` |
+| `auth:signIn.reject` / `email_in_use_by_credentials` | `actor_user_id` null (the existing user did not make the attempt), `target_table` = `user`, `target_id` = the existing user's id; `metadata` = `{ reason, provider }` |
+| `auth:signIn.reject` / `domain_not_allowed` | no local user exists, so `metadata` = `{ reason, provider }` only |
+
+`anonymizeUser()` still redacts `email`, `name`, `display_name` and
+`username` keys inside `audit_log.metadata` for rows whose `actor_user_id`
+is the erased user, because hand-written consumer code may put them there.
+Failed credential and MFA sign-ins are not recorded in `audit_log`; they
+are throttled by the Redis rate limits described above. Rows written by
+earlier versions may still hold `metadata.email` in a deployed database;
+cleaning them up is a manual operation.
+
+---
+
 ## Reading the session on the server
 
 Auth.js v5 replaces v4's `getServerSession(authOptions)` with a single
