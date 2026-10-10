@@ -96,7 +96,9 @@ test.describe('Direct attachment fields', () => {
     await openNew(page);
     await page.getByTestId('field-title').fill('Editable');
     await attach(page, 'contract_id', 'first.pdf', 'application/pdf');
+    await expect(page.getByTestId('attachment-name-contract_id')).toHaveText('first.pdf');
     await attach(page, 'file_id', 'photo.png', 'image/png');
+    await expect(page.getByTestId('attachment-name-file_id')).toHaveText('photo.png');
     await page.getByTestId('form-save').click();
     await expect(page.getByTestId('view-field-file_id')).toHaveText('photo.png');
 
@@ -106,7 +108,9 @@ test.describe('Direct attachment fields', () => {
     await expect(page.getByTestId('attachment-name-file_id')).toHaveText('photo.png');
 
     await attach(page, 'contract_id', 'second.pdf', 'application/pdf');
+    await expect(page.getByTestId('attachment-name-contract_id')).toHaveText('second.pdf');
     await page.getByTestId('attachment-clear-file_id').click();
+    await expect(page.getByTestId('attachment-name-file_id')).toHaveText('-');
     await page.getByTestId('form-save').click();
     await expect(page.getByTestId('view-mobile_document')).toBeVisible();
     await expect(page.getByTestId('view-field-contract_id')).toHaveText('second.pdf');
@@ -126,6 +130,7 @@ test.describe('Direct attachment fields', () => {
     await openNew(page);
     await page.getByTestId('field-title').fill('Openable');
     await attach(page, 'contract_id', 'openable.pdf', 'application/pdf');
+    await expect(page.getByTestId('attachment-name-contract_id')).toHaveText('openable.pdf');
     await page.getByTestId('form-save').click();
     await expect(page.getByTestId('view-field-contract_id')).toHaveText('openable.pdf');
     const popup = context.waitForEvent('page');
