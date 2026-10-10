@@ -1,16 +1,73 @@
-import type { ComponentType } from 'react';
+import { useState, type ComponentType } from 'react';
 import { Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import type { FieldKind, FieldSpec, RelationRow } from '@/lib/entity-http';
+import { DATE_VALUE_HINTS, instantToTimeOfDay, currentDateValue, isValidDateValue, normalizeDateValue, type DateValueFormat } from '@/lib/_date_value';
 import { RelationPicker, relationLabel, type InlineCreateProps } from '@/components/native/RelationPicker';
 
 // A relation field holds the selected id (many-to-one, one-to-one) or ids (many-to-many).
 export type FieldValueState = string | boolean | string[];
 
-const HINTS: Partial<Record<FieldKind, string>> = {
-  date: 'YYYY-MM-DD',
-  datetime: 'YYYY-MM-DDTHH:mm:ssZ',
-  time: 'HH:mm:ss',
+// The shared date rules name the date-time format 'date-time'; the field kind is 'datetime'.
+const DATE_FORMATS: Partial<Record<FieldKind, DateValueFormat>> = {
+  date: 'date',
+  datetime: 'date-time',
+  time: 'time',
 };
+
+const DATE_SHORTCUT_LABELS: Record<DateValueFormat, string> = { date: 'Today', 'date-time': 'Now', time: 'Now' };
+
+/**
+ * Date, date-time and time input. Validates with the same rules as the Web form and the API
+ * (lib/_date_value.ts), stores the shared value shape, and shows a field-level error on blur.
+ */
+function DateValueInput({ spec, format, value, onChange, locked }: {
+  spec: FieldSpec;
+  format: DateValueFormat;
+  value: FieldValueState;
+  onChange: (value: FieldValueState) => void;
+  locked: boolean | undefined;
+}) {
+  const text = typeof value === 'string' ? value : '';
+  const [touched, setTouched] = useState(false);
+  const invalid = text.trim() !== '' && !isValidDateValue(format, text);
+  const commit = () => {
+    setTouched(true);
+    const normalized = normalizeDateValue(format, text);
+    // Valid text is rewritten to the shared shape; invalid text is kept so submit is blocked.
+    if (normalized !== null && normalized !== text) onChange(normalized);
+  };
+  return (
+    <View>
+      <View style={styles.dateRow}>
+        <TextInput
+          style={[styles.input, styles.dateInput, locked ? styles.inputLocked : null, touched && invalid ? styles.inputInvalid : null]}
+          value={text}
+          onChangeText={(next) => onChange(next)}
+          onBlur={commit}
+          editable={!locked}
+          placeholder={DATE_VALUE_HINTS[format]}
+          autoCapitalize="none"
+          autoCorrect={false}
+          testID={`field-${spec.key}`}
+        />
+        {locked ? null : (
+          <Pressable
+            onPress={() => { setTouched(true); onChange(currentDateValue(format)); }}
+            style={styles.chip}
+            testID={`field-${spec.key}-now`}
+          >
+            <Text style={styles.chipText}>{DATE_SHORTCUT_LABELS[format]}</Text>
+          </Pressable>
+        )}
+      </View>
+      {touched && invalid ? (
+        <Text style={styles.fieldError} testID={`field-${spec.key}-error`}>
+          {spec.label} must be a valid {format === 'date-time' ? 'date and time' : format}. Use {DATE_VALUE_HINTS[format]}.
+        </Text>
+      ) : null}
+    </View>
+  );
+}
 
 /** Initial text a record's value is shown as in a form control. */
 export function toFieldState(spec: FieldSpec, value: unknown): FieldValueState {
@@ -21,6 +78,7 @@ export function toFieldState(spec: FieldSpec, value: unknown): FieldValueState {
   }
   if (value === null || value === undefined) return '';
   if (spec.kind === 'date') return String(value).slice(0, 10);
+  if (spec.kind === 'time') return instantToTimeOfDay(String(value));
   return String(value);
 }
 
@@ -29,6 +87,7 @@ export function toDisplayText(spec: FieldSpec, value: unknown): string {
   if (spec.kind === 'boolean') return value === true ? 'Yes' : 'No';
   if (value === null || value === undefined || value === '') return '-';
   if (spec.kind === 'date') return String(value).slice(0, 10);
+  if (spec.kind === 'time') return instantToTimeOfDay(String(value));
   return String(value);
 }
 
@@ -107,14 +166,15 @@ export function FieldInput({ spec, value, onChange, disabled, caller, formValues
             );
           })}
         </View>
+      ) : DATE_FORMATS[spec.kind] ? (
+        <DateValueInput spec={spec} format={DATE_FORMATS[spec.kind]!} value={value} onChange={onChange} locked={locked} />
       ) : (
         <TextInput
           style={[styles.input, locked ? styles.inputLocked : null]}
           value={typeof value === 'string' ? value : ''}
           onChangeText={onChange}
           editable={!locked}
-          placeholder={HINTS[spec.kind]}
-          keyboardType={spec.kind === 'number' ? 'number-pad' : spec.kind === 'decimal' ? 'decimal-pad' : 'default'}
+                    keyboardType={spec.kind === 'number' ? 'number-pad' : spec.kind === 'decimal' ? 'decimal-pad' : 'default'}
           autoCapitalize="none"
           testID={`field-${spec.key}`}
         />
@@ -127,6 +187,10 @@ const styles = StyleSheet.create({
   field: { gap: 6, marginBottom: 14 },
   label: { fontSize: 13, fontWeight: '600', color: '#374151' },
   input: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8, fontSize: 15 },
+  inputInvalid: { borderColor: '#dc2626' },
+  dateRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  dateInput: { flex: 1 },
+  fieldError: { color: '#dc2626', fontSize: 12, marginTop: 4 },
   inputLocked: { backgroundColor: '#f3f4f6', color: '#6b7280' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 },

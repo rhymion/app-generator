@@ -72,6 +72,46 @@ test.describe('Native entity screens: create, edit, delete, list', () => {
     expect(writes).toBe(0);
   });
 
+  test('a date-time field rejects text that is not a date and sends no request', async ({ page }) => {
+    await openList(page, 'mobile_note');
+    let writes = 0;
+    await page.route('**/api/mobile_note', (route) => {
+      if (route.request().method() === 'POST') writes += 1;
+      return route.continue();
+    });
+    await page.getByTestId('list-new').click();
+    await page.getByTestId('field-title').fill('Bad time');
+    await page.getByTestId('field-status-open').click();
+    await expect(page.getByTestId('field-remind_at')).toHaveAttribute('placeholder', 'YYYY-MM-DDTHH:mm:ssZ');
+    await page.getByTestId('field-remind_at').fill('test');
+    await page.getByTestId('field-remind_at').blur();
+    await expect(page.getByTestId('field-remind_at-error')).toBeVisible();
+    await page.getByTestId('form-save').click();
+    await expect(page.getByTestId('form-validation-error')).toHaveText('Remind At must be a valid date and time');
+    expect(writes).toBe(0);
+  });
+
+  test('date, date-time and time inputs normalize typed values and save them', async ({ page }) => {
+    await openList(page, 'mobile_note');
+    await page.getByTestId('list-new').click();
+    await page.getByTestId('field-title').fill('With times');
+    await page.getByTestId('field-status-open').click();
+    await page.getByTestId('field-remind_at').fill('2026-10-09T12:30:00.000Z');
+    await page.getByTestId('field-remind_at').blur();
+    await expect(page.getByTestId('field-remind_at')).toHaveValue('2026-10-09T12:30:00Z');
+    await page.getByTestId('field-remind_time').fill('08:30');
+    await page.getByTestId('field-remind_time').blur();
+    await expect(page.getByTestId('field-remind_time')).toHaveValue('08:30:00');
+    await page.getByTestId('field-due_on').fill('2026-02-30');
+    await page.getByTestId('field-due_on').blur();
+    await expect(page.getByTestId('field-due_on-error')).toBeVisible();
+    await page.getByTestId('field-due_on-now').click();
+    await expect(page.getByTestId('field-due_on-error')).toHaveCount(0);
+    await page.getByTestId('form-save').click();
+    await expect(page.getByTestId('view-mobile_note')).toBeVisible();
+    await expect(page.getByTestId('view-field-remind_time')).toHaveText('08:30:00');
+  });
+
   test('editing a record updates the detail screen', async ({ page }) => {
     await openList(page, 'mobile_note');
     await createNote(page, 'Before edit');

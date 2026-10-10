@@ -1273,6 +1273,10 @@ def generate_mobile_target(
     # Web and Expo lists cannot disagree on what a sort, a filter or the search box means.
     _write(mobile_dir / 'lib' / '_list_query.ts',
            (Path(__file__).resolve().parent.parent / 'lib' / '_list_query.ts').read_text(encoding='utf-8'))
+    # Date / date-time / time value rules: the Web form and the service guard import the same
+    # module, so the mobile inputs and the API agree on what a valid value is.
+    _write(mobile_dir / 'lib' / '_date_value.ts',
+           (Path(__file__).resolve().parent.parent / 'lib' / '_date_value.ts').read_text(encoding='utf-8'))
     # The time zone enum's IANA mapping is likewise the Web's own module, copied unchanged.
     _write(mobile_dir / 'lib' / '_timezone.ts',
            (Path(__file__).resolve().parent.parent / 'lib' / '_timezone.ts').read_text(encoding='utf-8'))

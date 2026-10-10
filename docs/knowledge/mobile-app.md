@@ -334,7 +334,8 @@ contexts into `mobile/`, so each copy is identical to its Web counterpart:
 |---|---|
 | `lib/<entity>/use_entity_form.ts` | form state, validation recording, submit, error-message mapping |
 | `lib/<entity>/use_entity_capabilities.ts` | whether Edit and Delete are shown |
-| `components/<entity>/form_validation.ts` | required-field and decimal checks |
+| `components/<entity>/form_validation.ts` | required-field, decimal and date / date-time / time checks |
+| `lib/_date_value.ts` | the date, date-time and time rules (valid value, normalized shape), copied unchanged from the Web `lib/` |
 
 `lib/_errors.ts` and `lib/authz.ts` in `mobile/` hold only the types those modules import.
 
@@ -352,8 +353,22 @@ transport call, so a save in flight is visible even where a transition does not 
 to the entity's REST routes, which call the same service functions the Server Actions call. Pages are
 zero-based, like the REST list. A save resolves to `{ ok: true, id }` or to an `ActionFailure` built from the
 REST error body (`code`, `field`, `reason`, `messageKey`, `messageArgs`); it never rejects, because the form
-hook runs the save inside a transition. Date, date-time and time fields are typed as text in the
-`YYYY-MM-DD`, ISO and `HH:mm:ss` forms.
+hook runs the save inside a transition.
+
+### Date, date-time and time fields
+
+`components/native/FieldInput.tsx` draws a date, date-time or time field with `DateValueInput`: a text box showing
+the format (`YYYY-MM-DD`, `YYYY-MM-DDTHH:mm:ssZ`, `HH:mm:ss`) and a *Today* / *Now* button. There is no native
+calendar or clock picker. When the box loses focus, a valid value is rewritten to the shared shape (a date-time
+typed with an offset becomes a UTC instant, one typed without an offset is read as local time) and an invalid
+one shows a field error and stays in the box. `form_validation.ts` then refuses to submit it, so no request is
+sent. The rules are `lib/_date_value.ts`; the Web form validation, the server write guard
+(`service_validation.ts`) and the mobile input all call it, so the three agree on what a valid value is. A value
+the server cannot parse as a date is a `VALIDATION` error (HTTP 400, `reason: invalid`) on the REST routes and the
+Server Actions alike; it no longer reaches Prisma. A time column is a full DateTime on the wire (the Web time picker
+sends an instant): the form edits the local time of day as `HH:mm:ss`, and `formDataToBody()` sends it as the instant
+of that time today (`timeOfDayToInstant()`), while a stored value is shown back as local `HH:mm:ss`. A blank value is not this check's concern: a required field is
+rejected by the required-field check.
 
 Messages come from `messages/<locale>.json` (`Common`, `Errors`, `ValidationMessages`) through
 `mobile/lib/messages.ts`; field labels are the title-cased column names.
@@ -529,7 +544,7 @@ check and is not part of the mandatory gate.
   (`submit_for_approval.ts`) with no REST route, so the app has nothing to call.
 - The one-to-one bridge grid (`x-bridge`).
 - The paid / waiting status of an `x-payment` record (no REST route exposes it).
-- The native date pickers (dates are typed as text).
+- Native calendar and clock pickers (date, date-time and time fields are typed text with a *Today* / *Now* button).
 - CSV export and import: the export and import routes accept a mobile access token (`resolveActorId()` in
   `lib/api-auth.ts` dispatches a bearer token by shape), but the app has no CSV screens. Bulk import and export
   stay in the Web admin screens.
