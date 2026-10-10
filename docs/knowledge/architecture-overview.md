@@ -69,7 +69,9 @@ Two cross-entity files are also regenerated on every run:
   actions file the `attachment` entity itself gets when directly generated, and whichever generation
   step ran later used to silently clobber the other's exports (`code_generator/generate.py`, the
   "Attachment bridge actions" section). A third file, `lib/attachment/direct_actions.ts`, is emitted
-  only when some entity declares an `x-relationship: {target: attachment, type: direct}` FK.
+  only when some entity declares an `x-relationship: {target: attachment, type: direct}` FK, together with
+  `app/api/attachment/direct/route.ts`, which runs the same function over REST for mobile access token and API
+  key callers.
 
 ### cleanup.py
 

@@ -243,6 +243,36 @@ definitions:
       - title
       - mobile_category_id
 
+  # Direct attachment fields (x-relationship type: direct): the form uploads a file, creates the
+  # attachment row and submits its id. `file` may stay empty, `contract` is required.
+  mobile_document:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - title:
+            primary: true
+    fields:
+      title: {}
+      file_id:
+        x-relationship:
+          target: attachment
+          type: direct
+      contract_id:
+        x-relationship:
+          target: attachment
+          type: direct
+    required:
+      - title
+      - contract_id
+
   # x-payment: creating a record answers with a hosted checkout URL, which the native form opens
   # in the in-app browser. The Price is the entity's own stripe_price_id (a column default).
   mobile_order:
@@ -277,6 +307,12 @@ definitions:
       api: false
       test: false
     fields:
+      type:
+        enum:
+          - image
+          - file
+          - video
+          - audio
       path:
         format: uri
   commentable:

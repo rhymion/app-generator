@@ -7,6 +7,8 @@ and checks that:
 - an entity gets the screens its own x-generate flags allow; a many-to-one foreign key, a one-to-one
   selector and a many-to-many declared with `x-outputType: list` are drawn as relation pickers, while an entity with a child grid,
   a bridge, a custom component or similar gets none
+- a direct attachment field is drawn as a file input that uploads through the REST routes and submits the
+  attachment row's id; the upload route accepts a mobile access token as well as the browser session
 - the pickers read their candidates from the target's REST options route and filter nothing themselves
 - the screens call the generated hooks the Web screens call, and carry no validation, submit or
   permission logic of their own
@@ -100,7 +102,6 @@ def test_plain_context_is_eligible():
 
 
 @pytest.mark.parametrize('key,value', [
-    ('direct_attachment_rels', [{'prop_name': 'x'}]),
     ('children_raw', [{'name': 'child'}]),
     ('non_comment_ch', [{'name': 'child', 'property_name': 'kids', 'is_many_to_many': False}]),
     ('entity_view_components', [{'name': 'ApprovalSection'}]),
@@ -631,3 +632,116 @@ def test_report_groups_entities_by_reason_in_a_stable_order():
     assert lines[1:] == ['    declares children_raw: a, b', '    no list screen: c']
     note = ineligible_note(pairs)
     assert '## declares children_raw\n\n- a\n- b\n\n## no list screen\n\n- c\n' in note
+
+
+# --- direct attachment fields ---------------------------------------------------------------
+
+def test_direct_attachment_alone_is_eligible_but_a_polymorphic_attachment_is_not():
+    ctx = _ctx(direct_attachment_rels=[{'prop_name': 'file_id', 'relation_name': 'file', 'required': False}])
+    assert mobile_ineligible_reason(ctx) is None
+    assert mobile_ineligible_reason({**ctx, 'has_attachable': True}) == 'declares has_attachable'
+
+
+def test_attachment_fields_are_described_by_embed_key_and_body_key(out):
+    client = _read(out, 'lib/mobile_document/mobile_client.ts')
+    spec = json.loads(re.search(r'MOBILE_DOCUMENT_FIELDS: FieldSpec\[\] = (\[.*?\n\]);', client, re.S).group(1))
+    by_key = {f['key']: f for f in spec}
+    assert {k: f['kind'] for k, f in by_key.items()} == {'title': 'text', 'file_id': 'attachment', 'contract_id': 'attachment'}
+    # The REST detail embeds the row under the column name without `_id`; the write body carries the id.
+    assert (by_key['file_id']['relationName'], by_key['file_id']['bodyKey']) == ('file', 'file_id')
+    assert (by_key['contract_id']['relationName'], by_key['contract_id']['bodyKey']) == ('contract', 'contract_id')
+    assert by_key['contract_id']['required'] is True and by_key['file_id']['required'] is False
+    assert 'target' not in by_key['file_id']
+
+
+def test_list_row_sort_and_filter_leave_out_attachment_fields(out):
+    client = _read(out, 'lib/mobile_document/mobile_client.ts')
+    assert 'MOBILE_DOCUMENT_LIST_KEYS: string[] = ["title"]' in client
+    assert 'MOBILE_DOCUMENT_SORT_KEYS: string[] = ["title"]' in client
+    assert 'MOBILE_DOCUMENT_FILTER_KEYS: string[] = ["title"]' in client
+
+
+def test_attachment_form_keeps_the_row_and_submits_only_its_id(out):
+    form = _read(out, 'components/mobile_document/FormUpsert.tsx')
+    assert 'useState<Record<string, AttachmentRow | null>>' in form
+    assert 'attachment={attachments[spec.key] ?? null}' in form
+    assert 'onAttachmentChange=' in form
+    # The edit form starts from the row the REST detail embeds.
+    assert 'record[spec.relationName ?? spec.key]' in form
+    http = _read(out, 'lib/entity-http.ts')
+    assert "spec.kind === 'relation' || spec.kind === 'attachment'" in http
+    input_ = _read(out, 'components/native/FieldInput.tsx')
+    assert "onChange(row ? row.id : '')" in input_
+
+
+def test_attachment_detail_shows_the_file_name_as_a_link(out):
+    view = _read(out, 'components/mobile_document/FormView.tsx')
+    assert "import { AttachmentValue } from '@/components/native/AttachmentInput';" in view
+    assert 'testID={`view-field-${spec.key}`}' in view
+    widget = _read(out, 'components/native/AttachmentInput.tsx')
+    assert 'Linking.openURL(resolveApiUrl(row.path))' in widget
+    assert "from 'expo-document-picker'" in widget
+
+
+def test_attachment_helpers_upload_then_create_the_row_through_rest(out):
+    helper = _read(out, 'lib/attachment-http.ts')
+    assert "apiFetch<{ url: string }>('/api/upload', { method: 'POST', body: form })" in helper
+    assert "'/api/attachment/direct'" in helper
+    assert "form.append('file', picked.file, picked.name)" in helper
+    # Every type the upload route accepts is offered by the picker.
+    server = (out / 'app' / 'api' / 'upload' / 'route.ts').read_text()
+    for mime in re.findall(r"'((?:image|application|text)/[^']+)'", server.split('validTypes')[1].split(']')[0]):
+        if mime != 'image/jpg':
+            assert f"'{mime}'" in helper, mime
+
+
+def test_multipart_upload_keeps_its_own_content_type(out):
+    base = _read(out, 'lib/api-base.ts')
+    assert 'init.body instanceof FormData' in base
+    assert 'export function resolveApiUrl' in base
+
+
+def test_attachment_dependency_and_helpers_exist_only_with_an_attachment_entity(out):
+    deps = json.loads(_read(out, 'package.json'))['dependencies']
+    assert deps['expo-document-picker'].startswith('~57.')
+    assert 'attachment' not in _read(out, 'components/mobile_note/FormUpsert.tsx').lower()
+    assert 'AttachmentValue' not in _read(out, 'components/mobile_note/FormView.tsx')
+
+
+def test_attachment_dependency_is_absent_without_an_attachment_entity(tmp_path):
+    import yaml
+    schema = yaml.safe_load((FIXTURE / 'json_schema.yaml').read_text())
+    del schema['definitions']['mobile_document']
+    trimmed = tmp_path / 'json_schema.yaml'
+    trimmed.write_text(yaml.safe_dump(schema, sort_keys=False))
+    prisma = tmp_path / 'schema.prisma'
+    shutil.copy(FIXTURE / 'schema.prisma', prisma)
+    work = tmp_path / 'work'
+    (work / 'prisma').mkdir(parents=True)
+    shutil.copy(prisma, work / 'prisma' / 'schema.prisma')
+    intermediate = work / 'generated_json_schema.yaml'
+    build_user_schema(trimmed, prisma, intermediate)
+    generate(str(intermediate), str(work))
+    assert 'expo-document-picker' not in (work / 'mobile' / 'package.json').read_text()
+    assert not (work / 'mobile' / 'lib' / 'attachment-http.ts').exists()
+    assert not (work / 'mobile' / 'components' / 'native' / 'AttachmentInput.tsx').exists()
+
+
+def test_upload_route_accepts_the_browser_session_and_a_mobile_token(out):
+    route = (out / 'app' / 'api' / 'upload' / 'route.ts').read_text()
+    assert "import { requireCaller, ApiError } from '@/lib/api-auth';" in route
+    assert 'await requireCaller(request);' in route
+    # A refused caller still gets the 401 body the Web form already handles.
+    assert "{ error: 'Unauthorized' }, { status: 401 }" in route
+    assert "from '@/auth'" not in route
+
+
+def test_direct_attachment_rest_route_runs_the_web_action_as_the_caller(out):
+    route = (out / 'app' / 'api' / 'attachment' / 'direct' / 'route.ts').read_text()
+    assert 'const { userId } = await requireCaller(request);' in route
+    assert 'withActor(userId, () =>' in route
+    assert "import { createDirectAttachment } from '@/lib/attachment/direct_actions';" in route
+    # The enum members of attachment.type are checked before Prisma sees the value.
+    assert 'const ATTACHMENT_TYPES: readonly string[] = ["image", "file", "video", "audio"];' in route
+    assert 'createDirectAttachment(name, path, type as' in route
+

@@ -122,8 +122,8 @@ and describes their fields; the templates are under `code_generator/templates/mo
 | Delete several records (selection mode on the list) | | `x-generate.delete` and the `delete` permission |
 
 An entity is left on the placeholder screen when it has no REST routes or no list screen, declares a
-child grid, a one-to-one bridge other than the ones to `approvable` (with `ApprovalSection`) and `commentable`, a direct attachment, a custom component other than `ApprovalSection`, virtual
-columns, attachments, `x-splittable` without the approval section, a reservation, a state machine, edit/delete
+child grid, a one-to-one bridge other than the ones to `approvable` (with `ApprovalSection`) and `commentable`, a custom component other than `ApprovalSection`, virtual
+columns, polymorphic attachments (`attachable`), `x-splittable` without the approval section, a reservation, a state machine, edit/delete
 guards without an approval or `x-self-only`, relates to an entity that has no
 REST routes, or has a field with no native widget (image or file URI, entity select, custom upsert
 component). In the default schema `role`, `organization` and `app_setting` qualify; `user` (a custom component) keeps
@@ -184,6 +184,34 @@ nothing itself: permission scope, organization isolation, invalidated records, l
 target's `autocomplete_filter.ts` are the server's. A `403` from the options route (no `read` on the target)
 shows the field disabled with the `Errors.fkPermissionDenied` message the Web form uses. The target need not
 have native screens of its own.
+
+### Direct attachment fields
+
+A field declared with `x-relationship: {target: attachment, type: direct}` is drawn by
+`components/native/AttachmentInput.tsx`: the attached file's name (a link that opens the file), *Select* to
+pick a file with the system document picker (`expo-document-picker`, added to the app's dependencies only
+when some entity has such a field) and, once a file is attached, *Clear*. The form holds the `attachment`
+row's id; the whole row is kept beside it so the name shows without another request.
+
+Choosing a file takes two requests, the same two the Web form makes (`SingleAttachmentUpload`, mode `fk`):
+
+| Step | Request | Result |
+|---|---|---|
+| Store the file | `POST /api/upload` (multipart, field `file`) | `{ url }`; a type the route does not accept or a file over `UPLOAD_MAX_BYTES` is refused with its own text, which the field shows |
+| Create the row | `POST /api/attachment/direct` with `{ name, path, type }` | `201 { id, name, path, type }` |
+
+The entity form then submits the id under the column name (`<column>: <id>`, `null` when cleared), and the
+detail and edit screens read the row the REST detail embeds under the column name without `_id`. The file name
+is stored encrypted and returned decrypted, as on the Web screens.
+
+Both routes accept a mobile access token, an API key or the browser session (`requireCaller()`), and nothing
+else changes about who may do what: any authenticated user may store a file and create the (still unlinked)
+row; the entity's own `create` / `update` permission and organization rules decide whether the link is saved,
+exactly as for the Web form. `/api/attachment/direct` runs the Web action (`createDirectAttachment`) as the
+authenticated caller, so there is one implementation of the row. The route rejects a `type` outside the
+`attachment.type` enum, an empty or over-long name and a `path` that is not a site-relative path or an
+`http(s)` URL. A file stored through the Google Cloud Storage upload route is served by `/api/gcs/...`, which
+requires a browser session, so the link on the detail screen opens only where that session is shared.
 
 ### Create the referenced record in place (`x-create-inline`)
 
@@ -454,7 +482,8 @@ the rest of its 15 minutes.
 
 Generated REST routes call `authenticate()` (`lib/api-auth.ts`), which accepts either a mobile access JWT
 or an API key (`X-API-Key` / `Authorization: Bearer`); a JWT always has three dot-separated segments and
-an API key never does. `authenticateApiKey()` is unchanged. `GET /api/notifications` accepts the same
+an API key never does. `POST /api/upload` and `POST /api/attachment/direct` call `requireCaller()`, which
+accepts the same credentials and falls back to the session cookie. `authenticateApiKey()` is unchanged. `GET /api/notifications` accepts the same
 bearer token when an `Authorization` header is present and the session cookie otherwise.
 
 ## Running and testing
@@ -519,6 +548,14 @@ runs the Expo web server and the proxy as one process so the runner can stop bot
   parts add up to the quantity, adding and removing parts (never fewer than two), cancel, the server refusing a part
   with no group and an already-approved record (its text shown), and a completed split sent with the
   quantities and the groups picked, after which the record shows its split status.
+- `mobile/e2e/attachments.spec.ts` covers the direct attachment fields on `mobile_document` (a required and an
+  optional one): a picked file uploaded with the access token and its row id saved with the record, a required
+  field blocking the save before any request, clearing an optional field, the edit form starting from the
+  attached files and replacing one, the server's refusal of a file type shown with nothing attached, and the
+  detail screen opening the file from its name.
+- `cypress/e2e/api/direct_attachment_rest.cy.ts` covers `POST /api/upload` and `POST /api/attachment/direct` with a
+  mobile access token (accepted), no credential or a tampered token (401), malformed input (400), the decrypted
+  name on the linked record, and a holder without `update` on the entity who can store a file but not link it (403).
 - `mobile/e2e/*.spec.ts` are curated, hand-written specs, one per flow, not generated. A mobile change
   ships a spec for the flow it changes.
 - `mobile/scripts/real-browser-verify.js` is the reusable real-browser check. It selects a preset with
@@ -531,8 +568,9 @@ runs the Expo web server and the proxy as one process so the runner can stop bot
   audit log link.
 - `code_generator/tests/test_mobile_audit_log.py` covers the generated audit log screens: registered, REST
   read-only, no permission logic of their own, linked in the nav tree and bundled strings.
-- `code_generator/tests/test_mobile_entities.py` covers which entities get screens, the relation field
-  descriptions, the *Create new* wiring and the checkout flow, that the screens and pickers call the shared modules and the options route, the REST client
+- `code_generator/tests/test_mobile_entities.py` covers which entities get screens, the relation and attachment field
+  descriptions, the *Create new* wiring and the checkout flow, the attachment upload helpers and the two attachment
+  routes, that the screens and pickers call the shared modules and the options route, the REST client
   and the React version the shared hooks need.
 - `cypress/e2e/api/mobile_auth.cy.ts`, `mobile_nav.cy.ts` and `mobile_permissions.cy.ts` cover the REST routes.
 
@@ -542,9 +580,10 @@ check and is not part of the mandatory gate.
 
 ## Not implemented yet
 
-- Entity screens for an entity that declares anything beyond plain fields, the relation pickers, the approval
-  section, the comment thread with its comment box and mentions, creating the referenced record in place and payment checkout: child grids and
-  attachments.
+- Entity screens for an entity that declares anything beyond plain fields, the relation pickers, direct attachment
+  fields, the approval section, the comment thread with its comment box and mentions, creating the referenced
+  record in place and payment checkout: child grids and polymorphic attachments (`attachable`). A plain URL
+  field with `x-uri-kind: file` or `image` is not drawn either.
 - Submitting a record for approval (the "(re)submit" button). Resubmitting is a Server Action
   (`submit_for_approval.ts`) with no REST route, so the app has nothing to call.
 - The one-to-one bridge grid (`x-bridge`).

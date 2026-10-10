@@ -1,0 +1,58 @@
+// Direct attachment fields: the file is stored through POST /api/upload, then an `attachment` row is
+// created for it through POST /api/attachment/direct. The form submits the row's id with the entity, as
+// the Web form does (components/_standard/SingleAttachmentUpload.tsx, mode 'fk').
+import { ApiError, apiFetch } from './api-base';
+
+/** The attachment row the REST detail embeds under a field's relation name; the create route answers with the same shape. */
+export type AttachmentRow = { id: string; name: string; path: string; type: string };
+
+/** A file chosen with the system picker; `file` is set on the web build only. */
+export type PickedFile = { uri: string; name: string; mimeType?: string | null; file?: Blob | null };
+
+/** The file types `/api/upload` accepts (it refuses anything else). */
+export const ATTACHMENT_MIME_TYPES = [
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/csv',
+  'text/plain',
+  'application/zip',
+];
+
+/** The attachment kind the Web form records for a file: by its MIME type. */
+export function attachmentKind(mimeType?: string | null): 'image' | 'video' | 'audio' | 'file' {
+  if (mimeType?.startsWith('image/')) return 'image';
+  if (mimeType?.startsWith('video/')) return 'video';
+  if (mimeType?.startsWith('audio/')) return 'audio';
+  return 'file';
+}
+
+/** The server's own text for a refused upload (for example an unsupported type or a file that is too large), or null. */
+export function uploadErrorMessage(err: unknown): string | null {
+  if (!(err instanceof ApiError)) return null;
+  try {
+    const body = JSON.parse(err.message) as { error?: unknown };
+    return typeof body.error === 'string' ? body.error : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Uploads the file and creates its attachment row. Rejects with an ApiError when the server refuses either step. */
+export async function uploadAttachment(picked: PickedFile): Promise<AttachmentRow> {
+  const form = new FormData();
+  if (picked.file) {
+    form.append('file', picked.file, picked.name);
+  } else {
+    // React Native reads a file part from its local URI.
+    form.append('file', { uri: picked.uri, name: picked.name, type: picked.mimeType ?? 'application/octet-stream' } as unknown as Blob);
+  }
+  const { url } = await apiFetch<{ url: string }>('/api/upload', { method: 'POST', body: form });
+  return apiFetch<AttachmentRow>('/api/attachment/direct', {
+    method: 'POST',
+    body: JSON.stringify({ name: picked.name, path: url, type: attachmentKind(picked.mimeType) }),
+  });
+}

@@ -63,6 +63,7 @@ from generators import (
     build_dashboard_catalog,
     build_attachable_owners,
     attachment_type_ts,
+    attachment_type_values,
     reaction_type_ts,
     _build_approval_create_block_for_entity,
     _build_split_approval_inherit_block,
@@ -1085,6 +1086,12 @@ _MOBILE_STATIC_TEMPLATES = [
     ('audit_log/View.tsx.jinja2', 'components/audit_log/View.tsx'),
 ]
 
+# Direct attachment fields: written only when some mobile entity has one (it adds the file picker dependency).
+_MOBILE_ATTACHMENT_TEMPLATES = [
+    ('lib/attachment-http.ts.jinja2', 'lib/attachment-http.ts'),
+    ('components/native/AttachmentInput.tsx.jinja2', 'components/native/AttachmentInput.tsx'),
+]
+
 # Scheduled task administration screens: written only when the schema declares a task.
 _MOBILE_SCHEDULED_TASK_TEMPLATES = [
     ('scheduled_task_run/mobile_client.ts.jinja2', 'lib/scheduled_task_run/mobile_client.ts'),
@@ -1160,6 +1167,8 @@ def _mobile_field_json(f: dict) -> dict:
             }
             if 'target' in f else {}
         ),
+        # A direct attachment field names where the REST detail embeds the row and what the write body carries.
+        **({'relationName': f['relation_name'], 'bodyKey': f['body_key']} if f['kind'] == 'attachment' else {}),
         **({'createInline': True} if f.get('create_form') else {}),
     }
 
@@ -1196,6 +1205,8 @@ def generate_mobile_entity(spec: dict, ctx: dict, schema: dict, mobile_dir: Path
         'has_form_hook': has_form_hook,
         # Fields whose picker offers "Create new" (x-create-inline), each with its target's create form.
         'create_fields': [f for f in spec['fields'] if f.get('create_form')],
+        # Direct attachment fields: the form keeps each field's attachment row, the detail screen links to the file.
+        'attachment_fields': [f for f in spec['fields'] if f['kind'] == 'attachment'],
     }
     lib_dir = mobile_dir / 'lib' / name
     components_dir = mobile_dir / 'components' / name
@@ -1254,6 +1265,8 @@ def generate_mobile_target(
         'entities': mobile_specs or [],
         'has_scheduled_tasks': has_scheduled_tasks,
         'has_payment': any(spec.get('is_payment') for spec in mobile_specs or []),
+        # Some entity has a direct attachment field: the app needs the file picker and the upload helpers.
+        'has_attachment': any(f['kind'] == 'attachment' for spec in mobile_specs or [] for f in spec['fields']),
         # The schema has an `x-mention` field, so the mention user search route exists.
         'has_mention': has_mention,
     }
@@ -1268,6 +1281,12 @@ def generate_mobile_target(
         _write(checkout_out, _render(env, 'mobile/lib/checkout.ts.jinja2', ctx))
     elif checkout_out.exists():
         checkout_out.unlink()
+    for tmpl_name, rel_out in _MOBILE_ATTACHMENT_TEMPLATES:
+        target = mobile_dir / rel_out
+        if ctx['has_attachment']:
+            _write(target, _render(env, f'mobile/{tmpl_name}', ctx))
+        elif target.exists():
+            target.unlink()
     for tmpl_name, rel_out in _MOBILE_STATIC_TEMPLATES:
         _write(mobile_dir / rel_out, _render(env, f'mobile/{tmpl_name}', ctx))
     # The list panel's state and query logic is the Web's own module, copied unchanged so the
@@ -2306,6 +2325,15 @@ def generate(schema_path: str, output_dir: str) -> None:
             }),
         )
         print('  Direct-attachment FK action → lib/attachment/direct_actions.ts')
+        # The same function over REST, for callers that carry a mobile access token or API key.
+        _write(
+            out / 'app' / 'api' / 'attachment' / 'direct' / 'route.ts',
+            _render(env, 'api_direct_attachment_route.ts.jinja2', {
+                'type_ts': attachment_type_ts(schema),
+                'type_values': attachment_type_values(schema),
+            }),
+        )
+        print('  Direct-attachment FK REST route → app/api/attachment/direct/route.ts')
 
     # --- Named constants (lib/reaction_constants.ts) ---
     # named_constants was pre-computed before the entity loop

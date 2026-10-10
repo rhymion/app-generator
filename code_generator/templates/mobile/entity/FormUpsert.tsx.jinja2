@@ -15,6 +15,9 @@ import {
   {{ const_name }}_FIELDS as FIELDS,
 } from '@/lib/{{ name }}/mobile_client';
 import { FieldInput, toFieldState, type FieldValueState } from '@/components/native/FieldInput';
+{% if attachment_fields %}
+import type { AttachmentRow } from '@/lib/attachment-http';
+{% endif %}
 {% if create_fields %}
 import type { InlineCreateProps } from '@/components/native/RelationPicker';
 {% for f in create_fields %}
@@ -53,6 +56,10 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
   const [values, setValues] = useState<Record<string, FieldValueState>>(() =>
     Object.fromEntries(FIELDS.map((spec) => [spec.key, toFieldState(spec, null)])),
   );
+{% if attachment_fields %}
+  // A direct attachment field's value is the attachment row's id; the whole row is kept to show its name.
+  const [attachments, setAttachments] = useState<Record<string, AttachmentRow | null>>({});
+{% endif %}
   const [permissions, setPermissions] = useState<ModelPermissions | undefined>(undefined);
   const [state, setState] = useState<'loading' | 'ready' | 'missing'>('loading');
   const [busy, setBusy] = useState(false);
@@ -95,6 +102,12 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
             return;
           }
           setValues(Object.fromEntries(FIELDS.map((spec) => [spec.key, toFieldState(spec, record[spec.key])])));
+{% if attachment_fields %}
+          setAttachments(Object.fromEntries(
+            FIELDS.filter((spec) => spec.kind === 'attachment')
+              .map((spec) => [spec.key, (record[spec.relationName ?? spec.key] as AttachmentRow | null | undefined) ?? null]),
+          ));
+{% endif %}
         }
 {% endif %}
         setState('ready');
@@ -191,6 +204,10 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
           formValues={values}
 {% if create_fields %}
           createForm={CREATE_FORMS[spec.key]}
+{% endif %}
+{% if attachment_fields %}
+          attachment={attachments[spec.key] ?? null}
+          onAttachmentChange={(row) => setAttachments((current) => ({ ...current, [spec.key]: row }))}
 {% endif %}
         />
       ))}

@@ -1,0 +1,92 @@
+import { useState } from 'react';
+import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
+import { useMessages } from '@/lib/messages';
+import type { FieldSpec } from '@/lib/entity-http';
+import { resolveApiUrl } from '@/lib/api-base';
+import {
+  ATTACHMENT_MIME_TYPES,
+  uploadAttachment,
+  uploadErrorMessage,
+  type AttachmentRow,
+} from '@/lib/attachment-http';
+
+/** The attached file's name; tapping it opens the file. Shows "-" when nothing is attached. */
+export function AttachmentValue({ row, testID }: { row: AttachmentRow | null | undefined; testID: string }) {
+  if (!row) return <Text style={styles.empty} testID={testID}>-</Text>;
+  return (
+    <Pressable onPress={() => void Linking.openURL(resolveApiUrl(row.path))} accessibilityRole="link">
+      <Text style={styles.link} testID={testID}>{row.name}</Text>
+    </Pressable>
+  );
+}
+
+type Props = {
+  spec: FieldSpec;
+  /** The attachment currently held by the field (its id is the form value). */
+  row: AttachmentRow | null;
+  onChange: (row: AttachmentRow | null) => void;
+  disabled?: boolean;
+};
+
+/**
+ * Direct attachment field: pick a file, upload it, and hold the created attachment row. The form
+ * submits only the row's id; the row is kept whole so its name can be shown without another request.
+ */
+export function AttachmentInput({ spec, row, onChange, disabled }: Props) {
+  const { t, terr } = useMessages();
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const locked = disabled || spec.readonly || uploading;
+
+  const pick = async () => {
+    setError(null);
+    const result = await DocumentPicker.getDocumentAsync({ type: ATTACHMENT_MIME_TYPES, copyToCacheDirectory: true });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    setUploading(true);
+    try {
+      onChange(await uploadAttachment({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType, file: asset.file }));
+    } catch (err) {
+      setError(uploadErrorMessage(err) ?? terr('unknown'));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>
+        {spec.label}
+        {spec.required ? ' *' : ''}
+      </Text>
+      <View style={styles.row}>
+        <View style={styles.name}>
+          {uploading ? <ActivityIndicator testID={`attachment-uploading-${spec.key}`} /> : <AttachmentValue row={row} testID={`attachment-name-${spec.key}`} />}
+        </View>
+        {locked ? null : (
+          <Pressable onPress={() => void pick()} style={styles.button} testID={`attachment-pick-${spec.key}`}>
+            <Text>{t('Common.select')}</Text>
+          </Pressable>
+        )}
+        {locked || !row ? null : (
+          <Pressable onPress={() => { setError(null); onChange(null); }} style={styles.button} testID={`attachment-clear-${spec.key}`}>
+            <Text>{t('Common.clear')}</Text>
+          </Pressable>
+        )}
+      </View>
+      {error ? <Text style={styles.error} testID={`attachment-error-${spec.key}`}>{error}</Text> : null}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  field: { gap: 6, marginBottom: 14 },
+  label: { fontSize: 13, fontWeight: '600', color: '#374151' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  name: { flex: 1 },
+  empty: { fontSize: 16 },
+  link: { fontSize: 16, color: '#2563eb' },
+  button: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6 },
+  error: { color: '#dc2626', fontSize: 12 },
+});

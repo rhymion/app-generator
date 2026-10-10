@@ -24,6 +24,10 @@ import {
 import { getEntityFormErrorMessage } from '@/lib/{{ name }}/use_entity_form';
 {% endif %}
 import { toRecordDisplayText } from '@/components/native/FieldInput';
+{% if attachment_fields %}
+import { AttachmentValue } from '@/components/native/AttachmentInput';
+import type { AttachmentRow } from '@/lib/attachment-http';
+{% endif %}
 {% if has_approval %}
 import { ApprovalSection, type ApprovalRequestRow } from '@/components/native/ApprovalSection';
 import { HAS_ON_WITHDRAWN } from '@/lib/{{ name }}/use_entity_approval_actions';
@@ -107,9 +111,19 @@ export function {{ pascal }}FormView({ id }: { id: string }) {
       {FIELDS.map((spec) => (
         <View key={spec.key} style={styles.field}>
           <Text style={styles.label}>{spec.label}</Text>
+{% if attachment_fields %}
+          {spec.kind === 'attachment' ? (
+            <AttachmentValue row={record[spec.relationName ?? spec.key] as AttachmentRow | null | undefined} testID={`view-field-${spec.key}`} />
+          ) : (
+            <Text style={styles.value} testID={`view-field-${spec.key}`}>
+              {toRecordDisplayText(spec, record)}
+            </Text>
+          )}
+{% else %}
           <Text style={styles.value} testID={`view-field-${spec.key}`}>
             {toRecordDisplayText(spec, record)}
           </Text>
+{% endif %}
         </View>
       ))}
 {% if is_payment %}
