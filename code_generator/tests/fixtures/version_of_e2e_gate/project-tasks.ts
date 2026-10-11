@@ -19,6 +19,16 @@ export function getProjectTasks(): Record<string, (...args: any[]) => any> {
         role = await prisma.role.create({ data: { name: ROLE_NAME, creator_id: user.id, updater_id: user.id } });
       }
       await prisma.role.update({ where: { id: role.id }, data: { users: { connect: [{ id: user.id }] } } });
+      // The version entity is generated with test: false, so db:grantAllPermissions
+      // does not cover it; grant the approver role full access explicitly.
+      for (const name of ['vo_item_version', 'vo_item_version_line']) {
+        await prisma.permission.create({
+          data: {
+            name, role_id: role.id, create: true, read: true, update: true, delete: true, import: true,
+            creator_id: user.id, updater_id: user.id,
+          },
+        });
+      }
       await prisma.approval_flow.deleteMany({ where: { entity_name: 'vo_item_version' } });
       await prisma.approval_flow.create({
         data: { entity_name: 'vo_item_version', approver_role_id: role.id, creator_id: user.id, updater_id: user.id },
