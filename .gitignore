@@ -200,6 +200,7 @@ memory/
 # ── lib/ ──
 lib/*/*
 !lib/account-link/**
+!lib/audit-log-integrity/**
 !lib/auth/**
 !lib/mfa/**
 !lib/rate-limit/**
