@@ -12,6 +12,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **Generated Cypress helpers: `selectAutocomplete` and the DataGrid cell helpers work for long labels and wide grids.**
+  `selectAutocomplete` compared the option text with whitespace collapsed but the expected label as-is, so a label with
+  trailing empty segments (for example an inventory with no lot number or expiry date) never matched. The expected label
+  is now collapsed the same way. `getDataGridCell` (and so `editDataGridCell` / `fillDataGridRow`) now scrolls the grid
+  horizontally until the column is rendered, because MUI DataGrid virtualizes columns that are off screen (the
+  `dashboard_widget` grid lost `group_by_field` once `timezone` was added in front of it).
 - **Mobile: the Audit Log screen no longer shows "An unexpected error occurred"** (Issue #926). `GET /api/audit_log`
   and `GET /api/audit_log/<id>` authenticated with `authenticateApiKey()`, which does not understand the mobile
   access token, so the app's `Authorization: Bearer <jwt>` request was answered `401 Invalid API key.`. Both routes

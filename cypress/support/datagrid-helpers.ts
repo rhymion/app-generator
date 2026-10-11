@@ -54,12 +54,38 @@ export function getDataGridRow(rowIndex: number, childTitle?: string) {
 }
 
 /**
+ * Scroll a DataGrid horizontally until the cell for `field` is rendered. MUI DataGrid
+ * virtualizes columns, so a cell far to the right of the visible area (a grid with many
+ * columns, or a narrow viewport next to the sidebar) is absent from the DOM until the
+ * grid is scrolled to it. Does nothing when the cell is already rendered.
+ */
+function revealDataGridCell(rowIndex: number, field: string, childTitle?: string) {
+  const cellSelector = `div[role="row"][data-rowindex="${rowIndex}"] div[data-field="${field}"]`;
+  const withGridRoot = (callback: ($root: JQuery<HTMLElement>) => void) =>
+    childTitle ? cy.contains('h2', childTitle).parent().then(callback) : cy.get('body').then(callback);
+  const scrollStep = (left: number) => {
+    withGridRoot(($root) => {
+      const $scroller = $root.find('.MuiDataGrid-virtualScroller').first();
+      // No virtualized grid in scope, or the cell is already rendered: nothing to reveal.
+      if ($scroller.length === 0 || $root.find(cellSelector).length > 0) return;
+      if (left > 0 && left >= $scroller[0].scrollWidth) return;
+      cy.wrap($scroller).scrollTo(left, 0, { duration: 0, ensureScrollable: false });
+      // Let the grid render the columns that entered the viewport before re-checking.
+      cy.wait(100);
+      scrollStep(left + Math.max($scroller[0].clientWidth / 2, 100));
+    });
+  };
+  scrollStep(0);
+}
+
+/**
  * Get a cell in a DataGrid row
  * @param rowIndex - 0-based row index
  * @param field - Field name (column)
  * @param childTitle - Optional: scope to a specific embedded child DataGrid (see getDataGridRow).
  */
 export function getDataGridCell(rowIndex: number, field: string, childTitle?: string) {
+  revealDataGridCell(rowIndex, field, childTitle);
   return getDataGridRow(rowIndex, childTitle).find(`div[data-field="${field}"]`);
 }
 
