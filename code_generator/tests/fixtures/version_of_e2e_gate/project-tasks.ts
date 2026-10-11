@@ -20,8 +20,8 @@ export function getProjectTasks(): Record<string, (...args: any[]) => any> {
       }
       await prisma.role.update({ where: { id: role.id }, data: { users: { connect: [{ id: user.id }] } } });
       // The version entity is generated with test: false, so db:grantAllPermissions
-      // does not cover it; grant the approver role full access explicitly.
-      for (const name of ['vo_item_version', 'vo_item_version_line']) {
+      // does not cover it (nor vo_item); grant the approver role full access explicitly.
+      for (const name of ['vo_item', 'vo_item_version', 'vo_item_version_line']) {
         await prisma.permission.create({
           data: {
             name, role_id: role.id, create: true, read: true, update: true, delete: true, import: true,
@@ -70,6 +70,46 @@ export function getProjectTasks(): Record<string, (...args: any[]) => any> {
     },
     async 'db:voAttachableId'(versionId: string) {
       return (await prisma.vo_item_version.findUniqueOrThrow({ where: { id: versionId }, select: { attachable_id: true } })).attachable_id;
+    },
+    async 'db:voCreateItem'(name: string) {
+      const user = await prisma.user.findFirstOrThrow({ orderBy: { created_at: 'asc' } });
+      return (await prisma.vo_item.create({ data: { name, creator_id: user.id, updater_id: user.id }, select: { id: true } })).id;
+    },
+    // Two organizations; `email` belongs to the first only.
+    async 'db:voSeedOrgs'(email: string) {
+      const user = await prisma.user.findUniqueOrThrow({ where: { email } });
+      const mk = (name: string, members: string[]) =>
+        prisma.organization.create({
+          data: { name, creator_id: user.id, updater_id: user.id, users: { connect: members.map((id) => ({ id })) } },
+          select: { id: true },
+        });
+      const own = await mk(`VoOrgOwn-${Date.now()}`, [user.id]);
+      const foreign = await mk(`VoOrgForeign-${Date.now()}`, []);
+      return { own: own.id, foreign: foreign.id };
+    },
+    // Inserts a version row directly: approved (numbered, optionally current) or an open draft.
+    async 'db:voInsertVersion'(p: {
+      itemId: string; orgId: string; title: string; notes?: string; versionNo: number | null; current?: boolean; lines?: string[];
+    }) {
+      const user = await prisma.user.findFirstOrThrow({ orderBy: { created_at: 'asc' } });
+      const approvable = await prisma.approvable.create({
+        data: { creator_id: user.id, approved_at: p.versionNo == null ? null : new Date() },
+      });
+      const version = await prisma.vo_item_version.create({
+        data: {
+          vo_item_id: p.itemId, organization_id: p.orgId, title: p.title, notes: p.notes ?? null, version_no: p.versionNo,
+          status: p.versionNo == null ? 'draft' : 'approved', approvable_id: approvable.id,
+          creator_id: user.id, updater_id: user.id,
+          vo_item_version_lines: { create: (p.lines ?? []).map((note) => ({ note })) },
+        },
+      });
+      if (p.current) await prisma.vo_item.update({ where: { id: p.itemId }, data: { current_version_id: version.id } });
+      return version.id;
+    },
+    // Removes read access to the version entity from every role.
+    async 'db:voRevokeVersionRead'() {
+      await prisma.permission.updateMany({ where: { name: 'vo_item_version' }, data: { read: false } });
+      return null;
     },
     async 'db:voLineCount'(versionId: string) {
       return prisma.vo_item_version_line.count({ where: { vo_item_version_id: versionId } });

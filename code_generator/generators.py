@@ -4880,6 +4880,9 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         'view_enum_ns_hooks':     '\n'.join(enum_ns_hooks),
         'view_enum_opt_setups':   '\n'.join(enum_opt_setups + flatten_enum_opt_setups),
         'all_parent_fields':      all_parent_fields,
+        # Per-field JSX in display order: the x-version-of diff renders each field with the very
+        # same markup the detail screen uses.
+        'ordered_field_jsx':      [{'field': f, 'jsx': jsx_by_field[f]} for f in _ordered_fields],
         'reverse_oto_fields':     reverse_oto_fields,
         'flatten_sections':       flatten_sections,
         'child_view_grids':       '\n'.join(child_view_grids),

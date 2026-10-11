@@ -30,6 +30,7 @@ from helpers.schema_helpers import (
     resolve_set_fields,
 )
 from keys import x_approval as approval_key
+from version_of import version_of_entities, version_of_for
 from payment_config import PAYMENT_PRICE_ID_FIELD
 from helpers.label_field import build_label_expression, render_prisma_include
 from helpers.bridge_direction import (
@@ -3890,6 +3891,15 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # Each item: {name, path?, target?}. Default target is ['list'] (backward compat).
     detail_def = schema['definitions'].get(def_key, {})
     _xcc_list_raw = detail_def.get('x-custom-components') or []
+    # x-version-of identity: mount the standard VersionHistory section unless the
+    # author declared x-custom-components themselves (any value, `[]` included).
+    if 'x-custom-components' not in detail_def and any(
+        v['identity'] == def_key for v in version_of_entities(schema)
+    ):
+        _xcc_list_raw = [{
+            'name': 'VersionHistory',
+            'target': ['view'],
+        }]
     if not isinstance(_xcc_list_raw, list):
         raise ValueError(
             f"x-custom-components on '{def_key}' must be a list of component objects; "
@@ -4834,6 +4844,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         entity_custom_components=entity_custom_components,
         entity_view_components=entity_view_components,
         entity_edit_components=entity_edit_components,
+        # x-version-of: set on the version entity (None otherwise); getters.ts adds the
+        # history/diff read functions behind the entity's own permission + org filter.
+        version_of=version_of_for(def_key, schema),
         # Helpers exposed for templates
         to_camel_case=to_camel_case,
         to_pascal_case=to_pascal_case,

@@ -51,7 +51,7 @@ from helpers.schema_helpers import is_optional_fk_to_parent
 from helpers.schema_helpers import get_approval_lines_props
 from helpers.schema_helpers import child_has_own_write_capability
 from keys import x_approval as approval_key
-from version_of import version_of_entities, version_of_for, version_of_children, version_of_prefill_plan
+from version_of import version_of_entities, version_of_for, version_of_children, version_of_prefill_plan, version_diff_children
 from generators import (
     chart_context,
     page_list_context,
@@ -1972,6 +1972,41 @@ def generate(schema_path: str, output_dir: str) -> None:
         if can_view:
             fv_ctx = {**ctx, **form_view_context(ctx, schema)}
             _write(components_dir / 'FormView.tsx', _render(env, 'form_view.tsx.jinja2', fv_ctx))
+            _vo_view = version_of_for(entity['definition_key'], schema)
+            if _vo_view:
+                # x-version-of: the identity's version list/diff, rendered with this
+                # version entity's own detail markup (see version_fields.tsx.jinja2).
+                _vo_jsx = '\n'.join(i['jsx'] for i in fv_ctx['ordered_field_jsx'])
+                _vo_dir = out / 'components' / _vo_view['identity']
+                _vo_fields_ctx = {
+                    'parent': parent, 'parent_pascal': ctx['parent_pascal'],
+                    'ordered_field_jsx': fv_ctx['ordered_field_jsx'],
+                    'field_names': [i['field'] for i in fv_ctx['ordered_field_jsx']],
+                    'enum_ns_hooks': fv_ctx['view_enum_ns_hooks'],
+                    'enum_opt_setups': fv_ctx['view_enum_opt_setups'],
+                    'uses_tf': 'tf(' in _vo_jsx or 'tf(' in fv_ctx['view_enum_opt_setups'],
+                    'uses_te': 'te(' in _vo_jsx or 'te(' in fv_ctx['view_enum_opt_setups'],
+                    'use_dayjs': 'dayjs' in _vo_jsx,
+                    'uses_format_label_value': 'formatLabelValue' in _vo_jsx,
+                    'uses_decimal_format': 'formatDecimalDisplay' in _vo_jsx,
+                    'needs_datetime_wrapper': '<DateTimeWrapper' in _vo_jsx,
+                    'needs_image_display': '<ImageDisplay' in _vo_jsx,
+                    'needs_link_display': '<AppFieldExternalLink' in _vo_jsx,
+                    'needs_single_attachment_display': '<SingleAttachmentDisplay' in _vo_jsx,
+                    'ui_imports': [c for c in ('AppFieldText', 'AppFieldBoolean', 'AppFieldRelation') if f'<{c}' in _vo_jsx],
+                }
+                _vo_fields_ctx['uses_t'] = _vo_fields_ctx['uses_tf'] or _vo_fields_ctx['uses_te'] or 'useTranslations' in (
+                    fv_ctx['view_enum_ns_hooks'] + fv_ctx['view_enum_opt_setups'])
+                _write(_vo_dir / 'VersionFields.tsx', _render(env, 'version_fields.tsx.jinja2', _vo_fields_ctx))
+                _vo_children = [
+                    {**c, 'title_key': to_camel_case(c['property_name'])}
+                    for c in version_diff_children(entity['definition_key'], schema, ctx['children_raw'])
+                ]
+                _write(_vo_dir / 'VersionHistory.tsx', _render(env, 'version_history.tsx.jinja2', {
+                    'parent': parent, 'parent_pascal': ctx['parent_pascal'],
+                    'identity': _vo_view['identity'], 'number': _vo_view['number'], 'children': _vo_children,
+                }))
+                print(f"  VersionHistory → components/{_vo_view['identity']}/")
             if fv_ctx.get('has_approval_section'):
                 _write(lib_dir / 'use_entity_approval_actions.ts',
                        _render(env, 'use_entity_approval_actions.ts.jinja2', fv_ctx))

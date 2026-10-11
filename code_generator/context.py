@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from helpers.naming import to_pascal_case, to_camel_case
+from version_of import version_of_entities
 from helpers.type_mapping import get_ts_type
 from helpers.schema_helpers import (
     filter_fields,
@@ -652,6 +653,11 @@ def build_entity_context(entity: dict, schema: dict) -> EntityContext:
 
     # Custom view/edit components from x-custom-components config (entity-level, list).
     _xcc_list_raw = schema['definitions'].get(def_key, {}).get('x-custom-components') or []
+    # x-version-of identity: the standard VersionHistory section (mirrors build_context.py).
+    if 'x-custom-components' not in schema['definitions'].get(def_key, {}) and any(
+        v['identity'] == def_key for v in version_of_entities(schema)
+    ):
+        _xcc_list_raw = [{'name': 'VersionHistory', 'target': ['view']}]
     if not isinstance(_xcc_list_raw, list):
         raise ValueError(
             f"x-custom-components on '{def_key}' must be a list of component objects; "

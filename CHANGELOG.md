@@ -82,6 +82,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **`x-version-of`: identity tombstone** (Refs #946). An identity with an approved version can no longer be deleted
   (retire it with `x-generate.invalidate`), and an invalidated identity takes no new draft. An identity that declares
   `x-generate.invalidate` now needs an `invalidated_at DateTime?` column, checked at generation time.
+- **`x-version-of`: standard version list and two-version diff** (Issue #953). An identity with a version entity gets a
+  Version history section on its detail screen that lists every readable version, drafts included, and compares any
+  two of them, by default the current version against the open draft. Fields render with the detail screen's markup,
+  long text gets a word diff, and owned child rows are paired by `x-import-key`, else by `order`, else shown as
+  additions and removals. The reads use the version entity's own permission and organization filter. A draft's approval
+  section links to the diff. No new schema key; an explicit `x-custom-components` on the identity (`[]` included) opts
+  out. See `docs/knowledge/schema-yaml-configuration.md` section 7.8.
 - **Mobile app: entities with a self-referencing `children` list get native screens** (Issue #942). A one-to-many
   `x-outputType: list` child attached through a nullable foreign key (for example `procedure.children`) no longer
   makes an entity ineligible: it is drawn as the same chip picker as a many-to-many list and saved as `children_ids`.

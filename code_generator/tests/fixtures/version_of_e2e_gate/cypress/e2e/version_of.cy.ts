@@ -19,6 +19,8 @@ function createItem(name = 'Widget') {
     });
 }
 
+let orgId = '';
+
 function createVersion(itemId: string, status: 'draft' | 'pending', lines = 0) {
   return cy.request({
     method: 'POST',
@@ -27,6 +29,7 @@ function createVersion(itemId: string, status: 'draft' | 'pending', lines = 0) {
     failOnStatusCode: false,
     body: {
       vo_item_id: itemId,
+      organization_id: orgId,
       title: `v-${status}`,
       summary: 'kept summary',
       ref_code: `ref-${++lineSeq}`,
@@ -51,6 +54,7 @@ describe('x-version-of (generated runtime behaviour)', () => {
     cy.task('db:seed');
     cy.task('db:grantAllPermissions');
     cy.task('db:setupVoApprover', TEST_CREDENTIALS.email);
+    cy.task<{ own: string }>('db:voSeedOrgs', TEST_CREDENTIALS.email).then((orgs) => { orgId = orgs.own; });
     Cypress.session.clearAllSavedSessions();
   });
 

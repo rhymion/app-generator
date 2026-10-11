@@ -1,0 +1,63 @@
+'use client';
+// AUTO-GENERATED - DO NOT EDIT
+//
+// x-version-of: renders one field of a '{{ parent }}' version with the same markup the
+// detail screen uses, so the version diff shows each side exactly as the detail would.
+{% if uses_t %}
+import { useTranslations } from 'next-intl';
+{% endif %}
+import type { {{ parent_pascal }}Detail } from '@/lib/{{ parent }}/types';
+{% if needs_datetime_wrapper %}
+import DateTimeWrapper from '@/components/_standard/DateTimeWrapper';
+{% endif %}
+{% if needs_image_display %}
+import ImageDisplay from '@/components/_standard/ImageDisplay';
+{% endif %}
+{% if needs_link_display %}
+import AppFieldExternalLink from '@/components/_standard/AppFieldExternalLink';
+{% endif %}
+{% if needs_single_attachment_display %}
+import SingleAttachmentDisplay from '@/components/_standard/SingleAttachmentDisplay';
+{% endif %}
+{% if uses_format_label_value %}
+import { formatLabelValue } from '@/lib/_format';
+{% endif %}
+{% if uses_decimal_format %}
+import { formatDecimalDisplay } from '@/lib/_decimal_format';
+{% endif %}
+{% if ui_imports %}
+import { {{ ui_imports | join(', ') }} } from '@/components/ui';
+{% endif %}
+{% if use_dayjs %}
+import dayjs from 'dayjs';
+{% endif %}
+
+/** Version fields in display order. */
+export const VERSION_FIELDS: string[] = {{ field_names | tojson }};
+
+export default function VersionField({ src, field }: { src: {{ parent_pascal }}Detail; field: string }) {
+{% if uses_tf %}
+  const tf = useTranslations('Fields');
+{% endif %}
+{% if uses_te %}
+  const te = useTranslations('EntityLabel');
+{% endif %}
+{% if enum_ns_hooks %}
+{{ enum_ns_hooks }}
+{% endif %}
+{% if enum_opt_setups %}
+{{ enum_opt_setups }}
+{% endif %}
+  switch (field) {
+{% for item in ordered_field_jsx %}
+    case '{{ item.field }}':
+      return (
+        <>
+{{ item.jsx }}
+        </>
+      );
+{% endfor %}
+    default:
+      return null;
+  }
+}
