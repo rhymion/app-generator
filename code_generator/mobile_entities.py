@@ -107,7 +107,7 @@ MAX_LIST_COLUMNS = 3
 
 
 def _picker_children(ctx: dict) -> list[dict]:
-    """The many-to-many children that are drawn as pickers.
+    """The children that are drawn as pickers: many-to-many lists and attachable one-to-many lists.
 
     The Web form draws a many-to-many declared with `x-outputType: list` as an
     autocomplete list of existing records; without it the child is an editable
@@ -115,8 +115,17 @@ def _picker_children(ctx: dict) -> list[dict]:
     """
     return [
         c for c in (ctx.get('non_comment_ch') or [])
-        if c.get('is_many_to_many') and c.get('output_type') == 'list'
+        if c.get('output_type') == 'list' and (c.get('is_many_to_many') or c.get('attach_fk'))
     ]
+
+
+def _picker_relationship(child: dict) -> dict:
+    """The relationship a picker child offers records of.
+
+    A one-to-many list child (`procedure.children`) has no `x-relationship`: it is the inverse of
+    the target's own nullable foreign key, so it offers records of the child's own entity.
+    """
+    return child.get('relationship') or {'target': child['name']}
 
 
 def _row_children(ctx: dict) -> list[dict]:
@@ -247,7 +256,7 @@ def mobile_ineligible_reason(ctx: dict, api_entities: set[str] | None = None) ->
             return f"has a {child['property_name']} row field ({unsupported}) the mobile form cannot draw"
     if api_entities is not None:
         targets = [r['target'] for r in (ctx.get('parent_rels_raw') or []) + (ctx.get('selector_oto_rels') or [])]
-        targets += [c['relationship']['target'] for c in pickers]
+        targets += [_picker_relationship(c)['target'] for c in pickers]
         for child in row_children:
             targets += [d['x-relationship']['target'] for d in child['child_prop_defs'].values()
                         if d.get('x-relationship') and d['x-relationship'].get('target')
@@ -383,9 +392,17 @@ def _attachment_entry(rel: dict, required: set[str], readonly: set[str], title) 
     }
 
 
-def _relation_many_entry(child: dict, readonly: set[str], title) -> dict:
-    """Field entry for a many-to-many picker."""
+def _relation_many_entry(child: dict, readonly: set[str], title, parent: str | None = None) -> dict:
+    """Field entry for a many-to-many picker, or for a one-to-many list picker.
+
+    A one-to-many list child is attached by pointing the target's nullable foreign key at the record.
+    The target's options route already offers only unattached records, and, when the list is of the
+    entity's own kind, never the record itself or one of its ancestors; for that last rule the picker
+    sends the record's `id` as part of the form values the route may narrow by (`context_fields`).
+    """
     name = child['property_name']
+    relationship = _picker_relationship(child)
+    own_kind = not child.get('is_many_to_many') and relationship['target'] == parent
     return {
         'key': name,
         'label': title(name),
@@ -393,11 +410,11 @@ def _relation_many_entry(child: dict, readonly: set[str], title) -> dict:
         'required': False,
         'readonly': name in readonly,
         'options': [],
-        'target': child['relationship']['target'],
-        'label_field': child['relationship'].get('label_field') or 'name',
+        'target': relationship['target'],
+        'label_field': relationship.get('label_field') or 'name',
         'relation_name': name,
         'body_key': f"{child['child_var']}_ids",
-        'context_fields': [],
+        'context_fields': ['id'] if own_kind else [],
     }
 
 
@@ -508,7 +525,7 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
     for rel in ctx.get('selector_oto_rels') or []:
         entries[rel['prop_name']] = _relation_entry(rel, ctx, required, readonly, title, rel['relation_name'])
     for child in _picker_children(ctx):
-        entries[child['property_name']] = _relation_many_entry(child, readonly, title)
+        entries[child['property_name']] = _relation_many_entry(child, readonly, title, ctx['parent'])
     for rel in ctx.get('direct_attachment_rels') or []:
         entries[rel['prop_name']] = _attachment_entry(rel, required, readonly, title)
     for child in _row_children(ctx):

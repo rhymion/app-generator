@@ -323,6 +323,24 @@ model mobile_stay {
   @@index([updater_id])
 }
 
+model mobile_step {
+  id         String        @id @default(cuid())
+  name       String
+  parent_id  String?
+  parent     mobile_step?  @relation("MobileStepTree", fields: [parent_id], references: [id])
+  children   mobile_step[] @relation("MobileStepTree")
+  created_at DateTime      @default(now()) @db.Timestamptz(0)
+  updated_at DateTime      @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user          @relation("MobileStepCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user          @relation("MobileStepUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([parent_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
 enum MobileInvoiceLineStatus {
   open
   billed

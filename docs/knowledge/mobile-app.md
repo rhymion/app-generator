@@ -180,8 +180,9 @@ the Web list panel too, so the two cannot disagree on what a sort, a filter or t
 
 ### Relation pickers
 
-A many-to-one foreign key, a one-to-one selector and a many-to-many declared with `x-outputType: list`
-(the Web form's autocomplete list of existing records) are drawn by
+A many-to-one foreign key, a one-to-one selector, a many-to-many declared with `x-outputType: list` and a
+one-to-many `x-outputType: list` attached through a nullable foreign key (the Web form's autocomplete list of
+existing records) are drawn by
 `components/native/RelationPicker.tsx`:
 
 | Relation | Control | Request body |
@@ -189,6 +190,7 @@ A many-to-one foreign key, a one-to-one selector and a many-to-many declared wit
 | Many-to-one foreign key | A button showing the selected record's label; *Select* opens a modal with a search box and the candidates. A tap selects and closes. An optional field has *Clear*. | `<column>: <id>` or `null` |
 | One-to-one selector | The same control. A record that is already linked elsewhere is rejected by the service and shown with the shared `fieldAlreadyLinked` message. | `<column>: <id>` or `null` |
 | Many-to-many | Chips for the selected records, each with a remove button; *Select* opens the modal, where a tap toggles a record and *Done* closes it. | `<name>_ids: [<id>, ...]`, an empty list when nothing is selected |
+| One-to-many list (for example `procedure.children`) | The same control as the many-to-many. The offered records are the child entity's own; it has no `x-relationship`, so the target is the child's entity name. | `<name>_ids: [<id>, ...]`, replacing the saved set |
 
 The candidates come from `GET /api/<target>/options` through `searchEntityOptions()` in `lib/entity-http.ts`
 (`relation-picker-rest-route.md`). The request carries `q` (typed text, debounced), `ids` (the current
@@ -196,7 +198,11 @@ selection, so a selected record is listed whatever the text), `caller` (the host
 (the values of the form fields the field's `x-autocomplete-context` names, as JSON). The picker filters
 nothing itself: permission scope, organization isolation, invalidated records, list-child attachment and the
 target's `autocomplete_filter.ts` are the server's. A `403` from the options route (no `read` on the target)
-shows the field disabled with the `Errors.fkPermissionDenied` message the Web form uses. The target need not
+shows the field disabled with the `Errors.fkPermissionDenied` message the Web form uses.
+A one-to-many list offers only records that no other record owns; when it lists the entity's own kind the
+form also sends the edited record's `id` in `context`, so the route leaves out the record itself and its
+ancestors (a record that is already a selected child is shown as a chip, not as a candidate).
+The service still refuses an attach that would break these rules, and the form shows the server's message. The target need not
 have native screens of its own.
 
 ### Direct attachment fields
@@ -569,7 +575,9 @@ runs the Expo web server and the proxy as one process so the runner can stop bot
 - `mobile/e2e/relation-pickers.spec.ts` covers the pickers: select, search with the current selection kept,
   the hosting entity and form values sent with the search, the shared required-field check, edit, a
   disabled field without read on the target, clear, a one-to-one already linked elsewhere, adding and
-  removing many-to-many records, an emptied set sent as an empty list, and the organization picker offering
+  removing many-to-many records, an emptied set sent as an empty list, a self-referencing one-to-many list
+  (`mobile_step.children`: free records offered, a record owned elsewhere, the record itself and its ancestors
+  not offered, the changed set sent as `children_ids`), and the organization picker offering
   only organizations the user belongs to. The fixture mode seeds the records it needs.
 - `mobile/e2e/inline-create-checkout.spec.ts` covers *Create new* (the target form in a modal, the new record
   selected, the hosting form's values kept, cancel, the target's validation, no control without the

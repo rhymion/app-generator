@@ -1,7 +1,9 @@
 /**
  * Audit log writer.
  *
- * Append-only record of security-relevant events: auth lifecycle (sign-in,
+ * Append-only record of security-relevant events (enforced by a Prisma Client
+ * guard, a database trigger and a digest chain; see
+ * docs/knowledge/audit-log-append-only.md): auth lifecycle (sign-in,
  * sign-out, account creation, rejected sign-in) and CRUD on protected
  * entities (roles, permissions, role assignments, …). The `audit_log` Prisma
  * model lives in `prisma/schema.prisma`.
@@ -53,7 +55,10 @@ export type AuditEvent = {
   /**
    * Free-form structured payload (provider name, rejection reason, before/after
    * snapshots, …). Use sparingly — large blobs make the table expensive to
-   * scan. Anything PII-sensitive should be omitted or hashed.
+   * scan. Must not contain personal data (names, email addresses, free text
+   * entered by a person): the table is append-only, so a row cannot be
+   * redacted later. Pass-through metadata (for example a caller-supplied
+   * object) falls under the same rule.
    */
   metadata?: Record<string, unknown> | null;
   /**

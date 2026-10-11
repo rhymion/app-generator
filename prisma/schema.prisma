@@ -611,8 +611,18 @@ model notification {
 // constraint — deleting a user does not cascade-delete their audit history.
 // `actor_user_id` is nullable because some events (rejected sign-in with an
 // unknown email, system-triggered actions) have no resolved actor.
+//
+// Append-only is enforced in layers (docs/knowledge/audit-log-append-only.md):
+// a Prisma Client guard (lib/audit-log-integrity/guard.ts), a row trigger and
+// privilege template (prisma/sql/audit_log_append_only.sql), and a digest
+// chain over closed periods. `metadata` never contains personal data.
+//
+// The table is range-partitioned on `created_at` by that SQL template, which
+// needs the partition key in the primary key; Prisma cannot declare
+// partitioning, and `prisma db push` / `migrate dev` leave a partitioned
+// parent table alone.
 model audit_log {
-  id            String   @id @default(cuid())
+  id            String   @default(cuid())
   actor_user_id String?
   actor_user    user?    @relation(fields: [actor_user_id], references: [id], onDelete: Restrict)
   action        String
@@ -621,9 +631,23 @@ model audit_log {
   metadata      Json?
   created_at    DateTime @default(now()) @db.Timestamptz(0)
 
+  @@id([id, created_at])
   @@index([actor_user_id])
   @@index([target_table, target_id])
   @@index([created_at])
+}
+
+// One digest per closed audit_log period (SHA-256 over the period's rows,
+// chained to the previous period's digest). Append-only like audit_log: the
+// SQL template adds the same trigger. See docs/knowledge/audit-log-append-only.md.
+model audit_log_digest {
+  id              String   @id @default(cuid())
+  period_start    DateTime @unique @db.Timestamptz(0)
+  period_end      DateTime @db.Timestamptz(0)
+  row_count       Int
+  digest          String
+  previous_digest String?
+  created_at      DateTime @default(now()) @db.Timestamptz(0)
 }
 
 // One-day idempotency-key cache for external API create calls

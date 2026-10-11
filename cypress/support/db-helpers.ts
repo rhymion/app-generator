@@ -22,11 +22,16 @@ export async function resetTestDatabase() {
   // Delete all records in correct order to respect foreign key constraints
   // Delete child tables first, then parent tables
 
+  // audit_log and audit_log_digest are append-only: a row trigger rejects
+  // DELETE, so they are emptied with TRUNCATE (which row triggers do not
+  // see). The connection here is the table owner; the application role has
+  // no TRUNCATE privilege. See docs/knowledge/audit-log-append-only.md.
+  await prisma.$executeRaw`TRUNCATE TABLE audit_log, audit_log_digest`;
+
   // Level 1: account, session, approval_history, audit_log, idempotency_key, mfa_recovery_code, mobile_session
   await prisma.account.deleteMany();
   await prisma.session.deleteMany();
   await prisma.approval_history.deleteMany();
-  await prisma.audit_log.deleteMany();
   await prisma.idempotency_key.deleteMany();
   await prisma.mfa_recovery_code.deleteMany();
   await prisma.mobile_session.deleteMany();
