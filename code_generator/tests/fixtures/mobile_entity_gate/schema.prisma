@@ -39,6 +39,8 @@ model user {
   created_mobile_tickets mobile_ticket[] @relation("MobileTicketCreator")
   updated_mobile_tickets mobile_ticket[] @relation("MobileTicketUpdater")
   created_mobile_orders mobile_order[] @relation("MobileOrderCreator")
+  created_mobile_invoices mobile_invoice[] @relation("MobileInvoiceCreator")
+  updated_mobile_invoices mobile_invoice[] @relation("MobileInvoiceUpdater")
   updated_mobile_orders mobile_order[] @relation("MobileOrderUpdater")
   created_mobile_documents mobile_document[] @relation("MobileDocumentCreator")
   updated_mobile_documents mobile_document[] @relation("MobileDocumentUpdater")
@@ -90,6 +92,7 @@ model mobile_group {
   id         String   @id @default(cuid())
   name       String
   mobile_tasks mobile_task[]
+  mobile_invoice_lines mobile_invoice_line[]
   created_at DateTime @default(now()) @db.Timestamptz(0)
   updated_at DateTime @updatedAt @db.Timestamptz(0)
   creator_id String
@@ -218,6 +221,42 @@ model mobile_order {
   @@index([name])
   @@index([creator_id])
   @@index([updater_id])
+}
+
+enum MobileInvoiceLineStatus {
+  open
+  billed
+}
+
+model mobile_invoice {
+  id         String                @id @default(cuid())
+  invoice_no String
+  lines      mobile_invoice_line[]
+  created_at DateTime              @default(now()) @db.Timestamptz(0)
+  updated_at DateTime              @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user                  @relation("MobileInvoiceCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user                  @relation("MobileInvoiceUpdater", fields: [updater_id], references: [id])
+  @@index([invoice_no])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_invoice_line {
+  id                String                   @id @default(cuid())
+  mobile_invoice_id String
+  mobile_invoice    mobile_invoice           @relation(fields: [mobile_invoice_id], references: [id], onDelete: Cascade)
+  description       String
+  quantity          Int
+  line_status       MobileInvoiceLineStatus  @default(open)
+  shipped_on        DateTime?                @db.Timestamptz(0)
+  mobile_group_id   String
+  mobile_group      mobile_group             @relation(fields: [mobile_group_id], references: [id])
+  created_at        DateTime                 @default(now()) @db.Timestamptz(0)
+  updated_at        DateTime                 @updatedAt @db.Timestamptz(0)
+  @@index([mobile_invoice_id])
+  @@index([mobile_group_id])
 }
 
 model attachable {

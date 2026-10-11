@@ -126,10 +126,11 @@ generated service layer, shared with the Web. The REST routes return HTTP 409 wi
 capacity is available and `code: 'RESERVATION_LOCKED'` when a count-mode reservation is already allocated, and the
 transport reads `code` before the status, so the form shows the same capacity / locked texts as the Web. The field
 the server fills in (the allocated pool reference) is only as required as the schema declares it. A count-mode
-reservation keeps its `lines` child grid and therefore stays on the placeholder screen.
+reservation with a `lines` child gets the [row editor](#child-rows), so `RESERVATION_LOCKED` is reachable on mobile for it.
 
 An entity is left on the placeholder screen when it has no REST routes or no list screen, declares a
-child grid, a one-to-one bridge other than the ones to `approvable` (with `ApprovalSection`) and `commentable`, a custom component other than `ApprovalSection`, virtual
+child that is neither a picker nor an [editable child collection](#child-rows) (an independent child with its own screens,
+or a row with a field the row editor cannot draw), a one-to-one bridge other than the ones to `approvable` (with `ApprovalSection`) and `commentable`, a custom component other than `ApprovalSection`, virtual
 columns, polymorphic attachments (`attachable`), `x-splittable` without the approval section, a state machine, edit/delete
 guards without an approval or `x-self-only`, relates to an entity that has no
 REST routes, or has a field with no native widget (image or file URI, entity select, custom upsert
@@ -240,7 +241,7 @@ closes the modal and leaves the field unchanged.
 - The button appears only when `GET /api/mobile/permissions?entity=<target>` says the caller may create the
   target; the create route stays the authority.
 - The control exists only when the target has native screens with a create form. A target that keeps the
-  placeholder screen (it has a child grid, for example) leaves the field a plain picker, and `generate-code`
+  placeholder screen (it has an independent child, for example) leaves the field a plain picker, and `generate-code`
   prints which field. The Web form still offers its dialog.
 - The generated hosting `FormUpsert.tsx` imports the target's `FormUpsert` and hands it to the picker;
   the target's `FormUpsert` takes optional `onCreated` and `onCancel` props and then reports the new id and
@@ -429,6 +430,34 @@ name; all `false` for an entity the caller holds nothing on). On a record, `upda
 overlaid with `operations` from `GET /api/<entity>/<id>/capabilities`. A form opened without `create`
 shows a permission message instead of fields.
 
+
+## Child rows
+
+A one-to-many child collection that the parent saves with its own record (the Web form's editable grid, declared
+without `x-outputType`) is drawn as a row editor, so the parent keeps its native screens.
+
+- **Form.** The collection is one field of kind `child_rows`. Each row draws the child's own fields with the controls the
+  form already has: text, number, decimal, boolean, enum, date, date-time, time and a relation picker for a foreign key
+  (the parent's own foreign key is not drawn). A required column without a schema default is required in the row; a
+  column with a schema default starts a new row at that value and is left out of the request when blank, so the server
+  applies the default. Columns the server fills in (`x-readonly`, `x-readonly-fields`) and bridge foreign keys
+  without a relationship (`*able_id`) are not drawn. **Add** appends an empty row and **Delete** removes one.
+- **Request.** The rows travel as one JSON entry of the form data and become the property array of the REST body
+  (`lines: [{ id?, ...fields }]`). A saved row keeps its `id`, so the server updates it in place; a row without an
+  `id` is created and a saved row that is missing is deleted. This is the shape the generated POST and PUT routes already
+  accepted; the server remains the authority for validation.
+- **Required fields.** Before sending, the form names the first row that lacks a required field (`Lines 1: Quantity is required`).
+  Everything else is checked by the server, as for the Web grid.
+- **Detail.** The collection is listed read-only, one line per row (`Field: value, Field: value`), with a relation shown
+  by its label.
+- **Not covered.** A child that is independent (it has its own screens and writes itself), a many-to-many without
+  `x-outputType: list`, a `list` child that is not a many-to-many (such as a self-referencing `children` list) and a row
+  field the editor cannot draw (image, file URI, entity select, custom upsert component) keep the entity on the placeholder
+  screen; the generation log names the property and, for a row field, the field.
+
+The fixture entity is `mobile_invoice` (`lines`: text, number, enum with a default, date and a required foreign key);
+`mobile/e2e/child-rows.spec.ts` creates, edits (keeping, changing, removing and adding rows) and reloads it.
+
 ## Audit log
 
 The audit log is a built-in feature, not a schema entity, so it is not among the entity screens. The app has
@@ -526,7 +555,7 @@ MODE=scheduled bash scripts/run_mobile_entity_playwright.sh  # scheduled-task fi
 
 The fixture mode merges `code_generator/tests/fixtures/mobile_entity_e2e_gate/` (`mobile_note` with full
 CRUD, `mobile_log` list-and-view only, `mobile_task` with a required foreign key, a many-to-many and a one-to-one
-selector to `mobile_group` / `mobile_tag` / `mobile_profile`, `mobile_org_item` with a foreign key to `organization`, `mobile_ticket` with an `x-create-inline` foreign key to `mobile_category`, `mobile_order` with `x-payment`, `mobile_request` with `x-approval`, `mobile_shipment` with `x-approval` and `x-splittable`, `mobile_thread` commentable and list-and-view only) into the copy's schema, as `scripts/compose_child_datagrid_e2e_fixture.py`
+selector to `mobile_group` / `mobile_tag` / `mobile_profile`, `mobile_org_item` with a foreign key to `organization`, `mobile_ticket` with an `x-create-inline` foreign key to `mobile_category`, `mobile_order` with `x-payment`, `mobile_request` with `x-approval`, `mobile_shipment` with `x-approval` and `x-splittable`, `mobile_thread` commentable and list-and-view only, `mobile_invoice` with a child collection) into the copy's schema, as `scripts/compose_child_datagrid_e2e_fixture.py`
 does for the other end-to-end fixtures, and signs in as the seeded administrator. `mobile/scripts/serve-web-with-proxy.js`
 runs the Expo web server and the proxy as one process so the runner can stop both.
 
