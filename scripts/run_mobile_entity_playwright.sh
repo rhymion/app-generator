@@ -115,6 +115,11 @@ values = {
     "NEXTAUTH_URL": f'"http://localhost:{app}"',
     "REDIS_URL": f'"redis://localhost:{redis}"',
     "COMPOSE_PROJECT_NAME": project,
+    # One signed-in user runs every spec within a few minutes, so the per-user REST ceilings of the
+    # `api:read` / `api:write` buckets (300 / 60 per minute, lib/rate-limit/index.ts) would answer the
+    # last specs with 429 once the suite is large enough.
+    "RATE_LIMIT_API_READ_LIMIT": "5000",
+    "RATE_LIMIT_API_WRITE_LIMIT": "5000",
 }
 text = open(path, encoding="utf-8").read()
 for key, value in values.items():
