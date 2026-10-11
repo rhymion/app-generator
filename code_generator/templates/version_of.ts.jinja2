@@ -4,7 +4,7 @@
 // the service create path ({{ version }}/service.ts) and from the approval
 // dispatch modules in lib/approval_request/, always inside the caller's
 // transaction, so a throw rolls the whole write back.
-import type { PrismaClient } from '@/app/generated/prisma/client';
+import type { PrismaClient{% if copy.uses_json %}, Prisma{% endif %} } from '@/app/generated/prisma/client';
 import { AppError } from '@/lib/_errors';
 
 {% include "_partials/tx_type.ts.jinja2" %}
@@ -14,9 +14,9 @@ import { AppError } from '@/lib/_errors';
  * approval has been granted (`approvable.approved_at` is set); a row that was
  * never submitted counts as open.
  */
-export async function assertSingleOpenDraft(tx: Tx, identityId: string, selfId: string): Promise<void> {
+export async function assertSingleOpenDraft(tx: Tx, identityId: string, selfId: string | null): Promise<void> {
   const siblings = await tx.{{ version }}.findMany({
-    where: { {{ identity_fk }}: identityId, id: { not: selfId } },
+    where: { {{ identity_fk }}: identityId, ...(selfId ? { id: { not: selfId } } : {}) },
     select: { approvable_id: true },
   });
   if (siblings.length === 0) return;
@@ -68,4 +68,53 @@ export async function deleteVersionDraft(tx: Tx, versionId: string): Promise<voi
   await tx.{{ c.model }}.deleteMany({ where: { {{ c.fk }}: versionId } });
 {% endfor %}
   await tx.{{ version }}.delete({ where: { id: versionId } });
+}
+
+/**
+ * New draft from the current version: copies the current version's columns
+ * and its owned child rows (one level) into a fresh, unsubmitted draft. The
+ * number is not copied (assigned at approval) and the approval submit field
+ * restarts from its default. Refused while another draft is open or when the
+ * {{ identity }} has no approved version yet.
+ */
+export async function newDraftFromCurrent(tx: Tx, identityId: string, actorId: string): Promise<{ id: string }> {
+  const identity = await tx.{{ identity }}.findUnique({
+    where: { id: identityId },
+    select: { current_version_id: true },
+  });
+  if (!identity) throw new AppError('NOT_FOUND', 'Not found');
+  if (!identity.current_version_id) {
+    throw new AppError('VALIDATION', 'This {{ identity }} has no approved version to copy', '{{ identity_fk }}', 'invalid');
+  }
+  await assertSingleOpenDraft(tx, identityId, null);
+  const source = await tx.{{ version }}.findUniqueOrThrow({ where: { id: identity.current_version_id } });
+  const approvable = await tx.approvable.create({ data: {} });
+  const draft = await tx.{{ version }}.create({
+    data: {
+      approvable_id: approvable.id,
+{% for a in copy.audit %}
+      {{ a }}: actorId,
+{% endfor %}
+{% for c in copy.columns %}
+      {{ c.name }}: {% if c.json %}(source.{{ c.name }} ?? undefined) as Prisma.InputJsonValue | undefined{% else %}source.{{ c.name }}{% endif %},
+{% endfor %}
+    },
+  });
+{% for c in copy.children %}
+  const {{ c.model }}Rows = await tx.{{ c.model }}.findMany({ where: { {{ c.fk }}: source.id }, orderBy: { id: 'asc' } });
+  if ({{ c.model }}Rows.length > 0) {
+    await tx.{{ c.model }}.createMany({
+      data: {{ c.model }}Rows.map((row) => ({
+        {{ c.fk }}: draft.id,
+{% for a in c.audit %}
+        {{ a }}: actorId,
+{% endfor %}
+{% for col in c.columns %}
+        {{ col.name }}: {% if col.json %}(row.{{ col.name }} ?? undefined) as Prisma.InputJsonValue | undefined{% else %}row.{{ col.name }}{% endif %},
+{% endfor %}
+      })),
+    });
+  }
+{% endfor %}
+  return { id: draft.id };
 }

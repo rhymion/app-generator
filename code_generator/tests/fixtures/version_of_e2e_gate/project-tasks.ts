@@ -55,6 +55,13 @@ export function getProjectTasks(): Record<string, (...args: any[]) => any> {
       });
       return { current_version_id: item.current_version_id, versions };
     },
+    async 'db:voDraft'(versionId: string) {
+      const v = await prisma.vo_item_version.findUniqueOrThrow({
+        where: { id: versionId },
+        select: { title: true, status: true, version_no: true, approvable_id: true, vo_item_version_lines: { select: { note: true }, orderBy: { note: 'asc' } } },
+      });
+      return { title: v.title, status: v.status, version_no: v.version_no, approvable_id: v.approvable_id, notes: v.vo_item_version_lines.map((l) => l.note) };
+    },
     async 'db:voLineCount'(versionId: string) {
       return prisma.vo_item_version_line.count({ where: { vo_item_version_id: versionId } });
     },

@@ -77,7 +77,7 @@ def version_of_children(version: str, schema: dict) -> tuple[list[dict], list[st
     from helpers.schema_helpers import resolve_parent_fk_props
     defs = schema.get('definitions') or {}
     owned, problems = [], []
-    for entry in _extract_children_of(_raw(version, defs), schema):
+    for entry in _extract_children_of(defs.get(version) or _raw(version, defs), schema):
         rel = entry.get('relationship') or {}
         if rel.get('type') == 'many-to-many' or entry.get('output_type') == 'comments':
             continue
@@ -90,6 +90,48 @@ def version_of_children(version: str, schema: dict) -> tuple[list[dict], list[st
             continue
         owned.append({'model': entry['name'], 'fk': fks[0]})
     return owned, problems
+
+
+_AUTO_COLUMNS = frozenset({'id', 'created_at', 'updated_at', 'creator_id', 'updater_id', 'approvable_id'})
+
+
+def _copy_columns(model, models: dict, skip: set[str]) -> tuple[list[dict], list[str]]:
+    """Scalar columns of a Prisma model a draft copy carries over, plus the
+    audit columns the copy sets itself (`creator_id`/`updater_id`).
+
+    Relation objects, back-relation lists, ids, timestamps and `@unique`
+    columns are never copied (a copied unique value would collide with the
+    source row); `skip` names further columns the caller sets or leaves to
+    their schema default."""
+    cols, audit = [], []
+    for f in model.fields.values():
+        if f.is_relation_object or f.is_list or f.prisma_type in models or f.is_id or f.is_updated_at:
+            continue
+        if f.name in ('creator_id', 'updater_id'):
+            audit.append(f.name)
+            continue
+        if f.name in _AUTO_COLUMNS or f.name in skip or f.is_unique:
+            continue
+        cols.append({'name': f.name, 'json': f.prisma_type == 'Json', 'nullable': f.nullable})
+    return cols, audit
+
+
+def version_of_copy_plan(vo: dict, children: list[dict], schema: dict, models: dict) -> dict:
+    """What 'new draft from current' copies, resolved against the Prisma models.
+
+    The version row keeps every scalar column except its number and the
+    approval submit field(s) (those restart from their schema defaults, so
+    the copy is an unsubmitted draft); each owned child row keeps its scalar
+    columns and is re-pointed at the new draft."""
+    version, number = vo['version'], vo['number']
+    submit = set(((_raw(version, schema.get('definitions') or {}).get('x-approval') or {}).get('submit_on') or {}))
+    cols, audit = _copy_columns(models[version], models, {number} | submit)
+    child_plans = []
+    for c in children:
+        c_cols, c_audit = _copy_columns(models[c['model']], models, {c['fk']})
+        child_plans.append({**c, 'columns': c_cols, 'audit': c_audit})
+    return {'columns': cols, 'audit': audit, 'children': child_plans, 'uses_json': any(
+        x['json'] for x in cols + [y for c in child_plans for y in c['columns']])}
 
 
 def version_of_errors(schema: dict) -> list[str]:

@@ -1720,6 +1720,21 @@ Generated, in `lib/<version>/version_of.ts` (always regenerated):
   (`deleteVersionDraft`). A version that holds a number is never deleted. A version entity without
   `on_withdrawn` keeps a withdrawn row as the open draft.
 
+- **New draft from the current version.** `newDraftFromCurrent` (same file) copies the identity's
+  `current_version_id` version into a fresh draft: every scalar column except the number, the
+  approval `submit_on` field(s) (they restart at their schema default, so the copy is unsubmitted),
+  `@unique` columns and system columns; `creator_id` / `updater_id` are set to the caller. The
+  version's own `approvable` bridge is created; approval requests are created later by the normal
+  submit edge. Each owned child row (one level) is copied and re-pointed at the draft; other columns of
+  a child, including its own `@unique` ones, follow the same rule. It runs in one transaction and is refused (`NOT_FOUND`,
+  or `VALIDATION` with reason `invalid`) for an unknown identity, an identity without an approved
+  version, or an identity that already has an open draft. It is exposed as
+  `POST /api/<version>/actions/new-draft` with body `{ "<identity>_id": "<id>" }` (201 and `{ id }`;
+  requires `create` permission on the version) and as the Server Action `newDraft<Version>(<identity>_id)`
+  in `lib/<version>/new_draft_action.ts`. Columns whose copy is not safe to infer (a required
+  `@unique` column without a default) must be given a default in Prisma. The copy is not written to the
+  audit log separately.
+
 Owned children are the one-to-many child arrays under the version's own `properties`; each needs
 exactly one structural FK to the version. Deeper levels are not deleted by the helper and must cascade
 in Prisma.

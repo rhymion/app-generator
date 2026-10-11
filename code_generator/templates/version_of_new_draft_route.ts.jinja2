@@ -1,0 +1,25 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { authenticate, requireApiPermission, handleApiError } from '@/lib/api-auth';
+import prisma from '@/lib/prisma';
+import { AppError } from '@/lib/_errors';
+import { newDraftFromCurrent } from '@/lib/{{ version }}/version_of';
+
+// POST /api/{{ version }}/actions/new-draft
+// Body: { "{{ identity_fk }}": "<id>" }
+// x-version-of: opens a new draft of the {{ identity }}'s current {{ version }},
+// copying its fields and owned child rows. Responds 201 with the new draft id.
+export async function POST(request: NextRequest) {
+  try {
+    const { userId } = await authenticate(request);
+    await requireApiPermission(userId, '{{ version }}', 'create');
+    const body = await request.json().catch(() => null);
+    const identityId = body && typeof body === 'object' ? (body as Record<string, unknown>).{{ identity_fk }} : undefined;
+    if (typeof identityId !== 'string' || identityId === '') {
+      throw new AppError('VALIDATION', '{{ identity_fk }} is required', '{{ identity_fk }}', 'missing');
+    }
+    const draft = await prisma.$transaction((tx) => newDraftFromCurrent(tx, identityId, userId));
+    return NextResponse.json(draft, { status: 201 });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

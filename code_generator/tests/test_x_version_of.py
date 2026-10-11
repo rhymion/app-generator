@@ -10,7 +10,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 from generate import _make_env, _render
 from validate import SchemaValidationError, validate_version_of_prisma
-from version_of import version_of_entities, version_of_errors, version_of_for
+from schema_deriver import parse_prisma_schema
+from version_of import version_of_copy_plan, version_of_entities, version_of_errors, version_of_for
 
 PRISMA_OK = """
 model product {
@@ -138,13 +139,14 @@ def test_key_is_registered_for_both_schema_builders():
 
 
 def _ctx(**over):
-    return {**version_of_for('product_version', _schema()), 'children': [], **over}
+    return {**version_of_for('product_version', _schema()), 'children': [],
+            'copy': {'columns': [], 'audit': [], 'children': [], 'uses_json': False}, **over}
 
 
 def test_helper_module_renders_all_three_functions():
     out = _render(_make_env(), 'version_of.ts.jinja2', _ctx(children=[{'model': 'coverage', 'fk': 'product_version_id'}]))
     assert 'export async function assertSingleOpenDraft' in out
-    assert 'where: { product_id: identityId, id: { not: selfId } }' in out
+    assert '...(selfId ? { id: { not: selfId } } : {})' in out
     assert 'approved_at: null' in out
     assert 'export async function assignVersionNumber' in out
     assert 'data: { current_version_id: versionId }' in out
@@ -176,3 +178,78 @@ def test_dispatch_templates_call_the_helpers_only_for_version_entities():
     withdrawn = _render(env, 'on_withdrawn_dispatch.ts.jinja2', {
         'withdrawable_entities': [base], 'withdrawn_body_needed': True})
     assert 'ProductVersionDeleteVersionDraft(tx, entity.id)' in withdrawn
+
+
+PRISMA_COPY = PRISMA_OK.replace(
+    "  version_no Int?\n",
+    "  version_no Int?\n  title String\n  status String @default(\"draft\")\n  slug String? @unique\n"
+    "  meta Json?\n  creator_id String\n  updater_id String\n  approvable_id String @unique\n"
+    "  created_at DateTime @default(now())\n  coverages coverage[]\n",
+) + """
+model coverage {
+  id                 String @id @default(cuid())
+  product_version_id String
+  product_version    product_version @relation(fields: [product_version_id], references: [id])
+  label              String
+  created_at         DateTime @default(now())
+}
+"""
+
+
+def _plan(tmp_path):
+    f = tmp_path / 'schema.prisma'
+    f.write_text(PRISMA_COPY)
+    vo = version_of_for('product_version', _schema())
+    return version_of_copy_plan(vo, [{'model': 'coverage', 'fk': 'product_version_id'}], _schema(), parse_prisma_schema(f))
+
+
+def test_copy_plan_skips_number_submit_field_unique_and_system_columns(tmp_path):
+    plan = _plan(tmp_path)
+    names = [c['name'] for c in plan['columns']]
+    # carried over: the identity FK and plain columns
+    assert names == ['product_id', 'title', 'meta']
+    # the number, the submit field (status), the unique slug, ids and timestamps restart
+    assert plan['audit'] == ['creator_id', 'updater_id']
+    assert plan['uses_json'] is True
+    child = plan['children'][0]
+    assert [c['name'] for c in child['columns']] == ['label']
+
+
+def test_new_draft_function_renders_copy_and_child_copy(tmp_path):
+    out = _render(_make_env(), 'version_of.ts.jinja2', _ctx(
+        children=[{'model': 'coverage', 'fk': 'product_version_id'}], copy=_plan(tmp_path)))
+    assert 'export async function newDraftFromCurrent' in out
+    assert 'identity.current_version_id' in out
+    assert 'await assertSingleOpenDraft(tx, identityId, null);' in out
+    assert 'title: source.title,' in out
+    assert 'version_no' not in out.split('newDraftFromCurrent')[1]
+    assert 'meta: (source.meta ?? undefined) as Prisma.InputJsonValue | undefined,' in out
+    assert 'creator_id: actorId,' in out
+    assert 'tx.coverage.createMany' in out and 'product_version_id: draft.id,' in out
+    assert 'label: row.label,' in out
+
+
+def test_new_draft_route_and_action_render():
+    vo = version_of_for('product_version', _schema())
+    route = _render(_make_env(), 'version_of_new_draft_route.ts.jinja2', vo)
+    assert "requireApiPermission(userId, 'product_version', 'create')" in route
+    assert 'newDraftFromCurrent(tx, identityId, userId)' in route and 'status: 201' in route
+    action = _render(_make_env(), 'version_of_new_draft_action.ts.jinja2', {**vo, 'pascal': 'ProductVersion'})
+    assert action.startswith('// AUTO-GENERATED') and "'use server';" in action
+    assert 'export async function newDraftProductVersion(' in action
+
+
+def test_owned_children_are_read_from_the_view_definition():
+    """A child array lives under the bare view's allOf, not on the '__' raw entity."""
+    from version_of import version_of_children
+    s = _schema()
+    s['definitions']['__coverage'] = {'type': 'object', 'properties': {'label': {'type': 'string'}}}
+    s['definitions']['coverage'] = {'allOf': [{'$ref': '#/definitions/__coverage'}]}
+    s['definitions']['product_version'] = {'allOf': [
+        {'$ref': '#/definitions/__product_version'},
+        {'type': 'object', 'properties': {'coverages': {
+            'type': 'array', 'items': {'$ref': '#/definitions/coverage'}, 'x-parent-fk': ['product_version_id']}}},
+    ]}
+    owned, problems = version_of_children('product_version', s)
+    assert problems == []
+    assert owned == [{'model': 'coverage', 'fk': 'product_version_id'}]

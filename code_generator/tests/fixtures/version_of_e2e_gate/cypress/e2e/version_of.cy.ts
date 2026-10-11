@@ -130,4 +130,55 @@ describe('x-version-of (generated runtime behaviour)', () => {
       });
     });
   });
+
+  describe('new draft from the current version', () => {
+    function newDraft(itemId: unknown) {
+      return cy.request({
+        method: 'POST',
+        url: '/api/vo_item_version/actions/new-draft',
+        headers,
+        failOnStatusCode: false,
+        body: { vo_item_id: itemId },
+      });
+    }
+
+    it('is refused while the identity has no approved version, and without an identity id', () => {
+      createItem().then((itemId) => {
+        newDraft(itemId).its('status').should('be.within', 400, 499);
+        newDraft(undefined).its('status').should('be.within', 400, 499);
+        newDraft('missing-id').its('status').should('be.within', 400, 499);
+      });
+    });
+
+    it('copies the current version and its child rows into an unsubmitted draft without a number', () => {
+      createItem().then((itemId) => {
+        createVersion(itemId, 'pending', 2).then((res) => {
+          const v1 = (res.body as { id: string }).id;
+          approve(v1);
+          newDraft(itemId).then((created) => {
+            expect(created.status).to.eq(201);
+            const draftId = (created.body as { id: string }).id;
+            expect(draftId).to.not.eq(v1);
+            cy.task<{ title: string; status: string; version_no: number | null; approvable_id: string; notes: string[] }>('db:voDraft', draftId).then((d) => {
+              expect(d.title).to.eq('v-pending');
+              expect(d.status, 'the submit field restarts at its default').to.eq('draft');
+              expect(d.version_no, 'numbered at approval, not at copy').to.eq(null);
+              expect(d.notes).to.deep.eq(['line 0', 'line 1']);
+            });
+            cy.task<number>('db:voLineCount', v1).should('eq', 2);
+            // one open draft per identity: a second request is refused
+            newDraft(itemId).its('status').should('be.within', 400, 499);
+            // approving the draft numbers it and moves current_version_id
+            cy.task<string | null>('db:voPendingRequestId', draftId).should('eq', null);
+            cy.request({ method: 'PUT', url: `/api/vo_item_version/${draftId}`, headers, body: { vo_item_id: itemId, title: 'v-pending', status: 'pending' } }).its('status').should('eq', 200);
+            approve(draftId);
+            cy.task<State>('db:voState', itemId).then((s) => {
+              expect(s.versions.map((v) => v.version_no)).to.deep.eq([1, 2]);
+              expect(s.current_version_id).to.eq(draftId);
+            });
+          });
+        });
+      });
+    });
+  });
 });

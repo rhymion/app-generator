@@ -51,7 +51,7 @@ from helpers.schema_helpers import is_optional_fk_to_parent
 from helpers.schema_helpers import get_approval_lines_props
 from helpers.schema_helpers import child_has_own_write_capability
 from keys import x_approval as approval_key
-from version_of import version_of_entities, version_of_for, version_of_children
+from version_of import version_of_entities, version_of_for, version_of_children, version_of_copy_plan
 from generators import (
     chart_context,
     page_list_context,
@@ -2591,11 +2591,22 @@ def generate(schema_path: str, output_dir: str) -> None:
     # the approval dispatch modules below. Always regenerated, never a stub.
     for _vo in version_of_entities(schema):
         _vo_children, _ = version_of_children(_vo['version'], schema)
+        _vo_copy = version_of_copy_plan(_vo, _vo_children, schema, _prisma_models)
         _write(
             out / 'lib' / _vo['version'] / 'version_of.ts',
-            _render(env, 'version_of.ts.jinja2', {**_vo, 'children': _vo_children}),
+            _render(env, 'version_of.ts.jinja2', {**_vo, 'children': _vo_children, 'copy': _vo_copy}),
         )
         print(f"  Version helpers → lib/{_vo['version']}/version_of.ts")
+        # New draft from the current version: REST route + Server Action.
+        _write(
+            out / 'app' / 'api' / _vo['version'] / 'actions' / 'new-draft' / 'route.ts',
+            _render(env, 'version_of_new_draft_route.ts.jinja2', _vo),
+        )
+        _write(
+            out / 'lib' / _vo['version'] / 'new_draft_action.ts',
+            _render(env, 'version_of_new_draft_action.ts.jinja2', {**_vo, 'pascal': to_pascal_case(_vo['version'])}),
+        )
+        print(f"  New-draft action → app/api/{_vo['version']}/actions/new-draft/, lib/{_vo['version']}/new_draft_action.ts")
 
     approvable_entities = []
     for def_key, def_val in defs.items():
