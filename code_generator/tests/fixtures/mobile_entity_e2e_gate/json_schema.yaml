@@ -78,6 +78,31 @@ definitions:
     required:
       - message
 
+  # x-entity-select: entity_name holds the name of one of the schema's entities; the native form draws
+  # it as chips labelled with the entity titles and saves the entity name.
+  mobile_rule:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - name:
+            primary: true
+        - entity_name: {}
+    fields:
+      name: {}
+      entity_name:
+        x-entity-select: true
+    required:
+      - name
+      - entity_name
+
   mobile_group:
     x-generate:
       list: true

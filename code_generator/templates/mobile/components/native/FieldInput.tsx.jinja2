@@ -106,10 +106,17 @@ export function emptyRow(spec: FieldSpec): ChildRowState {
   return { values };
 }
 
+/** Text an enum option is shown as: its label when the field has labels, else the option itself. */
+export function optionText(spec: FieldSpec, option: string): string {
+  const index = spec.options.indexOf(option);
+  return index >= 0 && spec.optionLabels[index] ? spec.optionLabels[index]! : option;
+}
+
 /** Text a record's value is displayed as on a read-only screen. */
 export function toDisplayText(spec: FieldSpec, value: unknown): string {
   if (spec.kind === 'boolean') return value === true ? 'Yes' : 'No';
   if (value === null || value === undefined || value === '') return '-';
+  if (spec.kind === 'enum') return optionText(spec, String(value));
   if (spec.kind === 'date') return String(value).slice(0, 10);
   if (spec.kind === 'time') return instantToTimeOfDay(String(value));
   return String(value);
@@ -279,7 +286,7 @@ export function FieldInput({ spec, value, onChange, disabled, caller, formValues
                 testID={`field-${spec.key}-${option}`}
                 accessibilityState={ { selected } }
               >
-                <Text style={selected ? styles.chipTextSelected : styles.chipText}>{option}</Text>
+                <Text style={selected ? styles.chipTextSelected : styles.chipText}>{optionText(spec, option)}</Text>
               </Pressable>
             );
           })}

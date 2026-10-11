@@ -1159,7 +1159,7 @@ def _mobile_field_json(f: dict) -> dict:
     """A field entry of the mobile spec as the `FieldSpec` the app reads."""
     return {
         'key': f['key'], 'label': f['label'], 'kind': f['kind'], 'required': f['required'],
-        'readonly': f['readonly'], 'options': f['options'], 'numericEnum': f.get('numeric_enum', False),
+        'readonly': f['readonly'], 'options': f['options'], 'optionLabels': f.get('option_labels', []), 'numericEnum': f.get('numeric_enum', False),
         **(
             {
                 'target': f['target'], 'labelField': f['label_field'], 'relationName': f['relation_name'],

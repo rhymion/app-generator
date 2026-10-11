@@ -22,6 +22,8 @@ model user {
   email    String @unique
   created_notes mobile_note[] @relation("MobileNoteCreator")
   updated_notes mobile_note[] @relation("MobileNoteUpdater")
+  created_rules mobile_rule[] @relation("MobileRuleCreator")
+  updated_rules mobile_rule[] @relation("MobileRuleUpdater")
   created_logs  mobile_log[]  @relation("MobileLogCreator")
   updated_logs  mobile_log[]  @relation("MobileLogUpdater")
   created_groups   mobile_group[]   @relation("MobileGroupCreator")
@@ -84,6 +86,22 @@ model mobile_log {
   updater_id String
   updater    user     @relation("MobileLogUpdater", fields: [updater_id], references: [id])
   @@index([message])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_rule {
+  id          String   @id @default(cuid())
+  name        String
+  entity_name String
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user     @relation("MobileRuleCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user     @relation("MobileRuleUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([entity_name])
   @@index([creator_id])
   @@index([updater_id])
 }
