@@ -408,9 +408,10 @@ end up in hosting runtime logs). A user is identified by id only:
 | `auth:signIn.reject` / `email_in_use_by_credentials` | `actor_user_id` null (the existing user did not make the attempt), `target_table` = `user`, `target_id` = the existing user's id; `metadata` = `{ reason, provider }` |
 | `auth:signIn.reject` / `domain_not_allowed` | no local user exists, so `metadata` = `{ reason, provider }` only |
 
-`anonymizeUser()` still redacts `email`, `name`, `display_name` and
-`username` keys inside `audit_log.metadata` for rows whose `actor_user_id`
-is the erased user, because hand-written consumer code may put them there.
+`audit_log.metadata` never holds personal data, so `anonymizeUser()` does not
+touch `audit_log`: the table is append-only (see
+[audit-log-append-only.md](audit-log-append-only.md)) and `actor_user_id` stays
+as the pseudonymous key. The person is erased on the `user` row.
 Failed credential and MFA sign-ins are not recorded in `audit_log`; they
 are throttled by the Redis rate limits described above. Rows written by
 earlier versions may still hold `metadata.email` in a deployed database;

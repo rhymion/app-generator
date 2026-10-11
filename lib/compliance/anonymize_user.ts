@@ -48,21 +48,10 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
         },
       });
 
-      // 5. Redact PII from audit_log metadata (actor_user_id retained per DP-6 ruling)
-      // GDPR Art.17(3)(b)(e): actor_user_id preserved as pseudonymous key for audit chain.
-      // Only PII values inside metadata JSON are redacted.
-      const auditRows = await tx.audit_log.findMany({ where: { actor_user_id: userId } });
-      await Promise.all(auditRows.map(async (row) => {
-        if (!row.metadata) return;
-        const meta = (typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata) as Record<string, unknown>;
-        let changed = false;
-        for (const key of ['email', 'name', 'display_name', 'username']) {
-          if (key in meta) { meta[key] = '[redacted]'; changed = true; }
-        }
-        if (changed) {
-          await tx.audit_log.update({ where: { id: row.id }, data: { metadata: meta as object } });
-        }
-      }));
+      // 5. audit_log is append-only and its metadata never holds personal data,
+      // so nothing in it is redacted here. actor_user_id stays as the
+      // pseudonymous key (GDPR Art.17(3)(b)(e)); the person is erased on the
+      // user row above.
 
       // 6. Safety check: verify Account rows are gone
       const remainingAccounts = await tx.account.count({ where: { userId } });

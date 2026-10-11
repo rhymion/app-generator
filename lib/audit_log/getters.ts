@@ -26,8 +26,10 @@ function buildAuditLogAccessWhere(
   return and;
 }
 
+// findFirst, not findUnique: the primary key is (id, created_at) (the table is
+// partitioned on created_at), and ids are cuids, unique on their own.
 export async function getAuditLogDetail(id: string): Promise<AuditLogDetail | null> {
-  const auditLog = await prisma.audit_log.findUnique({
+  const auditLog = await prisma.audit_log.findFirst({
     where: { id },
     include: {
       actor_user: true,
@@ -44,6 +46,8 @@ export async function getAuditLogDetail(id: string): Promise<AuditLogDetail | nu
   };
 }
 
+// findFirst, not findUnique: the primary key is (id, created_at) (the table is
+// partitioned on created_at), and ids are cuids, unique on their own.
 export async function getAuditLogDetailPageData(id: string, operation: Operation = 'read') {
   const [auditLog, { permissions: basePermissions, userId }] = await Promise.all([
     getAuditLogDetail(id),

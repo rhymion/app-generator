@@ -23,33 +23,28 @@ describe('API: User Invalidate DP-6 functional tests (cmd_244)', () => {
     });
   });
 
-  it('test2: anonymize_user source code redacts audit_log metadata PII (not null-wipes actor_user_id)', () => {
-    // Verify at the source-code level: the anonymizeUser implementation
-    // must contain the metadata PII redaction logic and must NOT null actor_user_id.
+  it('test2: anonymize_user never writes to audit_log (append-only; metadata holds no personal data)', () => {
+    // audit_log is append-only (app-generator #945), so the erasure transaction must neither
+    // update its rows nor null actor_user_id.
     cy.readFile('lib/compliance/anonymize_user.ts').then((content: string) => {
-      // Must NOT null out actor_user_id
       expect(content).not.to.include("data: { actor_user_id: null }");
-      // Must contain metadata redact loop
-      expect(content).to.include("'email', 'name', 'display_name', 'username'");
-      expect(content).to.include("'[redacted]'");
-      // Must query audit_log rows by actor_user_id (to iterate and redact)
-      expect(content).to.include('findMany({ where: { actor_user_id: userId } })');
+      expect(content).not.to.include('audit_log.update');
+      expect(content).not.to.include('audit_log.findMany');
+      expect(content).not.to.include("'[redacted]'");
     });
-    // Also verify the generator template was updated the same way
     cy.readFile('code_generator/templates/anonymize_user.ts.jinja2').then((content: string) => {
       expect(content).not.to.include("data: { actor_user_id: null }");
-      expect(content).to.include("'[redacted]'");
+      expect(content).not.to.include('audit_log.update');
+      expect(content).not.to.include("'[redacted]'");
     });
   });
 
   it('test3: anonymize_user preserves actor_user_id as pseudonymous key (DP-6 ruling)', () => {
-    // Verify at the source-code level: actor_user_id is preserved post-anonymization.
     cy.readFile('lib/compliance/anonymize_user.ts').then((content: string) => {
       // The old NULL step must be gone
       expect(content).not.to.match(/updateMany[\s\S]{0,200}actor_user_id: null/);
-      // actor_user_id preservation comment must be present
-      expect(content).to.include('actor_user_id retained per DP-6 ruling');
-      // GDPR basis must be cited
+      // actor_user_id stays as the pseudonymous key, with the GDPR basis cited
+      expect(content).to.include('actor_user_id stays as the');
       expect(content).to.include('GDPR Art.17(3)(b)(e)');
     });
   });

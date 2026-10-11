@@ -5,6 +5,7 @@ import { PrismaNeon } from '@prisma/adapter-neon';
 import { pinSslModeVerifyFull } from './db-url';
 import { resolvePrismaPoolMax } from './prisma-pool';
 import { cacheOnGlobal } from './global-singleton';
+import { auditLogAppendOnlyExtension } from './audit-log-integrity/guard';
 
 const globalForPrisma = global as unknown as Record<string, unknown>;
 
@@ -58,7 +59,7 @@ function attachSlowQueryListener(client: PrismaClient<'query'>): void {
 // TLS verification fails (rca_266a/267a). Doreen is following up with
 // Prisma support after other urgent work; once resolved, set PRISMA_DATABASE_URL
 // again to switch back to this branch without further code changes.
-const createPrismaClient = () => {
+const createBasePrismaClient = () => {
   if (process.env.PRISMA_DATABASE_URL) {
     const accelerateUrl = process.env.PRISMA_DATABASE_URL;
     // Fail fast if PRISMA_DATABASE_URL is a placeholder (e.g. created by
@@ -214,6 +215,12 @@ const createPrismaClient = () => {
     return client;
   }
 };
+
+// Every client the application uses rejects update/delete on audit_log (the
+// append-only guard, docs/knowledge/audit-log-append-only.md). The cast keeps
+// the plain PrismaClient type the rest of the code base already relies on.
+const createPrismaClient = () =>
+  createBasePrismaClient().$extends(auditLogAppendOnlyExtension) as unknown as PrismaClient;
 
 // Cache unconditionally, in every environment (see lib/global-singleton.ts
 // for why). This used to skip the cache outside dev

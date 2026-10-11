@@ -482,7 +482,7 @@ export default defineConfig({
         },
         async 'db:getAuditLogById'(rowId: string) {
           const { prisma } = require('./cypress/support/db-helpers');
-          const row = await prisma.audit_log.findUnique({ where: { id: rowId } });
+          const row = await prisma.audit_log.findFirst({ where: { id: rowId } });
           return JSON.parse(JSON.stringify(row));
         },
         async 'compliance:anonymizeUser'(userId: string) {
