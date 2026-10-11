@@ -425,6 +425,40 @@ jobs:
       - run: pip install -r requirements.txt
       - run: npm run test:scheduled-task-e2e-gate
 
+  version-of-e2e-gate-fixture:
+    name: Version Of E2E Gate Fixture Check
+    # Builds and runs a whole app generated from the default schema plus the
+    # dedicated fixture schema in code_generator/tests/fixtures/version_of_e2e_gate/
+    # (an identity and an x-version-of version entity with owned child rows) and
+    # runs its Cypress API specs: the version number assigned at approval, at most
+    # one open draft per identity, current_version_id, and deletion of a settled
+    # non-approved draft. Same shape and cost class as
+    # scheduled-task-e2e-gate-fixture above, so it is gated on detect-changes the
+    # same way; the local gate (npm run test:version-of-e2e-gate, step 14e of
+    # .claude/commands/update-generator.md) runs it without that exemption.
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - name: Cache Cypress binary
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm run test:version-of-e2e-gate
+
   pytest:
     name: Python Generator Tests
     runs-on: ubuntu-latest

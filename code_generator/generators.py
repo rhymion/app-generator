@@ -30,6 +30,7 @@ from helpers.schema_helpers import (
     derive_post_decision_freeze_values,
 )
 from keys import x_approval as approval_key
+from version_of import version_of_for
 from build_context import get_uri_kind, _exclusive_parent_all_columns
 from helpers.bridge_direction import get_new_form_bridge
 
@@ -3389,6 +3390,13 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     approval_edge_trigger_create_code = ''
     approval_edge_trigger_update_code = ''
     submit_for_approval_action_code = ''
+    # x-version-of: at most one open draft per identity, checked in the same
+    # transaction as the create (a throw rolls the new row back).
+    _version_of = version_of_for(parent, schema) if schema else None
+    version_of_create_code = (
+        f"    await assertSingleOpenDraft(tx, created.{_version_of['identity_fk']}, created.id);"
+        if _version_of and can_create else ''
+    )
     x_approval_submit_on_field: str | None = None
     # cmd_856 [変更4]: names which model's own service.ts actually exports
     # InsufficientPoolCapacityError, for submit_for_approval.ts.jinja2's
@@ -3973,6 +3981,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         + (f"\nimport {{ getModelPermissions }} from '@/lib/authz';" if server_value_override_fields and can_create else '')
         + (f"\nimport {{ assertEditAllowed }} from './edit_guard';" if has_edit_guard else '')
         + (f"\nimport {{ assertDeleteAllowed }} from './delete_guard';" if has_delete_guard else '')
+        + ("\nimport { assertSingleOpenDraft } from './version_of';" if version_of_create_code else '')
         + insufficient_inventory_error_class
         # TransactionClient/normalizeSnapshot/getCurrentSnapshot exist solely
         # to support update{{parent}}'s assertNotStale staleness check —
@@ -4023,6 +4032,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'should_filter_by_org':               should_filter_by_org,
         'org_id_client_writable':             org_id_client_writable,
         'approval_edge_trigger_create_code':  approval_edge_trigger_create_code,
+        'version_of_create_code':             version_of_create_code,
         'approval_edge_trigger_update_code':  approval_edge_trigger_update_code,
         'submit_for_approval_action_code':    submit_for_approval_action_code,
         'reservation_error_import_model':     reservation_error_import_model,

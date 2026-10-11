@@ -1,0 +1,11 @@
+{
+  "user": [
+    "created_vo_items vo_item[] @relation(\"VoItemCreator\")",
+    "updated_vo_items vo_item[] @relation(\"VoItemUpdater\")",
+    "created_vo_item_versions vo_item_version[] @relation(\"VoItemVersionCreator\")",
+    "updated_vo_item_versions vo_item_version[] @relation(\"VoItemVersionUpdater\")"
+  ],
+  "approvable": [
+    "vo_item_version vo_item_version?"
+  ]
+}

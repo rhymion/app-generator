@@ -182,6 +182,9 @@ code_generator/.generated/
 # scheduled-task-e2e-gate: disposable app copy built and run by
 # scripts/check_scheduled_task_e2e_gate_fixture.sh (never committed).
 .generated-scheduled-task-e2e-gate/
+# version-of-e2e-gate: disposable app copy built and run by
+# scripts/check_version_of_e2e_gate_fixture.sh (never committed).
+.generated-version-of-e2e-gate/
 .generated-mobile-entity-pw/
 
 # sample data
