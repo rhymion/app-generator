@@ -97,6 +97,11 @@ def _ctx(**overrides):
     return base
 
 
+def test_reservation_entity_is_eligible():
+    assert mobile_ineligible_reason(_ctx(reservation_config={'mode': 'count'})) is None
+    assert mobile_ineligible_reason(_ctx(reservation_config={'mode': 'item'})) is None
+
+
 def test_plain_context_is_eligible():
     assert mobile_ineligible_reason(_ctx()) is None
 
@@ -106,7 +111,6 @@ def test_plain_context_is_eligible():
     ('non_comment_ch', [{'name': 'child', 'property_name': 'kids', 'is_many_to_many': False}]),
     ('entity_view_components', [{'name': 'ApprovalSection'}]),
     ('has_attachable', True),
-    ('reservation_config', {'mode': 'count'}),
     ('state_machine_transitions', [{'field': 'status'}]),
     ('is_self_only', True),
 ])
