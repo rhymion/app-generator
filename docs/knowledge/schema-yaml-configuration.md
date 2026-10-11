@@ -1681,6 +1681,59 @@ Not covered:
   ledger rows), ledger and pool stubs, and the invalidate stub.
 - A direct write outside the generated code.
 
+## 7.8 `x-version-of` — an identity entity and its approved versions
+
+An entity that keeps its history as a stable identity row (for example `product`) plus one row per
+revision (`product_version`) declares the key on the **version** entity. The version is an ordinary
+`x-approval` entity; the identity declares nothing.
+
+```yaml
+product_version:
+  x-approval:
+    submit_on: { status: pending }
+    on_approved: { set_fields: { status: approved } }
+    on_rejected: { terminal: true, set_fields: { status: rejected } }
+  x-version-of:
+    identity: product      # the identity entity; the FK on the version is `product_id`
+    number: version_no     # integer field assigned at approval
+```
+
+The Prisma columns are declared by the app, because the generator reads `prisma/schema.prisma` and
+does not emit models:
+
+- version model: `<identity>_id` (relation to the identity), the number field as a nullable `Int?`
+  (a draft has none), and `@@unique([<identity>_id, <number>])`;
+- identity model: `current_version_id String?` with a `@relation(fields: [current_version_id], references: [id])`
+  to the version model.
+
+Generated, in `lib/<version>/version_of.ts` (always regenerated):
+
+- **Number on approval.** `assignVersionNumber` runs in the version's `on_approved` dispatch, in the
+  same transaction as the status write: the number becomes the identity's highest number plus one,
+  and the identity's `current_version_id` is set to the version. An abandoned draft takes no number.
+- **One open draft per identity.** `assertSingleOpenDraft` runs in `add<Version>` right after the
+  insert; a second version row whose identity still has a row that is not yet approved is refused
+  (`VALIDATION`, reason `invalid`, message "Another draft of this <identity> is still open") and the insert is rolled back. A row counts as open until
+  its `approvable.approved_at` is set, so a non-terminally rejected row stays the open draft.
+- **Settled non-approved outcomes.** A terminal rejection (`on_rejected.terminal: true`) and a
+  withdrawal (`on_withdrawn`) delete the draft and its owned child rows in the dispatch transaction
+  (`deleteVersionDraft`). A version that holds a number is never deleted. A version entity without
+  `on_withdrawn` keeps a withdrawn row as the open draft.
+
+Owned children are the one-to-many child arrays under the version's own `properties`; each needs
+exactly one structural FK to the version. Deeper levels are not deleted by the helper and must cascade
+in Prisma.
+
+Schema validation fails closed on: a value that is not a mapping, an unknown sub-key, a missing or
+non-snake-case `identity` / `number`, a version entity without `x-approval.on_approved`, an unknown
+identity or the version itself, an identity that is itself a version entity, two version entities for
+one identity, a `number` that is not an integer property or is `required`, an owned child without
+exactly one structural FK, and any missing Prisma column listed above.
+
+The key is opt-in; a schema without it generates the same output as before.
+
+---
+
 ## 8. `x-outputType` — Rendering Mode for Children and Related Entities
 
 Controls how a property under `properties:` is displayed in the detail view.

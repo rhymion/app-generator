@@ -8,6 +8,9 @@ import type { PrismaClient } from '@/app/generated/prisma/client';
 {% if entity.exclusive_check %}
 import { validateExclusiveParents as validate{{ entity.pascal_name }}ExclusiveParents } from '@/lib/{{ entity.snake_name }}/exclusive_parents';
 {% endif %}
+{% if entity.version_of %}
+import { assignVersionNumber as {{ entity.pascal_name }}AssignVersionNumber } from '@/lib/{{ entity.snake_name }}/version_of';
+{% endif %}
 {% if entity.emit_hook %}
 import { afterApprove as {{ entity.pascal_name }}AfterApprove } from '@/lib/{{ entity.snake_name }}/service_after_approve';
 {% endif %}
@@ -40,6 +43,10 @@ export async function dispatchOnApproved(
       where: { id: entity.id },
       data: { {% for field, value in entity.set_fields.items() %}{{ field }}: {% if value is number %}{{ value }}{% else %}'{{ value }}'{% endif %}{% if not loop.last %}, {% endif %}{% endfor %} },
     });
+{% endif %}
+{% if entity.version_of %}
+    // x-version-of: next version number + the identity's current_version_id
+    await {{ entity.pascal_name }}AssignVersionNumber(tx, entity.id);
 {% endif %}
 {% if entity.emit_hook %}
     // Custom hook — implement in service_after_approve.ts

@@ -1,0 +1,71 @@
+// AUTO-GENERATED - DO NOT EDIT
+//
+// x-version-of: '{{ version }}' is a version of '{{ identity }}'. Called from
+// the service create path ({{ version }}/service.ts) and from the approval
+// dispatch modules in lib/approval_request/, always inside the caller's
+// transaction, so a throw rolls the whole write back.
+import type { PrismaClient } from '@/app/generated/prisma/client';
+import { AppError } from '@/lib/_errors';
+
+{% include "_partials/tx_type.ts.jinja2" %}
+
+/**
+ * At most one open draft per identity. A version row is open until its
+ * approval has been granted (`approvable.approved_at` is set); a row that was
+ * never submitted counts as open.
+ */
+export async function assertSingleOpenDraft(tx: Tx, identityId: string, selfId: string): Promise<void> {
+  const siblings = await tx.{{ version }}.findMany({
+    where: { {{ identity_fk }}: identityId, id: { not: selfId } },
+    select: { approvable_id: true },
+  });
+  if (siblings.length === 0) return;
+  const bridgeIds = siblings.map((s) => s.approvable_id).filter((v): v is string => v != null);
+  const open =
+    bridgeIds.length < siblings.length ||
+    (await tx.approvable.count({ where: { id: { in: bridgeIds }, approved_at: null } })) > 0;
+  if (open) {
+    throw new AppError('VALIDATION', 'Another draft of this {{ identity }} is still open', '{{ identity_fk }}', 'invalid');
+  }
+}
+
+/**
+ * Approval time: give the version the next number of its identity and make it
+ * the identity's current version. Abandoned drafts never take a number.
+ */
+export async function assignVersionNumber(tx: Tx, versionId: string): Promise<void> {
+  const row = await tx.{{ version }}.findUnique({
+    where: { id: versionId },
+    select: { {{ identity_fk }}: true, {{ number }}: true },
+  });
+  if (!row || row.{{ number }} != null) return;
+  const top = await tx.{{ version }}.aggregate({
+    where: { {{ identity_fk }}: row.{{ identity_fk }} },
+    _max: { {{ number }}: true },
+  });
+  await tx.{{ version }}.update({
+    where: { id: versionId },
+    data: { {{ number }}: (top._max.{{ number }} ?? 0) + 1 },
+  });
+  await tx.{{ identity }}.update({
+    where: { id: row.{{ identity_fk }} },
+    data: { current_version_id: versionId },
+  });
+}
+
+/**
+ * Settled non-approved outcome (terminal rejection, withdrawal): drop the
+ * draft and its owned child rows. A version that holds a number is approved
+ * and is never deleted.
+ */
+export async function deleteVersionDraft(tx: Tx, versionId: string): Promise<void> {
+  const row = await tx.{{ version }}.findUnique({
+    where: { id: versionId },
+    select: { {{ number }}: true },
+  });
+  if (!row || row.{{ number }} != null) return;
+{% for c in children %}
+  await tx.{{ c.model }}.deleteMany({ where: { {{ c.fk }}: versionId } });
+{% endfor %}
+  await tx.{{ version }}.delete({ where: { id: versionId } });
+}

@@ -51,6 +51,7 @@ from helpers.schema_helpers import is_optional_fk_to_parent
 from helpers.schema_helpers import get_approval_lines_props
 from helpers.schema_helpers import child_has_own_write_capability
 from keys import x_approval as approval_key
+from version_of import version_of_entities, version_of_for, version_of_children
 from generators import (
     chart_context,
     page_list_context,
@@ -84,7 +85,7 @@ from payment_config import payment_context
 from validate import (
     validate_schema, validate_prisma_indexes,
     validate_self_only_creator_id_columns, validate_defaults_cross_schema,
-    validate_submit_on_default_matches_prisma,
+    validate_submit_on_default_matches_prisma, validate_version_of_prisma,
     validate_direct_attachment_prerequisite,
     validate_direct_attachment_reverse_fields,
     validate_write_once_stub_asymmetry,
@@ -1341,6 +1342,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         validate_self_only_creator_id_columns(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_defaults_cross_schema(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_submit_on_default_matches_prisma(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
+        validate_version_of_prisma(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_direct_attachment_prerequisite(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
         validate_direct_attachment_reverse_fields(schema, Path(output_dir) / 'prisma' / 'schema.prisma')
     except SchemaValidationError as exc:
@@ -2576,6 +2578,17 @@ def generate(schema_path: str, output_dir: str) -> None:
             _val_entity_name, _val_x_approval, _val_def_val.get('properties', {}), _val_is_editable,
         )
 
+    # x-version-of: one lib/<version>/version_of.ts per version entity (number
+    # assignment, open-draft guard, draft delete), called from service.ts and
+    # the approval dispatch modules below. Always regenerated, never a stub.
+    for _vo in version_of_entities(schema):
+        _vo_children, _ = version_of_children(_vo['version'], schema)
+        _write(
+            out / 'lib' / _vo['version'] / 'version_of.ts',
+            _render(env, 'version_of.ts.jinja2', {**_vo, 'children': _vo_children}),
+        )
+        print(f"  Version helpers → lib/{_vo['version']}/version_of.ts")
+
     approvable_entities = []
     for def_key, def_val in defs.items():
         if not def_key.startswith('__'):
@@ -2636,6 +2649,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'set_fields': resolved_sf,
             'emit_hook': bool(on_approved.get('emit_hook', False)),
             'exclusive_check': bool(set(resolved_sf) & set(_exclusive_parent_all_columns(def_key, schema))),
+            'version_of': version_of_for(def_key, schema),
             'has_ledger_source': bool(x_ledger_source),
             'ledger_source': x_ledger_source,
             'is_ship_skeleton': False,
@@ -2743,6 +2757,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'emit_hook': bool(on_rejected.get('emit_hook', False)),
             'exclusive_check': bool(set(resolved_sf) & set(_exclusive_parent_all_columns(def_key, schema))),
             'terminal': bool(on_rejected.get('terminal', False)),
+            'version_of': version_of_for(def_key, schema),
         })
     # tx / approvableId are only read inside the per-entity `if (set_fields or
     # emit_hook)` body (see the template); rejectedByUserId only inside the
@@ -2750,7 +2765,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     # them dead — same interface-conformance case as on_approved_dispatch.ts,
     # since dispatchOnRejected's 4-arg signature is a stable call-site
     # contract (cmd_529).
-    _rejected_body_needed = any(e['set_fields'] or e['emit_hook'] for e in rejectable_entities)
+    _rejected_body_needed = any(e['set_fields'] or e['emit_hook'] or (e['version_of'] and e['terminal']) for e in rejectable_entities)
     _rejected_hook_needed = any(e['emit_hook'] for e in rejectable_entities)
     _write(
         out / 'lib' / 'approval_request' / 'on_rejected_dispatch.ts',
@@ -2795,10 +2810,11 @@ def generate(schema_path: str, output_dir: str) -> None:
             'set_fields': resolved_sf,
             'emit_hook': bool(on_withdrawn.get('emit_hook', False)),
             'exclusive_check': bool(set(resolved_sf) & set(_exclusive_parent_all_columns(def_key, schema))),
+            'version_of': version_of_for(def_key, schema),
         })
     # Always emitted (mirrors on_rejected_dispatch.ts above) — actions.ts
     # imports this unconditionally, so it must exist even with zero entities.
-    _withdrawn_body_needed = any(e['set_fields'] or e['emit_hook'] for e in withdrawable_entities)
+    _withdrawn_body_needed = any(e['set_fields'] or e['emit_hook'] or e['version_of'] for e in withdrawable_entities)
     _write(
         out / 'lib' / 'approval_request' / 'on_withdrawn_dispatch.ts',
         _render(env, 'on_withdrawn_dispatch.ts.jinja2', {

@@ -8,6 +8,9 @@ import type { PrismaClient } from '@/app/generated/prisma/client';
 {% if entity.exclusive_check %}
 import { validateExclusiveParents as validate{{ entity.pascal_name }}ExclusiveParents } from '@/lib/{{ entity.snake_name }}/exclusive_parents';
 {% endif %}
+{% if entity.version_of and entity.terminal %}
+import { deleteVersionDraft as {{ entity.pascal_name }}DeleteVersionDraft } from '@/lib/{{ entity.snake_name }}/version_of';
+{% endif %}
 {% if entity.emit_hook %}
 import { afterReject as {{ entity.pascal_name }}AfterReject } from '@/lib/{{ entity.snake_name }}/service_after_reject';
 {% endif %}
@@ -40,7 +43,7 @@ export async function dispatchOnRejected(
 ): Promise<void> {
 {% for entity in rejectable_entities %}
   if (entityType === '{{ entity.snake_name }}') {
-{% if entity.set_fields or entity.emit_hook %}
+{% if entity.set_fields or entity.emit_hook or (entity.version_of and entity.terminal) %}
     const entity = await tx.{{ entity.snake_name }}.findFirst({ where: { approvable_id: approvableId } });
     if (!entity) return;
 {% if entity.set_fields %}
@@ -57,6 +60,10 @@ export async function dispatchOnRejected(
 {% endif %}
 {% if entity.emit_hook %}
     await {{ entity.pascal_name }}AfterReject(tx, entity.id, approvableId, rejectedByUserId);
+{% endif %}
+{% if entity.version_of and entity.terminal %}
+    // x-version-of: a terminally rejected draft is not kept
+    await {{ entity.pascal_name }}DeleteVersionDraft(tx, entity.id);
 {% endif %}
 {% endif %}
     return;

@@ -62,6 +62,9 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
 {% endif %}
       },
     });
+{% if version_of_create_code %}
+{{ version_of_create_code }}
+{% endif %}
 {% if flatten_nested_creates %}
 {{ flatten_nested_creates }}
 {% endif %}

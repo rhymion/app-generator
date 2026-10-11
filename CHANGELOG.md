@@ -5,6 +5,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **`x-version-of`: identity + version entities with approval-backed history** (Issue #946). Declared on the version entity
+  (an `x-approval` entity), it generates the version number assigned at approval, at most one open draft per identity,
+  the identity's `current_version_id`, and deletion of a terminally rejected or withdrawn draft with its owned child rows.
+  The Prisma columns are declared by the app and checked at generation time. See `docs/knowledge/schema-yaml-configuration.md`
+  section 7.8.
 - **Mobile app: entities that declare `x-reservation` get native screens** (Issue #937). `reservation_config` no longer
   makes an entity ineligible, so a reservation entity without a child grid (item mode, for example a room reservation)
   has list, detail, create, edit and delete screens. The generated REST routes now answer a request with no free

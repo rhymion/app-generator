@@ -29,6 +29,7 @@ from keys import x_approval as approval_key
 from manifest import sha256_file
 from payment_config import PAYMENT_PRICE_ID_FIELD, resolve_payment_price_source
 from schema_deriver import parse_prisma_schema
+from version_of import version_of_errors, validate_version_of_prisma as _validate_version_of_prisma
 
 _SNAKE_CASE = re.compile(r'^(__)?[a-z][a-z0-9_]*$')
 _ID_SUFFIX  = re.compile(r'_id$')
@@ -351,6 +352,11 @@ def validate_self_only_creator_id_columns(schema: dict, prisma_schema_path: str 
             f"x-self-only validation failed — {len(errors)} entity(ies) missing "
             f"a creator_id column:\n\n{bullet_list}\n"
         )
+
+
+def validate_version_of_prisma(schema: dict, prisma_schema_path: str | Path) -> None:
+    """Prisma-side prerequisites of `x-version-of` (see version_of.py)."""
+    _validate_version_of_prisma(schema, prisma_schema_path, SchemaValidationError)
 
 
 _ATTACHABLE_ID_NULLABLE = re.compile(r'^\s*attachable_id\s+String\?\s*$', re.MULTILINE)
@@ -3191,6 +3197,11 @@ def validate_schema(schema: dict) -> None:
     # x-create-inline
     # -----------------------------------------------------------------------
     errors.extend(_create_inline_errors(schema))
+
+    # -----------------------------------------------------------------------
+    # x-version-of
+    # -----------------------------------------------------------------------
+    errors.extend(version_of_errors(schema))
 
     # -----------------------------------------------------------------------
     # Report

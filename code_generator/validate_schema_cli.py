@@ -25,7 +25,7 @@ import yaml
 from validate import (
     validate_schema, validate_prisma_indexes,
     validate_self_only_creator_id_columns, validate_defaults_cross_schema,
-    validate_submit_on_default_matches_prisma,
+    validate_submit_on_default_matches_prisma, validate_version_of_prisma,
     SchemaValidationError,
 )
 
@@ -55,6 +55,7 @@ def main(argv: list[str]) -> int:
         validate_self_only_creator_id_columns(schema, prisma_schema_path)
         validate_defaults_cross_schema(schema, prisma_schema_path)
         validate_submit_on_default_matches_prisma(schema, prisma_schema_path)
+        validate_version_of_prisma(schema, prisma_schema_path)
     except SchemaValidationError as exc:
         print(str(exc), file=sys.stderr)
         return 1
