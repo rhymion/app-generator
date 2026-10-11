@@ -51,6 +51,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   access token, so the app's `Authorization: Bearer <jwt>` request was answered `401 Invalid API key.`. Both routes
   now use `authenticate()` like every generated entity route (mobile access token or API key); permission checks
   and the service API key path are unchanged.
+- **`audit_log` monthly partitions can be created by the restricted application role** (Issue #952). `audit_log_create_month_partition()`
+  is now `SECURITY DEFINER` with a pinned `search_path` and `EXECUTE` revoked from `PUBLIC`; `audit_log_app_role.sql` grants it to the
+  application role. Re-run `audit_log_append_only.sql` and `audit_log_app_role.sql` on existing databases. The docs now say the
+  consumer sets up the role's rights on other tables, and no longer claim every `neon_superuser` member can disable the trigger
+  (verified for the table owner only). See `docs/knowledge/audit-log-append-only.md`.
+
 ### Added
 - **Mobile: entities with an editable child collection** (Issue #939). An entity whose form has an editable one-to-many
   grid (for example `asn.lines`, `purchase_order.lines`) is no longer left on the "not available in the mobile app yet"
