@@ -439,3 +439,68 @@ definitions:
       - status
       - mobile_group_id
       - approvable_id
+
+  # Reservation: the server allocates a room from the pool when a stay is created. A request with no free
+  # room is refused with CAPACITY, and an allocated stay can no longer change its criteria
+  # (RESERVATION_LOCKED); the form never asks for the allocated room.
+  mobile_room:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - room_no:
+            primary: true
+        - category: {}
+    fields:
+      room_no: {}
+      category: {}
+      room_state:
+        type: integer
+    required:
+      - room_no
+      - category
+      - room_state
+
+  mobile_stay:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-reservation:
+      mode: item
+      pool:
+        entity: mobile_room
+        statusField: room_state
+        availableStatus: 0
+        reservedStatus: 2
+      request:
+        criteria:
+          category: category
+      result:
+        allocatedField: mobile_room_id
+    x-display:
+      table:
+        - guest_name:
+            primary: true
+        - category: {}
+    fields:
+      guest_name: {}
+      category: {}
+      mobile_room_id:
+        x-relationship:
+          labelField: room_no
+    required:
+      - guest_name
+      - category

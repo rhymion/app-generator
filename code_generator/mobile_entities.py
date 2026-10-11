@@ -82,7 +82,6 @@ _COMMENTABLE_TARGET = 'commentable'
 
 _FEATURE_FLAGS = (
     'has_attachable',
-    'reservation_config',
     'state_machine_transitions',
     'is_self_only',
 )

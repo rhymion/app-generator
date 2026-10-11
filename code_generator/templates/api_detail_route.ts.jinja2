@@ -180,7 +180,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   } catch (error) {
 {% if reservation_config and reservation_config.mode == 'count' %}
     if (error instanceof ReservationMutationError) {
-      return NextResponse.json({ error: (error as Error).message }, { status: 409 });
+      return NextResponse.json({ error: (error as Error).message, code: 'RESERVATION_LOCKED' }, { status: 409 });
     }
 {% endif %}
     return handleApiError(error);
@@ -247,7 +247,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   } catch (error) {
 {% if reservation_config and reservation_config.mode == 'count' %}
     if (error instanceof ReservationMutationError) {
-      return NextResponse.json({ error: (error as Error).message }, { status: 409 });
+      return NextResponse.json({ error: (error as Error).message, code: 'RESERVATION_LOCKED' }, { status: 409 });
     }
 {% endif %}
     return handleApiError(error);
