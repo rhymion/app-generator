@@ -17,7 +17,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `{ error, code: 'RESERVATION_LOCKED' }` (HTTP 409 as before; clients reading `error` are unaffected), so the app shows
   the same texts as the Web instead of the stale-update warning. A count-mode reservation with `lines` still stays on the
   placeholder screen because of its child grid. See `docs/knowledge/mobile-app.md`.
+- **`audit_log` is append-only, with tamper detection** (Issue #945). A Prisma Client guard rejects `update`, `updateMany`,
+  `upsert`, `delete` and `deleteMany` on `audit_log`; `prisma/sql/audit_log_append_only.sql` adds a row trigger that rejects
+  UPDATE and DELETE, partitions the table by month and creates `audit_log_digest`; `npm run audit-log:digest` closes daily
+  SHA-256 digests (chained, written to a storage interface with a local-directory implementation), verifies them, and exports a
+  month for the retention procedure. `audit_log` now has the primary key `(id, created_at)` and there is a new
+  `audit_log_digest` model. `npm run db:apply-audit-log-sql` runs after `db:push` in the test and setup scripts, and
+  `resetTestDatabase()` empties both tables with `TRUNCATE`. Consumers add the SQL to their own migrations, create the
+  restricted application role and the write-once bucket; see `docs/knowledge/audit-log-append-only.md`.
 ### Changed
+- **`anonymizeUser()` no longer redacts `audit_log.metadata`** (Issue #945). `audit_log.metadata` must not contain personal
+  data, so the step never changed anything, and under the trigger an update would fail the erasure transaction.
+  `recordAuditEvent`'s documentation now says `metadata` must not contain personal data.
 - **Auth code no longer writes email addresses to `audit_log` or to auth `console.info` lines** (Issue #935). `auth:signIn`
   and `auth:createUser` rows drop `metadata.email`; the `email_in_use_by_credentials` rejection drops it too and now
   records the existing user's id as `target_id` (`actor_user_id` stays null); `domain_not_allowed` keeps only `reason`
