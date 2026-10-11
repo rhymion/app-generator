@@ -12,10 +12,13 @@ x-generator:
 #    entity's own x-generate flags.
 #  - mobile_group / mobile_tag / mobile_profile / mobile_task: the relation pickers (a required
 #    many-to-one foreign key, a many-to-many and a one-to-one selector).
+#  - mobile_step: a self-referencing one-to-many list (`children`) over a nullable `parent_id`.
 #  - mobile_org_item: a foreign key to organization, which scopes the entity by organization
 #    membership, so the picker must offer only the caller's organizations.
 #  - mobile_thread: a commentable entity (list, view, edit and delete): its detail screen draws the comment
 #    thread with the comment box, the @-mention lookup and the reaction bar. The default schema supplies commentable / comment / reaction.
+#  - mobile_invoice: a one-to-many child collection (`lines`, each with text, number, enum, date and a required
+#    foreign key to mobile_group): the form draws a row editor and sends the rows as the property array.
 #  - mobile_document: two direct attachment fields (x-relationship type: direct), `file` optional and
 #    `contract` required: the form picks a file, uploads it, and submits the created attachment row's id.
 # Used by the Expo Playwright run described in docs/knowledge/mobile-app.md.
@@ -504,3 +507,80 @@ definitions:
     required:
       - guest_name
       - category
+
+  # A one-to-many child collection (the Web form's editable grid): drawn on mobile as a row editor.
+  # The line carries a required integer, an enum with a default, an optional date, a decimal-free text and a
+  # required foreign key to mobile_group, so the row editor draws a text, number, enum, date and picker control.
+  mobile_invoice:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - invoice_no:
+            primary: true
+    fields:
+      invoice_no: {}
+    properties:
+      lines:
+        type: array
+        items:
+          $ref: "#/definitions/mobile_invoice_line"
+    required:
+      - invoice_no
+
+  mobile_invoice_line:
+    fields:
+      description: {}
+      quantity:
+        minimum: 1
+      line_status:
+        enum: ["open", "billed"]
+        default: open
+      shipped_on:
+        format: date
+      mobile_group_id:
+        x-relationship:
+          labelField: name
+    required:
+      - description
+      - quantity
+      - mobile_group_id
+
+  # A self-referencing one-to-many list (`children`) over the nullable `parent_id`: the picker offers records
+  # that have no parent yet or are already this record's children, and never the record itself.
+  mobile_step:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - name:
+            primary: true
+    fields:
+      name: {}
+      parent_id:
+        x-relationship: {}
+    properties:
+      parent:
+        $ref: "#/definitions/mobile_step"
+      children:
+        type: array
+        items:
+          $ref: "#/definitions/mobile_step"
+        x-outputType: list
+    required:
+      - name
+      - children

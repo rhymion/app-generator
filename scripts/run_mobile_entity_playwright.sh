@@ -20,7 +20,8 @@
 #                           mobile/e2e/relation-pickers.spec.ts, mobile/e2e/inline-create-checkout.spec.ts,
 #                           mobile/e2e/list-capabilities.spec.ts, mobile/e2e/comments.spec.ts,
 #                           mobile/e2e/approval-actions.spec.ts, mobile/e2e/split-action.spec.ts,
-#                           mobile/e2e/reservation.spec.ts and mobile/e2e/attachments.spec.ts
+#                           mobile/e2e/reservation.spec.ts, mobile/e2e/attachments.spec.ts and
+#                           mobile/e2e/child-rows.spec.ts
 #   MODE=default            unmodified schema; runs every other spec in mobile/e2e/
 #   MODE=scheduled          the scheduled-task-e2e-gate fixture (three scheduled tasks) merged and the
 #                           test user made a ScheduledTaskRunner; runs mobile/e2e/scheduled-task.spec.ts
@@ -163,6 +164,14 @@ WITH actor AS (SELECT id FROM "user" ORDER BY created_at LIMIT 1)
 INSERT INTO organization (id, name, updated_at, creator_id, updater_id)
 SELECT v.id, v.name, now(), actor.id, actor.id FROM actor, (VALUES ('org-own', 'Mobile Own Org'), ('org-foreign', 'Mobile Foreign Org')) AS v(id, name);
 INSERT INTO "_UserOrganizations" ("A", "B") SELECT 'org-own', id FROM "user" WHERE email = 'admin@example.com';
+-- a self-referencing one-to-many list (children): free records, one owned by step-holder, and two small trees
+WITH actor AS (SELECT id FROM "user" ORDER BY created_at LIMIT 1)
+INSERT INTO mobile_step (id, name, parent_id, updated_at, creator_id, updater_id)
+SELECT v.id, v.name, v.parent_id, now(), actor.id, actor.id FROM actor,
+  (VALUES ('step-holder', 'Holder', NULL), ('step-owned', 'Owned elsewhere', 'step-holder'),
+          ('step-a1', 'Free A1', NULL), ('step-a2', 'Free A2', NULL),
+          ('step-edit', 'Edit me', NULL), ('step-e1', 'Child E1', 'step-edit'), ('step-e2', 'Free E2', NULL),
+          ('step-top', 'Top', NULL), ('step-mid', 'Middle', 'step-top'), ('step-free', 'Free for the cycle test', NULL)) AS v(id, name, parent_id);
 SQL
   echo "-- records for the approval section --"
   # Three roles: the test administrator holds "Mobile Approver" and "Mobile Second Approver", not the other one.
@@ -245,7 +254,7 @@ SELECT v.id, v.message, 'thread-commentable-4', now(), CASE WHEN v.mine THEN act
 FROM actor, (VALUES ('comment-edit-1', 'Editable comment', true, 1), ('comment-edit-2', 'Look at this, @[user_id:user-other] please', true, 2),
   ('comment-del-1', 'Delete me', true, 3), ('comment-del-2', 'Keep me', true, 4), ('comment-other', 'Written by someone else', false, 5)) AS v(id, message, mine, ord);
 SQL
-  PW_TARGET="entity-crud.spec.ts relation-pickers.spec.ts list-capabilities.spec.ts inline-create-checkout.spec.ts comments.spec.ts approval-actions.spec.ts split-action.spec.ts reservation.spec.ts attachments.spec.ts"
+  PW_TARGET="entity-crud.spec.ts relation-pickers.spec.ts list-capabilities.spec.ts inline-create-checkout.spec.ts comments.spec.ts approval-actions.spec.ts split-action.spec.ts reservation.spec.ts attachments.spec.ts child-rows.spec.ts"
   export MOBILE_PW_IGNORE=""
 elif [ "$MODE" = "scheduled" ]; then
   echo "-- the test user holds the ScheduledTaskRunner role --"
@@ -258,7 +267,7 @@ SQL
   export MOBILE_PW_IGNORE=""
 else
   PW_TARGET=""
-  export MOBILE_PW_IGNORE="**/{entity-crud,relation-pickers,list-capabilities,inline-create-checkout,comments,approval-actions,split-action,reservation,attachments,scheduled-task}.spec.ts"
+  export MOBILE_PW_IGNORE="**/{entity-crud,relation-pickers,list-capabilities,inline-create-checkout,comments,approval-actions,split-action,reservation,attachments,child-rows,scheduled-task}.spec.ts"
 fi
 
 echo "-- installing the Expo dependencies --"

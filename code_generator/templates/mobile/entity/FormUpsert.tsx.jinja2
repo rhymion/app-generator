@@ -15,6 +15,9 @@ import {
   {{ const_name }}_FIELDS as FIELDS,
 } from '@/lib/{{ name }}/mobile_client';
 import { FieldInput, toFieldState, type FieldValueState } from '@/components/native/FieldInput';
+{% if row_fields %}
+import { firstMissingRowField, type ChildRowState } from '@/lib/entity-http';
+{% endif %}
 {% if attachment_fields %}
 import type { AttachmentRow } from '@/lib/attachment-http';
 {% endif %}
@@ -129,13 +132,22 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
       else typed[spec.key] = value;
     }
     if (!validate(() => validateForm(typed))) return;
+{% if row_fields %}
+    // A child row must carry its required fields; the server checks the rest, as for the Web grid.
+    const missing = FIELDS.filter((spec) => spec.kind === 'child_rows')
+      .map((spec) => ({ spec, found: firstMissingRowField(spec, values[spec.key] as ChildRowState[]) }))
+      .find((entry) => entry.found !== null);
+    if (missing?.found && !validate(() => `${missing.spec.label} ${missing.found!.row}: ${missing.found!.field.label} is required`)) return;
+{% endif %}
     const formData = new FormData();
     if (id) formData.append('id', id);
     for (const spec of FIELDS) {
       if (spec.readonly) continue;
       const value = values[spec.key];
+      // The rows of a child collection travel as one JSON entry.
+      if (spec.kind === 'child_rows') formData.append(spec.key, JSON.stringify(value));
       // A many-to-many travels as one entry per selected id.
-      if (Array.isArray(value)) value.forEach((id) => formData.append(spec.key, id));
+      else if (Array.isArray(value)) (value as string[]).forEach((id) => formData.append(spec.key, id));
       else formData.append(spec.key, String(value));
     }
     submit(formData, async (savedId) => {
@@ -201,7 +213,7 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
           onChange={(next) => setValues((current) => ({ ...current, [spec.key]: next }))}
           disabled={busy}
           caller="{{ name }}"
-          formValues={values}
+          formValues={id ? { ...values, id } : values}
 {% if create_fields %}
           createForm={CREATE_FORMS[spec.key]}
 {% endif %}

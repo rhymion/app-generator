@@ -10,6 +10,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   the identity's `current_version_id`, and deletion of a terminally rejected or withdrawn draft with its owned child rows.
   The Prisma columns are declared by the app and checked at generation time. See `docs/knowledge/schema-yaml-configuration.md`
   section 7.8.
+
+- **Mobile app: entities with a self-referencing `children` list get native screens** (Issue #942). A one-to-many
+  `x-outputType: list` child attached through a nullable foreign key (for example `procedure.children`) no longer
+  makes an entity ineligible: it is drawn as the same chip picker as a many-to-many list and saved as `children_ids`.
+  The edit form sends the record's `id` with the picker's search so the options route leaves out the record itself and
+  its ancestors; records owned by another record are not offered. See `docs/knowledge/mobile-app.md`.
 - **Mobile app: entities that declare `x-reservation` get native screens** (Issue #937). `reservation_config` no longer
   makes an entity ineligible, so a reservation entity without a child grid (item mode, for example a room reservation)
   has list, detail, create, edit and delete screens. The generated REST routes now answer a request with no free
@@ -37,6 +43,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   now use `authenticate()` like every generated entity route (mobile access token or API key); permission checks
   and the service API key path are unchanged.
 ### Added
+- **Mobile: entities with an editable child collection** (Issue #939). An entity whose form has an editable one-to-many
+  grid (for example `asn.lines`, `purchase_order.lines`) is no longer left on the "not available in the mobile app yet"
+  placeholder. The Expo form draws a row editor (add, remove, and each row's own fields, including relation pickers),
+  sends the rows as the property array of the existing POST and PUT routes, and the detail screen lists them. A child
+  that is independent, a `list` child that is not a many-to-many, or a row field with no native control still keeps the
+  placeholder; the generation log names the property and field. See `docs/knowledge/mobile-app.md`.
 - **Mobile: direct attachment fields** (Issue #931). An entity with an `x-relationship: {target: attachment,
   type: direct}` field (for example `leave_request.medical_certificate_id`) is no longer left on the
   "not available in the mobile app yet" placeholder. The Expo form picks a file with the system document picker
