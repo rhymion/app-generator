@@ -30,7 +30,7 @@ from build_user_schema import build_user_schema
 from generate import generate
 from mobile_entities import (
     build_mobile_entity_spec, group_ineligible_by_reason, ineligible_log_lines, ineligible_note,
-    mobile_ineligible_reason,
+    _relation_many_entry, mobile_ineligible_reason,
 )
 
 FIXTURE = Path(__file__).resolve().parent / 'fixtures' / 'mobile_entity_gate'
@@ -147,6 +147,100 @@ def test_child_grid_is_ineligible_even_beside_a_picker(overrides):
     child = _m2m_child(**overrides)
     ctx = _ctx(children_raw=[child], non_comment_ch=[child])
     assert mobile_ineligible_reason(ctx) is not None
+
+
+def _list_child(**overrides):
+    """A one-to-many list child (`procedure.children`): no `x-relationship`, attached through a nullable FK."""
+    child = {
+        'name': 'step', 'property_name': 'children', 'child_var': 'children', 'output_type': 'list',
+        'is_many_to_many': False, 'use_connect': True, 'attach_fk': 'parent_id',
+    }
+    child.update(overrides)
+    return child
+
+
+def _row_child(**overrides):
+    child = {
+        'name': 'line', 'property_name': 'lines', 'child_var': 'lines', 'output_type': None,
+        'is_many_to_many': False, 'is_independent': False, 'nested_writable': True, 'relationship': None,
+        'props_no_id': ['description', 'quantity', 'group_id'],
+        'child_prop_defs': {
+            'description': {'type': 'string'},
+            'quantity': {'type': 'integer', 'minimum': 1},
+            'group_id': {'type': 'string', 'x-relationship': {'type': 'many-to-one', 'target': 'group', 'labelField': 'name'}},
+        },
+        'readonly_field_names': set(),
+    }
+    child.update(overrides)
+    return child
+
+
+def test_one_to_many_list_child_attached_through_a_nullable_fk_is_eligible():
+    child = _list_child()
+    ctx = _ctx(parent='step', children_raw=[child], non_comment_ch=[child])
+    assert mobile_ineligible_reason(ctx) is None
+    assert mobile_ineligible_reason(ctx, {'step'}) is None
+    # The offered records are the child's own entity, so it needs REST routes.
+    assert 'step, which has no REST routes' in mobile_ineligible_reason(ctx, {'other'})
+
+
+@pytest.mark.parametrize('overrides', [{'attach_fk': None}, {'output_type': None}, {'output_type': 'comments'}])
+def test_one_to_many_child_that_is_not_an_attachable_list_stays_ineligible(overrides):
+    child = _list_child(**overrides)
+    ctx = _ctx(parent='step', children_raw=[child], non_comment_ch=[child])
+    assert mobile_ineligible_reason(ctx) == 'declares children_raw'
+
+
+def test_list_child_picker_of_its_own_kind_sends_the_record_id_to_the_options_route():
+    entry = _relation_many_entry(_list_child(), set(), lambda n: n, 'step')
+    assert (entry['target'], entry['body_key'], entry['context_fields']) == ('step', 'children_ids', ['id'])
+    other = _relation_many_entry(_list_child(name='item'), set(), lambda n: n, 'order')
+    assert (other['target'], other['context_fields']) == ('item', [])
+    m2m = _relation_many_entry(_m2m_child(child_var='tags'), set(), lambda n: n, 'task')
+    assert m2m['context_fields'] == []
+
+
+def test_editable_child_rows_are_eligible_beside_a_picker():
+    rows, picker = _row_child(), _m2m_child()
+    ctx = _ctx(children_raw=[rows, picker], non_comment_ch=[rows, picker])
+    assert mobile_ineligible_reason(ctx) is None
+    assert mobile_ineligible_reason(ctx, {'group', 'tag'}) is None
+
+
+@pytest.mark.parametrize('overrides', [
+    {'is_independent': True}, {'nested_writable': False}, {'output_type': 'list'}, {'output_type': 'comments'},
+])
+def test_a_child_the_parent_cannot_save_stays_ineligible(overrides):
+    child = _row_child(**overrides)
+    assert mobile_ineligible_reason(_ctx(children_raw=[child], non_comment_ch=[child])) == 'declares children_raw'
+
+
+def test_a_row_field_without_a_native_control_names_the_child_and_the_field():
+    child = _row_child(
+        props_no_id=['description', 'photo'],
+        child_prop_defs={'description': {'type': 'string'}, 'photo': {'type': 'string', 'format': 'uri', 'x-uri-kind': 'image'}},
+    )
+    reason = mobile_ineligible_reason(_ctx(children_raw=[child], non_comment_ch=[child]))
+    assert reason is not None and 'lines' in reason and 'photo' in reason
+
+
+def test_a_row_relation_to_an_entity_without_rest_routes_is_ineligible():
+    child = _row_child()
+    ctx = _ctx(children_raw=[child], non_comment_ch=[child])
+    assert 'no REST routes' in mobile_ineligible_reason(ctx, {'other'})
+
+
+def test_readonly_and_bridge_columns_are_not_drawn_in_a_row():
+    child = _row_child(
+        props_no_id=['description', 'note', 'inventory_transactionable_id'],
+        child_prop_defs={
+            'description': {'type': 'string'}, 'note': {'type': 'string', 'x-readonly': True},
+            'inventory_transactionable_id': {'type': 'string'},
+        },
+        readonly_field_names={'note'},
+    )
+    ctx = _ctx(children_raw=[child], non_comment_ch=[child])
+    assert mobile_ineligible_reason(ctx) is None
 
 
 def test_relation_to_an_entity_without_rest_routes_is_ineligible():
@@ -331,6 +425,23 @@ def test_picker_reads_candidates_from_the_options_route_and_filters_nothing(out)
     http = _read(out, 'lib/entity-http.ts')
     assert '/api/${entity}/options' in http
     assert 'err.status === 403' in http
+
+
+def test_edit_form_hands_the_record_id_to_its_pickers(out):
+    assert 'formValues={id ? { ...values, id } : values}' in _read(out, 'components/mobile_task/FormUpsert.tsx')
+
+
+def test_one_to_many_list_entity_gets_screens_and_a_picker_field(out):
+    assert 'mobile_step' in _read(out, 'lib/entity-registry.ts')
+    fields = _fields(out, 'mobile_step', 'MOBILE_STEP')
+    children = next(f for f in fields if f['key'] == 'children')
+    assert children['kind'] == 'relation_many'
+    assert (children['target'], children['bodyKey'], children['relationName']) == ('mobile_step', 'children_ids', 'children')
+    assert children['contextFields'] == ['id']
+    parent = next(f for f in fields if f['key'] == 'parent_id')
+    assert parent['kind'] == 'relation' and parent['contextFields'] == []
+    tags = next(f for f in _fields(out, 'mobile_task', 'MOBILE_TASK') if f['key'] == 'tags')
+    assert tags['contextFields'] == []
 
 
 def test_picker_is_disabled_without_read_on_the_target(out):
@@ -749,3 +860,77 @@ def test_direct_attachment_rest_route_runs_the_web_action_as_the_caller(out):
     assert 'const ATTACHMENT_TYPES: readonly string[] = ["image", "file", "video", "audio"];' in route
     assert 'createDirectAttachment(name, path, type as' in route
 
+
+
+# --- one-to-many child rows --------------------------------------------------------------------
+
+def _invoice_fields(out):
+    return {f['key']: f for f in _fields(out, 'mobile_invoice', 'MOBILE_INVOICE')}
+
+
+def test_an_entity_with_an_editable_child_collection_gets_every_screen(out):
+    for rel in ('lib/mobile_invoice/mobile_client.ts', 'components/mobile_invoice/FormUpsert.tsx',
+                'components/mobile_invoice/FormView.tsx', 'components/mobile_invoice/List.tsx'):
+        assert (out / 'mobile' / rel).exists(), rel
+    assert 'mobile_invoice: {' in _read(out, 'lib/entity-registry.ts')
+    assert 'mobile_invoice' not in _read(out, 'MOBILE_ENTITIES.md')
+
+
+def test_the_child_collection_is_a_field_that_describes_its_rows(out):
+    lines = _invoice_fields(out)['lines']
+    assert lines['kind'] == 'child_rows'
+    assert lines['bodyKey'] == 'lines' and lines['relationName'] == 'lines'
+    rows = {f['key']: f for f in lines['rowFields']}
+    assert {k: f['kind'] for k, f in rows.items()} == {
+        'description': 'text', 'quantity': 'number', 'line_status': 'enum', 'shipped_on': 'date', 'mobile_group_id': 'relation',
+    }
+    # the parent's foreign key is not drawn; the others are required unless nullable or defaulted
+    assert {k for k, f in rows.items() if f['required']} == {'description', 'quantity', 'mobile_group_id'}
+    assert rows['line_status']['options'] == ['open', 'billed']
+    # a schema default starts a new row at that value, and a blank field is left out so the server applies it
+    assert rows['line_status']['defaultValue'] == 'open' and 'defaultValue' not in rows['quantity']
+    assert rows['mobile_group_id']['target'] == 'mobile_group' and rows['mobile_group_id']['bodyKey'] == 'mobile_group_id'
+
+
+def test_the_list_row_leaves_the_child_collection_out(out):
+    client = _read(out, 'lib/mobile_invoice/mobile_client.ts')
+    assert 'MOBILE_INVOICE_LIST_KEYS: string[] = ["invoice_no"]' in client
+    assert '"lines"' not in re.search(r'MOBILE_INVOICE_SORT_KEYS: string\[\] = (.*);', client).group(1)
+
+
+def test_rows_travel_as_one_json_entry_and_become_the_property_array(out):
+    form = _read(out, 'components/mobile_invoice/FormUpsert.tsx')
+    assert "formData.append(spec.key, JSON.stringify(value))" in form
+    http = _read(out, 'lib/entity-http.ts')
+    assert "spec.kind === 'child_rows'" in http
+    assert 'body[spec.bodyKey ?? key] = rows.map' in http
+    # a saved row keeps its id so the server updates it in place
+    assert "row.id ? { id: row.id } : {}" in http
+    assert 'field.defaultValue !== undefined' in http
+
+
+def test_the_form_checks_required_row_fields_before_it_sends_the_rows(out):
+    form = _read(out, 'components/mobile_invoice/FormUpsert.tsx')
+    assert 'firstMissingRowField' in form
+    assert 'firstMissingRowField' not in _read(out, 'components/mobile_note/FormUpsert.tsx')
+
+
+def test_the_row_editor_adds_and_removes_rows_and_reuses_the_field_controls(out):
+    input_ = _read(out, 'components/native/FieldInput.tsx')
+    assert 'function ChildRowsInput' in input_
+    assert 'row-${spec.key}-add' in input_ and 'row-${spec.key}-${index}-remove' in input_
+    assert "t('Common.add')" in input_ and "t('Common.delete')" in input_
+    assert 'function emptyRow' in input_ or 'export function emptyRow' in input_
+
+
+def test_the_detail_screen_lists_the_rows(out):
+    input_ = _read(out, 'components/native/FieldInput.tsx')
+    assert "spec.kind === 'child_rows'" in input_
+    view = _read(out, 'components/mobile_invoice/FormView.tsx')
+    assert 'toRecordDisplayText(spec, record)' in view
+
+
+def test_row_editor_strings_exist_in_both_locales():
+    for locale in ('en', 'ja'):
+        common = json.loads((REPO / 'messages' / f'{locale}.json').read_text(encoding='utf-8'))['Common']
+        assert 'add' in common and 'delete' in common, locale

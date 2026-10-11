@@ -270,3 +270,61 @@ test.describe('List: sort and filter by a relation column', () => {
     expect(filters).toContain('Beta');
   });
 });
+
+test.describe('Relation pickers: one-to-many list of the entity\'s own kind', () => {
+  // mobile_step.children: the picker offers records that have no parent yet, and never the record itself or one of its ancestors (the options route applies this from the record id the form sends). The script seeds step-holder (parent of step-owned), the free records step-a1,
+  // step-a2 and step-e2, step-edit (parent of step-e1) and step-top (parent of step-mid) and step-free. Each test acts on its own records.
+
+  async function openStep(page: Page, id: string) {
+    await login(page);
+    await page.getByTestId('footer-tab-mobile_step').click();
+    await expect(page.getByTestId('list-mobile_step')).toBeVisible();
+    await page.getByTestId(`list-row-${id}`).click();
+    await expect(page.getByTestId('view-mobile_step')).toBeVisible();
+  }
+
+  test('a new record takes free records as children and is not offered a record that has another parent', async ({ page }) => {
+    const bodies = captureWrite(page, 'mobile_step', 'POST');
+    await openNew(page, 'mobile_step');
+    await page.getByTestId('field-name').fill('Assembly');
+    await page.getByTestId('picker-open-children').click();
+    await expect(page.getByTestId('picker-option-step-a1')).toBeVisible();
+    await expect(page.getByTestId('picker-option-step-a2')).toBeVisible();
+    await expect(page.getByTestId('picker-option-step-owned')).toHaveCount(0);
+    await page.getByTestId('picker-option-step-a1').click();
+    await page.getByTestId('picker-option-step-a2').click();
+    await page.getByTestId('picker-done').click();
+    await page.getByTestId('form-save').click();
+    await expect(page.getByTestId('view-mobile_step')).toBeVisible();
+    await expect(page.getByTestId('view-field-children')).toContainText('Free A1');
+    await expect(page.getByTestId('view-field-children')).toContainText('Free A2');
+    expect(bodies[0].children_ids).toEqual(['step-a1', 'step-a2']);
+  });
+
+  test('editing never offers the record itself, keeps its children, and sends the changed set', async ({ page }) => {
+    await openStep(page, 'step-edit');
+    await expect(page.getByTestId('view-field-children')).toHaveText('Child E1');
+    const bodies = captureWrite(page, 'mobile_step', 'PUT');
+    await page.getByTestId('view-edit').click();
+    await expect(page.getByTestId('picker-chip-children-step-e1')).toContainText('Child E1');
+    await page.getByTestId('picker-open-children').click();
+    await expect(page.getByTestId('picker-option-step-e2')).toBeVisible();
+    await expect(page.getByTestId('picker-option-step-edit')).toHaveCount(0);
+    await expect(page.getByTestId('picker-option-step-owned')).toHaveCount(0);
+    await page.getByTestId('picker-option-step-e2').click();
+    await page.getByTestId('picker-done').click();
+    await page.getByTestId('picker-remove-children-step-e1').click();
+    await page.getByTestId('form-save').click();
+    await expect(page.getByTestId('view-field-children')).toHaveText('Free E2');
+    expect(bodies[0].children_ids).toEqual(['step-e2']);
+  });
+
+  test('an ancestor is not offered, so a cycle cannot be built from the form', async ({ page }) => {
+    await openStep(page, 'step-mid');
+    await page.getByTestId('view-edit').click();
+    await page.getByTestId('picker-open-children').click();
+    await expect(page.getByTestId('picker-option-step-free')).toBeVisible();
+    await expect(page.getByTestId('picker-option-step-top')).toHaveCount(0);
+    await expect(page.getByTestId('picker-option-step-mid')).toHaveCount(0);
+  });
+});

@@ -1171,6 +1171,12 @@ def _mobile_field_json(f: dict) -> dict:
         # A direct attachment field names where the REST detail embeds the row and what the write body carries.
         **({'relationName': f['relation_name'], 'bodyKey': f['body_key']} if f['kind'] == 'attachment' else {}),
         **({'createInline': True} if f.get('create_form') else {}),
+        **({'defaultValue': f['default_value']} if 'default_value' in f else {}),
+        # A one-to-many child collection: the row editor draws these fields for each row.
+        **(
+            {'relationName': f['relation_name'], 'bodyKey': f['body_key'], 'rowFields': [_mobile_field_json(r) for r in f['row_fields']]}
+            if f['kind'] == 'child_rows' else {}
+        ),
     }
 
 
@@ -1208,6 +1214,8 @@ def generate_mobile_entity(spec: dict, ctx: dict, schema: dict, mobile_dir: Path
         'create_fields': [f for f in spec['fields'] if f.get('create_form')],
         # Direct attachment fields: the form keeps each field's attachment row, the detail screen links to the file.
         'attachment_fields': [f for f in spec['fields'] if f['kind'] == 'attachment'],
+        # One-to-many child collections: the form checks each row's required fields before it sends the rows.
+        'row_fields': [f for f in spec['fields'] if f['kind'] == 'child_rows'],
     }
     lib_dir = mobile_dir / 'lib' / name
     components_dir = mobile_dir / 'components' / name
