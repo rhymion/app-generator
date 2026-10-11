@@ -45,6 +45,22 @@ model mobile_log {
   @@index([updater_id])
 }
 
+model mobile_rule {
+  id          String   @id @default(cuid())
+  name        String
+  entity_name String
+  created_at  DateTime @default(now()) @db.Timestamptz(0)
+  updated_at  DateTime @updatedAt @db.Timestamptz(0)
+  creator_id  String
+  creator     user     @relation("MobileRuleCreator", fields: [creator_id], references: [id])
+  updater_id  String
+  updater     user     @relation("MobileRuleUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([entity_name])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
 model mobile_group {
   id         String   @id @default(cuid())
   name       String

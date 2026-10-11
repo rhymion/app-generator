@@ -118,10 +118,41 @@ def test_feature_beyond_plain_crud_is_ineligible(key, value):
     assert mobile_ineligible_reason(_ctx(**{key: value})) is not None
 
 
-@pytest.mark.parametrize('category', ['custom_upsert', 'image', 'file_uri', 'entity_select'])
+@pytest.mark.parametrize('category', ['custom_upsert', 'image', 'file_uri'])
 def test_field_without_a_native_widget_is_ineligible(category):
     ctx = _ctx(field_categories={'text': ['name'], category: ['x']})
     assert 'has a' in mobile_ineligible_reason(ctx)
+
+
+def test_entity_select_field_is_eligible_and_drawn_as_labelled_enum_chips():
+    ctx = _ctx(
+        field_categories={'text': ['name'], 'entity_select': ['entity_name']},
+        entity_select_options=[{'value': 'purchase_order', 'label': 'Purchase Order'}, {'value': 'user', 'label': 'User'}],
+    )
+    assert mobile_ineligible_reason(ctx) is None
+    ctx.update(
+        filtered_props={'name': {'type': 'string'}, 'entity_name': {'type': 'string', 'x-entity-select': True}},
+        model_def={}, readonly_fields=[], parent='rule', parent_pascal='Rule',
+    )
+    spec = build_mobile_entity_spec(ctx, {'client_required_fields': [{'key': 'entity_name'}]}, str.title)
+    field = [f for f in spec['fields'] if f['key'] == 'entity_name'][0]
+    assert field['kind'] == 'enum'
+    assert field['required'] is True
+    assert field['options'] == ['purchase_order', 'user']
+    assert field['option_labels'] == ['Purchase Order', 'User']
+    assert field['numeric_enum'] is False
+    assert 'entity_name' in spec['filter_keys']
+
+
+def test_entity_select_spec_reaches_the_generated_client(out):
+    client = _read(out, 'lib/mobile_rule/mobile_client.ts')
+    spec = json.loads(re.search(r'MOBILE_RULE_FIELDS: FieldSpec\[\] = (\[.*?\n\]);', client, re.S).group(1))
+    field = [f for f in spec if f['key'] == 'entity_name'][0]
+    assert field['kind'] == 'enum'
+    assert 'mobile_note' in field['options']
+    labels = dict(zip(field['options'], field['optionLabels']))
+    assert labels['mobile_note'] == 'Mobile Note'
+    assert 'mobile_rule: {' in _read(out, 'lib/entity-registry.ts')
 
 
 def _m2m_child(**overrides):

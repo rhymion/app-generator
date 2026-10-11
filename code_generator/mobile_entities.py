@@ -7,6 +7,8 @@ generated modules the Web screens call (`use_entity_form`,
 `use_entity_capabilities`, `form_validation`), so this module only describes the
 fields to draw.
 
+An `x-entity-select` field (the name of one of the schema's entities) is drawn as enum chips labelled
+with the entity titles.
 A many-to-one foreign key, a one-to-one selector and a many-to-many declared with
 `x-outputType: list` are drawn as relation pickers whose candidates come from `GET /api/{target}/options`.
 A direct attachment field (`x-relationship: {target: attachment, type: direct}`) is drawn as a file
@@ -56,11 +58,12 @@ _CATEGORY_KIND = (
     ('boolean', KIND_BOOLEAN),
     ('enum_string', KIND_ENUM),
     ('enum_integer', KIND_ENUM),
+    ('entity_select', KIND_ENUM),
 )
 
 # Categories that need a widget the mobile app does not have yet (file / image
-# upload, entity picker, custom component); an entity with one is not eligible.
-_UNSUPPORTED_CATEGORIES = ('custom_upsert', 'image', 'file_uri', 'entity_select')
+# upload, custom component); an entity with one is not eligible.
+_UNSUPPORTED_CATEGORIES = ('custom_upsert', 'image', 'file_uri')
 
 
 # Context keys whose presence means the entity carries a feature that lives
@@ -253,8 +256,16 @@ def _field_entry(name: str, defn: dict, kind: str, ctx: dict, required: set[str]
         'required': name in required,
         'readonly': name in readonly,
         'options': [],
+        'option_labels': [],
     }
-    if kind == KIND_ENUM:
+    if name in (ctx.get('field_categories') or {}).get('entity_select', []):
+        # An `x-entity-select` field holds the name of one of the schema's entities. It is drawn as the
+        # enum chips, labelled as the Web select labels them, and the entity name is what is saved.
+        entities = ctx.get('entity_select_options') or []
+        entry['options'] = [str(o['value']) for o in entities]
+        entry['option_labels'] = [str(o['label']) for o in entities]
+        entry['numeric_enum'] = False
+    elif kind == KIND_ENUM:
         # A value only the approval workflow may write is not offered, as the Web form disables it.
         locked = {str(v) for v in ((ctx.get('write_locked_values') or {}).get(name) or [])}
         entry['options'] = [str(v) for v in defn.get('enum', []) if str(v) not in locked]

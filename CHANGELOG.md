@@ -5,6 +5,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Mobile app: entities with an `x-entity-select` field get native screens** (Issue #944). `entity_select` no longer
+  makes an entity ineligible: the field is drawn as chips labelled with the entity titles, the entity name is saved,
+  and the list and detail screens show the title. The mobile field spec gains `optionLabels`. In the default schema
+  `approval_flow` and `permission` get mobile screens. See `docs/knowledge/mobile-app.md`.
 - **Mobile app: entities that declare `x-reservation` get native screens** (Issue #937). `reservation_config` no longer
   makes an entity ineligible, so a reservation entity without a child grid (item mode, for example a room reservation)
   has list, detail, create, edit and delete screens. The generated REST routes now answer a request with no free
