@@ -195,7 +195,9 @@ Cypress.Commands.add('selectAutocomplete', (label: string, searchText: string, o
   getAutocompleteInput(label).then(($input) => {
     cy.wrap($input).type('{selectall}' + searchText, { force: true });
   });
-  const escaped = clickText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // The option text is compared with whitespace collapsed (below), so collapse the expected
+  // label too: a label ending in empty segments (e.g. a blank lot number) keeps trailing spaces.
+  const escaped = clickText.replace(/\s+/g, ' ').trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const exactRe = new RegExp(`^${escaped}$`);
   // A label with an empty segment (an owner column an x-exclusive-parents row leaves
   // empty) renders with a doubled space; compare with whitespace collapsed.

@@ -24,12 +24,24 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **Generated Cypress helpers: `selectAutocomplete` and the DataGrid cell helpers work for long labels and wide grids.**
+  `selectAutocomplete` compared the option text with whitespace collapsed but the expected label as-is, so a label with
+  trailing empty segments (for example an inventory with no lot number or expiry date) never matched. The expected label
+  is now collapsed the same way. `getDataGridCell` (and so `editDataGridCell` / `fillDataGridRow`) now scrolls the grid
+  horizontally until the column is rendered, because MUI DataGrid virtualizes columns that are off screen (the
+  `dashboard_widget` grid lost `group_by_field` once `timezone` was added in front of it).
 - **Mobile: the Audit Log screen no longer shows "An unexpected error occurred"** (Issue #926). `GET /api/audit_log`
   and `GET /api/audit_log/<id>` authenticated with `authenticateApiKey()`, which does not understand the mobile
   access token, so the app's `Authorization: Bearer <jwt>` request was answered `401 Invalid API key.`. Both routes
   now use `authenticate()` like every generated entity route (mobile access token or API key); permission checks
   and the service API key path are unchanged.
 ### Added
+- **Mobile: entities with an editable child collection** (Issue #939). An entity whose form has an editable one-to-many
+  grid (for example `asn.lines`, `purchase_order.lines`) is no longer left on the "not available in the mobile app yet"
+  placeholder. The Expo form draws a row editor (add, remove, and each row's own fields, including relation pickers),
+  sends the rows as the property array of the existing POST and PUT routes, and the detail screen lists them. A child
+  that is independent, a `list` child that is not a many-to-many, or a row field with no native control still keeps the
+  placeholder; the generation log names the property and field. See `docs/knowledge/mobile-app.md`.
 - **Mobile: direct attachment fields** (Issue #931). An entity with an `x-relationship: {target: attachment,
   type: direct}` field (for example `leave_request.medical_certificate_id`) is no longer left on the
   "not available in the mobile app yet" placeholder. The Expo form picks a file with the system document picker

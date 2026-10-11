@@ -14,7 +14,10 @@ A many-to-one foreign key, a one-to-one selector and a many-to-many declared wit
 A direct attachment field (`x-relationship: {target: attachment, type: direct}`) is drawn as a file
 input: the chosen file is uploaded, an `attachment` row is created for it, and the form submits that
 row's id, as the Web form does.
-An entity with any other relation feature (children, bridges, polymorphic attachments, ...)
+A one-to-many child collection that the parent saves with its own record (the Web form's editable grid) is
+drawn as a row editor: each row has the child's own fields, the rows travel in the request body as the
+property array (`lines`), and the detail screen lists them.
+An entity with any other relation feature (other children, bridges, polymorphic attachments, ...)
 keeps the placeholder screen. The exceptions are the approval bridge and the comment bridge.
 
 An entity that declares `x-approval` (a one-to-one bridge to `approvable` and the `ApprovalSection` view
@@ -47,6 +50,8 @@ KIND_RELATION = 'relation'
 KIND_RELATION_MANY = 'relation_many'
 # A direct attachment field: one `attachment` row the form uploads a file for.
 KIND_ATTACHMENT = 'attachment'
+# An editable collection of new rows of a one-to-many child (`x-children` without `x-outputType`).
+KIND_CHILD_ROWS = 'child_rows'
 
 # Keys of the field categories (build_context._categorize_form_fields) that the
 # mobile form can draw, mapped to the widget kind.
@@ -106,12 +111,63 @@ def _picker_children(ctx: dict) -> list[dict]:
 
     The Web form draws a many-to-many declared with `x-outputType: list` as an
     autocomplete list of existing records; without it the child is an editable
-    grid of new rows, which the mobile form has no control for.
+    grid of new rows, which is drawn as a row editor (see `_row_children`).
     """
     return [
         c for c in (ctx.get('non_comment_ch') or [])
         if c.get('is_many_to_many') and c.get('output_type') == 'list'
     ]
+
+
+def _row_children(ctx: dict) -> list[dict]:
+    """The one-to-many children the parent saves with its own record, drawn as a row editor.
+
+    Only the plain editable grid qualifies: not a many-to-many, not a `list` or `comments` child, and the
+    child must be writable through the parent (an independent child with its own screens is not).
+    """
+    return [
+        c for c in (ctx.get('non_comment_ch') or [])
+        if not c.get('is_many_to_many') and c.get('output_type') is None
+        and c.get('nested_writable') and not c.get('is_independent') and c.get('child_prop_defs') is not None
+    ]
+
+
+def _row_field_kinds(child: dict) -> tuple[dict[str, str], str | None]:
+    """The kind of each field of a child row, or the first field the row editor cannot draw.
+
+    Returns `(kinds, None)` or `({}, field_name)`. A field the server fills in (readonly) is not drawn.
+    """
+    from build_context import _categorize_form_fields
+
+    # A readonly column is filled in by the server; so is a bridge foreign key without a relationship
+    # (`*able_id`, set by the approval or reservation flows), which the Web grid does not draw either.
+    props = {
+        k: v for k, v in (child.get('child_prop_defs') or {}).items()
+        if k not in (child.get('readonly_field_names') or ()) and not (k.endswith('able_id') and not v.get('x-relationship'))
+    }
+    kinds: dict[str, str] = {}
+    plain = {}
+    for name, defn in props.items():
+        relationship = defn.get('x-relationship')
+        if relationship:
+            if relationship.get('type') != 'many-to-one' or not relationship.get('target'):
+                return {}, name
+            kinds[name] = KIND_RELATION
+        else:
+            plain[name] = defn
+    cats = _categorize_form_fields(plain, [], {})
+    for key in _UNSUPPORTED_CATEGORIES:
+        if cats.get(key):
+            return {}, cats[key][0]
+    for category, kind in _CATEGORY_KIND:
+        for name in cats.get(category, []):
+            kinds[name] = kind
+    for name in cats.get('date_time', []):
+        kinds[name] = _date_kind(plain[name])
+    for name in plain:
+        if name not in kinds:
+            return {}, name
+    return kinds, None
 
 
 def has_approval_section(ctx: dict) -> bool:
@@ -182,11 +238,20 @@ def mobile_ineligible_reason(ctx: dict, api_entities: set[str] | None = None) ->
     if has_approval_bridge != has_approval_section(ctx):
         return 'declares one_to_one_rels' if has_approval_bridge else 'declares entity_view_components'
     pickers = _picker_children(ctx)
-    if len(pickers) != len(ctx.get('children_raw') or []) or len(pickers) != len(ctx.get('non_comment_ch') or []):
+    row_children = _row_children(ctx)
+    if len(pickers) + len(row_children) != len(ctx.get('children_raw') or []) or len(pickers) + len(row_children) != len(ctx.get('non_comment_ch') or []):
         return 'declares children_raw'
+    for child in row_children:
+        kinds, unsupported = _row_field_kinds(child)
+        if unsupported is not None:
+            return f"has a {child['property_name']} row field ({unsupported}) the mobile form cannot draw"
     if api_entities is not None:
         targets = [r['target'] for r in (ctx.get('parent_rels_raw') or []) + (ctx.get('selector_oto_rels') or [])]
         targets += [c['relationship']['target'] for c in pickers]
+        for child in row_children:
+            targets += [d['x-relationship']['target'] for d in child['child_prop_defs'].values()
+                        if d.get('x-relationship') and d['x-relationship'].get('target')
+                        and d['x-relationship']['target'] != ctx.get('parent')]
         for target in targets:
             if target not in api_entities:
                 return f'relates to {target}, which has no REST routes'
@@ -336,6 +401,48 @@ def _relation_many_entry(child: dict, readonly: set[str], title) -> dict:
     }
 
 
+def _row_required(defn: dict) -> bool:
+    """Whether a child row must carry a value: a non-nullable column without a default."""
+    types = defn.get('type')
+    nullable = isinstance(types, list) and 'null' in types
+    return not nullable and 'default' not in defn
+
+
+def _child_rows_entry(child: dict, kinds: dict[str, str], title) -> dict:
+    """Field entry for a one-to-many child collection: the row editor and its per-row fields."""
+    rows = []
+    for name in child['props_no_id']:
+        if name not in kinds:
+            continue
+        defn = child['child_prop_defs'][name]
+        required = {name} if _row_required(defn) else set()
+        if kinds[name] == KIND_RELATION:
+            relationship = defn['x-relationship']
+            rel = {
+                'prop_name': name, 'target': relationship['target'],
+                'label_field': relationship.get('labelField') or relationship.get('label_field'),
+            }
+            rows.append(_relation_entry(rel, {}, required, set(), title, name[:-3] if name.endswith('_id') else name))
+        else:
+            rows.append(_field_entry(name, defn, kinds[name], {}, required, set(), title))
+        # A column with a schema default starts a new row at that value, and a blank one is left out of the
+        # body so the server applies the default (a null would be refused for a non-nullable column).
+        if 'default' in defn and kinds[name] != KIND_BOOLEAN and defn['default'] is not None:
+            rows[-1]['default_value'] = str(defn['default'])
+    name = child['property_name']
+    return {
+        'key': name,
+        'label': title(name),
+        'kind': KIND_CHILD_ROWS,
+        'required': False,
+        'readonly': False,
+        'options': [],
+        'relation_name': name,
+        'body_key': name,
+        'row_fields': rows,
+    }
+
+
 def _split_entry(ctx: dict, entries: dict[str, dict], required: set[str], title) -> dict | None:
     """Description of the split section: the quantity field and the fields each part must specify.
 
@@ -404,6 +511,8 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
         entries[child['property_name']] = _relation_many_entry(child, readonly, title)
     for rel in ctx.get('direct_attachment_rels') or []:
         entries[rel['prop_name']] = _attachment_entry(rel, required, readonly, title)
+    for child in _row_children(ctx):
+        entries[child['property_name']] = _child_rows_entry(child, _row_field_kinds(child)[0], title)
     if declared:
         names = [n for n in declared if n in entries]
     else:
@@ -415,7 +524,7 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
     table = [next(iter(col)) for col in (ctx.get('xdisplay_table') or []) if isinstance(col, dict) and col]
     # A list row shows scalar columns only: a relation column holds an id, and the
     # REST list does not embed the related record's label.
-    scalar_keys = [f['key'] for f in fields if f['kind'] not in (KIND_RELATION, KIND_RELATION_MANY, KIND_ATTACHMENT)]
+    scalar_keys = [f['key'] for f in fields if f['kind'] not in (KIND_RELATION, KIND_RELATION_MANY, KIND_ATTACHMENT, KIND_CHILD_ROWS)]
     list_keys = [k for k in table if k in kind_by_field] or scalar_keys or [fields[0]['key']]
     list_keys = list_keys[:MAX_LIST_COLUMNS]
     # The REST list sorts and filters on scalar columns, and on the relation display columns

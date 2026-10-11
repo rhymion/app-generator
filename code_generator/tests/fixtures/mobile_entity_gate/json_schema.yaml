@@ -321,6 +321,51 @@ definitions:
     required:
       - name
 
+  # A one-to-many child collection (the Web form's editable grid): drawn on mobile as a row editor.
+  # The line carries a required integer, an enum with a default, an optional date, a decimal-free text and a
+  # required foreign key to mobile_group, so the row editor draws a text, number, enum, date and picker control.
+  mobile_invoice:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - invoice_no:
+            primary: true
+    fields:
+      invoice_no: {}
+    properties:
+      lines:
+        type: array
+        items:
+          $ref: "#/definitions/mobile_invoice_line"
+    required:
+      - invoice_no
+
+  mobile_invoice_line:
+    fields:
+      description: {}
+      quantity:
+        minimum: 1
+      line_status:
+        enum: ["open", "billed"]
+        default: open
+      shipped_on:
+        format: date
+      mobile_group_id:
+        x-relationship:
+          labelField: name
+    required:
+      - description
+      - quantity
+      - mobile_group_id
+
   attachment:
     x-generate:
       list: false
