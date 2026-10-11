@@ -5,6 +5,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Mobile app: entities with a self-referencing `children` list get native screens** (Issue #942). A one-to-many
+  `x-outputType: list` child attached through a nullable foreign key (for example `procedure.children`) no longer
+  makes an entity ineligible: it is drawn as the same chip picker as a many-to-many list and saved as `children_ids`.
+  The edit form sends the record's `id` with the picker's search so the options route leaves out the record itself and
+  its ancestors; records owned by another record are not offered. See `docs/knowledge/mobile-app.md`.
 - **Mobile app: entities that declare `x-reservation` get native screens** (Issue #937). `reservation_config` no longer
   makes an entity ineligible, so a reservation entity without a child grid (item mode, for example a room reservation)
   has list, detail, create, edit and delete screens. The generated REST routes now answer a request with no free

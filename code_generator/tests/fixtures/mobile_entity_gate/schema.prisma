@@ -32,6 +32,8 @@ model user {
   updated_profiles mobile_profile[] @relation("MobileProfileUpdater")
   created_tasks    mobile_task[]    @relation("MobileTaskCreator")
   updated_tasks    mobile_task[]    @relation("MobileTaskUpdater")
+  created_mobile_steps mobile_step[] @relation("MobileStepCreator")
+  updated_mobile_steps mobile_step[] @relation("MobileStepUpdater")
   created_mobile_categories mobile_category[] @relation("MobileCategoryCreator")
   updated_mobile_categories mobile_category[] @relation("MobileCategoryUpdater")
   created_mobile_tickets mobile_ticket[] @relation("MobileTicketCreator")
@@ -333,6 +335,24 @@ model mobile_thread {
   updater_id     String
   updater        user        @relation("MobileThreadUpdater", fields: [updater_id], references: [id])
   @@index([title])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_step {
+  id         String        @id @default(cuid())
+  name       String
+  parent_id  String?
+  parent     mobile_step?  @relation("MobileStepTree", fields: [parent_id], references: [id])
+  children   mobile_step[] @relation("MobileStepTree")
+  created_at DateTime      @default(now()) @db.Timestamptz(0)
+  updated_at DateTime      @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user          @relation("MobileStepCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user          @relation("MobileStepUpdater", fields: [updater_id], references: [id])
+  @@index([name])
+  @@index([parent_id])
   @@index([creator_id])
   @@index([updater_id])
 }

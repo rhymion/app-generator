@@ -30,7 +30,7 @@ from build_user_schema import build_user_schema
 from generate import generate
 from mobile_entities import (
     build_mobile_entity_spec, group_ineligible_by_reason, ineligible_log_lines, ineligible_note,
-    mobile_ineligible_reason,
+    _relation_many_entry, mobile_ineligible_reason,
 )
 
 FIXTURE = Path(__file__).resolve().parent / 'fixtures' / 'mobile_entity_gate'
@@ -149,6 +149,16 @@ def test_child_grid_is_ineligible_even_beside_a_picker(overrides):
     assert mobile_ineligible_reason(ctx) is not None
 
 
+def _list_child(**overrides):
+    """A one-to-many list child (`procedure.children`): no `x-relationship`, attached through a nullable FK."""
+    child = {
+        'name': 'step', 'property_name': 'children', 'child_var': 'children', 'output_type': 'list',
+        'is_many_to_many': False, 'use_connect': True, 'attach_fk': 'parent_id',
+    }
+    child.update(overrides)
+    return child
+
+
 def _row_child(**overrides):
     child = {
         'name': 'line', 'property_name': 'lines', 'child_var': 'lines', 'output_type': None,
@@ -163,6 +173,31 @@ def _row_child(**overrides):
     }
     child.update(overrides)
     return child
+
+
+def test_one_to_many_list_child_attached_through_a_nullable_fk_is_eligible():
+    child = _list_child()
+    ctx = _ctx(parent='step', children_raw=[child], non_comment_ch=[child])
+    assert mobile_ineligible_reason(ctx) is None
+    assert mobile_ineligible_reason(ctx, {'step'}) is None
+    # The offered records are the child's own entity, so it needs REST routes.
+    assert 'step, which has no REST routes' in mobile_ineligible_reason(ctx, {'other'})
+
+
+@pytest.mark.parametrize('overrides', [{'attach_fk': None}, {'output_type': None}, {'output_type': 'comments'}])
+def test_one_to_many_child_that_is_not_an_attachable_list_stays_ineligible(overrides):
+    child = _list_child(**overrides)
+    ctx = _ctx(parent='step', children_raw=[child], non_comment_ch=[child])
+    assert mobile_ineligible_reason(ctx) == 'declares children_raw'
+
+
+def test_list_child_picker_of_its_own_kind_sends_the_record_id_to_the_options_route():
+    entry = _relation_many_entry(_list_child(), set(), lambda n: n, 'step')
+    assert (entry['target'], entry['body_key'], entry['context_fields']) == ('step', 'children_ids', ['id'])
+    other = _relation_many_entry(_list_child(name='item'), set(), lambda n: n, 'order')
+    assert (other['target'], other['context_fields']) == ('item', [])
+    m2m = _relation_many_entry(_m2m_child(child_var='tags'), set(), lambda n: n, 'task')
+    assert m2m['context_fields'] == []
 
 
 def test_editable_child_rows_are_eligible_beside_a_picker():
@@ -390,6 +425,23 @@ def test_picker_reads_candidates_from_the_options_route_and_filters_nothing(out)
     http = _read(out, 'lib/entity-http.ts')
     assert '/api/${entity}/options' in http
     assert 'err.status === 403' in http
+
+
+def test_edit_form_hands_the_record_id_to_its_pickers(out):
+    assert 'formValues={id ? { ...values, id } : values}' in _read(out, 'components/mobile_task/FormUpsert.tsx')
+
+
+def test_one_to_many_list_entity_gets_screens_and_a_picker_field(out):
+    assert 'mobile_step' in _read(out, 'lib/entity-registry.ts')
+    fields = _fields(out, 'mobile_step', 'MOBILE_STEP')
+    children = next(f for f in fields if f['key'] == 'children')
+    assert children['kind'] == 'relation_many'
+    assert (children['target'], children['bodyKey'], children['relationName']) == ('mobile_step', 'children_ids', 'children')
+    assert children['contextFields'] == ['id']
+    parent = next(f for f in fields if f['key'] == 'parent_id')
+    assert parent['kind'] == 'relation' and parent['contextFields'] == []
+    tags = next(f for f in _fields(out, 'mobile_task', 'MOBILE_TASK') if f['key'] == 'tags')
+    assert tags['contextFields'] == []
 
 
 def test_picker_is_disabled_without_read_on_the_target(out):
