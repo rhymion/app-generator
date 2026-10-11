@@ -198,6 +198,38 @@ definitions:
   # x-create-inline: mobile_ticket's category field offers "Create new", which opens
   # mobile_category's native create form over the ticket form. mobile_category declares no
   # x-create-inline itself (nesting depth is 1).
+  # A self-referencing one-to-many list (`children`) over the nullable `parent_id`: the picker offers records
+  # that have no parent yet or are already this record's children, and never the record itself.
+  mobile_step:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - name:
+            primary: true
+    fields:
+      name: {}
+      parent_id:
+        x-relationship: {}
+    properties:
+      parent:
+        $ref: "#/definitions/mobile_step"
+      children:
+        type: array
+        items:
+          $ref: "#/definitions/mobile_step"
+        x-outputType: list
+    required:
+      - name
+      - children
+
   mobile_category:
     x-generate:
       list: true

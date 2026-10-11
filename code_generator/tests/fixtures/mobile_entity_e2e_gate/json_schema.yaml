@@ -12,6 +12,7 @@ x-generator:
 #    entity's own x-generate flags.
 #  - mobile_group / mobile_tag / mobile_profile / mobile_task: the relation pickers (a required
 #    many-to-one foreign key, a many-to-many and a one-to-one selector).
+#  - mobile_step: a self-referencing one-to-many list (`children`) over a nullable `parent_id`.
 #  - mobile_org_item: a foreign key to organization, which scopes the entity by organization
 #    membership, so the picker must offer only the caller's organizations.
 #  - mobile_thread: a commentable entity (list, view, edit and delete): its detail screen draws the comment
@@ -504,3 +505,35 @@ definitions:
     required:
       - guest_name
       - category
+
+  # A self-referencing one-to-many list (`children`) over the nullable `parent_id`: the picker offers records
+  # that have no parent yet or are already this record's children, and never the record itself.
+  mobile_step:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - name:
+            primary: true
+    fields:
+      name: {}
+      parent_id:
+        x-relationship: {}
+    properties:
+      parent:
+        $ref: "#/definitions/mobile_step"
+      children:
+        type: array
+        items:
+          $ref: "#/definitions/mobile_step"
+        x-outputType: list
+    required:
+      - name
+      - children

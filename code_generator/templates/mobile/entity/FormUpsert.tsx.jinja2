@@ -201,7 +201,7 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
           onChange={(next) => setValues((current) => ({ ...current, [spec.key]: next }))}
           disabled={busy}
           caller="{{ name }}"
-          formValues={values}
+          formValues={id ? { ...values, id } : values}
 {% if create_fields %}
           createForm={CREATE_FORMS[spec.key]}
 {% endif %}

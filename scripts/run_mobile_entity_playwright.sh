@@ -163,6 +163,14 @@ WITH actor AS (SELECT id FROM "user" ORDER BY created_at LIMIT 1)
 INSERT INTO organization (id, name, updated_at, creator_id, updater_id)
 SELECT v.id, v.name, now(), actor.id, actor.id FROM actor, (VALUES ('org-own', 'Mobile Own Org'), ('org-foreign', 'Mobile Foreign Org')) AS v(id, name);
 INSERT INTO "_UserOrganizations" ("A", "B") SELECT 'org-own', id FROM "user" WHERE email = 'admin@example.com';
+-- a self-referencing one-to-many list (children): free records, one owned by step-holder, and two small trees
+WITH actor AS (SELECT id FROM "user" ORDER BY created_at LIMIT 1)
+INSERT INTO mobile_step (id, name, parent_id, updated_at, creator_id, updater_id)
+SELECT v.id, v.name, v.parent_id, now(), actor.id, actor.id FROM actor,
+  (VALUES ('step-holder', 'Holder', NULL), ('step-owned', 'Owned elsewhere', 'step-holder'),
+          ('step-a1', 'Free A1', NULL), ('step-a2', 'Free A2', NULL),
+          ('step-edit', 'Edit me', NULL), ('step-e1', 'Child E1', 'step-edit'), ('step-e2', 'Free E2', NULL),
+          ('step-top', 'Top', NULL), ('step-mid', 'Middle', 'step-top'), ('step-free', 'Free for the cycle test', NULL)) AS v(id, name, parent_id);
 SQL
   echo "-- records for the approval section --"
   # Three roles: the test administrator holds "Mobile Approver" and "Mobile Second Approver", not the other one.
