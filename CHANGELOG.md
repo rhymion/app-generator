@@ -10,7 +10,6 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   the identity's `current_version_id`, and deletion of a terminally rejected or withdrawn draft with its owned child rows.
   The Prisma columns are declared by the app and checked at generation time. See `docs/knowledge/schema-yaml-configuration.md`
   section 7.8.
-
 - **Mobile app: entities with a self-referencing `children` list get native screens** (Issue #942). A one-to-many
   `x-outputType: list` child attached through a nullable foreign key (for example `procedure.children`) no longer
   makes an entity ineligible: it is drawn as the same chip picker as a many-to-many list and saved as `children_ids`.
