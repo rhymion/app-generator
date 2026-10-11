@@ -109,7 +109,9 @@ export type FieldKind =
   // A foreign key or one-to-one selector (one record) and a many-to-many (a set of records).
   | 'relation' | 'relation_many'
   // A direct attachment: the form holds the id of an `attachment` row created for an uploaded file.
-  | 'attachment';
+  | 'attachment'
+  // An editable collection of new rows of a one-to-many child; the rows travel in the body as the property array.
+  | 'child_rows';
 
 /** One field of an entity's form, as described by the schema. */
 export type FieldSpec = {
@@ -133,7 +135,39 @@ export type FieldSpec = {
   contextFields?: string[];
   /** The field declares x-create-inline and its target has a native create form. */
   createInline?: boolean;
+  /** A row field only: the schema default, which starts a new row and which the server applies when the field is left blank. */
+  defaultValue?: string;
+  /** A `child_rows` field only: the fields each row draws (`bodyKey` and `relationName` name the property array). */
+  rowFields?: FieldSpec[];
 };
+
+/** One row of a `child_rows` field as the form holds it: the saved row's id (absent on a new row) and the field values. */
+export type ChildRowState = { id?: string; values: Record<string, string | boolean | string[]> };
+
+/** The body value of one scalar or relation field from its form text; `undefined` leaves the key out. */
+function fieldBodyValue(spec: FieldSpec, text: string): unknown {
+  if (spec.kind === 'relation' || spec.kind === 'attachment') return text === '' ? null : text;
+  if (spec.kind === 'boolean') return text === 'true';
+  if (text === '') return null;
+  if (spec.kind === 'time') return timeOfDayToInstant(text) ?? text;
+  // The API hands the value to Prisma, which wants a full instant; the Web form reads a date as UTC midnight.
+  if (spec.kind === 'date') return /^\d{4}-\d{2}-\d{2}$/.test(text) ? `${text}T00:00:00.000Z` : text;
+  if (spec.kind === 'number' || (spec.kind === 'enum' && spec.numericEnum)) return Number(text);
+  return text;
+}
+
+/** The first required field of a `child_rows` field that a row leaves empty, as `{ row, field }` (row is 1-based). */
+export function firstMissingRowField(spec: FieldSpec, rows: ChildRowState[]): { row: number; field: FieldSpec } | null {
+  for (let index = 0; index < rows.length; index += 1) {
+    for (const field of spec.rowFields ?? []) {
+      const value = rows[index].values[field.key];
+      if (field.required && !field.readonly && field.kind !== 'boolean' && (value === undefined || value === '')) {
+        return { row: index + 1, field };
+      }
+    }
+  }
+  return null;
+}
 
 /** Reads a FormData into the JSON body the REST routes take. */
 export function formDataToBody(
@@ -149,17 +183,25 @@ export function formDataToBody(
       body[spec.bodyKey ?? key] = formData.getAll(key).map(String);
       continue;
     }
+    if (spec.kind === 'child_rows') {
+      // The form sends the rows as one JSON entry; an update replaces the collection, so an empty list clears it.
+      const rows = JSON.parse(String(formData.get(key) ?? '[]')) as ChildRowState[];
+      body[spec.bodyKey ?? key] = rows.map((row) => {
+        const item: Record<string, unknown> = row.id ? { id: row.id } : {};
+        for (const field of spec.rowFields ?? []) {
+          if (field.readonly) continue;
+          const text = row.values[field.key] === undefined ? '' : String(row.values[field.key]);
+          // A blank field with a default is left out so the server applies the default.
+          if (text === '' && field.defaultValue !== undefined) continue;
+          item[field.bodyKey ?? field.key] = fieldBodyValue(field, text);
+        }
+        return item;
+      });
+      continue;
+    }
     const raw = formData.get(key);
     if (raw === null) continue;
-    const text = String(raw);
-    if (spec.kind === 'relation' || spec.kind === 'attachment') body[spec.bodyKey ?? key] = text === '' ? null : text;
-    else if (spec.kind === 'boolean') body[key] = text === 'true';
-    else if (text === '') body[key] = null;
-    else if (spec.kind === 'time') body[key] = timeOfDayToInstant(text) ?? text;
-    // The API hands the value to Prisma, which wants a full instant; the Web form reads a date as UTC midnight.
-    else if (spec.kind === 'date') body[key] = /^\d{4}-\d{2}-\d{2}$/.test(text) ? `${text}T00:00:00.000Z` : text;
-    else if (spec.kind === 'number' || (spec.kind === 'enum' && spec.numericEnum)) body[key] = Number(text);
-    else body[key] = text;
+    body[spec.kind === 'relation' || spec.kind === 'attachment' ? spec.bodyKey ?? key : key] = fieldBodyValue(spec, String(raw));
   }
   return body;
 }
