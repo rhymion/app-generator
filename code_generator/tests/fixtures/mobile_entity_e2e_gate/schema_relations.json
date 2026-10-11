@@ -31,7 +31,9 @@
     "created_mobile_rooms mobile_room[] @relation(\"MobileRoomCreator\")",
     "updated_mobile_rooms mobile_room[] @relation(\"MobileRoomUpdater\")",
     "created_mobile_stays mobile_stay[] @relation(\"MobileStayCreator\")",
-    "updated_mobile_stays mobile_stay[] @relation(\"MobileStayUpdater\")"
+    "updated_mobile_stays mobile_stay[] @relation(\"MobileStayUpdater\")",
+    "created_mobile_invoices mobile_invoice[] @relation(\"MobileInvoiceCreator\")",
+    "updated_mobile_invoices mobile_invoice[] @relation(\"MobileInvoiceUpdater\")"
   ],
   "organization": [
     "mobile_org_items mobile_org_item[]"

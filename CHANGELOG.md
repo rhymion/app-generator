@@ -26,6 +26,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   now use `authenticate()` like every generated entity route (mobile access token or API key); permission checks
   and the service API key path are unchanged.
 ### Added
+- **Mobile: entities with an editable child collection** (Issue #939). An entity whose form has an editable one-to-many
+  grid (for example `asn.lines`, `purchase_order.lines`) is no longer left on the "not available in the mobile app yet"
+  placeholder. The Expo form draws a row editor (add, remove, and each row's own fields, including relation pickers),
+  sends the rows as the property array of the existing POST and PUT routes, and the detail screen lists them. A child
+  that is independent, a `list` child that is not a many-to-many, or a row field with no native control still keeps the
+  placeholder; the generation log names the property and field. See `docs/knowledge/mobile-app.md`.
 - **Mobile: direct attachment fields** (Issue #931). An entity with an `x-relationship: {target: attachment,
   type: direct}` field (for example `leave_request.medical_certificate_id`) is no longer left on the
   "not available in the mobile app yet" placeholder. The Expo form picks a file with the system document picker

@@ -23,7 +23,7 @@ type Props = {
   onChange: (value: string | string[]) => void;
   disabled?: boolean;
   caller?: string;
-  formValues?: Record<string, string | boolean | string[]>;
+  formValues?: Record<string, unknown>;
   /** The target's native create form; set only for a field that declares x-create-inline. */
   createForm?: ComponentType<InlineCreateProps>;
 };
