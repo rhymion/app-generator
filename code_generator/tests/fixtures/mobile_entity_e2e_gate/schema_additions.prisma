@@ -268,3 +268,40 @@ model mobile_document {
   @@index([creator_id])
   @@index([updater_id])
 }
+
+model mobile_room {
+  id         String   @id @default(cuid())
+  room_no    String
+  category   String
+  room_state Int
+  mobile_stays mobile_stay[]
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("MobileRoomCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("MobileRoomUpdater", fields: [updater_id], references: [id])
+  @@index([room_no])
+  @@index([category])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_stay {
+  id             String       @id @default(cuid())
+  guest_name     String
+  category       String
+  mobile_room_id String?
+  mobile_room    mobile_room? @relation(fields: [mobile_room_id], references: [id])
+  created_at     DateTime     @default(now()) @db.Timestamptz(0)
+  updated_at     DateTime     @updatedAt @db.Timestamptz(0)
+  creator_id     String
+  creator        user         @relation("MobileStayCreator", fields: [creator_id], references: [id])
+  updater_id     String
+  updater        user         @relation("MobileStayUpdater", fields: [updater_id], references: [id])
+  @@index([guest_name])
+  @@index([category])
+  @@index([mobile_room_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}

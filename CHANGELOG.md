@@ -4,6 +4,14 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
+### Added
+- **Mobile app: entities that declare `x-reservation` get native screens** (Issue #937). `reservation_config` no longer
+  makes an entity ineligible, so a reservation entity without a child grid (item mode, for example a room reservation)
+  has list, detail, create, edit and delete screens. The generated REST routes now answer a request with no free
+  capacity with `{ error, code: 'CAPACITY' }` and a locked count-mode reservation with
+  `{ error, code: 'RESERVATION_LOCKED' }` (HTTP 409 as before; clients reading `error` are unaffected), so the app shows
+  the same texts as the Web instead of the stale-update warning. A count-mode reservation with `lines` still stays on the
+  placeholder screen because of its child grid. See `docs/knowledge/mobile-app.md`.
 ### Changed
 - **Auth code no longer writes email addresses to `audit_log` or to auth `console.info` lines** (Issue #935). `auth:signIn`
   and `auth:createUser` rows drop `metadata.email`; the `email_in_use_by_credentials` rejection drops it too and now

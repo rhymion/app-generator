@@ -121,9 +121,16 @@ and describes their fields; the templates are under `code_generator/templates/mo
 | Delete (one record, with a confirmation panel, from the detail screen) | | `x-generate.delete` |
 | Delete several records (selection mode on the list) | | `x-generate.delete` and the `delete` permission |
 
+A reservation entity (`x-reservation`) is drawn like any other entity: the reservation runs on the server in the
+generated service layer, shared with the Web. The REST routes return HTTP 409 with `code: 'CAPACITY'` when no pool
+capacity is available and `code: 'RESERVATION_LOCKED'` when a count-mode reservation is already allocated, and the
+transport reads `code` before the status, so the form shows the same capacity / locked texts as the Web. The field
+the server fills in (the allocated pool reference) is only as required as the schema declares it. A count-mode
+reservation keeps its `lines` child grid and therefore stays on the placeholder screen.
+
 An entity is left on the placeholder screen when it has no REST routes or no list screen, declares a
 child grid, a one-to-one bridge other than the ones to `approvable` (with `ApprovalSection`) and `commentable`, a custom component other than `ApprovalSection`, virtual
-columns, polymorphic attachments (`attachable`), `x-splittable` without the approval section, a reservation, a state machine, edit/delete
+columns, polymorphic attachments (`attachable`), `x-splittable` without the approval section, a state machine, edit/delete
 guards without an approval or `x-self-only`, relates to an entity that has no
 REST routes, or has a field with no native widget (image or file URI, entity select, custom upsert
 component). In the default schema `role`, `organization` and `app_setting` qualify; `user` (a custom component) keeps

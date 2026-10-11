@@ -27,7 +27,11 @@
     "created_mobile_threads mobile_thread[] @relation(\"MobileThreadCreator\")",
     "updated_mobile_threads mobile_thread[] @relation(\"MobileThreadUpdater\")",
     "created_mobile_documents mobile_document[] @relation(\"MobileDocumentCreator\")",
-    "updated_mobile_documents mobile_document[] @relation(\"MobileDocumentUpdater\")"
+    "updated_mobile_documents mobile_document[] @relation(\"MobileDocumentUpdater\")",
+    "created_mobile_rooms mobile_room[] @relation(\"MobileRoomCreator\")",
+    "updated_mobile_rooms mobile_room[] @relation(\"MobileRoomUpdater\")",
+    "created_mobile_stays mobile_stay[] @relation(\"MobileStayCreator\")",
+    "updated_mobile_stays mobile_stay[] @relation(\"MobileStayUpdater\")"
   ],
   "organization": [
     "mobile_org_items mobile_org_item[]"
