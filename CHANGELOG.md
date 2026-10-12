@@ -62,6 +62,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **`npm run test:flows` no longer destroys the working tree and runs serially.** `test/flows/cleanup.test.ts` ran
+  `npm run cleanup:all` (`--prune-orphans`) in the working tree itself, which deleted the generated code
+  (`lib/*/service.ts`, ...); it now runs on a disposable copy and asserts the working tree is unchanged.
+  `vitest.flows.config.ts` sets `fileParallelism: false`, and `startServer` removes only a stale `.next/dev/lock`
+  instead of the whole `.next` directory. `multistage_approval_rounds.test.ts` supplies its own
+  `on_withdrawn`-declaring approvable instead of relying on an entity of the consumer's schema. See
+  `docs/knowledge/flows-tests.md`.
 - The virtual column resolver stub was never announced in the `ACTION REQUIRED` summary: `_write_stub` returned `None`, so
   the notice keyed on its result never fired. It now returns whether it created the file.
 - **Attachment bridge: `setAttachmentsForBridge` only accepts attachment ids of the record being edited** (Issue #958).
