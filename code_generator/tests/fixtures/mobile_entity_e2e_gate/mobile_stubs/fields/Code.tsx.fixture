@@ -1,0 +1,8 @@
+import { Text, TextInput } from 'react-native';
+import type { FieldComponentProps } from '@/lib/custom-component';
+
+// One file serves both targets: the form passes onChange, the detail screen only the value.
+export default function Code({ value, onChange }: FieldComponentProps) {
+  if (!onChange) return <Text testID="gadget-code-view">{`code is ${String(value ?? '')}`}</Text>;
+  return <TextInput testID="gadget-code-input" value={String(value ?? '')} onChangeText={onChange} />;
+}

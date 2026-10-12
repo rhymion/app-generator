@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState{% if create_fields %}, type ComponentType{% endif %} } from 'react';
+import { {% if custom_fields | selectattr('custom.upsert') | list %}createElement, {% endif %}useEffect, useRef, useState{% if create_fields or (custom_fields | selectattr('custom.upsert') | list) %}, type ComponentType{% endif %} } from 'react';
 import { router } from 'expo-router';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useMessages } from '@/lib/messages';
@@ -33,6 +33,22 @@ import { {{ f.create_form.pascal }}FormUpsert } from '@/components/{{ f.create_f
 {% endif %}
 {% if is_payment %}
 import { isCheckoutUrl, openCheckout } from '@/lib/checkout';
+{% endif %}
+{% for comp in custom_components.edit | map(attribute='name') | unique %}
+import {{ comp }} from '@/components/{{ name }}/custom/{{ comp }}';
+{% endfor %}
+{% if custom_fields | selectattr('custom.upsert') | list %}
+import type { FieldUpsertProps } from '@/lib/custom-component';
+{% for f in custom_fields if f.custom.upsert %}
+import Field{{ f.key | pascal_case }} from '@/components/{{ name }}/custom/fields/{{ f.key | pascal_case }}';
+{% endfor %}
+
+// Fields a hand-written component draws (x-custom-component, target upsert): it replaces the whole input.
+const CUSTOM_UPSERT: Record<string, ComponentType<FieldUpsertProps>> = {
+{% for f in custom_fields if f.custom.upsert %}
+  {{ f.key }}: Field{{ f.key | pascal_case }},
+{% endfor %}
+};
 {% endif %}
 {% if attachments and attachments.can_edit %}
 
@@ -82,6 +98,16 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
   const [permissions, setPermissions] = useState<ModelPermissions | undefined>(undefined);
   const [state, setState] = useState<'loading' | 'ready' | 'missing'>('loading');
   const [busy, setBusy] = useState(false);
+{% if custom_components.edit %}
+  // The saved record the edit components receive (`null` on the create form), and a counter their `reload` bumps.
+  const [record, setRecord] = useState<{ id: string } & Record<string, unknown> | null>(null);
+  const [reloads, setReloads] = useState(0);
+{% endif %}
+{% if custom_fields | selectattr('custom.upsert') | list %}
+  // What a custom field started with: a field its component left untouched is not sent, so a value the
+  // screen never held (a password, for example) is not overwritten by a blank.
+  const initialValues = useRef<Record<string, FieldValueState>>({});
+{% endif %}
 {% if is_payment %}
   const checkoutUrl = useRef<string | null>(null);
   const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
@@ -121,6 +147,12 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
             return;
           }
           setValues(Object.fromEntries(FIELDS.map((spec) => [spec.key, toFieldState(spec, record[spec.key])])));
+{% if custom_components.edit %}
+          setRecord(record);
+{% endif %}
+{% if custom_fields | selectattr('custom.upsert') | list %}
+          initialValues.current = Object.fromEntries(FIELDS.map((spec) => [spec.key, toFieldState(spec, record[spec.key])]));
+{% endif %}
 {% if attachment_fields %}
           setAttachments(Object.fromEntries(
             FIELDS.filter((spec) => spec.kind === 'attachment')
@@ -140,7 +172,7 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
       }
     };
     void load();
-  }, [id]);
+  }, [id{% if custom_components.edit %}, reloads{% endif %}]);
 
   const allowed = isEdit ? canEdit : Boolean(permissions?.create);
 
@@ -165,6 +197,10 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
     for (const spec of FIELDS) {
       if (spec.readonly) continue;
       const value = values[spec.key];
+{% if custom_fields | selectattr('custom.upsert') | list %}
+      // A field a custom component draws is sent only once the component has changed it.
+      if (CUSTOM_UPSERT[spec.key] && value === (spec.key in initialValues.current ? initialValues.current[spec.key] : toFieldState(spec, null))) continue;
+{% endif %}
       // The rows of a child collection travel as one JSON entry.
       if (spec.kind === 'child_rows') formData.append(spec.key, JSON.stringify(value));
       // A many-to-many travels as one entry per selected id.
@@ -245,7 +281,12 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
 
   return (
     <ScrollView style={styles.container} testID={isEdit ? 'form-edit-{{ name }}' : 'form-new-{{ name }}'}>
-      {FIELDS.map((spec) => (
+      {FIELDS.map((spec) => {% if custom_fields | selectattr('custom.upsert') | list %}CUSTOM_UPSERT[spec.key] ? createElement(CUSTOM_UPSERT[spec.key], {
+        key: spec.key,
+        value: values[spec.key] as string | boolean,
+        onChange: (next: string | boolean) => setValues((current) => ({ ...current, [spec.key]: next })),
+        isEdit,
+      }) : {% endif %}(
         <FieldInput
           key={spec.key}
           spec={spec}
@@ -266,6 +307,9 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
 {% if attachments and attachments.can_edit %}
       {isEdit ? <AttachmentList types={ATTACHMENT_TYPES} items={bridgeItems} onChange={(next) => { setBridgeError(null); setBridgeItems(next); }} disabled={busy} error={bridgeError} /> : null}
 {% endif %}
+{% for comp in custom_components.edit %}
+      <{{ comp.name }} record={record} permissions={permissions} reload={() => setReloads((n) => n + 1)}{% for k, v in comp.props.items() %} {{ k }}={ {{ v | tojson }} }{% endfor %} />
+{% endfor %}
       {validationError ? <Text style={styles.error} testID="form-validation-error">{validationError}</Text> : null}
       {error ? <Text style={styles.error} testID="form-error">{error}</Text> : null}
 {% if is_payment %}

@@ -1,0 +1,4 @@
+// Web-side placeholder for the mobile_gadget fixture: the Web build needs the component the schema names.
+export default function GadgetBanner(_props: Record<string, unknown>) {
+  return null;
+}

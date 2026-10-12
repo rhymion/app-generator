@@ -136,12 +136,12 @@ schema `approval_flow` (`entity_name`) and `permission` (`name`) qualify.
 
 An entity is left on the placeholder screen when it has no REST routes or no list screen, declares a
 child that is neither a picker nor an [editable child collection](#child-rows) (an independent child with its own screens,
-or a row with a field the row editor cannot draw), a one-to-one bridge other than the ones to `approvable` (with `ApprovalSection`), `commentable` and `attachable` (with `AttachmentSection`), a custom component other than `ApprovalSection` and `AttachmentSection`, virtual
+or a row with a field the row editor cannot draw), a one-to-one bridge other than the ones to `approvable` (with `ApprovalSection`), `commentable` and `attachable` (with `AttachmentSection`), an `ApprovalSection` or `AttachmentSection` component without its bridge, virtual
 columns, `x-splittable` without the approval section, a state machine, edit/delete
 guards without an approval or `x-self-only`, relates to an entity that has no
-REST routes, or has a field with no native widget (image or file URI, custom upsert
-component). In the default schema `role`, `organization` and `app_setting` qualify; `user` (a custom component) keeps
-the placeholder. The fixture schema in `code_generator/tests/fixtures/mobile_entity_gate/` covers the rest.
+REST routes, or has a field with no native widget (image or file URI). Hand-written components
+(`x-custom-components`, `x-custom-component`) are not a reason: they get an [insertion point](#hand-written-components).
+In the default schema every entity qualifies except `setting` (no list screen). The fixture schema in `code_generator/tests/fixtures/mobile_entity_gate/` covers the rest.
 
 `generate-code` reports which entities were left on the placeholder screen and why. It prints them at the end of the
 mobile step, grouped by reason (the first failing check of `mobile_ineligible_reason()`), and writes the same list to
@@ -232,6 +232,62 @@ authenticated caller, so there is one implementation of the row. The route rejec
 `attachment.type` enum, an empty or over-long name and a `path` that is not a site-relative path or an
 `http(s)` URL. A file stored through the Google Cloud Storage upload route is served by `/api/gcs/...`, which
 requires a browser session, so the link on the detail screen opens only where that session is shared.
+
+### Hand-written components
+
+A project's own components (a status chip, a dashboard, a field with its own control) cannot be ported by the generator.
+The mobile screens therefore read the declarations the Web screens already read, with no further schema key, and leave an
+insertion point for a native counterpart: `x-custom-components` (entity level, targets `list`, `view`, `edit`) and
+`x-custom-component` (field level, targets `upsert`, `view`). An entity is no longer left on the placeholder screen only
+because it declares one. `ApprovalSection` and `AttachmentSection` are not insertion points: the screens serve them natively
+(see [Approval](#approval) and [Attachments of an `attachable` bridge](#attachments-of-an-attachable-bridge)).
+
+**Where each component is mounted** (the position of the Web counterpart):
+
+| Declaration | Native position |
+|---|---|
+| entity `list` | the list's search / sort / filter row, after the *Filter* button |
+| entity `view` | the detail screen, after the fields and the built-in sections (approval, split, attachments), before the comment thread |
+| entity `edit` | the form, after the inputs; the create form shows it too, as on the Web |
+| field `upsert` | replaces that field's input (label and control) on the form |
+| field `view` | replaces that field's row (label and value) on the detail screen |
+
+A field with an `upsert` target and no `view` target that holds a string (a password, an API key) is never listed, sorted,
+filtered or shown on the detail screen; the REST detail does not return it. A field component is sent with the save only
+once it has changed the value, so a form that never touched it does not overwrite the stored value with a blank.
+
+**Where the files are.** The generator writes one native stub per component, once, and never overwrites it (the same
+write-once rule as the other hand-maintained stubs); `cleanup` does not delete one you edited. Entity components are
+`mobile/components/<entity>/custom/<ComponentName>.tsx`, field components are
+`mobile/components/<entity>/custom/fields/<FieldPascalCase>.tsx` (one file per field, serving both targets). A component's
+Web `path` is ignored: the native component is always found by name. Commit the implemented files to the project's own
+source of truth, as for the other stubs, so a fresh rebuild keeps them.
+
+**The stub draws nothing.** A generated stub returns `null`. No placeholder text, marker or "not implemented" notice reaches
+the user, because some Web features (CSV export and import, for example) are deliberately not built on mobile. The developer
+learns about a new stub from the `ACTION REQUIRED` summary at the end of `generate-code`, which lists each file and where it
+is mounted.
+
+**Props.** The contract is generated into `mobile/lib/custom-component.ts` and follows what the Web components receive:
+
+```ts
+// Entity components (list, view, edit) -- the static `props` of the schema entry arrive as further props.
+type EntityComponentProps = {
+  record?: ({ id: string } & Record<string, unknown>) | null; // absent on the list, null on the create form
+  permissions?: ModelPermissions;                              // the caller's flags (for the record on view / edit)
+  reload: () => void;                                          // re-read the list page / the record
+} & Record<string, unknown>;
+
+// Field components: `onChange` and `isEdit` are set on the form only.
+type FieldUpsertProps = { value: string | boolean; onChange: (next: string | boolean) => void; isEdit: boolean };
+type FieldViewProps = { value: unknown };
+```
+
+The Web view and edit components also receive `currentUserRoleIds` and `currentUserId`; the native ones do not (the app
+holds no session user), so a native component that needs them reads them from the REST API itself.
+
+The fixture entity is `mobile_gadget`; `mobile/e2e/custom-components.spec.ts` runs against hand-written files placed before
+generation (the generator keeps files that exist) and against a stub left as generated.
 
 ### Attachments of an `attachable` bridge
 
@@ -682,7 +738,8 @@ check and is not part of the mandatory gate.
 
 - Entity screens for an entity that declares anything beyond plain fields, the relation pickers, direct attachment
   fields, the attachments of an `attachable` bridge, the approval section, the comment thread with its comment box and
-  mentions, creating the referenced record in place and payment checkout: child grids. A plain URL
+  mentions, creating the referenced record in place, payment checkout and the insertion points for
+  [hand-written components](#hand-written-components): child grids. A plain URL
   field with `x-uri-kind: file` or `image` is not drawn either.
 - Submitting a record for approval (the "(re)submit" button). Resubmitting is a Server Action
   (`submit_for_approval.ts`) with no REST route, so the app has nothing to call.

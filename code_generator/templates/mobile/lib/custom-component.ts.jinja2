@@ -1,0 +1,39 @@
+// The props the hand-written native components receive. They mirror what the Web screens pass the same
+// components (`x-custom-components` / `x-custom-component`), so a component keeps one contract on both.
+// Hand-maintained stubs live under components/<entity>/custom/ and are generated once.
+import type { ModelPermissions } from './authz';
+
+/**
+ * Props of an entity-level component (`x-custom-components`), mounted on the list, the detail screen or the form.
+ *
+ * - `record`: the record on screen; absent on the list, `null` on the create form.
+ * - `permissions`: the caller's flags for the entity (for the record, on the detail screen and the edit form);
+ *   `undefined` until they are loaded.
+ * - `reload`: asks the screen to re-read its data (the list page, the record).
+ * - the static `props` of the schema entry arrive as further props, by name.
+ */
+export type EntityComponentProps = {
+  record?: ({ id: string } & Record<string, unknown>) | null;
+  permissions?: ModelPermissions;
+  reload: () => void;
+} & Record<string, unknown>;
+
+/** Props of a field component (`x-custom-component`, target `upsert`): it replaces the field's input. */
+export type FieldUpsertProps = {
+  value: string | boolean;
+  onChange: (next: string | boolean) => void;
+  /** True on the edit form, false on the create form. */
+  isEdit: boolean;
+};
+
+/** Props of a field component (`x-custom-component`, target `view`): it replaces the field's display on the detail screen. */
+export type FieldViewProps = {
+  /** The field's value as the REST detail returns it. */
+  value: unknown;
+};
+
+/**
+ * Props of a field component that serves both targets (one file per field): `onChange` and `isEdit` are
+ * set on the form only, so a component that is also written for the detail screen reads `value` alone there.
+ */
+export type FieldComponentProps = FieldViewProps & Partial<Omit<FieldUpsertProps, 'value'>>;

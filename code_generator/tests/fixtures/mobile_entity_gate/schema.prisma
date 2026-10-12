@@ -54,6 +54,8 @@ model user {
   updated_assets mobile_asset[] @relation("MobileAssetUpdater")
   created_threads mobile_thread[] @relation("MobileThreadCreator")
   updated_threads mobile_thread[] @relation("MobileThreadUpdater")
+  created_widgets mobile_widget[] @relation("MobileWidgetCreator")
+  updated_widgets mobile_widget[] @relation("MobileWidgetUpdater")
 }
 
 model mobile_note {
@@ -224,6 +226,7 @@ model mobile_document {
   updater_id  String
   updater     user        @relation("MobileDocumentUpdater", fields: [updater_id], references: [id])
   @@index([title])
+  @@index([badge])
   @@index([creator_id])
   @@index([updater_id])
 }
@@ -356,6 +359,7 @@ model mobile_thread {
   updater_id     String
   updater        user        @relation("MobileThreadUpdater", fields: [updater_id], references: [id])
   @@index([title])
+  @@index([badge])
   @@index([creator_id])
   @@index([updater_id])
 }
@@ -390,6 +394,25 @@ model mobile_asset {
   updater_id    String
   updater       user       @relation("MobileAssetUpdater", fields: [updater_id], references: [id])
   @@index([title])
+  @@index([badge])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_widget {
+  id         String   @id @default(cuid())
+  title      String
+  secret     String?
+  badge      String?
+  mood       Boolean  @default(false)
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("MobileWidgetCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("MobileWidgetUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([badge])
   @@index([creator_id])
   @@index([updater_id])
 }

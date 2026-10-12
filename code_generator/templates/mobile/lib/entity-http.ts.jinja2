@@ -141,6 +141,10 @@ export type FieldSpec = {
   defaultValue?: string;
   /** A `child_rows` field only: the fields each row draws (`bodyKey` and `relationName` name the property array). */
   rowFields?: FieldSpec[];
+  /** A hand-written component draws the field: on the form (`upsert`), on the detail screen (`view`), or both. */
+  custom?: { upsert: boolean; view: boolean };
+  /** A credential the API never returns (an upsert-only string such as a password): the detail screen does not list it. */
+  writeOnly?: boolean;
 };
 
 /** One row of a `child_rows` field as the form holds it: the saved row's id (absent on a new row) and the field values. */

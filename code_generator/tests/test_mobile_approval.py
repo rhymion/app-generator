@@ -95,11 +95,12 @@ def test_bridge_without_the_section_and_section_without_the_bridge_are_ineligibl
     assert mobile_ineligible_reason(_ctx(entity_view_components=SECTION)) is not None
 
 
-def test_another_one_to_one_bridge_or_component_keeps_the_placeholder():
+def test_another_one_to_one_bridge_keeps_the_placeholder_but_a_component_does_not():
     other = [{'prop_name': 'x_id', 'target': 'other'}]
     assert mobile_ineligible_reason(_ctx(one_to_one_rels=BRIDGE + other, entity_view_components=SECTION)) is not None
+    # A hand-written component beside the approval section is an extension point, not a reason to leave the entity out.
     assert mobile_ineligible_reason(
-        _ctx(one_to_one_rels=BRIDGE, entity_view_components=SECTION + [{'name': 'Chart'}])) is not None
+        _ctx(one_to_one_rels=BRIDGE, entity_view_components=SECTION + [{'name': 'Chart'}])) is None
 
 
 # --- generated screens -----------------------------------------------------------------------

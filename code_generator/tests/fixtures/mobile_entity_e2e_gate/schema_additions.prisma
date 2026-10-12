@@ -392,3 +392,20 @@ model mobile_asset {
   @@index([creator_id])
   @@index([updater_id])
 }
+
+model mobile_gadget {
+  id         String   @id @default(cuid())
+  title      String
+  code       String?
+  pin        String?
+  created_at DateTime @default(now()) @db.Timestamptz(0)
+  updated_at DateTime @updatedAt @db.Timestamptz(0)
+  creator_id String
+  creator    user     @relation("MobileGadgetCreator", fields: [creator_id], references: [id])
+  updater_id String
+  updater    user     @relation("MobileGadgetUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([code])
+  @@index([creator_id])
+  @@index([updater_id])
+}

@@ -16,8 +16,8 @@ test.describe('Sub-level navigation on the main screen', () => {
     await login(page);
     await page.getByTestId('footer-tab-administration').click();
     await page.getByTestId('nav-row-user').click();
-    await expect(page.getByTestId('entity-user')).toBeVisible();
-    await page.getByTestId('entity-back').click();
+    await expect(page.getByTestId('list-user')).toBeVisible();
+    await page.goBack();
     await expect(page.getByTestId('section-administration')).toBeVisible();
   });
 

@@ -75,6 +75,57 @@ definitions:
       - status
       - is_done
 
+  # Hand-written components: entity level (list, view, edit; one on both view and edit) and field level
+  # (`secret` upsert only, `badge` view only, `mood` both).
+  mobile_widget:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - title:
+            primary: true
+        - badge: {}
+    x-custom-components:
+      - name: WidgetToolbar
+        target:
+          - list
+      - name: WidgetSummary
+        target:
+          - view
+        props:
+          compact: true
+      - name: WidgetHelper
+        target:
+          - view
+          - edit
+      - name: WidgetEditNote
+        target:
+          - edit
+    fields:
+      title: {}
+      secret:
+        x-custom-component:
+          target:
+            - upsert
+      badge:
+        x-custom-component:
+          target:
+            - view
+      mood:
+        x-custom-component:
+          target:
+            - upsert
+            - view
+    required:
+      - title
+
   mobile_log:
     x-generate:
       list: true
