@@ -30,6 +30,12 @@ export default defineConfig({
       // under .generated-payment-gate/).
       "code_generator/tests/fixtures/payment_gate/**",
       ".generated-payment-gate/**",
+      // Attachment bridge ownership fixture: run by
+      // code_generator/tests/test_attachment_actions.py against the rendered
+      // template, with its own config (and the copy it stages under
+      // .generated-attachment-bridge-test/).
+      "code_generator/tests/fixtures/attachment_bridge_actions/**",
+      ".generated-attachment-bridge-test/**",
     ],
   },
   resolve: {
