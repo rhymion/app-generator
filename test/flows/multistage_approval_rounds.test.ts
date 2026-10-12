@@ -27,6 +27,36 @@ const getSessionUserIdOrThrow = vi.fn();
 const getUserRoleIds = vi.fn();
 vi.mock('@/lib/authz', () => ({ getSessionUserIdOrThrow, getUserRoleIds }));
 
+// A withdrawable entity the test supplies itself. withdrawApprovalRequest
+// refuses an entity that does not declare x-approval.on_withdrawn, and which
+// entities declare it depends on the consumer's schema. Rather than borrow an
+// entity from one particular schema, the generated resolver and dispatcher
+// are wrapped so that this one name is treated as an approvable that declares
+// on_withdrawn (with no side effects); every other name falls through to the
+// generated behavior, so the reject tests below still exercise the real
+// non-terminal-reject path.
+const WITHDRAWABLE_ENTITY = vi.hoisted(() => 'multistage_test_withdrawable');
+vi.mock('@/lib/approval_request/resolve_target', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/lib/approval_request/resolve_target')>();
+  return {
+    ...original,
+    resolveApprovableModel: (entityType: string) =>
+      entityType === WITHDRAWABLE_ENTITY ? entityType : original.resolveApprovableModel(entityType),
+  };
+});
+vi.mock('@/lib/approval_request/on_withdrawn_dispatch', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/lib/approval_request/on_withdrawn_dispatch')>();
+  return {
+    ...original,
+    hasOnWithdrawn: (entityType: string) =>
+      entityType === WITHDRAWABLE_ENTITY || original.hasOnWithdrawn(entityType),
+    dispatchOnWithdrawn: async (...args: Parameters<typeof original.dispatchOnWithdrawn>) => {
+      if (args[1] === WITHDRAWABLE_ENTITY) return;
+      return original.dispatchOnWithdrawn(...args);
+    },
+  };
+});
+
 const { default: prisma } = await import('@/lib/prisma');
 const { approveApprovalRequest, rejectApprovalRequest, withdrawApprovalRequest } =
   await import('@/lib/approval_request/actions');
@@ -55,12 +85,10 @@ type Round = {
 // the reject-focused tests below need (they pin the "unrecognized
 // entity_name" non-terminal-reject path -- see the 4th test's own
 // comment). Callers that exercise withdrawApprovalRequest on a round with
-// a still-pending row (cmd_969a, Issue not filed -- docs/knowledge/
-// proj-b-backlog-2026-09.md §9) must instead pass a real
-// on_withdrawn-declaring entity name (e.g. 'goods_receipt_line') --
-// swapping the default here would silently flip isTerminalReject too
-// (every on_withdrawn entity in this schema is also terminal-reject),
-// breaking the reject tests' asserted 'rejected' (non-terminal) status.
+// a still-pending row must pass WITHDRAWABLE_ENTITY, the on_withdrawn-
+// declaring entity this file supplies for itself (see the mocks above), so
+// the result does not depend on which entities the consumer's schema
+// declares on_withdrawn for.
 async function build3StageRound(creatorId: string, entityName = 'user'): Promise<Round> {
   const approverRole1 = await prisma.role.create({
     data: { name: `MultistageApprover1_${createId()}`, creator_id: creatorId, updater_id: creatorId },
@@ -122,7 +150,7 @@ describe('multistage approval rounds (cmd_844)', () => {
   // PD-1 final ruling: round_id scoping alone -- approved rows are never
   // rewritten, only the round's remaining pending rows are closed.
   it('withdraw closes only the round\'s pending rows, leaving an already-approved stage untouched', async () => {
-    const round = await build3StageRound(creator.id, 'goods_receipt_line');
+    const round = await build3StageRound(creator.id, WITHDRAWABLE_ENTITY);
     getSessionUserIdOrThrow.mockResolvedValue(creator.id);
     getUserRoleIds.mockResolvedValue([round.approverRole1.id]);
     await approveApprovalRequest(round.stage1.id);
@@ -239,7 +267,7 @@ describe('multistage approval rounds (cmd_844)', () => {
   // check, must never let an OLD (closed) round's approved row satisfy a
   // NEW round's own ordering/completeness requirement.
   it('a new round after a withdrawn round starts genuinely fresh -- old approved stage does not unblock the new round\'s later stage', async () => {
-    const round1 = await build3StageRound(creator.id, 'goods_receipt_line');
+    const round1 = await build3StageRound(creator.id, WITHDRAWABLE_ENTITY);
     getSessionUserIdOrThrow.mockResolvedValue(creator.id);
     getUserRoleIds.mockResolvedValueOnce([round1.approverRole1.id]);
     await approveApprovalRequest(round1.stage1.id);
