@@ -45,6 +45,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **Attachment bridge: `setAttachmentsForBridge` only accepts attachment ids of the record being edited** (Issue #958).
+  An id belonging to another record, in the same or another organization, or to another attachment type now rejects the
+  whole call with `NOT_FOUND` before anything is written, and the update filters on `attachable_id` as well.
 - **Generated Cypress helpers: `selectAutocomplete` and the DataGrid cell helpers work for long labels and wide grids.**
   `selectAutocomplete` compared the option text with whitespace collapsed but the expected label as-is, so a label with
   trailing empty segments (for example an inventory with no lot number or expiry date) never matched. The expected label

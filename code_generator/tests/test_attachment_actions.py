@@ -18,6 +18,8 @@ Three surfaces are covered:
      components/_standard/AttachmentSection.tsx imports from it
      unconditionally.
 """
+import shutil
+import subprocess
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
@@ -250,3 +252,44 @@ def test_cleanup_deletes_generated_catalogs(tmp_path: Path):
     # entity were in the schema. The minimal fixture above has only `thing`,
     # so lib/dashboard is empty and gets pruned too.
     assert not (out / 'lib' / 'dashboard').exists()
+
+
+# ---------------------------------------------------------------------------
+# setAttachmentsForBridge ownership (Issue #958)
+# ---------------------------------------------------------------------------
+
+BRIDGE_FIXTURE = REPO_ROOT / 'code_generator' / 'tests' / 'fixtures' / 'attachment_bridge_actions'
+BRIDGE_STAGE = REPO_ROOT / '.generated-attachment-bridge-test'
+
+
+def test_rendered_bridge_action_rejects_foreign_attachment_ids():
+    """Runs the rendered action under vitest against an in-memory Prisma fake.
+
+    Covers an attachment id of a same-organization record, of another
+    organization, of the same record but another type (all rejected with
+    nothing written), the unchanged replace/order semantics, and the permission
+    check that precedes it. The test names live in bridge_actions.test.ts.
+    """
+    shutil.rmtree(BRIDGE_STAGE, ignore_errors=True)
+    (BRIDGE_STAGE / 'lib').mkdir(parents=True)
+    try:
+        shutil.copy(REPO_ROOT / 'lib' / '_errors.ts', BRIDGE_STAGE / 'lib' / '_errors.ts')
+        shutil.copytree(BRIDGE_FIXTURE / 'fake', BRIDGE_STAGE / 'fake')
+        for name in ('bridge_actions.test.ts', 'vitest.config.mts'):
+            shutil.copy(BRIDGE_FIXTURE / name, BRIDGE_STAGE / name)
+        env = Environment(
+            loader=FileSystemLoader(str(TEMPLATES_DIR)),
+            trim_blocks=True, lstrip_blocks=True,
+        )
+        (BRIDGE_STAGE / 'bridge_actions.ts').write_text(
+            env.get_template('attachment_actions.ts.jinja2').render(
+                owners=[{'name': 'resource'}], type_ts='number',
+            )
+        )
+        result = subprocess.run(
+            ['npx', 'vitest', 'run', '--config', str(BRIDGE_STAGE / 'vitest.config.mts')],
+            cwd=REPO_ROOT, capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+    finally:
+        shutil.rmtree(BRIDGE_STAGE, ignore_errors=True)

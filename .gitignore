@@ -162,6 +162,7 @@ code_generator/.generated/
 # (pre-existing gap alongside its siblings above, noticed while running the
 # update-generator gate for the user.image direct-FK migration.)
 .generated-direct-attachment-gate/
+.generated-attachment-bridge-test/
 
 # filter-sort-gate fixture check (cmd_1200(c)) scratch output —
 # scripts/check_filter_sort_gate_fixture.sh regenerates this from
