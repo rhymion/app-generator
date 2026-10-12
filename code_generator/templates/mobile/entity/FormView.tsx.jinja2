@@ -36,6 +36,12 @@ import type { ApprovalState } from '@/lib/entity-http';
 {% if split %}
 import { SplitSection } from '@/components/native/SplitSection';
 {% endif %}
+{% if attachments %}
+import { AttachmentList } from '@/components/native/AttachmentList';
+import type { BridgeAttachment } from '@/lib/attachment-http';
+
+const ATTACHMENT_TYPES: string[] = {{ attachments.types | tojson }};
+{% endif %}
 {% if comments %}
 import { CommentThread, type CommentRow } from '@/components/native/CommentThread';
 
@@ -146,6 +152,12 @@ export function {{ pascal }}FormView({ id }: { id: string }) {
         split={split{{ pascal }}}
         describeError={(failure) => {% if has_form_hook %}getEntityFormErrorMessage(failure, { terr, tmsg }){% else %}terr('unknown'){% endif %}}
         onChanged={() => setReloads((n) => n + 1)}
+      />
+{% endif %}
+{% if attachments %}
+      <AttachmentList
+        types={ATTACHMENT_TYPES}
+        items={((record[{{ attachments.rel_name | tojson }}] as { {{ attachments.prop }}?: BridgeAttachment[] } | null)?.{{ attachments.prop }}) ?? []}
       />
 {% endif %}
 {% if comments %}

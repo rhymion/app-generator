@@ -37,7 +37,9 @@
     "created_mobile_rules mobile_rule[] @relation(\"MobileRuleCreator\")",
     "updated_mobile_rules mobile_rule[] @relation(\"MobileRuleUpdater\")",
     "created_mobile_steps mobile_step[] @relation(\"MobileStepCreator\")",
-    "updated_mobile_steps mobile_step[] @relation(\"MobileStepUpdater\")"
+    "updated_mobile_steps mobile_step[] @relation(\"MobileStepUpdater\")",
+    "created_mobile_assets mobile_asset[] @relation(\"MobileAssetCreator\")",
+    "updated_mobile_assets mobile_asset[] @relation(\"MobileAssetUpdater\")"
   ],
   "organization": [
     "mobile_org_items mobile_org_item[]"
@@ -52,5 +54,8 @@
   "attachment": [
     "mobile_document_file mobile_document? @relation(\"MobileDocumentFile\")",
     "mobile_document_contract mobile_document? @relation(\"MobileDocumentContract\")"
+  ],
+  "attachable": [
+    "mobile_asset mobile_asset?"
   ]
 }

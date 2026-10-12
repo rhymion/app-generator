@@ -17,8 +17,9 @@ row's id, as the Web form does.
 A one-to-many child collection that the parent saves with its own record (the Web form's editable grid) is
 drawn as a row editor: each row has the child's own fields, the rows travel in the request body as the
 property array (`lines`), and the detail screen lists them.
-An entity with any other relation feature (other children, bridges, polymorphic attachments, ...)
-keeps the placeholder screen. The exceptions are the approval bridge and the comment bridge.
+An entity with any other relation feature (other children, bridges, ...)
+keeps the placeholder screen. The exceptions are the approval bridge, the comment bridge and the
+polymorphic `attachable` bridge.
 
 An entity that declares `x-approval` (a one-to-one bridge to `approvable` and the `ApprovalSection` view
 component) gets the same screens plus the approval section, whose approve / reject /
@@ -33,6 +34,13 @@ An entity that is commentable through the shared `commentable` bridge keeps its 
 lists the comment thread (read from the REST detail) and draws the reaction bar, which calls the comment
 reactions route. When the entity has the comment write routes, the thread also has a composer, edit and
 delete controls and, when the schema has an `x-mention` field, the `@` user lookup; otherwise it is read-only.
+
+An entity that owns attachments through the `attachable` bridge (`attachable_id` with
+`x-relationship: {type: one-to-one_bridge, target: attachable}` and the `AttachmentSection` view / edit
+component) keeps its screens too: the detail screen lists the attachments (read from the REST detail) and
+the edit form lets the user add, remove and reorder them, saving the whole set through
+`PUT /api/<entity>/<id>/attachments` after the record itself is saved. The `showImages` / `showFiles` props of the
+`AttachmentSection` entries decide which attachment types are listed and offered.
 """
 from __future__ import annotations
 
@@ -87,6 +95,10 @@ APPROVAL_SECTION = 'ApprovalSection'
 # The relation features that are served by something other than a form field. The
 # bridge to `commentable` is one of them: it is the comment thread, not a relation to draw.
 _COMMENTABLE_TARGET = 'commentable'
+# The polymorphic bridge to the shared `attachable` row that owns an entity's attachments.
+_ATTACHABLE_TARGET = 'attachable'
+# The component the Web screens mount to list and edit the bridge's attachments.
+ATTACHMENT_SECTION = 'AttachmentSection'
 
 _FEATURE_FLAGS = (
     'has_attachable',
@@ -185,20 +197,71 @@ def has_approval_section(ctx: dict) -> bool:
 
 
 def _other_one_to_one(ctx: dict) -> list[dict]:
-    """One-to-one relations other than the approval and comment bridges (those keep the placeholder)."""
+    """One-to-one relations other than the approval, comment and attachable bridges (those keep the placeholder)."""
     return [
         r for r in (ctx.get('one_to_one_rels') or [])
-        if r.get('target') != 'approvable' and not _is_comment_bridge(r, ctx)
+        if r.get('target') != 'approvable' and not _is_comment_bridge(r, ctx) and not _is_attachable_bridge(r, ctx)
     ]
 
 
 def _non_approval_components(ctx: dict, key: str) -> list[dict]:
-    return [c for c in (ctx.get(key) or []) if c.get('name') != APPROVAL_SECTION]
+    """The view / edit components other than the ones whose bridge the mobile screens serve themselves."""
+    served = {APPROVAL_SECTION}
+    if attachable_bridge_ready(ctx):
+        served.add(ATTACHMENT_SECTION)
+    return [c for c in (ctx.get(key) or []) if c.get('name') not in served]
 
 
 def _is_comment_bridge(rel: dict, ctx: dict) -> bool:
     """True for the one-to-one bridge to the shared `commentable` row of a commentable entity."""
     return bool(ctx.get('has_commentable')) and rel.get('target') == _COMMENTABLE_TARGET
+
+
+def _is_attachable_bridge(rel: dict, ctx: dict) -> bool:
+    """True for the one-to-one bridge to the shared `attachable` row of an entity the screens serve (see below)."""
+    return rel.get('target') == _ATTACHABLE_TARGET and attachable_bridge_ready(ctx)
+
+
+def attachable_bridge_ready(ctx: dict) -> bool:
+    """Whether the entity owns attachments through the `attachable` bridge in the shape the screens serve.
+
+    The REST detail embeds `<attachable_rel_name>.<attachments_prop>` (decrypted) only when the bridge and its
+    `attachment` child are both resolved, which is what `has_attachable` records. As with the approval bridge,
+    the bridge and the `AttachmentSection` component come together: the Web shows no attachments without the
+    component, so a bridge without it keeps the placeholder.
+    """
+    return bool(
+        ctx.get('has_attachable') and ctx.get('attachable_rel_name') and ctx.get('attachable_attachments_prop')
+        and any(r.get('target') == _ATTACHABLE_TARGET for r in ctx.get('one_to_one_rels') or [])
+        and any(c.get('name') == ATTACHMENT_SECTION
+                for key in ('entity_view_components', 'entity_edit_components') for c in ctx.get(key) or [])
+    )
+
+
+def attachment_section_spec(ctx: dict) -> dict | None:
+    """The attachment list the detail screen draws and the edit form edits, or None.
+
+    `rel_name` / `prop` name where the REST detail embeds the list (`<rel_name>.<prop>`). `show_images` /
+    `show_files` come from the props of the `AttachmentSection` component entries (both default to true, as
+    on the Web). `can_edit` is the entity's own edit screen: attachments can only be added once the owner
+    exists, so there is no section on the create form. `types` are the `attachment.type` values the Web
+    section handles, restricted to the ones the props leave on.
+    """
+    if not (attachable_bridge_ready(ctx) and ctx.get('can_view')):
+        return None
+    entries = [c for key in ('entity_view_components', 'entity_edit_components') for c in ctx.get(key) or []
+               if c.get('name') == ATTACHMENT_SECTION]
+    show_images = all((c.get('props') or {}).get('showImages', True) is not False for c in entries)
+    show_files = all((c.get('props') or {}).get('showFiles', True) is not False for c in entries)
+    types = [t for t, shown in (('image', show_images), ('file', show_files)) if shown]
+    return {
+        'rel_name': ctx['attachable_rel_name'],
+        'prop': ctx['attachable_attachments_prop'],
+        'show_images': show_images,
+        'show_files': show_files,
+        'types': types,
+        'can_edit': bool(ctx.get('can_update')),
+    }
 
 
 def comment_thread_spec(ctx: dict) -> dict | None:
@@ -265,6 +328,8 @@ def mobile_ineligible_reason(ctx: dict, api_entities: set[str] | None = None) ->
             if target not in api_entities:
                 return f'relates to {target}, which has no REST routes'
     for key in _FEATURE_FLAGS:
+        if key == 'has_attachable' and attachable_bridge_ready(ctx):
+            continue
         if ctx.get(key):
             return f'declares {key}'
     if not has_approval_section(ctx):
@@ -584,4 +649,5 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
         'has_approval': has_approval_section(ctx),
         'split': _split_entry(ctx, entries, required, title) if ctx.get('can_view') else None,
         'comments': comment_thread_spec(ctx),
+        'attachments': attachment_section_spec(ctx),
     }

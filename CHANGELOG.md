@@ -5,6 +5,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Mobile app: entities that own attachments through the `attachable` bridge get native screens** (Issue #949). An entity
+  with `attachable_id` (`one-to-one_bridge` to `attachable`) and the `AttachmentSection` component is no longer left on the
+  placeholder screen: the detail screen lists its images and files, and the edit form adds (system file picker), removes and
+  reorders them. A new generated route, `PUT /api/<entity>/<id>/attachments`, replaces one type's attachments through the Web
+  panel's own `setAttachmentsForBridge`, with the owner's `update` permission and organization checks, and refuses an id that is
+  not the record's own attachment. The `showImages` / `showFiles` props decide which lists are drawn. In an app where only the
+  bridge needs it, the file picker dependency is now added too. See `docs/knowledge/mobile-app.md`.
 - **`x-version-of`: identity + version entities with approval-backed history** (Issue #946). Declared on the version entity
   (an `x-approval` entity), it generates the version number assigned at approval, at most one open draft per identity,
   the identity's `current_version_id`, and deletion of a terminally rejected or withdrawn draft with its owned child rows.
