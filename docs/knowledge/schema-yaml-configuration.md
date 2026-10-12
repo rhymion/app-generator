@@ -1741,6 +1741,16 @@ Generated, in `lib/<version>/version_of.ts` (always regenerated):
   - Own-screen one-to-many and many-to-many records are not carried; they start empty.
   A new record never keeps a number: the create path clears the number field, which is assigned at approval.
 
+- **Identity tombstone.** `assertIdentityDeletable` (same file) is called from the identity entity's
+  `delete<Identity>` service function, in the delete transaction and before the write, so every delete path
+  (REST, Server Action, bulk) is covered: an identity with at least one approved version (a version row
+  holding a number) cannot be deleted (`VALIDATION`, field `<identity>_id`); an identity with only
+  unapproved drafts still can. Retiring an identity is an invalidation: when the identity declares
+  `x-generate.invalidate`, its Prisma model needs `invalidated_at  DateTime?` (checked at generation time),
+  and `assertIdentityActive` refuses a new draft for an invalidated identity when a version is created, so a
+  save from the new version screen is refused too. Its approved versions stay readable and referenced. An identity that does not
+  declare `x-generate.invalidate` has no retire step, so the new-draft refusal is not generated.
+
 Owned children are the one-to-many child arrays under the version's own `properties`; each needs
 exactly one structural FK to the version. Deeper levels are not deleted by the helper and must cascade
 in Prisma.

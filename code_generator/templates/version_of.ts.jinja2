@@ -9,6 +9,34 @@ import { AppError } from '@/lib/_errors';
 
 {% include "_partials/tx_type.ts.jinja2" %}
 
+{% if identity_invalidatable %}
+/**
+ * A retired ({{ identity }}.invalidated_at set) {{ identity }} takes no new
+ * draft; its approved versions stay readable and referenced.
+ */
+export async function assertIdentityActive(tx: Tx, identityId: string): Promise<void> {
+  const identity = await tx.{{ identity }}.findUnique({ where: { id: identityId }, select: { invalidated_at: true } });
+  if (identity?.invalidated_at) {
+    throw new AppError('VALIDATION', 'This {{ identity }} is invalidated and takes no new draft', '{{ identity_fk }}', 'invalid');
+  }
+}
+
+{% endif %}
+/**
+ * An {{ identity }} that has an approved version (one holding a number) cannot
+ * be deleted: deleting it would delete the history. Retire it by invalidation;
+ * a {{ identity }} with only unapproved drafts can still be deleted.
+ */
+export async function assertIdentityDeletable(tx: Tx, identityIds: string[]): Promise<void> {
+  if (identityIds.length === 0) return;
+  const approved = await tx.{{ version }}.count({
+    where: { {{ identity_fk }}: { in: identityIds }, {{ number }}: { not: null } },
+  });
+  if (approved > 0) {
+    throw new AppError('VALIDATION', 'This {{ identity }} has an approved version and cannot be deleted', '{{ identity_fk }}', 'invalid');
+  }
+}
+
 /**
  * At most one open draft per identity. A version row is open until its
  * approval has been granted (`approvable.approved_at` is set); a row that was
