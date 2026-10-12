@@ -16,8 +16,9 @@ callers outside a transaction (auth events) and swallows a write failure. Do not
 | Database, privileges | The application role has `SELECT` and `INSERT` only: not the owner, no `UPDATE`, `DELETE` or `TRUNCATE` | `prisma/sql/audit_log_app_role.sql` (template) |
 | Detection | Chained SHA-256 digest per closed period, kept in `audit_log_digest` and in storage outside the database | `lib/audit-log-integrity/digest.ts` |
 
-No database role can both run the system and be unable to disable a trigger: the table owner (and on Neon any
-`neon_superuser` member) can `DISABLE TRIGGER`, drop it, or `TRUNCATE`. The first three layers stop every ordinary path; the
+No database role can both run the system and be unable to disable a trigger: the table owner can `DISABLE TRIGGER`,
+drop it, or `TRUNCATE`. On Neon, other `neon_superuser` members may have the same reach; that has not been verified, so treat
+them as privileged too. The first three layers stop every ordinary path; the
 digest chain makes a privileged change visible.
 
 ## What the generator ships
@@ -26,7 +27,8 @@ digest chain makes a privileged change visible.
   partition key, so the Prisma model has `@@id([id, created_at])`. Prisma cannot declare partitioning; the SQL template converts
   the table (idempotent) and adds a default partition. `prisma db push` and `prisma migrate dev` leave a partitioned parent
   table alone (checked: no drift reported, nothing recreated). `audit_log_create_month_partition(timestamptz)` creates a
-  monthly partition; create next month's ahead of time (`npm run audit-log:digest -- ensure-partitions`, run as the owner),
+  monthly partition (`SECURITY DEFINER` with a pinned `search_path`, `EXECUTE` revoked from `PUBLIC` and granted to the application
+  role by `audit_log_app_role.sql`, so the restricted role can create next month's partition without owning the table); create next month's ahead of time (`npm run audit-log:digest -- ensure-partitions`, run as the owner),
   because it cannot be created once the default partition holds rows for that month.
 - **Test databases.** `prisma db push` does not run SQL, so `npm run db:apply-audit-log-sql` runs after it (in `setup` and every
   `test:e2e*` script). `resetTestDatabase()` empties `audit_log` and `audit_log_digest` with `TRUNCATE` as the owner, because the
@@ -47,6 +49,10 @@ digest chain makes a privileged change visible.
 2. Create the application role with SQL `CREATE ROLE` (roles made in the Neon console or API are `neon_superuser` members),
    apply `audit_log_app_role.sql` for it, and switch the application's connection string to it. Migrations and the retention
    procedure keep using the owner role.
+   That template covers `audit_log` and `audit_log_digest` only. Give the role its rights on every other table yourself
+   (for example `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public`, plus `USAGE` on sequences) and set
+   `ALTER DEFAULT PRIVILEGES` as the owner so tables created by later migrations are covered too.
+   Re-run `audit_log_append_only.sql` on an existing database to pick up the `SECURITY DEFINER` function.
 3. Provide write-once storage (for example S3 Object Lock in compliance mode or GCS Bucket Lock) by implementing `AuditLogStorage`,
    and schedule the digest job against it.
 4. Define the retention procedure: when a partition passes the online retention period, export it, copy the file to the write-once
