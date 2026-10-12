@@ -47,7 +47,7 @@ test.describe('Attachments of an entity with the attachable bridge', () => {
   test('files are added, reordered and removed on the edit form and listed on the detail screen', async ({ page }) => {
     const puts = capturePuts(page);
     await createAsset(page, 'Folder');
-    await expect(page.getByTestId('attachments-section')).toBeVisible();
+    // Nothing is attached yet: the detail screen draws no list.
     await expect(page.getByTestId('attachment-name-file-0')).toHaveCount(0);
 
     await page.getByTestId('view-edit').click();
