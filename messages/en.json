@@ -369,6 +369,15 @@
     "moveUp": "Move up",
     "moveDown": "Move down",
     "removeWidget": "Remove widget",
-    "addWidget": "Add widget"
+    "addWidget": "Add widget",
+    "unknownField": "Unknown field \"{name}\". The selected data source does not offer it; choose another field.",
+    "lineNeedsDatetime": "A line chart plots a time series, so only date and time fields can be grouped.",
+    "fieldKind": {
+      "boolean": "yes/no",
+      "enum": "choice",
+      "fk": "reference",
+      "number": "number",
+      "datetime": "date/time"
+    }
   }
 }

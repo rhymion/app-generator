@@ -5,6 +5,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Dashboard widget editor: group-by and series fields are chosen from a list** (Issue #906, part of #904). `group_by_field`
+  and `series_field` are dropdowns of the selected data source's fields, with translated labels and the field kind, instead of
+  free text. Changing the data source clears the fields of the previous one. Options follow the chart: the time bucket only for
+  a date/time group-by field, the series not for pie, the stack mode only for bar / column with a series, and a line chart groups
+  by a date/time field and always has a bucket, so inapplicable combinations are corrected in the editor rather than found at
+  render time. Stored values are unchanged; a stored field the data source no longer offers is flagged. No new schema key.
+  See `docs/knowledge/schema-yaml-configuration.md`.
 - **Dashboard widget editor: the data source is chosen from a list** (Issue #905, part of #904). The dashboard edit form no
   longer shows widgets as a grid of free-text cells; each widget is edited in a card, and `entity_name` is a dropdown of the
   `x-display.dashboard` entities the user can read, with translated labels. Stored values do not change, so existing widgets
