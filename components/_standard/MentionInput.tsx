@@ -22,7 +22,7 @@
 // complexity for a generated component; anchoring to the field itself is a
 // simpler, robust, and equally discoverable UX.
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import TextField from '@mui/material/TextField';
 import Popper from '@mui/material/Popper';
 import Paper from '@mui/material/Paper';
@@ -93,6 +93,12 @@ export default function MentionInput({
   debounceMs = 250,
 }: MentionInputProps) {
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+  // Popper needs the element during render, so keep it in state as well as the ref.
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const setInputEl = useCallback((el: HTMLInputElement | HTMLTextAreaElement | null) => {
+    inputRef.current = el;
+    setAnchorEl(el);
+  }, []);
   const [trigger, setTrigger] = useState<{ start: number; query: string } | null>(null);
   const [options, setOptions] = useState<MentionUserOption[]>([]);
   const [permissionDenied, setPermissionDenied] = useState(false);
@@ -101,14 +107,9 @@ export default function MentionInput({
   const seqRef = useRef(0);
 
   useEffect(() => {
-    if (trigger === null) {
-      setOptions([]);
-      setPermissionDenied(false);
-      return;
-    }
+    if (trigger === null) return;
     let cancelled = false;
     const mySeq = ++seqRef.current;
-    setLoading(true);
     const handle = setTimeout(async () => {
       if (cancelled) return;
       try {
@@ -137,10 +138,21 @@ export default function MentionInput({
     const newValue = e.target.value;
     onChange(newValue);
     const caret = e.target.selectionStart ?? newValue.length;
-    setTrigger(findMentionTrigger(newValue, caret));
+    updateTrigger(findMentionTrigger(newValue, caret));
   };
 
-  const closeDropdown = () => setTrigger(null);
+  // Reset suggestions / start the loading state here (an event path) rather than in the search effect.
+  const updateTrigger = (next: { start: number; query: string } | null) => {
+    if (next === null) {
+      setOptions([]);
+      setPermissionDenied(false);
+    } else {
+      setLoading(true);
+    }
+    setTrigger(next);
+  };
+
+  const closeDropdown = () => updateTrigger(null);
 
   const selectOption = (option: MentionUserOption) => {
     if (!trigger) return;
@@ -179,7 +191,7 @@ export default function MentionInput({
   return (
     <>
       <TextField
-        inputRef={inputRef}
+        inputRef={setInputEl}
         label={label}
         value={value}
         onChange={handleChange}
@@ -198,7 +210,7 @@ export default function MentionInput({
       />
       <Popper
         open={open}
-        anchorEl={inputRef.current}
+        anchorEl={anchorEl}
         placement="bottom-start"
         style={{ zIndex: 1300, minWidth: 260 }}
       >
