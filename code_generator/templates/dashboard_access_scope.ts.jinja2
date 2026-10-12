@@ -1,0 +1,26 @@
+// AUTO-GENERATED - DO NOT EDIT
+// Row-level read scope of every generated entity, as the entity's own list getters apply it:
+// organization isolation, x-self-only and x-filter-values. The dashboard aggregate reads this
+// so a widget sees exactly the rows its viewer could list.
+
+export type DashboardAccessScope = {
+  should_filter_by_org: boolean;
+  org_relationship_optional: boolean;
+  has_assignee_id: boolean;
+  is_self_only: boolean;
+  self_only_admin_bypass: boolean;
+  filter_values: Record<string, (string | number | boolean)[]>;
+};
+
+export const DASHBOARD_ACCESS_SCOPES: Record<string, DashboardAccessScope> = {
+{% for name, sc in scopes.items() %}
+  '{{ name }}': {
+    should_filter_by_org: {{ 'true' if sc.should_filter_by_org else 'false' }},
+    org_relationship_optional: {{ 'true' if sc.org_relationship_optional else 'false' }},
+    has_assignee_id: {{ 'true' if sc.has_assignee_id else 'false' }},
+    is_self_only: {{ 'true' if sc.is_self_only else 'false' }},
+    self_only_admin_bypass: {{ 'true' if sc.self_only_admin_bypass else 'false' }},
+    filter_values: {{ sc.filter_values | tojson }},
+  },
+{% endfor %}
+};

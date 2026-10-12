@@ -1,9 +1,11 @@
-// Core aggregation logic — no auth check. Caller is responsible for authentication
-// and authorization. Used by both the 'use server' aggregateForWidget wrapper
-// (session auth) and the REST API route (API-key auth).
+// Core aggregation logic. The caller authenticates and passes the acting user's id; this module
+// enforces the user's read permission on the entity and applies the entity's row-level read scope
+// (organization isolation, x-self-only, x-filter-values) to every query. Used by both the
+// 'use server' aggregateForWidget wrapper (session auth) and the REST API route (API-key auth).
 import prisma from '@/lib/prisma';
 import { ApiError } from '@/lib/api-auth';
 import { findDashboardEntity, findDashboardField, DashboardField } from './catalog';
+import { requireDashboardReadScope, tryDashboardReadScope, combineWhere } from './access-where';
 import { DEFAULT_TIMEZONE, type Timezone } from '@/lib/_timezone';
 import {
   truncateToBucket,
@@ -93,6 +95,7 @@ function buildConditionsWhere(conditions: FilterCondition[]): Record<string, any
 async function buildLabelMap(
   field: DashboardField,
   rawValues: unknown[],
+  userId: string,
 ): Promise<Map<string, string>> {
   if (field.kind === 'boolean') {
     return new Map(rawValues.map((v) => [String(v), v ? 'Yes' : 'No']));
@@ -109,20 +112,33 @@ async function buildLabelMap(
     return new Map(rawValues.map((v) => [String(v), String(v)]));
   }
   const ids = rawValues.filter((v): v is string => typeof v === 'string' && v.length > 0);
+  return lookupFkLabels(field, ids, userId);
+}
+
+// FK labels come from the target entity, so the target's read permission and row scope apply too.
+// A target the viewer cannot read yields no labels (the caller shows '(unknown)').
+async function lookupFkLabels(
+  field: Extract<DashboardField, { kind: 'fk' }>,
+  ids: string[],
+  userId: string,
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (ids.length === 0) return map;
+  const targetAccess = await tryDashboardReadScope(field.fk_target, userId);
+  if (!targetAccess) return map;
   const targets = await getModelClient(field.fk_target).findMany({
-    where: { id: { in: ids } },
+    where: combineWhere(targetAccess, { id: { in: ids } }),
     select: { id: true, [field.fk_label_field]: true },
   });
-  const map = new Map<string, string>();
   for (const t of targets as Array<Record<string, unknown>>) {
     map.set(String(t.id), String(t[field.fk_label_field] ?? '(unnamed)'));
   }
   return map;
 }
 
-function applyLabel(labelMap: Map<string, string>, raw: unknown): string {
+function applyLabel(labelMap: Map<string, string>, raw: unknown, field: DashboardField): string {
   if (raw == null) return '(unspecified)';
-  return labelMap.get(String(raw)) ?? String(raw);
+  return labelMap.get(String(raw)) ?? (field.kind === 'fk' ? '(unknown)' : String(raw));
 }
 
 // Fetch all rows and group by timestamp bucket in TypeScript (no raw SQL).
@@ -132,8 +148,9 @@ async function aggregateBucketSingle(
   bucket: BucketGranularity,
   conditions: FilterCondition[],
   zone: Timezone,
+  access: Record<string, unknown>[],
 ): Promise<{ kind: 'single'; data: AggregateBucket[]; timezone?: Timezone }> {
-  const where = buildConditionsWhere(conditions);
+  const where = combineWhere(access, buildConditionsWhere(conditions));
   const rows = await getModelClient(entityName).findMany({
     select: { [field.name]: true },
     where,
@@ -165,8 +182,10 @@ async function aggregateBucketMultiSeries(
   bucket: BucketGranularity,
   conditions: FilterCondition[],
   zone: Timezone,
+  access: Record<string, unknown>[],
+  userId: string,
 ): Promise<{ kind: 'multi'; categories: string[]; series: { label: string; data: number[] }[]; timezone?: Timezone }> {
-  const where = buildConditionsWhere(conditions);
+  const where = combineWhere(access, buildConditionsWhere(conditions));
   const rows = await getModelClient(entityName).findMany({
     select: { [catField.name]: true, [serField.name]: true },
     where,
@@ -195,10 +214,10 @@ async function aggregateBucketMultiSeries(
 
   bucketOrder.sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
   const categories = bucketOrder.map((k) => k === '(unspecified)' ? k : formatBucketKey(k, bucket));
-  const serLabels = await buildLabelMap(serField, rawSerVals);
+  const serLabels = await buildLabelMap(serField, rawSerVals, userId);
 
   const series = rawSerVals.map((sv) => ({
-    label: applyLabel(serLabels, sv),
+    label: applyLabel(serLabels, sv, serField),
     data: bucketOrder.map((bk) => counts.get(bk)?.get(String(sv ?? '')) ?? 0),
   }));
 
@@ -210,6 +229,7 @@ async function aggregateMultiSeries(
   catField: DashboardField,
   serField: DashboardField,
   where: Record<string, unknown> | undefined,
+  userId: string,
 ): Promise<{ kind: 'multi'; categories: string[]; series: { label: string; data: number[] }[] }> {
   const rows = await getModelClient(entityName).groupBy({
     by: [catField.name, serField.name],
@@ -225,14 +245,14 @@ async function aggregateMultiSeries(
   }
 
   const [catLabels, serLabels] = await Promise.all([
-    buildLabelMap(catField, rawCatSet),
-    buildLabelMap(serField, rawSerSet),
+    buildLabelMap(catField, rawCatSet, userId),
+    buildLabelMap(serField, rawSerSet, userId),
   ]);
 
-  const categories = rawCatSet.map((v) => applyLabel(catLabels, v));
+  const categories = rawCatSet.map((v) => applyLabel(catLabels, v, catField));
 
   const series = rawSerSet.map((sv) => {
-    const seriesLabel = applyLabel(serLabels, sv);
+    const seriesLabel = applyLabel(serLabels, sv, serField);
     const data = rawCatSet.map((cv) => {
       const row = rows.find(
         (r) => r[catField.name] === cv && r[serField.name] === sv,
@@ -245,9 +265,11 @@ async function aggregateMultiSeries(
   return { kind: 'multi', categories, series };
 }
 
-// Core aggregation without auth — called by both the session-auth Server Action
-// and the API-key-auth REST route. Validates entity/fields via catalog.
+// Core aggregation — called by both the session-auth Server Action and the API-key-auth REST
+// route with the acting user's id. Validates entity/fields via catalog, then requires the user's
+// read permission and scopes every query to the rows the user may read.
 export async function aggregateForWidgetCore(
+  userId: string,
   entityName: string,
   groupByField: string,
   filter: AggregateFilter = null,
@@ -276,6 +298,7 @@ export async function aggregateForWidgetCore(
   }
 
   const zone = resolveBucketZone(timezone, field, groupByField);
+  const access = await requireDashboardReadScope(entityName, userId);
 
   if (groupByBucket) {
     if (field.kind !== 'datetime') {
@@ -284,18 +307,17 @@ export async function aggregateForWidgetCore(
     if (seriesField) {
       const serField = findDashboardField(entityName, seriesField);
       if (!serField) throw new ApiError(400, `Unknown series_field: ${seriesField}`);
-      return aggregateBucketMultiSeries(entityName, field, serField, groupByBucket, activeConditions, zone);
+      return aggregateBucketMultiSeries(entityName, field, serField, groupByBucket, activeConditions, zone, access, userId);
     }
-    return aggregateBucketSingle(entityName, field, groupByBucket, activeConditions, zone);
+    return aggregateBucketSingle(entityName, field, groupByBucket, activeConditions, zone, access);
   }
 
-  const where: Record<string, unknown> | undefined =
-    activeConditions.length > 0 ? buildConditionsWhere(activeConditions) : undefined;
+  const where = combineWhere(access, activeConditions.length > 0 ? buildConditionsWhere(activeConditions) : undefined);
 
   if (seriesField) {
     const serField = findDashboardField(entityName, seriesField);
     if (!serField) throw new ApiError(400, `Unknown series_field: ${seriesField}`);
-    return aggregateMultiSeries(entityName, field, serField, where);
+    return aggregateMultiSeries(entityName, field, serField, where, userId);
   }
 
   const rows = await getModelClient(entityName).groupBy({
@@ -339,16 +361,7 @@ export async function aggregateForWidgetCore(
   const fkIds = rows
     .map((r) => r[groupByField])
     .filter((id): id is string => typeof id === 'string' && id.length > 0);
-  const labelById = new Map<string, string>();
-  if (fkIds.length > 0) {
-    const targets = await getModelClient(field.fk_target).findMany({
-      where: { id: { in: fkIds } },
-      select: { id: true, [field.fk_label_field]: true },
-    });
-    for (const t of targets as Array<Record<string, unknown>>) {
-      labelById.set(String(t.id), String(t[field.fk_label_field] ?? '(unnamed)'));
-    }
-  }
+  const labelById = await lookupFkLabels(field, fkIds, userId);
   return {
     kind: 'single',
     data: rows.map((r) => ({

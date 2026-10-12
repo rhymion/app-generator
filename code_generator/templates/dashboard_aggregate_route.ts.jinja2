@@ -21,7 +21,8 @@ function resolveBucket(raw: number | undefined): BucketGranularity | undefined {
 // timezone is the Timezone enum's string literal (e.g. 'asia_tokyo'); optional, defaults to 'utc'.
 // An unknown value returns 400, as does a non-utc zone on a field that is not a date-time.
 // Returns AggregateOutput (single-series or multi-series).
-// Enforces API-key auth and read permission on the target entity.
+// Enforces API-key auth and read permission on the target entity; the core also applies the
+// entity's row-level read scope.
 export async function POST(request: NextRequest) {
   try {
     const { userId: actorId } = await authenticate(request);
@@ -42,7 +43,10 @@ export async function POST(request: NextRequest) {
       );
     }
     await requireApiPermission(actorId, entity_name, 'read');
+    // aggregateForWidgetCore re-checks the read permission and applies the entity's row-level read
+    // scope, the same as the Server Action path.
     const result = await aggregateForWidgetCore(
+      actorId,
       entity_name,
       group_by_field,
       filter ?? null,
