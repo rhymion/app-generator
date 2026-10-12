@@ -31,6 +31,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   entity's create form filled with the current version's values, including child rows that have no screens of their own;
   nothing is saved until the user saves it. Unique columns (including required ones on child rows) are left for the user,
   and a new attachment bridge is created for the new record.
+- **`x-version-of`: identity tombstone** (Refs #946). An identity with an approved version can no longer be deleted
+  (retire it with `x-generate.invalidate`), and an invalidated identity takes no new draft. An identity that declares
+  `x-generate.invalidate` now needs an `invalidated_at DateTime?` column, checked at generation time.
 - **Mobile app: entities with a self-referencing `children` list get native screens** (Issue #942). A one-to-many
   `x-outputType: list` child attached through a nullable foreign key (for example `procedure.children`) no longer
   makes an entity ineligible: it is drawn as the same chip picker as a many-to-many list and saved as `children_ids`.
