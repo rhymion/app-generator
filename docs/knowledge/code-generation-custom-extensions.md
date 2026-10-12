@@ -13,12 +13,32 @@ rolls back the whole create.
 
 ---
 
+## Native mobile counterparts
+
+The Expo app (`x-generator.mobile.enabled: true`) reads the same two declarations, `x-custom-component` and
+`x-custom-components`, and adds no schema key. It cannot reuse a Web component, so it mounts a **native** component of the
+same name at the position of the Web one and generates a stub for it once:
+
+| Declaration | Native file (write-once) |
+|---|---|
+| `x-custom-components`, any target | `mobile/components/{entity}/custom/{ComponentName}.tsx` |
+| `x-custom-component` on a property | `mobile/components/{entity}/custom/fields/{PropPascalCase}.tsx` |
+
+The stub renders `null`: nothing is shown to the user until the file is implemented, and an `ACTION REQUIRED` entry in the
+`generate-code` log names it. A component's `path` is a Web import path and is ignored on mobile. The props, the positions
+and the exact rules are in `docs/knowledge/mobile-app.md` ("Hand-written components"); the props follow the Web
+interfaces above (`record` is the Web `src`, `permissions`, plus `reload`; a field component gets `value`, and on the form
+`onChange` and `isEdit`).
+
+---
+
 ## Overview
 
 | Extension point | File (not overwritten) | Purpose |
 |---|---|---|
 | Property-level custom field | `components/{entity}/{prop}.tsx` | Replace a form field with a custom UI component |
 | Entity-level custom component | `components/{entity}/{ComponentName}.tsx` | Add a custom widget to the list, view, or edit page |
+| Native mobile counterpart | `mobile/components/{entity}/custom/...` | Draw the same component or field natively in the Expo app (stub renders nothing) |
 | Server-side service validation | `lib/{entity}/service_validation_custom.ts` | Pre-write validation inside DB transactions |
 | Test-helper dependency values | `cypress/support/{entity}/helper_custom.ts` | Hand-written column values for the dependency rows a generated test helper creates |
 

@@ -118,7 +118,7 @@ def test_feature_beyond_plain_crud_is_ineligible(key, value):
     assert mobile_ineligible_reason(_ctx(**{key: value})) is not None
 
 
-@pytest.mark.parametrize('category', ['custom_upsert', 'image', 'file_uri'])
+@pytest.mark.parametrize('category', ['image', 'file_uri'])
 def test_field_without_a_native_widget_is_ineligible(category):
     ctx = _ctx(field_categories={'text': ['name'], category: ['x']})
     assert 'has a' in mobile_ineligible_reason(ctx)
@@ -644,8 +644,14 @@ def test_attachable_bridge_without_the_attachment_section_stays_ineligible():
     assert mobile_ineligible_reason(ctx) == 'declares one_to_one_rels'
 
 
-def test_other_components_beside_the_attachment_section_stay_ineligible():
+def test_other_components_beside_the_attachment_section_are_extension_points():
     ctx = _attachable_ctx(entity_view_components=[{'name': 'AttachmentSection'}, {'name': 'SomethingElse'}])
+    assert mobile_ineligible_reason(ctx) is None
+
+
+def test_attachment_section_without_its_bridge_stays_ineligible():
+    # A built-in section the screens cannot serve is not an extension point: the Web would show attachments.
+    ctx = _ctx(can_view=True, entity_view_components=[{'name': 'AttachmentSection'}])
     assert mobile_ineligible_reason(ctx) == 'declares entity_view_components'
 
 

@@ -21,6 +21,9 @@ x-generator:
 #    foreign key to mobile_group): the form draws a row editor and sends the rows as the property array.
 #  - mobile_document: two direct attachment fields (x-relationship type: direct), `file` optional and
 #    `contract` required: the form picks a file, uploads it, and submits the created attachment row's id.
+#  - mobile_gadget: hand-written native components (x-custom-components on list / view / edit and x-custom-component on
+#    two fields). Most of them are overridden by the files in mobile_stubs/, copied in before generation (the stubs are
+#    write-once, so the generator keeps them); the rest keep the generated stub, which draws nothing.
 #  - mobile_asset: an entity that owns attachments through the `attachable` bridge (one-to-one_bridge to
 #    `attachable` plus the AttachmentSection view / edit component): the detail screen lists the attachments and
 #    the edit form adds, removes and reorders them (images and files).
@@ -643,5 +646,49 @@ definitions:
     properties:
       attachable:
         $ref: "#/definitions/attachable"
+    required:
+      - title
+
+  mobile_gadget:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - title:
+            primary: true
+        - code: {}
+    x-custom-components:
+      - name: GadgetToolbar
+        target:
+          - list
+      - name: GadgetSummary
+        target:
+          - view
+        props:
+          tone: info
+      - name: GadgetBanner
+        target:
+          - edit
+      - name: GadgetNote
+        target:
+          - edit
+    fields:
+      title: {}
+      code:
+        x-custom-component:
+          target:
+            - upsert
+            - view
+      pin:
+        x-custom-component:
+          target:
+            - upsert
     required:
       - title

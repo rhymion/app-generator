@@ -41,8 +41,16 @@ component) keeps its screens too: the detail screen lists the attachments (read 
 the edit form lets the user add, remove and reorder them, saving the whole set through
 `PUT /api/<entity>/<id>/attachments` after the record itself is saved. The `showImages` / `showFiles` props of the
 `AttachmentSection` entries decide which attachment types are listed and offered.
+
+Every other component the schema declares is hand-written, so the generator cannot port it. The screens
+instead leave an insertion point for it and generate a native stub once (write-once, like the other
+hand-maintained stubs) that renders nothing: `x-custom-components` (entity level, targets list / view /
+edit) and `x-custom-component` (field level, targets upsert / view) are read as they stand, with no
+further schema key. An entity is no longer left out of the mobile app only because it declares one.
 """
 from __future__ import annotations
+
+from helpers.schema_helpers import _get_actual_type, is_write_only_prop
 
 # Field kinds the native form widgets know how to draw.
 KIND_TEXT = 'text'
@@ -75,8 +83,9 @@ _CATEGORY_KIND = (
 )
 
 # Categories that need a widget the mobile app does not have yet (file / image
-# upload, custom component); an entity with one is not eligible.
-_UNSUPPORTED_CATEGORIES = ('custom_upsert', 'image', 'file_uri')
+# upload); an entity with one is not eligible. A field replaced by a custom component
+# (`x-custom-component` with an `upsert` target) is not in this list: the component draws it.
+_UNSUPPORTED_CATEGORIES = ('image', 'file_uri')
 
 
 # Context keys whose presence means the entity carries a feature that lives
@@ -84,7 +93,6 @@ _UNSUPPORTED_CATEGORIES = ('custom_upsert', 'image', 'file_uri')
 _FEATURE_KEYS = (
     'reverse_oto_rels',
     'flatten_rels',
-    'entity_custom_components',
     'virtual_columns',
     'mention_fields',
 )
@@ -204,12 +212,36 @@ def _other_one_to_one(ctx: dict) -> list[dict]:
     ]
 
 
-def _non_approval_components(ctx: dict, key: str) -> list[dict]:
-    """The view / edit components other than the ones whose bridge the mobile screens serve themselves."""
+def _unserved_builtin_components(ctx: dict, key: str) -> list[dict]:
+    """The built-in components of `key` that the screens do not serve for this entity.
+
+    `ApprovalSection` and `AttachmentSection` are native sections, not extension points: one declared
+    for an entity that is not shaped for it (no bridge) keeps the placeholder rather than silently
+    showing nothing where the Web shows the section.
+    """
     served = {APPROVAL_SECTION}
     if attachable_bridge_ready(ctx):
         served.add(ATTACHMENT_SECTION)
-    return [c for c in (ctx.get(key) or []) if c.get('name') not in served]
+    return [c for c in (ctx.get(key) or []) if c.get('name') in (APPROVAL_SECTION, ATTACHMENT_SECTION) and c.get('name') not in served]
+
+
+def custom_component_slots(ctx: dict) -> dict[str, list[dict]]:
+    """The hand-written entity components to mount, by screen: `list`, `view` and `edit`.
+
+    Each entry is `{name, props}`, in declaration order; `props` are the static props of the schema
+    entry. The built-in sections the screens serve themselves (see `_unserved_builtin_components`) are
+    not slots.
+    """
+    served = {APPROVAL_SECTION}
+    if attachable_bridge_ready(ctx):
+        served.add(ATTACHMENT_SECTION)
+    return {
+        screen: [
+            {'name': c['name'], 'props': c.get('props') or {}}
+            for c in (ctx.get(key) or []) if c.get('name') not in served
+        ]
+        for screen, key in (('list', 'entity_custom_components'), ('view', 'entity_view_components'), ('edit', 'entity_edit_components'))
+    }
 
 
 def _is_comment_bridge(rel: dict, ctx: dict) -> bool:
@@ -303,7 +335,7 @@ def mobile_ineligible_reason(ctx: dict, api_entities: set[str] | None = None) ->
     if _other_one_to_one(ctx):
         return 'declares one_to_one_rels'
     for key in ('entity_view_components', 'entity_edit_components'):
-        if _non_approval_components(ctx, key):
+        if _unserved_builtin_components(ctx, key):
             return f'declares {key}'
     # The approval bridge and its section come together; one without the other is not the approval shape.
     has_approval_bridge = any(r.get('target') == 'approvable' for r in ctx.get('one_to_one_rels') or [])
@@ -410,6 +442,29 @@ def _field_entry(name: str, defn: dict, kind: str, ctx: dict, required: set[str]
         entry['options'] = [str(v) for v in defn.get('enum', []) if str(v) not in locked]
         entry['numeric_enum'] = defn.get('type') in ('integer', 'number')
     return entry
+
+
+def _custom_targets(defn: dict) -> list[str]:
+    """The targets (`upsert`, `view`) of a field's `x-custom-component`, or none."""
+    xc = defn.get('x-custom-component')
+    targets = xc.get('target') if isinstance(xc, dict) else None
+    return [t for t in targets if t in ('upsert', 'view')] if isinstance(targets, list) else []
+
+
+def _custom_field_kind(defn: dict) -> str:
+    """The kind of value a field replaced by a custom component holds, which is what the form keeps for it."""
+    actual = _get_actual_type(defn)
+    if actual == 'boolean':
+        return KIND_BOOLEAN
+    if defn.get('format') in ('date', 'date-time', 'time'):
+        return _date_kind(defn)
+    if isinstance(defn.get('enum'), list):
+        return KIND_ENUM
+    if defn.get('_prisma_decimal_type'):
+        return KIND_DECIMAL
+    if actual in ('integer', 'number'):
+        return KIND_NUMBER
+    return KIND_TEXT
 
 
 def _date_kind(defn: dict) -> str:
@@ -573,6 +628,10 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
             kind_by_field[name] = kind
     for name in cats.get('date_time', []):
         kind_by_field[name] = _date_kind(props[name])
+    # A field a custom component draws (`upsert` target) keeps the kind its value has; the component
+    # replaces the control, not the value the form saves.
+    for name in cats.get('custom_upsert', []):
+        kind_by_field[name] = _custom_field_kind(props[name])
 
     # x-display.form, when declared, is the set (and order) of fields the form
     # draws; otherwise every categorised field in schema order.
@@ -580,6 +639,13 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
     order = [n for n in declared if n in kind_by_field] if declared else [n for n in props if n in kind_by_field]
 
     entries = {n: _field_entry(n, props[n], kind_by_field[n], ctx, required, readonly, title) for n in order}
+    for name, entry in entries.items():
+        targets = _custom_targets(props[name])
+        if targets:
+            entry['custom'] = {'upsert': 'upsert' in targets, 'view': 'view' in targets}
+        # A credential field (upsert-only string, e.g. a password) is never read back: the screens do not list it.
+        if is_write_only_prop(props[name]):
+            entry['write_only'] = True
     # Foreign keys and one-to-one selectors are columns of the entity, so they take
     # their place among the scalar fields; the Prisma relation field the REST detail
     # embeds is the column name without `_id` (a selector carries its own name).
@@ -606,8 +672,9 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
     table = [next(iter(col)) for col in (ctx.get('xdisplay_table') or []) if isinstance(col, dict) and col]
     # A list row shows scalar columns only: a relation column holds an id, and the
     # REST list does not embed the related record's label.
-    scalar_keys = [f['key'] for f in fields if f['kind'] not in (KIND_RELATION, KIND_RELATION_MANY, KIND_ATTACHMENT, KIND_CHILD_ROWS)]
-    list_keys = [k for k in table if k in kind_by_field] or scalar_keys or [fields[0]['key']]
+    scalar_keys = [f['key'] for f in fields
+                   if f['kind'] not in (KIND_RELATION, KIND_RELATION_MANY, KIND_ATTACHMENT, KIND_CHILD_ROWS) and not f.get('write_only')]
+    list_keys = [k for k in table if k in kind_by_field and k in scalar_keys] or scalar_keys or [fields[0]['key']]
     list_keys = list_keys[:MAX_LIST_COLUMNS]
     # The REST list sorts and filters on scalar columns, and on the relation display columns
     # of getters.ts (`sort_filter_relation_fields`): a foreign key shown in x-display.table whose
@@ -615,7 +682,7 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
     # the relation name (`room_type`, not `room_type_id`). Those columns are list-only entries that
     # the form never draws, and they take the same text control the Web list panel gives them.
     sort_keys = list(scalar_keys)
-    filter_keys = [f['key'] for f in fields if f['kind'] in _FILTERABLE_KINDS]
+    filter_keys = [f['key'] for f in fields if f['kind'] in _FILTERABLE_KINDS and not f.get('write_only')]
     fk_names = {f['key'] for f in fields if f['kind'] == KIND_RELATION}
     relation_columns = []
     for relation, _label_column in ctx.get('sort_filter_relation_fields') or []:
@@ -628,8 +695,9 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
         sort_keys.append(relation)
         filter_keys.append(relation)
     # The search box matches the first text column of the list row (else the first text field).
-    text_keys = [f['key'] for f in fields if f['kind'] == KIND_TEXT]
+    text_keys = [f['key'] for f in fields if f['kind'] == KIND_TEXT and not f.get('write_only')]
     search_key = next((k for k in list_keys if k in text_keys), text_keys[0] if text_keys else None)
+    slots = custom_component_slots(ctx)
     return {
         'name': ctx['parent'],
         'pascal': ctx['parent_pascal'],
@@ -650,4 +718,8 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
         'split': _split_entry(ctx, entries, required, title) if ctx.get('can_view') else None,
         'comments': comment_thread_spec(ctx),
         'attachments': attachment_section_spec(ctx),
+        'custom_components': slots,
+        # Each hand-written component once, wherever it is mounted: one stub file per name.
+        'custom_component_names': list(dict.fromkeys(c['name'] for screen in ('list', 'view', 'edit') for c in slots[screen])),
+        'custom_fields': [f for f in fields if f.get('custom')],
     }

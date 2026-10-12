@@ -5,6 +5,16 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Mobile app: insertion points for hand-written components** (Issue #873). The Expo app now reads
+  `x-custom-components` (entity level: `list`, `view`, `edit`) and `x-custom-component` (field level: `upsert`, `view`) as
+  they stand, with no new schema key, and mounts a native component of the same name at the position of the Web one: the
+  list's search / sort / filter row, the detail screen after the built-in sections, the form after the inputs (create form
+  included), and in place of a field's input or detail row. Each component gets a native stub, generated once and never
+  overwritten, that renders nothing; `generate-code` lists new stubs under `ACTION REQUIRED`. Entities left on the placeholder
+  screen only because of these components (in the default schema `user` and `dashboard`) now get native screens. The props
+  contract is generated into `mobile/lib/custom-component.ts`. A credential field (an upsert-only string) is not listed or
+  shown, and a field component is sent only once changed. `ApprovalSection` and `AttachmentSection` keep their native
+  support. See `docs/knowledge/mobile-app.md` and `docs/knowledge/code-generation-custom-extensions.md`.
 - **Mobile app: entities that own attachments through the `attachable` bridge get native screens** (Issue #949). An entity
   with `attachable_id` (`one-to-one_bridge` to `attachable`) and the `AttachmentSection` component is no longer left on the
   placeholder screen: the detail screen lists its images and files, and the edit form adds (system file picker), removes and
@@ -52,6 +62,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- The virtual column resolver stub was never announced in the `ACTION REQUIRED` summary: `_write_stub` returned `None`, so
+  the notice keyed on its result never fired. It now returns whether it created the file.
 - **Attachment bridge: `setAttachmentsForBridge` only accepts attachment ids of the record being edited** (Issue #958).
   An id belonging to another record, in the same or another organization, or to another attachment type now rejects the
   whole call with `NOT_FOUND` before anything is written, and the update filters on `attachable_id` as well.

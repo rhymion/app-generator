@@ -198,7 +198,8 @@ test.describe('Native entity screens: permission-hidden actions', () => {
 
   test('an entity without native screens still says so', async ({ page }) => {
     await login(page);
-    await page.goto('/entity/user');
-    await expect(page.getByTestId('entity-user')).toBeVisible();
+    // `setting` has no list screen, so it keeps the placeholder (`user` has native screens: its MfaToggle is a slot).
+    await page.goto('/entity/setting');
+    await expect(page.getByTestId('entity-setting')).toBeVisible();
   });
 });

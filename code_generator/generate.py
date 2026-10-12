@@ -663,8 +663,11 @@ def _write_vercel_json_crons(path: Path, scheduled_task_entities: list) -> None:
         print(f'  Skipped (up to date) {path} (crons: {len(crons)})')
 
 
-def _write_stub(path: Path, content: str) -> None:
+def _write_stub(path: Path, content: str) -> bool:
     """Write stub only if file does not already exist (user may have customized).
+
+    Returns True only when the stub was newly created by this call (the caller's cue to
+    raise an ACTION REQUIRED notice); a skipped or refreshed stub returns False.
 
     Exception (cmd_413b): if the existing file's content matches a *past*
     pristine render of this same stub (recorded across manifest runs — see
@@ -681,16 +684,17 @@ def _write_stub(path: Path, content: str) -> None:
         existing_hash = sha256_file(path)
         if existing_hash == sha256_text(content):
             print(f'  Skipped (up to date) {path}')
-            return
+            return False
         if _manifest.is_stale_stub(path, existing_hash):
             path.write_text(content, encoding='utf-8')
             print(f'  Refreshed (stale stub, schema changed since it was first generated) {path}')
-            return
+            return False
         print(f'  Skipped (exists) {path}')
-        return
+        return False
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding='utf-8')
     print(f'  Wrote {path}')
+    return True
 
 
 # Collects reminders about write-once stubs the generator just created. These are
@@ -1093,6 +1097,8 @@ _MOBILE_ATTACHMENT_TEMPLATES = [
     ('lib/attachment-http.ts.jinja2', 'lib/attachment-http.ts', ('has_attachment', 'has_bridge_attachment')),
     ('components/native/AttachmentInput.tsx.jinja2', 'components/native/AttachmentInput.tsx', ('has_attachment',)),
     ('components/native/AttachmentList.tsx.jinja2', 'components/native/AttachmentList.tsx', ('has_bridge_attachment',)),
+    # The props the hand-written components receive; written only when some entity mounts one.
+    ('lib/custom-component.ts.jinja2', 'lib/custom-component.ts', ('has_custom_components',)),
 ]
 
 # Scheduled task administration screens: written only when the schema declares a task.
@@ -1173,6 +1179,9 @@ def _mobile_field_json(f: dict) -> dict:
         # A direct attachment field names where the REST detail embeds the row and what the write body carries.
         **({'relationName': f['relation_name'], 'bodyKey': f['body_key']} if f['kind'] == 'attachment' else {}),
         **({'createInline': True} if f.get('create_form') else {}),
+        # A hand-written component draws the field (upsert: the input, view: the detail display).
+        **({'custom': f['custom']} if f.get('custom') else {}),
+        **({'writeOnly': True} if f.get('write_only') else {}),
         **({'defaultValue': f['default_value']} if 'default_value' in f else {}),
         # A one-to-many child collection: the row editor draws these fields for each row.
         **(
@@ -1239,6 +1248,39 @@ def generate_mobile_entity(spec: dict, ctx: dict, schema: dict, mobile_dir: Path
     _write(components_dir / 'List.tsx', _render(env, 'mobile/entity/List.tsx.jinja2', spec_ctx))
     if spec['can_view']:
         _write(components_dir / 'FormView.tsx', _render(env, 'mobile/entity/FormView.tsx.jinja2', spec_ctx))
+    _write_mobile_custom_stubs(spec, mobile_dir, env)
+
+
+def _write_mobile_custom_stubs(spec: dict, mobile_dir: Path, env: Environment) -> None:
+    """Write the native stub of each hand-written component the entity declares, once.
+
+    The stubs render nothing, are never overwritten after a developer edits them, and are announced in
+    the ACTION REQUIRED summary when first created. Entity components live in
+    `components/<entity>/custom/<Name>.tsx`, field components in `components/<entity>/custom/fields/<Field>.tsx`.
+    """
+    name = spec['name']
+    custom_dir = mobile_dir / 'components' / name / 'custom'
+    for comp in spec['custom_component_names']:
+        path = custom_dir / f'{comp}.tsx'
+        mounted = [screen for screen in ('list', 'view', 'edit') if any(c['name'] == comp for c in spec['custom_components'][screen])]
+        if _write_stub(path, _render(env, 'mobile/entity/custom_component_stub.tsx.jinja2', {'component': comp})):
+            _note_stub_created(
+                path,
+                f'Entity "{name}" declares the custom component {comp} (mobile: {", ".join(mounted)}); the native app mounts it but it draws nothing yet.',
+                'Implement the native component (props: see mobile/lib/custom-component.ts) and commit the file to '
+                'your project SoT so it survives cleanup and a fresh rebuild.',
+            )
+    for field in spec['custom_fields']:
+        comp = to_pascal_case(field['key'])
+        path = custom_dir / 'fields' / f'{comp}.tsx'
+        targets = [t for t in ('upsert', 'view') if field['custom'].get(t)]
+        if _write_stub(path, _render(env, 'mobile/entity/custom_field_stub.tsx.jinja2', {'component': comp})):
+            _note_stub_created(
+                path,
+                f'Field "{name}.{field["key"]}" is drawn by a custom component ({", ".join(targets)}); the native app mounts it but it draws nothing yet.',
+                'Implement the native field component (props: see mobile/lib/custom-component.ts) and commit the file to '
+                'your project SoT so it survives cleanup and a fresh rebuild.',
+            )
 
 
 def _read_messages(output_dir: Path) -> dict:
@@ -1280,6 +1322,8 @@ def generate_mobile_target(
         'has_attachment': any(f['kind'] == 'attachment' for spec in mobile_specs or [] for f in spec['fields']),
         # Some entity owns attachments through the `attachable` bridge: the app needs the upload helper and the list.
         'has_bridge_attachment': any(spec.get('attachments') for spec in mobile_specs or []),
+        # Some entity mounts a hand-written component: the app needs the props contract they are written against.
+        'has_custom_components': any(spec.get('custom_component_names') or spec.get('custom_fields') for spec in mobile_specs or []),
         # The schema has an `x-mention` field, so the mention user search route exists.
         'has_mention': has_mention,
     }

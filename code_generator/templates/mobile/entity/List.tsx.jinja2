@@ -12,11 +12,16 @@ import {
   toListQuery,
   type ListQuerySpec,
 } from '@/lib/_list_query';
-{% if can_delete %}
+{% if can_delete or custom_components.list %}
 import type { ModelPermissions } from '@/lib/authz';
+{% endif %}
+{% if can_delete %}
 import type { ActionFailure } from '@/lib/_errors';
 import { useEntityCapabilities } from '@/lib/{{ name }}/use_entity_capabilities';
 {% endif %}
+{% for comp in custom_components.list | map(attribute='name') | unique %}
+import {{ comp }} from '@/components/{{ name }}/custom/{{ comp }}';
+{% endfor %}
 import {
   fetch{{ pascal }}Page,
   get{{ pascal }}Permissions,
@@ -59,8 +64,10 @@ export function {{ pascal }}List() {
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [panel, setPanel] = useState<'sort' | 'filter' | null>(null);
   const latest = useRef(0);
-{% if can_delete %}
+{% if can_delete or custom_components.list %}
   const [permissions, setPermissions] = useState<ModelPermissions | undefined>(undefined);
+{% endif %}
+{% if can_delete %}
   const [selected, setSelected] = useState<string[] | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
@@ -97,7 +104,7 @@ export function {{ pascal }}List() {
     get{{ pascal }}Permissions()
       .then((permissions) => {
         setCanCreate(permissions.create);
-{% if can_delete %}
+{% if can_delete or custom_components.list %}
         setPermissions(permissions);
 {% endif %}
       })
@@ -192,6 +199,9 @@ export function {{ pascal }}List() {
             <Text style={styles.toolText}>{activeFilters > 0 ? `${t('Common.filter')} (${activeFilters})` : t('Common.filter')}</Text>
           </Pressable>
         ) : null}
+{% for comp in custom_components.list %}
+        <{{ comp.name }} permissions={permissions} reload={() => void load(page)}{% for k, v in comp.props.items() %} {{ k }}={ {{ v | tojson }} }{% endfor %} />
+{% endfor %}
       </View>
       {panel === 'sort' ? (
         <View style={styles.panel} testID="list-sort-panel">

@@ -1,0 +1,7 @@
+import { Text } from 'react-native';
+import type { EntityComponentProps } from '@/lib/custom-component';
+
+// Hand-written for the Playwright run (scripts/run_mobile_entity_playwright.sh copies it in before generation).
+export default function GadgetToolbar({ permissions }: EntityComponentProps) {
+  return <Text testID="gadget-toolbar">{`toolbar create=${permissions?.create === true}`}</Text>;
+}
