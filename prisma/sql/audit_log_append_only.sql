@@ -70,20 +70,29 @@ CREATE TRIGGER audit_log_digest_append_only
 -- that contains `month_start` (UTC) if it does not exist yet. It fails when
 -- audit_log_default already holds rows in that month; create partitions
 -- ahead of time (the digest job calls this for the current and next month).
+-- SECURITY DEFINER: creating a partition needs ownership of audit_log, which
+-- the restricted application role must not have. The function runs with the
+-- owner's rights, pins search_path, and builds the statement only from quoted
+-- identifiers and literals derived from its timestamp argument. Objects are
+-- schema-qualified with public (the Prisma default schema) because the pinned
+-- search_path puts pg_catalog first. Execution is revoked from
+-- PUBLIC; audit_log_app_role.sql grants it to the application role.
 CREATE OR REPLACE FUNCTION audit_log_create_month_partition(month_start timestamptz)
-RETURNS text LANGUAGE plpgsql AS $$
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
 DECLARE
   first_day timestamptz := date_trunc('month', month_start AT TIME ZONE 'UTC') AT TIME ZONE 'UTC';
   next_day timestamptz := first_day + interval '1 month';
   part_name text := 'audit_log_' || to_char(first_day AT TIME ZONE 'UTC', 'YYYY_MM');
 BEGIN
-  IF to_regclass(part_name) IS NULL THEN
-    EXECUTE format('CREATE TABLE %I PARTITION OF audit_log FOR VALUES FROM (%L) TO (%L)',
+  IF to_regclass(format('public.%I', part_name)) IS NULL THEN
+    EXECUTE format('CREATE TABLE public.%I PARTITION OF public.audit_log FOR VALUES FROM (%L) TO (%L)',
                    part_name, first_day, next_day);
   END IF;
   RETURN part_name;
 END
 $$;
+
+REVOKE EXECUTE ON FUNCTION audit_log_create_month_partition(timestamptz) FROM PUBLIC;
 
 SELECT audit_log_create_month_partition(now());
 SELECT audit_log_create_month_partition(now() + interval '1 month');

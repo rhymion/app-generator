@@ -9,7 +9,10 @@
 --
 -- The role must not own audit_log or audit_log_digest and must not hold
 -- UPDATE, DELETE or TRUNCATE on them. Run as the table owner, after
--- audit_log_append_only.sql.
+-- audit_log_append_only.sql. The role also gets EXECUTE on
+-- audit_log_create_month_partition() (SECURITY DEFINER) so it can create next
+-- month's partition without owning the table.
 
 REVOKE ALL ON audit_log, audit_log_digest FROM :"app_role";
 GRANT SELECT, INSERT ON audit_log, audit_log_digest TO :"app_role";
+GRANT EXECUTE ON FUNCTION audit_log_create_month_partition(timestamptz) TO :"app_role";
