@@ -50,6 +50,8 @@ model user {
   image     attachment? @relation("UserImage", fields: [image_id], references: [id], onDelete: SetNull)
   comments  comment[]  @relation("CommentCreator")
   reactions reaction[] @relation("ReactionUser")
+  created_assets mobile_asset[] @relation("MobileAssetCreator")
+  updated_assets mobile_asset[] @relation("MobileAssetUpdater")
   created_threads mobile_thread[] @relation("MobileThreadCreator")
   updated_threads mobile_thread[] @relation("MobileThreadUpdater")
 }
@@ -280,6 +282,7 @@ model mobile_invoice_line {
 model attachable {
   id          String       @id @default(cuid())
   attachments attachment[]
+  mobile_asset mobile_asset?
 }
 
 enum AttachmentType {
@@ -371,6 +374,22 @@ model mobile_step {
   updater    user          @relation("MobileStepUpdater", fields: [updater_id], references: [id])
   @@index([name])
   @@index([parent_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model mobile_asset {
+  id            String     @id @default(cuid())
+  title         String
+  attachable_id String     @unique
+  attachable    attachable @relation(fields: [attachable_id], references: [id], onDelete: Cascade)
+  created_at    DateTime   @default(now()) @db.Timestamptz(0)
+  updated_at    DateTime   @updatedAt @db.Timestamptz(0)
+  creator_id    String
+  creator       user       @relation("MobileAssetCreator", fields: [creator_id], references: [id])
+  updater_id    String
+  updater       user       @relation("MobileAssetUpdater", fields: [updater_id], references: [id])
+  @@index([title])
   @@index([creator_id])
   @@index([updater_id])
 }

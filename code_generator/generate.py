@@ -28,7 +28,7 @@ from generate_types import extract_entities, extract_named_constants
 from mobile_nav import build_mobile_nav
 from nav_config import schema_declares_scheduled_tasks
 from mobile_entities import (
-    build_mobile_entity_spec, ineligible_log_lines, ineligible_note, mobile_ineligible_reason,
+    attachable_bridge_ready, build_mobile_entity_spec, ineligible_log_lines, ineligible_note, mobile_ineligible_reason,
 )
 from helpers.naming import to_title_case
 from context import build_entity_context
@@ -1088,9 +1088,11 @@ _MOBILE_STATIC_TEMPLATES = [
 ]
 
 # Direct attachment fields: written only when some mobile entity has one (it adds the file picker dependency).
+# The upload helpers are shared with the bridge attachment list, so they are written for either.
 _MOBILE_ATTACHMENT_TEMPLATES = [
-    ('lib/attachment-http.ts.jinja2', 'lib/attachment-http.ts'),
-    ('components/native/AttachmentInput.tsx.jinja2', 'components/native/AttachmentInput.tsx'),
+    ('lib/attachment-http.ts.jinja2', 'lib/attachment-http.ts', ('has_attachment', 'has_bridge_attachment')),
+    ('components/native/AttachmentInput.tsx.jinja2', 'components/native/AttachmentInput.tsx', ('has_attachment',)),
+    ('components/native/AttachmentList.tsx.jinja2', 'components/native/AttachmentList.tsx', ('has_bridge_attachment',)),
 ]
 
 # Scheduled task administration screens: written only when the schema declares a task.
@@ -1107,7 +1109,7 @@ _MOBILE_MESSAGE_NAMESPACES = ('Common', 'Errors', 'ValidationMessages', 'Payment
 _MOBILE_MESSAGE_KEYS = {
     'EntityLabel': ('auditLog',),
     'Fields': (
-        'comments', 'approvalRequests', 'approve', 'reject', 'withdraw', 'message',
+        'comments', 'approvalRequests', 'approve', 'reject', 'withdraw', 'message', 'images', 'attachments',
         'action', 'actorUser', 'created_at', 'metadata', 'targetId', 'targetTable',
     ),
 }
@@ -1276,6 +1278,8 @@ def generate_mobile_target(
         'has_payment': any(spec.get('is_payment') for spec in mobile_specs or []),
         # Some entity has a direct attachment field: the app needs the file picker and the upload helpers.
         'has_attachment': any(f['kind'] == 'attachment' for spec in mobile_specs or [] for f in spec['fields']),
+        # Some entity owns attachments through the `attachable` bridge: the app needs the upload helper and the list.
+        'has_bridge_attachment': any(spec.get('attachments') for spec in mobile_specs or []),
         # The schema has an `x-mention` field, so the mention user search route exists.
         'has_mention': has_mention,
     }
@@ -1290,9 +1294,9 @@ def generate_mobile_target(
         _write(checkout_out, _render(env, 'mobile/lib/checkout.ts.jinja2', ctx))
     elif checkout_out.exists():
         checkout_out.unlink()
-    for tmpl_name, rel_out in _MOBILE_ATTACHMENT_TEMPLATES:
+    for tmpl_name, rel_out, needed_by in _MOBILE_ATTACHMENT_TEMPLATES:
         target = mobile_dir / rel_out
-        if ctx['has_attachment']:
+        if any(ctx[flag] for flag in needed_by):
             _write(target, _render(env, f'mobile/{tmpl_name}', ctx))
         elif target.exists():
             target.unlink()
@@ -1840,6 +1844,17 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _write(api_dir / '[id]' / 'comments' / '[commentId]' / 'route.ts',
                        _render(env, 'api_comment_item_route.ts.jinja2', _comment_ctx))
                 print(f'  Comment routes → app/api/{parent}/[id]/comments/')
+            # --- attachments route: REST side of the attachment panel ---
+            # Runs setAttachmentsForBridge (lib/attachment/bridge_actions.ts), the Server Action the
+            # AttachmentSection panel calls, for an owner that has the panel and an edit screen.
+            if attachable_bridge_ready(ctx) and can_view and can_edit:
+                _write(api_dir / '[id]' / 'attachments' / 'route.ts',
+                       _render(env, 'api_attachments_route.ts.jinja2', {
+                           **ctx,
+                           'type_ts': attachment_type_ts(schema),
+                           'type_values': attachment_type_values(schema),
+                       }))
+                print(f'  Attachments route → app/api/{parent}/[id]/attachments/')
             print(f'  API routes → app/api/{parent}/')
 
             # --- CSV Export route (Phase 1: can_api+can_list+can_export) ---

@@ -46,7 +46,7 @@ Run in this order:
 14. `npm run test:filter-sort-gate` — single entity carrying every ColumnFilterKind (enum/boolean/number/decimal/date/date-time/time/string) fixture generate-code → tsc check (see below)
 14a. `npm run test:child-datagrid-e2e-gate` — builds and RUNS a fixture app (default schema + the dedicated fixture schema) and runs its Cypress specs: embedded child DataGrid written from the parent screens (see below)
 14b. `npm run test:list-child-e2e-gate` — builds and RUNS a fixture app (default schema + the dedicated fixture schema) and runs its Cypress specs: a child embedded with `x-outputType: list` shown on the parent's screens, and association add / remove from the parent screen (see below)
-14c. `npm run test:comment-rest-e2e-gate` — builds and RUNS a fixture app (default schema + a commentable entity scoped by organization) and runs its Cypress specs: the REST routes for adding, editing and deleting a comment, and the @-mention user search (see below)
+14c. `npm run test:comment-rest-e2e-gate` — builds and RUNS a fixture app (default schema + a commentable entity scoped by organization) and runs its Cypress specs: the REST routes for adding, editing and deleting a comment, the @-mention user search, and the attachments route for an `attachable` bridge owner (see below)
 14d. `npm run test:scheduled-task-e2e-gate` — builds and RUNS a fixture app (default schema + three scheduled tasks) and runs its Cypress API specs: the scheduled-task admin REST routes `/api/scheduled-task-runs` (see below)
 14e. `npm run test:version-of-e2e-gate` — builds and RUNS a fixture app (default schema + an `x-version-of` identity and version entity) and runs its Cypress API specs: version number at approval, one open draft per identity, `current_version_id`, deletion of settled non-approved drafts (see below)
 15. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
@@ -398,8 +398,11 @@ so this is the only run that exercises `POST /api/<entity>/{id}/comments`,
 `PATCH` / `DELETE .../comments/{commentId}` and `GET /api/mention/users` against
 a real database: an API key and a mobile access token, the update-permission and
 organization checks, the author-only edit and the delete rule, the mention
-notifications, and the candidate search's organization scope. CI runs it as
-`comment-rest-e2e-gate-fixture`, skipped for a docs-only diff exactly like
+notifications, and the candidate search's organization scope. The fixture also
+holds `cr_asset`, an organization-scoped owner of the `attachable` bridge, so the
+same run exercises `PUT /api/<entity>/{id}/attachments` (replace semantics, the
+update-permission and organization checks, and the refusal of another record's
+attachment id). CI runs it as `comment-rest-e2e-gate-fixture`, skipped for a docs-only diff exactly like
 `e2e-tests`; locally it always runs. See
 `scripts/check_comment_rest_e2e_gate_fixture.sh`.
 

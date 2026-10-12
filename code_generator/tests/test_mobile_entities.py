@@ -622,6 +622,126 @@ def test_list_strings_exist_in_both_locales():
             assert key in common, (locale, key)
 
 
+# --- polymorphic attachable bridge ---------------------------------------------------------
+
+def _attachable_ctx(**overrides):
+    section = {'name': 'AttachmentSection', 'props': {}}
+    ctx = _ctx(has_attachable=True, can_view=True, can_update=True, attachable_rel_name='attachable',
+               attachable_attachments_prop='attachments',
+               one_to_one_rels=[{'prop_name': 'attachable_id', 'target': 'attachable', 'relation_name': 'attachable'}],
+               entity_view_components=[section], entity_edit_components=[section])
+    ctx.update(overrides)
+    return ctx
+
+
+def test_entity_owning_attachments_through_the_attachable_bridge_is_eligible():
+    assert mobile_ineligible_reason(_attachable_ctx()) is None
+
+
+def test_attachable_bridge_without_the_attachment_section_stays_ineligible():
+    # The Web shows no attachments without the component, so the placeholder is kept.
+    ctx = _attachable_ctx(entity_view_components=[], entity_edit_components=[])
+    assert mobile_ineligible_reason(ctx) == 'declares one_to_one_rels'
+
+
+def test_other_components_beside_the_attachment_section_stay_ineligible():
+    ctx = _attachable_ctx(entity_view_components=[{'name': 'AttachmentSection'}, {'name': 'SomethingElse'}])
+    assert mobile_ineligible_reason(ctx) == 'declares entity_view_components'
+
+
+def test_other_one_to_one_bridge_beside_the_attachable_bridge_is_ineligible():
+    other = {'prop_name': 'x_id', 'target': 'other', 'relation_name': 'x'}
+    ctx = _attachable_ctx(one_to_one_rels=_attachable_ctx()['one_to_one_rels'] + [other])
+    assert mobile_ineligible_reason(ctx) == 'declares one_to_one_rels'
+
+
+def test_attachment_section_component_without_the_bridge_is_ineligible():
+    ctx = _attachable_ctx(has_attachable=False, one_to_one_rels=[])
+    assert mobile_ineligible_reason(ctx) == 'declares entity_view_components'
+
+
+def test_attachment_section_spec_follows_the_component_props():
+    from mobile_entities import attachment_section_spec
+    assert attachment_section_spec(_attachable_ctx()) == {
+        'rel_name': 'attachable', 'prop': 'attachments', 'show_images': True, 'show_files': True,
+        'types': ['image', 'file'], 'can_edit': True,
+    }
+    files_only = {'name': 'AttachmentSection', 'props': {'showImages': False}}
+    spec = attachment_section_spec(_attachable_ctx(entity_view_components=[files_only], entity_edit_components=[files_only]))
+    assert spec['types'] == ['file'] and spec['show_images'] is False
+    none = {'name': 'AttachmentSection', 'props': {'showImages': False, 'showFiles': False}}
+    assert attachment_section_spec(_attachable_ctx(entity_edit_components=[none]))['types'] == []
+    assert attachment_section_spec(_attachable_ctx(can_update=False))['can_edit'] is False
+    assert attachment_section_spec(_attachable_ctx(can_view=False)) is None
+    assert attachment_section_spec(_ctx()) is None
+
+
+def test_detail_screen_lists_the_attachments_read_from_the_rest_detail(out):
+    view = _read(out, 'components/mobile_asset/FormView.tsx')
+    assert "import { AttachmentList } from '@/components/native/AttachmentList'" in view
+    assert 'record["attachable"]' in view
+    assert 'ATTACHMENT_TYPES: string[] = ["image", "file"]' in view
+    # Read-only on the detail screen: no change handler.
+    assert 'onChange=' not in view[view.index('<AttachmentList'):view.index('/>', view.index('<AttachmentList'))]
+
+
+def test_edit_form_saves_the_attachments_after_the_record_through_the_attachments_route(out):
+    form = _read(out, 'components/mobile_asset/FormUpsert.tsx')
+    assert "setBridgeAttachments('mobile_asset', id, type" in form
+    assert 'attachmentsChanged(savedBridge, bridgeItems, type)' in form
+    # Only on edit: attachments can be added once the owner exists, as on the Web.
+    assert '{isEdit ? <AttachmentList' in form
+    # The owner is saved first (inside the submit success callback); a refusal stays on the section.
+    assert form.index('submit(formData, async (savedId)') < form.index('setBridgeAttachments(')
+    assert 'setBridgeError(' in form
+    http = _read(out, 'lib/attachment-http.ts')
+    assert '/api/${encodeURIComponent(entity)}/${encodeURIComponent(recordId)}/attachments' in http
+    assert "method: 'PUT'" in http
+    lst = _read(out, 'components/native/AttachmentList.tsx')
+    for needle in ('attachments-pick-${type}', 'attachment-remove-${type}-${index}', 'attachment-up-${type}-${index}',
+                   'attachment-down-${type}-${index}', 'uploadFile('):
+        assert needle in lst, needle
+    # The picker uploads the file only; the attachment rows are written by the attachments route.
+    assert 'uploadAttachment' not in lst and '/api/attachment/direct' not in lst
+    for forbidden in ('prisma', 'use server'):
+        assert forbidden not in lst + http, forbidden
+
+
+def test_entities_without_the_bridge_get_no_attachment_list(out):
+    for name in ('mobile_note', 'mobile_thread'):
+        assert 'AttachmentList' not in _read(out, f'components/{name}/FormView.tsx')
+    assert 'AttachmentList' not in _read(out, 'components/mobile_note/FormUpsert.tsx')
+
+
+def test_attachments_route_is_generated_for_the_owner_only(out):
+    route = (out / 'app/api/mobile_asset/[id]/attachments/route.ts').read_text()
+    assert 'export async function PUT' in route
+    assert "requireApiPermission(actorId, 'mobile_asset', 'update')" in route
+    assert 'resolvePermissions(basePerms, item, actorId)' in route
+    assert "setAttachmentsForBridge(attachableId, type as AttachmentType, parsed)" in route or 'setAttachmentsForBridge(attachableId' in route
+    # A listed id must already belong to this record, so another record's attachment cannot be taken over.
+    assert 'held.has(entry.id)' in route
+    assert 'const ATTACHMENT_TYPES: readonly string[] = ["image", "file", "video", "audio"]' in route
+    assert not (out / 'app/api/mobile_note/[id]/attachments/route.ts').exists()
+    assert not (out / 'app/api/mobile_thread/[id]/attachments/route.ts').exists()
+
+
+def test_bridge_only_app_gets_the_upload_helpers_and_the_picker_dependency(out):
+    # mobile_document has direct attachment fields too in this fixture; the helpers are written for either.
+    assert (out / 'mobile/components/native/AttachmentList.tsx').exists()
+    assert (out / 'mobile/lib/attachment-http.ts').exists()
+    assert 'expo-document-picker' in (out / 'mobile/package.json').read_text()
+
+
+def test_attachment_list_headings_and_buttons_reach_the_message_bundle():
+    from generate import _mobile_messages_json
+    en = json.loads((REPO / 'messages' / 'en.json').read_text(encoding='utf-8'))
+    bundle = json.loads(_mobile_messages_json({'en': en}))['en']
+    assert bundle['Fields']['images'] == en['Fields']['images']
+    assert bundle['Fields']['attachments'] == en['Fields']['attachments']
+    assert bundle['Common']['add'] == en['Common']['add'] and bundle['Common']['delete'] == en['Common']['delete']
+
+
 # --- comment thread and reactions ------------------------------------------------------------
 
 def _commentable_ctx(**overrides):
@@ -854,10 +974,11 @@ def test_attachment_dependency_and_helpers_exist_only_with_an_attachment_entity(
     assert 'AttachmentValue' not in _read(out, 'components/mobile_note/FormView.tsx')
 
 
-def test_attachment_dependency_is_absent_without_an_attachment_entity(tmp_path):
+def _generate_without(tmp_path, *removed):
     import yaml
     schema = yaml.safe_load((FIXTURE / 'json_schema.yaml').read_text())
-    del schema['definitions']['mobile_document']
+    for name in removed:
+        del schema['definitions'][name]
     trimmed = tmp_path / 'json_schema.yaml'
     trimmed.write_text(yaml.safe_dump(schema, sort_keys=False))
     prisma = tmp_path / 'schema.prisma'
@@ -868,9 +989,30 @@ def test_attachment_dependency_is_absent_without_an_attachment_entity(tmp_path):
     intermediate = work / 'generated_json_schema.yaml'
     build_user_schema(trimmed, prisma, intermediate)
     generate(str(intermediate), str(work))
+    return work
+
+
+def test_attachment_dependency_is_absent_without_an_attachment_entity(tmp_path):
+    work = _generate_without(tmp_path, 'mobile_document', 'mobile_asset')
     assert 'expo-document-picker' not in (work / 'mobile' / 'package.json').read_text()
     assert not (work / 'mobile' / 'lib' / 'attachment-http.ts').exists()
     assert not (work / 'mobile' / 'components' / 'native' / 'AttachmentInput.tsx').exists()
+    assert not (work / 'mobile' / 'components' / 'native' / 'AttachmentList.tsx').exists()
+    assert not (work / 'app' / 'api' / 'mobile_asset').exists()
+
+
+def test_bridge_attachments_alone_need_the_helpers_and_the_list_but_not_the_direct_input(tmp_path):
+    work = _generate_without(tmp_path, 'mobile_document')
+    assert 'expo-document-picker' in (work / 'mobile' / 'package.json').read_text()
+    assert (work / 'mobile' / 'lib' / 'attachment-http.ts').exists()
+    assert (work / 'mobile' / 'components' / 'native' / 'AttachmentList.tsx').exists()
+    assert not (work / 'mobile' / 'components' / 'native' / 'AttachmentInput.tsx').exists()
+
+
+def test_direct_attachment_fields_alone_do_not_write_the_bridge_list(tmp_path):
+    work = _generate_without(tmp_path, 'mobile_asset')
+    assert (work / 'mobile' / 'components' / 'native' / 'AttachmentInput.tsx').exists()
+    assert not (work / 'mobile' / 'components' / 'native' / 'AttachmentList.tsx').exists()
 
 
 def test_upload_route_accepts_the_browser_session_and_a_mobile_token(out):

@@ -136,8 +136,8 @@ schema `approval_flow` (`entity_name`) and `permission` (`name`) qualify.
 
 An entity is left on the placeholder screen when it has no REST routes or no list screen, declares a
 child that is neither a picker nor an [editable child collection](#child-rows) (an independent child with its own screens,
-or a row with a field the row editor cannot draw), a one-to-one bridge other than the ones to `approvable` (with `ApprovalSection`) and `commentable`, a custom component other than `ApprovalSection`, virtual
-columns, polymorphic attachments (`attachable`), `x-splittable` without the approval section, a state machine, edit/delete
+or a row with a field the row editor cannot draw), a one-to-one bridge other than the ones to `approvable` (with `ApprovalSection`), `commentable` and `attachable` (with `AttachmentSection`), a custom component other than `ApprovalSection` and `AttachmentSection`, virtual
+columns, `x-splittable` without the approval section, a state machine, edit/delete
 guards without an approval or `x-self-only`, relates to an entity that has no
 REST routes, or has a field with no native widget (image or file URI, custom upsert
 component). In the default schema `role`, `organization` and `app_setting` qualify; `user` (a custom component) keeps
@@ -232,6 +232,43 @@ authenticated caller, so there is one implementation of the row. The route rejec
 `attachment.type` enum, an empty or over-long name and a `path` that is not a site-relative path or an
 `http(s)` URL. A file stored through the Google Cloud Storage upload route is served by `/api/gcs/...`, which
 requires a browser session, so the link on the detail screen opens only where that session is shared.
+
+### Attachments of an `attachable` bridge
+
+An entity that owns attachments through the polymorphic bridge (`attachable_id` with
+`x-relationship: {type: one-to-one_bridge, target: attachable}`, shown on the Web screens by the `AttachmentSection`
+component in its `x-custom-components`) keeps its native screens; as with the approval bridge, the bridge and the
+component come together, and a bridge without the component stays on the placeholder. The component's `showImages` /
+`showFiles` props (both default to `true`) decide which of the two lists, *Images* (`image`) and *Attachments* (`file`),
+the screens draw.
+
+`components/native/AttachmentList.tsx` draws the lists. The detail screen lists each attachment's name (a link that opens
+the file) in stored order, with a thumbnail for an image, from the `attachments` the REST detail embeds under the bridge
+(`attachable.attachments`, already decrypted). The edit form adds *Add* (the system document picker, which uploads
+the file with `POST /api/upload`), *Delete* and move up / down to each list. Nothing is saved while editing: the form
+saves the record first, then sends the whole list of each type that changed to the attachments route. As on the Web, the
+create form has no attachment section (attachments can only be added once the record exists).
+
+| Step | Request | Result |
+|---|---|---|
+| Store a file | `POST /api/upload` (multipart, field `file`) | `{ url }`; a refused type or size is shown on the section |
+| Save a type's list | `PUT /api/<entity>/<id>/attachments` with `{ type, items: [{ id?, name, path }] }` | `200 { ok: true }` |
+
+`PUT /api/<entity>/<id>/attachments` is generated for an owner with the bridge, the component, a detail screen and an edit
+screen. It runs the Web panel's own Server Action (`setAttachmentsForBridge`, `lib/attachment/bridge_actions.ts`) as the
+authenticated caller (mobile access token or API key), so the replace semantics are the Web's: the listed order is the stored order,
+an item with an `id` keeps its row, an item without one is created, and a row of that type that is not listed is deleted.
+The other types are untouched. File names are stored encrypted, as on the Web.
+
+Access is the owner's: the caller needs `update` on the entity (and, for a record-level grant, on that record), and the
+record is read through the entity's detail getter, so a record of another organization (or, for an `x-self-only` entity,
+not the caller's own) answers `404` and writes nothing. A listed `id` must already be an attachment of this record, so the
+id of another record's (or another organization's) attachment cannot be used to take it over (`400`). The route also
+rejects a `type` outside the `attachment.type` enum, an empty or over-long name, a `path` that is not a site-relative path
+or an `http(s)` URL, and more than 100 items.
+
+If the second request is refused, the record itself is already saved; the form stays open and shows the server's text on the
+section, with the edits kept.
 
 ### Create the referenced record in place (`x-create-inline`)
 
@@ -606,6 +643,16 @@ runs the Expo web server and the proxy as one process so the runner can stop bot
   field blocking the save before any request, clearing an optional field, the edit form starting from the
   attached files and replacing one, the server's refusal of a file type shown with nothing attached, and the
   detail screen opening the file from its name.
+- `mobile/e2e/bridge-attachments.spec.ts` covers the attachments of `mobile_asset` (an `attachable` bridge): no section on the
+  create form, adding files, moving one and removing one on the edit form, the whole list sent in the listed order for
+  the type that changed and nothing for the others, images and files as separate lists, the detail screen listing the
+  saved set without controls, the server's refusal of a file type, a refused save keeping the edits and showing the
+  error on the section, and opening a file from its name.
+- `code_generator/tests/fixtures/comment_rest_e2e_gate/cypress/e2e/attachments_rest.cy.ts` covers
+  `PUT /api/cr_asset/{id}/attachments` (see `npm run test:comment-rest-e2e-gate`): a mobile access token (accepted), no
+  credential or a bad key (401), replace semantics (listed order, reorder, removal, images and files separate), malformed
+  bodies (400), a caller without `update` (403), a record of a foreign organization (404, nothing written) and an id that
+  belongs to another record (400, nothing taken over).
 - `cypress/e2e/api/direct_attachment_rest.cy.ts` covers `POST /api/upload` and `POST /api/attachment/direct` with a
   mobile access token (accepted), no credential or a tampered token (401), malformed input (400), the decrypted
   name on the linked record, and a holder without `update` on the entity who can store a file but not link it (403).
@@ -634,8 +681,8 @@ check and is not part of the mandatory gate.
 ## Not implemented yet
 
 - Entity screens for an entity that declares anything beyond plain fields, the relation pickers, direct attachment
-  fields, the approval section, the comment thread with its comment box and mentions, creating the referenced
-  record in place and payment checkout: child grids and polymorphic attachments (`attachable`). A plain URL
+  fields, the attachments of an `attachable` bridge, the approval section, the comment thread with its comment box and
+  mentions, creating the referenced record in place and payment checkout: child grids. A plain URL
   field with `x-uri-kind: file` or `image` is not drawn either.
 - Submitting a record for approval (the "(re)submit" button). Resubmitting is a Server Action
   (`submit_for_approval.ts`) with no REST route, so the app has nothing to call.

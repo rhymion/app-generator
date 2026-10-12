@@ -5,7 +5,7 @@ import { useMessages } from '@/lib/messages';
 import type { ModelPermissions } from '@/lib/authz';
 import { validateForm } from '@/components/{{ name }}/form_validation';
 import { useEntityCapabilities } from '@/lib/{{ name }}/use_entity_capabilities';
-import { useEntityForm } from '@/lib/{{ name }}/use_entity_form';
+import { useEntityForm{% if attachments and attachments.can_edit %}, getEntityFormErrorMessage{% endif %} } from '@/lib/{{ name }}/use_entity_form';
 import {
 {% if can_edit %}
   get{{ pascal }}Detail,
@@ -21,6 +21,10 @@ import { firstMissingRowField, type ChildRowState } from '@/lib/entity-http';
 {% if attachment_fields %}
 import type { AttachmentRow } from '@/lib/attachment-http';
 {% endif %}
+{% if attachments and attachments.can_edit %}
+import { AttachmentList, attachmentsChanged } from '@/components/native/AttachmentList';
+import { setBridgeAttachments, type BridgeAttachment } from '@/lib/attachment-http';
+{% endif %}
 {% if create_fields %}
 import type { InlineCreateProps } from '@/components/native/RelationPicker';
 {% for f in create_fields %}
@@ -29,6 +33,11 @@ import { {{ f.create_form.pascal }}FormUpsert } from '@/components/{{ f.create_f
 {% endif %}
 {% if is_payment %}
 import { isCheckoutUrl, openCheckout } from '@/lib/checkout';
+{% endif %}
+{% if attachments and attachments.can_edit %}
+
+// The types the entity's AttachmentSection lists (its showImages / showFiles props).
+const ATTACHMENT_TYPES: string[] = {{ attachments.types | tojson }};
 {% endif %}
 {% if create_fields %}
 
@@ -62,6 +71,13 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
 {% if attachment_fields %}
   // A direct attachment field's value is the attachment row's id; the whole row is kept to show its name.
   const [attachments, setAttachments] = useState<Record<string, AttachmentRow | null>>({});
+{% endif %}
+{% if attachments and attachments.can_edit %}
+  // The `attachable` bridge's attachments: the saved set and the one being edited. They are saved after the
+  // record itself, and only once it exists (as on the Web, the create form has no attachment section).
+  const [savedBridge, setSavedBridge] = useState<BridgeAttachment[]>([]);
+  const [bridgeItems, setBridgeItems] = useState<BridgeAttachment[]>([]);
+  const [bridgeError, setBridgeError] = useState<string | null>(null);
 {% endif %}
   const [permissions, setPermissions] = useState<ModelPermissions | undefined>(undefined);
   const [state, setState] = useState<'loading' | 'ready' | 'missing'>('loading');
@@ -111,6 +127,11 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
               .map((spec) => [spec.key, (record[spec.relationName ?? spec.key] as AttachmentRow | null | undefined) ?? null]),
           ));
 {% endif %}
+{% if attachments and attachments.can_edit %}
+          const embedded = ((record[{{ attachments.rel_name | tojson }}] as { {{ attachments.prop }}?: BridgeAttachment[] } | null)?.{{ attachments.prop }}) ?? [];
+          setSavedBridge(embedded);
+          setBridgeItems(embedded);
+{% endif %}
         }
 {% endif %}
         setState('ready');
@@ -151,6 +172,25 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
       else formData.append(spec.key, String(value));
     }
     submit(formData, async (savedId) => {
+{% if attachments and attachments.can_edit %}
+      // The record is saved; its attachments go in a second request, one per type that changed. A refusal
+      // is shown on the section and the form stays (the record's own changes are already saved).
+      if (id) {
+        setBusy(true);
+        try {
+          for (const type of ATTACHMENT_TYPES) {
+            if (!attachmentsChanged(savedBridge, bridgeItems, type)) continue;
+            const result = await setBridgeAttachments('{{ name }}', id, type, bridgeItems.filter((item) => item.type === type).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
+            if (!result.ok) {
+              setBridgeError(getEntityFormErrorMessage(result, { terr, tmsg }));
+              return;
+            }
+          }
+        } finally {
+          setBusy(false);
+        }
+      }
+{% endif %}
       if (onCreated) {
         onCreated(savedId);
         return;
@@ -223,6 +263,9 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
 {% endif %}
         />
       ))}
+{% if attachments and attachments.can_edit %}
+      {isEdit ? <AttachmentList types={ATTACHMENT_TYPES} items={bridgeItems} onChange={(next) => { setBridgeError(null); setBridgeItems(next); }} disabled={busy} error={bridgeError} /> : null}
+{% endif %}
       {validationError ? <Text style={styles.error} testID="form-validation-error">{validationError}</Text> : null}
       {error ? <Text style={styles.error} testID="form-error">{error}</Text> : null}
 {% if is_payment %}
