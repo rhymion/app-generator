@@ -359,5 +359,16 @@
     "pacific_noumea": "Nouméa",
     "pacific_pago_pago": "Pago Pago",
     "utc": "UTC (Coordinated Universal Time)"
+  },
+  "DashboardWidgetEditor": {
+    "noDashboardEntities": "No entity is enabled for dashboards, so there is no data source to choose. Set x-display.dashboard: true on an entity in the schema.",
+    "docsLinkLabel": "Open the schema documentation",
+    "docsUrl": "https://github.com/rhymion/app-generator/blob/develop/docs/knowledge/schema-yaml-configuration.md",
+    "unknownDataSource": "Unknown data source \"{name}\". It is not enabled for dashboards (any more); choose another data source.",
+    "unreadableDataSource": "You do not have permission to read {name}; this widget cannot show its data to you.",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "removeWidget": "Remove widget",
+    "addWidget": "Add widget"
   }
 }

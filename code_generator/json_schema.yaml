@@ -600,6 +600,11 @@ definitions:
         type: array
         items:
           $ref: "#/definitions/dashboard_widget"
+        # A hand-written editor (components/dashboard/widgets.tsx) replaces the generated grid
+        # on the edit form; it lists only the entities opted in with x-display.dashboard.
+        x-custom-component:
+          target:
+            - upsert
 
   app_setting:
     x-nav:

@@ -359,5 +359,16 @@
     "pacific_noumea": "ヌメア",
     "pacific_pago_pago": "パゴパゴ",
     "utc": "UTC（協定世界時）"
+  },
+  "DashboardWidgetEditor": {
+    "noDashboardEntities": "ダッシュボードに有効なエンティティがないため、データソースを選べません。スキーマでエンティティに x-display.dashboard: true を設定してください。",
+    "docsLinkLabel": "スキーマのドキュメントを開く",
+    "docsUrl": "https://github.com/rhymion/app-generator/blob/develop/docs/knowledge/schema-yaml-configuration.md",
+    "unknownDataSource": "不明なデータソース「{name}」です。ダッシュボードで有効ではありません。別のデータソースを選んでください。",
+    "unreadableDataSource": "{name} を読む権限がないため、このウィジェットのデータは表示されません。",
+    "moveUp": "上へ",
+    "moveDown": "下へ",
+    "removeWidget": "ウィジェットを削除",
+    "addWidget": "ウィジェットを追加"
   }
 }

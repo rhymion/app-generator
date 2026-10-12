@@ -5,6 +5,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Dashboard widget editor: the data source is chosen from a list** (Issue #905, part of #904). The dashboard edit form no
+  longer shows widgets as a grid of free-text cells; each widget is edited in a card, and `entity_name` is a dropdown of the
+  `x-display.dashboard` entities the user can read, with translated labels. Stored values do not change, so existing widgets
+  load as before; a stored data source that is no longer available is flagged. When no entity opts in, the editor says so and
+  links to the schema documentation. To make this possible, `x-custom-component` (target `upsert`) now also works on a child
+  array property: a hand-written component takes the place of the generated grid and keeps its row contract. No new schema key.
+  See `docs/knowledge/code-generation-custom-extensions.md`.
 - **Mobile app: insertion points for hand-written components** (Issue #873). The Expo app now reads
   `x-custom-components` (entity level: `list`, `view`, `edit`) and `x-custom-component` (field level: `upsert`, `view`) as
   they stand, with no new schema key, and mounts a native component of the same name at the position of the Web one: the

@@ -106,6 +106,36 @@ and api_key straight through `GET /api/user/{id}`. Confirmed by curl
 (subtask_810e, 2026-08-25) and fixed by switching both call sites from
 `filtered_props` to `model_def.get('properties', {})`.
 
+### On a child array property: replacing the generated grid
+
+`x-custom-component` with an `upsert` target can also sit on an **array property that points at a child entity**
+(an embedded one-to-many child, which the form draws as an editable grid). No new key is involved. The generator then:
+
+- draws `<Widgets ... />` on the edit form instead of the grid, and imports it from `./widgets`
+  (`components/{entity}/{prop}.tsx`, PascalCase of the property name; never created or overwritten by the generator);
+- keeps everything else of the grid path unchanged: the initial rows, the new-row seed (`createNewRow`, parent FK set),
+  the required-field check, and the `{prop}[]` form entries built from the rows. Only the grid itself is dropped; its column definitions are handed to the component as `columns`, so it can reuse
+  the grid's enum options without importing generated code (a unit test of the component then runs on a clean checkout).
+
+The component takes the grid's place **and its contract**:
+
+```tsx
+interface Props {
+  initialFields?: GridRowsProp;          // the rows as loaded (temp ids for none)
+  createNewRow: () => Record<string, unknown>;   // a new row, parent FK already set
+  columns?: Array<{ field: string }>;    // the grid's column definitions (valueOptions of enum cells)
+  title?: string;
+}
+// forwardRef handle, read when the form is submitted:
+interface Handle { getFields: () => GridRowsProp }
+```
+
+Rows whose `id` starts with `temp-` are created, the others updated, and rows no longer returned are deleted. The generated
+UI tests do not drive such a child (they do not know the component's layout; the API tests still send the rows), so
+cover the component with its own tests. The default `dashboard.widgets` property uses this: `components/dashboard/widgets.tsx`
+offers the data source as a list of the `x-display.dashboard` entities the user can read (see
+`docs/knowledge/schema-yaml-configuration.md`, "Dashboard membership"). A `view` target is not used for child arrays.
+
 ---
 
 ## 2. Entity-Level Custom Components (`x-custom-components` on `_detail`)
