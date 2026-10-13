@@ -173,5 +173,20 @@ describe('dashboard widget editor', () => {
       await open({ group_by_field: 'gone' });
       expect(screen.getByText('DashboardWidgetEditor:unknownField')).toBeInTheDocument();
     });
+
+    it('explains a filter on a field the data source does not offer', async () => {
+      await open({ filter_field: 'gone', filter_value: 'x' });
+      expect(screen.getByText('DashboardWidgetProblem:unknownField')).toBeInTheDocument();
+    });
+
+    it('explains a filter value that does not fit the filtered field', async () => {
+      await open({ filter_field: 'status', filter_value: 'archived' });
+      expect(screen.getByText('DashboardWidgetProblem:invalidFilterValue')).toBeInTheDocument();
+    });
+
+    it('shows no problem for a consistent widget', async () => {
+      await open({ filter_field: 'status', filter_value: 'open' });
+      expect(screen.queryByText(/^DashboardWidgetProblem:/)).not.toBeInTheDocument();
+    });
   });
 });

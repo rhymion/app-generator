@@ -3,9 +3,9 @@
 // (organization isolation, x-self-only, x-filter-values) to every query. Used by both the
 // 'use server' aggregateForWidget wrapper (session auth) and the REST API route (API-key auth).
 import prisma from '@/lib/prisma';
-import { ApiError } from '@/lib/api-auth';
-import { findDashboardEntity, findDashboardField, DashboardField } from './catalog';
+import { DASHBOARDABLE_ENTITIES, findDashboardField, DashboardField } from './catalog';
 import { requireDashboardReadScope, tryDashboardReadScope, combineWhere } from './access-where';
+import { findWidgetProblems, WidgetProblemError, type WidgetInput } from './widget-problem';
 import { DEFAULT_TIMEZONE, type Timezone } from '@/lib/_timezone';
 import {
   truncateToBucket,
@@ -278,22 +278,36 @@ export async function aggregateForWidgetCore(
   groupByBucket?: BucketGranularity,
   timezone?: string | null,
 ): Promise<AggregateOutput> {
-  const entity = findDashboardEntity(entityName);
-  if (!entity) throw new ApiError(400, `Entity '${entityName}' is not dashboardable`);
-  const field = findDashboardField(entityName, groupByField);
-  if (!field) throw new ApiError(400, `Unknown group_by_field: ${groupByField}`);
+  // Reject a request the data source cannot answer with a typed problem (not a bare message), so the caller can
+  // say which setting is wrong and how to fix it. The chart-level rules (line needs a bucket, stack needs a series)
+  // are checked on the stored widget, not here: this request carries no chart type.
+  const legacy = filter && filter.field && filter.value ? filter : null;
+  const request: WidgetInput = {
+    entity_name: entityName,
+    group_by_field: groupByField,
+    series_field: seriesField,
+    group_by_bucket: groupByBucket,
+    timezone,
+    filter_field: legacy?.field,
+    filter_value: legacy?.value,
+  };
+  const [problem] = findWidgetProblems(DASHBOARDABLE_ENTITIES, request);
+  if (problem) throw new WidgetProblemError(problem);
+  const field = findDashboardField(entityName, groupByField)!;
 
   // Validate all condition fields against the catalog (multi-layer defense).
   const activeConditions: FilterCondition[] =
     (conditions && conditions.length > 0)
       ? conditions
-      : (filter && filter.field && filter.value)
-        ? [{ field: filter.field, operator: 'equals', values: [filter.value] }]
+      : legacy
+        ? [{ field: legacy.field, operator: 'equals', values: [legacy.value] }]
         : [];
 
   for (const c of activeConditions) {
     if (!findDashboardField(entityName, c.field)) {
-      throw new ApiError(400, `Unknown filter field: ${c.field}`);
+      throw new WidgetProblemError({
+        code: 'unknownField', setting: 'filter_field', params: { entity: entityName, field: c.field },
+      });
     }
   }
 
@@ -301,12 +315,8 @@ export async function aggregateForWidgetCore(
   const access = await requireDashboardReadScope(entityName, userId);
 
   if (groupByBucket) {
-    if (field.kind !== 'datetime') {
-      throw new ApiError(400, `group_by_bucket requires a datetime field; '${groupByField}' is '${field.kind}'`);
-    }
     if (seriesField) {
-      const serField = findDashboardField(entityName, seriesField);
-      if (!serField) throw new ApiError(400, `Unknown series_field: ${seriesField}`);
+      const serField = findDashboardField(entityName, seriesField)!;
       return aggregateBucketMultiSeries(entityName, field, serField, groupByBucket, activeConditions, zone, access, userId);
     }
     return aggregateBucketSingle(entityName, field, groupByBucket, activeConditions, zone, access);
@@ -315,8 +325,7 @@ export async function aggregateForWidgetCore(
   const where = combineWhere(access, activeConditions.length > 0 ? buildConditionsWhere(activeConditions) : undefined);
 
   if (seriesField) {
-    const serField = findDashboardField(entityName, seriesField);
-    if (!serField) throw new ApiError(400, `Unknown series_field: ${seriesField}`);
+    const serField = findDashboardField(entityName, seriesField)!;
     return aggregateMultiSeries(entityName, field, serField, where, userId);
   }
 

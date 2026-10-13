@@ -397,3 +397,10 @@ def test_aggregate_route_takes_group_by_bucket_as_an_enum_string_literal():
     assert 'BUCKET_LABELS' not in result
     assert 'resolveBucket(' not in result
     assert 'integer enum' not in result
+
+
+def test_aggregate_route_returns_the_typed_problem_as_400():
+    """A request the data source cannot answer is a 400 naming the setting, not a generic 500."""
+    result = _make_env().get_template('dashboard_aggregate_route.ts.jinja2').render()
+    assert 'error instanceof WidgetProblemError' in result
+    assert '{ error: error.message, code, setting, params }, { status: 400 }' in result
