@@ -63,6 +63,7 @@ The `x-generate` block in the entity definition controls which outputs are activ
 Two cross-entity files are also regenerated on every run:
 
 - `lib/dashboard/catalog.ts` — aggregates all entities for the dashboard widget catalog
+- `lib/dashboard/access-scope.ts` — per-entity row-level read scope facts the dashboard aggregate applies (see `schema-yaml-configuration.md` §10)
 - `lib/attachment/bridge_actions.ts` — polymorphic attachment bridge for entities that own `attachable`,
   always emitted (`components/_standard/AttachmentSection.tsx` unconditionally imports from it). This
   file was renamed from `lib/attachment/actions.ts` — that name collided with the standard per-entity

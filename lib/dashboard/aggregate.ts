@@ -18,7 +18,8 @@ export type {
   AggregateOutput,
 } from './aggregate-core';
 
-// Server Action — enforces session auth then delegates to aggregateForWidgetCore.
+// Server Action — enforces session auth, then delegates to aggregateForWidgetCore, which requires
+// the user's read permission on the entity and applies its row-level read scope.
 export async function aggregateForWidget(
   entityName: string,
   groupByField: string,
@@ -28,6 +29,6 @@ export async function aggregateForWidget(
   groupByBucket?: BucketGranularity,
   timezone?: string | null,
 ): Promise<AggregateOutput> {
-  await getSessionUserIdOrThrow();
-  return aggregateForWidgetCore(entityName, groupByField, filter, seriesField, conditions, groupByBucket, timezone);
+  const userId = await getSessionUserIdOrThrow();
+  return aggregateForWidgetCore(userId, entityName, groupByField, filter, seriesField, conditions, groupByBucket, timezone);
 }

@@ -1480,6 +1480,9 @@ def generate(schema_path: str, output_dir: str) -> None:
     # docs/generated/openapi.json after the loop finishes.
     openapi_entity_specs: list[dict] = []
     self_only_admin_bypass_entities: list[str] = []
+    # Per-entity read-scope facts (organization isolation, x-self-only, x-filter-values) for the
+    # dashboard aggregate, which applies the same scope as the entity's own list getters.
+    dashboard_access_scopes: dict[str, dict] = {}
     # State-transition gatekeeper table (Issue #696, lib/state_transitions.ts)
     # -- collected across every model in the per-entity loop below (each
     # ctx['state_machine_transitions'] entry already carries the parsed
@@ -1575,6 +1578,14 @@ def generate(schema_path: str, output_dir: str) -> None:
             })
         if ctx.get('is_self_only') and ctx.get('self_only_admin_bypass'):
             self_only_admin_bypass_entities.append(parent)
+        dashboard_access_scopes[parent] = {
+            'should_filter_by_org': bool(ctx.get('should_filter_by_org')),
+            'org_relationship_optional': bool(ctx.get('org_relationship_optional')),
+            'has_assignee_id': bool(ctx.get('has_assignee_id')),
+            'is_self_only': bool(ctx.get('is_self_only')),
+            'self_only_admin_bypass': bool(ctx.get('self_only_admin_bypass')),
+            'filter_values': dict(ctx.get('filter_values') or {}),
+        }
         # State-transition entries: gated on can_update the same way
         # service.ts.jinja2/service_validation.ts.jinja2 gate their own
         # transition-check codegen -- a governed field on a can_update=false
@@ -2335,6 +2346,11 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'dashboard_catalog.ts.jinja2', {'entities': dashboard_catalog}),
         )
         print(f'  Dashboard catalog → lib/dashboard/catalog.ts ({len(dashboard_catalog)} entities)')
+        _write(
+            out / 'lib' / 'dashboard' / 'access-scope.ts',
+            _render(env, 'dashboard_access_scope.ts.jinja2', {'scopes': dashboard_access_scopes}),
+        )
+        print(f'  Dashboard access scope → lib/dashboard/access-scope.ts ({len(dashboard_access_scopes)} entities)')
 
     # --- Dashboard aggregate REST endpoint (app/api/dashboard/aggregate/route.ts) ---
     # Emitted when at least one dashboardable entity exists so the endpoint

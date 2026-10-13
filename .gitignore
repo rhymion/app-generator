@@ -208,6 +208,7 @@ lib/*/*
 !lib/dashboard/**
 lib/dashboard/actions.ts
 lib/dashboard/catalog.ts
+lib/dashboard/access-scope.ts
 lib/dashboard/getters.ts
 lib/dashboard/service.ts
 lib/dashboard/types.ts

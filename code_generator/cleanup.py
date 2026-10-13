@@ -608,6 +608,7 @@ def _clean_schema_driven(out: Path, entities: list, test_entities: list,
     # stale behind), while a user who stripped the marker to fork the file keeps
     # their copy rather than silently losing it.
     _delete_if_generated(out / 'lib' / 'dashboard' / 'catalog.ts')
+    _delete_if_generated(out / 'lib' / 'dashboard' / 'access-scope.ts')
     _try_rmdir(out / 'lib' / 'dashboard')
     # Dashboard aggregate REST endpoint — emitted alongside the catalog, but it
     # lives under the schema-wide app/api/dashboard/ tree rather than any
