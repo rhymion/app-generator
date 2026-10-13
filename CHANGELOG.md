@@ -5,6 +5,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Scheduled tasks on GCP, in dependency order**. `docs/knowledge/scheduled-task-operations.md` explains what to
+  register on GCP (one `task:run-all` Job versus one Scheduler job per task), that `task:run-all` honors `depends_on` order
+  and the UTC business date but not the time of day of an `interval`, how non-daily tasks are recorded as `not_due` and how a
+  missed month is recovered, how entity-level tasks are declared and ordered, how to run once by hand and read the result, and
+  a local dry run with a shifted clock. `docs/knowledge/audit-log-append-only.md` states what `verify` detects and does not.
+  Documentation only.
 - **Dashboard guide, and corrected dashboard docs** (Issue #909, part of #904). `docs/knowledge/dashboard-guide.md` explains
   how a schema author opts an entity in and which fields become groupable, what each widget setting does and which
   combinations are valid, what each problem message means, how read permission and row scope apply, and the
