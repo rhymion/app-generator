@@ -3462,6 +3462,15 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     )
     if _connect_child_data_lines:
         validation_data_obj = validation_data_obj + '\n' + _connect_child_data_lines
+    # Owned (non-connect) children are exposed the same way: `data['{{ property_name }}']` is the array of
+    # rows the caller submits. Keys are only added; no existing key changes meaning.
+    _owned_child_data_lines = '\n'.join(
+        f"      {c['property_name']}: {c['child_var']}Items,"
+        for c in write_ch
+        if not c['use_connect']
+    )
+    if _owned_child_data_lines:
+        validation_data_obj = validation_data_obj + '\n' + _owned_child_data_lines
 
     child_nested_create = _build_child_nested_create(write_ch)
     child_nested_update = _build_child_nested_update(write_ch)

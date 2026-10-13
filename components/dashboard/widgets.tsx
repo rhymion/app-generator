@@ -13,6 +13,8 @@ import AppFieldSelect from '@/components/ui/forms/AppFieldSelect';
 import type { AppFieldSelectOption } from '@/components/ui/forms/AppFieldSelect';
 import { DASHBOARDABLE_ENTITIES, findDashboardEntity } from './catalog-source';
 import { getReadableDashboardEntityNames } from '@/lib/dashboard/readable-entities';
+import { findWidgetProblems } from '@/lib/dashboard/widget-problem';
+import { useProblemMessage } from './widget-problem-message';
 import {
   groupByChoices, normalizeRow, seriesChoices, showsBucket, showsSeries, stackModeEnabled,
 } from './widget-rules';
@@ -40,6 +42,7 @@ const Widgets = forwardRef<WidgetsHandle, WidgetsProps>(function Widgets({ initi
   const tf = useTranslations('Fields');
   const te = useTranslations('EntityLabel');
   const tk = useTranslations('DashboardWidgetEditor.fieldKind');
+  const problemMessage = useProblemMessage();
   const [rows, setRows] = useState<Row[]>(() => (initialFields ?? []).map((r): Row => ({ ...r })));
   // null while loading; afterwards the catalog entities the user may read.
   const [readable, setReadable] = useState<string[] | null>(null);
@@ -148,6 +151,10 @@ const Widgets = forwardRef<WidgetsHandle, WidgetsProps>(function Widgets({ initi
         const fields = known?.groupable_fields ?? [];
         const groupOptions = withCurrentField(fieldOptionsOf(groupByChoices(fields, row.chart_type)), row.group_by_field);
         const seriesOptions = withCurrentField(fieldOptionsOf(seriesChoices(fields, row)), row.series_field);
+        // The rest of what the widget view would complain about (filter, bucket, time zone, ...), shown while editing.
+        // The data source and group-by problems have their own, more specific alerts above and below.
+        const otherProblems = findWidgetProblems(DASHBOARDABLE_ENTITIES, row)
+          .filter((p) => p.setting !== 'entity_name' && p.setting !== 'group_by_field' && p.code !== 'noDataSources');
         const groupValue = String(row.group_by_field ?? '');
         const unknownField = !!known && groupValue !== '' && !fields.some((f) => f.name === groupValue);
         return (
@@ -228,6 +235,9 @@ const Widgets = forwardRef<WidgetsHandle, WidgetsProps>(function Widgets({ initi
                 onChange={(v) => update(id, { filter_value: v === '' ? null : v })}
                 fullWidth
               />
+              {otherProblems.map((p) => (
+                <AppAlert key={`${p.code}:${p.setting}`} severity="error" mb={1}>{problemMessage(p)}</AppAlert>
+              ))}
               <AppBox display="flex" gap={1} mt={1}>
                 <AppButton variant="outlined" size="small" disabled={index === 0} onClick={() => move(index, -1)}>{t('moveUp')}</AppButton>
                 <AppButton variant="outlined" size="small" disabled={index === rows.length - 1} onClick={() => move(index, 1)}>{t('moveDown')}</AppButton>

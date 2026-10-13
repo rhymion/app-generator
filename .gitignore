@@ -309,6 +309,7 @@ components/*/*
 !components/dashboard/widgets.test.tsx
 !components/dashboard/widget-rules.ts
 !components/dashboard/widget-rules.test.ts
+!components/dashboard/widget-problem-message.ts
 components/setting/FormUpsert.tsx
 components/setting/FormView.tsx
 components/setting/column_def.tsx
