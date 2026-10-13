@@ -2034,11 +2034,16 @@ when it is one of:
 - a `many-to-one` FK (each FK value becomes a series, labelled via the
   relationship's `labelField` on the target);
 - a nativeEnum or legacy int-enum field (§4.3) (each enum label is a category);
-- a `boolean` (Yes / No).
+- a `boolean` (Yes / No);
+- an `integer` or `number` without `enum` (kind `number`);
+- a string with `format: date` or `format: date-time` (kind `datetime`).
 
-If an entity has no groupable field (e.g. only free-form strings/numbers),
-it is silently dropped from the catalog — there is nothing meaningful to
-chart. Add a categorical field, or remove the `dashboard: true` flag.
+Every dashboardable entity also gets `creator_id` and `updater_id` (FKs to `user`) and
+`created_at` / `updated_at` (date-time) appended, so the catalog is never empty for an
+opted-in entity and no entity is dropped for lack of a groupable field. `id` is not offered.
+The same list serves Group by, Series and Filter field.
+
+For how users build widgets and the endpoint contract, see [dashboard-guide.md](dashboard-guide.md).
 
 `x-display.dashboard` is independent of `table` and `chart`. Setting it
 does not affect whether the list or chart pages are generated.
