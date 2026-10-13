@@ -1,8 +1,9 @@
 import { expect, type Page } from '@playwright/test';
 
 export const BASE_URL = process.env.EXPO_WEB_URL ?? 'http://localhost:8081';
-// Matches the user the test database is seeded with.
-export const TEST_EMAIL = process.env.TEST_EMAIL ?? 'test@example.com';
+// Matches the administrator that `npm run db:seed-baseline` creates
+// (DEFAULT_ADMIN_EMAIL in scripts/seed-baseline-credentials.ts).
+export const TEST_EMAIL = process.env.TEST_EMAIL ?? 'admin@example.com';
 export const TEST_PASSWORD = process.env.TEST_PASSWORD ?? 'password123';
 
 /** Signs in through the login screen and waits for the authenticated shell. */

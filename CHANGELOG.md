@@ -5,6 +5,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Mobile Playwright entry point, gate step and CI job** (Issue #985, part of #140). `npm run test:e2e:mobile:pw` now runs
+  `scripts/run_mobile_entity_playwright.sh`, which runs the fixture, default and scheduled modes in turn and fails if any mode
+  fails; the bare Playwright invocation is `test:e2e:mobile:pw:raw` and refuses to run unless `MOBILE_PW_PRECONDITIONS_READY=1`
+  is set. The mobile specs sign in as `admin@example.com` by default (the `db:seed-baseline` administrator), the script refuses a
+  symlinked `node_modules`, and `docs/knowledge/mobile-app.md` describes the three modes, the manual recipe and why app-template
+  does not run these specs. The update-generator gate has a path-triggered step for the suite
+  (`scripts/mobile_pw_gate_applies.sh` holds the path list) and CI has a path-filtered `mobile-playwright` job.
 - **Dashboard guide, and corrected dashboard docs** (Issue #909, part of #904). `docs/knowledge/dashboard-guide.md` explains
   how a schema author opts an entity in and which fields become groupable, what each widget setting does and which
   combinations are valid, what each problem message means, how read permission and row scope apply, and the
