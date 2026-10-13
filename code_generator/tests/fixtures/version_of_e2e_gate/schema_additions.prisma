@@ -75,6 +75,7 @@ model vo_item_version_line {
 
 enum VoDocVersionStatus {
   draft
+  revise
   pending
   approved
 }

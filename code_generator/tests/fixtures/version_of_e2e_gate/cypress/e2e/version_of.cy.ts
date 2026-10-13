@@ -192,24 +192,26 @@ describe('x-version-of (generated runtime behaviour)', () => {
   it('ignores a version number sent by the client: create stores none, update keeps the stored value', () => {
     createItem().then((itemId) => {
       // a form submits an empty numeric field as 0; two such rows must not collide on (identity, number)
-      createVersion(itemId, 'pending', 0, { version_no: 0 }).then((res) => {
+      createVersion(itemId, 'draft', 0, { version_no: 0 }).then((res) => {
         expect(res.status).to.eq(201);
         const v1 = (res.body as { id: string }).id;
         cy.task<State>('db:voState', itemId).then((s) => expect(s.versions.map((v) => v.version_no)).to.deep.eq([null]));
+        // an edit of the draft, submitted in the same write, sends the number again
         cy.request({ method: 'GET', url: `/api/vo_item_version/${v1}`, headers }).then((cur) => {
           cy.request({
             method: 'PUT', url: `/api/vo_item_version/${v1}`, headers,
-            body: { ...cur.body, title: 'edited', version_no: 0 },
+            body: { ...cur.body, title: 'edited', version_no: 0, status: 'pending' },
           }).its('status').should('eq', 200);
         });
         cy.task<State>('db:voState', itemId).then((s) => expect(s.versions.map((v) => v.version_no), 'an edit writes no number').to.deep.eq([null]));
         approve(v1);
         cy.task<State>('db:voState', itemId).then((s) => expect(s.versions.map((v) => v.version_no)).to.deep.eq([1]));
-        createVersion(itemId, 'pending', 0, { version_no: 0 }).then((res2) => {
+        createVersion(itemId, 'draft', 0, { version_no: 0 }).then((res2) => {
           expect(res2.status, 'a second row sent with 0 does not collide').to.eq(201);
-          cy.request({ method: 'GET', url: `/api/vo_item_version/${(res2.body as { id: string }).id}`, headers }).then((cur) => {
+          const v2 = (res2.body as { id: string }).id;
+          cy.request({ method: 'GET', url: `/api/vo_item_version/${v2}`, headers }).then((cur) => {
             cy.request({
-              method: 'PUT', url: `/api/vo_item_version/${(res2.body as { id: string }).id}`, headers,
+              method: 'PUT', url: `/api/vo_item_version/${v2}`, headers,
               body: { ...cur.body, version_no: 1 },
             }).its('status').should('eq', 200);
           });

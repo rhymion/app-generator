@@ -157,7 +157,7 @@ definitions:
           status: approved
       on_rejected:
         set_fields:
-          status: draft
+          status: revise
       on_withdrawn:
         set_fields:
           status: draft
@@ -173,6 +173,7 @@ definitions:
       status:
         enum:
           - draft
+          - revise
           - pending
           - approved
         default: draft
