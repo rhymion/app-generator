@@ -181,7 +181,23 @@ def version_of_prefill_plan(vo: dict, schema: dict, models: dict) -> dict:
     for c in dependent:
         c_resets, c_drop = _reset_columns(models[c['model']], models, set())
         children.append({**c, 'resets': c_resets, 'drop': c_drop})
-    return {'resets': resets, 'drop': drop, 'children': children, 'left_empty': left_empty}
+    # One-to-one records that hold the foreign key to the version (a singular relation on
+    # the version, none of the bridges/identity side): carried like a dependent child row
+    # (their values are initial values) except for unique columns, which the user chooses.
+    holders = []
+    for f in models[version].fields.values():
+        if f.is_list or f.relation_fk_fields or f.prisma_type not in models:
+            continue
+        if f.prisma_type == vo['identity']:
+            continue
+        target = models[f.prisma_type]
+        back_fks = {c for g in target.fields.values()
+                    if g.is_relation_object and g.prisma_type == version for c in g.relation_fk_fields}
+        if not back_fks:
+            continue
+        h_resets, h_drop = _reset_columns(target, models, back_fks)
+        holders.append({'prop': f.name, 'resets': h_resets, 'drop': h_drop})
+    return {'resets': resets, 'drop': drop, 'children': children, 'left_empty': left_empty, 'holders': holders}
 
 
 def version_of_errors(schema: dict) -> list[str]:

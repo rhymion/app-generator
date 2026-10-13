@@ -8,6 +8,7 @@ type State = {
 };
 
 const headers = { 'X-API-Key': TEST_API_KEY };
+let lineSeq = 0;
 
 function createItem(name = 'Widget') {
   return cy
@@ -27,8 +28,10 @@ function createVersion(itemId: string, status: 'draft' | 'pending', lines = 0) {
     body: {
       vo_item_id: itemId,
       title: `v-${status}`,
+      summary: 'kept summary',
+      ref_code: `ref-${++lineSeq}`,
       status,
-      vo_item_version_lines: Array.from({ length: lines }, (_, i) => ({ note: `line ${i}` })),
+      vo_item_version_lines: Array.from({ length: lines }, (_, i) => ({ line_code: `code-${++lineSeq}`, note: `line ${i}`, quantity: i + 1 })),
     },
   });
 }
@@ -131,51 +134,61 @@ describe('x-version-of (generated runtime behaviour)', () => {
     });
   });
 
-  describe('new draft from the current version', () => {
-    function newDraft(itemId: unknown) {
-      return cy.request({
-        method: 'POST',
-        url: '/api/vo_item_version/actions/new-draft',
-        headers,
-        failOnStatusCode: false,
-        body: { vo_item_id: itemId },
-      });
-    }
+  describe('new version screen (prefilled create form)', () => {
+    const newVersionUrl = (itemId: unknown) => `/en/vo_item_version/new?new_version_of=${String(itemId)}`;
 
-    it('is refused while the identity has no approved version, and without an identity id', () => {
+    it('says so when the identity has no approved version or already has an open draft', () => {
       createItem().then((itemId) => {
-        newDraft(itemId).its('status').should('be.within', 400, 499);
-        newDraft(undefined).its('status').should('be.within', 400, 499);
-        newDraft('missing-id').its('status').should('be.within', 400, 499);
+        cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
+        cy.visit(newVersionUrl(itemId));
+        cy.contains('no approved version');
+        createVersion(itemId, 'pending', 1).then((res) => {
+          approve((res.body as { id: string }).id);
+          createVersion(itemId, 'draft').its('status').should('eq', 201);
+          cy.visit(newVersionUrl(itemId));
+          cy.contains('already has an open draft');
+        });
       });
     });
 
-    it('copies the current version and its child rows into an unsubmitted draft without a number', () => {
+    it('opens filled with the current version, writes nothing until saved, then saves a new draft', () => {
       createItem().then((itemId) => {
         createVersion(itemId, 'pending', 2).then((res) => {
           const v1 = (res.body as { id: string }).id;
           approve(v1);
-          newDraft(itemId).then((created) => {
-            expect(created.status).to.eq(201);
-            const draftId = (created.body as { id: string }).id;
-            expect(draftId).to.not.eq(v1);
-            cy.task<{ title: string; status: string; version_no: number | null; approvable_id: string; notes: string[] }>('db:voDraft', draftId).then((d) => {
+          cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
+          cy.visit(newVersionUrl(itemId));
+          cy.get('input').then(($inputs) => {
+            const values = [...$inputs].map((i) => (i as HTMLInputElement).value);
+            expect(values, 'title and summary carried over').to.include.members(['v-pending', 'kept summary']);
+            expect(values.some((v) => v.startsWith('ref-')), 'a unique column is not carried').to.eq(false);
+          });
+          cy.contains('line 0');
+          cy.contains('line 1');
+          // nothing is written by opening the screen
+          cy.task<State>('db:voState', itemId).then((s) => expect(s.versions).to.have.length(1));
+          // a unique, required child column is left for the user to fill in
+          cy.get('button[type="submit"]').click();
+          cy.task<State>('db:voState', itemId).then((s) => expect(s.versions, 'blocked until the codes are given').to.have.length(1));
+          ['new-code-a', 'new-code-b'].forEach((code, i) => {
+            cy.get(`[role="row"][data-rowindex="${i}"] [data-field="line_code"]`).dblclick();
+            cy.focused().type(`${code}{enter}`);
+          });
+          cy.get('button[type="submit"]').click();
+          cy.location('pathname').should('eq', '/vo_item_version');
+          cy.task<State>('db:voState', itemId).then((s) => {
+            expect(s.versions).to.have.length(2);
+            const draft = s.versions.find((v) => v.id !== v1)!;
+            expect(draft.version_no, 'numbered at approval, not at save').to.eq(null);
+            cy.task<{ title: string; status: string; ref_code: string | null; attachable_id: string; notes: string[]; codes: string[] }>('db:voDraft', draft.id).then((d) => {
               expect(d.title).to.eq('v-pending');
               expect(d.status, 'the submit field restarts at its default').to.eq('draft');
-              expect(d.version_no, 'numbered at approval, not at copy').to.eq(null);
+              expect(d.ref_code).to.eq(null);
               expect(d.notes).to.deep.eq(['line 0', 'line 1']);
+              expect(d.codes).to.deep.eq(['new-code-a', 'new-code-b']);
+              cy.task<string>('db:voAttachableId', v1).should('not.eq', d.attachable_id);
             });
             cy.task<number>('db:voLineCount', v1).should('eq', 2);
-            // one open draft per identity: a second request is refused
-            newDraft(itemId).its('status').should('be.within', 400, 499);
-            // approving the draft numbers it and moves current_version_id
-            cy.task<string | null>('db:voPendingRequestId', draftId).should('eq', null);
-            cy.request({ method: 'PUT', url: `/api/vo_item_version/${draftId}`, headers, body: { vo_item_id: itemId, title: 'v-pending', status: 'pending' } }).its('status').should('eq', 200);
-            approve(draftId);
-            cy.task<State>('db:voState', itemId).then((s) => {
-              expect(s.versions.map((v) => v.version_no)).to.deep.eq([1, 2]);
-              expect(s.current_version_id).to.eq(draftId);
-            });
           });
         });
       });

@@ -36,6 +36,16 @@ const CHILDREN: Array<{ prop: string; reset: Array<[string, unknown]>; drop: str
   },
 {% endfor %}
 ];
+// One-to-one records holding the foreign key to the version: carried as initial values.
+const HOLDERS: Array<{ prop: string; reset: Array<[string, unknown]>; drop: string[] }> = [
+{% for c in plan.holders %}
+  {
+    prop: '{{ c.prop }}',
+    reset: [{% for r in c.resets %}['{{ r.key }}', {{ r.value }}]{% if not loop.last %}, {% endif %}{% endfor %}],
+    drop: [{% for d in c.drop %}'{{ d }}'{% if not loop.last %}, {% endif %}{% endfor %}],
+  },
+{% endfor %}
+];
 // Every other child property of the version starts empty.
 const EMPTY_CHILDREN: string[] = [{% for p in plan.left_empty %}'{{ p }}'{% if not loop.last %}, {% endif %}{% endfor %}];
 
@@ -71,6 +81,10 @@ export async function getNewVersionPrefill(identityId: string, defaults: Row): P
   for (const c of CHILDREN) {
     const rows = ((current as unknown as Row)[c.prop] ?? []) as Row[];
     src[c.prop] = rows.map((row, i) => ({ ...resetRow(row, {}, c.reset, c.drop), id: `temp-prefill-${i}` }));
+  }
+  for (const h of HOLDERS) {
+    const value = (current as unknown as Row)[h.prop];
+    if (value && typeof value === 'object') src[h.prop] = resetRow(value as Row, {}, h.reset, h.drop);
   }
   return { ok: true, src };
 }

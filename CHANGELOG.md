@@ -10,8 +10,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   the identity's `current_version_id`, and deletion of a terminally rejected or withdrawn draft with its owned child rows.
   The Prisma columns are declared by the app and checked at generation time. See `docs/knowledge/schema-yaml-configuration.md`
   section 7.8.
-- **`x-version-of`: new draft from the current version** (Refs #946). `POST /api/<version>/actions/new-draft` and the Server Action
-  `newDraft<Version>` copy the identity's current version and its owned child rows (one level) into an unsubmitted draft.
+- **`x-version-of`: new version screen** (Refs #946). `/<version>/new?new_version_of=<identity id>` opens the version
+  entity's create form filled with the current version's values, including child rows that have no screens of their own;
+  nothing is saved until the user saves it. Unique columns (including required ones on child rows) are left for the user,
+  and a new attachment bridge is created for the new record.
 - **Mobile app: entities with a self-referencing `children` list get native screens** (Issue #942). A one-to-many
   `x-outputType: list` child attached through a nullable foreign key (for example `procedure.children`) no longer
   makes an entity ineligible: it is drawn as the same chip picker as a many-to-many list and saved as `children_ids`.

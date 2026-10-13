@@ -253,3 +253,23 @@ def test_owned_children_are_read_from_the_view_definition():
     owned, problems = version_of_children('product_version', s)
     assert problems == []
     assert owned == [{'model': 'coverage', 'fk': 'product_version_id'}]
+
+
+def test_prefill_plan_carries_one_to_one_record_holding_the_version_fk(tmp_path):
+    prisma = PRISMA_COPY.replace("  coverages coverage[]\n", "  coverages coverage[]\n  badge badge?\n") + """
+model badge {
+  id                 String @id @default(cuid())
+  product_version_id String @unique
+  product_version    product_version @relation(fields: [product_version_id], references: [id])
+  code               String @unique
+  label              String
+}
+"""
+    f = tmp_path / 'schema.prisma'
+    f.write_text(prisma)
+    plan = version_of_prefill_plan(version_of_for('product_version', _schema()), _schema(), parse_prisma_schema(f))
+    (holder,) = plan['holders']
+    assert holder['prop'] == 'badge'
+    resets = {r['key'] for r in holder['resets']}
+    # the id, the version FK and the unique code restart; the label is an initial value
+    assert {'id', 'product_version_id', 'code'} <= resets and 'label' not in resets
