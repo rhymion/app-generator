@@ -697,6 +697,199 @@ two service accounts, the `task-runner-*` secrets, and the
 `app-cron-secret`. Wiring that secret into the Cloud Run service's env is
 still not done by `gcp-deploy.sh`.
 
+### Running tasks in dependency order on GCP
+
+This section answers the questions an operator has before relying on the
+nightly Job. "Verified" means the behavior was observed by running
+`npm run task:run-all` against a local database with a shifted clock (see
+"Dry run on a local machine"). "Not run" means the step comes from reading
+the scripts and the official Google Cloud documentation and has not been
+executed.
+
+**What to register.** Register the single nightly `task-runner` Job
+(`scripts/gcp-task-runner.sh`) and let `task:run-all` decide what is due. Do
+not also register a per-task Cloud Scheduler job for any task that has a
+`depends_on` edge or a non-daily `interval`:
+
+| | One `task:run-all` Job | One Cloud Scheduler job per task, calling the HTTP route |
+|---|---|---|
+| Order | Dependency order (Kahn), every night | None. Each job fires at its own time. A task whose predecessor has no completion record for the day is refused (HTTP 409) and not retried until the next firing |
+| Non-daily intervals | `not_due` is recorded on the nights the task is not due | The Scheduler cron is the only gate; no `not_due` record is written, so a successor of a weekly or monthly task is blocked on the other nights |
+| Missed nights | One catch-up run | The missed firing is lost |
+| Needs | `DATABASE_URL` and every secret the handlers read, in the Job | The deployed app reachable over HTTPS and `CRON_SECRET` |
+
+If both exist for the same task, the completion record makes the second
+caller a no-op for that business date (`already_succeeded`, HTTP 200), so a
+double trigger never runs a handler twice. It can still make the task run at
+the wrong moment relative to its predecessors, which is why the combination
+is not recommended.
+
+**Is the order of the declared times honored?** No. `task:run-all` does not
+read the time of day of an `interval`. It starts once, at the time the
+Scheduler job fires, and for each task decides only whether it is *due* for
+the current UTC calendar day (see "Which tasks run tonight"). The order in
+which the tasks run is the `depends_on` order; tasks with no edge between them
+run in declaration order, entity-level `x-scheduled-task` entries before
+top-level `x-scheduled-tasks` entries. Declare `depends_on` for every order
+that matters; a declared `interval` of `0 1 * * *` versus `15 1 * * *` creates
+no ordering by itself. Verified: started at 12:00 UTC, all four tasks of the
+example below ran in one pass regardless of their declared times (01:00,
+01:15, 02:00, 03:00 on the 1st).
+
+The business date is the UTC calendar day of the moment the Job starts. With
+the default `TASK_RUNNER_SCHEDULE="0 2 * * *"` and
+`TASK_RUNNER_TIME_ZONE=Asia/Tokyo`, the Job starts at 17:00 UTC of the
+previous day, so the business date lags the Tokyo date by one day. Verified:
+the start at 02:00 JST on the 1st of a month (31st 17:00 UTC) reports
+`not_due` for a task scheduled `0 3 1 * *`; the start at 02:00 JST on the 2nd
+runs it.
+
+**Tasks that are not daily.** Example task: `audit_log_export_for_retirement`
+with `interval: "0 3 1 * *"`. Under `task:run-all`:
+
+- It runs on the first night whose business date is on or after the 1st of a
+  month that has no success yet, and on the very first run of a database
+  whatever the date.
+- On every other night the pass writes a `not_due` record for it and exits 0.
+- One run covers all months missed: after a long stop it runs once, not once
+  per missed month. What a run does is up to its handler. The audit-log export
+  writes the month before the run date only, so an earlier missed month is
+  exported by hand (`npm run audit-log:digest -- export-month YYYY-MM`).
+- A date that already has a `succeeded` record cannot be run again:
+  `task:run <task_id>` and `task:run-all` both report `already_succeeded`
+  and the admin page offers no action on a succeeded record.
+
+Verified sequence (one local database, the four audit-log tasks of the
+example; each line is one `task:run-all` invocation; dates are in 2026 unless
+a year is shown):
+
+| Business date | Situation | close | verify | partitions | export (`0 3 1 * *`) | Exit |
+|---|---|---|---|---|---|---|
+| 10-13 | First run on a fresh database | succeeded | succeeded | succeeded | succeeded | 0 |
+| 10-13 | Same day again | already_succeeded | already_succeeded | already_succeeded | already_succeeded | 0 |
+| 10-14 | Next day | succeeded | succeeded | succeeded | not_due | 0 |
+| 10-15 | Storage not configured | failed | blocked (waiting on close) | succeeded | not_due | 1 |
+| 10-15 | Same night again, storage configured | succeeded | succeeded | already_succeeded | not_due | 0 |
+| 10-31 | Night before the 1st | succeeded | succeeded | succeeded | not_due | 0 |
+| 11-01 | The 1st | succeeded | succeeded | succeeded | succeeded | 0 |
+| 11-01 | Same night again | already_succeeded (all four) | | | | 0 |
+| 11-02 | Day after | succeeded | succeeded | succeeded | not_due | 0 |
+| 12-05 | Nothing ran 11-03 to 12-04 (the run of 12-01 missed) | succeeded | succeeded | succeeded | succeeded (exports November) | 0 |
+| 2027-02-10 | Nothing ran for two months | succeeded | succeeded | succeeded | succeeded (exports January only; December stays missing until `export-month`) | 0 |
+
+Exporting the skipped month by hand then writes its file and checksum;
+running the same export again with unchanged rows is a no-op.
+
+**Tasks attached to an entity.** An entity-level task is declared with a
+singular `x-scheduled-task` key inside an entity definition; at most one per
+entity:
+
+```yaml
+definitions:
+  widget:
+    x-scheduled-task:
+      task_id: widget_timeout
+      filter:
+        status_in: ["pending"]
+      handler: afterTimeout
+      interval: "0 * * * *"
+      depends_on: [demo_reset]
+```
+
+A complete example, mixed with a top-level task and a `depends_on` chain across
+both kinds, is `code_generator/tests/fixtures/scheduled_task_bulk_gate/json_schema.yaml`
+in this repository. The registry, the dependency graph, `task:run-all`, the
+completion records and the admin page treat both kinds the same, so nothing
+differs on GCP: the Job runs them in one pass. The two kinds differ only in
+what the handler receives (an entity-level handler is called once per matching
+row inside its own transaction; a top-level handler is called once). To check
+the order the Job will use, read the generated `lib/scheduled-tasks/dependencies.ts`:
+its key order is the tie-break order (entity-level entries first, then
+top-level entries), and its `TASK_DEPENDENCIES` lists the edges. The end-to-end
+test `npm run test:scheduled-task-e2e-gate` runs `task:run-all` over a fixture
+schema. Not run for this section: an entity-level task executed against the
+local database; the observations above use top-level tasks.
+
+**Run once by hand and check the result.**
+
+```sh
+# Start the same Job the Scheduler starts, and wait for it (not run)
+gcloud run jobs execute task-runner --region=<region> --project=<project> --wait
+# Start it through the Scheduler job instead (not run)
+gcloud scheduler jobs run task-runner-nightly --location=<region> --project=<project>
+# Recent executions and one execution's status (not run)
+gcloud run jobs executions list --job=task-runner --region=<region> --project=<project>
+gcloud run jobs executions describe <execution> --region=<region> --project=<project>
+# Container output of the Job (not run; filter built from the log fields
+# the Cloud Run documentation lists for jobs)
+gcloud logging read 'resource.type=cloud_run_job AND resource.labels.job_name=task-runner' \
+  --project=<project> --limit=50
+```
+
+Each task prints one line, `<task_id>: <outcome>`, followed by a summary line
+(see the table above). `task:run-all` exits 1 when any task failed, was
+blocked or was already running; the Cloud Run documentation states that an
+execution succeeds only if all its tasks run to completion successfully, and
+the script creates the Job with `--max-retries=0`, so a failed night is
+reported and not retried until the next run. The Google documentation pages
+read for this section do not say how a failed execution is labeled or how
+`--wait` reports it.
+
+The authoritative result per task is the `scheduled_task_run` table: the
+admin page `/scheduled_task_run` (members of the `ScheduledTaskRunner` role),
+or `GET /api/scheduled-task-runs?date=YYYY-MM-DD`, shows status, message
+and why a task did not run for a date. The table itself was queried directly
+for the runs above; the page was not opened in a browser for this section.
+
+To re-run after a failure, fix the cause and start the Job again the same
+night: succeeded tasks report `already_succeeded` and are not run twice, the
+failed task is retried and its blocked successors then run (verified:
+unconfigured storage, then configured). A `running` record left by a crashed
+run is taken over only by `task:run <task_id>` (or the admin page's Rerun on a
+stuck record), never by `task:run-all`. To re-run a single task, run `npm run task:run -- <task_id>` from a shell that
+has the Job's environment (the same `DATABASE_URL` and handler secrets).
+
+### Dry run on a local machine
+
+`task:run-all` reads the date from the process clock, so a different night is
+simulated by shifting the clock of that one process. No GCP resource is
+involved. Use a throw-away database: handlers really run, and a success
+recorded for a future date makes later real nights look already done.
+
+1. Prepare a scratch checkout and its test database (`npm run test:e2e:build`
+   or the `setup` steps), then `npm run db:seed-baseline`.
+2. Save as `fake-date.cjs`:
+
+   ```js
+   // Shifts the process clock to FAKE_NOW (ISO 8601, UTC); the clock keeps running.
+   const fake = process.env.FAKE_NOW;
+   if (fake) {
+     const RealDate = Date;
+     const offset = new RealDate(fake).getTime() - RealDate.now();
+     class FakeDate extends RealDate {
+       constructor(...args) { if (args.length === 0) super(RealDate.now() + offset); else super(...args); }
+       static now() { return RealDate.now() + offset; }
+     }
+     globalThis.Date = FakeDate;
+   }
+   ```
+
+3. Run a night, with the dates in ascending order:
+
+   ```sh
+   NODE_ENV=test FAKE_NOW=2026-11-01T00:30:00Z NODE_OPTIONS="--require $PWD/fake-date.cjs" \
+     npm run task:run-all
+   ```
+
+4. Inspect the records: `select task_id, business_date, status from scheduled_task_run order by business_date, task_id;`
+
+The shifted clock covers Node code only. Database defaults (`now()`, the
+`created_at` of `audit_log` rows) and SQL that calls `now()` keep the real
+time. `NODE_ENV=test` loads `.env.test` and `.env.test.local`; a variable
+defined there (for example `AUDIT_LOG_STORAGE_DIR`) is not overridden by an
+empty value in a later file, so set it explicitly on the command line when a
+run depends on it being present or absent.
+
 ### Where the three canonical env vars go under GCP
 
 The Vercel path canonically injects three env vars via `scripts/vercel-env.sh`:

@@ -5,6 +5,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Scheduled tasks on GCP, in dependency order**. `docs/knowledge/scheduled-task-operations.md` explains what to
+  register on GCP (one `task:run-all` Job versus one Scheduler job per task), that `task:run-all` honors `depends_on` order
+  and the UTC business date but not the time of day of an `interval`, how non-daily tasks are recorded as `not_due` and how a
+  missed month is recovered, how entity-level tasks are declared and ordered, how to run once by hand and read the result, and
+  a local dry run with a shifted clock. `docs/knowledge/audit-log-append-only.md` states what `verify` detects and does not.
+  Documentation only.
 - **Mobile Playwright entry point, gate step and CI job** (Issue #985, part of #140). `npm run test:e2e:mobile:pw` now runs
   `scripts/run_mobile_entity_playwright.sh`, which runs the fixture, default and scheduled modes in turn and fails if any mode
   fails; the bare Playwright invocation is `test:e2e:mobile:pw:raw` and refuses to run unless `MOBILE_PW_PRECONDITIONS_READY=1`
