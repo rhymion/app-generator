@@ -51,7 +51,7 @@ from helpers.schema_helpers import is_optional_fk_to_parent
 from helpers.schema_helpers import get_approval_lines_props
 from helpers.schema_helpers import child_has_own_write_capability
 from keys import x_approval as approval_key
-from version_of import version_of_entities, version_of_for, version_of_children, version_of_copy_plan
+from version_of import version_of_entities, version_of_for, version_of_children, version_of_prefill_plan
 from generators import (
     chart_context,
     page_list_context,
@@ -1983,7 +1983,9 @@ def generate(schema_path: str, output_dir: str) -> None:
         # parent-embedded grid (cmd_167 §4); the form binds the parent implicitly
         # and never shows a parent picker.
         if can_new or ctx.get('bridge_child_ir'):
-            _write(app_dir / 'new' / 'page.tsx', _render(env, 'page_new.tsx.jinja2', ctx))
+            _write(app_dir / 'new' / 'page.tsx', _render(
+                env, 'page_new.tsx.jinja2', {**ctx, 'version_of_new': version_of_for(parent, schema)},
+            ))
 
         # --- page edit ---
         if can_edit:
@@ -2591,22 +2593,21 @@ def generate(schema_path: str, output_dir: str) -> None:
     # the approval dispatch modules below. Always regenerated, never a stub.
     for _vo in version_of_entities(schema):
         _vo_children, _ = version_of_children(_vo['version'], schema)
-        _vo_copy = version_of_copy_plan(_vo, _vo_children, schema, _prisma_models)
         _write(
             out / 'lib' / _vo['version'] / 'version_of.ts',
-            _render(env, 'version_of.ts.jinja2', {**_vo, 'children': _vo_children, 'copy': _vo_copy}),
+            _render(env, 'version_of.ts.jinja2', {**_vo, 'children': _vo_children}),
         )
         print(f"  Version helpers → lib/{_vo['version']}/version_of.ts")
-        # New draft from the current version: REST route + Server Action.
+        # New-version screen: the prefill the create page reads (no record is
+        # created until the user saves).
         _write(
-            out / 'app' / 'api' / _vo['version'] / 'actions' / 'new-draft' / 'route.ts',
-            _render(env, 'version_of_new_draft_route.ts.jinja2', _vo),
+            out / 'lib' / _vo['version'] / 'version_of_prefill.ts',
+            _render(env, 'version_of_prefill.ts.jinja2', {
+                **_vo, 'pascal': to_pascal_case(_vo['version']),
+                'plan': version_of_prefill_plan(_vo, schema, _prisma_models),
+            }),
         )
-        _write(
-            out / 'lib' / _vo['version'] / 'new_draft_action.ts',
-            _render(env, 'version_of_new_draft_action.ts.jinja2', {**_vo, 'pascal': to_pascal_case(_vo['version'])}),
-        )
-        print(f"  New-draft action → app/api/{_vo['version']}/actions/new-draft/, lib/{_vo['version']}/new_draft_action.ts")
+        print(f"  New-version prefill → lib/{_vo['version']}/version_of_prefill.ts")
 
     approvable_entities = []
     for def_key, def_val in defs.items():

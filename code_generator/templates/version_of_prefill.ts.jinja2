@@ -1,0 +1,76 @@
+// AUTO-GENERATED - DO NOT EDIT
+//
+// x-version-of: initial values for the "new {{ version }}" screen of a
+// {{ identity }}. The screen opens as an ordinary create form filled with the
+// current version's values; nothing is written until the user saves it.
+import prisma from '@/lib/prisma';
+import { assertPermission, getModelPermissions } from '@/lib/authz';
+import { AppError } from '@/lib/_errors';
+import { get{{ pascal }}Detail } from './getters';
+import { assertSingleOpenDraft } from './version_of';
+
+export type NewVersionPrefill =
+  | { ok: true; src: Record<string, unknown> }
+  | { ok: false; reason: 'not_found' | 'no_current_version' | 'open_draft' };
+
+type Row = Record<string, unknown>;
+
+// Columns that restart from the schema default (or are left for the user to
+// fill in): system columns, the version number, the approval submit field(s)
+// and every single-column unique column (a copied value would collide).
+const RESET: Array<[string, unknown]> = [
+{% for r in plan.resets %}
+  ['{{ r.key }}', {{ r.value }}],
+{% endfor %}
+];
+// Relation objects that belong to a reset column.
+const DROP: string[] = [{% for d in plan.drop %}'{{ d }}'{% if not loop.last %}, {% endif %}{% endfor %}];
+
+// Child rows that depend on the version and have no screens of their own.
+const CHILDREN: Array<{ prop: string; reset: Array<[string, unknown]>; drop: string[] }> = [
+{% for c in plan.children %}
+  {
+    prop: '{{ c.prop }}',
+    reset: [{% for r in c.resets %}['{{ r.key }}', {{ r.value }}]{% if not loop.last %}, {% endif %}{% endfor %}],
+    drop: [{% for d in c.drop %}'{{ d }}'{% if not loop.last %}, {% endif %}{% endfor %}],
+  },
+{% endfor %}
+];
+// Every other child property of the version starts empty.
+const EMPTY_CHILDREN: string[] = [{% for p in plan.left_empty %}'{{ p }}'{% if not loop.last %}, {% endif %}{% endfor %}];
+
+function resetRow(row: Row, defaults: Row, reset: Array<[string, unknown]>, drop: string[]): Row {
+  const out: Row = { ...row };
+  for (const [key, empty] of reset) out[key] = key in defaults ? defaults[key] : empty;
+  for (const key of drop) delete out[key];
+  return out;
+}
+
+/**
+ * Initial values for a new {{ version }} of `identityId`: the current version's
+ * values (see RESET above for what is not carried) plus its dependent child rows
+ * as new rows. `defaults` is the create page's blank form state.
+ */
+export async function getNewVersionPrefill(identityId: string, defaults: Row): Promise<NewVersionPrefill> {
+  const { permissions } = await getModelPermissions('{{ version }}');
+  await assertPermission(permissions.general, 'read', '{{ version }}');
+  const identity = await prisma.{{ identity }}.findUnique({ where: { id: identityId }, select: { current_version_id: true } });
+  if (!identity) return { ok: false, reason: 'not_found' };
+  if (!identity.current_version_id) return { ok: false, reason: 'no_current_version' };
+  try {
+    await assertSingleOpenDraft(prisma, identityId, null);
+  } catch (e) {
+    if (e instanceof AppError) return { ok: false, reason: 'open_draft' };
+    throw e;
+  }
+  const current = await get{{ pascal }}Detail(identity.current_version_id);
+  if (!current) return { ok: false, reason: 'not_found' };
+  const src = resetRow(current as unknown as Row, defaults, RESET, DROP);
+  src.id = '';
+  for (const prop of EMPTY_CHILDREN) src[prop] = defaults[prop] ?? [];
+  for (const c of CHILDREN) {
+    const rows = ((current as unknown as Row)[c.prop] ?? []) as Row[];
+    src[c.prop] = rows.map((row, i) => ({ ...resetRow(row, {}, c.reset, c.drop), id: `temp-prefill-${i}` }));
+  }
+  return { ok: true, src };
+}

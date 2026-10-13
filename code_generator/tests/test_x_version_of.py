@@ -11,7 +11,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 from generate import _make_env, _render
 from validate import SchemaValidationError, validate_version_of_prisma
 from schema_deriver import parse_prisma_schema
-from version_of import version_of_copy_plan, version_of_entities, version_of_errors, version_of_for
+from version_of import version_of_prefill_plan, version_of_entities, version_of_errors, version_of_for
 
 PRISMA_OK = """
 model product {
@@ -139,8 +139,7 @@ def test_key_is_registered_for_both_schema_builders():
 
 
 def _ctx(**over):
-    return {**version_of_for('product_version', _schema()), 'children': [],
-            'copy': {'columns': [], 'audit': [], 'children': [], 'uses_json': False}, **over}
+    return {**version_of_for('product_version', _schema()), 'children': [], **over}
 
 
 def test_helper_module_renders_all_three_functions():
@@ -199,44 +198,45 @@ model coverage {
 def _plan(tmp_path):
     f = tmp_path / 'schema.prisma'
     f.write_text(PRISMA_COPY)
-    vo = version_of_for('product_version', _schema())
-    return version_of_copy_plan(vo, [{'model': 'coverage', 'fk': 'product_version_id'}], _schema(), parse_prisma_schema(f))
+    s = _schema()
+    s['definitions']['__coverage'] = {'type': 'object', 'properties': {'label': {'type': 'string'}}}
+    s['definitions']['coverage'] = {'allOf': [{'$ref': '#/definitions/__coverage'}]}
+    s['definitions']['product_version'] = {'allOf': [
+        {'$ref': '#/definitions/__product_version'},
+        {'type': 'object', 'properties': {'coverages': {
+            'type': 'array', 'items': {'$ref': '#/definitions/coverage'}, 'x-parent-fk': ['product_version_id']}}},
+    ]}
+    return s, version_of_prefill_plan(version_of_for('product_version', s), s, parse_prisma_schema(f))
 
 
-def test_copy_plan_skips_number_submit_field_unique_and_system_columns(tmp_path):
-    plan = _plan(tmp_path)
-    names = [c['name'] for c in plan['columns']]
+def test_prefill_plan_resets_number_submit_field_unique_and_system_columns(tmp_path):
+    _, plan = _plan(tmp_path)
+    reset = {r['key'] for r in plan['resets']}
+    # restart: ids/timestamps/audit/bridge, the number, the submit field, the unique slug
+    assert {'id', 'created_at', 'creator_id', 'updater_id', 'approvable_id', 'version_no', 'status', 'slug'} <= reset
     # carried over: the identity FK and plain columns
-    assert names == ['product_id', 'title', 'meta']
-    # the number, the submit field (status), the unique slug, ids and timestamps restart
-    assert plan['audit'] == ['creator_id', 'updater_id']
-    assert plan['uses_json'] is True
-    child = plan['children'][0]
-    assert [c['name'] for c in child['columns']] == ['label']
+    assert not reset & {'product_id', 'title', 'meta'}
 
 
-def test_new_draft_function_renders_copy_and_child_copy(tmp_path):
-    out = _render(_make_env(), 'version_of.ts.jinja2', _ctx(
-        children=[{'model': 'coverage', 'fk': 'product_version_id'}], copy=_plan(tmp_path)))
-    assert 'export async function newDraftFromCurrent' in out
-    assert 'identity.current_version_id' in out
-    assert 'await assertSingleOpenDraft(tx, identityId, null);' in out
-    assert 'title: source.title,' in out
-    assert 'version_no' not in out.split('newDraftFromCurrent')[1]
-    assert 'meta: (source.meta ?? undefined) as Prisma.InputJsonValue | undefined,' in out
-    assert 'creator_id: actorId,' in out
-    assert 'tx.coverage.createMany' in out and 'product_version_id: draft.id,' in out
-    assert 'label: row.label,' in out
+def test_prefill_plan_carries_dependent_children_and_leaves_own_screen_children_empty(tmp_path):
+    s, plan = _plan(tmp_path)
+    assert [(c['prop'], c['model']) for c in plan['children']] == [('coverages', 'coverage')]
+    # a child with its own screens (new/edit/delete not all disabled) is not prefilled
+    s['definitions']['coverage']['x-generate'] = {'list': True}
+    from version_of import version_of_dependent_children
+    dependent, empty = version_of_dependent_children('product_version', s)
+    assert dependent == [] and empty == ['coverages']
 
 
-def test_new_draft_route_and_action_render():
+def test_prefill_module_renders_without_a_created_record(tmp_path):
+    _, plan = _plan(tmp_path)
     vo = version_of_for('product_version', _schema())
-    route = _render(_make_env(), 'version_of_new_draft_route.ts.jinja2', vo)
-    assert "requireApiPermission(userId, 'product_version', 'create')" in route
-    assert 'newDraftFromCurrent(tx, identityId, userId)' in route and 'status: 201' in route
-    action = _render(_make_env(), 'version_of_new_draft_action.ts.jinja2', {**vo, 'pascal': 'ProductVersion'})
-    assert action.startswith('// AUTO-GENERATED') and "'use server';" in action
-    assert 'export async function newDraftProductVersion(' in action
+    out = _render(_make_env(), 'version_of_prefill.ts.jinja2', {**vo, 'pascal': 'ProductVersion', 'plan': plan})
+    assert 'export async function getNewVersionPrefill' in out
+    assert "['version_no', null]" in out and "prop: 'coverages'" in out
+    assert 'create(' not in out and 'createMany' not in out
+    assert 'await assertSingleOpenDraft(prisma, identityId, null);' in out
+    assert "reason: 'open_draft'" in out
 
 
 def test_owned_children_are_read_from_the_view_definition():
