@@ -3,7 +3,18 @@
 import { ApiError } from '@/lib/api-auth';
 import { TIMEZONE_VALUES, TIMEZONE_IANA_NAME, DEFAULT_TIMEZONE, type Timezone } from '@/lib/_timezone';
 
-export type BucketGranularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
+export const BUCKET_GRANULARITY_VALUES = ['day', 'week', 'month', 'quarter', 'year'] as const;
+export type BucketGranularity = (typeof BUCKET_GRANULARITY_VALUES)[number];
+
+// A missing bucket means "no bucketing"; any other value must be one of the enum's string literals.
+// An unknown value is a client error naming the allowed values, never silently ignored.
+export function resolveBucketGranularity(raw: unknown): BucketGranularity | undefined {
+  if (raw == null) return undefined;
+  if (typeof raw !== 'string' || !(BUCKET_GRANULARITY_VALUES as readonly string[]).includes(raw)) {
+    throw new ApiError(400, `Unknown group_by_bucket: ${JSON.stringify(raw)}. Allowed values: ${BUCKET_GRANULARITY_VALUES.join(', ')}`);
+  }
+  return raw as BucketGranularity;
+}
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 

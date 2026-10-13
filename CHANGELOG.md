@@ -59,6 +59,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `resetTestDatabase()` empties both tables with `TRUNCATE`. Consumers add the SQL to their own migrations, create the
   restricted application role and the write-once bucket; see `docs/knowledge/audit-log-append-only.md`.
 ### Changed
+- **Dashboard REST: `group_by_bucket` is the enum string literal** (Issue #912). `POST /api/dashboard/aggregate` now takes
+  `day`, `week`, `month`, `quarter` or `year`, like every other native enum in the REST API, and the integer form `0`-`4` is
+  removed. An unknown value returns `400` naming the allowed values instead of being ignored (which returned an unbucketed
+  result). A client that sent the integers must send the literals. The built-in dashboard UI already used the literals.
 - **`anonymizeUser()` no longer redacts `audit_log.metadata`** (Issue #945). `audit_log.metadata` must not contain personal
   data, so the step never changed anything, and under the trigger an update would fail the erasure transaction.
   `recordAuditEvent`'s documentation now says `metadata` must not contain personal data.
