@@ -331,7 +331,7 @@ def test_aggregate_route_accepts_the_timezone_enum_literal_and_passes_it_through
     result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
     assert 'timezone?: string | null;' in result
     assert 'group_by_bucket, timezone } = body;' in result
-    assert 'resolveBucket(group_by_bucket),\n      timezone,' in result
+    assert 'resolveBucketGranularity(group_by_bucket),\n      timezone,' in result
 
 
 # ---------------------------------------------------------------------------
@@ -368,3 +368,14 @@ def test_access_scope_template_renders_with_no_entities():
     env = _make_env()
     result = env.get_template('dashboard_access_scope.ts.jinja2').render(scopes={})
     assert 'DASHBOARD_ACCESS_SCOPES: Record<string, DashboardAccessScope> = {\n};' in result
+
+
+def test_aggregate_route_takes_group_by_bucket_as_an_enum_string_literal():
+    """Issue #912: the integer form is gone; the route validates through resolveBucketGranularity."""
+    env = _make_env()
+    result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
+    assert 'group_by_bucket?: string | null;' in result
+    assert "import { resolveBucketGranularity } from '@/lib/dashboard/time-bucket';" in result
+    assert 'BUCKET_LABELS' not in result
+    assert 'resolveBucket(' not in result
+    assert 'integer enum' not in result

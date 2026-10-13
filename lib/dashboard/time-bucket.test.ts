@@ -8,7 +8,7 @@ vi.mock('@/lib/api-auth', () => ({
   },
 }));
 
-import { truncateToBucket, bucketKeyOf, formatBucketKey, resolveTimezone, resolveBucketZone } from './time-bucket';
+import { truncateToBucket, bucketKeyOf, formatBucketKey, resolveTimezone, resolveBucketZone, resolveBucketGranularity } from './time-bucket';
 
 describe('truncateToBucket', () => {
   it('defaults to UTC and keeps the former boundaries', () => {
@@ -126,5 +126,23 @@ describe('resolveBucketZone', () => {
     expect(() => resolveBucketZone('asia_tokyo', { kind: 'boolean' }, 'is_done')).toThrowError(
       expect.objectContaining({ status: 400 }),
     );
+  });
+});
+
+describe('resolveBucketGranularity', () => {
+  it('accepts each enum string literal', () => {
+    for (const b of ['day', 'week', 'month', 'quarter', 'year']) expect(resolveBucketGranularity(b)).toBe(b);
+  });
+
+  it('treats a missing value as no bucketing', () => {
+    for (const v of [undefined, null]) expect(resolveBucketGranularity(v)).toBeUndefined();
+  });
+
+  it('rejects the former integer form and unknown values with 400, naming the allowed values', () => {
+    for (const bad of [0, 2, '2', 'hour', 'Month', '']) {
+      expect(() => resolveBucketGranularity(bad)).toThrowError(
+        expect.objectContaining({ status: 400, message: expect.stringContaining('day, week, month, quarter, year') }),
+      );
+    }
   });
 });

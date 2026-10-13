@@ -5,19 +5,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, requireApiPermission, handleApiError } from '@/lib/api-auth';
 import { aggregateForWidgetCore } from '@/lib/dashboard/aggregate-core';
-import type { AggregateFilter, FilterCondition, BucketGranularity } from '@/lib/dashboard/aggregate-core';
-
-// group_by_bucket integer enum: 0=day,1=week,2=month,3=quarter,4=year.
-const BUCKET_LABELS: BucketGranularity[] = ['day', 'week', 'month', 'quarter', 'year'];
-function resolveBucket(raw: number | undefined): BucketGranularity | undefined {
-  if (raw == null) return undefined;
-  if (raw >= 0 && raw < BUCKET_LABELS.length) return BUCKET_LABELS[raw];
-  return undefined;
-}
+import type { AggregateFilter, FilterCondition } from '@/lib/dashboard/aggregate-core';
+import { resolveBucketGranularity } from '@/lib/dashboard/time-bucket';
 
 // POST /api/dashboard/aggregate
 // Body: { entity_name, group_by_field, filter?, conditions?, series_field?, group_by_bucket?, timezone? }
-// group_by_bucket accepts integer enum (0-4).
+// group_by_bucket is the enum's string literal: day, week, month, quarter or year. An unknown value
+// (including the former integer form) returns 400, naming the allowed values.
 // timezone is the Timezone enum's string literal (e.g. 'asia_tokyo'); optional, defaults to 'utc'.
 // An unknown value returns 400, as does a non-utc zone on a field that is not a date-time.
 // Returns AggregateOutput (single-series or multi-series).
@@ -32,7 +26,7 @@ export async function POST(request: NextRequest) {
       filter?: AggregateFilter;
       conditions?: FilterCondition[];
       series_field?: string;
-      group_by_bucket?: number;
+      group_by_bucket?: string | null;
       timezone?: string | null;
     };
     const { entity_name, group_by_field, filter, conditions, series_field, group_by_bucket, timezone } = body;
@@ -52,7 +46,7 @@ export async function POST(request: NextRequest) {
       filter ?? null,
       series_field,
       conditions,
-      resolveBucket(group_by_bucket),
+      resolveBucketGranularity(group_by_bucket),
       timezone,
     );
     return NextResponse.json(result);

@@ -1969,6 +1969,11 @@ chart. Add a categorical field, or remove the `dashboard: true` flag.
 `x-display.dashboard` is independent of `table` and `chart`. Setting it
 does not affect whether the list or chart pages are generated.
 
+**REST `group_by_bucket`.** `POST /api/dashboard/aggregate` takes `group_by_bucket` as the
+`dashboard_widget.group_by_bucket` enum's string literal, as every other native enum in the REST API does:
+`day`, `week`, `month`, `quarter` or `year`. Omit it (or send `null`) for no bucketing. Any other value,
+including the former integers `0`-`4`, returns `400` naming the allowed values; it is never ignored.
+
 **Access control.** A widget counts only what its viewer could list on the
 entity's own page. Both entry points, the `aggregateForWidget` Server Action and
 `POST /api/dashboard/aggregate`, call `aggregateForWidgetCore` with the acting
