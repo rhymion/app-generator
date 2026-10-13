@@ -21,7 +21,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   params }`. Saving a dashboard now rejects a widget that cannot be drawn with a field-level error (widgets saved earlier and
   left unchanged are not re-judged), and the editor shows the same messages while editing. For this, owned child rows are now
   passed to `validateCustomRules` as `data.<property_name>`, like connect-style children's ids; no existing key changes. The
-  generated-once `lib/dashboard/service_validation_custom.ts` of an existing app needs the call added by hand. No new schema
+  call lives in the tracked `lib/dashboard/service_validation_custom.ts`; only an app that overrides that file from `prj/` needs
+  the call added by hand. No new schema
   key. See `docs/knowledge/schema-yaml-configuration.md`.
 - **`scripts/check-migrations-match-schema.sh`: checks that the migrations build the schema.** On an empty local scratch
   database it runs `prisma migrate deploy` and then `prisma migrate diff` against `prisma/schema.prisma`, and fails with the

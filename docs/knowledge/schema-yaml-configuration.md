@@ -2024,8 +2024,10 @@ generic one. `POST /api/dashboard/aggregate` answers a problem with HTTP 400 and
 On save, `lib/dashboard/service_validation_custom.ts` checks every widget with the same rules and rejects the save with a
 field-level `AppError` (field `widgets`, message key `DashboardWidgetProblem.<code>`, naming the widget by position and
 name). A widget saved earlier and left unchanged is not re-judged, so a dashboard whose data source was removed stays
-editable; with no entity in the catalog nothing is rejected. This file is generated once: a consumer that already has the
-no-op stub adds the same call (`validateWidgets(DASHBOARDABLE_ENTITIES, data.widgets, stored)`) by hand.
+editable; with no entity in the catalog nothing is rejected. This is a tracked file in the generator, so it reaches an app with the
+submodule pointer. Only an app that supplies its own `prj/lib/dashboard/service_validation_custom.ts` (copied over the
+generator's file by `scripts/prj_sync.py`) must contain the call
+`validateWidgets(DASHBOARDABLE_ENTITIES, data.widgets, stored)` itself.
 
 The generator scans every dashboardable entity for **groupable fields** and
 emits a static catalog at `lib/dashboard/catalog.ts`. A field is groupable

@@ -95,8 +95,10 @@ administrator."
 Saving a dashboard runs the same rules (`lib/dashboard/service_validation_custom.ts`) and rejects a widget that cannot be
 drawn with an error on the `widgets` field that names the widget by position and name. A widget that was saved earlier
 and is left unchanged is not judged again, so a dashboard whose data source was removed can still be opened and edited.
-`service_validation_custom.ts` is generated once; an app that already has the empty stub adds
-`validateWidgets(DASHBOARDABLE_ENTITIES, data.widgets, stored)` by hand.
+`lib/dashboard/service_validation_custom.ts` is a tracked file in the generator, so it reaches an app with the
+generator's submodule pointer. Only an app that supplies its own `prj/lib/dashboard/service_validation_custom.ts`, which
+`scripts/prj_sync.py` copies over the generator's file, must contain
+`validateWidgets(DASHBOARDABLE_ENTITIES, data.widgets, stored)` itself.
 
 ### Permissions and row scope
 
