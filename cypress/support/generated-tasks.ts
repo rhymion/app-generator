@@ -63,10 +63,6 @@ export function getGeneratedTasks() {
       const { populateDashboardFullData } = require('./dashboard/helper');
       return await populateDashboardFullData(length);
     },
-    async 'db:populateDashboardDashboardWidget'(params: { parentId: string; length?: number }) {
-      const { populateDashboardDashboardWidgetData } = require('./dashboard/helper');
-      return await populateDashboardDashboardWidgetData(params.parentId, params.length || 1);
-    },
     async 'db:populateAppSettingDependencies'() {
       const { populateAppSettingDependencies } = require('./app_setting/helper');
       return await populateAppSettingDependencies();

@@ -78,6 +78,9 @@ def _extract_children(defn: dict, schema: dict) -> list[dict]:
                 # Structural parent FK column(s) of the child, named by the
                 # Prisma relation (build_user_schema.py); None when unnamed.
                 'parent_fk': prop.get('x-parent-fk'),
+                # `x-custom-component` on the array property: a hand-written editor
+                # replaces the generated child grid (targets: upsert). Present only when declared.
+                **({'custom_component': prop['x-custom-component']} if prop.get('x-custom-component') else {}),
             })
 
     return children

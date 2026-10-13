@@ -5997,6 +5997,18 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     has_many_to_many = any((c.get('relationship') or {}).get('type') == 'many-to-many' for c in children_raw)
     has_many_to_one = bool(parent_rels_raw) or bool(selector_oto_rels)
 
+    # Grid children whose array property declares `x-custom-component` with an `upsert`
+    # target: a hand-written component (components/{entity}/{prop}.tsx) replaces the
+    # generated editable grid on the form. It takes the grid's place and keeps the grid's
+    # ref contract (`getFields()`), so row serialization and validation are unchanged.
+    custom_grid_props = {
+        c['property_name'] for c in non_comment_ch
+        if c.get('output_type') != 'list'
+        and (c.get('relationship') or {}).get('type') != 'many-to-many'
+        and isinstance(c.get('custom_component'), dict)
+        and 'upsert' in (c['custom_component'].get('target') or [])
+    }
+
     # Column fn names (grid children only)
     col_fn_names = [
         f"use{to_pascal_case(c['property_name'])}Columns"
@@ -6073,11 +6085,16 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             for c in _grid_ch
         ]
         dg_import_parts = []
-        if not all(_grid_ch_has_order):
+        _plain_grid_has_order = [
+            has_o for c, has_o in zip(_grid_ch, _grid_ch_has_order)
+            if c['property_name'] not in custom_grid_props
+        ]
+        if not all(_plain_grid_has_order):
             dg_import_parts.append("import FieldsDataGrid from '@/components/_standard/FieldsDataGrid';")
-        if any(_grid_ch_has_order):
+        if any(_plain_grid_has_order):
             dg_import_parts.append("import OrderedFieldsDataGrid from '@/components/_standard/OrderedFieldsDataGrid';")
-        child_imports_parts.append('\n'.join(dg_import_parts))
+        if dg_import_parts:
+            child_imports_parts.append('\n'.join(dg_import_parts))
     if col_fn_names:
         child_imports_parts.append(f"import {{ {', '.join(col_fn_names)} }} from '../{parent}/column_def';")
     if has_indep_list_children:
@@ -6263,8 +6280,9 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         parent_fk_assignments = '\n'.join(
             f"    {fk_prop}: src.id," for fk_prop in sorted(parent_fk_props_child)
         )
+        _columns_line = f"  const {child_var}Columns = use{to_pascal_case(prop_name)}Columns(true{rel_args_str});\n\n"
         child_grid_setup_parts.append(
-            f"  const {child_var}Columns = use{to_pascal_case(prop_name)}Columns(true{rel_args_str});\n\n"
+            f"{_columns_line}"
             f"  const [localInitial{child_pascal}] = useState<GridRowsProp>(() => src.{prop_name}.map(f => ({{ ...f, id: f.id || `temp-${{Date.now()}}-${{Math.random()}}` }})));\n\n"
             f"  const createNew{child_pascal} = () => ({{\n"
             f"    id: `temp-${{Date.now()}}-${{Math.random()}}`,\n"
@@ -6310,6 +6328,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
     for c in non_comment_ch:
         if c.get('output_type') == 'list' or (c.get('relationship') or {}).get('type') == 'many-to-many':
             continue
+        if c['property_name'] in custom_grid_props:
+            continue  # no generated columns, so no relation cell configs
         cdef = _raw_def(c['name'], schema)
         parent_fk_props_cdef = resolve_parent_fk_props(c, cdef, model) | set(c.get('exclusive_parent_fks') or ())
         child_prop_name = c['property_name']
@@ -6646,6 +6666,17 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             continue
 
         # Grid child
+        if prop_name in custom_grid_props:
+            child_grid_components_parts.append(
+                f"      <{child_pascal}\n"
+                f"        ref={{{child_var}Ref}}\n"
+                f"        initialFields={{localInitial{child_pascal}}}\n"
+                f"        createNewRow={{createNew{child_pascal}}}\n"
+                f"        columns={{{child_var}Columns}}\n"
+                f"        title={{tf('{child_camel}')}}\n"
+                f"      />"
+            )
+            continue
         has_order = 'order' in child_props_dict
         grid_comp = 'OrderedFieldsDataGrid' if has_order else 'FieldsDataGrid'
         child_grid_components_parts.append(
@@ -6981,7 +7012,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
             )
 
     custom_upsert_imports = '\n'.join(
-        f"import {to_pascal_case(p)} from './{p}';" for p in custom_upsert_props
+        f"import {to_pascal_case(p)} from './{p}';" for p in [*custom_upsert_props, *sorted(custom_grid_props)]
     )
 
     # ---- Flatten edit sections (non-m2o only, edit-mode accordion) ----

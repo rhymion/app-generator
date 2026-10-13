@@ -436,6 +436,76 @@ class TestInlineChildDataGrid:
 
 
 # ---------------------------------------------------------------------------
+# Grid child drawn by a hand-written component (x-custom-component on the array property)
+# ---------------------------------------------------------------------------
+
+class TestCustomComponentGridChild:
+    """`x-custom-component` (target upsert) on a child array property replaces the generated grid."""
+
+    def _ctx(self, custom: bool) -> dict:
+        schema = {
+            "definitions": {
+                "parent": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "properties": _base_props(),
+                },
+                "field": {
+                    "type": "object",
+                    "required": ["id", "label", "parent_id"],
+                    "properties": {
+                        "id": {"type": "string"},
+                        "label": {"type": "string"},
+                        "parent_id": {"type": "string"},
+                        "order": {"type": "integer", "default": 0},
+                    },
+                },
+            }
+        }
+        child = _child_entry("field", "fields")
+        if custom:
+            child["custom_component"] = {"target": ["upsert"]}
+        return _build_upsert_ctx(_entity("parent", children=[child]), schema)
+
+    def test_component_replaces_the_grid(self):
+        ctx = self._ctx(custom=True)
+        jsx = ctx["child_grid_components"]
+        assert "<Fields\n" in jsx
+        assert "ref={fieldsRef}" in jsx
+        assert "initialFields={localInitialFields}" in jsx
+        assert "createNewRow={createNewFields}" in jsx
+        assert "FieldsDataGrid" not in jsx
+
+    def test_component_is_imported_from_the_entity_folder(self):
+        ctx = self._ctx(custom=True)
+        assert "import Fields from './fields';" in ctx["custom_upsert_imports"]
+
+    def test_generated_grid_is_replaced_but_columns_are_handed_to_the_component(self):
+        ctx = self._ctx(custom=True)
+        assert "FieldsDataGrid" not in ctx["child_imports"]
+        assert "<Fields" in ctx["child_grid_components"]
+        assert "OrderedFieldsDataGrid" not in ctx["child_grid_components"]
+        # The column definitions are passed in, so the component needs no import of generated code.
+        assert "useFieldsColumns" in ctx["child_imports"]
+        assert "columns={fieldsColumns}" in ctx["child_grid_components"]
+        # The grid's row state and the parent-FK seed stay, so the component gets the same inputs.
+        assert "localInitialFields" in ctx["child_grid_setup"]
+        assert "createNewFields" in ctx["child_grid_setup"]
+        assert "GridRowsProp" in ctx["child_imports"]
+
+    def test_rows_are_still_validated_and_submitted_from_the_ref(self):
+        ctx = self._ctx(custom=True)
+        assert "fieldsRef.current?.getFields" in ctx["child_form_data_handling"]
+        assert "fieldsRef.current?.getFields" in ctx["child_validation_code"]
+
+    def test_without_the_key_the_generated_grid_is_unchanged(self):
+        ctx = self._ctx(custom=False)
+        assert "OrderedFieldsDataGrid" in ctx["child_grid_components"]
+        assert "useFieldsColumns" in ctx["child_grid_setup"]
+        assert not ctx["custom_upsert_imports"]
+
+
+# ---------------------------------------------------------------------------
 # Selector OTO — mandatory FK (non-nullable)
 # ---------------------------------------------------------------------------
 

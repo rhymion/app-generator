@@ -304,6 +304,9 @@ components/*/*
 !components/_standard/**
 !components/ui/**
 !components/setting/**
+!components/dashboard/widgets.tsx
+!components/dashboard/catalog-source.ts
+!components/dashboard/widgets.test.tsx
 components/setting/FormUpsert.tsx
 components/setting/FormView.tsx
 components/setting/column_def.tsx
@@ -326,6 +329,7 @@ cypress/e2e/*.cy.ts
 !cypress/e2e/datagrid_native_date_input_typing.cy.ts
 !cypress/e2e/list_filter_sort_relation_column.cy.ts
 !cypress/e2e/list_query_panel.cy.ts
+!cypress/e2e/dashboard_widget_editor.cy.ts
 !cypress/e2e/save_and_continue_editing.cy.ts
 cypress/e2e/mobile/*.cy.ts
 !cypress/e2e/mobile/layout.cy.ts

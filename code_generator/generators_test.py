@@ -1342,6 +1342,13 @@ def get_child_render_type(child: dict, schema: dict = None, parent_model_name: s
         return 'editable-list-text'
     if child.get('output_type') == 'comments':
         return 'comments'
+    # A grid child whose array property declares `x-custom-component` with an `upsert`
+    # target is drawn by a hand-written editor, not the generated grid. The generated
+    # UI tests do not know that editor's layout, so they do not drive it (the API tests
+    # still send the child rows).
+    _xc = child.get('custom_component')
+    if isinstance(_xc, dict) and 'upsert' in (_xc.get('target') or []):
+        return 'custom-component'
     # issue #538 (a follow-up to the read-only embed decision, issue
     # #520/PR#528/PR#530): an independent child -- one that can create,
     # edit, or delete its own rows through its own new/edit/delete pages,

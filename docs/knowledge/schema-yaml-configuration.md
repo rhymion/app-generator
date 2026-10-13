@@ -1953,6 +1953,13 @@ resource:
 builder. The user-facing dashboard pages live under `/dashboard` (not per
 entity); this flag only marks the entity as a selectable data source.
 
+The dashboard edit form chooses a widget's data source from a list, not free text. The list holds the catalog entities
+(`x-display.dashboard: true`) the signed-in user may `read`, with their translated labels; the stored value stays the entity
+key. A stored `entity_name` that is not in the catalog is flagged as an unknown data source, and one the user cannot read is
+flagged as unreadable. When no entity opts in, the editor says so and links here. The editor is
+`components/dashboard/widgets.tsx`, mounted through `x-custom-component` on the `widgets` child array
+(`docs/knowledge/code-generation-custom-extensions.md`).
+
 The generator scans every dashboardable entity for **groupable fields** and
 emits a static catalog at `lib/dashboard/catalog.ts`. A field is groupable
 when it is one of:
