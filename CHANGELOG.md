@@ -5,7 +5,22 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
-- **Mobile executable guide** (Issue #987). `docs/knowledge/mobile-executable.md` documents building a release `.apk` locally with `expo prebuild` and Gradle (measured), the iOS routes and what each needs, setting `EXPO_PUBLIC_API_BASE_URL` for a real device, and the `app.json` / `eas.json` settings the generator does not emit. Documentation only.
+- **Mobile executable guide** (Issue #987). `docs/knowledge/mobile-executable.md` documents building a release `.apk` locally 
+  with `expo prebuild` and Gradle (measured), the iOS routes and what each needs, setting `EXPO_PUBLIC_API_BASE_URL` for a real 
+  device, and the `app.json` / `eas.json` settings the generator does not emit. Documentation only.
+- **Scheduled tasks on GCP, in dependency order**. `docs/knowledge/scheduled-task-operations.md` explains what to
+  register on GCP (one `task:run-all` Job versus one Scheduler job per task), that `task:run-all` honors `depends_on` order
+  and the UTC business date but not the time of day of an `interval`, how non-daily tasks are recorded as `not_due` and how a
+  missed month is recovered, how entity-level tasks are declared and ordered, how to run once by hand and read the result, and
+  a local dry run with a shifted clock. `docs/knowledge/audit-log-append-only.md` states what `verify` detects and does not.
+  Documentation only.
+- **Mobile Playwright entry point, gate step and CI job** (Issue #985, part of #140). `npm run test:e2e:mobile:pw` now runs
+  `scripts/run_mobile_entity_playwright.sh`, which runs the fixture, default and scheduled modes in turn and fails if any mode
+  fails; the bare Playwright invocation is `test:e2e:mobile:pw:raw` and refuses to run unless `MOBILE_PW_PRECONDITIONS_READY=1`
+  is set. The mobile specs sign in as `admin@example.com` by default (the `db:seed-baseline` administrator), the script refuses a
+  symlinked `node_modules`, and `docs/knowledge/mobile-app.md` describes the three modes, the manual recipe and why app-template
+  does not run these specs. The update-generator gate has a path-triggered step for the suite
+  (`scripts/mobile_pw_gate_applies.sh` holds the path list) and CI has a path-filtered `mobile-playwright` job.
 - **Dashboard guide, and corrected dashboard docs** (Issue #909, part of #904). `docs/knowledge/dashboard-guide.md` explains
   how a schema author opts an entity in and which fields become groupable, what each widget setting does and which
   combinations are valid, what each problem message means, how read permission and row scope apply, and the

@@ -57,6 +57,25 @@ Run in this order:
 20. `pip-audit -r requirements.txt`
 21. `npm run check:readme-sync` — fails closed if this branch's diff touches
     README.md without also touching README_ja.md (or vice versa)
+22. `npm run test:e2e:mobile:pw` — **path-triggered**: builds and RUNS the Expo web app in three modes (fixture, default, scheduled) and runs its Playwright specs; about 20 minutes (see below)
+
+**Step 22 (`test:e2e:mobile:pw`, path-triggered)**: unlike steps 2-14, this step runs only when the change
+touches a path the mobile suite exercises. The decision is mechanical, not a judgment call:
+`bash scripts/mobile_pw_gate_applies.sh` (default base `origin/develop`; pass another base ref if the
+branch forked elsewhere) prints `yes` or `no`, and prints `yes` when it cannot resolve the base. The paths
+are `mobile/**`, `code_generator/templates/mobile/**`, `code_generator/mobile_entities.py`,
+`code_generator/mobile_nav.py`, `code_generator/generate.py`, `code_generator/validate.py`,
+`code_generator/tests/fixtures/mobile_entity_e2e_gate/**`,
+`code_generator/tests/fixtures/scheduled_task_e2e_gate/**`, `scripts/compose_child_datagrid_e2e_fixture.py`,
+`scripts/run_mobile_entity_playwright.sh` and `scripts/mobile_pw_gate_applies.sh`; the script holds the
+authoritative list. `build_context.py` is not on it (it holds no mobile logic).
+Run `npm run test:e2e:mobile:pw` when the answer is `yes`; it runs `scripts/run_mobile_entity_playwright.sh`,
+which starts its own disposable stack per mode (own docker project, derived ports), so it runs locally
+without CI. A `no` answer is a skip you may state in the report together with the script output. The
+bare `npm run test:e2e:mobile:pw:raw` is not a gate command: it refuses to run without a prepared stack. The
+same list drives the CI job `mobile-playwright` (`.github/workflows/ci.yml`), which is independent of the
+other jobs. The specs are bound to this repository's default and fixture schemas, so app-template does not
+run them (see `docs/knowledge/mobile-app.md`). The unconditional-step rule above covers steps 2-14 only.
 
 **Step 1 (`npm run lint`) must run on a checkout where `generate-code` has
 not yet run** — that is what CI's `Lint` job actually checks (`npm ci && npm
