@@ -655,13 +655,15 @@ EXPO_WEB_URL=http://localhost:8096 npm run test:e2e:mobile:pw   # from the repos
 ```
 
 **Open the proxy URL (here `http://localhost:8096`), not the Expo dev server's own address (`8095`), which Expo
-opens in the browser automatically.** A page loaded from 8095 is cross-origin to the API, so the browser blocks the
-sign-in request and the navigation lookup. The app says so: the sign-in screen shows "Could not reach the server"
-and, on web, a hint naming the address to open (`web-origin-hint`); when only the navigation lookup
-(`GET /api/mobile/nav`) fails, the footer shows only the fixed Search tab plus a notice that the menu could not be
-loaded (`nav-load-failed`). The footer stays fail-closed in that case: the notice explains the empty footer, it does not
-reveal anything. An empty footer with that notice is a connection problem, not missing permissions.
-`mobile/e2e/web-origin.spec.ts` covers these screens (`EXPO_WEB_DIRECT_URL` is the dev server's address).
+opens in the browser automatically.** A page loaded from 8095 is cross-origin to the API (the REST routes send no CORS
+headers), so the browser blocks the sign-in request and the navigation lookup.
+
+When the server cannot be reached (server down, device offline, or a request the browser blocked), the sign-in screen
+shows "Could not reach the server" instead of an error screen. When only the navigation lookup (`GET /api/mobile/nav`)
+fails, the footer shows only the fixed Search tab plus a notice that the menu could not be loaded (`nav-load-failed`).
+The footer stays fail-closed in that case: the notice explains the empty footer, it does not reveal anything. An empty
+footer with that notice is a connection problem, not missing permissions. `mobile/e2e/network-failure.spec.ts` covers
+these screens.
 
 `scripts/run_mobile_entity_playwright.sh` does all of this in a disposable copy of the working tree with its
 own docker project and ports, and runs the specs in two modes (the footer specs assume the default schema's

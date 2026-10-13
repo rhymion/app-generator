@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { router } from 'expo-router';
 import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
-import { WebOriginHint } from '@/components/WebOriginHint';
 import { setTokens } from '@/lib/token-storage';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
@@ -104,7 +103,6 @@ export default function LoginScreen() {
         </>
       )}
       {error ? <Text testID="login-error" style={styles.error}>{error}</Text> : null}
-      <WebOriginHint />
       <Pressable testID="login-submit" style={styles.button} onPress={handleSubmit} disabled={submitting}>
         <Text style={styles.buttonText}>{submitting ? 'Signing in…' : 'Sign In'}</Text>
       </Pressable>
