@@ -238,6 +238,8 @@ generated Prisma schema. The generator does not write a migration for it;
 a consumer writes that migration when it deploys (the same cadence as any
 other schema change), not on every generator bump. Test databases pick the
 table up through `db:push`. A consumer that declares no task gets no table.
+`scripts/check-migrations-match-schema.sh` reports a migration that is still
+missing (see `migration-schema-check.md`).
 
 ## Admin page: run status, why a task did not run, and recovery
 
