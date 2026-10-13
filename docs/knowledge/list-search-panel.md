@@ -62,6 +62,9 @@ list accepts:
 - Record id columns (`id`, `creator_id`, `assignee_id`) and foreign key columns are left out. A
   foreign key's relation display column (the ones `RELATION_FILTER_FIELDS` lists) is offered as a
   `text` column that sorts and filters by the related record's label.
+- Internal bridge foreign keys (`approvable_id`, `attachable_id`, `commentable_id`, ...) are left out too. They are
+  detected by `get_internal_bridge_fk_prop_names()` (`helpers/schema_helpers.py`), not by name, and listed in the list context
+  as `sort_filter_panel_excluded`. Only the panel drops them: the REST list keeps them in its sort / filter allow-list.
 - `label` is `Fields.<camelCase key>` when the translation exists and the title-cased column name
   otherwise.
 - An enum column also carries `optionLabels` when the list translates its members for display.
