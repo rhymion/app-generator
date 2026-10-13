@@ -176,6 +176,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   can list: organization isolation, `x-self-only`, `x-filter-values` and Creator/Assignee-only read. FK labels are resolved 
   through the target entity's permission and scope, and an unreadable label shows as `(unknown)`. `aggregateForWidgetCore` 
   takes the acting user's id as its first argument. See `docs/knowledge/schema-yaml-configuration.md` §10.
+- **MUI DataGrid and date picker text follows the app locale** (Issue #765, Refs #764). The theme in `app/[locale]/providers.tsx` is built per locale with the `jaJP` bundles of `@mui/material`, `@mui/x-data-grid` and `@mui/x-date-pickers` (new `lib/mui-locale.ts`), so the column menu, filter panel and "Manage columns" are Japanese on `/ja`. One app-wide `LocalizationProvider` carries the dayjs locale; the nested providers in `DateTimeWrapper`, `AppDatePicker` and `GanttChart` are removed so pickers no longer reset to English. The native date inputs of DataGrid date columns are unchanged. See `docs/knowledge/i18n-locale-routing.md`.
 - **`x-version-of`: a rejected version no longer blocks the next one, and the version number cannot be written** (Refs #946). A terminally
   rejected version stays as a closed record and is not counted as an open draft; a version rejected without `terminal`, or
   withdrawn, stays the open draft that is fixed and resubmitted. Neither is deleted any more. A number sent by a form or an API
