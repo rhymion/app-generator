@@ -4695,6 +4695,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         sort_filter_field_kinds=_field_kinds,
         sort_filter_relation_fields=_relation_filter_fields,
         sort_filter_enum_members=_enum_members,
+        # Internal bridge FK columns (approvable_id, attachable_id, ...): kept in the REST
+        # allow-list above, but the Web and mobile list panels never offer them.
+        sort_filter_panel_excluded=sorted(get_internal_bridge_fk_prop_names(model_def, schema)),
         enum_members_quoted=enum_members_quoted,
         decimal_scales_quoted=decimal_scales_quoted,
         searchable_text_fields=searchable_text_fields,

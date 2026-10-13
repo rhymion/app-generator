@@ -683,7 +683,8 @@ def _list_query_code(ctx: dict, primary_field: str, enum_ns_list: list[dict]) ->
 
     Built from the same allow-list the REST list reads (`sort_filter_fields`, the per-column kinds
     and the relation display columns of `getters.ts`), so the panel offers exactly what the list
-    accepts. Foreign-key id columns are left out in favor of their relation display column.
+    accepts. Foreign-key id columns are left out in favor of their relation display column, and so are the
+    internal bridge FK columns (`approvable_id`, `attachable_id`, ...), which no user sorts or filters by.
     Labels come from the `Fields` namespace at render time, falling back to the title-cased name.
     """
     kinds: dict = ctx.get('sort_filter_field_kinds') or {}
@@ -692,7 +693,7 @@ def _list_query_code(ctx: dict, primary_field: str, enum_ns_list: list[dict]) ->
         r['prop_name']
         for r in list(ctx.get('parent_rels_raw', [])) + list(ctx.get('selector_oto_rels', []))
     }
-    skipped = fk_columns | _LIST_QUERY_ID_COLUMNS
+    skipped = fk_columns | _LIST_QUERY_ID_COLUMNS | set(ctx.get('sort_filter_panel_excluded') or [])
 
     panel_fields: list[tuple[str, str]] = []  # (key, kind)
     for column in ctx.get('sort_filter_fields') or []:

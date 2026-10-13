@@ -10,6 +10,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   verification), and `scripts/vercel-env.sh` reminds that its `DATABASE_URL` injection is the owner's pooled URL. The
   scheduled-task documentation states that a consumer writes the migration for generator-injected models such as
   `scheduled_task_run`.
+- **Dashboard widget editor: group-by and series fields are chosen from a list** (Issue #906, part of #904). `group_by_field`
+  and `series_field` are dropdowns of the selected data source's fields, with translated labels and the field kind, instead of
+  free text. Changing the data source clears the fields of the previous one. Options follow the chart: the time bucket only for
+  a date/time group-by field, the series not for pie, the stack mode only for bar / column with a series, and a line chart groups
+  by a date/time field and always has a bucket, so inapplicable combinations are corrected in the editor rather than found at
+  render time. Stored values are unchanged; a stored field the data source no longer offers is flagged. No new schema key.
+  See `docs/knowledge/schema-yaml-configuration.md`.
 - **Dashboard widget editor: the data source is chosen from a list** (Issue #905, part of #904). The dashboard edit form no
   longer shows widgets as a grid of free-text cells; each widget is edited in a card, and `entity_name` is a dropdown of the
   `x-display.dashboard` entities the user can read, with translated labels. Stored values do not change, so existing widgets
@@ -68,6 +75,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `resetTestDatabase()` empties both tables with `TRUNCATE`. Consumers add the SQL to their own migrations, create the
   restricted application role and the write-once bucket; see `docs/knowledge/audit-log-append-only.md`.
 ### Changed
+- **List sort / filter panel no longer offers internal bridge foreign keys** (Issue #967). `Approvable Id`, `Attachable Id`,
+  `Commentable Id` and the like are dropped from the Web panel and from the Expo list's sort and filter keys, using the
+  generator's existing internal-bridge detection (no new schema key). The REST list still accepts them as sort / filter
+  parameters. See `docs/knowledge/list-search-panel.md`.
 - **Dashboard REST: `group_by_bucket` is the enum string literal** (Issue #912). `POST /api/dashboard/aggregate` now takes
   `day`, `week`, `month`, `quarter` or `year`, like every other native enum in the REST API, and the integer form `0`-`4` is
   removed. An unknown value returns `400` naming the allowed values instead of being ignored (which returned an unbucketed
