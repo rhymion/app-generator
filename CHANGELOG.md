@@ -17,6 +17,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   passed to `validateCustomRules` as `data.<property_name>`, like connect-style children's ids; no existing key changes. The
   generated-once `lib/dashboard/service_validation_custom.ts` of an existing app needs the call added by hand. No new schema
   key. See `docs/knowledge/schema-yaml-configuration.md`.
+- **`scripts/check-migrations-match-schema.sh`: checks that the migrations build the schema.** On an empty local scratch
+  database it runs `prisma migrate deploy` and then `prisma migrate diff` against `prisma/schema.prisma`, and fails with the
+  missing SQL when they differ. This catches a generator-added model (for example `scheduled_task_run`) that a consumer has
+  no migration for, which `db:push` test databases never show. It refuses any non-loopback database host, passes
+  connection details through environment variables only, and reads known differences from an optional exceptions file
+  (`prisma/migration-schema-exceptions.txt`, none by default). It is run when preparing a `develop` merge or a deployment,
+  not per commit. No new schema key. See `docs/knowledge/migration-schema-check.md`.
+- **Audit log: steps for switching the application to the restricted database role** are listed in
+  `docs/knowledge/audit-log-append-only.md` (password, hand-assembled connection strings, one role per Neon branch,
+  verification), and `scripts/vercel-env.sh` reminds that its `DATABASE_URL` injection is the owner's pooled URL. The
+  scheduled-task documentation states that a consumer writes the migration for generator-injected models such as
+  `scheduled_task_run`.
 - **Dashboard widget editor: group-by and series fields are chosen from a list** (Issue #906, part of #904). `group_by_field`
   and `series_field` are dropdowns of the selected data source's fields, with translated labels and the field kind, instead of
   free text. Changing the data source clears the fields of the previous one. Options follow the chart: the time bucket only for
