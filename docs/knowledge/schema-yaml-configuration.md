@@ -1769,6 +1769,30 @@ identity or the version itself, an identity that is itself a version entity, two
 one identity, a `number` that is not an integer property or is `required`, an owned child without
 exactly one structural FK, and any missing Prisma column listed above.
 
+
+### Version list and two-version diff
+
+An identity that has a version entity gets a **Version history** section at the bottom of its detail screen,
+with no further schema key. It lists every version the caller may read (drafts included; the current version is
+marked) and shows the changes between any two of them, by default the current version against the open draft.
+
+- **Injection.** The generator adds the standard `VersionHistory` view component to the identity's
+  `x-custom-components` when the identity declares no `x-custom-components` at all. Any declared list,
+  `[]` included, is left exactly as written, which also disables the section.
+- **Reads.** `get<Version>VersionHistory` and `get<Version>VersionDiff` are generated into `lib/<version>/getters.ts`
+  and use the version entity's own read permission and access filter (organization scope, creator/assignee scope),
+  so they never show more than the version's own list and detail screens. A diff of a version the caller cannot
+  see fails with `NOT_FOUND`.
+- **Fields.** Each side of a field is rendered with the version entity's own detail-screen markup
+  (`components/<identity>/VersionFields.tsx`), so enums, decimals, dates and relations look as they do on the
+  detail screen. A changed field is highlighted; a changed text longer than 80 characters also gets a word diff.
+- **Owned child rows** (one level) are paired across versions by the child's `x-import-key` when it declares one
+  (dotted paths are ignored), otherwise by position under the child's `order` column, and otherwise not at all:
+  the diff then lists additions and removals only and says so. Child values are shown as plain text.
+- **From a version.** On a draft version's own screen the approval section shows **Compare with current version**,
+  which opens the identity's detail screen with that draft preselected (`?compare=<version id>`).
+- **Messages.** The text lives in the `VersionHistory` section of `messages/*.json`.
+
 The key is opt-in; a schema without it generates the same output as before.
 
 Verification: pytest `code_generator/tests/test_x_version_of.py` covers validation, context building and registration;

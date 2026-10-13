@@ -88,6 +88,9 @@ type Props = {
   // ENTITIES_WITH_ON_WITHDRAWN) rejects a withdrawal for any entity where
   // this is false, so the button is hidden here rather than left to fail.
   hasOnWithdrawn?: boolean;
+  // x-version-of: link to the identity's version diff with this version preselected
+  // (set by form_view.tsx.jinja2 on a version entity only).
+  compareHref?: string;
 };
 
 // cmd_844: split the full (ascending-created_at-ordered, see
@@ -114,8 +117,9 @@ function splitRounds(requests: ApprovalRequest[]): {
   return { currentRoundRequests, pastRounds };
 }
 
-export default function ApprovalSection({ src, currentUserRoleIds, currentUserId, onSubmitForApproval, hasOnWithdrawn }: Props) {
+export default function ApprovalSection({ src, currentUserRoleIds, currentUserId, onSubmitForApproval, hasOnWithdrawn, compareHref }: Props) {
   const t = useTranslations('Fields');
+  const tVersion = useTranslations('VersionHistory');
   const tCommon = useTranslations('Common');
   const tErr = useTranslations('Errors');
   const tStatus = useTranslations('ApprovalRequestStatus');
@@ -283,6 +287,11 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
   return (
     <div style={{ marginTop: '1.5rem' }}>
       <h2>{t('approvalRequests')}</h2>
+      {compareHref && (
+        <Button size="small" href={compareHref} data-testid="compare-with-current">
+          {tVersion('compareWithCurrent')}
+        </Button>
+      )}
       {canSubmit && (
         // cmd_843: PD-3 ruling -- one label for both the first submission
         // and any later resubmission, no first-vs-again wording split.

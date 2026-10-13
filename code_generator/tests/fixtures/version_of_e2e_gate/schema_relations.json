@@ -9,6 +9,9 @@
     "created_vo_doc_versions vo_doc_version[] @relation(\"VoDocVersionCreator\")",
     "updated_vo_doc_versions vo_doc_version[] @relation(\"VoDocVersionUpdater\")"
   ],
+  "organization": [
+    "vo_item_versions vo_item_version[]"
+  ],
   "approvable": [
     "vo_item_version vo_item_version?",
     "vo_doc_version vo_doc_version?"

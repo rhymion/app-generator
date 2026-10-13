@@ -37,9 +37,12 @@ model vo_item_version {
   vo_item_id           String
   vo_item              vo_item               @relation("VoItemVersions", fields: [vo_item_id], references: [id], onDelete: Cascade)
   current_of           vo_item?              @relation("VoItemCurrent")
+  organization_id      String
+  organization         organization          @relation(fields: [organization_id], references: [id])
   title                String
   summary              String?
   ref_code             String?               @unique
+  notes                String?
   version_no           Int?
   status               VoItemVersionStatus   @default(draft)
   approvable_id        String                @unique
@@ -56,6 +59,7 @@ model vo_item_version {
 
   @@unique([vo_item_id, version_no])
   @@index([vo_item_id])
+  @@index([organization_id])
   @@index([title])
   @@index([creator_id])
   @@index([updater_id])

@@ -334,3 +334,38 @@ def validate_version_of_prisma(schema: dict, prisma_schema_path: str | Path, err
     if errors:
         bullet_list = '\n'.join(f"  • {e}" for e in errors)
         raise error_cls(f"{KEY} validation failed — {len(errors)} problem(s):\n\n{bullet_list}\n")
+
+
+_CHILD_SYSTEM_PROPS = frozenset({'id', 'created_at', 'updated_at', 'creator_id', 'updater_id'})
+
+
+def version_diff_children(version: str, schema: dict, children_raw: list[dict]) -> list[dict]:
+    """Owned child tables of a version as the two-version diff reads them.
+
+    Rows of the two versions are matched by the child's `x-import-key` when it
+    declares one, else by position under its `order` column, else not at all
+    (the diff then reports additions and removals only)."""
+    from build_context import _raw_def
+    owned, _ = version_of_children(version, schema)
+    by_name = {c['name']: c for c in children_raw}
+    out = []
+    for item in owned:
+        child = by_name.get(item['model'])
+        if not child:
+            continue
+        raw = _raw_def(item['model'], schema)
+        props = raw.get('properties') or {}
+        key_fields = [f for f in (raw.get('x-import-key') or []) if isinstance(f, str) and '.' not in f]
+        fields = [
+            name for name, prop in props.items()
+            if name not in _CHILD_SYSTEM_PROPS and name != item['fk']
+            and not (isinstance(prop, dict) and prop.get('x-relationship'))
+        ]
+        match = 'key' if key_fields else ('order' if 'order' in props else 'none')
+        out.append({
+            'property_name': child['property_name'],
+            'fields': fields,
+            'match': match,
+            'key_fields': key_fields,
+        })
+    return out

@@ -237,6 +237,19 @@ def test_prefill_module_renders_without_a_created_record(tmp_path):
     assert "reason: 'open_draft'" in out
 
 
+def test_prefill_module_passes_the_session_user_when_the_detail_getter_takes_one(tmp_path):
+    """An organization-scoped version entity's get<Version>Detail(id, userId) needs the caller."""
+    _, plan = _plan(tmp_path)
+    vo = version_of_for('product_version', _schema())
+    ctx = {**vo, 'pascal': 'ProductVersion', 'plan': plan}
+    scoped = _render(_make_env(), 'version_of_prefill.ts.jinja2', {**ctx, 'detail_takes_user_id': True})
+    assert 'getProductVersionDetail(identity.current_version_id, await getSessionUserIdOrThrow())' in scoped
+    assert 'getSessionUserIdOrThrow }' in scoped
+    plain = _render(_make_env(), 'version_of_prefill.ts.jinja2', {**ctx, 'detail_takes_user_id': False})
+    assert 'getProductVersionDetail(identity.current_version_id)' in plain
+    assert 'getSessionUserIdOrThrow' not in plain
+
+
 def test_owned_children_are_read_from_the_view_definition():
     """A child array lives under the bare view's allOf, not on the '__' raw entity."""
     from version_of import version_of_children
@@ -302,3 +315,74 @@ def test_invalidatable_identity_needs_invalidated_at_column(tmp_path):
     assert 'invalidated_at  DateTime?' in str(exc.value)
     ok = PRISMA_OK.replace('  current_version_id String?\n', '  current_version_id String?\n  invalidated_at DateTime?\n')
     validate_version_of_prisma(s, _prisma(tmp_path, ok))
+
+
+# --- standard version list + two-version diff -------------------------------
+
+def _identity_ctx(xcc=None):
+    from build_context import build_context
+    props = {'id': {'type': 'string'}, 'name': {'type': 'string'}}
+    detail = {'type': 'object', 'required': ['id'], 'properties': props}
+    if xcc is not None:
+        detail['x-custom-components'] = xcc
+    schema = {'definitions': {
+        'thing': detail,
+        '__thing_version': {'x-version-of': {'identity': 'thing', 'number': 'version_no'}},
+        'thing_version': {},
+    }}
+    entity = {'parent': 'thing', 'model': 'thing', 'definition_key': 'thing', 'children': [],
+              'generate_config': {'list': True, 'view': True, 'new': True, 'edit': True,
+                                  'delete': True, 'api': False, 'test': False, 'fields': None}}
+    return build_context(entity, schema)
+
+
+def test_identity_gets_version_history_unless_the_author_declared_components():
+    assert [c['name'] for c in _identity_ctx()['entity_view_components']] == ['VersionHistory']
+    # an explicit list (even empty) is the author's choice and is left alone
+    assert _identity_ctx([])['entity_view_components'] == []
+    own = _identity_ctx([{'name': 'Mine', 'path': '@/c/mine', 'target': ['view']}])
+    assert [c['name'] for c in own['entity_view_components']] == ['Mine']
+
+
+def test_version_entity_context_carries_the_declaration():
+    from build_context import build_context
+    entity = {'parent': 'product_version', 'model': 'product_version', 'definition_key': 'product_version',
+              'children': [], 'generate_config': {'list': True, 'view': True, 'new': True, 'edit': True,
+                                                  'delete': True, 'api': False, 'test': False, 'fields': None}}
+    schema = _schema()
+    schema['definitions']['product_version'] = {'type': 'object', 'required': ['id'],
+                                                'properties': {'id': {'type': 'string'}}}
+    assert build_context(entity, schema)['version_of']['identity'] == 'product'
+
+
+def test_version_i18n_section_follows_the_identity_injection():
+    from generators_i18n import _collect_custom_component_sections
+    entities = [{'definition_key': 'product'}, {'definition_key': 'other'}]
+    sections = _collect_custom_component_sections(entities, _schema())
+    assert 'compareWithCurrent' in sections['VersionHistory']
+    assert _collect_custom_component_sections([{'definition_key': 'other'}], _schema()) == {}
+
+
+def test_version_diff_children_match_by_key_then_order_then_not_at_all():
+    from version_of import version_diff_children
+    schema = _schema()
+    defs = schema['definitions']
+    import version_of as vo
+    owned = [{'model': 'a', 'fk': 'product_version_id'}, {'model': 'b', 'fk': 'product_version_id'},
+             {'model': 'c', 'fk': 'product_version_id'}]
+    raw = {
+        'a': {'x-import-key': ['sku', 'x.y'], 'properties': {'sku': {}, 'qty': {}, 'product_version_id': {}}},
+        'b': {'properties': {'order': {}, 'note': {}, 'product_version_id': {}}},
+        'c': {'properties': {'note': {}, 'product_version_id': {}}},
+    }
+    import build_context as bc
+    orig_children, orig_raw = vo.version_of_children, bc._raw_def
+    vo.version_of_children = lambda *_: (owned, [])
+    bc._raw_def = lambda name, _s: raw[name]
+    try:
+        out = version_diff_children('product_version', schema,
+                                    [{'name': n, 'property_name': f'{n}_rows'} for n in 'abc'])
+    finally:
+        vo.version_of_children, bc._raw_def = orig_children, orig_raw
+    assert [(c['match'], c['key_fields']) for c in out] == [('key', ['sku']), ('order', []), ('none', [])]
+    assert out[0]['fields'] == ['sku', 'qty']
