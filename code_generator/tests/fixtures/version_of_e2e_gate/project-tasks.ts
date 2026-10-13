@@ -95,12 +95,13 @@ export function getProjectTasks(): Record<string, (...args: any[]) => any> {
       const approvable = await prisma.approvable.create({
         data: { creator_id: user.id, approved_at: p.versionNo == null ? null : new Date() },
       });
+      const attachable = await prisma.attachable.create({ data: {} });
       const version = await prisma.vo_item_version.create({
         data: {
-          vo_item_id: p.itemId, organization_id: p.orgId, title: p.title, notes: p.notes ?? null, version_no: p.versionNo,
+          vo_item_id: p.itemId, attachable_id: attachable.id, organization_id: p.orgId, title: p.title, notes: p.notes ?? null, version_no: p.versionNo,
           status: p.versionNo == null ? 'draft' : 'approved', approvable_id: approvable.id,
           creator_id: user.id, updater_id: user.id,
-          vo_item_version_lines: { create: (p.lines ?? []).map((note) => ({ note })) },
+          vo_item_version_lines: { create: (p.lines ?? []).map((note, i) => ({ note, line_code: `L-${attachable.id}-${i}` })) },
         },
       });
       if (p.current) await prisma.vo_item.update({ where: { id: p.itemId }, data: { current_version_id: version.id } });
