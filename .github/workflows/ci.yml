@@ -431,8 +431,10 @@ jobs:
     # dedicated fixture schema in code_generator/tests/fixtures/version_of_e2e_gate/
     # (an identity and an x-version-of version entity with owned child rows) and
     # runs its Cypress API specs: the version number assigned at approval, at most
-    # one open draft per identity, current_version_id, and deletion of a settled
-    # non-approved draft. Same shape and cost class as
+    # one open draft per identity, current_version_id, deletion of a settled
+    # non-approved draft, the prefilled new version screen, and the identity
+    # tombstone (delete refused after an approved version, new draft refused for
+    # an invalidated identity). Same shape and cost class as
     # scheduled-task-e2e-gate-fixture above, so it is gated on detect-changes the
     # same way; the local gate (npm run test:version-of-e2e-gate, step 14e of
     # .claude/commands/update-generator.md) runs it without that exemption.
