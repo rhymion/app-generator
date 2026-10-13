@@ -15,8 +15,11 @@
 # AUTH_SECRET. Cleanup is `docker compose -p <that project> down -v`. A port
 # already in use fails the run.
 #
-# Three modes, because the footer specs assume the default schema's tabs:
-#   MODE=fixture (default)  fixture entities merged; runs mobile/e2e/entity-crud.spec.ts,
+# Four values of MODE; `all` (the default) runs the three real modes one after another, because the
+# footer specs assume the default schema's tabs:
+#   MODE=all (default)      fixture, default and scheduled in this order, each in its own disposable
+#                           copy and docker project; the exit status is non-zero if any mode failed
+#   MODE=fixture            fixture entities merged; runs mobile/e2e/entity-crud.spec.ts,
 #                           mobile/e2e/relation-pickers.spec.ts, mobile/e2e/inline-create-checkout.spec.ts,
 #                           mobile/e2e/list-capabilities.spec.ts, mobile/e2e/comments.spec.ts,
 #                           mobile/e2e/approval-actions.spec.ts, mobile/e2e/split-action.spec.ts,
@@ -28,16 +31,46 @@
 #                           test user made a ScheduledTaskRunner; runs mobile/e2e/scheduled-task.spec.ts
 #
 # Usage: bash scripts/run_mobile_entity_playwright.sh
-# Environment: GATE_KEEP_BUILD_DIR=1 keeps the copy; PORT_SLOT=<0-899> picks another port set; PW_ARGS='<playwright args>'
-#              narrows the run (for example PW_ARGS='entity-crud.spec.ts').
+# Environment: MODE=all|fixture|default|scheduled picks the mode(s); GATE_KEEP_BUILD_DIR=1 keeps the copy;
+#              PORT_SLOT=<0-899> picks another port set; PW_ARGS='<playwright args>' narrows the run of ONE mode
+#              (for example MODE=fixture PW_ARGS='entity-crud.spec.ts'; refused with MODE=all).
+#              EXPO_WEB_URL, TEST_EMAIL and TEST_PASSWORD from the caller are ignored: the script starts its own
+#              stack and signs in as the seeded administrator.
 # Every mode sets x-generator.mobile.enabled: true in the copy and fails closed if mobile/ is not generated.
-# This is an optional check, not part of the mandatory gate.
+# Path-triggered step of the update-generator gate (.claude/commands/update-generator.md), not part of the
+# unconditional gate.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-MODE="${MODE:-fixture}"
+# The three modes run one after another, each as a fresh invocation of this script (own copy, own docker
+# project). Every mode runs even when an earlier one failed, so one run reports all of them.
+if [ "${MODE:-all}" = "all" ]; then
+  if [ -n "${PW_ARGS:-}" ]; then
+    echo "mobile-entity-playwright: PW_ARGS narrows one mode; set MODE=fixture, default or scheduled with it." >&2
+    exit 1
+  fi
+  overall=0
+  summary=""
+  for m in fixture default scheduled; do
+    echo "######## MODE=$m"
+    if MODE="$m" bash "${BASH_SOURCE[0]}"; then
+      summary="$summary $m=pass"
+    else
+      summary="$summary $m=FAIL"
+      overall=1
+    fi
+  done
+  echo "== mobile entity playwright, all modes:$summary =="
+  exit "$overall"
+fi
+
+MODE="${MODE:-all}"
+case "$MODE" in
+  fixture|default|scheduled) ;;
+  *) echo "mobile-entity-playwright: unknown MODE '$MODE' (expected all, fixture, default or scheduled)." >&2; exit 1 ;;
+esac
 FIXTURE_DIR="code_generator/tests/fixtures/mobile_entity_e2e_gate"
 BUILD_DIR="$REPO_ROOT/.generated-mobile-entity-pw"
 
@@ -79,6 +112,12 @@ mkdir -p "$BUILD_DIR"
 git ls-files -z --cached --others --exclude-standard \
   | tar --null --ignore-failed-read -T - -cf - 2>/dev/null \
   | tar -xf - -C "$BUILD_DIR"
+# next build (Turbopack) cannot resolve a symlink that points at another symlink, so the checkout's
+# node_modules must be a real directory (a plain `npm ci` in this checkout).
+if [ -L "$REPO_ROOT/node_modules" ] || [ ! -d "$REPO_ROOT/node_modules" ]; then
+  echo "mobile-entity-playwright: $REPO_ROOT/node_modules must be a real directory (run npm ci in this checkout); a symlinked one breaks next build in the copy." >&2
+  exit 1
+fi
 ln -s "$REPO_ROOT/node_modules" "$BUILD_DIR/node_modules"
 
 if [ "$MODE" = "fixture" ]; then
@@ -298,7 +337,7 @@ echo "-- installing the Expo dependencies --"
 # them all when the specs finish.
 echo "-- API + Expo web bundle + same-origin proxy, then playwright --"
 set +e
-NODE_ENV=test PAYMENT_FAKE_STRIPE=1 \
+NODE_ENV=test PAYMENT_FAKE_STRIPE=1 MOBILE_PW_PRECONDITIONS_READY=1 \
 EXPO_WEB_URL="http://localhost:$PROXY_PORT" TEST_EMAIL=admin@example.com TEST_PASSWORD=password123 \
 npx start-server-and-test \
   "npm run test:e2e:start" "http://localhost:$APP_PORT" \
