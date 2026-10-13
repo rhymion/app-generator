@@ -381,5 +381,19 @@
       "number": "数値",
       "datetime": "日付/日時"
     }
+  },
+  "DashboardWidgetProblem": {
+    "noDataSources": "{where}ダッシュボードに有効なエンティティがないため、表示できるデータがありません。スキーマでエンティティに x-display.dashboard: true を設定してください。",
+    "dataSourceUnavailable": "{where}データソース「{entity}」は利用できません（ダッシュボードで有効ではなくなっています）。別のデータソースを選んでください。",
+    "noPermission": "{where}「{entity}」を読む権限がないため、このグラフのデータは表示されません。管理者に読み取り権限を依頼するか、別のデータソースを選んでください。",
+    "unknownField": "{where}「{field}」は「{entity}」のフィールドではありません（削除された可能性があります）。別のフィールドを選んでください。",
+    "bucketNeedsDatetime": "{where}「{field}」は日付・日時のフィールドではないため、期間で区切れません。集計軸に日付・日時のフィールドを選ぶか、期間の区切りを解除してください。",
+    "lineNeedsBucket": "{where}折れ線グラフは時系列を描きます。期間の区切りを選んでください。",
+    "stackNeedsSeries": "{where}積み上げ方法を使うには系列フィールドが必要です。系列フィールドを選ぶか、積み上げ方法を解除してください。",
+    "timezoneNeedsDatetime": "{where}タイムゾーンは日時のフィールドにのみ適用され、「{field}」は日時ではありません。タイムゾーンを UTC にするか、日時のフィールドで集計してください。",
+    "invalidFilterValue": "{where}「{value}」は「{field}」（{kind}）の絞り込み値として正しくありません。合う値を入力するか、絞り込みを解除してください。",
+    "seriesSameAsGroup": "{where}系列フィールド「{field}」が集計軸と同じです。別の系列フィールドを選んでください。",
+    "noMatchingData": "このグラフに該当するデータはありません。",
+    "loadFailed": "グラフを読み込めませんでした。ページを再読み込みし、改善しない場合は管理者に連絡してください。"
   }
 }

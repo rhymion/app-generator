@@ -5,6 +5,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Dashboard widgets say why they cannot be drawn** (Issue #908, part of #904). A widget that cannot render now names
+  the wrong setting, why, and how to fix it, in English or Japanese, instead of showing a raw internal message or
+  "Failed to load". Distinct messages cover: no data source in the schema, a data source that is not available, no read
+  permission, an unknown or removed field, a time bucket or time zone on a field that is not a date/time, a stack mode
+  without a series, a line chart without a bucket, and a filter value that does not fit its field; a filter matching no rows
+  reads "No data matches this chart." `aggregateForWidget` returns the problem as data (`{ ok: false, problem }`) so it
+  survives a production build, and `POST /api/dashboard/aggregate` answers with HTTP 400 and `{ error, code, setting,
+  params }`. Saving a dashboard now rejects a widget that cannot be drawn with a field-level error (widgets saved earlier and
+  left unchanged are not re-judged), and the editor shows the same messages while editing. For this, owned child rows are now
+  passed to `validateCustomRules` as `data.<property_name>`, like connect-style children's ids; no existing key changes. The
+  generated-once `lib/dashboard/service_validation_custom.ts` of an existing app needs the call added by hand. No new schema
+  key. See `docs/knowledge/schema-yaml-configuration.md`.
 - **`scripts/check-migrations-match-schema.sh`: checks that the migrations build the schema.** On an empty local scratch
   database it runs `prisma migrate deploy` and then `prisma migrate diff` against `prisma/schema.prisma`, and fails with the
   missing SQL when they differ. This catches a generator-added model (for example `scheduled_task_run`) that a consumer has

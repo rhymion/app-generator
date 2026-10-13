@@ -339,6 +339,8 @@ export async function validateCustomRules(
 ```
 
 - `data` — the raw create/update payload, keyed by schema property names.
+  Connect-style children appear as their selected ids (`data.users: string[]`) and owned children as the rows the caller
+  submitted (`data.lines: { id?: string; ... }[]`), each under its property name.
 - `currentId` — `null` on create, the row id on update.
 - `prevRow` — the full row as it stood *before* this write (`null` on
   create) — see `docs/knowledge/pre-edit-row-handoff-to-custom-validation.md`.

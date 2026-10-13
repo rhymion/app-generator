@@ -1995,6 +1995,38 @@ render, and corrects the row when a change makes a setting inapplicable (rules i
 A stored field the data source no longer offers stays visible, flagged, until the user changes it; an unchanged widget is
 saved as it was.
 
+#### Why a widget cannot be drawn
+
+A widget that cannot be drawn says which setting is wrong, why, and how to fix it, in the page language (messages in
+the `DashboardWidgetProblem` namespace, `en` and `ja`). The rules are one function, `findWidgetProblems`
+(`lib/dashboard/widget-problem.ts`), used by the aggregate, the dashboard save and the editor, so they read the same
+everywhere. Each case has its own message:
+
+| Case | Setting named | Fix offered |
+|---|---|---|
+| `noDataSources`: no entity opts in | none | set `x-display.dashboard: true` on an entity |
+| `dataSourceUnavailable`: the entity is not (or no longer) in the catalog | Data source | choose another |
+| `noPermission`: the viewer may not read the entity | Data source | ask for read access or choose another |
+| `unknownField`: a group-by, series or filter field the data source does not offer | that field | choose another |
+| `bucketNeedsDatetime`: a time bucket on a field that is not a date or time | Time bucket | choose a date/time field or clear it |
+| `lineNeedsBucket`: a line chart without a time bucket | Time bucket | choose one |
+| `stackNeedsSeries`: a stack mode without a series | Stack mode | choose a series or clear it |
+| `timezoneNeedsDatetime`: a time zone on a field that is not a date-time | Time zone | use UTC or a date-time field |
+| `invalidFilterValue`: a filter value that does not fit the filtered field | Filter value | enter a matching value or clear it |
+| `seriesSameAsGroup`: the series is the group-by field | Series field | choose another |
+
+A filter that matches no rows is not a problem: the widget says "No data matches this chart."
+
+The `aggregateForWidget` Server Action returns `{ ok: true, output }` or `{ ok: false, problem }`. A problem is data and
+not a thrown error because a production build replaces the message of an exception thrown from a Server Action with a
+generic one. `POST /api/dashboard/aggregate` answers a problem with HTTP 400 and `{ error, code, setting, params }`.
+
+On save, `lib/dashboard/service_validation_custom.ts` checks every widget with the same rules and rejects the save with a
+field-level `AppError` (field `widgets`, message key `DashboardWidgetProblem.<code>`, naming the widget by position and
+name). A widget saved earlier and left unchanged is not re-judged, so a dashboard whose data source was removed stays
+editable; with no entity in the catalog nothing is rejected. This file is generated once: a consumer that already has the
+no-op stub adds the same call (`validateWidgets(DASHBOARDABLE_ENTITIES, data.widgets, stored)`) by hand.
+
 The generator scans every dashboardable entity for **groupable fields** and
 emits a static catalog at `lib/dashboard/catalog.ts`. A field is groupable
 when it is one of:
