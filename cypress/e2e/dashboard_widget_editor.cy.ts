@@ -53,6 +53,19 @@ describe('Dashboard widget editor', () => {
     });
   });
 
+  it('shows the stored group-by field in a dropdown that offers no other field when the data source is unavailable', () => {
+    createDashboardWithWidget('removed_entity').then((id) => {
+      cy.visit(`/en/dashboard/edit/${id}`);
+      cy.get('[data-testid="widget-row-0"]').within(() => {
+        cy.get('input[role="combobox"]').filter((_, el) => (el as HTMLInputElement).value === 'status').should('have.length', 1);
+        cy.contains('label', 'Group By Field').invoke('attr', 'for').then((inputId) => {
+          cy.get(`#${inputId}`).click();
+        });
+      });
+      cy.get('[role="listbox"] [role="option"]').should('have.length', 1).and('have.attr', 'aria-disabled', 'true');
+    });
+  });
+
   it('keeps the stored values of an existing widget when the dashboard is saved unchanged', () => {
     createDashboardWithWidget('removed_entity').then((id) => {
       cy.visit(`/en/dashboard/edit/${id}`);
