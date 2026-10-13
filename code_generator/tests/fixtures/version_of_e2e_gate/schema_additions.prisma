@@ -37,10 +37,14 @@ model vo_item_version {
   vo_item              vo_item               @relation("VoItemVersions", fields: [vo_item_id], references: [id], onDelete: Cascade)
   current_of           vo_item?              @relation("VoItemCurrent")
   title                String
+  summary              String?
+  ref_code             String?               @unique
   version_no           Int?
   status               VoItemVersionStatus   @default(draft)
   approvable_id        String                @unique
   approvable           approvable            @relation(fields: [approvable_id], references: [id], onDelete: Cascade)
+  attachable_id        String                @unique
+  attachable           attachable            @relation(fields: [attachable_id], references: [id])
   vo_item_version_lines vo_item_version_line[]
   created_at           DateTime              @default(now()) @db.Timestamptz(0)
   updated_at           DateTime              @updatedAt @db.Timestamptz(0)
@@ -60,7 +64,9 @@ model vo_item_version_line {
   id                 String          @id @default(cuid())
   vo_item_version_id String
   vo_item_version    vo_item_version @relation(fields: [vo_item_version_id], references: [id], onDelete: Cascade)
+  line_code          String          @unique
   note               String
+  quantity           Int?
   created_at         DateTime        @default(now()) @db.Timestamptz(0)
   updated_at         DateTime        @updatedAt @db.Timestamptz(0)
 

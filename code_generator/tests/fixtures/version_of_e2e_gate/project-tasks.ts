@@ -55,6 +55,22 @@ export function getProjectTasks(): Record<string, (...args: any[]) => any> {
       });
       return { current_version_id: item.current_version_id, versions };
     },
+    async 'db:voDraft'(versionId: string) {
+      const v = await prisma.vo_item_version.findUniqueOrThrow({
+        where: { id: versionId },
+        select: {
+          title: true, status: true, ref_code: true, attachable_id: true,
+          vo_item_version_lines: { select: { note: true, line_code: true }, orderBy: { note: 'asc' } },
+        },
+      });
+      return {
+        title: v.title, status: v.status, ref_code: v.ref_code, attachable_id: v.attachable_id,
+        notes: v.vo_item_version_lines.map((l) => l.note), codes: v.vo_item_version_lines.map((l) => l.line_code),
+      };
+    },
+    async 'db:voAttachableId'(versionId: string) {
+      return (await prisma.vo_item_version.findUniqueOrThrow({ where: { id: versionId }, select: { attachable_id: true } })).attachable_id;
+    },
     async 'db:voLineCount'(versionId: string) {
       return prisma.vo_item_version_line.count({ where: { vo_item_version_id: versionId } });
     },

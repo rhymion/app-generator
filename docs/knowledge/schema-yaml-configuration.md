@@ -1720,6 +1720,27 @@ Generated, in `lib/<version>/version_of.ts` (always regenerated):
   (`deleteVersionDraft`). A version that holds a number is never deleted. A version entity without
   `on_withdrawn` keeps a withdrawn row as the open draft.
 
+- **New version screen.** `/<version>/new?new_version_of=<identity id>` is the version entity's ordinary create
+  form, filled with the identity's `current_version_id` version as initial values (`lib/<version>/version_of_prefill.ts`,
+  `getNewVersionPrefill`). Opening it writes nothing; the new record exists only when the user saves, through the
+  normal create path (so the one-open-draft rule, the approval bridge and the attachment bridge are created for the
+  new record as for any other, never shared with the current version). The screen shows an alert instead when the
+  identity does not exist, has no approved version yet, or already has an open draft.
+  What is carried over and what is not:
+  - Scalar columns of the version are carried over, except system columns, the version number, the approval
+    `submit_on` field(s) (back to their schema default, so the new record is an unsubmitted draft), and every
+    single-column `@unique` column (a copied value would collide, so the user chooses it).
+  - Child rows are carried over as initial rows only when they depend on the version and have no screens of
+    their own: the same decision the generator makes for the parent form (a child with its own new/edit/delete,
+    a many-to-many or nullable-FK list child, a comments child and an approval-indexed line child are not).
+    Carried rows keep their columns except `@unique` ones. A required `@unique` column with no default (for
+    example a line code) is left empty and the user must fill it in on the screen; it is never dropped or guessed.
+    Values that are determined (the new version's own id) are set by the create path.
+  - A one-to-one record that holds the foreign key to the version is carried like a child row, with its
+    unique columns left empty.
+  - Own-screen one-to-many and many-to-many records are not carried; they start empty.
+  A new record never keeps a number: the create path clears the number field, which is assigned at approval.
+
 Owned children are the one-to-many child arrays under the version's own `properties`; each needs
 exactly one structural FK to the version. Deeper levels are not deleted by the helper and must cascade
 in Prisma.

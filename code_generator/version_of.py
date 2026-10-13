@@ -77,7 +77,7 @@ def version_of_children(version: str, schema: dict) -> tuple[list[dict], list[st
     from helpers.schema_helpers import resolve_parent_fk_props
     defs = schema.get('definitions') or {}
     owned, problems = [], []
-    for entry in _extract_children_of(_raw(version, defs), schema):
+    for entry in _extract_children_of(defs.get(version) or _raw(version, defs), schema):
         rel = entry.get('relationship') or {}
         if rel.get('type') == 'many-to-many' or entry.get('output_type') == 'comments':
             continue
@@ -90,6 +90,114 @@ def version_of_children(version: str, schema: dict) -> tuple[list[dict], list[st
             continue
         owned.append({'model': entry['name'], 'fk': fks[0]})
     return owned, problems
+
+
+def _x_generate(name: str, defs: dict) -> dict:
+    return (defs.get(name) or {}).get('x-generate') or _raw(name, defs).get('x-generate') or {}
+
+
+def version_of_dependent_children(version: str, schema: dict) -> tuple[list[dict], list[str]]:
+    """Owned children of a version that depend on it and have no screens of
+    their own, and the child properties that are not carried to a new version.
+
+    Uses the decision the generator itself makes for the parent form
+    (build_context `is_independent` / `use_connect`): a child with its own
+    new/edit/delete, a many-to-many or nullable-FK list child, a comments child
+    and an approval-indexed line child are not written through the version's own
+    form, so a new-version screen does not prefill them. Returns
+    (dependent children [{'model','fk','prop'}], property names left empty)."""
+    from build_context import _extract_children_of
+    from helpers.schema_helpers import (
+        child_has_own_write_capability, get_approval_lines_props, is_optional_fk_to_parent,
+    )
+    defs = schema.get('definitions') or {}
+    version_def = defs.get(version) or _raw(version, defs)
+    lines_props = set(get_approval_lines_props(_raw(version, defs), version, schema))
+    owned, _ = version_of_children(version, schema)
+    owned_by_model = {c['model']: c for c in owned}
+    dependent, left_empty = [], []
+    for entry in _extract_children_of(version_def, schema):
+        prop = entry.get('property_name')
+        c = owned_by_model.get(entry['name'])
+        child_def = _raw(entry['name'], defs)
+        if (
+            c is None
+            or child_has_own_write_capability(_x_generate(entry['name'], defs))
+            or is_optional_fk_to_parent(child_def, version)
+            or prop in lines_props
+        ):
+            left_empty.append(prop)
+        else:
+            dependent.append({**c, 'prop': prop})
+    return dependent, left_empty
+
+
+_SYSTEM_COLUMNS = ('id', 'created_at', 'updated_at', 'creator_id', 'updater_id', 'approvable_id')
+
+
+def _empty_value(f) -> str:
+    """TypeScript literal for a column that must be chosen on the new screen."""
+    if f.prisma_type == 'String' and not f.nullable:
+        return "''"
+    if f.prisma_type == 'Boolean':
+        return 'false'
+    return 'null'
+
+
+def _reset_columns(model, models: dict, extra: set[str]) -> tuple[list[dict], list[str]]:
+    """Columns a new-version screen does not carry over: system columns, the
+    caller's `extra` names, and every single-column `@unique` (a copied value
+    would collide with the source row). Returns ({'key','value'} for scalars
+    the user fills in or the schema default restores, relation-object keys to
+    drop)."""
+    resets, drop = [], []
+    reset_names = set(_SYSTEM_COLUMNS) | extra
+    for f in model.fields.values():
+        if f.is_relation_object or f.is_list or f.prisma_type in models:
+            continue
+        if f.name in reset_names or f.is_unique:
+            resets.append({'key': f.name, 'value': _empty_value(f)})
+            reset_names.add(f.name)
+    for f in model.fields.values():
+        if f.is_relation_object and set(f.relation_fk_fields) & reset_names:
+            drop.append(f.name)
+    return resets, drop
+
+
+def version_of_prefill_plan(vo: dict, schema: dict, models: dict) -> dict:
+    """What the new-version screen carries over from the current version.
+
+    The version row keeps every scalar column except its number, the approval
+    submit field(s), system columns and `@unique` columns (those restart from
+    the schema default, so the new record is an unsubmitted draft the user
+    completes and saves). Child rows that depend on the version and have no
+    screens of their own are carried as initial rows with the same exclusions;
+    all other children start empty."""
+    version, number = vo['version'], vo['number']
+    submit = set(((_raw(version, schema.get('definitions') or {}).get('x-approval') or {}).get('submit_on') or {}))
+    resets, drop = _reset_columns(models[version], models, {number} | submit)
+    dependent, left_empty = version_of_dependent_children(version, schema)
+    children = []
+    for c in dependent:
+        c_resets, c_drop = _reset_columns(models[c['model']], models, set())
+        children.append({**c, 'resets': c_resets, 'drop': c_drop})
+    # One-to-one records that hold the foreign key to the version (a singular relation on
+    # the version, none of the bridges/identity side): carried like a dependent child row
+    # (their values are initial values) except for unique columns, which the user chooses.
+    holders = []
+    for f in models[version].fields.values():
+        if f.is_list or f.relation_fk_fields or f.prisma_type not in models:
+            continue
+        if f.prisma_type == vo['identity']:
+            continue
+        target = models[f.prisma_type]
+        back_fks = {c for g in target.fields.values()
+                    if g.is_relation_object and g.prisma_type == version for c in g.relation_fk_fields}
+        if not back_fks:
+            continue
+        h_resets, h_drop = _reset_columns(target, models, back_fks)
+        holders.append({'prop': f.name, 'resets': h_resets, 'drop': h_drop})
+    return {'resets': resets, 'drop': drop, 'children': children, 'left_empty': left_empty, 'holders': holders}
 
 
 def version_of_errors(schema: dict) -> list[str]:

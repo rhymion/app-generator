@@ -53,7 +53,9 @@
     "sessionExpired": "Your session has expired. Please sign in again.",
     "staleMutation": "This record has been updated since you opened it. Please reload to compare with the latest changes.",
     "tryAgain": "Try again",
-    "unknown": "An unexpected error occurred. Please try again."
+    "unknown": "An unexpected error occurred. Please try again.",
+    "versionOfOpenDraft": "This item already has an open draft. Finish or withdraw it before starting a new version.",
+    "versionOfNoCurrentVersion": "There is no approved version to start from yet."
   },
   "EntityLabel": {
     "approvalFlow": "Approval Flow",

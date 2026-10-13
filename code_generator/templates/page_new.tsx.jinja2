@@ -22,7 +22,15 @@ import { search{{ oto.target | pascal_case }}Options } from '@/lib/{{ oto.target
 {% endfor %}
 import { get{{ parent_pascal }}NewPageAccessCheck } from '@/lib/{{ parent }}/getters';
 
-{% if bridge_child_ir %}
+{% if version_of_new %}
+import { getNewVersionPrefill } from '@/lib/{{ parent }}/version_of_prefill';
+{% endif %}
+{% if version_of_new and not required_relation_fields %}
+import AppAlert from '@/components/ui/AppAlert';
+import { getTranslations } from 'next-intl/server';
+{% endif %}
+
+{% if bridge_child_ir or version_of_new %}
 type NewSearchParams = Record<string, string | string[] | undefined>;
 
 export default function Add{{ parent_pascal }}Page({ searchParams }: { searchParams: Promise<NewSearchParams> }) {
@@ -35,8 +43,10 @@ export default function Add{{ parent_pascal }}Page({ searchParams }: { searchPar
 
 async function {{ parent_pascal }}NewContent({ searchParams }: { searchParams: Promise<NewSearchParams> }) {
   const _sp = await searchParams;
+{% if bridge_child_ir %}
   const _initialParentType = typeof _sp.parentType === 'string' ? _sp.parentType : '';
   const _initialParentId = typeof _sp.parentId === 'string' ? _sp.parentId : '';
+{% endif %}
 {% else %}
 export default function Add{{ parent_pascal }}Page() {
   return (
@@ -92,6 +102,30 @@ async function {{ parent_pascal }}NewContent() {
     );
   }
 {% endif %}
+{% if version_of_new %}
+  const blankSrc = {
+    id: '',
+{{ parent_default_props }}
+{% for child in children_raw %}
+    {{ child.property_name }}: [],
+{% endfor %}
+  };
+  // x-version-of: ?new_version_of=<{{ version_of_new.identity }} id> opens this form filled with the
+  // current version's values. Nothing is saved until the user submits the form.
+  let src: typeof blankSrc = blankSrc;
+  if (typeof _sp.new_version_of === 'string' && _sp.new_version_of !== '') {
+    const prefill = await getNewVersionPrefill(_sp.new_version_of, blankSrc);
+    if (!prefill.ok) {
+      const te = await getTranslations('Errors');
+      return (
+        <AppAlert severity="warning" className="mb-4">
+          {te(prefill.reason === 'open_draft' ? 'versionOfOpenDraft' : prefill.reason === 'no_current_version' ? 'versionOfNoCurrentVersion' : 'notFound')}
+        </AppAlert>
+      );
+    }
+    src = prefill.src as typeof blankSrc;
+  }
+{% else %}
   const src = {
     id: '',
 {{ parent_default_props }}
@@ -99,5 +133,6 @@ async function {{ parent_pascal }}NewContent() {
     {{ child.property_name }}: [],
 {% endfor %}
   };
+{% endif %}
   return <FormUpsert src={src} isEdit={false} permissions={userPermissions}{% for target in selection_targets %} initial{{ target | pascal_case }}s={ initial{{ target | pascal_case }}s } initial{{ target | pascal_case }}sPermissionDenied={Boolean((initial{{ target | pascal_case }}s as { permissionDenied?: boolean } | undefined)?.permissionDenied)} search{{ target | pascal_case }}Options={ {% if target == 'organization' %}searchAssociatedOrganizationOptions{% else %}search{{ target | pascal_case }}Options{% endif %} }{% endfor %}{% for oto in selector_oto_rels %} initial{{ oto.target | pascal_case }}s={ initialAvailable{{ oto.target | pascal_case }}s } initial{{ oto.target | pascal_case }}sPermissionDenied={Boolean((initialAvailable{{ oto.target | pascal_case }}s as { permissionDenied?: boolean } | undefined)?.permissionDenied)} search{{ oto.target | pascal_case }}Options={ {% if oto.target == 'organization' %}searchAssociatedOrganizationOptions{% else %}search{{ oto.target | pascal_case }}Options{% endif %} }{% endfor %}{% if bridge_child_ir %} initialParentType={_initialParentType} initialParentId={_initialParentId}{% endif %} />;
 }

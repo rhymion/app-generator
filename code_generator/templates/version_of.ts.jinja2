@@ -14,9 +14,9 @@ import { AppError } from '@/lib/_errors';
  * approval has been granted (`approvable.approved_at` is set); a row that was
  * never submitted counts as open.
  */
-export async function assertSingleOpenDraft(tx: Tx, identityId: string, selfId: string): Promise<void> {
+export async function assertSingleOpenDraft(tx: Tx, identityId: string, selfId: string | null): Promise<void> {
   const siblings = await tx.{{ version }}.findMany({
-    where: { {{ identity_fk }}: identityId, id: { not: selfId } },
+    where: { {{ identity_fk }}: identityId, ...(selfId ? { id: { not: selfId } } : {}) },
     select: { approvable_id: true },
   });
   if (siblings.length === 0) return;

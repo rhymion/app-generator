@@ -38,9 +38,13 @@ definitions:
       invalidate: false
       api: false
       test: false
+    required:
+      - line_code
     fields:
       vo_item_version_id: {}
+      line_code: {}
       note: {}
+      quantity: {}
 
   vo_item_version:
     x-generate:
@@ -77,6 +81,8 @@ definitions:
         x-relationship:
           labelField: name
       title: {}
+      summary: {}
+      ref_code: {}
       version_no: {}
       status:
         enum:
@@ -90,12 +96,18 @@ definitions:
           type: one-to-one_bridge
           target: approvable
           labelField: id
+      attachable_id:
+        x-relationship:
+          type: one-to-one_bridge
+          labelField: id
     required:
       - vo_item_id
       - title
     properties:
       approvable:
         $ref: "#/definitions/approvable"
+      attachable:
+        $ref: "#/definitions/attachable"
       vo_item_version_lines:
         type: array
         items:
