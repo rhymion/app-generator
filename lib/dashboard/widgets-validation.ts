@@ -10,7 +10,8 @@ import {
   type WidgetProblem,
 } from './widget-problem';
 
-type LabelledCatalog = Array<CatalogEntity & { label?: string; groupable_fields: Array<CatalogEntity['groupable_fields'][number] & { label?: string }> }>;
+type LabelledField = CatalogEntity['groupable_fields'][number] & { label?: string };
+type LabelledCatalog = Array<{ name: string; label?: string; groupable_fields: LabelledField[] }>;
 
 // The message key renders in the form's language; names in it are the schema's display labels.
 function messageArgs(catalog: LabelledCatalog, problem: WidgetProblem, widgetEntity: string, where: string): MessageArgs {
