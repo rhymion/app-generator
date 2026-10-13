@@ -4,7 +4,7 @@
 // {{ identity }}. The screen opens as an ordinary create form filled with the
 // current version's values; nothing is written until the user saves it.
 import prisma from '@/lib/prisma';
-import { assertPermission, getModelPermissions } from '@/lib/authz';
+import { assertPermission, getModelPermissions{% if detail_takes_user_id %}, getSessionUserIdOrThrow{% endif %} } from '@/lib/authz';
 import { AppError } from '@/lib/_errors';
 import { get{{ pascal }}Detail } from './getters';
 import { assertSingleOpenDraft } from './version_of';
@@ -73,7 +73,7 @@ export async function getNewVersionPrefill(identityId: string, defaults: Row): P
     if (e instanceof AppError) return { ok: false, reason: 'open_draft' };
     throw e;
   }
-  const current = await get{{ pascal }}Detail(identity.current_version_id);
+  const current = await get{{ pascal }}Detail(identity.current_version_id{% if detail_takes_user_id %}, await getSessionUserIdOrThrow(){% endif %});
   if (!current) return { ok: false, reason: 'not_found' };
   const src = resetRow(current as unknown as Row, defaults, RESET, DROP);
   src.id = '';

@@ -1712,13 +1712,21 @@ Generated, in `lib/<version>/version_of.ts` (always regenerated):
   same transaction as the status write: the number becomes the identity's highest number plus one,
   and the identity's `current_version_id` is set to the version. An abandoned draft takes no number.
 - **One open draft per identity.** `assertSingleOpenDraft` runs in `add<Version>` right after the
-  insert; a second version row whose identity still has a row that is not yet approved is refused
-  (`VALIDATION`, reason `invalid`, message "Another draft of this <identity> is still open") and the insert is rolled back. A row counts as open until
-  its `approvable.approved_at` is set, so a non-terminally rejected row stays the open draft.
-- **Settled non-approved outcomes.** A terminal rejection (`on_rejected.terminal: true`) and a
-  withdrawal (`on_withdrawn`) delete the draft and its owned child rows in the dispatch transaction
-  (`deleteVersionDraft`). A version that holds a number is never deleted. A version entity without
-  `on_withdrawn` keeps a withdrawn row as the open draft.
+  insert; a second version row whose identity still has an open row is refused
+  (`VALIDATION`, reason `invalid`, message "Another draft of this <identity> is still open") and the insert is rolled back.
+  A row is closed once its `approvable.approved_at` is set or one of its approval requests has the status
+  `terminal_rejected` (read from the approval records, not from the values `on_rejected.set_fields` writes). Every other
+  row is open: a row never submitted, a pending one, and one that was rejected without `terminal` or withdrawn.
+- **Rejected and withdrawn versions.** The generator never deletes a version row. A terminally rejected version
+  (`on_rejected.terminal: true`) stays as a closed record: it takes no number, is frozen like any terminally decided
+  row (edit and delete are refused), and does not block the next version, which is created from the new version screen
+  or the API as usual. A version rejected without `terminal`, or withdrawn, stays the open draft: the user fixes it and
+  resubmits it, and no other version can be created for the identity until it is approved or terminally rejected. Setting
+  `on_rejected` without `terminal` therefore keeps the draft editable; with `terminal` the record is final and the next
+  version starts from the current approved version.
+- **The number is not writable.** A version holds a number only after approval. A number sent by a form or an API client is
+  dropped: create stores none, update keeps the stored value. (An empty numeric form field arrives as `0`; stored, it would
+  collide on `(identity, number)` with any other row holding `0`.)
 
 - **New version screen.** `/<version>/new?new_version_of=<identity id>` is the version entity's ordinary create
   form, filled with the identity's `current_version_id` version as initial values (`lib/<version>/version_of_prefill.ts`,
@@ -1760,6 +1768,30 @@ non-snake-case `identity` / `number`, a version entity without `x-approval.on_ap
 identity or the version itself, an identity that is itself a version entity, two version entities for
 one identity, a `number` that is not an integer property or is `required`, an owned child without
 exactly one structural FK, and any missing Prisma column listed above.
+
+
+### Version list and two-version diff
+
+An identity that has a version entity gets a **Version history** section at the bottom of its detail screen,
+with no further schema key. It lists every version the caller may read (drafts included; the current version is
+marked) and shows the changes between any two of them, by default the current version against the open draft.
+
+- **Injection.** The generator adds the standard `VersionHistory` view component to the identity's
+  `x-custom-components` when the identity declares no `x-custom-components` at all. Any declared list,
+  `[]` included, is left exactly as written, which also disables the section.
+- **Reads.** `get<Version>VersionHistory` and `get<Version>VersionDiff` are generated into `lib/<version>/getters.ts`
+  and use the version entity's own read permission and access filter (organization scope, creator/assignee scope),
+  so they never show more than the version's own list and detail screens. A diff of a version the caller cannot
+  see fails with `NOT_FOUND`.
+- **Fields.** Each side of a field is rendered with the version entity's own detail-screen markup
+  (`components/<identity>/VersionFields.tsx`), so enums, decimals, dates and relations look as they do on the
+  detail screen. A changed field is highlighted; a changed text longer than 80 characters also gets a word diff.
+- **Owned child rows** (one level) are paired across versions by the child's `x-import-key` when it declares one
+  (dotted paths are ignored), otherwise by position under the child's `order` column, and otherwise not at all:
+  the diff then lists additions and removals only and says so. Child values are shown as plain text.
+- **From a version.** On a draft version's own screen the approval section shows **Compare with current version**,
+  which opens the identity's detail screen with that draft preselected (`?compare=<version id>`).
+- **Messages.** The text lives in the `VersionHistory` section of `messages/*.json`.
 
 The key is opt-in; a schema without it generates the same output as before.
 

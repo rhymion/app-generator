@@ -8,9 +8,6 @@ import type { PrismaClient } from '@/app/generated/prisma/client';
 {% if entity.exclusive_check %}
 import { validateExclusiveParents as validate{{ entity.pascal_name }}ExclusiveParents } from '@/lib/{{ entity.snake_name }}/exclusive_parents';
 {% endif %}
-{% if entity.version_of %}
-import { deleteVersionDraft as {{ entity.pascal_name }}DeleteVersionDraft } from '@/lib/{{ entity.snake_name }}/version_of';
-{% endif %}
 {% if entity.emit_hook %}
 import { afterWithdraw as {{ entity.pascal_name }}AfterWithdraw } from '@/lib/{{ entity.snake_name }}/service_after_withdraw';
 {% endif %}
@@ -46,7 +43,7 @@ export async function dispatchOnWithdrawn(
 ): Promise<void> {
 {% for entity in withdrawable_entities %}
   if (entityType === '{{ entity.snake_name }}') {
-{% if entity.set_fields or entity.emit_hook or entity.version_of %}
+{% if entity.set_fields or entity.emit_hook %}
     const entity = await tx.{{ entity.snake_name }}.findFirst({ where: { approvable_id: approvableId } });
     if (!entity) return;
 {% if entity.set_fields %}
@@ -63,10 +60,6 @@ export async function dispatchOnWithdrawn(
 {% endif %}
 {% if entity.emit_hook %}
     await {{ entity.pascal_name }}AfterWithdraw(tx, entity.id, approvableId);
-{% endif %}
-{% if entity.version_of %}
-    // x-version-of: a withdrawn draft is not kept
-    await {{ entity.pascal_name }}DeleteVersionDraft(tx, entity.id);
 {% endif %}
 {% endif %}
     return;

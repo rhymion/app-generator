@@ -19,7 +19,9 @@ function createItem(name = 'Widget') {
     });
 }
 
-function createVersion(itemId: string, status: 'draft' | 'pending', lines = 0) {
+let orgId = '';
+
+function createVersion(itemId: string, status: 'draft' | 'pending', lines = 0, extra: Record<string, unknown> = {}) {
   return cy.request({
     method: 'POST',
     url: '/api/vo_item_version',
@@ -27,10 +29,12 @@ function createVersion(itemId: string, status: 'draft' | 'pending', lines = 0) {
     failOnStatusCode: false,
     body: {
       vo_item_id: itemId,
+      organization_id: orgId,
       title: `v-${status}`,
       summary: 'kept summary',
       ref_code: `ref-${++lineSeq}`,
       status,
+      ...extra,
       vo_item_version_lines: Array.from({ length: lines }, (_, i) => ({ line_code: `code-${++lineSeq}`, note: `line ${i}`, quantity: i + 1 })),
     },
   });
@@ -45,12 +49,61 @@ function approve(versionId: string) {
   });
 }
 
+function reject(versionId: string) {
+  cy.task<string | null>('db:voPendingRequestId', versionId).then((requestId) => {
+    expect(requestId, 'a pending approval request').to.be.a('string');
+    cy.request({ method: 'POST', url: `/api/approval_request/${requestId}/reject`, headers, body: {} })
+      .its('status')
+      .should('eq', 200);
+  });
+}
+
+// vo_doc / vo_doc_version: the pair whose rejection is not terminal.
+function createDoc(name = 'Manual') {
+  return cy
+    .request({ method: 'POST', url: '/api/vo_doc', headers, body: { name } })
+    .then((res) => {
+      expect(res.status).to.eq(201);
+      return (res.body as { id: string }).id;
+    });
+}
+
+function createDocVersion(docId: string, status: 'draft' | 'pending') {
+  return cy.request({
+    method: 'POST',
+    url: '/api/vo_doc_version',
+    headers,
+    failOnStatusCode: false,
+    body: { vo_doc_id: docId, title: `d-${status}`, status },
+  });
+}
+
+// Fix and resubmit: put the version back to the submit value.
+function resubmitDocVersion(versionId: string) {
+  cy.request({ method: 'GET', url: `/api/vo_doc_version/${versionId}`, headers }).then((cur) => {
+    cy.request({
+      method: 'PUT', url: `/api/vo_doc_version/${versionId}`, headers,
+      body: { ...cur.body, title: 'fixed', status: 'pending' },
+    }).its('status').should('eq', 200);
+  });
+}
+
+function approveDoc(versionId: string) {
+  cy.task<string | null>('db:voDocPendingRequestId', versionId).then((requestId) => {
+    expect(requestId, 'a pending approval request after resubmission').to.be.a('string');
+    cy.request({ method: 'POST', url: `/api/approval_request/${requestId}/approve`, headers, body: {} })
+      .its('status')
+      .should('eq', 200);
+  });
+}
+
 describe('x-version-of (generated runtime behaviour)', () => {
   beforeEach(() => {
     cy.task('db:reset');
     cy.task('db:seed');
     cy.task('db:grantAllPermissions');
     cy.task('db:setupVoApprover', TEST_CREDENTIALS.email);
+    cy.task<{ own: string }>('db:voSeedOrgs', TEST_CREDENTIALS.email).then((orgs) => { orgId = orgs.own; });
     Cypress.session.clearAllSavedSessions();
   });
 
@@ -95,41 +148,121 @@ describe('x-version-of (generated runtime behaviour)', () => {
     });
   });
 
-  it('deletes a terminally rejected draft together with its child rows, never an approved version', () => {
+  it('keeps a terminally rejected version as a closed record: no number, frozen, and the next draft can be created', () => {
     createItem().then((itemId) => {
       createVersion(itemId, 'pending', 2).then((res) => {
         const v1 = (res.body as { id: string }).id;
-        cy.task<number>('db:voLineCount', v1).should('eq', 2);
         approve(v1);
       });
       createVersion(itemId, 'pending', 2).then((res) => {
         const v2 = (res.body as { id: string }).id;
-        cy.task<string | null>('db:voPendingRequestId', v2).then((requestId) => {
-          cy.request({ method: 'POST', url: `/api/approval_request/${requestId}/reject`, headers, body: {} })
-            .its('status')
-            .should('eq', 200);
-        });
-        cy.task<number>('db:voLineCount', v2).should('eq', 0);
+        reject(v2);
+        cy.task<string[]>('db:voRequestStatuses', v2).should('deep.eq', ['terminal_rejected']);
+        // (e) a rejected version never takes a number; the record and its rows stay
         cy.task<State>('db:voState', itemId).then((s) => {
-          expect(s.versions.map((v) => v.version_no), 'only the approved version remains').to.deep.eq([1]);
+          expect(s.versions.map((v) => [v.version_no, v.status])).to.deep.eq([[1, 'approved'], [null, 'rejected']]);
+          expect(s.current_version_id, 'the approved version stays current').to.not.eq(v2);
+        });
+        cy.task<number>('db:voLineCount', v2).should('eq', 2);
+        // (d) the freeze holds: edit and delete are refused, the row is unchanged
+        cy.request({ method: 'GET', url: `/api/vo_item_version/${v2}`, headers }).then((cur) => {
+          cy.request({
+            method: 'PUT', url: `/api/vo_item_version/${v2}`, headers, failOnStatusCode: false,
+            body: { ...cur.body, title: 'edited after rejection' },
+          }).its('status').should('be.within', 400, 499);
+        });
+        cy.request({ method: 'DELETE', url: `/api/vo_item_version/${v2}`, headers, failOnStatusCode: false })
+          .its('status').should('be.within', 400, 499);
+        cy.task<State>('db:voState', itemId).then((s) => expect(s.versions).to.have.length(2));
+        cy.task<number>('db:voLineCount', v2).should('eq', 2);
+        // (a) the identity is free for a new version draft, by the API and by the new version screen
+        cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
+        cy.visit(`/en/vo_item_version/new?new_version_of=${itemId}`);
+        cy.get('input').then(($inputs) => {
+          expect([...$inputs].map((i) => (i as HTMLInputElement).value), 'the screen opens filled').to.include('v-pending');
+        });
+        cy.contains('already has an open draft').should('not.exist');
+        createVersion(itemId, 'pending', 1).then((res3) => {
+          expect(res3.status).to.eq(201);
+          approve((res3.body as { id: string }).id);
+          cy.task<State>('db:voState', itemId).then((s) => {
+            expect(s.versions.map((v) => v.version_no), 'the rejected version does not use up a number').to.deep.eq([1, null, 2]);
+          });
         });
       });
     });
   });
 
-  it('deletes a withdrawn draft together with its child rows', () => {
+  it('ignores a version number sent by the client: create stores none, update keeps the stored value', () => {
     createItem().then((itemId) => {
-      createVersion(itemId, 'pending', 1).then((res) => {
+      // a form submits an empty numeric field as 0; two such rows must not collide on (identity, number)
+      createVersion(itemId, 'draft', 0, { version_no: 0 }).then((res) => {
+        expect(res.status).to.eq(201);
         const v1 = (res.body as { id: string }).id;
-        cy.task<string | null>('db:voPendingRequestId', v1).then((requestId) => {
-          cy.request({ method: 'POST', url: `/api/approval_request/${requestId}/withdraw`, headers, body: {} })
-            .its('status')
-            .should('eq', 200);
+        cy.task<State>('db:voState', itemId).then((s) => expect(s.versions.map((v) => v.version_no)).to.deep.eq([null]));
+        // an edit of the draft, submitted in the same write, sends the number again
+        cy.request({ method: 'GET', url: `/api/vo_item_version/${v1}`, headers }).then((cur) => {
+          cy.request({
+            method: 'PUT', url: `/api/vo_item_version/${v1}`, headers,
+            body: { ...cur.body, title: 'edited', version_no: 0, status: 'pending' },
+          }).its('status').should('eq', 200);
         });
-        cy.task<number>('db:voLineCount', v1).should('eq', 0);
-        cy.task<State>('db:voState', itemId).then((s) => expect(s.versions).to.have.length(0));
-        // the identity is free for a new draft again
-        createVersion(itemId, 'draft').its('status').should('eq', 201);
+        cy.task<State>('db:voState', itemId).then((s) => expect(s.versions.map((v) => v.version_no), 'an edit writes no number').to.deep.eq([null]));
+        approve(v1);
+        cy.task<State>('db:voState', itemId).then((s) => expect(s.versions.map((v) => v.version_no)).to.deep.eq([1]));
+        createVersion(itemId, 'draft', 0, { version_no: 0 }).then((res2) => {
+          expect(res2.status, 'a second row sent with 0 does not collide').to.eq(201);
+          const v2 = (res2.body as { id: string }).id;
+          cy.request({ method: 'GET', url: `/api/vo_item_version/${v2}`, headers }).then((cur) => {
+            cy.request({
+              method: 'PUT', url: `/api/vo_item_version/${v2}`, headers,
+              body: { ...cur.body, version_no: 1 },
+            }).its('status').should('eq', 200);
+          });
+          cy.task<State>('db:voState', itemId).then((s) => expect(s.versions.map((v) => v.version_no), 'a sent 1 is dropped too').to.deep.eq([1, null]));
+        });
+      });
+    });
+  });
+
+  it('keeps a version rejected without terminal as the open draft, which can be fixed and resubmitted', () => {
+    createDoc().then((docId) => {
+      createDocVersion(docId, 'pending').then((res) => {
+        const v1 = (res.body as { id: string }).id;
+        cy.task<string | null>('db:voDocPendingRequestId', v1).then((requestId) => {
+          cy.request({ method: 'POST', url: `/api/approval_request/${requestId}/reject`, headers, body: {} }).its('status').should('eq', 200);
+        });
+        // (b) the version is still the open draft: a new one is refused, the version is not deleted
+        createDocVersion(docId, 'draft').then((res2) => {
+          expect(res2.status).to.be.within(400, 499);
+          expect(JSON.stringify(res2.body)).to.contain('is still open');
+        });
+        cy.task<State>('db:voDocState', docId).then((s) => expect(s.versions.map((v) => v.id)).to.deep.eq([v1]));
+        resubmitDocVersion(v1);
+        approveDoc(v1);
+        cy.task<State>('db:voDocState', docId).then((s) => {
+          expect(s.versions).to.deep.eq([{ id: v1, version_no: 1, status: 'approved' }]);
+        });
+      });
+    });
+  });
+
+  it('keeps a withdrawn version as the open draft, which can be resubmitted', () => {
+    createDoc().then((docId) => {
+      createDocVersion(docId, 'pending').then((res) => {
+        const v1 = (res.body as { id: string }).id;
+        cy.task<string | null>('db:voDocPendingRequestId', v1).then((requestId) => {
+          cy.request({ method: 'POST', url: `/api/approval_request/${requestId}/withdraw`, headers, body: {} }).its('status').should('eq', 200);
+        });
+        // (c) same as after a non-terminal rejection
+        createDocVersion(docId, 'draft').then((res2) => {
+          expect(res2.status).to.be.within(400, 499);
+          expect(JSON.stringify(res2.body)).to.contain('is still open');
+        });
+        cy.task<State>('db:voDocState', docId).then((s) => expect(s.versions.map((v) => v.id)).to.deep.eq([v1]));
+        resubmitDocVersion(v1);
+        approveDoc(v1);
+        cy.task<State>('db:voDocState', docId).then((s) => expect(s.versions[0].version_no).to.eq(1));
       });
     });
   });

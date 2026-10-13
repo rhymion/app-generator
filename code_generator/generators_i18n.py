@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 from helpers.naming import to_camel_case, to_title_case
+from version_of import version_of_entities
 from helpers.schema_helpers import filter_fields
 from nav_config import (
     build_nav_config,
@@ -108,6 +109,30 @@ _CUSTOM_COMPONENT_FIELD_KEYS: dict[str, dict[str, str]] = {
 # Unlike _CUSTOM_COMPONENT_FIELD_KEYS (merged into Fields), these keep their
 # own top-level section so the component's translations stay grouped together.
 _CUSTOM_COMPONENT_SECTIONS: dict[str, dict[str, dict[str, str]]] = {
+    # x-version-of identities get this component injected automatically.
+    'VersionHistory': {
+        'VersionHistory': {
+            'title': 'Version history',
+            'draft': 'Draft',
+            'versionLabel': 'Version {number}',
+            'current': 'Current',
+            'superseded': 'Superseded',
+            'number': 'Version',
+            'status': 'Status',
+            'created': 'Created',
+            'compare': 'Compare',
+            'compareFrom': 'From',
+            'compareTo': 'To',
+            'diffTitle': 'Changes between versions',
+            'added': 'Added',
+            'removed': 'Removed',
+            'changed': 'Changed',
+            'unchanged': 'Unchanged',
+            'rowsUnmatchedNotice': 'Rows could not be matched between versions; showing additions and removals only.',
+            'compareWithCurrent': 'Compare with current version',
+            'loadError': 'The version history could not be loaded.',
+        },
+    },
     'CopyShiftsButton': {
         'ShiftTemplate': {
             'copyToShifts': 'Copy to Shifts',
@@ -123,9 +148,14 @@ def _collect_custom_component_sections(entities: list, schema: dict) -> dict[str
     result: dict[str, dict[str, str]] = {}
     for entity in entities:
         def_key = entity.get('definition_key', '')
-        custom_comps = schema['definitions'].get(def_key, {}).get('x-custom-components') or []
+        entity_def = schema['definitions'].get(def_key, {})
+        custom_comps = entity_def.get('x-custom-components') or []
         if not isinstance(custom_comps, list):
             continue
+        if 'x-custom-components' not in entity_def and any(
+            v['identity'] == def_key for v in version_of_entities(schema)
+        ):
+            custom_comps = [{'name': 'VersionHistory'}]
         for custom_comp in custom_comps:
             if not isinstance(custom_comp, dict):
                 continue

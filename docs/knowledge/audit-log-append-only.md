@@ -42,6 +42,40 @@ digest chain makes a privileged change visible.
 - **Partition export.** `npm run audit-log:digest -- export-month YYYY-MM` writes the month as JSON Lines plus its SHA-256 to
   storage. Rows written after the last digest and before the next are protected by the first three layers only until the next run.
 
+## What digest verification detects
+
+`verify` (`npm run audit-log:digest -- verify`, or a scheduled task wrapping `verifyAuditLogDigests`) reads **every** row of
+`audit_log_digest` on every run, recomputes each closed period from the live rows (from the archive file when the period's
+rows were archived and the partition dropped) and compares the result with the table and with the storage copy. It does not
+look only at the latest day. Observed on a local database, after the corresponding change was made by the table owner with the
+row trigger disabled:
+
+| Change | Reported by the next `verify` |
+|---|---|
+| A row of a closed period is edited | `digest_mismatch`, and `storage_mismatch` |
+| A row is inserted into, or deleted from, a closed period | `row_count_mismatch`, `digest_mismatch`, and `storage_mismatch` |
+| The same edit, plus the `audit_log_digest` rows rewritten and re-chained to match the edited rows | `storage_mismatch` for every period from the edit onward (the table and the chain are consistent, the storage copy is not) |
+| The same, plus the storage copies rewritten (local-directory storage) | Nothing: `verify` passes |
+| A digest row in the middle of the table is deleted | `chain_break` at the next period |
+| The newest digest row is deleted, together with a change to that period's rows | Nothing from `verify`: it only visits periods present in the table. The next `close` recomputes the period, finds a different body at the existing storage key and refuses to overwrite it, so the `close` run fails |
+| A row of the current day (not yet closed) is edited | Nothing: the content at close time is what the digest records |
+
+What this means:
+
+- A change to a closed period is caught on the next `verify`, however old the period, because every period is recomputed each
+  time.
+- The storage copy is the trust anchor. Rewriting the digest table and re-chaining it defeats the table but not a copy the
+  attacker cannot rewrite. That holds only with write-once storage (S3 Object Lock in compliance mode, GCS Bucket Lock). With
+  `LocalDirectoryStorage`, whoever can write the database can usually write the directory too, so this guarantee does not
+  exist (fourth row of the table). Object Lock protects a copy only until its retention date; choose a retention period at
+  least as long as the history that must stay verifiable.
+- Changes before a period is closed are not detectable: closing is what fixes a period's content. The window is the current UTC
+  day plus the close margin, until `close` has run.
+- `verify` does not enumerate storage, so a digest that exists only in storage is not reported. Compare the key listing of the
+  digests prefix with the table occasionally, and treat a failed `close` with `Refusing to overwrite` as an alarm.
+- When all rows of a period are gone and an archive file exists for its month, `verify` recomputes the period from the file, so
+  an export is treated as a retirement, not as a deletion. The archive file's own SHA-256 is checked on read.
+
 ## What a consumer sets up
 
 1. Add `prisma/sql/audit_log_append_only.sql` to one of your own Prisma migrations (a hand-edited `migration.sql`; the

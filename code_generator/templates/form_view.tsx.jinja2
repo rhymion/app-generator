@@ -123,7 +123,7 @@ export default function FormView({ src, {% if can_update or entity_view_componen
       />
 {% endif %}
 {% for comp in entity_view_components %}
-      <{{ comp.name }} src={src}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId}{% if submit_for_approval_needed and comp.name == 'ApprovalSection' %} onSubmitForApproval={approvalActions.onSubmitForApproval}{% endif %}{% if comp.name == 'ApprovalSection' %} hasOnWithdrawn={approvalActions.hasOnWithdrawn}{% endif %} />
+      <{{ comp.name }} src={src}{% if comp.props_jsx %} {{ comp.props_jsx }}{% endif %} permissions={permissions} currentUserRoleIds={currentUserRoleIds} currentUserId={currentUserId}{% if submit_for_approval_needed and comp.name == 'ApprovalSection' %} onSubmitForApproval={approvalActions.onSubmitForApproval}{% endif %}{% if comp.name == 'ApprovalSection' %} hasOnWithdrawn={approvalActions.hasOnWithdrawn}{% if version_of %} compareHref={src.{{ version_of.number }} == null ? `/{{ version_of.identity }}/view/${src.{{ version_of.identity_fk }}}?compare=${src.id}` : undefined}{% endif %}{% endif %} />
 {% endfor %}
     </AppDetailShell>
   );

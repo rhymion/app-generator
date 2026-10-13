@@ -51,7 +51,7 @@ from helpers.schema_helpers import is_optional_fk_to_parent
 from helpers.schema_helpers import get_approval_lines_props
 from helpers.schema_helpers import child_has_own_write_capability
 from keys import x_approval as approval_key
-from version_of import version_of_entities, version_of_for, version_of_children, version_of_prefill_plan
+from version_of import version_of_entities, version_of_for, version_of_children, version_of_prefill_plan, version_diff_children
 from generators import (
     chart_context,
     page_list_context,
@@ -1506,6 +1506,8 @@ def generate(schema_path: str, output_dir: str) -> None:
     mobile_ineligible: list[tuple[str, str]] = []
     # Entities with REST routes, hence an options route a mobile relation picker can call.
     api_entities = {e['parent'] for e in entities if (e.get('generate_config') or {}).get('api')}
+    # Entities whose get<Entity>Detail() takes a userId (organization scope or x-self-only).
+    detail_takes_user_id: dict[str, bool] = {}
 
     for entity in entities:
         parent     = entity['parent']
@@ -1615,6 +1617,7 @@ def generate(schema_path: str, output_dir: str) -> None:
 
         # --- getters.ts ---
         getters_ctx = {**ctx, 'named_constants': named_constants}
+        detail_takes_user_id[parent] = bool(ctx.get('should_filter_by_org') or ctx.get('is_self_only'))
         _write(lib_dir / 'getters.ts', _render(env, 'getters.ts.jinja2', getters_ctx))
 
         # --- autocomplete/list custom filter stubs (cmd_377/379 DP-1) ---
@@ -1972,6 +1975,41 @@ def generate(schema_path: str, output_dir: str) -> None:
         if can_view:
             fv_ctx = {**ctx, **form_view_context(ctx, schema)}
             _write(components_dir / 'FormView.tsx', _render(env, 'form_view.tsx.jinja2', fv_ctx))
+            _vo_view = version_of_for(entity['definition_key'], schema)
+            if _vo_view:
+                # x-version-of: the identity's version list/diff, rendered with this
+                # version entity's own detail markup (see version_fields.tsx.jinja2).
+                _vo_jsx = '\n'.join(i['jsx'] for i in fv_ctx['ordered_field_jsx'])
+                _vo_dir = out / 'components' / _vo_view['identity']
+                _vo_fields_ctx = {
+                    'parent': parent, 'parent_pascal': ctx['parent_pascal'],
+                    'ordered_field_jsx': fv_ctx['ordered_field_jsx'],
+                    'field_names': [i['field'] for i in fv_ctx['ordered_field_jsx']],
+                    'enum_ns_hooks': fv_ctx['view_enum_ns_hooks'],
+                    'enum_opt_setups': fv_ctx['view_enum_opt_setups'],
+                    'uses_tf': 'tf(' in _vo_jsx or 'tf(' in fv_ctx['view_enum_opt_setups'],
+                    'uses_te': 'te(' in _vo_jsx or 'te(' in fv_ctx['view_enum_opt_setups'],
+                    'use_dayjs': 'dayjs' in _vo_jsx,
+                    'uses_format_label_value': 'formatLabelValue' in _vo_jsx,
+                    'uses_decimal_format': 'formatDecimalDisplay' in _vo_jsx,
+                    'needs_datetime_wrapper': '<DateTimeWrapper' in _vo_jsx,
+                    'needs_image_display': '<ImageDisplay' in _vo_jsx,
+                    'needs_link_display': '<AppFieldExternalLink' in _vo_jsx,
+                    'needs_single_attachment_display': '<SingleAttachmentDisplay' in _vo_jsx,
+                    'ui_imports': [c for c in ('AppFieldText', 'AppFieldBoolean', 'AppFieldRelation') if f'<{c}' in _vo_jsx],
+                }
+                _vo_fields_ctx['uses_t'] = _vo_fields_ctx['uses_tf'] or _vo_fields_ctx['uses_te'] or 'useTranslations' in (
+                    fv_ctx['view_enum_ns_hooks'] + fv_ctx['view_enum_opt_setups'])
+                _write(_vo_dir / 'VersionFields.tsx', _render(env, 'version_fields.tsx.jinja2', _vo_fields_ctx))
+                _vo_children = [
+                    {**c, 'title_key': to_camel_case(c['property_name'])}
+                    for c in version_diff_children(entity['definition_key'], schema, ctx['children_raw'])
+                ]
+                _write(_vo_dir / 'VersionHistory.tsx', _render(env, 'version_history.tsx.jinja2', {
+                    'parent': parent, 'parent_pascal': ctx['parent_pascal'],
+                    'identity': _vo_view['identity'], 'number': _vo_view['number'], 'children': _vo_children,
+                }))
+                print(f"  VersionHistory → components/{_vo_view['identity']}/")
             if fv_ctx.get('has_approval_section'):
                 _write(lib_dir / 'use_entity_approval_actions.ts',
                        _render(env, 'use_entity_approval_actions.ts.jinja2', fv_ctx))
@@ -2664,13 +2702,12 @@ def generate(schema_path: str, output_dir: str) -> None:
         )
 
     # x-version-of: one lib/<version>/version_of.ts per version entity (number
-    # assignment, open-draft guard, draft delete), called from service.ts and
+    # assignment, open-draft guard), called from service.ts and
     # the approval dispatch modules below. Always regenerated, never a stub.
     for _vo in version_of_entities(schema):
-        _vo_children, _ = version_of_children(_vo['version'], schema)
         _write(
             out / 'lib' / _vo['version'] / 'version_of.ts',
-            _render(env, 'version_of.ts.jinja2', {**_vo, 'children': _vo_children}),
+            _render(env, 'version_of.ts.jinja2', _vo),
         )
         print(f"  Version helpers → lib/{_vo['version']}/version_of.ts")
         # New-version screen: the prefill the create page reads (no record is
@@ -2679,6 +2716,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             out / 'lib' / _vo['version'] / 'version_of_prefill.ts',
             _render(env, 'version_of_prefill.ts.jinja2', {
                 **_vo, 'pascal': to_pascal_case(_vo['version']),
+                'detail_takes_user_id': detail_takes_user_id.get(_vo['version'], False),
                 'plan': version_of_prefill_plan(_vo, schema, _prisma_models),
             }),
         )
@@ -2860,7 +2898,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     # them dead — same interface-conformance case as on_approved_dispatch.ts,
     # since dispatchOnRejected's 4-arg signature is a stable call-site
     # contract (cmd_529).
-    _rejected_body_needed = any(e['set_fields'] or e['emit_hook'] or (e['version_of'] and e['terminal']) for e in rejectable_entities)
+    _rejected_body_needed = any(e['set_fields'] or e['emit_hook'] for e in rejectable_entities)
     _rejected_hook_needed = any(e['emit_hook'] for e in rejectable_entities)
     _write(
         out / 'lib' / 'approval_request' / 'on_rejected_dispatch.ts',
@@ -2909,7 +2947,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         })
     # Always emitted (mirrors on_rejected_dispatch.ts above) — actions.ts
     # imports this unconditionally, so it must exist even with zero entities.
-    _withdrawn_body_needed = any(e['set_fields'] or e['emit_hook'] or e['version_of'] for e in withdrawable_entities)
+    _withdrawn_body_needed = any(e['set_fields'] or e['emit_hook'] for e in withdrawable_entities)
     _write(
         out / 'lib' / 'approval_request' / 'on_withdrawn_dispatch.ts',
         _render(env, 'on_withdrawn_dispatch.ts.jinja2', {
