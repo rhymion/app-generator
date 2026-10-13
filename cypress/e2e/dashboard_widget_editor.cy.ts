@@ -17,12 +17,11 @@ describe('Dashboard widget editor', () => {
     cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
   });
 
-  // The editor shows its empty-catalog hint only when the schema opts no entity into the dashboard.
+  // The aggregate endpoint is generated only when at least one entity opts into the dashboard, so its absence means the
+  // data-source list is empty. (The editor's own hint cannot tell: it is shown while the list is still loading.)
   function withCatalogState(run: (catalogIsEmpty: boolean) => void) {
-    cy.visit('/en/dashboard/new');
-    cy.contains('button', 'Add widget').should('be.visible');
-    cy.get('body').then(($body) => {
-      run($body.text().includes('No entity is enabled for dashboards'));
+    cy.request({ url: '/api/dashboard/aggregate', headers: { 'X-API-Key': TEST_API_KEY }, failOnStatusCode: false }).then((res) => {
+      run(res.status === 404);
     });
   }
 
@@ -33,10 +32,11 @@ describe('Dashboard widget editor', () => {
 
   it('says there is no data source to choose when no entity opts into the dashboard', () => {
     withCatalogState((catalogIsEmpty) => {
+      cy.visit('/en/dashboard/new');
       if (catalogIsEmpty) {
         cy.contains('No entity is enabled for dashboards').should('be.visible');
       } else {
-        // Entities are enabled: the hint must not be shown, and a new widget still gets a row to fill in.
+        // Entities are enabled: the hint must go away once the list has loaded.
         cy.contains('No entity is enabled for dashboards').should('not.exist');
       }
       cy.contains('button', 'Add widget').click();
