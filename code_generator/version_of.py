@@ -13,7 +13,9 @@ columns this key relies on are declared by the app and checked here:
 
 - version model: `<identity>_id` FK, nullable `<number>` Int, and
   `@@unique([<identity>_id, <number>])`;
-- identity model: nullable `current_version_id` with a relation to the version.
+- identity model: nullable `current_version_id` with a relation to the version,
+  plus nullable `invalidated_at` when the identity declares `x-generate.invalidate`
+  (retiring an identity that has approved versions is an invalidation, not a delete).
 """
 from __future__ import annotations
 
@@ -50,6 +52,7 @@ def _declared(schema: dict) -> list[tuple[str, object]]:
 def version_of_entities(schema: dict) -> list[dict]:
     """Resolved declarations (only meaningful after `version_of_errors` is empty)."""
     out = []
+    defs = schema.get('definitions') or {}
     for version, cfg in _declared(schema):
         if not isinstance(cfg, dict):
             continue
@@ -58,12 +61,31 @@ def version_of_entities(schema: dict) -> list[dict]:
             'identity': cfg.get('identity'),
             'number': cfg.get('number'),
             'identity_fk': f"{cfg.get('identity')}_id",
+            'identity_invalidatable': _invalidatable(cfg.get('identity'), defs),
         })
     return out
 
 
+def _invalidatable(identity, defs: dict) -> bool:
+    """True when the identity entity declares `x-generate.invalidate` (bool or mapping)."""
+    if not isinstance(identity, str):
+        return False
+    # The key lives on the resolved definition; the `__` raw one may not carry it.
+    for d in (defs.get(identity), defs.get(f'__{identity}')):
+        gen = (d or {}).get('x-generate') or {}
+        inv = gen.get('invalidate', False) if isinstance(gen, dict) else False
+        if (inv.get('enabled', False) if isinstance(inv, dict) else inv):
+            return True
+    return False
+
+
 def version_of_for(entity: str, schema: dict) -> dict | None:
     return next((v for v in version_of_entities(schema) if v['version'] == entity), None)
+
+
+def version_of_identity_for(entity: str, schema: dict) -> dict | None:
+    """The declaration whose identity entity is `entity`, if any."""
+    return next((v for v in version_of_entities(schema) if v['identity'] == entity), None)
 
 
 def version_of_children(version: str, schema: dict) -> tuple[list[dict], list[str]]:
@@ -303,6 +325,11 @@ def validate_version_of_prisma(schema: dict, prisma_schema_path: str | Path, err
             errors.append(
                 f"{where}: identity model '{i}' needs a @relation(fields: [current_version_id], "
                 f"references: [id]) to '{v}'."
+            )
+        if d['identity_invalidatable'] and not re.search(r'^\s*invalidated_at\s+DateTime\?(\s|$)', ibody, re.MULTILINE):
+            errors.append(
+                f"{where}: identity model '{i}' declares x-generate.invalidate and needs "
+                f"'invalidated_at  DateTime?' so an invalidated {i} can refuse new drafts."
             )
     if errors:
         bullet_list = '\n'.join(f"  • {e}" for e in errors)

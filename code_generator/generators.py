@@ -30,7 +30,7 @@ from helpers.schema_helpers import (
     derive_post_decision_freeze_values,
 )
 from keys import x_approval as approval_key
-from version_of import version_of_for
+from version_of import version_of_for, version_of_identity_for
 from build_context import get_uri_kind, _exclusive_parent_all_columns
 from helpers.bridge_direction import get_new_form_bridge
 
@@ -683,7 +683,8 @@ def _list_query_code(ctx: dict, primary_field: str, enum_ns_list: list[dict]) ->
 
     Built from the same allow-list the REST list reads (`sort_filter_fields`, the per-column kinds
     and the relation display columns of `getters.ts`), so the panel offers exactly what the list
-    accepts. Foreign-key id columns are left out in favor of their relation display column.
+    accepts. Foreign-key id columns are left out in favor of their relation display column, and so are the
+    internal bridge FK columns (`approvable_id`, `attachable_id`, ...), which no user sorts or filters by.
     Labels come from the `Fields` namespace at render time, falling back to the title-cased name.
     """
     kinds: dict = ctx.get('sort_filter_field_kinds') or {}
@@ -692,7 +693,7 @@ def _list_query_code(ctx: dict, primary_field: str, enum_ns_list: list[dict]) ->
         r['prop_name']
         for r in list(ctx.get('parent_rels_raw', [])) + list(ctx.get('selector_oto_rels', []))
     }
-    skipped = fk_columns | _LIST_QUERY_ID_COLUMNS
+    skipped = fk_columns | _LIST_QUERY_ID_COLUMNS | set(ctx.get('sort_filter_panel_excluded') or [])
 
     panel_fields: list[tuple[str, str]] = []  # (key, kind)
     for column in ctx.get('sort_filter_fields') or []:
@@ -3394,10 +3395,12 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     # transaction as the create (a throw rolls the new row back).
     _version_of = version_of_for(parent, schema) if schema else None
     version_of_create_code = (
-        f"    await assertSingleOpenDraft(tx, created.{_version_of['identity_fk']}, created.id);\n"
-        f"    // A new row is never numbered: the number is assigned at approval (a form that\n"
-        f"    // submits the field, even empty, must not leave a value behind).\n"
-        f"    await tx.{model}.update({{ where: {{ id: created.id }}, data: {{ {_version_of['number']}: null }} }});"
+        (f"    await assertIdentityActive(tx, created.{_version_of['identity_fk']});\n"
+         if _version_of['identity_invalidatable'] else '')
+        + f"    await assertSingleOpenDraft(tx, created.{_version_of['identity_fk']}, created.id);\n"
+        + f"    // A new row is never numbered: the number is assigned at approval (a form that\n"
+        + f"    // submits the field, even empty, must not leave a value behind).\n"
+        + f"    await tx.{model}.update({{ where: {{ id: created.id }}, data: {{ {_version_of['number']}: null }} }});"
         if _version_of and can_create else ''
     )
     # x-version-of: the number is system-assigned at approval, so a value a form or
@@ -3413,6 +3416,13 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     version_of_pre_update_code = (
         f"    {version_of_number_param} = (_prevRow?.{_version_of['number']} ?? null) as number | null;"
         if version_of_number_param and can_update else ''
+    )
+    # x-version-of, identity side: an identity with an approved version cannot be
+    # deleted (retire it by invalidation instead).
+    _version_identity = version_of_identity_for(parent, schema) if schema else None
+    version_of_delete_code = (
+        f"    await assertIdentityDeletable(tx, _deleteRows.map((r) => r.id));"
+        if _version_identity and can_delete else ''
     )
     x_approval_submit_on_field: str | None = None
     # cmd_856 [変更4]: names which model's own service.ts actually exports
@@ -3998,7 +4008,11 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         + (f"\nimport {{ getModelPermissions }} from '@/lib/authz';" if server_value_override_fields and can_create else '')
         + (f"\nimport {{ assertEditAllowed }} from './edit_guard';" if has_edit_guard else '')
         + (f"\nimport {{ assertDeleteAllowed }} from './delete_guard';" if has_delete_guard else '')
-        + ("\nimport { assertSingleOpenDraft } from './version_of';" if version_of_create_code else '')
+        + (("\nimport { assertSingleOpenDraft"
+            + (', assertIdentityActive' if _version_of['identity_invalidatable'] else '')
+            + " } from './version_of';") if version_of_create_code else '')
+        + (f"\nimport {{ assertIdentityDeletable }} from '@/lib/{_version_identity['version']}/version_of';"
+           if version_of_delete_code else '')
         + insufficient_inventory_error_class
         # TransactionClient/normalizeSnapshot/getCurrentSnapshot exist solely
         # to support update{{parent}}'s assertNotStale staleness check —
@@ -4052,6 +4066,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'version_of_create_code':             version_of_create_code,
         'version_of_pre_create_code':         version_of_pre_create_code,
         'version_of_pre_update_code':         version_of_pre_update_code,
+        'version_of_delete_code':             version_of_delete_code,
         'approval_edge_trigger_update_code':  approval_edge_trigger_update_code,
         'submit_for_approval_action_code':    submit_for_approval_action_code,
         'reservation_error_import_model':     reservation_error_import_model,

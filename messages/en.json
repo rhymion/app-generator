@@ -371,6 +371,29 @@
     "moveUp": "Move up",
     "moveDown": "Move down",
     "removeWidget": "Remove widget",
-    "addWidget": "Add widget"
+    "addWidget": "Add widget",
+    "unknownField": "Unknown field \"{name}\". The selected data source does not offer it; choose another field.",
+    "lineNeedsDatetime": "A line chart plots a time series, so only date and time fields can be grouped.",
+    "fieldKind": {
+      "boolean": "yes/no",
+      "enum": "choice",
+      "fk": "reference",
+      "number": "number",
+      "datetime": "date/time"
+    }
+  },
+  "DashboardWidgetProblem": {
+    "noDataSources": "{where}No entity is enabled for dashboards, so there is nothing to chart. Set x-display.dashboard: true on an entity in the schema.",
+    "dataSourceUnavailable": "{where}The data source “{entity}” is not available: it is not enabled for dashboards (any more). Choose another Data source.",
+    "noPermission": "{where}You do not have permission to read “{entity}”, so this chart cannot show its data to you. Ask an administrator for read access, or choose another Data source.",
+    "unknownField": "{where}“{field}” is not a field of “{entity}” (it may have been removed). Choose another field.",
+    "bucketNeedsDatetime": "{where}“{field}” is not a date or time field, so it cannot be bucketed by time. Choose a date or time field in Group by, or clear Time bucket.",
+    "lineNeedsBucket": "{where}A line chart plots a time series. Choose a Time bucket.",
+    "stackNeedsSeries": "{where}Stack mode needs a Series field. Choose a Series field or clear Stack mode.",
+    "timezoneNeedsDatetime": "{where}Time zone applies only to date-time fields, and “{field}” is not one. Set Time zone to UTC or group by a date-time field.",
+    "invalidFilterValue": "{where}“{value}” is not a valid Filter value for “{field}” ({kind}). Enter a matching value or clear the filter.",
+    "seriesSameAsGroup": "{where}Series field “{field}” is the same as Group by. Choose a different Series field.",
+    "noMatchingData": "No data matches this chart.",
+    "loadFailed": "The chart could not be loaded. Reload the page; if it keeps failing, contact an administrator."
   }
 }

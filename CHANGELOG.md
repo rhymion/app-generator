@@ -5,6 +5,44 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Dashboard guide, and corrected dashboard docs** (Issue #909, part of #904). `docs/knowledge/dashboard-guide.md` explains
+  how a schema author opts an entity in and which fields become groupable, what each widget setting does and which
+  combinations are valid, what each problem message means, how read permission and row scope apply, and the
+  `POST /api/dashboard/aggregate` request, response and errors. README, README_ja and the schema reference now describe the
+  one schema-wide aggregate endpoint (not a per-entity one), CSV export only (not Excel), and the full groupable-field list
+  including number and date/time fields and the always-added creator, updater and timestamp fields. Documentation only.
+- **Dashboard widgets say why they cannot be drawn** (Issue #908, part of #904). A widget that cannot render now names
+  the wrong setting, why, and how to fix it, in English or Japanese, instead of showing a raw internal message or
+  "Failed to load". Distinct messages cover: no data source in the schema, a data source that is not available, no read
+  permission, an unknown or removed field, a time bucket or time zone on a field that is not a date/time, a stack mode
+  without a series, a line chart without a bucket, and a filter value that does not fit its field; a filter matching no rows
+  reads "No data matches this chart." `aggregateForWidget` returns the problem as data (`{ ok: false, problem }`) so it
+  survives a production build, and `POST /api/dashboard/aggregate` answers with HTTP 400 and `{ error, code, setting,
+  params }`. Saving a dashboard now rejects a widget that cannot be drawn with a field-level error (widgets saved earlier and
+  left unchanged are not re-judged), and the editor shows the same messages while editing. For this, owned child rows are now
+  passed to `validateCustomRules` as `data.<property_name>`, like connect-style children's ids; no existing key changes. The
+  call lives in the tracked `lib/dashboard/service_validation_custom.ts`; only an app that overrides that file from `prj/` needs
+  the call added by hand. No new schema
+  key. See `docs/knowledge/schema-yaml-configuration.md`.
+- **`scripts/check-migrations-match-schema.sh`: checks that the migrations build the schema.** On an empty local scratch
+  database it runs `prisma migrate deploy` and then `prisma migrate diff` against `prisma/schema.prisma`, and fails with the
+  missing SQL when they differ. This catches a generator-added model (for example `scheduled_task_run`) that a consumer has
+  no migration for, which `db:push` test databases never show. It refuses any non-loopback database host, passes
+  connection details through environment variables only, and reads known differences from an optional exceptions file
+  (`prisma/migration-schema-exceptions.txt`, none by default). It is run when preparing a `develop` merge or a deployment,
+  not per commit. No new schema key. See `docs/knowledge/migration-schema-check.md`.
+- **Audit log: steps for switching the application to the restricted database role** are listed in
+  `docs/knowledge/audit-log-append-only.md` (password, hand-assembled connection strings, one role per Neon branch,
+  verification), and `scripts/vercel-env.sh` reminds that its `DATABASE_URL` injection is the owner's pooled URL. The
+  scheduled-task documentation states that a consumer writes the migration for generator-injected models such as
+  `scheduled_task_run`.
+- **Dashboard widget editor: group-by and series fields are chosen from a list** (Issue #906, part of #904). `group_by_field`
+  and `series_field` are dropdowns of the selected data source's fields, with translated labels and the field kind, instead of
+  free text. Changing the data source clears the fields of the previous one. Options follow the chart: the time bucket only for
+  a date/time group-by field, the series not for pie, the stack mode only for bar / column with a series, and a line chart groups
+  by a date/time field and always has a bucket, so inapplicable combinations are corrected in the editor rather than found at
+  render time. Stored values are unchanged; a stored field the data source no longer offers is flagged. No new schema key.
+  See `docs/knowledge/schema-yaml-configuration.md`.
 - **Dashboard widget editor: the data source is chosen from a list** (Issue #905, part of #904). The dashboard edit form no
   longer shows widgets as a grid of free-text cells; each widget is edited in a card, and `entity_name` is a dropdown of the
   `x-display.dashboard` entities the user can read, with translated labels. Stored values do not change, so existing widgets
@@ -34,10 +72,16 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   the identity's `current_version_id`, and a terminally rejected version kept as a closed record that does not block the next version.
   The Prisma columns are declared by the app and checked at generation time. See `docs/knowledge/schema-yaml-configuration.md`
   section 7.8.
+- **`x-version-of`: gate and CI cover the whole feature** (Refs #946). The `version-of-e2e-gate` fixture gate (local step 14e and the
+  `version-of-e2e-gate-fixture` CI job) now documents and runs the number assignment, the one-open-draft rule, the prefilled new
+  version screen and the identity tombstone; README.md / README_ja.md list the key. No generated output changes.
 - **`x-version-of`: new version screen** (Refs #946). `/<version>/new?new_version_of=<identity id>` opens the version
   entity's create form filled with the current version's values, including child rows that have no screens of their own;
   nothing is saved until the user saves it. Unique columns (including required ones on child rows) are left for the user,
   and a new attachment bridge is created for the new record.
+- **`x-version-of`: identity tombstone** (Refs #946). An identity with an approved version can no longer be deleted
+  (retire it with `x-generate.invalidate`), and an invalidated identity takes no new draft. An identity that declares
+  `x-generate.invalidate` now needs an `invalidated_at DateTime?` column, checked at generation time.
 - **Mobile app: entities with a self-referencing `children` list get native screens** (Issue #942). A one-to-many
   `x-outputType: list` child attached through a nullable foreign key (for example `procedure.children`) no longer
   makes an entity ineligible: it is drawn as the same chip picker as a many-to-many list and saved as `children_ids`.
@@ -63,6 +107,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `resetTestDatabase()` empties both tables with `TRUNCATE`. Consumers add the SQL to their own migrations, create the
   restricted application role and the write-once bucket; see `docs/knowledge/audit-log-append-only.md`.
 ### Changed
+- **List sort / filter panel no longer offers internal bridge foreign keys** (Issue #967). `Approvable Id`, `Attachable Id`,
+  `Commentable Id` and the like are dropped from the Web panel and from the Expo list's sort and filter keys, using the
+  generator's existing internal-bridge detection (no new schema key). The REST list still accepts them as sort / filter
+  parameters. See `docs/knowledge/list-search-panel.md`.
 - **Dashboard REST: `group_by_bucket` is the enum string literal** (Issue #912). `POST /api/dashboard/aggregate` now takes
   `day`, `week`, `month`, `quarter` or `year`, like every other native enum in the REST API, and the integer form `0`-`4` is
   removed. An unknown value returns `400` naming the allowed values instead of being ignored (which returned an unbucketed

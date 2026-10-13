@@ -3462,6 +3462,15 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     )
     if _connect_child_data_lines:
         validation_data_obj = validation_data_obj + '\n' + _connect_child_data_lines
+    # Owned (non-connect) children are exposed the same way: `data['{{ property_name }}']` is the array of
+    # rows the caller submits. Keys are only added; no existing key changes meaning.
+    _owned_child_data_lines = '\n'.join(
+        f"      {c['property_name']}: {c['child_var']}Items,"
+        for c in write_ch
+        if not c['use_connect']
+    )
+    if _owned_child_data_lines:
+        validation_data_obj = validation_data_obj + '\n' + _owned_child_data_lines
 
     child_nested_create = _build_child_nested_create(write_ch)
     child_nested_update = _build_child_nested_update(write_ch)
@@ -4695,6 +4704,9 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         sort_filter_field_kinds=_field_kinds,
         sort_filter_relation_fields=_relation_filter_fields,
         sort_filter_enum_members=_enum_members,
+        # Internal bridge FK columns (approvable_id, attachable_id, ...): kept in the REST
+        # allow-list above, but the Web and mobile list panels never offer them.
+        sort_filter_panel_excluded=sorted(get_internal_bridge_fk_prop_names(model_def, schema)),
         enum_members_quoted=enum_members_quoted,
         decimal_scales_quoted=decimal_scales_quoted,
         searchable_text_fields=searchable_text_fields,

@@ -3,8 +3,9 @@
 # default code_generator/json_schema.yaml inside a disposable build directory.
 # The default schema, its generated output and every other fixture stay untouched.
 #
-#   vo_item               the identity entity; declares nothing about versions. Its
-#                         Prisma model carries the nullable current_version_id.
+#   vo_item               the identity entity; declares nothing about versions (it enables
+#                         x-generate.invalidate, the way an identity is retired). Its Prisma
+#                         model carries the nullable current_version_id and invalidated_at.
 #   vo_item_version       the version entity: an ordinary x-approval entity plus
 #                         x-version-of. Its rejection is terminal: the rejected version stays
 #                         as a closed record and does not block the next version.
@@ -19,7 +20,7 @@ definitions:
       new: true
       edit: true
       delete: true
-      invalidate: false
+      invalidate: true
       api: true
       test: false
     x-display:

@@ -437,6 +437,9 @@ export async function delete{{ parent_pascal }}(actorId: string | null, ids: str
       assertDeleteAllowed(_row);
     }
 {% endif %}
+{% if version_of_delete_code %}
+{{ version_of_delete_code }}
+{% endif %}
     // cmd_923b: pre-delete validation hook, in-tx -- same convergence-point
     // convention as validateOnAdd/validateOnUpdate (runs before the write
     // it guards, inside the same transaction, throws to reject).
@@ -486,6 +489,9 @@ export async function delete{{ parent_pascal }}(ids: string[]): Promise<void> {
     for (const _row of _deleteRows) {
       assertDeleteAllowed(_row);
     }
+{% endif %}
+{% if version_of_delete_code %}
+{{ version_of_delete_code }}
 {% endif %}
     for (const _row of _deleteRows) {
       await validateOnDelete(tx, _row.id, _row as Record<string, unknown>);

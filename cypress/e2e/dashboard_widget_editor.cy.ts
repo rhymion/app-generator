@@ -53,6 +53,19 @@ describe('Dashboard widget editor', () => {
     });
   });
 
+  it('shows the stored group-by field in a dropdown that offers no other field when the data source is unavailable', () => {
+    createDashboardWithWidget('removed_entity').then((id) => {
+      cy.visit(`/en/dashboard/edit/${id}`);
+      cy.get('[data-testid="widget-row-0"]').within(() => {
+        cy.get('input[role="combobox"]').filter((_, el) => (el as HTMLInputElement).value === 'status').should('have.length', 1);
+        cy.contains('label', 'Group By Field').invoke('attr', 'for').then((inputId) => {
+          cy.get(`#${inputId}`).click();
+        });
+      });
+      cy.get('[role="listbox"] [role="option"]').should('have.length', 1).and('have.attr', 'aria-disabled', 'true');
+    });
+  });
+
   it('keeps the stored values of an existing widget when the dashboard is saved unchanged', () => {
     createDashboardWithWidget('removed_entity').then((id) => {
       cy.visit(`/en/dashboard/edit/${id}`);
@@ -65,6 +78,18 @@ describe('Dashboard widget editor', () => {
         expect(res.body.widgets).to.have.length(1);
         expect(res.body.widgets[0]).to.include({ name: 'Old widget', entity_name: 'removed_entity', group_by_field: 'status' });
       });
+    });
+  });
+
+  // The widget is told why it cannot be drawn through the Server Action's return value, so the translated message
+  // reaches the browser under `next build && next start` as well (a thrown error would be replaced by a generic one).
+  it('tells the viewer why a widget cannot be drawn, in the page language', () => {
+    createDashboardWithWidget('removed_entity').then((id) => {
+      cy.visit(`/en/dashboard/view/${id}`);
+      cy.contains('No entity is enabled for dashboards, so there is nothing to chart').should('be.visible');
+      cy.contains('Minified React error').should('not.exist');
+      cy.visit(`/ja/dashboard/view/${id}`);
+      cy.contains('ダッシュボードに有効なエンティティがないため、表示できるデータがありません').should('be.visible');
     });
   });
 });

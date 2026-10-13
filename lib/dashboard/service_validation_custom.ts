@@ -1,4 +1,7 @@
 // GENERATED ONCE — safe to edit (will not be overwritten on regeneration)
+import { DASHBOARDABLE_ENTITIES } from './catalog';
+import { validateWidgets } from './widgets-validation';
+
 // Custom save-time validation for dashboard.
 //
 // validateCustomRules() is called unconditionally from validateOnAdd()/
@@ -13,12 +16,21 @@
 // child exposes its linked ids as `data.<property_name>: string[]`) —
 // see build_context.py's validation_data_obj for what is exposed.
 //
-// Default (unedited) stub is a no-op. Cast `tx` to your own Prisma
+// Rejects a save that contains a widget which could not be drawn (see widgets-validation.ts). Cast `tx` to your own Prisma
 // transaction-client type as needed, e.g.:
 //   import type { PrismaClient } from '@/app/generated/prisma/client';
 //   type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+type DashboardReader = {
+  dashboard: { findUnique: (args: unknown) => Promise<{ widgets: Parameters<typeof validateWidgets>[2] } | null> };
+};
+
 export async function validateCustomRules(
-  _tx: unknown,
-  _data: Record<string, unknown>,
-  _currentId: string | null,
-): Promise<void> {}
+  tx: unknown,
+  data: Record<string, unknown>,
+  currentId: string | null,
+): Promise<void> {
+  const stored = currentId
+    ? (await (tx as DashboardReader).dashboard.findUnique({ where: { id: currentId }, select: { widgets: true } }))?.widgets
+    : undefined;
+  validateWidgets(DASHBOARDABLE_ENTITIES, data.widgets, stored);
+}

@@ -1749,6 +1749,16 @@ Generated, in `lib/<version>/version_of.ts` (always regenerated):
   - Own-screen one-to-many and many-to-many records are not carried; they start empty.
   A new record never keeps a number: the create path clears the number field, which is assigned at approval.
 
+- **Identity tombstone.** `assertIdentityDeletable` (same file) is called from the identity entity's
+  `delete<Identity>` service function, in the delete transaction and before the write, so every delete path
+  (REST, Server Action, bulk) is covered: an identity with at least one approved version (a version row
+  holding a number) cannot be deleted (`VALIDATION`, field `<identity>_id`); an identity with only
+  unapproved drafts still can. Retiring an identity is an invalidation: when the identity declares
+  `x-generate.invalidate`, its Prisma model needs `invalidated_at  DateTime?` (checked at generation time),
+  and `assertIdentityActive` refuses a new draft for an invalidated identity when a version is created, so a
+  save from the new version screen is refused too. Its approved versions stay readable and referenced. An identity that does not
+  declare `x-generate.invalidate` has no retire step, so the new-draft refusal is not generated.
+
 Owned children are the one-to-many child arrays under the version's own `properties`; each needs
 exactly one structural FK to the version. Deeper levels are not deleted by the helper and must cascade
 in Prisma.
@@ -1760,6 +1770,11 @@ one identity, a `number` that is not an integer property or is `required`, an ow
 exactly one structural FK, and any missing Prisma column listed above.
 
 The key is opt-in; a schema without it generates the same output as before.
+
+Verification: pytest `code_generator/tests/test_x_version_of.py` covers validation, context building and registration;
+`npm run test:version-of-e2e-gate` (CI job `version-of-e2e-gate-fixture`) generates and runs a fixture app with an
+identity and a version entity, because the default schema declares no `x-version-of`. The default schema's generated
+output is unchanged (`npm run check:generated`).
 
 ---
 
@@ -1989,6 +2004,54 @@ flagged as unreadable. When no entity opts in, the editor says so and links here
 `components/dashboard/widgets.tsx`, mounted through `x-custom-component` on the `widgets` child array
 (`docs/knowledge/code-generation-custom-extensions.md`).
 
+`group_by_field` and `series_field` are dropdowns of the selected data source's groupable fields (translated label plus
+field kind). Changing the data source clears the fields of the previous one. The editor offers only combinations that
+render, and corrects the row when a change makes a setting inapplicable (rules in `components/dashboard/widget-rules.ts`):
+
+- a line chart can be grouped by a date/time field only, and always has a time bucket;
+- the time bucket (`group_by_bucket`) is offered only when the group-by field is a date/time field;
+- a pie chart has no series and no stack mode;
+- `stack_mode` is offered for bar / column once a series is chosen; picking a series on a bar / column without a bucket
+  sets `grouped`, and clearing the series clears the stack mode;
+- the series cannot be the group-by field itself.
+
+A stored field the data source no longer offers stays visible, flagged, until the user changes it; an unchanged widget is
+saved as it was.
+
+#### Why a widget cannot be drawn
+
+A widget that cannot be drawn says which setting is wrong, why, and how to fix it, in the page language (messages in
+the `DashboardWidgetProblem` namespace, `en` and `ja`). The rules are one function, `findWidgetProblems`
+(`lib/dashboard/widget-problem.ts`), used by the aggregate, the dashboard save and the editor, so they read the same
+everywhere. Each case has its own message:
+
+| Case | Setting named | Fix offered |
+|---|---|---|
+| `noDataSources`: no entity opts in | none | set `x-display.dashboard: true` on an entity |
+| `dataSourceUnavailable`: the entity is not (or no longer) in the catalog | Data source | choose another |
+| `noPermission`: the viewer may not read the entity | Data source | ask for read access or choose another |
+| `unknownField`: a group-by, series or filter field the data source does not offer | that field | choose another |
+| `bucketNeedsDatetime`: a time bucket on a field that is not a date or time | Time bucket | choose a date/time field or clear it |
+| `lineNeedsBucket`: a line chart without a time bucket | Time bucket | choose one |
+| `stackNeedsSeries`: a stack mode without a series | Stack mode | choose a series or clear it |
+| `timezoneNeedsDatetime`: a time zone on a field that is not a date-time | Time zone | use UTC or a date-time field |
+| `invalidFilterValue`: a filter value that does not fit the filtered field | Filter value | enter a matching value or clear it |
+| `seriesSameAsGroup`: the series is the group-by field | Series field | choose another |
+
+A filter that matches no rows is not a problem: the widget says "No data matches this chart."
+
+The `aggregateForWidget` Server Action returns `{ ok: true, output }` or `{ ok: false, problem }`. A problem is data and
+not a thrown error because a production build replaces the message of an exception thrown from a Server Action with a
+generic one. `POST /api/dashboard/aggregate` answers a problem with HTTP 400 and `{ error, code, setting, params }`.
+
+On save, `lib/dashboard/service_validation_custom.ts` checks every widget with the same rules and rejects the save with a
+field-level `AppError` (field `widgets`, message key `DashboardWidgetProblem.<code>`, naming the widget by position and
+name). A widget saved earlier and left unchanged is not re-judged, so a dashboard whose data source was removed stays
+editable; with no entity in the catalog nothing is rejected. This is a tracked file in the generator, so it reaches an app with the
+submodule pointer. Only an app that supplies its own `prj/lib/dashboard/service_validation_custom.ts` (copied over the
+generator's file by `scripts/prj_sync.py`) must contain the call
+`validateWidgets(DASHBOARDABLE_ENTITIES, data.widgets, stored)` itself.
+
 The generator scans every dashboardable entity for **groupable fields** and
 emits a static catalog at `lib/dashboard/catalog.ts`. A field is groupable
 when it is one of:
@@ -1996,11 +2059,16 @@ when it is one of:
 - a `many-to-one` FK (each FK value becomes a series, labelled via the
   relationship's `labelField` on the target);
 - a nativeEnum or legacy int-enum field (§4.3) (each enum label is a category);
-- a `boolean` (Yes / No).
+- a `boolean` (Yes / No);
+- an `integer` or `number` without `enum` (kind `number`);
+- a string with `format: date` or `format: date-time` (kind `datetime`).
 
-If an entity has no groupable field (e.g. only free-form strings/numbers),
-it is silently dropped from the catalog — there is nothing meaningful to
-chart. Add a categorical field, or remove the `dashboard: true` flag.
+Every dashboardable entity also gets `creator_id` and `updater_id` (FKs to `user`) and
+`created_at` / `updated_at` (date-time) appended, so the catalog is never empty for an
+opted-in entity and no entity is dropped for lack of a groupable field. `id` is not offered.
+The same list serves Group by, Series and Filter field.
+
+For how users build widgets and the endpoint contract, see [dashboard-guide.md](dashboard-guide.md).
 
 `x-display.dashboard` is independent of `table` and `chart`. Setting it
 does not affect whether the list or chart pages are generated.

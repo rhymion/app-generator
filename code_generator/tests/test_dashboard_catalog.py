@@ -199,6 +199,24 @@ def test_every_dashboardable_entity_gets_the_audit_timestamps():
         assert by_name['updated_at']['datetime_format'] == 'date-time'
 
 
+def test_every_catalog_field_carries_a_label_and_a_kind_the_widget_editor_knows():
+    """The widget editor lists a data source's fields by label and kind (components/dashboard/widget-rules.ts)."""
+    schema = _schema({
+        '__task': _entity({
+            'is_done': {'type': 'boolean'},
+            'priority': {'type': 'integer', 'enum': [1, 2], 'x-enum-labels': ['Low', 'High']},
+            'points': {'type': 'integer'},
+            'due_on': {'type': 'string', 'format': 'date'},
+            'owner_id': {'type': 'string', 'x-relationship': {'type': 'many-to-one', 'target': 'user', 'labelField': 'name'}},
+        }),
+    })
+    fields = build_dashboard_catalog(schema)[0]['groupable_fields']
+    assert fields
+    for f in fields:
+        assert f['label']
+        assert f['kind'] in {'boolean', 'enum', 'fk', 'number', 'datetime'}
+
+
 # ---------------------------------------------------------------------------
 # Fixture schema integration — uses the actual json_schema.yaml
 # ---------------------------------------------------------------------------
@@ -379,3 +397,10 @@ def test_aggregate_route_takes_group_by_bucket_as_an_enum_string_literal():
     assert 'BUCKET_LABELS' not in result
     assert 'resolveBucket(' not in result
     assert 'integer enum' not in result
+
+
+def test_aggregate_route_returns_the_typed_problem_as_400():
+    """A request the data source cannot answer is a 400 naming the setting, not a generic 500."""
+    result = _make_env().get_template('dashboard_aggregate_route.ts.jinja2').render()
+    assert 'error instanceof WidgetProblemError' in result
+    assert '{ error: error.message, code, setting, params }, { status: 400 }' in result

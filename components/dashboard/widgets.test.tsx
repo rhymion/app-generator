@@ -111,4 +111,82 @@ describe('dashboard widget editor', () => {
     fireEvent.click(screen.getAllByText('DashboardWidgetEditor:removeWidget')[0]);
     expect(ref.current?.getFields().map((r) => r.id)).toEqual(['w1']);
   });
+
+  describe('field dropdowns', () => {
+    const fields = [
+      { name: 'status', label: 'Status', kind: 'enum', enum_values: ['open'] },
+      { name: 'created_at', label: 'Created At', kind: 'datetime', datetime_format: 'date-time' },
+      { name: 'owner_id', label: 'Owner', kind: 'fk', fk_target: 'user', fk_label_field: 'name' },
+    ];
+    beforeEach(() => {
+      catalog.entities = [{ name: 'task', label: 'Task', groupable_fields: fields }];
+    });
+    const columns = [
+      { field: 'chart_type', valueOptions: [{ value: 'column', label: 'Column' }, { value: 'line', label: 'Line' }, { value: 'pie', label: 'Pie' }] },
+      { field: 'group_by_bucket', valueOptions: [{ value: '', label: '' }, { value: 'day', label: 'Day' }] },
+      { field: 'stack_mode', valueOptions: [{ value: 'grouped', label: 'Grouped' }] },
+    ];
+    const open = async (initial: Record<string, unknown>) => {
+      const ref = createRef<WidgetsHandle>();
+      render(<Widgets ref={ref} initialFields={[{ ...baseRow, ...initial }]} createNewRow={createNewRow} columns={columns} />);
+      await waitFor(() => expect(mockReadable).toHaveBeenCalled());
+      await waitFor(() => expect(screen.getByLabelText(/Fields:groupByField/)).toBeEnabled());
+      return ref;
+    };
+
+    it('lists the fields of the selected data source with their kind', async () => {
+      await open({});
+      fireEvent.mouseDown(screen.getByLabelText(/Fields:groupByField/));
+      const listbox = await screen.findByRole('listbox');
+      expect(within(listbox).getByText('Created At (DashboardWidgetEditor.fieldKind:datetime)')).toBeInTheDocument();
+      expect(within(listbox).getByText('Owner (DashboardWidgetEditor.fieldKind:fk)')).toBeInTheDocument();
+    });
+
+    it('hides the bucket for a non-datetime group-by and the series for a pie', async () => {
+      await open({ chart_type: 'pie' });
+      expect(screen.queryByLabelText(/Fields:groupByBucket/)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/Fields:seriesField/)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/Fields:stackMode/)).not.toBeInTheDocument();
+    });
+
+    it('shows the bucket for a datetime group-by', async () => {
+      await open({ group_by_field: 'created_at' });
+      expect(screen.getByLabelText(/Fields:groupByBucket/)).toBeInTheDocument();
+    });
+
+    it('clears the fields when the data source changes', async () => {
+      catalog.entities = [...catalog.entities, { name: 'bug', label: 'Bug', groupable_fields: [] }];
+      mockReadable.mockResolvedValue(['task', 'bug']);
+      const ref = await open({ series_field: 'owner_id' });
+      fireEvent.mouseDown(screen.getByLabelText(/Fields:entityName/));
+      const listbox = await screen.findByRole('listbox');
+      fireEvent.click(within(listbox).getByText('Bug'));
+      expect(ref.current?.getFields()[0]).toMatchObject({ entity_name: 'bug', group_by_field: '', series_field: null });
+    });
+
+    it('keeps the stored values of an unchanged widget', async () => {
+      const ref = await open({ series_field: 'owner_id', stack_mode: 'grouped' });
+      expect(ref.current?.getFields()[0]).toMatchObject({ group_by_field: 'status', series_field: 'owner_id', stack_mode: 'grouped' });
+    });
+
+    it('flags a stored group-by field the data source does not offer', async () => {
+      await open({ group_by_field: 'gone' });
+      expect(screen.getByText('DashboardWidgetEditor:unknownField')).toBeInTheDocument();
+    });
+
+    it('explains a filter on a field the data source does not offer', async () => {
+      await open({ filter_field: 'gone', filter_value: 'x' });
+      expect(screen.getByText('DashboardWidgetProblem:unknownField')).toBeInTheDocument();
+    });
+
+    it('explains a filter value that does not fit the filtered field', async () => {
+      await open({ filter_field: 'status', filter_value: 'archived' });
+      expect(screen.getByText('DashboardWidgetProblem:invalidFilterValue')).toBeInTheDocument();
+    });
+
+    it('shows no problem for a consistent widget', async () => {
+      await open({ filter_field: 'status', filter_value: 'open' });
+      expect(screen.queryByText(/^DashboardWidgetProblem:/)).not.toBeInTheDocument();
+    });
+  });
 });

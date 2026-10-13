@@ -87,6 +87,22 @@ def test_foreign_key_id_columns_are_left_out_of_the_panel(out):
     assert 'mobile_group_id' not in literal and 'creator_id' not in literal
 
 
+def test_internal_bridge_fk_columns_are_left_out_of_the_panel(out):
+    # attachable_id / commentable_id are server-managed plumbing, not something a user sorts or filters by.
+    for entity, column in (('mobile_asset', 'attachable_id'), ('mobile_thread', 'commentable_id')):
+        literal = _spec_literal(_page(out, entity))
+        assert column not in literal, entity
+        assert _keys(literal, 'sortKeys') == ['title', 'created_at', 'updated_at'], entity
+        assert _keys(literal, 'filterKeys') == ['title'], entity
+
+
+def test_rest_allow_list_still_accepts_the_internal_bridge_fk_columns(out):
+    # Only the panel drops them; the REST list keeps accepting the columns so existing callers do not break.
+    getters = (out / 'lib' / 'mobile_asset' / 'getters.ts').read_text()
+    assert "'attachable_id'" in re.search(r'SORTABLE_FIELDS = new Set<string>\(\[(.*?)\]\)', getters).group(1)
+    assert "'attachable_id'" in re.search(r'FILTERABLE_FIELDS = new Set<string>\(\[(.*?)\]\)', getters).group(1)
+
+
 def test_page_context_without_a_filterable_column_has_no_spec():
     ctx = {
         'parent': 'widget', 'parent_pascal': 'Widget', 'parent_camel': 'widget',

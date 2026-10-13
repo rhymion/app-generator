@@ -345,4 +345,39 @@ describe('x-version-of (generated runtime behaviour)', () => {
       });
     });
   });
+
+  describe('identity tombstone', () => {
+    it('refuses to delete an identity that has an approved version, and deletes one with only a draft', () => {
+      createItem('Approved').then((itemId) => {
+        createVersion(itemId, 'pending').then((res) => approve((res.body as { id: string }).id));
+        cy.request({ method: 'DELETE', url: `/api/vo_item/${itemId}`, headers, failOnStatusCode: false })
+          .its('status')
+          .should('be.within', 400, 499);
+        cy.task<State>('db:voState', itemId).then((s) => expect(s.versions).to.have.length(1));
+      });
+      createItem('Draft only').then((itemId) => {
+        createVersion(itemId, 'draft').its('status').should('eq', 201);
+        cy.request({ method: 'DELETE', url: `/api/vo_item/${itemId}`, headers }).its('status').should('be.within', 200, 204);
+        cy.request({ method: 'GET', url: `/api/vo_item/${itemId}`, headers, failOnStatusCode: false })
+          .its('status')
+          .should('eq', 404);
+      });
+    });
+
+    it('refuses a new draft for an invalidated identity, and keeps its versions', () => {
+      createItem('Retired').then((itemId) => {
+        createVersion(itemId, 'pending').then((res) => approve((res.body as { id: string }).id));
+        cy.request({ method: 'POST', url: `/api/vo_item/${itemId}/actions/invalidate`, headers, body: {} })
+          .its('status')
+          .should('eq', 200);
+        createVersion(itemId, 'draft').then((res) => {
+          expect(res.status).to.be.within(400, 499);
+          expect(JSON.stringify(res.body)).to.contain('invalidated');
+        });
+        cy.task<State>('db:voState', itemId).then((s) => {
+          expect(s.versions.map((v) => v.version_no), 'approved version stays').to.deep.eq([1]);
+        });
+      });
+    });
+  });
 });

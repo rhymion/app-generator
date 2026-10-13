@@ -11,7 +11,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 from generate import _make_env, _render
 from validate import SchemaValidationError, validate_version_of_prisma
 from schema_deriver import parse_prisma_schema
-from version_of import version_of_prefill_plan, version_of_entities, version_of_errors, version_of_for
+from version_of import version_of_prefill_plan, version_of_entities, version_of_errors, version_of_for, version_of_identity_for
 
 PRISMA_OK = """
 model product {
@@ -58,7 +58,7 @@ def test_valid_declaration_has_no_errors_and_resolves():
     assert version_of_errors(_schema()) == []
     assert version_of_for('product_version', _schema()) == {
         'version': 'product_version', 'identity': 'product',
-        'number': 'version_no', 'identity_fk': 'product_id',
+        'number': 'version_no', 'identity_fk': 'product_id', 'identity_invalidatable': False,
     }
     assert version_of_for('product', _schema()) is None
 
@@ -271,3 +271,34 @@ model badge {
     resets = {r['key'] for r in holder['resets']}
     # the id, the version FK and the unique code restart; the label is an initial value
     assert {'id', 'product_version_id', 'code'} <= resets and 'label' not in resets
+
+
+def _invalidatable_schema() -> dict:
+    s = copy.deepcopy(_schema())
+    s['definitions']['__product']['x-generate'] = {'invalidate': True}
+    return s
+
+
+def test_identity_is_found_and_flags_invalidation():
+    assert version_of_identity_for('product', _schema())['version'] == 'product_version'
+    assert version_of_identity_for('product_version', _schema()) is None
+    assert version_of_for('product_version', _invalidatable_schema())['identity_invalidatable'] is True
+
+
+def test_identity_delete_guard_renders_always_and_active_guard_only_when_invalidatable():
+    plain = _render(_make_env(), 'version_of.ts.jinja2', _ctx())
+    assert 'export async function assertIdentityDeletable' in plain
+    assert 'version_no: { not: null }' in plain
+    assert 'assertIdentityActive' not in plain
+    vo = version_of_for('product_version', _invalidatable_schema())
+    inv = _render(_make_env(), 'version_of.ts.jinja2', {**_ctx(), **vo})
+    assert 'export async function assertIdentityActive' in inv
+
+
+def test_invalidatable_identity_needs_invalidated_at_column(tmp_path):
+    s = _invalidatable_schema()
+    with pytest.raises(SchemaValidationError) as exc:
+        validate_version_of_prisma(s, _prisma(tmp_path, PRISMA_OK))
+    assert 'invalidated_at  DateTime?' in str(exc.value)
+    ok = PRISMA_OK.replace('  current_version_id String?\n', '  current_version_id String?\n  invalidated_at DateTime?\n')
+    validate_version_of_prisma(s, _prisma(tmp_path, ok))
