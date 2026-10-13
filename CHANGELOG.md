@@ -63,6 +63,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `resetTestDatabase()` empties both tables with `TRUNCATE`. Consumers add the SQL to their own migrations, create the
   restricted application role and the write-once bucket; see `docs/knowledge/audit-log-append-only.md`.
 ### Changed
+- **A `mobile` key under `x-generate` is rejected** (Issue #977). It was silently ignored; `generate-code` now fails with an error naming the top-level `x-generator.mobile.enabled` and pointing to `docs/knowledge/mobile-app.md`, for entity and field level. Other unknown `x-generate` keys are still accepted. No new schema key.
 - **Dashboard REST: `group_by_bucket` is the enum string literal** (Issue #912). `POST /api/dashboard/aggregate` now takes
   `day`, `week`, `month`, `quarter` or `year`, like every other native enum in the REST API, and the integer form `0`-`4` is
   removed. An unknown value returns `400` naming the allowed values instead of being ignored (which returned an unbucketed

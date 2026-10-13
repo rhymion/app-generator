@@ -20,6 +20,9 @@ x-generator:
   `false` means no `mobile/` output at all: no entity screens, no nav, no Expo dependencies.
 - `validate_generator_config` rejects a non-boolean `enabled`, a non-mapping `mobile` and any other
   sub-key under `x-generator.mobile`.
+- There is no per-entity switch; `mobile_entities.py` decides which entities are included automatically.
+  `validate_x_generate_mobile` rejects a `mobile` key under `x-generate` (entity or field level) with an error that
+  names `x-generator.mobile.enabled`; nothing reads such a key.
 - This repository's own schema leaves the flag off. The mobile tests and fixtures
   (`mobile_entity_gate`, `mobile_entity_e2e_gate`) set it, and `scripts/run_mobile_entity_playwright.sh`
   sets it in every mode and refuses to run when `mobile/` was not generated.

@@ -993,6 +993,38 @@ def validate_generator_config(schema: dict) -> None:
         raise SchemaValidationError("\n".join(errors))
 
 
+def _find_x_generate_mobile(node, path: str, found: list[str]) -> None:
+    """Collect the path of every `x-generate` mapping (entity or field level) that carries a `mobile` key."""
+    if isinstance(node, dict):
+        gen = node.get('x-generate')
+        if isinstance(gen, dict) and 'mobile' in gen:
+            found.append(f"{path}.x-generate.mobile" if path else "x-generate.mobile")
+        for key, value in node.items():
+            _find_x_generate_mobile(value, f"{path}.{key}" if path else str(key), found)
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            _find_x_generate_mobile(value, f"{path}[{index}]", found)
+
+
+def validate_x_generate_mobile(schema: dict) -> None:
+    """Reject a `mobile` key under `x-generate` (entity or field level).
+
+    Nothing reads it, so it would be silently ignored. The Expo app is switched on for the whole schema
+    by `x-generator.mobile.enabled`; the entities it includes are chosen by `mobile_entities.py`.
+    Other unknown `x-generate` keys are deliberately still accepted.
+    """
+    found: list[str] = []
+    _find_x_generate_mobile(schema, '', found)
+    if found:
+        raise SchemaValidationError(
+            "`mobile` is not a supported key under x-generate and would be silently ignored: "
+            + ", ".join(found)
+            + ". Remove it. The mobile app is enabled for the whole schema with the top-level "
+            "`x-generator.mobile.enabled: true`; there is no per-entity or per-field switch. "
+            "See docs/knowledge/mobile-app.md."
+        )
+
+
 def validate_schema(schema: dict) -> None:
     """Validate *schema* and raise SchemaValidationError listing all problems."""
     defs = schema.get('definitions', {})

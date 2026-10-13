@@ -89,7 +89,7 @@ from validate import (
     validate_direct_attachment_prerequisite,
     validate_direct_attachment_reverse_fields,
     validate_write_once_stub_asymmetry,
-    validate_generator_config, mobile_generation_enabled,
+    validate_generator_config, validate_x_generate_mobile, mobile_generation_enabled,
     SchemaValidationError,
 )
 from generators_doc import build_doc_entity_context, build_doc_index_context, convert_md_to_mdx
@@ -1393,6 +1393,7 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     try:
         validate_generator_config(schema)
+        validate_x_generate_mobile(schema)
         validate_schema(schema)
         validate_prisma_indexes(Path(output_dir) / 'prisma' / 'schema.prisma', schema)
         validate_self_only_creator_id_columns(schema, Path(output_dir) / 'prisma' / 'schema.prisma')

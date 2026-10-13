@@ -132,3 +132,47 @@ def test_generate_rejects_invalid_mobile_block(tmp_path):
     with pytest.raises((SchemaValidationError, SystemExit)):
         generate(str(intermediate), str(tmp_path))
     assert not (tmp_path / 'mobile').exists()
+
+
+# --- `mobile` under x-generate is rejected (it was silently ignored) ---
+
+from validate import validate_x_generate_mobile  # noqa: E402
+
+
+def test_x_generate_mobile_on_entity_is_rejected():
+    schema = {'definitions': {'note': {'x-generate': {'mobile': {'enabled': True}}}}}
+    with pytest.raises(SchemaValidationError) as exc:
+        validate_x_generate_mobile(schema)
+    msg = str(exc.value)
+    assert 'definitions.note.x-generate.mobile' in msg
+    assert 'x-generator.mobile.enabled' in msg
+    assert 'docs/knowledge/mobile-app.md' in msg
+
+
+def test_x_generate_mobile_on_field_is_rejected():
+    schema = {'definitions': {'note': {'properties': {'body': {'type': 'string', 'x-generate': {'mobile': False}}}}}}
+    with pytest.raises(SchemaValidationError) as exc:
+        validate_x_generate_mobile(schema)
+    assert 'definitions.note.properties.body.x-generate.mobile' in str(exc.value)
+    assert 'x-generator.mobile.enabled' in str(exc.value)
+
+
+def test_valid_mobile_schemas_still_pass():
+    validate_x_generate_mobile({'x-generator': {'mobile': {'enabled': True}},
+                                'definitions': {'note': {'x-generate': {'list': True, 'api': True}}}})
+    # Rejecting unknown x-generate keys in general is out of scope: only `mobile` is refused.
+    validate_x_generate_mobile({'definitions': {'note': {'x-generate': {'something_else': 1}}}})
+
+
+def test_generate_fails_on_x_generate_mobile(tmp_path):
+    intermediate = tmp_path / 'generated_json_schema.yaml'
+    prisma_dir = tmp_path / 'prisma'
+    prisma_dir.mkdir()
+    shutil.copy(FIXTURE / 'schema.prisma', prisma_dir / 'schema.prisma')
+    build_user_schema(FIXTURE / 'json_schema.yaml', FIXTURE / 'schema.prisma', intermediate)
+    schema = yaml.safe_load(intermediate.read_text())
+    entity = next(k for k, v in schema['definitions'].items() if isinstance(v.get('x-generate'), dict))
+    schema['definitions'][entity]['x-generate']['mobile'] = {'enabled': True}
+    intermediate.write_text(yaml.safe_dump(schema))
+    with pytest.raises((SchemaValidationError, SystemExit)):
+        generate(str(intermediate), str(tmp_path))
