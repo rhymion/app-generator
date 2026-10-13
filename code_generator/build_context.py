@@ -3907,18 +3907,19 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
             'path': _item.get('path'),
             'target': _item.get('target') or ['list'],
             'props_jsx': _jsx_props_str(_item.get('props') or {}),
+            'props': _item.get('props') or {},
         })
     # Per-target lists. Each entry is {name, path?, props_jsx} so templates can iterate.
     entity_custom_components = [
-        {'name': i['name'], 'path': i['path'], 'props_jsx': i['props_jsx']}
+        {'name': i['name'], 'path': i['path'], 'props_jsx': i['props_jsx'], 'props': i['props']}
         for i in _xcc_items if 'list' in i['target']
     ]
     entity_view_components = [
-        {'name': i['name'], 'path': i['path'], 'props_jsx': i['props_jsx']}
+        {'name': i['name'], 'path': i['path'], 'props_jsx': i['props_jsx'], 'props': i['props']}
         for i in _xcc_items if 'view' in i['target']
     ]
     entity_edit_components = [
-        {'name': i['name'], 'path': i['path'], 'props_jsx': i['props_jsx']}
+        {'name': i['name'], 'path': i['path'], 'props_jsx': i['props_jsx'], 'props': i['props']}
         for i in _xcc_items if 'edit' in i['target']
     ]
 

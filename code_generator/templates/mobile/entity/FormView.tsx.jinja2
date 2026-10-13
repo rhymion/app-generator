@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { {% if custom_fields | selectattr('custom.view') | list %}createElement, {% endif %}useEffect, useState } from 'react';
 import { router{% if is_payment %}, useLocalSearchParams{% endif %} } from 'expo-router';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useMessages } from '@/lib/messages';
@@ -36,6 +36,29 @@ import type { ApprovalState } from '@/lib/entity-http';
 {% if split %}
 import { SplitSection } from '@/components/native/SplitSection';
 {% endif %}
+{% for comp in custom_components.view | map(attribute='name') | unique %}
+import {{ comp }} from '@/components/{{ name }}/custom/{{ comp }}';
+{% endfor %}
+{% if custom_fields | selectattr('custom.view') | list %}
+import type { ComponentType } from 'react';
+import type { FieldViewProps } from '@/lib/custom-component';
+{% for f in custom_fields if f.custom.view %}
+import Field{{ f.key | pascal_case }} from '@/components/{{ name }}/custom/fields/{{ f.key | pascal_case }}';
+{% endfor %}
+
+// Fields a hand-written component displays (x-custom-component, target view): it replaces the whole row.
+const CUSTOM_VIEW: Record<string, ComponentType<FieldViewProps>> = {
+{% for f in custom_fields if f.custom.view %}
+  {{ f.key }}: Field{{ f.key | pascal_case }},
+{% endfor %}
+};
+{% endif %}
+{% if attachments %}
+import { AttachmentList } from '@/components/native/AttachmentList';
+import type { BridgeAttachment } from '@/lib/attachment-http';
+
+const ATTACHMENT_TYPES: string[] = {{ attachments.types | tojson }};
+{% endif %}
 {% if comments %}
 import { CommentThread, type CommentRow } from '@/components/native/CommentThread';
 
@@ -55,7 +78,7 @@ export function {{ pascal }}FormView({ id }: { id: string }) {
 {% if has_approval %}
   const [approval, setApproval] = useState<ApprovalState | null>(null);
 {% endif %}
-{% if has_approval or (comments and comments.write) %}
+{% if has_approval or (comments and comments.write) or custom_components.view %}
   const [reloads, setReloads] = useState(0);
 {% endif %}
 
@@ -70,7 +93,7 @@ export function {{ pascal }}FormView({ id }: { id: string }) {
         setState(detail ? 'ready' : 'missing');
       })
       .catch(() => setState('missing'));
-  }, [id{% if has_approval or (comments and comments.write) %}, reloads{% endif %}]);
+  }, [id{% if has_approval or (comments and comments.write) or custom_components.view %}, reloads{% endif %}]);
 
   // Show / hide decisions come from the shared capabilities module, the same
   // one the Web screens call.
@@ -108,7 +131,7 @@ export function {{ pascal }}FormView({ id }: { id: string }) {
           <Text style={styles.link}>{t('Common.goBack')}</Text>
         </Pressable>
       </View>
-      {FIELDS.map((spec) => (
+      {FIELDS.filter((spec) => !spec.writeOnly).map((spec) => {% if custom_fields | selectattr('custom.view') | list %}CUSTOM_VIEW[spec.key] ? createElement(CUSTOM_VIEW[spec.key], { key: spec.key, value: record[spec.key] }) : {% endif %}(
         <View key={spec.key} style={styles.field}>
           <Text style={styles.label}>{spec.label}</Text>
 {% if attachment_fields %}
@@ -148,6 +171,15 @@ export function {{ pascal }}FormView({ id }: { id: string }) {
         onChanged={() => setReloads((n) => n + 1)}
       />
 {% endif %}
+{% if attachments %}
+      <AttachmentList
+        types={ATTACHMENT_TYPES}
+        items={((record[{{ attachments.rel_name | tojson }}] as { {{ attachments.prop }}?: BridgeAttachment[] } | null)?.{{ attachments.prop }}) ?? []}
+      />
+{% endif %}
+{% for comp in custom_components.view %}
+      <{{ comp.name }} record={record} permissions={permissions} reload={() => setReloads((n) => n + 1)}{% for k, v in comp.props.items() %} {{ k }}={ {{ v | tojson }} }{% endfor %} />
+{% endfor %}
 {% if comments %}
       <CommentThread
         comments={((record[{{ comments.rel_name | tojson }}] as { comments?: CommentRow[] } | null)?.comments) ?? []}

@@ -28,7 +28,7 @@ from generate_types import extract_entities, extract_named_constants
 from mobile_nav import build_mobile_nav
 from nav_config import schema_declares_scheduled_tasks
 from mobile_entities import (
-    build_mobile_entity_spec, ineligible_log_lines, ineligible_note, mobile_ineligible_reason,
+    attachable_bridge_ready, build_mobile_entity_spec, ineligible_log_lines, ineligible_note, mobile_ineligible_reason,
 )
 from helpers.naming import to_title_case
 from context import build_entity_context
@@ -663,8 +663,11 @@ def _write_vercel_json_crons(path: Path, scheduled_task_entities: list) -> None:
         print(f'  Skipped (up to date) {path} (crons: {len(crons)})')
 
 
-def _write_stub(path: Path, content: str) -> None:
+def _write_stub(path: Path, content: str) -> bool:
     """Write stub only if file does not already exist (user may have customized).
+
+    Returns True only when the stub was newly created by this call (the caller's cue to
+    raise an ACTION REQUIRED notice); a skipped or refreshed stub returns False.
 
     Exception (cmd_413b): if the existing file's content matches a *past*
     pristine render of this same stub (recorded across manifest runs — see
@@ -681,16 +684,17 @@ def _write_stub(path: Path, content: str) -> None:
         existing_hash = sha256_file(path)
         if existing_hash == sha256_text(content):
             print(f'  Skipped (up to date) {path}')
-            return
+            return False
         if _manifest.is_stale_stub(path, existing_hash):
             path.write_text(content, encoding='utf-8')
             print(f'  Refreshed (stale stub, schema changed since it was first generated) {path}')
-            return
+            return False
         print(f'  Skipped (exists) {path}')
-        return
+        return False
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding='utf-8')
     print(f'  Wrote {path}')
+    return True
 
 
 # Collects reminders about write-once stubs the generator just created. These are
@@ -1088,9 +1092,13 @@ _MOBILE_STATIC_TEMPLATES = [
 ]
 
 # Direct attachment fields: written only when some mobile entity has one (it adds the file picker dependency).
+# The upload helpers are shared with the bridge attachment list, so they are written for either.
 _MOBILE_ATTACHMENT_TEMPLATES = [
-    ('lib/attachment-http.ts.jinja2', 'lib/attachment-http.ts'),
-    ('components/native/AttachmentInput.tsx.jinja2', 'components/native/AttachmentInput.tsx'),
+    ('lib/attachment-http.ts.jinja2', 'lib/attachment-http.ts', ('has_attachment', 'has_bridge_attachment')),
+    ('components/native/AttachmentInput.tsx.jinja2', 'components/native/AttachmentInput.tsx', ('has_attachment',)),
+    ('components/native/AttachmentList.tsx.jinja2', 'components/native/AttachmentList.tsx', ('has_bridge_attachment',)),
+    # The props the hand-written components receive; written only when some entity mounts one.
+    ('lib/custom-component.ts.jinja2', 'lib/custom-component.ts', ('has_custom_components',)),
 ]
 
 # Scheduled task administration screens: written only when the schema declares a task.
@@ -1107,7 +1115,7 @@ _MOBILE_MESSAGE_NAMESPACES = ('Common', 'Errors', 'ValidationMessages', 'Payment
 _MOBILE_MESSAGE_KEYS = {
     'EntityLabel': ('auditLog',),
     'Fields': (
-        'comments', 'approvalRequests', 'approve', 'reject', 'withdraw', 'message',
+        'comments', 'approvalRequests', 'approve', 'reject', 'withdraw', 'message', 'images', 'attachments',
         'action', 'actorUser', 'created_at', 'metadata', 'targetId', 'targetTable',
     ),
 }
@@ -1171,6 +1179,9 @@ def _mobile_field_json(f: dict) -> dict:
         # A direct attachment field names where the REST detail embeds the row and what the write body carries.
         **({'relationName': f['relation_name'], 'bodyKey': f['body_key']} if f['kind'] == 'attachment' else {}),
         **({'createInline': True} if f.get('create_form') else {}),
+        # A hand-written component draws the field (upsert: the input, view: the detail display).
+        **({'custom': f['custom']} if f.get('custom') else {}),
+        **({'writeOnly': True} if f.get('write_only') else {}),
         **({'defaultValue': f['default_value']} if 'default_value' in f else {}),
         # A one-to-many child collection: the row editor draws these fields for each row.
         **(
@@ -1237,6 +1248,39 @@ def generate_mobile_entity(spec: dict, ctx: dict, schema: dict, mobile_dir: Path
     _write(components_dir / 'List.tsx', _render(env, 'mobile/entity/List.tsx.jinja2', spec_ctx))
     if spec['can_view']:
         _write(components_dir / 'FormView.tsx', _render(env, 'mobile/entity/FormView.tsx.jinja2', spec_ctx))
+    _write_mobile_custom_stubs(spec, mobile_dir, env)
+
+
+def _write_mobile_custom_stubs(spec: dict, mobile_dir: Path, env: Environment) -> None:
+    """Write the native stub of each hand-written component the entity declares, once.
+
+    The stubs render nothing, are never overwritten after a developer edits them, and are announced in
+    the ACTION REQUIRED summary when first created. Entity components live in
+    `components/<entity>/custom/<Name>.tsx`, field components in `components/<entity>/custom/fields/<Field>.tsx`.
+    """
+    name = spec['name']
+    custom_dir = mobile_dir / 'components' / name / 'custom'
+    for comp in spec['custom_component_names']:
+        path = custom_dir / f'{comp}.tsx'
+        mounted = [screen for screen in ('list', 'view', 'edit') if any(c['name'] == comp for c in spec['custom_components'][screen])]
+        if _write_stub(path, _render(env, 'mobile/entity/custom_component_stub.tsx.jinja2', {'component': comp})):
+            _note_stub_created(
+                path,
+                f'Entity "{name}" declares the custom component {comp} (mobile: {", ".join(mounted)}); the native app mounts it but it draws nothing yet.',
+                'Implement the native component (props: see mobile/lib/custom-component.ts) and commit the file to '
+                'your project SoT so it survives cleanup and a fresh rebuild.',
+            )
+    for field in spec['custom_fields']:
+        comp = to_pascal_case(field['key'])
+        path = custom_dir / 'fields' / f'{comp}.tsx'
+        targets = [t for t in ('upsert', 'view') if field['custom'].get(t)]
+        if _write_stub(path, _render(env, 'mobile/entity/custom_field_stub.tsx.jinja2', {'component': comp})):
+            _note_stub_created(
+                path,
+                f'Field "{name}.{field["key"]}" is drawn by a custom component ({", ".join(targets)}); the native app mounts it but it draws nothing yet.',
+                'Implement the native field component (props: see mobile/lib/custom-component.ts) and commit the file to '
+                'your project SoT so it survives cleanup and a fresh rebuild.',
+            )
 
 
 def _read_messages(output_dir: Path) -> dict:
@@ -1276,6 +1320,10 @@ def generate_mobile_target(
         'has_payment': any(spec.get('is_payment') for spec in mobile_specs or []),
         # Some entity has a direct attachment field: the app needs the file picker and the upload helpers.
         'has_attachment': any(f['kind'] == 'attachment' for spec in mobile_specs or [] for f in spec['fields']),
+        # Some entity owns attachments through the `attachable` bridge: the app needs the upload helper and the list.
+        'has_bridge_attachment': any(spec.get('attachments') for spec in mobile_specs or []),
+        # Some entity mounts a hand-written component: the app needs the props contract they are written against.
+        'has_custom_components': any(spec.get('custom_component_names') or spec.get('custom_fields') for spec in mobile_specs or []),
         # The schema has an `x-mention` field, so the mention user search route exists.
         'has_mention': has_mention,
     }
@@ -1290,9 +1338,9 @@ def generate_mobile_target(
         _write(checkout_out, _render(env, 'mobile/lib/checkout.ts.jinja2', ctx))
     elif checkout_out.exists():
         checkout_out.unlink()
-    for tmpl_name, rel_out in _MOBILE_ATTACHMENT_TEMPLATES:
+    for tmpl_name, rel_out, needed_by in _MOBILE_ATTACHMENT_TEMPLATES:
         target = mobile_dir / rel_out
-        if ctx['has_attachment']:
+        if any(ctx[flag] for flag in needed_by):
             _write(target, _render(env, f'mobile/{tmpl_name}', ctx))
         elif target.exists():
             target.unlink()
@@ -1432,6 +1480,9 @@ def generate(schema_path: str, output_dir: str) -> None:
     # docs/generated/openapi.json after the loop finishes.
     openapi_entity_specs: list[dict] = []
     self_only_admin_bypass_entities: list[str] = []
+    # Per-entity read-scope facts (organization isolation, x-self-only, x-filter-values) for the
+    # dashboard aggregate, which applies the same scope as the entity's own list getters.
+    dashboard_access_scopes: dict[str, dict] = {}
     # State-transition gatekeeper table (Issue #696, lib/state_transitions.ts)
     # -- collected across every model in the per-entity loop below (each
     # ctx['state_machine_transitions'] entry already carries the parsed
@@ -1527,6 +1578,14 @@ def generate(schema_path: str, output_dir: str) -> None:
             })
         if ctx.get('is_self_only') and ctx.get('self_only_admin_bypass'):
             self_only_admin_bypass_entities.append(parent)
+        dashboard_access_scopes[parent] = {
+            'should_filter_by_org': bool(ctx.get('should_filter_by_org')),
+            'org_relationship_optional': bool(ctx.get('org_relationship_optional')),
+            'has_assignee_id': bool(ctx.get('has_assignee_id')),
+            'is_self_only': bool(ctx.get('is_self_only')),
+            'self_only_admin_bypass': bool(ctx.get('self_only_admin_bypass')),
+            'filter_values': dict(ctx.get('filter_values') or {}),
+        }
         # State-transition entries: gated on can_update the same way
         # service.ts.jinja2/service_validation.ts.jinja2 gate their own
         # transition-check codegen -- a governed field on a can_update=false
@@ -1840,6 +1899,17 @@ def generate(schema_path: str, output_dir: str) -> None:
                 _write(api_dir / '[id]' / 'comments' / '[commentId]' / 'route.ts',
                        _render(env, 'api_comment_item_route.ts.jinja2', _comment_ctx))
                 print(f'  Comment routes → app/api/{parent}/[id]/comments/')
+            # --- attachments route: REST side of the attachment panel ---
+            # Runs setAttachmentsForBridge (lib/attachment/bridge_actions.ts), the Server Action the
+            # AttachmentSection panel calls, for an owner that has the panel and an edit screen.
+            if attachable_bridge_ready(ctx) and can_view and can_edit:
+                _write(api_dir / '[id]' / 'attachments' / 'route.ts',
+                       _render(env, 'api_attachments_route.ts.jinja2', {
+                           **ctx,
+                           'type_ts': attachment_type_ts(schema),
+                           'type_values': attachment_type_values(schema),
+                       }))
+                print(f'  Attachments route → app/api/{parent}/[id]/attachments/')
             print(f'  API routes → app/api/{parent}/')
 
             # --- CSV Export route (Phase 1: can_api+can_list+can_export) ---
@@ -2278,6 +2348,11 @@ def generate(schema_path: str, output_dir: str) -> None:
             _render(env, 'dashboard_catalog.ts.jinja2', {'entities': dashboard_catalog}),
         )
         print(f'  Dashboard catalog → lib/dashboard/catalog.ts ({len(dashboard_catalog)} entities)')
+        _write(
+            out / 'lib' / 'dashboard' / 'access-scope.ts',
+            _render(env, 'dashboard_access_scope.ts.jinja2', {'scopes': dashboard_access_scopes}),
+        )
+        print(f'  Dashboard access scope → lib/dashboard/access-scope.ts ({len(dashboard_access_scopes)} entities)')
 
     # --- Dashboard aggregate REST endpoint (app/api/dashboard/aggregate/route.ts) ---
     # Emitted when at least one dashboardable entity exists so the endpoint

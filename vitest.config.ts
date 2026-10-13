@@ -1,9 +1,30 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import path from "path";
+import fs from "fs";
+
+// lib/dashboard/{catalog,access-scope}.ts are generated and gitignored, so a checkout without
+// generate-code (the CI Unit Tests job) cannot resolve them. Unit tests mock both modules, but
+// Vite's import analysis still needs the specifier to resolve, so fall back to an empty stub
+// only when the generated file is missing; a generated file always wins.
+const DASHBOARD_GENERATED_STUBS: Record<string, string> = {
+  "./catalog": "test/stubs/dashboard-catalog.ts",
+  "./access-scope": "test/stubs/dashboard-access-scope.ts",
+};
+const dashboardDir = path.resolve(__dirname, "lib/dashboard") + path.sep;
+const dashboardGeneratedFallback = {
+  name: "dashboard-generated-fallback",
+  enforce: "pre" as const,
+  resolveId(source: string, importer?: string) {
+    const stub = DASHBOARD_GENERATED_STUBS[source];
+    if (!stub || !importer || !importer.startsWith(dashboardDir)) return null;
+    if (fs.existsSync(path.resolve(dashboardDir, `${source}.ts`))) return null;
+    return path.resolve(__dirname, stub);
+  },
+};
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), dashboardGeneratedFallback],
   test: {
     typecheck: { tsconfig: "./tsconfig.test.json" },
     environment: "jsdom",
@@ -30,6 +51,12 @@ export default defineConfig({
       // under .generated-payment-gate/).
       "code_generator/tests/fixtures/payment_gate/**",
       ".generated-payment-gate/**",
+      // Attachment bridge ownership fixture: run by
+      // code_generator/tests/test_attachment_actions.py against the rendered
+      // template, with its own config (and the copy it stages under
+      // .generated-attachment-bridge-test/).
+      "code_generator/tests/fixtures/attachment_bridge_actions/**",
+      ".generated-attachment-bridge-test/**",
     ],
   },
   resolve: {

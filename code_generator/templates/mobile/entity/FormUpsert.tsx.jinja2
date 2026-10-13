@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState{% if create_fields %}, type ComponentType{% endif %} } from 'react';
+import { {% if custom_fields | selectattr('custom.upsert') | list %}createElement, {% endif %}useEffect, useRef, useState{% if create_fields or (custom_fields | selectattr('custom.upsert') | list) %}, type ComponentType{% endif %} } from 'react';
 import { router } from 'expo-router';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useMessages } from '@/lib/messages';
 import type { ModelPermissions } from '@/lib/authz';
 import { validateForm } from '@/components/{{ name }}/form_validation';
 import { useEntityCapabilities } from '@/lib/{{ name }}/use_entity_capabilities';
-import { useEntityForm } from '@/lib/{{ name }}/use_entity_form';
+import { useEntityForm{% if attachments and attachments.can_edit %}, getEntityFormErrorMessage{% endif %} } from '@/lib/{{ name }}/use_entity_form';
 import {
 {% if can_edit %}
   get{{ pascal }}Detail,
@@ -21,6 +21,10 @@ import { firstMissingRowField, type ChildRowState } from '@/lib/entity-http';
 {% if attachment_fields %}
 import type { AttachmentRow } from '@/lib/attachment-http';
 {% endif %}
+{% if attachments and attachments.can_edit %}
+import { AttachmentList, attachmentsChanged } from '@/components/native/AttachmentList';
+import { setBridgeAttachments, type BridgeAttachment } from '@/lib/attachment-http';
+{% endif %}
 {% if create_fields %}
 import type { InlineCreateProps } from '@/components/native/RelationPicker';
 {% for f in create_fields %}
@@ -29,6 +33,27 @@ import { {{ f.create_form.pascal }}FormUpsert } from '@/components/{{ f.create_f
 {% endif %}
 {% if is_payment %}
 import { isCheckoutUrl, openCheckout } from '@/lib/checkout';
+{% endif %}
+{% for comp in custom_components.edit | map(attribute='name') | unique %}
+import {{ comp }} from '@/components/{{ name }}/custom/{{ comp }}';
+{% endfor %}
+{% if custom_fields | selectattr('custom.upsert') | list %}
+import type { FieldUpsertProps } from '@/lib/custom-component';
+{% for f in custom_fields if f.custom.upsert %}
+import Field{{ f.key | pascal_case }} from '@/components/{{ name }}/custom/fields/{{ f.key | pascal_case }}';
+{% endfor %}
+
+// Fields a hand-written component draws (x-custom-component, target upsert): it replaces the whole input.
+const CUSTOM_UPSERT: Record<string, ComponentType<FieldUpsertProps>> = {
+{% for f in custom_fields if f.custom.upsert %}
+  {{ f.key }}: Field{{ f.key | pascal_case }},
+{% endfor %}
+};
+{% endif %}
+{% if attachments and attachments.can_edit %}
+
+// The types the entity's AttachmentSection lists (its showImages / showFiles props).
+const ATTACHMENT_TYPES: string[] = {{ attachments.types | tojson }};
 {% endif %}
 {% if create_fields %}
 
@@ -63,9 +88,26 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
   // A direct attachment field's value is the attachment row's id; the whole row is kept to show its name.
   const [attachments, setAttachments] = useState<Record<string, AttachmentRow | null>>({});
 {% endif %}
+{% if attachments and attachments.can_edit %}
+  // The `attachable` bridge's attachments: the saved set and the one being edited. They are saved after the
+  // record itself, and only once it exists (as on the Web, the create form has no attachment section).
+  const [savedBridge, setSavedBridge] = useState<BridgeAttachment[]>([]);
+  const [bridgeItems, setBridgeItems] = useState<BridgeAttachment[]>([]);
+  const [bridgeError, setBridgeError] = useState<string | null>(null);
+{% endif %}
   const [permissions, setPermissions] = useState<ModelPermissions | undefined>(undefined);
   const [state, setState] = useState<'loading' | 'ready' | 'missing'>('loading');
   const [busy, setBusy] = useState(false);
+{% if custom_components.edit %}
+  // The saved record the edit components receive (`null` on the create form), and a counter their `reload` bumps.
+  const [record, setRecord] = useState<{ id: string } & Record<string, unknown> | null>(null);
+  const [reloads, setReloads] = useState(0);
+{% endif %}
+{% if custom_fields | selectattr('custom.upsert') | list %}
+  // What a custom field started with: a field its component left untouched is not sent, so a value the
+  // screen never held (a password, for example) is not overwritten by a blank.
+  const initialValues = useRef<Record<string, FieldValueState>>({});
+{% endif %}
 {% if is_payment %}
   const checkoutUrl = useRef<string | null>(null);
   const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
@@ -105,11 +147,22 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
             return;
           }
           setValues(Object.fromEntries(FIELDS.map((spec) => [spec.key, toFieldState(spec, record[spec.key])])));
+{% if custom_components.edit %}
+          setRecord(record);
+{% endif %}
+{% if custom_fields | selectattr('custom.upsert') | list %}
+          initialValues.current = Object.fromEntries(FIELDS.map((spec) => [spec.key, toFieldState(spec, record[spec.key])]));
+{% endif %}
 {% if attachment_fields %}
           setAttachments(Object.fromEntries(
             FIELDS.filter((spec) => spec.kind === 'attachment')
               .map((spec) => [spec.key, (record[spec.relationName ?? spec.key] as AttachmentRow | null | undefined) ?? null]),
           ));
+{% endif %}
+{% if attachments and attachments.can_edit %}
+          const embedded = ((record[{{ attachments.rel_name | tojson }}] as { {{ attachments.prop }}?: BridgeAttachment[] } | null)?.{{ attachments.prop }}) ?? [];
+          setSavedBridge(embedded);
+          setBridgeItems(embedded);
 {% endif %}
         }
 {% endif %}
@@ -119,7 +172,7 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
       }
     };
     void load();
-  }, [id]);
+  }, [id{% if custom_components.edit %}, reloads{% endif %}]);
 
   const allowed = isEdit ? canEdit : Boolean(permissions?.create);
 
@@ -144,6 +197,10 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
     for (const spec of FIELDS) {
       if (spec.readonly) continue;
       const value = values[spec.key];
+{% if custom_fields | selectattr('custom.upsert') | list %}
+      // A field a custom component draws is sent only once the component has changed it.
+      if (CUSTOM_UPSERT[spec.key] && value === (spec.key in initialValues.current ? initialValues.current[spec.key] : toFieldState(spec, null))) continue;
+{% endif %}
       // The rows of a child collection travel as one JSON entry.
       if (spec.kind === 'child_rows') formData.append(spec.key, JSON.stringify(value));
       // A many-to-many travels as one entry per selected id.
@@ -151,6 +208,25 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
       else formData.append(spec.key, String(value));
     }
     submit(formData, async (savedId) => {
+{% if attachments and attachments.can_edit %}
+      // The record is saved; its attachments go in a second request, one per type that changed. A refusal
+      // is shown on the section and the form stays (the record's own changes are already saved).
+      if (id) {
+        setBusy(true);
+        try {
+          for (const type of ATTACHMENT_TYPES) {
+            if (!attachmentsChanged(savedBridge, bridgeItems, type)) continue;
+            const result = await setBridgeAttachments('{{ name }}', id, type, bridgeItems.filter((item) => item.type === type).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
+            if (!result.ok) {
+              setBridgeError(getEntityFormErrorMessage(result, { terr, tmsg }));
+              return;
+            }
+          }
+        } finally {
+          setBusy(false);
+        }
+      }
+{% endif %}
       if (onCreated) {
         onCreated(savedId);
         return;
@@ -205,7 +281,12 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
 
   return (
     <ScrollView style={styles.container} testID={isEdit ? 'form-edit-{{ name }}' : 'form-new-{{ name }}'}>
-      {FIELDS.map((spec) => (
+      {FIELDS.map((spec) => {% if custom_fields | selectattr('custom.upsert') | list %}CUSTOM_UPSERT[spec.key] ? createElement(CUSTOM_UPSERT[spec.key], {
+        key: spec.key,
+        value: values[spec.key] as string | boolean,
+        onChange: (next: string | boolean) => setValues((current) => ({ ...current, [spec.key]: next })),
+        isEdit,
+      }) : {% endif %}(
         <FieldInput
           key={spec.key}
           spec={spec}
@@ -223,6 +304,12 @@ export function {{ pascal }}FormUpsert({ id, onCreated, onCancel }: Props) {
 {% endif %}
         />
       ))}
+{% if attachments and attachments.can_edit %}
+      {isEdit ? <AttachmentList types={ATTACHMENT_TYPES} items={bridgeItems} onChange={(next) => { setBridgeError(null); setBridgeItems(next); }} disabled={busy} error={bridgeError} /> : null}
+{% endif %}
+{% for comp in custom_components.edit %}
+      <{{ comp.name }} record={record} permissions={permissions} reload={() => setReloads((n) => n + 1)}{% for k, v in comp.props.items() %} {{ k }}={ {{ v | tojson }} }{% endfor %} />
+{% endfor %}
       {validationError ? <Text style={styles.error} testID="form-validation-error">{validationError}</Text> : null}
       {error ? <Text style={styles.error} testID="form-error">{error}</Text> : null}
 {% if is_payment %}

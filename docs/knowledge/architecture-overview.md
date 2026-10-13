@@ -63,6 +63,7 @@ The `x-generate` block in the entity definition controls which outputs are activ
 Two cross-entity files are also regenerated on every run:
 
 - `lib/dashboard/catalog.ts` — aggregates all entities for the dashboard widget catalog
+- `lib/dashboard/access-scope.ts` — per-entity row-level read scope facts the dashboard aggregate applies (see `schema-yaml-configuration.md` §10)
 - `lib/attachment/bridge_actions.ts` — polymorphic attachment bridge for entities that own `attachable`,
   always emitted (`components/_standard/AttachmentSection.tsx` unconditionally imports from it). This
   file was renamed from `lib/attachment/actions.ts` — that name collided with the standard per-entity
@@ -72,6 +73,10 @@ Two cross-entity files are also regenerated on every run:
   only when some entity declares an `x-relationship: {target: attachment, type: direct}` FK, together with
   `app/api/attachment/direct/route.ts`, which runs the same function over REST for mobile access token and API
   key callers.
+  `setAttachmentsForBridge` authorizes the owner it is given, then requires every `items[].id` to be one of
+  that attachable's own rows of the requested type. Any other id rejects the whole call with
+  `AppError('NOT_FOUND')` before a write, and the update also filters on `attachable_id`, so one record's
+  editor can never rewrite an attachment of another record, in the same or another organization.
 
 ### cleanup.py
 

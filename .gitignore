@@ -162,6 +162,7 @@ code_generator/.generated/
 # (pre-existing gap alongside its siblings above, noticed while running the
 # update-generator gate for the user.image direct-FK migration.)
 .generated-direct-attachment-gate/
+.generated-attachment-bridge-test/
 
 # filter-sort-gate fixture check (cmd_1200(c)) scratch output —
 # scripts/check_filter_sort_gate_fixture.sh regenerates this from
@@ -207,6 +208,7 @@ lib/*/*
 !lib/dashboard/**
 lib/dashboard/actions.ts
 lib/dashboard/catalog.ts
+lib/dashboard/access-scope.ts
 lib/dashboard/getters.ts
 lib/dashboard/service.ts
 lib/dashboard/types.ts

@@ -1990,6 +1990,25 @@ chart. Add a categorical field, or remove the `dashboard: true` flag.
 `x-display.dashboard` is independent of `table` and `chart`. Setting it
 does not affect whether the list or chart pages are generated.
 
+**Access control.** A widget counts only what its viewer could list on the
+entity's own page. Both entry points, the `aggregateForWidget` Server Action and
+`POST /api/dashboard/aggregate`, call `aggregateForWidgetCore` with the acting
+user's id, which:
+
+- requires the user's `read` permission on the entity (`PERMISSION_DENIED`, HTTP 403
+  on the REST route, otherwise);
+- ANDs the entity's row-level read scope with the widget's filter conditions in
+  every query shape (single and two-field group-by, bucketed queries, FK label
+  lookups). The scope is the one the entity's list getters apply: organization
+  isolation, `x-self-only` (with its audited `admin_bypass`), `x-filter-values`, and
+  Creator/Assignee-only read;
+- resolves FK labels through the **target** entity's read permission and scope. A
+  label the viewer cannot read is shown as `(unknown)`.
+
+The scope facts are generated into `lib/dashboard/access-scope.ts` (one entry per
+generated entity); `lib/dashboard/access-where.ts` turns them into Prisma `where`
+clauses. An entity with no recorded entry is never readable through the dashboard.
+
 ---
 
 ## 11. `x-custom-component` / `x-custom-components` — Custom UI Elements

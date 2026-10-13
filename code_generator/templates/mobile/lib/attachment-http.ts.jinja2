@@ -1,7 +1,11 @@
 // Direct attachment fields: the file is stored through POST /api/upload, then an `attachment` row is
 // created for it through POST /api/attachment/direct. The form submits the row's id with the entity, as
 // the Web form does (components/_standard/SingleAttachmentUpload.tsx, mode 'fk').
+// Bridge attachments (an entity that owns attachments through `attachable`): the file is stored through
+// POST /api/upload and the record's whole set is saved through PUT /api/<entity>/<id>/attachments.
 import { ApiError, apiFetch } from './api-base';
+import { toActionFailure } from './entity-http';
+import type { ActionFailure } from './_errors';
 
 /** The attachment row the REST detail embeds under a field's relation name; the create route answers with the same shape. */
 export type AttachmentRow = { id: string; name: string; path: string; type: string };
@@ -41,8 +45,8 @@ export function uploadErrorMessage(err: unknown): string | null {
   }
 }
 
-/** Uploads the file and creates its attachment row. Rejects with an ApiError when the server refuses either step. */
-export async function uploadAttachment(picked: PickedFile): Promise<AttachmentRow> {
+/** Stores the file through POST /api/upload and answers the URL it is served from. Rejects with an ApiError when the server refuses it. */
+export async function uploadFile(picked: PickedFile): Promise<string> {
   const form = new FormData();
   if (picked.file) {
     form.append('file', picked.file, picked.name);
@@ -51,8 +55,43 @@ export async function uploadAttachment(picked: PickedFile): Promise<AttachmentRo
     form.append('file', { uri: picked.uri, name: picked.name, type: picked.mimeType ?? 'application/octet-stream' } as unknown as Blob);
   }
   const { url } = await apiFetch<{ url: string }>('/api/upload', { method: 'POST', body: form });
+  return url;
+}
+
+/** Uploads the file and creates its attachment row. Rejects with an ApiError when the server refuses either step. */
+export async function uploadAttachment(picked: PickedFile): Promise<AttachmentRow> {
+  const path = await uploadFile(picked);
   return apiFetch<AttachmentRow>('/api/attachment/direct', {
     method: 'POST',
-    body: JSON.stringify({ name: picked.name, path: url, type: attachmentKind(picked.mimeType) }),
+    body: JSON.stringify({ name: picked.name, path, type: attachmentKind(picked.mimeType) }),
   });
+}
+
+/**
+ * One attachment of a record that owns attachments through the `attachable` bridge, as the REST detail embeds it
+ * (`id`, `name`, `path`, `type`, `order`). An entry the user just added has no `id` yet.
+ */
+export type BridgeAttachment = { id?: string; name: string; path: string; type?: string; order?: number };
+
+/**
+ * `PUT /api/<entity>/<id>/attachments`: replaces the record's attachments of one type with `items`, in the order
+ * listed (an entry with an `id` keeps its row, one without is created, a row not listed is deleted). Never rejects:
+ * a refusal (no `update` on the record, a record of another organization, an id that is not the record's own)
+ * comes back as an ActionFailure.
+ */
+export async function setBridgeAttachments(
+  entity: string,
+  recordId: string,
+  type: string,
+  items: BridgeAttachment[],
+): Promise<{ ok: true } | ActionFailure> {
+  try {
+    await apiFetch(`/api/${encodeURIComponent(entity)}/${encodeURIComponent(recordId)}/attachments`, {
+      method: 'PUT',
+      body: JSON.stringify({ type, items: items.map(({ id, name, path }) => ({ id, name, path })) }),
+    });
+    return { ok: true };
+  } catch (err) {
+    return toActionFailure(err);
+  }
 }

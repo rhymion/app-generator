@@ -1,0 +1,6 @@
+import { Text } from 'react-native';
+import type { EntityComponentProps } from '@/lib/custom-component';
+
+export default function GadgetBanner({ record }: EntityComponentProps) {
+  return <Text testID="gadget-banner">{record ? `banner saved ${String(record.title)}` : 'banner new'}</Text>;
+}

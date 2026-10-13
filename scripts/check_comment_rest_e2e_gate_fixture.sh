@@ -10,7 +10,9 @@
 # /api/<entity>/{id}/comments with an API key and a mobile access token, the permission
 # and organization checks (also on the Server Actions themselves, through a test-only probe
 # route that skips the REST pre-gates), the author-only edit and delete rules, the mention
-# notifications, and GET /api/mention/users.
+# notifications, and GET /api/mention/users. The fixture also holds an organization-scoped owner of the
+# `attachable` bridge (cr_asset), for PUT /api/<entity>/{id}/attachments: replace semantics, the
+# permission and organization checks, and the refusal of another record's attachment id.
 #
 # Isolation (the repository's own schema, generated output, database and other
 # fixtures are never touched):

@@ -6,7 +6,7 @@
 // disabled, and the partition export round trip.
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { loadEnvConfig } from '@next/env';
 
 loadEnvConfig(path.resolve(process.cwd()), process.env.NODE_ENV !== 'production');
@@ -87,6 +87,40 @@ describe('audit_log append-only', () => {
     await seedRows();
     await truncate();
     expect(await prisma.audit_log.count()).toBe(0);
+  });
+
+  it('lets the restricted application role create a monthly partition but nothing else', async () => {
+    const role = 'audit_log_probe_app';
+    const appRoleSql = (await readFile(path.resolve(process.cwd(), 'prisma/sql/audit_log_app_role.sql'), 'utf8')).replaceAll(
+      ':"app_role"',
+      `"${role}"`,
+    );
+    const url = new URL(process.env.DATABASE_URL as string);
+    url.username = role;
+    url.password = 'probe';
+    await ownerQuery(async (c) => {
+      await c.query(`DROP OWNED BY ${role}`).catch(() => undefined);
+      await c.query(`DROP ROLE IF EXISTS ${role}`);
+      await c.query(`CREATE ROLE ${role} LOGIN PASSWORD 'probe'`);
+      await c.query(`GRANT USAGE ON SCHEMA public TO ${role}`);
+      await c.query(appRoleSql);
+    });
+    const app = new Client({ connectionString: url.toString() });
+    await app.connect();
+    try {
+      // A month far from "now" so no live partition is involved.
+      const result = await app.query(`SELECT audit_log_create_month_partition('2031-07-15T00:00:00Z') AS name`);
+      expect(result.rows[0].name).toBe('audit_log_2031_07');
+      await expect(app.query(`DROP TABLE audit_log_2031_07`)).rejects.toThrow(/must be owner|permission denied/);
+      await expect(app.query(`TRUNCATE TABLE audit_log`)).rejects.toThrow(/permission denied/);
+    } finally {
+      await app.end();
+      await ownerQuery(async (c) => {
+        await c.query('DROP TABLE IF EXISTS audit_log_2031_07');
+        await c.query(`DROP OWNED BY ${role}`);
+        await c.query(`DROP ROLE ${role}`);
+      });
+    }
   });
 
   it('verification passes on untouched data and is idempotent', async () => {

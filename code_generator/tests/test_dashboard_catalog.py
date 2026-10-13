@@ -332,3 +332,39 @@ def test_aggregate_route_accepts_the_timezone_enum_literal_and_passes_it_through
     assert 'timezone?: string | null;' in result
     assert 'group_by_bucket, timezone } = body;' in result
     assert 'resolveBucket(group_by_bucket),\n      timezone,' in result
+
+
+# ---------------------------------------------------------------------------
+# Row-level read scope (Issue #910)
+# ---------------------------------------------------------------------------
+
+def test_aggregate_route_passes_the_caller_to_the_core():
+    """The core needs the acting user to apply permission and row-level scope."""
+    env = _make_env()
+    result = env.get_template('dashboard_aggregate_route.ts.jinja2').render()
+    assert 'aggregateForWidgetCore(\n      actorId,\n      entity_name,' in result
+
+
+def test_access_scope_template_renders_every_scope_fact():
+    env = _make_env()
+    result = env.get_template('dashboard_access_scope.ts.jinja2').render(scopes={
+        'ticket': {
+            'should_filter_by_org': True,
+            'org_relationship_optional': False,
+            'has_assignee_id': True,
+            'is_self_only': False,
+            'self_only_admin_bypass': False,
+            'filter_values': {'status': [0, 1]},
+        },
+    })
+    assert result.startswith('// AUTO-GENERATED')
+    assert "'ticket': {" in result
+    assert 'should_filter_by_org: true,' in result
+    assert 'is_self_only: false,' in result
+    assert 'filter_values: {"status": [0, 1]},' in result
+
+
+def test_access_scope_template_renders_with_no_entities():
+    env = _make_env()
+    result = env.get_template('dashboard_access_scope.ts.jinja2').render(scopes={})
+    assert 'DASHBOARD_ACCESS_SCOPES: Record<string, DashboardAccessScope> = {\n};' in result

@@ -54,8 +54,11 @@ export async function startServer(
   if (await isPortInUse(port)) {
     throw new Error(`Port ${port} is already in use`);
   }
-  // Clear Next.js build state to prevent "Another dev server is already running" error
-  spawnSync('bash', ['-c', 'rm -rf .next'], { cwd, stdio: 'ignore' });
+  // Drop a stale dev-server lock left by a previous run ("Another dev server is
+  // already running"). Only the lock file is removed: the rest of .next belongs
+  // to the working tree (a build or dev server the developer may be using) and
+  // the port check above already ruled out a live server on this port.
+  fs.rmSync(path.join(cwd, '.next', 'dev', 'lock'), { force: true });
   const proc = spawn('bash', ['-c', `npm run ${npmScript}`], {
     cwd,
     detached: true,

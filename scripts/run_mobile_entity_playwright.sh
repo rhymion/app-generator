@@ -21,7 +21,8 @@
 #                           mobile/e2e/list-capabilities.spec.ts, mobile/e2e/comments.spec.ts,
 #                           mobile/e2e/approval-actions.spec.ts, mobile/e2e/split-action.spec.ts,
 #                           mobile/e2e/reservation.spec.ts, mobile/e2e/attachments.spec.ts,
-#                           mobile/e2e/child-rows.spec.ts and mobile/e2e/entity-select.spec.ts
+#                           mobile/e2e/child-rows.spec.ts, mobile/e2e/entity-select.spec.ts,
+#                           mobile/e2e/bridge-attachments.spec.ts and mobile/e2e/custom-components.spec.ts
 #   MODE=default            unmodified schema; runs every other spec in mobile/e2e/
 #   MODE=scheduled          the scheduled-task-e2e-gate fixture (three scheduled tasks) merged and the
 #                           test user made a ScheduledTaskRunner; runs mobile/e2e/scheduled-task.spec.ts
@@ -83,6 +84,21 @@ ln -s "$REPO_ROOT/node_modules" "$BUILD_DIR/node_modules"
 if [ "$MODE" = "fixture" ]; then
   echo "-- merging the fixture schema into the copy --"
   python3 scripts/compose_child_datagrid_e2e_fixture.py "$FIXTURE_DIR" "$BUILD_DIR"
+  echo "-- placing the hand-written native components of mobile_gadget (the generator keeps files that already exist) --"
+  # Native component stubs are write-once: the generator never overwrites one. Placing these before
+  # generation is what a developer's own implementation looks like to it. mobile_gadget's other
+  # components (GadgetNote, the `pin` field) keep the generated stub, which draws nothing.
+  while IFS= read -r -d '' stub; do
+    rel="${stub#"$FIXTURE_DIR/mobile_stubs/"}"
+    dest="$BUILD_DIR/mobile/components/mobile_gadget/custom/${rel%.fixture}"
+    mkdir -p "$(dirname "$dest")"
+    cp "$stub" "$dest"
+  done < <(find "$FIXTURE_DIR/mobile_stubs" -name '*.fixture' -print0)
+  # The Web build resolves the same components by name, so it needs (empty) Web counterparts.
+  mkdir -p "$BUILD_DIR/components/mobile_gadget"
+  for stub in "$FIXTURE_DIR"/web_stubs/*.fixture; do
+    cp "$stub" "$BUILD_DIR/components/mobile_gadget/$(basename "${stub%.fixture}")"
+  done
 elif [ "$MODE" = "scheduled" ]; then
   echo "-- merging the scheduled-task fixture schema into the copy --"
   python3 scripts/compose_child_datagrid_e2e_fixture.py code_generator/tests/fixtures/scheduled_task_e2e_gate "$BUILD_DIR"
@@ -259,7 +275,7 @@ SELECT v.id, v.message, 'thread-commentable-4', now(), CASE WHEN v.mine THEN act
 FROM actor, (VALUES ('comment-edit-1', 'Editable comment', true, 1), ('comment-edit-2', 'Look at this, @[user_id:user-other] please', true, 2),
   ('comment-del-1', 'Delete me', true, 3), ('comment-del-2', 'Keep me', true, 4), ('comment-other', 'Written by someone else', false, 5)) AS v(id, message, mine, ord);
 SQL
-  PW_TARGET="entity-crud.spec.ts relation-pickers.spec.ts list-capabilities.spec.ts inline-create-checkout.spec.ts comments.spec.ts approval-actions.spec.ts split-action.spec.ts reservation.spec.ts attachments.spec.ts child-rows.spec.ts entity-select.spec.ts"
+  PW_TARGET="entity-crud.spec.ts relation-pickers.spec.ts list-capabilities.spec.ts inline-create-checkout.spec.ts comments.spec.ts approval-actions.spec.ts split-action.spec.ts reservation.spec.ts attachments.spec.ts child-rows.spec.ts entity-select.spec.ts bridge-attachments.spec.ts custom-components.spec.ts"
   export MOBILE_PW_IGNORE=""
 elif [ "$MODE" = "scheduled" ]; then
   echo "-- the test user holds the ScheduledTaskRunner role --"
@@ -272,7 +288,7 @@ SQL
   export MOBILE_PW_IGNORE=""
 else
   PW_TARGET=""
-  export MOBILE_PW_IGNORE="**/{entity-crud,relation-pickers,list-capabilities,inline-create-checkout,comments,approval-actions,split-action,reservation,attachments,child-rows,entity-select,scheduled-task}.spec.ts"
+  export MOBILE_PW_IGNORE="**/{entity-crud,relation-pickers,list-capabilities,inline-create-checkout,comments,approval-actions,split-action,reservation,attachments,child-rows,entity-select,bridge-attachments,custom-components,scheduled-task}.spec.ts"
 fi
 
 echo "-- installing the Expo dependencies --"

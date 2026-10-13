@@ -1,0 +1,148 @@
+{% raw %}
+import { useState } from 'react';
+import { ActivityIndicator, Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
+import { useMessages } from '@/lib/messages';
+import { resolveApiUrl } from '@/lib/api-base';
+import {
+  ATTACHMENT_MIME_TYPES,
+  uploadErrorMessage,
+  uploadFile,
+  type BridgeAttachment,
+} from '@/lib/attachment-http';
+
+const IMAGE_MIME_TYPES = ATTACHMENT_MIME_TYPES.filter((type) => type.startsWith('image/'));
+const FILE_MIME_TYPES = ATTACHMENT_MIME_TYPES.filter((type) => !type.startsWith('image/'));
+
+/** The attachments of one type, in their stored order. */
+export function attachmentsOfType(items: BridgeAttachment[], type: string): BridgeAttachment[] {
+  return items.filter((item) => item.type === type).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+}
+
+/** Whether the list of one type differs from the saved one (a different set, name, file or order). */
+export function attachmentsChanged(saved: BridgeAttachment[], current: BridgeAttachment[], type: string): boolean {
+  const key = (items: BridgeAttachment[]) =>
+    JSON.stringify(attachmentsOfType(items, type).map((item) => [item.id ?? null, item.name, item.path]));
+  return key(saved) !== key(current);
+}
+
+type Props = {
+  /** The types to list, from the `AttachmentSection` props: `image` and / or `file`. */
+  types: string[];
+  /** All the record's attachments (the types not listed are kept as they are). */
+  items: BridgeAttachment[];
+  /** Offers add, remove and reorder; `onChange` then receives the whole set. */
+  onChange?: (items: BridgeAttachment[]) => void;
+  disabled?: boolean;
+  /** The server's refusal of the last save, shown on the section. */
+  error?: string | null;
+};
+
+/**
+ * The attachments of a record that owns them through the `attachable` bridge. Read-only without `onChange`
+ * (the detail screen); with it, each type has an *Add* button (system file picker, upload) and each entry
+ * has remove and move up / down. Nothing is saved here: the form saves the set after the record itself.
+ */
+export function AttachmentList({ types, items, onChange, disabled, error }: Props) {
+  const { t, terr } = useMessages();
+  const [uploading, setUploading] = useState<string | null>(null);
+  const [pickError, setPickError] = useState<string | null>(null);
+  const editable = Boolean(onChange) && !disabled;
+
+  const pick = async (type: string) => {
+    if (!onChange) return;
+    setPickError(null);
+    const result = await DocumentPicker.getDocumentAsync({
+      type: type === 'image' ? IMAGE_MIME_TYPES : FILE_MIME_TYPES,
+      copyToCacheDirectory: true,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    setUploading(type);
+    try {
+      const path = await uploadFile({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType, file: asset.file });
+      const order = attachmentsOfType(items, type).length;
+      onChange([...items, { name: asset.name, path, type, order }]);
+    } catch (err) {
+      setPickError(uploadErrorMessage(err) ?? terr('unknown'));
+    } finally {
+      setUploading(null);
+    }
+  };
+
+  const remove = (type: string, index: number) => {
+    if (!onChange) return;
+    const rest = attachmentsOfType(items, type).filter((_, i) => i !== index);
+    onChange([...items.filter((item) => item.type !== type), ...rest.map((item, i) => ({ ...item, order: i }))]);
+  };
+
+  const move = (type: string, index: number, by: number) => {
+    if (!onChange) return;
+    const list = attachmentsOfType(items, type);
+    const target = index + by;
+    if (target < 0 || target >= list.length) return;
+    [list[index], list[target]] = [list[target], list[index]];
+    onChange([...items.filter((item) => item.type !== type), ...list.map((item, i) => ({ ...item, order: i }))]);
+  };
+
+  return (
+    <View style={styles.section} testID="attachments-section">
+      {types.map((type) => {
+        const list = attachmentsOfType(items, type);
+        if (!editable && list.length === 0) return null;
+        return (
+          <View key={type} style={styles.group} testID={`attachments-${type}`}>
+            <Text style={styles.title}>{t(type === 'image' ? 'Fields.images' : 'Fields.attachments')}</Text>
+            {list.map((item, index) => (
+              <View key={item.id ?? `${item.path}-${index}`} style={styles.row} testID={`attachment-row-${type}-${index}`}>
+                {type === 'image' ? (
+                  <Image source={{ uri: resolveApiUrl(item.path) }} style={styles.thumb} accessibilityLabel={item.name} />
+                ) : null}
+                <Pressable style={styles.name} onPress={() => void Linking.openURL(resolveApiUrl(item.path))} accessibilityRole="link">
+                  <Text style={styles.link} testID={`attachment-name-${type}-${index}`}>{item.name}</Text>
+                </Pressable>
+                {editable ? (
+                  <View style={styles.controls}>
+                    <Pressable style={styles.button} onPress={() => move(type, index, -1)} accessibilityLabel="up" testID={`attachment-up-${type}-${index}`}>
+                      <Text>{'↑'}</Text>
+                    </Pressable>
+                    <Pressable style={styles.button} onPress={() => move(type, index, 1)} accessibilityLabel="down" testID={`attachment-down-${type}-${index}`}>
+                      <Text>{'↓'}</Text>
+                    </Pressable>
+                    <Pressable style={styles.button} onPress={() => remove(type, index)} testID={`attachment-remove-${type}-${index}`}>
+                      <Text>{t('Common.delete')}</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+              </View>
+            ))}
+            {editable ? (
+              <View style={styles.row}>
+                <Pressable style={styles.button} disabled={uploading !== null} onPress={() => void pick(type)} testID={`attachments-pick-${type}`}>
+                  <Text>{t('Common.add')}</Text>
+                </Pressable>
+                {uploading === type ? <ActivityIndicator testID={`attachments-uploading-${type}`} /> : null}
+              </View>
+            ) : null}
+          </View>
+        );
+      })}
+      {pickError ? <Text style={styles.error} testID="attachments-pick-error">{pickError}</Text> : null}
+      {error ? <Text style={styles.error} testID="attachments-error">{error}</Text> : null}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  section: { gap: 12, marginBottom: 14 },
+  group: { gap: 6 },
+  title: { fontSize: 13, fontWeight: '600', color: '#374151' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  name: { flex: 1 },
+  link: { fontSize: 16, color: '#2563eb' },
+  thumb: { width: 40, height: 40, resizeMode: 'contain' },
+  controls: { flexDirection: 'row', gap: 6 },
+  button: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 },
+  error: { color: '#dc2626', fontSize: 12 },
+});
+{% endraw %}

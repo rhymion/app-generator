@@ -5,6 +5,23 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Mobile app: insertion points for hand-written components** (Issue #873). The Expo app now reads
+  `x-custom-components` (entity level: `list`, `view`, `edit`) and `x-custom-component` (field level: `upsert`, `view`) as
+  they stand, with no new schema key, and mounts a native component of the same name at the position of the Web one: the
+  list's search / sort / filter row, the detail screen after the built-in sections, the form after the inputs (create form
+  included), and in place of a field's input or detail row. Each component gets a native stub, generated once and never
+  overwritten, that renders nothing; `generate-code` lists new stubs under `ACTION REQUIRED`. Entities left on the placeholder
+  screen only because of these components (in the default schema `user` and `dashboard`) now get native screens. The props
+  contract is generated into `mobile/lib/custom-component.ts`. A credential field (an upsert-only string) is not listed or
+  shown, and a field component is sent only once changed. `ApprovalSection` and `AttachmentSection` keep their native
+  support. See `docs/knowledge/mobile-app.md` and `docs/knowledge/code-generation-custom-extensions.md`.
+- **Mobile app: entities that own attachments through the `attachable` bridge get native screens** (Issue #949). An entity
+  with `attachable_id` (`one-to-one_bridge` to `attachable`) and the `AttachmentSection` component is no longer left on the
+  placeholder screen: the detail screen lists its images and files, and the edit form adds (system file picker), removes and
+  reorders them. A new generated route, `PUT /api/<entity>/<id>/attachments`, replaces one type's attachments through the Web
+  panel's own `setAttachmentsForBridge`, with the owner's `update` permission and organization checks, and refuses an id that is
+  not the record's own attachment. The `showImages` / `showFiles` props decide which lists are drawn. In an app where only the
+  bridge needs it, the file picker dependency is now added too. See `docs/knowledge/mobile-app.md`.
 - **`x-version-of`: identity + version entities with approval-backed history** (Issue #946). Declared on the version entity
   (an `x-approval` entity), it generates the version number assigned at approval, at most one open draft per identity,
   the identity's `current_version_id`, and deletion of a terminally rejected or withdrawn draft with its owned child rows.
@@ -49,6 +66,19 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **Dashboard aggregate: read permission and row-level scope on both entry points** (Issue #910). The `aggregateForWidget` Server Action now requires the user's `read` permission on the entity, as `POST /api/dashboard/aggregate` already did, and both paths limit every query (single and two-field group-by, bucketed queries, FK label lookups) to the rows the user can list: organization isolation, `x-self-only`, `x-filter-values` and Creator/Assignee-only read. FK labels are resolved through the target entity's permission and scope, and an unreadable label shows as `(unknown)`. `aggregateForWidgetCore` takes the acting user's id as its first argument. See `docs/knowledge/schema-yaml-configuration.md` §10.
+- **`npm run test:flows` no longer destroys the working tree and runs serially.** `test/flows/cleanup.test.ts` ran
+  `npm run cleanup:all` (`--prune-orphans`) in the working tree itself, which deleted the generated code
+  (`lib/*/service.ts`, ...); it now runs on a disposable copy and asserts the working tree is unchanged.
+  `vitest.flows.config.ts` sets `fileParallelism: false`, and `startServer` removes only a stale `.next/dev/lock`
+  instead of the whole `.next` directory. `multistage_approval_rounds.test.ts` supplies its own
+  `on_withdrawn`-declaring approvable instead of relying on an entity of the consumer's schema. See
+  `docs/knowledge/flows-tests.md`.
+- The virtual column resolver stub was never announced in the `ACTION REQUIRED` summary: `_write_stub` returned `None`, so
+  the notice keyed on its result never fired. It now returns whether it created the file.
+- **Attachment bridge: `setAttachmentsForBridge` only accepts attachment ids of the record being edited** (Issue #958).
+  An id belonging to another record, in the same or another organization, or to another attachment type now rejects the
+  whole call with `NOT_FOUND` before anything is written, and the update filters on `attachable_id` as well.
 - **Generated Cypress helpers: `selectAutocomplete` and the DataGrid cell helpers work for long labels and wide grids.**
   `selectAutocomplete` compared the option text with whitespace collapsed but the expected label as-is, so a label with
   trailing empty segments (for example an inventory with no lot number or expiry date) never matched. The expected label
@@ -60,6 +90,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   access token, so the app's `Authorization: Bearer <jwt>` request was answered `401 Invalid API key.`. Both routes
   now use `authenticate()` like every generated entity route (mobile access token or API key); permission checks
   and the service API key path are unchanged.
+- **`audit_log` monthly partitions can be created by the restricted application role** (Issue #952). `audit_log_create_month_partition()`
+  is now `SECURITY DEFINER` with a pinned `search_path` and `EXECUTE` revoked from `PUBLIC`; `audit_log_app_role.sql` grants it to the
+  application role. Re-run `audit_log_append_only.sql` and `audit_log_app_role.sql` on existing databases. The docs now say the
+  consumer sets up the role's rights on other tables, and no longer claim every `neon_superuser` member can disable the trigger
+  (verified for the table owner only). See `docs/knowledge/audit-log-append-only.md`.
+
 ### Added
 - **Mobile: entities with an editable child collection** (Issue #939). An entity whose form has an editable one-to-many
   grid (for example `asn.lines`, `purchase_order.lines`) is no longer left on the "not available in the mobile app yet"
