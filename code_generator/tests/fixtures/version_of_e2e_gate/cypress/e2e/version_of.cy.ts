@@ -94,6 +94,26 @@ function approveDoc(versionId: string) {
   });
 }
 
+// TEMPORARY diagnostic, to be removed before merge: records every submit button
+// (with its ancestors) and the page HTML, so a failure seen only on CI can be
+// inspected from the uploaded artifact.
+function dumpSubmitButtons(tag: string) {
+  cy.screenshot(`diag/${tag}`, { capture: 'fullPage' });
+  cy.document().then((doc) => {
+    const buttons = [...doc.querySelectorAll('button[type="submit"]')].map((b) => {
+      const ancestors: string[] = [];
+      for (let el: Element | null = b; el && ancestors.length < 15; el = el.parentElement) {
+        const role = el.getAttribute('role');
+        const cls = typeof el.className === 'string' && el.className ? `.${el.className.split(/\s+/).slice(0, 3).join('.')}` : '';
+        ancestors.push(`${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}${role ? `[role=${role}]` : ''}${cls}`);
+      }
+      return { html: b.outerHTML, visible: (b as HTMLElement).offsetParent !== null, ancestors };
+    });
+    cy.writeFile(`cypress/screenshots/diag/${tag}-buttons.json`, { url: doc.location.href, count: buttons.length, buttons });
+    cy.writeFile(`cypress/screenshots/diag/${tag}-page.html`, doc.documentElement.outerHTML);
+  });
+}
+
 describe('x-version-of (generated runtime behaviour)', () => {
   beforeEach(() => {
     cy.task('db:reset');
@@ -297,12 +317,14 @@ describe('x-version-of (generated runtime behaviour)', () => {
           // nothing is written by opening the screen
           cy.task<State>('db:voState', itemId).then((s) => expect(s.versions).to.have.length(1));
           // a unique, required child column is left for the user to fill in
+          dumpSubmitButtons('before-first-save');
           cy.get('button[type="submit"]').click();
           cy.task<State>('db:voState', itemId).then((s) => expect(s.versions, 'blocked until the codes are given').to.have.length(1));
           ['new-code-a', 'new-code-b'].forEach((code, i) => {
             cy.get(`[role="row"][data-rowindex="${i}"] [data-field="line_code"]`).dblclick();
             cy.focused().type(`${code}{enter}`);
           });
+          dumpSubmitButtons('before-second-save');
           cy.get('button[type="submit"]').click();
           cy.location('pathname').should('eq', '/vo_item_version');
           cy.task<State>('db:voState', itemId).then((s) => {

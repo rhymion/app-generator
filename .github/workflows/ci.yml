@@ -458,6 +458,18 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - run: npm run test:version-of-e2e-gate
+        # TEMPORARY diagnostic, to be removed before merge: keep the build copy so
+        # its Cypress screenshots and DOM dumps can be uploaded below.
+        env:
+          GATE_KEEP_BUILD_DIR: '1'
+      - name: Upload version-of gate diagnostics (temporary)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: version-of-e2e-gate-diagnostics
+          path: .generated-version-of-e2e-gate/cypress/screenshots
+          retention-days: 7
+          if-no-files-found: warn
 
   pytest:
     name: Python Generator Tests
