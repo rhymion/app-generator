@@ -6,6 +6,8 @@ navigation is built from the **same source as the desktop sidebar** — `x-nav` 
 further mobile-specific key. `mobile/` is generated output: it is git-ignored, except for the hand-written
 Playwright files in `mobile/e2e/`, `mobile/playwright.config.ts` and `mobile/scripts/`.
 
+To build an installable Android `.apk`, see [mobile-executable.md](mobile-executable.md).
+
 ## Turning generation on
 
 The Expo app is **off by default**. Set `x-generator.mobile.enabled: true` in the schema to generate it:
