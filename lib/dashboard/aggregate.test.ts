@@ -38,6 +38,7 @@ vi.mock('./catalog', () => {
   ];
   const entity = { name: 'ticket', label: 'Ticket', groupable_fields: fields };
   return {
+    DASHBOARDABLE_ENTITIES: [entity],
     findDashboardEntity: (n: string) => (n === 'ticket' ? entity : undefined),
     findDashboardField: (n: string, f: string) => (n === 'ticket' ? fields.find((x) => x.name === f) : undefined),
   };
@@ -80,11 +81,19 @@ const entryPoints = [
   {
     name: 'Server Action',
     actor: 'session-user',
-    call: (...args: Parameters<typeof aggregateForWidget>) => aggregateForWidget(...args),
+    // The action reports a refused read as a typed problem (not a thrown error); unwrap it so the shared
+    // cases below read the same on both entry points.
+    call: async (...args: Parameters<typeof aggregateForWidget>) => {
+      const result = await aggregateForWidget(...args);
+      if (!result.ok) throw new Error(`${result.problem.code}:${result.problem.params.entity}`);
+      return result.output;
+    },
+    denied: /noPermission:ticket/,
   },
   {
     name: 'REST core',
     actor: 'api-user',
+    denied: /Access denied: ticket\.read/,
     call: (...args: Parameters<typeof aggregateForWidget>) => aggregateForWidgetCore('api-user', ...args),
   },
 ];
@@ -99,10 +108,10 @@ beforeEach(() => {
   m.userFindMany.mockResolvedValue([]);
 });
 
-describe.each(entryPoints)('dashboard aggregate via $name', ({ actor, call }) => {
+describe.each(entryPoints)('dashboard aggregate via $name', ({ actor, call, denied }) => {
   it('refuses a role without read permission on the entity', async () => {
     m.getModelPermissions.mockResolvedValue(perms({}));
-    await expect(call('ticket', 'status')).rejects.toThrow(/Access denied: ticket\.read/);
+    await expect(call('ticket', 'status')).rejects.toThrow(denied);
     expect(m.getModelPermissions).toHaveBeenCalledWith('ticket', actor);
     expect(m.ticketGroupBy).not.toHaveBeenCalled();
   });
