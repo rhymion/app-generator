@@ -48,7 +48,7 @@ Run in this order:
 14b. `npm run test:list-child-e2e-gate` — builds and RUNS a fixture app (default schema + the dedicated fixture schema) and runs its Cypress specs: a child embedded with `x-outputType: list` shown on the parent's screens, and association add / remove from the parent screen (see below)
 14c. `npm run test:comment-rest-e2e-gate` — builds and RUNS a fixture app (default schema + a commentable entity scoped by organization) and runs its Cypress specs: the REST routes for adding, editing and deleting a comment, the @-mention user search, and the attachments route for an `attachable` bridge owner (see below)
 14d. `npm run test:scheduled-task-e2e-gate` — builds and RUNS a fixture app (default schema + three scheduled tasks) and runs its Cypress API specs: the scheduled-task admin REST routes `/api/scheduled-task-runs` (see below)
-14e. `npm run test:version-of-e2e-gate` — builds and RUNS a fixture app (default schema + an `x-version-of` identity and version entity) and runs its Cypress API specs: version number at approval, one open draft per identity, `current_version_id`, deletion of settled non-approved drafts (see below)
+14e. `npm run test:version-of-e2e-gate` — builds and RUNS a fixture app (default schema + an `x-version-of` identity and version entity) and runs its Cypress API specs: version number at approval, one open draft per identity, `current_version_id`, deletion of settled non-approved drafts, the new version screen, the identity tombstone (see below)
 15. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
 16. `npm run check:generated`  — generated code matches templates/schema
 17. `npm run test:e2e:cy:api`  — API Cypress specs only
@@ -432,8 +432,12 @@ runs only that fixture's Cypress API specs, with its own docker compose project,
 ports and `AUTH_SECRET`. The default schema declares no `x-version-of` entity, so
 step 15 never generates `lib/<version>/version_of.ts`; the specs cover the number
 assigned at approval, the (identity, number) uniqueness, at most one open draft
-per identity, the identity's `current_version_id`, and deletion of a terminally
-rejected or withdrawn draft with its child rows. The specs are permanent. CI runs
+per identity, the identity's `current_version_id`, deletion of a terminally
+rejected or withdrawn draft with its child rows, the new version screen (opens
+prefilled, writes nothing until saved, then saves an unsubmitted draft; carried
+child rows and a one-to-one holder), and the identity tombstone (delete refused
+after an approved version, new draft refused for an invalidated identity). The
+specs are permanent. CI runs
 it as `version-of-e2e-gate-fixture`, skipped for a docs-only diff exactly like
 `e2e-tests`; locally it always runs.
 
