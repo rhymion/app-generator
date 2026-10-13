@@ -70,6 +70,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `resetTestDatabase()` empties both tables with `TRUNCATE`. Consumers add the SQL to their own migrations, create the
   restricted application role and the write-once bucket; see `docs/knowledge/audit-log-append-only.md`.
 ### Changed
+- **List sort / filter panel no longer offers internal bridge foreign keys** (Issue #967). `Approvable Id`, `Attachable Id`,
+  `Commentable Id` and the like are dropped from the Web panel and from the Expo list's sort and filter keys, using the
+  generator's existing internal-bridge detection (no new schema key). The REST list still accepts them as sort / filter
+  parameters. See `docs/knowledge/list-search-panel.md`.
 - **Dashboard REST: `group_by_bucket` is the enum string literal** (Issue #912). `POST /api/dashboard/aggregate` now takes
   `day`, `week`, `month`, `quarter` or `year`, like every other native enum in the REST API, and the integer form `0`-`4` is
   removed. An unknown value returns `400` naming the allowed values instead of being ignored (which returned an unbucketed
