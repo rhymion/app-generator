@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticate, requireApiPermission, handleApiError } from '@/lib/api-auth';
 import { aggregateForWidgetCore } from '@/lib/dashboard/aggregate-core';
+import { WidgetProblemError } from '@/lib/dashboard/widget-problem';
 import type { AggregateFilter, FilterCondition } from '@/lib/dashboard/aggregate-core';
 import { resolveBucketGranularity } from '@/lib/dashboard/time-bucket';
 
@@ -51,6 +52,11 @@ export async function POST(request: NextRequest) {
     );
     return NextResponse.json(result);
   } catch (error) {
+    // A request the data source cannot answer: the typed problem names the setting, its params and the fix.
+    if (error instanceof WidgetProblemError) {
+      const { code, setting, params } = error.problem;
+      return NextResponse.json({ error: error.message, code, setting, params }, { status: 400 });
+    }
     return handleApiError(error);
   }
 }

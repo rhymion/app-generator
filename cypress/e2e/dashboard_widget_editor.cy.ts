@@ -80,4 +80,16 @@ describe('Dashboard widget editor', () => {
       });
     });
   });
+
+  // The widget is told why it cannot be drawn through the Server Action's return value, so the translated message
+  // reaches the browser under `next build && next start` as well (a thrown error would be replaced by a generic one).
+  it('tells the viewer why a widget cannot be drawn, in the page language', () => {
+    createDashboardWithWidget('removed_entity').then((id) => {
+      cy.visit(`/en/dashboard/view/${id}`);
+      cy.contains('No entity is enabled for dashboards, so there is nothing to chart').should('be.visible');
+      cy.contains('Minified React error').should('not.exist');
+      cy.visit(`/ja/dashboard/view/${id}`);
+      cy.contains('ダッシュボードに有効なエンティティがないため、表示できるデータがありません').should('be.visible');
+    });
+  });
 });

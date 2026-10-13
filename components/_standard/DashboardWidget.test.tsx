@@ -8,6 +8,12 @@ vi.mock('next-intl', () => ({
   useTranslations: (ns: string) => (key: string) => `${ns}:${key}`,
 }));
 
+// The generated catalog is absent on a clean checkout; the problem messages only need its labels.
+vi.mock('@/components/dashboard/catalog-source', () => ({
+  DASHBOARDABLE_ENTITIES: [],
+  findDashboardEntity: () => undefined,
+}));
+
 vi.mock('@/lib/dashboard/aggregate', () => ({
   aggregateForWidget: vi.fn(),
 }));
@@ -42,22 +48,22 @@ describe('DashboardWidget', () => {
   });
 
   it('renders widget name in card header', async () => {
-    mockAggregate.mockResolvedValue({ kind: 'single', data: [] });
+    mockAggregate.mockResolvedValue({ ok: true, output: { kind: 'single', data: [] } });
     render(<DashboardWidget widget={widget} />);
     expect(screen.getByText('Status Chart')).toBeInTheDocument();
   });
 
   it('renders entity/group subheader', async () => {
-    mockAggregate.mockResolvedValue({ kind: 'single', data: [] });
+    mockAggregate.mockResolvedValue({ ok: true, output: { kind: 'single', data: [] } });
     render(<DashboardWidget widget={widget} />);
     expect(screen.getByText('task grouped by status')).toBeInTheDocument();
   });
 
   it('renders chart after data loads', async () => {
-    mockAggregate.mockResolvedValue({ kind: 'single', data: [
+    mockAggregate.mockResolvedValue({ ok: true, output: { kind: 'single', data: [
       { label: 'Open', count: 5 },
       { label: 'Closed', count: 3 },
-    ] });
+    ] } });
     render(<DashboardWidget widget={widget} />);
     await waitFor(() => {
       expect(screen.getByTestId('dashboard-chart')).toBeInTheDocument();
@@ -66,29 +72,60 @@ describe('DashboardWidget', () => {
   });
 
   it('renders with chart_type "pie"', async () => {
-    mockAggregate.mockResolvedValue({ kind: 'single', data: [{ label: 'A', count: 1 }] });
+    mockAggregate.mockResolvedValue({ ok: true, output: { kind: 'single', data: [{ label: 'A', count: 1 }] } });
     render(<DashboardWidget widget={{ ...widget, chart_type: 'pie' }} />);
     await waitFor(() => screen.getByTestId('dashboard-chart'));
     expect(screen.getByTestId('dashboard-chart')).toHaveAttribute('data-type', 'pie');
   });
 
   it('renders with chart_type "column"', async () => {
-    mockAggregate.mockResolvedValue({ kind: 'single', data: [{ label: 'A', count: 1 }] });
+    mockAggregate.mockResolvedValue({ ok: true, output: { kind: 'single', data: [{ label: 'A', count: 1 }] } });
     render(<DashboardWidget widget={{ ...widget, chart_type: 'column' }} />);
     await waitFor(() => screen.getByTestId('dashboard-chart'));
     expect(screen.getByTestId('dashboard-chart')).toHaveAttribute('data-type', 'column');
   });
 
-  it('shows error message when aggregateForWidget rejects', async () => {
+  it('shows a generic translated message when the load fails unexpectedly', async () => {
     mockAggregate.mockRejectedValue(new Error('Server error'));
     render(<DashboardWidget widget={widget} />);
     await waitFor(() => {
-      expect(screen.getByText('Server error')).toBeInTheDocument();
+      expect(screen.getByText('DashboardWidgetProblem:loadFailed')).toBeInTheDocument();
     });
+    expect(screen.queryByText('Server error')).not.toBeInTheDocument();
+  });
+
+  it.each(['dataSourceUnavailable', 'noPermission', 'unknownField', 'bucketNeedsDatetime', 'invalidFilterValue'] as const)(
+    'shows the translated message for the %s problem the aggregate returns',
+    async (code) => {
+      mockAggregate.mockResolvedValue({ ok: false, problem: { code, setting: 'group_by_field', params: { entity: 'task', field: 'status' } } });
+      render(<DashboardWidget widget={widget} />);
+      expect(await screen.findByText(`DashboardWidgetProblem:${code}`)).toBeInTheDocument();
+      expect(screen.queryByTestId('dashboard-chart')).not.toBeInTheDocument();
+    },
+  );
+
+  it('explains a stack mode without a series field without asking the server', () => {
+    render(<DashboardWidget widget={{ ...widget, chart_type: 'column', stack_mode: 'stacked' }} />);
+    expect(screen.getByText('DashboardWidgetProblem:stackNeedsSeries')).toBeInTheDocument();
+    expect(mockAggregate).not.toHaveBeenCalled();
+  });
+
+  it('explains a line chart without a time bucket without asking the server', () => {
+    render(<DashboardWidget widget={{ ...widget, chart_type: 'line' }} />);
+    expect(screen.getByText('DashboardWidgetProblem:lineNeedsBucket')).toBeInTheDocument();
+    expect(mockAggregate).not.toHaveBeenCalled();
+  });
+
+  it('says that nothing matches, as a message and not as an error', async () => {
+    mockAggregate.mockResolvedValue({ ok: true, output: { kind: 'single', data: [] } });
+    render(<DashboardWidget widget={widget} />);
+    const message = await screen.findByText('DashboardWidgetProblem:noMatchingData');
+    expect(message).not.toHaveClass('MuiTypography-colorError');
+    expect(screen.queryByTestId('dashboard-chart')).not.toBeInTheDocument();
   });
 
   it('passes filter to aggregateForWidget when filter_field and filter_value provided', async () => {
-    mockAggregate.mockResolvedValue({ kind: 'single', data: [] });
+    mockAggregate.mockResolvedValue({ ok: true, output: { kind: 'single', data: [] } });
     const filteredWidget = { ...widget, filter_field: 'priority', filter_value: 'high' };
     render(<DashboardWidget widget={filteredWidget} />);
     await waitFor(() => {
@@ -105,7 +142,7 @@ describe('DashboardWidget', () => {
   });
 
   it('passes null filter when filter_field is absent', async () => {
-    mockAggregate.mockResolvedValue({ kind: 'single', data: [] });
+    mockAggregate.mockResolvedValue({ ok: true, output: { kind: 'single', data: [] } });
     render(<DashboardWidget widget={widget} />);
     await waitFor(() => {
       expect(mockAggregate).toHaveBeenCalledWith('task', 'status', null, undefined, undefined, undefined, undefined);
@@ -113,7 +150,7 @@ describe('DashboardWidget', () => {
   });
 
   it('passes the stored time zone to the aggregation and names a non-UTC zone in the subheader', async () => {
-    mockAggregate.mockResolvedValue({ kind: 'single', data: [], timezone: 'asia_tokyo' });
+    mockAggregate.mockResolvedValue({ ok: true, output: { kind: 'single', data: [], timezone: 'asia_tokyo' } });
     render(
       <DashboardWidget
         widget={{ ...widget, group_by_field: 'created_at', chart_type: 'line', group_by_bucket: 'day', timezone: 'asia_tokyo' }}
@@ -124,7 +161,7 @@ describe('DashboardWidget', () => {
   });
 
   it('shows no zone for a UTC widget', async () => {
-    mockAggregate.mockResolvedValue({ kind: 'single', data: [] });
+    mockAggregate.mockResolvedValue({ ok: true, output: { kind: 'single', data: [] } });
     render(<DashboardWidget widget={{ ...widget, timezone: 'utc' }} />);
     await waitFor(() => expect(mockAggregate).toHaveBeenCalled());
     expect(screen.getByText('task grouped by status')).toBeInTheDocument();

@@ -12,6 +12,8 @@ import Tooltip from '@mui/material/Tooltip';
 import DownloadIcon from '@mui/icons-material/Download';
 import DashboardChart, { ChartDatum, ChartType, StackMode } from './DashboardChart';
 import { aggregateForWidget, AggregateOutput, FilterCondition, BucketGranularity } from '@/lib/dashboard/aggregate';
+import { findChartProblems, type WidgetProblem } from '@/lib/dashboard/widget-problem';
+import { useProblemMessage } from '@/components/dashboard/widget-problem-message';
 
 export type { FilterCondition };
 
@@ -49,19 +51,6 @@ function normalizeBucketGranularity(raw: BucketGranularity | null | undefined): 
   return raw ?? undefined;
 }
 
-// Validation: config consistency checks.
-function validateConfig(config: WidgetConfig): string | null {
-  const chartType = normalizeChartType(config.chart_type);
-  const stackMode = normalizeStackMode(config.stack_mode);
-  if (stackMode != null && !config.series_field) {
-    return `stack_mode '${stackMode}' requires series_field to be set`;
-  }
-  if (chartType === 'line' && config.group_by_bucket == null) {
-    return `chart_type 'line' requires group_by_bucket to be set`;
-  }
-  return null;
-}
-
 // Download filtered+grouped data as a UTF-8 BOM CSV (Excel-compatible).
 function exportToCSV(output: AggregateOutput, widgetName: string): void {
   let csvContent: string;
@@ -94,17 +83,20 @@ function exportToCSV(output: AggregateOutput, widgetName: string): void {
 
 const EMPTY_OUTPUT: AggregateOutput = { kind: 'single', data: [] };
 
-type State = { output: AggregateOutput; error: string | null; loading: boolean };
+// `problem` is why the chart cannot be drawn (a setting to fix); `failed` is an unexpected load failure.
+type State = { output: AggregateOutput; problem: WidgetProblem | null; failed: boolean; loading: boolean };
 type Action =
   | { type: 'start' }
   | { type: 'success'; output: AggregateOutput }
-  | { type: 'error'; message: string };
+  | { type: 'problem'; problem: WidgetProblem }
+  | { type: 'failed' };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
-    case 'start': return { output: state.output, error: null, loading: true };
-    case 'success': return { output: action.output, error: null, loading: false };
-    case 'error': return { output: EMPTY_OUTPUT, error: action.message, loading: false };
+    case 'start': return { output: state.output, problem: null, failed: false, loading: true };
+    case 'success': return { output: action.output, problem: null, failed: false, loading: false };
+    case 'problem': return { output: EMPTY_OUTPUT, problem: action.problem, failed: false, loading: false };
+    case 'failed': return { output: EMPTY_OUTPUT, problem: null, failed: true, loading: false };
   }
 }
 
@@ -115,9 +107,13 @@ function conditionsKey(conditions: FilterCondition[] | null | undefined): string
 
 export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
   const tz = useTranslations('Timezone');
-  const [{ output, error, loading }, dispatch] = useReducer(reducer, { output: EMPTY_OUTPUT, error: null, loading: true });
+  const tp = useTranslations('DashboardWidgetProblem');
+  const problemMessage = useProblemMessage();
+  const [{ output, problem, failed, loading }, dispatch] = useReducer(reducer, { output: EMPTY_OUTPUT, problem: null, failed: false, loading: true });
 
-  const validationError = validateConfig(widget);
+  // Settings that contradict each other are known without asking the server.
+  const [configProblem] = findChartProblems(widget);
+  const validationError = configProblem ?? null;
   const activeConditions = widget.conditions && widget.conditions.length > 0 ? widget.conditions : null;
   const condKey = conditionsKey(activeConditions);
 
@@ -144,10 +140,11 @@ export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
       groupByBucket,
       widget.timezone ?? undefined,
     )
-      .then((result) => { if (!cancelled) dispatch({ type: 'success', output: result }); })
-      .catch((e: unknown) => {
-        if (!cancelled) dispatch({ type: 'error', message: e instanceof Error ? e.message : 'Failed to load' });
-      });
+      .then((result) => {
+        if (cancelled) return;
+        dispatch(result.ok ? { type: 'success', output: result.output } : { type: 'problem', problem: result.problem });
+      })
+      .catch(() => { if (!cancelled) dispatch({ type: 'failed' }); });
     return () => { cancelled = true; };
   }, [widget.entity_name, widget.group_by_field, widget.filter_field, widget.filter_value, widget.stack_mode, widget.series_field, widget.group_by_bucket, widget.timezone, validationError, condKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -176,7 +173,7 @@ export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
   }
 
   const hasData =
-    !loading && !error && !validationError &&
+    !loading && !problem && !failed && !validationError &&
     (output.kind === 'single' ? output.data.length > 0 : output.categories.length > 0);
 
   return (
@@ -184,7 +181,7 @@ export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
       <CardHeader
         title={widget.name}
         // A non-UTC zone is named in the subheader so the buckets are never ambiguous.
-        subheader={`${widget.entity_name} grouped by ${widget.group_by_field}${!loading && !error && output.timezone ? ` (${tz(output.timezone)})` : ''}`}
+        subheader={`${widget.entity_name} grouped by ${widget.group_by_field}${!loading && !problem && !failed && output.timezone ? ` (${tz(output.timezone)})` : ''}`}
         titleTypographyProps={{ variant: 'subtitle1' }}
         subheaderTypographyProps={{ variant: 'caption' }}
         action={
@@ -199,11 +196,16 @@ export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
       />
       <CardContent>
         {validationError ? (
-          <Typography color="error" variant="caption">{validationError}</Typography>
+          <Typography color="error" variant="caption">{problemMessage(validationError)}</Typography>
         ) : loading ? (
           <Skeleton variant="rectangular" height={240} />
-        ) : error ? (
-          <Typography color="error" variant="caption">{error}</Typography>
+        ) : problem ? (
+          <Typography color="error" variant="caption">{problemMessage(problem)}</Typography>
+        ) : failed ? (
+          <Typography color="error" variant="caption">{tp('loadFailed')}</Typography>
+        ) : !hasData ? (
+          // Nothing matches: an answer, not an error.
+          <Typography color="text.secondary" variant="caption">{tp('noMatchingData')}</Typography>
         ) : (
           renderChart()
         )}
