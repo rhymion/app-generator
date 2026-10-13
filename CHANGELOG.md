@@ -65,6 +65,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   the identity's `current_version_id`, and deletion of a terminally rejected or withdrawn draft with its owned child rows.
   The Prisma columns are declared by the app and checked at generation time. See `docs/knowledge/schema-yaml-configuration.md`
   section 7.8.
+- **`x-version-of`: gate and CI cover the whole feature** (Refs #946). The `version-of-e2e-gate` fixture gate (local step 14e and the
+  `version-of-e2e-gate-fixture` CI job) now documents and runs the number assignment, the one-open-draft rule, the prefilled new
+  version screen and the identity tombstone; README.md / README_ja.md list the key. No generated output changes.
 - **`x-version-of`: new version screen** (Refs #946). `/<version>/new?new_version_of=<identity id>` opens the version
   entity's create form filled with the current version's values, including child rows that have no screens of their own;
   nothing is saved until the user saves it. Unique columns (including required ones on child rows) are left for the user,

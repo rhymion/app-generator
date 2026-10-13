@@ -1763,6 +1763,11 @@ exactly one structural FK, and any missing Prisma column listed above.
 
 The key is opt-in; a schema without it generates the same output as before.
 
+Verification: pytest `code_generator/tests/test_x_version_of.py` covers validation, context building and registration;
+`npm run test:version-of-e2e-gate` (CI job `version-of-e2e-gate-fixture`) generates and runs a fixture app with an
+identity and a version entity, because the default schema declares no `x-version-of`. The default schema's generated
+output is unchanged (`npm run check:generated`).
+
 ---
 
 ## 8. `x-outputType` — Rendering Mode for Children and Related Entities
