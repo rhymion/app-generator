@@ -239,6 +239,14 @@ a consumer writes that migration when it deploys (the same cadence as any
 other schema change), not on every generator bump. Test databases pick the
 table up through `db:push`. A consumer that declares no task gets no table.
 
+This holds for every model the generator injects, not only models written in the consumer's schema: `scheduled_task_run`
+and `ScheduledTaskRunStatus` appear in `prisma/schema.prisma` without a line in the consumer's schema file. Because
+`db:push` creates them, a test environment hides a missing migration; a deployment that runs `migrate deploy` does not,
+and every scheduled task then fails with `The table public.scheduled_task_run does not exist in the current database`.
+Before the first deployment of a consumer that declares a task, confirm that its migrations create the table and the enum,
+for example by applying them to an empty database and running `prisma migrate diff --from-migrations prisma/migrations
+--to-schema-datamodel prisma/schema.prisma --shadow-database-url <scratch database>` (empty output means no drift).
+
 ## Admin page: run status, why a task did not run, and recovery
 
 When the schema declares a scheduled task, `generate-code` also writes an admin

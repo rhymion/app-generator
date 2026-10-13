@@ -5,6 +5,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Audit log: steps for switching the application to the restricted database role** are listed in
+  `docs/knowledge/audit-log-append-only.md` (password, hand-assembled connection strings, one role per Neon branch,
+  verification), and `scripts/vercel-env.sh` reminds that its `DATABASE_URL` injection is the owner's pooled URL. The
+  scheduled-task documentation states that a consumer writes the migration for generator-injected models such as
+  `scheduled_task_run`.
 - **Dashboard widget editor: the data source is chosen from a list** (Issue #905, part of #904). The dashboard edit form no
   longer shows widgets as a grid of free-text cells; each widget is edited in a card, and `entity_name` is a dropdown of the
   `x-display.dashboard` entities the user can read, with translated labels. Stored values do not change, so existing widgets
