@@ -5,6 +5,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Dashboard guide, and corrected dashboard docs** (Issue #909, part of #904). `docs/knowledge/dashboard-guide.md` explains
+  how a schema author opts an entity in and which fields become groupable, what each widget setting does and which
+  combinations are valid, what each problem message means, how read permission and row scope apply, and the
+  `POST /api/dashboard/aggregate` request, response and errors. README, README_ja and the schema reference now describe the
+  one schema-wide aggregate endpoint (not a per-entity one), CSV export only (not Excel), and the full groupable-field list
+  including number and date/time fields and the always-added creator, updater and timestamp fields. Documentation only.
 - **Dashboard widgets say why they cannot be drawn** (Issue #908, part of #904). A widget that cannot render now names
   the wrong setting, why, and how to fix it, in English or Japanese, instead of showing a raw internal message or
   "Failed to load". Distinct messages cover: no data source in the schema, a data source that is not available, no read
@@ -15,7 +21,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   params }`. Saving a dashboard now rejects a widget that cannot be drawn with a field-level error (widgets saved earlier and
   left unchanged are not re-judged), and the editor shows the same messages while editing. For this, owned child rows are now
   passed to `validateCustomRules` as `data.<property_name>`, like connect-style children's ids; no existing key changes. The
-  generated-once `lib/dashboard/service_validation_custom.ts` of an existing app needs the call added by hand. No new schema
+  call lives in the tracked `lib/dashboard/service_validation_custom.ts`; only an app that overrides that file from `prj/` needs
+  the call added by hand. No new schema
   key. See `docs/knowledge/schema-yaml-configuration.md`.
 - **`scripts/check-migrations-match-schema.sh`: checks that the migrations build the schema.** On an empty local scratch
   database it runs `prisma migrate deploy` and then `prisma migrate diff` against `prisma/schema.prisma`, and fails with the

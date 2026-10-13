@@ -2034,8 +2034,10 @@ generic one. `POST /api/dashboard/aggregate` answers a problem with HTTP 400 and
 On save, `lib/dashboard/service_validation_custom.ts` checks every widget with the same rules and rejects the save with a
 field-level `AppError` (field `widgets`, message key `DashboardWidgetProblem.<code>`, naming the widget by position and
 name). A widget saved earlier and left unchanged is not re-judged, so a dashboard whose data source was removed stays
-editable; with no entity in the catalog nothing is rejected. This file is generated once: a consumer that already has the
-no-op stub adds the same call (`validateWidgets(DASHBOARDABLE_ENTITIES, data.widgets, stored)`) by hand.
+editable; with no entity in the catalog nothing is rejected. This is a tracked file in the generator, so it reaches an app with the
+submodule pointer. Only an app that supplies its own `prj/lib/dashboard/service_validation_custom.ts` (copied over the
+generator's file by `scripts/prj_sync.py`) must contain the call
+`validateWidgets(DASHBOARDABLE_ENTITIES, data.widgets, stored)` itself.
 
 The generator scans every dashboardable entity for **groupable fields** and
 emits a static catalog at `lib/dashboard/catalog.ts`. A field is groupable
@@ -2044,11 +2046,16 @@ when it is one of:
 - a `many-to-one` FK (each FK value becomes a series, labelled via the
   relationship's `labelField` on the target);
 - a nativeEnum or legacy int-enum field (§4.3) (each enum label is a category);
-- a `boolean` (Yes / No).
+- a `boolean` (Yes / No);
+- an `integer` or `number` without `enum` (kind `number`);
+- a string with `format: date` or `format: date-time` (kind `datetime`).
 
-If an entity has no groupable field (e.g. only free-form strings/numbers),
-it is silently dropped from the catalog — there is nothing meaningful to
-chart. Add a categorical field, or remove the `dashboard: true` flag.
+Every dashboardable entity also gets `creator_id` and `updater_id` (FKs to `user`) and
+`created_at` / `updated_at` (date-time) appended, so the catalog is never empty for an
+opted-in entity and no entity is dropped for lack of a groupable field. `id` is not offered.
+The same list serves Group by, Series and Filter field.
+
+For how users build widgets and the endpoint contract, see [dashboard-guide.md](dashboard-guide.md).
 
 `x-display.dashboard` is independent of `table` and `chart`. Setting it
 does not affect whether the list or chart pages are generated.
