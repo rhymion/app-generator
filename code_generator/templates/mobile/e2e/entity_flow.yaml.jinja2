@@ -1,0 +1,73 @@
+# AUTO-GENERATED - DO NOT EDIT
+#
+# {{ title }}: the minimal native flow. Sign in, open the list from the footer tabs, check the list chrome,
+# open the first row when one exists (always required when E2E_REQUIRE_SEED_ROWS=1){% if create_steps is not none %}, create one record{% endif %}.
+appId: ${E2E_APP_ID}
+name: {{ name }}
+tags:
+  - generated
+---
+- runFlow: subflows/sign_in.yaml
+{% for tap in path %}
+- tapOn:
+    id: {{ tap }}
+{% endfor %}
+- extendedWaitUntil:
+    visible:
+      id: list-{{ name }}
+    timeout: 15000
+- assertVisible:
+    id: list-title
+- assertVisible:
+    id: list-page
+- assertNotVisible:
+    id: list-error
+- runFlow:
+    when:
+      true: ${E2E_REQUIRE_SEED_ROWS == '1'}
+    commands:
+      - assertVisible:
+          id: list-row-.*
+{% if can_view %}
+- runFlow:
+    when:
+      visible:
+        id: list-row-.*
+    commands:
+      - tapOn:
+          id: list-row-.*
+          index: 0
+      - extendedWaitUntil:
+          visible:
+            id: view-{{ name }}
+          timeout: 15000
+      - tapOn:
+          id: view-back
+      - assertVisible:
+          id: list-{{ name }}
+{% endif %}
+{% if create_steps is not none %}
+- tapOn:
+    id: list-new
+- extendedWaitUntil:
+    visible:
+      id: form-new-{{ name }}
+    timeout: 15000
+{% for step in create_steps %}
+- tapOn:
+    id: {{ step.id }}
+{% if step.action == 'type' %}
+- inputText: "{{ step.text }}"
+{% endif %}
+{% endfor %}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: form-save
+- tapOn:
+    id: form-save
+- extendedWaitUntil:
+    visible:
+      id: view-{{ name }}
+    timeout: 20000
+{% endif %}
