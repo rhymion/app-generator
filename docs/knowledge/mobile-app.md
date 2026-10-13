@@ -629,46 +629,81 @@ bearer token when an `Authorization` header is present and the session cookie ot
 
 ## Running and testing
 
-The Playwright suite drives the Expo **web** bundle in Chromium. It needs three processes, started
-explicitly on ports you choose: the Next.js API, `expo start --web`, and the same-origin proxy that joins
-them. Entity REST routes send no CORS headers, so a browser that loads the app from one port and the API
-from another is blocked; the proxy makes both one origin. Native iOS and Android builds are not subject
-to CORS.
+The Playwright suite drives the Expo **web** bundle in Chromium. It needs three processes: the Next.js API,
+the Expo web server and the same-origin proxy that joins them. Entity REST routes send no CORS headers, so a
+browser that loads the app from one port and the API from another is blocked; the proxy makes both one origin.
+Native iOS and Android builds are not subject to CORS.
 
-`expo` is a dependency of the generated `mobile/package.json`, not of the repository root, so the steps
-below work only after generation is turned on and `mobile/` has its own install:
+### The entry point
 
-1. Set `x-generator.mobile.enabled: true` in the schema (see "Turning generation on") and run `generate-code`.
-   With the flag off, `mobile/package.json` is not written and `npx expo` finds nothing to run.
-2. Check that `mobile/package.json` exists.
-3. Run `cd mobile && npm install`. `mobile/` is its own npm project; installing at the repository root
-   does not provide `expo`.
+`npm run test:e2e:mobile:pw` (from the repository root of the generator) runs
+`scripts/run_mobile_entity_playwright.sh` and is the entry point. The script builds a disposable copy of the
+working tree with its own docker compose project, three ports derived from the checkout's path and a throwaway
+`AUTH_SECRET`, starts the three processes, and runs the specs in three modes, one after another, each on a
+fresh stack (about 20 minutes in all). The exit status is non-zero if any mode failed, and every mode runs
+even when an earlier one failed. The schema differs per mode because the footer specs assume the default
+schema's tabs and the entity specs need the fixture entities:
 
-In a consumer repository the generator lives in the `app-generator/` submodule, so the directory is
-`app-generator/mobile/` and the commands run from `app-generator/`.
+| Mode | Schema of the copy | Specs | Tests |
+|------|--------------------|-------|-------|
+| `fixture` | default plus `code_generator/tests/fixtures/mobile_entity_e2e_gate/` | `entity-crud`, `relation-pickers`, `list-capabilities`, `inline-create-checkout`, `comments`, `approval-actions`, `split-action`, `reservation`, `attachments`, `child-rows`, `entity-select`, `bridge-attachments`, `custom-components` (13 specs) | 103 |
+| `default` | default, unmodified | `audit-log`, `auth`, `drill-down`, `footer-nav` (4 specs) | 15 |
+| `scheduled` | default plus `code_generator/tests/fixtures/scheduled_task_e2e_gate/`, the test user holds the `ScheduledTaskRunner` role | `scheduled-task` (1 spec) | 6 |
+
+```bash
+npm run test:e2e:mobile:pw                                    # all three modes
+MODE=fixture bash scripts/run_mobile_entity_playwright.sh     # one mode (fixture, default or scheduled)
+MODE=fixture PW_ARGS='entity-crud.spec.ts' bash scripts/run_mobile_entity_playwright.sh   # one mode, narrowed
+```
+
+The environment variables the script honours are `MODE`, `PW_ARGS` (one mode only; refused with the default
+`all`), `PORT_SLOT` (0-899, picks another port set) and `GATE_KEEP_BUILD_DIR=1` (keeps the copy). It ignores
+`EXPO_WEB_URL`, `TEST_EMAIL` and `TEST_PASSWORD` from the caller: it never runs against an already running
+stack, it starts its own and signs in as the seeded administrator (`admin@example.com` / `password123`). The
+checkout's `node_modules` must be a real directory (a plain `npm ci`); the script refuses a symlinked one,
+because `next build` (Turbopack) cannot resolve it in the copy.
+
+The specs are bound to this repository's own default and fixture schemas. They are not run in app-template or
+another consumer repository: its schema has different footer tabs and none of the `mobile_*` fixture entities.
+In CI the job `mobile-playwright` runs the same command when the diff touches a path the suite exercises, and
+the update-generator gate has the same path-triggered step (`scripts/mobile_pw_gate_applies.sh` holds the path
+list).
+
+### Running specs against a stack you prepared
+
+`npm run test:e2e:mobile:pw:raw` is the bare Playwright invocation. It refuses to start unless
+`MOBILE_PW_PRECONDITIONS_READY=1` is set (the script sets it), because almost every spec fails with a
+timeout against a stack that does not match. The stack must provide:
+
+1. The schema the specs need: a spec of the `fixture` mode needs the `mobile_*` fixture entities merged in,
+   their SQL seed rows and the write-once native component stubs of `mobile_gadget` (see the script); the
+   `default` specs assume the default schema's footer tabs; `scheduled-task.spec.ts` needs the scheduled-task
+   fixture and the `ScheduledTaskRunner` role. A mismatch is a precondition failure, not a generator defect.
+   The fixture and scheduled modes cannot be reproduced by hand in practice; use the script.
+2. `x-generator.mobile.enabled: true` in the schema and `generate-code`, so that `mobile/package.json` exists
+   (with the flag off `npx expo` finds nothing to run), then `cd mobile && npm install`. `mobile/` is its own
+   npm project; installing at the repository root does not provide `expo`. In a consumer repository the
+   generator lives in the `app-generator/` submodule, so the directory is `app-generator/mobile/` and the
+   commands run from `app-generator/`.
+3. A seeded and fully granted administrator: `npm run db:seed-baseline` and `npm run db:grant-all-permissions`
+   (with `NODE_ENV=test`), and `TEST_EMAIL=admin@example.com TEST_PASSWORD=password123`. Without the seeded
+   user every spec fails in `login()`.
 
 ```bash
 cd mobile && npm install
-PROXY_PORT=8096 API_PORT=3012 WEB_PORT=8095 node scripts/same-origin-proxy.js
-EXPO_PUBLIC_API_BASE_URL=http://localhost:8096 npx expo start --web --port 8095
-EXPO_WEB_URL=http://localhost:8096 npm run test:e2e:mobile:pw   # from the repository root
+PROXY_PORT=8096 API_PORT=3012 WEB_PORT=8095 EXPO_PUBLIC_API_BASE_URL=http://localhost:8096 node scripts/serve-web-with-proxy.js
+# from the repository root, with the API running on port 3012:
+MOBILE_PW_PRECONDITIONS_READY=1 EXPO_WEB_URL=http://localhost:8096 \
+  TEST_EMAIL=admin@example.com TEST_PASSWORD=password123 npm run test:e2e:mobile:pw:raw -- footer-nav.spec.ts
 ```
 
-`scripts/run_mobile_entity_playwright.sh` does all of this in a disposable copy of the working tree with its
-own docker project and ports, and runs the specs in two modes (the footer specs assume the default schema's
-tabs, the entity specs need the fixture entities):
-
-```bash
-bash scripts/run_mobile_entity_playwright.sh               # fixture schema: entity-crud, relation-pickers, inline-create-checkout and comments specs
-MODE=default bash scripts/run_mobile_entity_playwright.sh  # default schema: the other specs
-MODE=scheduled bash scripts/run_mobile_entity_playwright.sh  # scheduled-task fixture, user holds the ScheduledTaskRunner role: scheduled-task.spec.ts
-```
+`serve-web-with-proxy.js` runs the Expo web server and the proxy as one process so the runner can stop both;
+`same-origin-proxy.js` is the proxy alone.
 
 The fixture mode merges `code_generator/tests/fixtures/mobile_entity_e2e_gate/` (`mobile_note` with full
 CRUD, `mobile_log` list-and-view only, `mobile_task` with a required foreign key, a many-to-many and a one-to-one
 selector to `mobile_group` / `mobile_tag` / `mobile_profile`, `mobile_org_item` with a foreign key to `organization`, `mobile_ticket` with an `x-create-inline` foreign key to `mobile_category`, `mobile_order` with `x-payment`, `mobile_request` with `x-approval`, `mobile_shipment` with `x-approval` and `x-splittable`, `mobile_thread` commentable and list-and-view only, `mobile_invoice` with a child collection) into the copy's schema, as `scripts/compose_child_datagrid_e2e_fixture.py`
-does for the other end-to-end fixtures, and signs in as the seeded administrator. `mobile/scripts/serve-web-with-proxy.js`
-runs the Expo web server and the proxy as one process so the runner can stop both.
+does for the other end-to-end fixtures, and signs in as the seeded administrator.
 
 - `mobile/e2e/entity-crud.spec.ts` covers list paging, create, edit, delete with confirmation, the shared
   validation (no request is sent for an invalid form), a server-side rejection, and every permission-hidden
@@ -743,8 +778,9 @@ runs the Expo web server and the proxy as one process so the runner can stop bot
 - `cypress/e2e/api/mobile_auth.cy.ts`, `mobile_nav.cy.ts` and `mobile_permissions.cy.ts` cover the REST routes.
 
 The suite runs the web bundle, not native rendering, so native-only behavior (secure storage prompts,
-the biometric lock, native icon fonts) is not exercised by it. `npm run test:e2e:mobile:pw` is an optional
-check and is not part of the mandatory gate.
+the biometric lock, native icon fonts) is not exercised by it. `npm run test:e2e:mobile:pw` is a path-triggered
+step of the update-generator gate (it applies when the change touches a path the suite exercises) and is not
+part of the unconditional steps.
 
 ## Not implemented yet
 

@@ -29,7 +29,7 @@ const path = require('path');
 const { chromium } = require(path.join(__dirname, '..', 'node_modules', 'playwright'));
 
 const BASE_URL = process.env.BASE_URL ?? process.env.EXPO_WEB_URL ?? 'http://localhost:8081';
-const TEST_EMAIL = process.env.TEST_EMAIL ?? 'test@example.com';
+const TEST_EMAIL = process.env.TEST_EMAIL ?? 'admin@example.com';
 const TEST_PASSWORD = process.env.TEST_PASSWORD ?? 'password123';
 const FLOW_TYPE = process.env.FLOW_TYPE ?? 'assert';
 const SCREENSHOT_PATH = process.env.SCREENSHOT_PATH ?? path.join(__dirname, 'real-browser-verify.png');

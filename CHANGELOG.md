@@ -11,6 +11,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   missed month is recovered, how entity-level tasks are declared and ordered, how to run once by hand and read the result, and
   a local dry run with a shifted clock. `docs/knowledge/audit-log-append-only.md` states what `verify` detects and does not.
   Documentation only.
+- **Mobile Playwright entry point, gate step and CI job** (Issue #985, part of #140). `npm run test:e2e:mobile:pw` now runs
+  `scripts/run_mobile_entity_playwright.sh`, which runs the fixture, default and scheduled modes in turn and fails if any mode
+  fails; the bare Playwright invocation is `test:e2e:mobile:pw:raw` and refuses to run unless `MOBILE_PW_PRECONDITIONS_READY=1`
+  is set. The mobile specs sign in as `admin@example.com` by default (the `db:seed-baseline` administrator), the script refuses a
+  symlinked `node_modules`, and `docs/knowledge/mobile-app.md` describes the three modes, the manual recipe and why app-template
+  does not run these specs. The update-generator gate has a path-triggered step for the suite
+  (`scripts/mobile_pw_gate_applies.sh` holds the path list) and CI has a path-filtered `mobile-playwright` job.
 - **Dashboard guide, and corrected dashboard docs** (Issue #909, part of #904). `docs/knowledge/dashboard-guide.md` explains
   how a schema author opts an entity in and which fields become groupable, what each widget setting does and which
   combinations are valid, what each problem message means, how read permission and row scope apply, and the
@@ -75,7 +82,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   bridge needs it, the file picker dependency is now added too. See `docs/knowledge/mobile-app.md`.
 - **`x-version-of`: identity + version entities with approval-backed history** (Issue #946). Declared on the version entity
   (an `x-approval` entity), it generates the version number assigned at approval, at most one open draft per identity,
-  the identity's `current_version_id`, and deletion of a terminally rejected or withdrawn draft with its owned child rows.
+  the identity's `current_version_id`, and a terminally rejected version kept as a closed record that does not block the next version.
   The Prisma columns are declared by the app and checked at generation time. See `docs/knowledge/schema-yaml-configuration.md`
   section 7.8.
 - **`x-version-of`: gate and CI cover the whole feature** (Refs #946). The `version-of-e2e-gate` fixture gate (local step 14e and the
@@ -132,6 +139,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   See `docs/knowledge/authentication.md`.
 ### Fixed
 - **Dashboard aggregate: read permission and row-level scope on both entry points** (Issue #910). The `aggregateForWidget` Server Action now requires the user's `read` permission on the entity, as `POST /api/dashboard/aggregate` already did, and both paths limit every query (single and two-field group-by, bucketed queries, FK label lookups) to the rows the user can list: organization isolation, `x-self-only`, `x-filter-values` and Creator/Assignee-only read. FK labels are resolved through the target entity's permission and scope, and an unreadable label shows as `(unknown)`. `aggregateForWidgetCore` takes the acting user's id as its first argument. See `docs/knowledge/schema-yaml-configuration.md` §10.
+- **`x-version-of`: a rejected version no longer blocks the next one, and the version number cannot be written** (Refs #946). A terminally
+  rejected version stays as a closed record and is not counted as an open draft; a version rejected without `terminal`, or
+  withdrawn, stays the open draft that is fixed and resubmitted. Neither is deleted any more. A number sent by a form or an API
+  client is dropped (create stores none, update keeps the stored value): an empty numeric field arrives as `0` and made the next
+  draft collide on `(identity, number)` with an earlier row holding `0`. See `docs/knowledge/schema-yaml-configuration.md`.
 - **`npm run test:flows` no longer destroys the working tree and runs serially.** `test/flows/cleanup.test.ts` ran
   `npm run cleanup:all` (`--prune-orphans`) in the working tree itself, which deleted the generated code
   (`lib/*/service.ts`, ...); it now runs on a disposable copy and asserts the working tree is unchanged.

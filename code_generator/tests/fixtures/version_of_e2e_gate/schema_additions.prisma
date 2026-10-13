@@ -73,3 +73,53 @@ model vo_item_version_line {
 
   @@index([vo_item_version_id])
 }
+
+enum VoDocVersionStatus {
+  draft
+  revise
+  pending
+  approved
+}
+
+model vo_doc {
+  id                 String           @id @default(cuid())
+  name               String           @unique
+  current_version_id String?          @unique
+  current_version    vo_doc_version?  @relation("VoDocCurrent", fields: [current_version_id], references: [id], onDelete: SetNull)
+  versions           vo_doc_version[] @relation("VoDocVersions")
+  created_at         DateTime         @default(now()) @db.Timestamptz(0)
+  updated_at         DateTime         @updatedAt @db.Timestamptz(0)
+  creator_id         String
+  creator            user             @relation("VoDocCreator", fields: [creator_id], references: [id])
+  updater_id         String
+  updater            user             @relation("VoDocUpdater", fields: [updater_id], references: [id])
+
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model vo_doc_version {
+  id            String             @id @default(cuid())
+  vo_doc_id     String
+  vo_doc        vo_doc             @relation("VoDocVersions", fields: [vo_doc_id], references: [id], onDelete: Cascade)
+  current_of    vo_doc?            @relation("VoDocCurrent")
+  title         String
+  version_no    Int?
+  status        VoDocVersionStatus @default(draft)
+  approvable_id String             @unique
+  approvable    approvable         @relation(fields: [approvable_id], references: [id], onDelete: Cascade)
+  attachable_id String             @unique
+  attachable    attachable         @relation(fields: [attachable_id], references: [id])
+  created_at    DateTime           @default(now()) @db.Timestamptz(0)
+  updated_at    DateTime           @updatedAt @db.Timestamptz(0)
+  creator_id    String
+  creator       user               @relation("VoDocVersionCreator", fields: [creator_id], references: [id])
+  updater_id    String
+  updater       user               @relation("VoDocVersionUpdater", fields: [updater_id], references: [id])
+
+  @@unique([vo_doc_id, version_no])
+  @@index([vo_doc_id])
+  @@index([title])
+  @@index([creator_id])
+  @@index([updater_id])
+}
