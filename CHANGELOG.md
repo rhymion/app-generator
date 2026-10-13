@@ -5,6 +5,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Audit log: steps for switching the application to the restricted database role** are listed in
+  `docs/knowledge/audit-log-append-only.md` (password, hand-assembled connection strings, one role per Neon branch,
+  verification), and `scripts/vercel-env.sh` reminds that its `DATABASE_URL` injection is the owner's pooled URL. The
+  scheduled-task documentation states that a consumer writes the migration for generator-injected models such as
+  `scheduled_task_run`.
 - **Dashboard widget editor: group-by and series fields are chosen from a list** (Issue #906, part of #904). `group_by_field`
   and `series_field` are dropdowns of the selected data source's fields, with translated labels and the field kind, instead of
   free text. Changing the data source clears the fields of the previous one. Options follow the chart: the time bucket only for

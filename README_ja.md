@@ -299,7 +299,7 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 
 ## 監査・コンプライアンス
 
-**監査ログ** — `audit_log` モデル上に構築された、スキーマ非依存の read-only ビューア（`app/[locale]/audit_log/page.tsx`）で、全生成エンティティの作成・更新・削除操作を横断表示します。`lib/audit_log/getters.ts` が FK JOIN でアクター（実行ユーザー）を解決し、`CardListPagination` でページネーションします。生JSONの `metadata` は admin 専用の詳細ページでのみ表示されます。`audit_log` モデルのカラム自体は2.0.0以前から存在しますが、JOIN先である `actor_user` リレーション（`onDelete: Restrict` の外部キー制約含む）は3.0の新規追加です — 詳細は [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md) を参照。 テーブルは追記専用（クライアントガード・行トリガー・権限を絞ったアプリ用ロール）で、改ざん検知用にダイジェストを連鎖させます — [docs/knowledge/audit-log-append-only.md](docs/knowledge/audit-log-append-only.md) を参照。
+**監査ログ** — `audit_log` モデル上に構築された、スキーマ非依存の read-only ビューア（`app/[locale]/audit_log/page.tsx`）で、全生成エンティティの作成・更新・削除操作を横断表示します。`lib/audit_log/getters.ts` が FK JOIN でアクター（実行ユーザー）を解決し、`CardListPagination` でページネーションします。生JSONの `metadata` は admin 専用の詳細ページでのみ表示されます。`audit_log` モデルのカラム自体は2.0.0以前から存在しますが、JOIN先である `actor_user` リレーション（`onDelete: Restrict` の外部キー制約含む）は3.0の新規追加です — 詳細は [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md) を参照。 テーブルは追記専用（クライアントガード・行トリガー・権限を絞ったアプリ用ロール）で、改ざん検知用にダイジェストを連鎖させます — [docs/knowledge/audit-log-append-only.md](docs/knowledge/audit-log-append-only.md) を参照（アプリケーションを制限付きデータベースロールへ切り替える手順を含む）。利用側の配備手順書は `docs/knowledge/audit-log-operations.md` に置く。
 
 **GDPR / データ保護**:
 - `x-pii` フィールド分類（`direct`/`sensitive`/`indirect`）が、消去（GDPR第17条・忘れられる権利）時に `anonymizeUser()` がスクラブするフィールドを決定します。このスクラブはトランザクション内で不可逆的に実行され、参照整合性を保つためユーザー行自体は削除せず、`user` モデルに `anonymized_at` を記録します。
