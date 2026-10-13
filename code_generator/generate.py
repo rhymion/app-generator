@@ -2702,13 +2702,12 @@ def generate(schema_path: str, output_dir: str) -> None:
         )
 
     # x-version-of: one lib/<version>/version_of.ts per version entity (number
-    # assignment, open-draft guard, draft delete), called from service.ts and
+    # assignment, open-draft guard), called from service.ts and
     # the approval dispatch modules below. Always regenerated, never a stub.
     for _vo in version_of_entities(schema):
-        _vo_children, _ = version_of_children(_vo['version'], schema)
         _write(
             out / 'lib' / _vo['version'] / 'version_of.ts',
-            _render(env, 'version_of.ts.jinja2', {**_vo, 'children': _vo_children}),
+            _render(env, 'version_of.ts.jinja2', _vo),
         )
         print(f"  Version helpers → lib/{_vo['version']}/version_of.ts")
         # New-version screen: the prefill the create page reads (no record is
@@ -2899,7 +2898,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     # them dead — same interface-conformance case as on_approved_dispatch.ts,
     # since dispatchOnRejected's 4-arg signature is a stable call-site
     # contract (cmd_529).
-    _rejected_body_needed = any(e['set_fields'] or e['emit_hook'] or (e['version_of'] and e['terminal']) for e in rejectable_entities)
+    _rejected_body_needed = any(e['set_fields'] or e['emit_hook'] for e in rejectable_entities)
     _rejected_hook_needed = any(e['emit_hook'] for e in rejectable_entities)
     _write(
         out / 'lib' / 'approval_request' / 'on_rejected_dispatch.ts',
@@ -2948,7 +2947,7 @@ def generate(schema_path: str, output_dir: str) -> None:
         })
     # Always emitted (mirrors on_rejected_dispatch.ts above) — actions.ts
     # imports this unconditionally, so it must exist even with zero entities.
-    _withdrawn_body_needed = any(e['set_fields'] or e['emit_hook'] or e['version_of'] for e in withdrawable_entities)
+    _withdrawn_body_needed = any(e['set_fields'] or e['emit_hook'] for e in withdrawable_entities)
     _write(
         out / 'lib' / 'approval_request' / 'on_withdrawn_dispatch.ts',
         _render(env, 'on_withdrawn_dispatch.ts.jinja2', {

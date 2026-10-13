@@ -828,3 +828,58 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - run: npm run test:filter-sort-gate
+
+  mobile-playwright:
+    name: Mobile Playwright (path-filtered)
+    # Runs `npm run test:e2e:mobile:pw` (scripts/run_mobile_entity_playwright.sh: the fixture, default and
+    # scheduled modes, each against its own disposable stack) when the diff touches a path the mobile suite
+    # exercises. The path list lives in scripts/mobile_pw_gate_applies.sh, which the local gate step in
+    # .claude/commands/update-generator.md also uses. It is independent of the other jobs: it does not
+    # need detect-changes, and nothing needs it. The decision is made inside the job (not with a top-level
+    # `paths:` filter) so the check shows as passed when the change is out of scope instead of being absent.
+    # About 20 minutes when it runs. The Playwright specs are bound to this repository's own default and
+    # fixture schemas, so they are not part of app-template's CI.
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Decide whether the mobile suite applies to this diff
+        id: scope
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          if [ -z "${BASE:-}" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            echo "No usable base commit - running the mobile suite (fail-closed)."
+            echo "applies=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "applies=$(bash scripts/mobile_pw_gate_applies.sh "$BASE")" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v7
+        if: steps.scope.outputs.applies == 'yes'
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+      - uses: actions/setup-python@v7
+        if: steps.scope.outputs.applies == 'yes'
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        if: steps.scope.outputs.applies == 'yes'
+        run: |
+          npm ci
+          pip install -r requirements.txt
+      - name: Install the Playwright browser (version pinned by the generated mobile/package.json)
+        if: steps.scope.outputs.applies == 'yes'
+        run: |
+          PW_VERSION="$(grep -o '"@playwright/test": "[^"]*"' code_generator/templates/mobile/package.json.jinja2 | sed 's/.*"\([~^]*[0-9][^"]*\)"$/\1/; s/^[~^]//')"
+          npx --yes "playwright@${PW_VERSION}" install --with-deps chromium
+      - name: npm run test:e2e:mobile:pw
+        if: steps.scope.outputs.applies == 'yes'
+        run: npm run test:e2e:mobile:pw

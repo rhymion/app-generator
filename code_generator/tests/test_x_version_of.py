@@ -142,20 +142,20 @@ def _ctx(**over):
     return {**version_of_for('product_version', _schema()), 'children': [], **over}
 
 
-def test_helper_module_renders_all_three_functions():
-    out = _render(_make_env(), 'version_of.ts.jinja2', _ctx(children=[{'model': 'coverage', 'fk': 'product_version_id'}]))
+def test_helper_module_renders_the_number_and_open_draft_helpers():
+    out = _render(_make_env(), 'version_of.ts.jinja2', _ctx())
     assert 'export async function assertSingleOpenDraft' in out
     assert '...(selfId ? { id: { not: selfId } } : {})' in out
+    # closed = approved, or terminally rejected per the approval records
     assert 'approved_at: null' in out
+    assert "approval_requests: { none: { status: 'terminal_rejected' } }" in out
     assert 'export async function assignVersionNumber' in out
     assert 'data: { current_version_id: versionId }' in out
-    assert 'export async function deleteVersionDraft' in out
-    assert 'tx.coverage.deleteMany({ where: { product_version_id: versionId } })' in out
-    # an approved version (it holds a number) is never deleted
-    assert 'row.version_no != null) return;' in out
+    # a rejected or withdrawn row is a record or an open draft, never deleted by a helper
+    assert 'deleteVersionDraft' not in out
 
 
-def test_dispatch_templates_call_the_helpers_only_for_version_entities():
+def test_dispatch_templates_never_delete_a_version_row():
     env, vo = _make_env(), version_of_for('product_version', _schema())
     base = {'snake_name': 'product_version', 'pascal_name': 'ProductVersion', 'set_fields': {},
             'emit_hook': False, 'exclusive_check': False, 'version_of': vo}
@@ -165,18 +165,16 @@ def test_dispatch_templates_call_the_helpers_only_for_version_entities():
                     {'approvable_entities': [{**base, 'version_of': None}]})
     assert 'AssignVersionNumber' not in plain
 
-    rej = {**base, 'terminal': True}
+    # terminal and non-terminal rejection, and withdrawal, leave the row to its set_fields
+    rej = {**base, 'terminal': True, 'set_fields': {'status': 'rejected'}}
     rejected = _render(env, 'on_rejected_dispatch.ts.jinja2', {
         'rejectable_entities': [rej], 'rejected_body_needed': True, 'rejected_hook_needed': False})
-    assert 'ProductVersionDeleteVersionDraft(tx, entity.id)' in rejected
-    soft = _render(env, 'on_rejected_dispatch.ts.jinja2', {
-        'rejectable_entities': [{**rej, 'terminal': False}], 'rejected_body_needed': False,
-        'rejected_hook_needed': False})
-    assert 'DeleteVersionDraft' not in soft  # a non-terminal rejection keeps the open draft
-
+    assert 'DeleteVersionDraft' not in rejected
+    assert "data: { status: 'rejected' }" in rejected
     withdrawn = _render(env, 'on_withdrawn_dispatch.ts.jinja2', {
-        'withdrawable_entities': [base], 'withdrawn_body_needed': True})
-    assert 'ProductVersionDeleteVersionDraft(tx, entity.id)' in withdrawn
+        'withdrawable_entities': [{**base, 'set_fields': {'status': 'draft'}}], 'withdrawn_body_needed': True})
+    assert 'DeleteVersionDraft' not in withdrawn
+    assert "data: { status: 'draft' }" in withdrawn
 
 
 PRISMA_COPY = PRISMA_OK.replace(

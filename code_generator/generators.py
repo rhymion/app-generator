@@ -3403,6 +3403,20 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         + f"    await tx.{model}.update({{ where: {{ id: created.id }}, data: {{ {_version_of['number']}: null }} }});"
         if _version_of and can_create else ''
     )
+    # x-version-of: the number is system-assigned at approval, so a value a form or
+    # an API client sends for it is dropped: create writes null (an empty numeric
+    # form field arrives as 0 and would collide on (identity, number) with any other
+    # row holding 0), update keeps the stored value.
+    version_of_number_param = ''
+    if _version_of and re.search(rf"\b{to_camel_case(_version_of['number'])}\??:", parent_params_with_types or ''):
+        version_of_number_param = to_camel_case(_version_of['number'])
+    version_of_pre_create_code = (
+        f"    {version_of_number_param} = null;" if version_of_number_param and can_create else ''
+    )
+    version_of_pre_update_code = (
+        f"    {version_of_number_param} = (_prevRow?.{_version_of['number']} ?? null) as number | null;"
+        if version_of_number_param and can_update else ''
+    )
     # x-version-of, identity side: an identity with an approved version cannot be
     # deleted (retire it by invalidation instead).
     _version_identity = version_of_identity_for(parent, schema) if schema else None
@@ -4050,6 +4064,8 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
         'org_id_client_writable':             org_id_client_writable,
         'approval_edge_trigger_create_code':  approval_edge_trigger_create_code,
         'version_of_create_code':             version_of_create_code,
+        'version_of_pre_create_code':         version_of_pre_create_code,
+        'version_of_pre_update_code':         version_of_pre_update_code,
         'version_of_delete_code':             version_of_delete_code,
         'approval_edge_trigger_update_code':  approval_edge_trigger_update_code,
         'submit_for_approval_action_code':    submit_for_approval_action_code,

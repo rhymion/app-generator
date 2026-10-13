@@ -3,15 +3,21 @@
     "created_vo_items vo_item[] @relation(\"VoItemCreator\")",
     "updated_vo_items vo_item[] @relation(\"VoItemUpdater\")",
     "created_vo_item_versions vo_item_version[] @relation(\"VoItemVersionCreator\")",
-    "updated_vo_item_versions vo_item_version[] @relation(\"VoItemVersionUpdater\")"
+    "updated_vo_item_versions vo_item_version[] @relation(\"VoItemVersionUpdater\")",
+    "created_vo_docs vo_doc[] @relation(\"VoDocCreator\")",
+    "updated_vo_docs vo_doc[] @relation(\"VoDocUpdater\")",
+    "created_vo_doc_versions vo_doc_version[] @relation(\"VoDocVersionCreator\")",
+    "updated_vo_doc_versions vo_doc_version[] @relation(\"VoDocVersionUpdater\")"
   ],
   "organization": [
     "vo_item_versions vo_item_version[]"
   ],
   "approvable": [
-    "vo_item_version vo_item_version?"
+    "vo_item_version vo_item_version?",
+    "vo_doc_version vo_doc_version?"
   ],
   "attachable": [
-    "vo_item_version vo_item_version?"
+    "vo_item_version vo_item_version?",
+    "vo_doc_version vo_doc_version?"
   ]
 }
