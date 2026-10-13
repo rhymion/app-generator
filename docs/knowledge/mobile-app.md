@@ -635,6 +635,18 @@ them. Entity REST routes send no CORS headers, so a browser that loads the app f
 from another is blocked; the proxy makes both one origin. Native iOS and Android builds are not subject
 to CORS.
 
+`expo` is a dependency of the generated `mobile/package.json`, not of the repository root, so the steps
+below work only after generation is turned on and `mobile/` has its own install:
+
+1. Set `x-generator.mobile.enabled: true` in the schema (see "Turning generation on") and run `generate-code`.
+   With the flag off, `mobile/package.json` is not written and `npx expo` finds nothing to run.
+2. Check that `mobile/package.json` exists.
+3. Run `cd mobile && npm install`. `mobile/` is its own npm project; installing at the repository root
+   does not provide `expo`.
+
+In a consumer repository the generator lives in the `app-generator/` submodule, so the directory is
+`app-generator/mobile/` and the commands run from `app-generator/`.
+
 ```bash
 cd mobile && npm install
 PROXY_PORT=8096 API_PORT=3012 WEB_PORT=8095 node scripts/same-origin-proxy.js
