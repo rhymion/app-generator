@@ -13,6 +13,9 @@ import AppFieldSelect from '@/components/ui/forms/AppFieldSelect';
 import type { AppFieldSelectOption } from '@/components/ui/forms/AppFieldSelect';
 import { DASHBOARDABLE_ENTITIES, findDashboardEntity } from './catalog-source';
 import { getReadableDashboardEntityNames } from '@/lib/dashboard/readable-entities';
+import {
+  groupByChoices, normalizeRow, seriesChoices, showsBucket, showsSeries, stackModeEnabled,
+} from './widget-rules';
 
 type Row = Record<string, unknown>;
 
@@ -36,7 +39,8 @@ const Widgets = forwardRef<WidgetsHandle, WidgetsProps>(function Widgets({ initi
   const t = useTranslations('DashboardWidgetEditor');
   const tf = useTranslations('Fields');
   const te = useTranslations('EntityLabel');
-    const [rows, setRows] = useState<Row[]>(() => (initialFields ?? []).map((r): Row => ({ ...r })));
+  const tk = useTranslations('DashboardWidgetEditor.fieldKind');
+  const [rows, setRows] = useState<Row[]>(() => (initialFields ?? []).map((r): Row => ({ ...r })));
   // null while loading; afterwards the catalog entities the user may read.
   const [readable, setReadable] = useState<string[] | null>(null);
 
@@ -70,7 +74,35 @@ const Widgets = forwardRef<WidgetsHandle, WidgetsProps>(function Widgets({ initi
     return (col?.valueOptions ?? []).filter((o) => o.value !== '');
   };
 
-  const update = (id: string, patch: Row) => setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const fieldLabel = useCallback((name: string, fallback: string) => {
+    const camel = name.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());
+    return tf.has(camel) ? tf(camel) : fallback;
+  }, [tf]);
+
+  const fieldOptionsOf = (fields: Array<{ name: string; label: string; kind: string }>): AppFieldSelectOption<string>[] =>
+    fields.map((f) => ({ value: f.name, label: `${fieldLabel(f.name, f.label)} (${tk(f.kind)})` }));
+
+  const bucketDefault = optionsOf('group_by_bucket')[0]?.value ?? null;
+
+  /** Applies `patch` and brings the row back to a valid combination (see widget-rules.ts). */
+  const update = (id: string, patch: Row) => setRows((prev) => prev.map((r) => {
+    if (r.id !== id) return r;
+    const merged = { ...r, ...patch };
+    const entity = findDashboardEntity(String(merged.entity_name ?? ''));
+    if (!entity) return merged;
+    if (patch.entity_name !== undefined && patch.entity_name !== r.entity_name) {
+      // The fields of the previous data source mean nothing for the new one.
+      merged.group_by_field = '';
+      merged.series_field = null;
+      merged.group_by_bucket = null;
+      merged.stack_mode = null;
+      if (!entity.groupable_fields.some((f) => f.name === merged.filter_field)) {
+        merged.filter_field = null;
+        merged.filter_value = null;
+      }
+    }
+    return normalizeRow(entity.groupable_fields, merged, bucketDefault);
+  }));
   const remove = (id: string) => setRows((prev) => prev.filter((r) => r.id !== id));
   const move = (index: number, delta: number) => setRows((prev) => {
     const target = index + delta;
@@ -83,6 +115,12 @@ const Widgets = forwardRef<WidgetsHandle, WidgetsProps>(function Widgets({ initi
 
   const selectValue = (options: AppFieldSelectOption<string>[], value: unknown) =>
     options.find((o) => o.value === value) ?? null;
+
+  // A stored field that the data source no longer offers stays visible (disabled) so the widget keeps showing what it uses.
+  const withCurrentField = (options: AppFieldSelectOption<string>[], value: unknown) => {
+    const v = typeof value === 'string' ? value : '';
+    return v && !options.some((o) => o.value === v) ? [...options, { value: v, label: v, disabled: true }] : options;
+  };
 
   const noCatalog = DASHBOARDABLE_ENTITIES.length === 0;
 
@@ -107,6 +145,11 @@ const Widgets = forwardRef<WidgetsHandle, WidgetsProps>(function Widgets({ initi
           : options;
         const unknownSource = current !== '' && !known;
         const unreadableSource = !noCatalog && !stillLoading && !!known && !readable?.includes(current);
+        const fields = known?.groupable_fields ?? [];
+        const groupOptions = withCurrentField(fieldOptionsOf(groupByChoices(fields, row.chart_type)), row.group_by_field);
+        const seriesOptions = withCurrentField(fieldOptionsOf(seriesChoices(fields, row)), row.series_field);
+        const groupValue = String(row.group_by_field ?? '');
+        const unknownField = !!known && groupValue !== '' && !fields.some((f) => f.name === groupValue);
         return (
           <AppSurface key={id} variant="outlined" elevation={0} p={2} mb={2}>
             <div data-testid={`widget-row-${index}`}>
@@ -133,37 +176,46 @@ const Widgets = forwardRef<WidgetsHandle, WidgetsProps>(function Widgets({ initi
                 onChange={(v) => update(id, { chart_type: v ?? 'column' })}
                 required
               />
-              <AppFieldInput
+              <AppFieldSelect
                 label={tf('groupByField')}
-                value={String(row.group_by_field ?? '')}
-                onChange={(v) => update(id, { group_by_field: v })}
-                fullWidth
+                options={groupOptions}
+                value={selectValue(groupOptions, row.group_by_field)}
+                onChange={(v) => update(id, { group_by_field: v ?? '' })}
                 required
               />
-              <AppFieldSelect
-                label={tf('stackMode')}
-                options={optionsOf('stack_mode')}
-                value={selectValue(optionsOf('stack_mode'), row.stack_mode)}
-                onChange={(v) => update(id, { stack_mode: v })}
-              />
-              <AppFieldSelect
-                label={tf('groupByBucket')}
-                options={optionsOf('group_by_bucket')}
-                value={selectValue(optionsOf('group_by_bucket'), row.group_by_bucket)}
-                onChange={(v) => update(id, { group_by_bucket: v })}
-              />
+              {row.chart_type === 'line' && <AppText variant="caption" mb={1}>{t('lineNeedsDatetime')}</AppText>}
+              {unknownField && <AppAlert severity="error" mb={1}>{t('unknownField', { name: String(row.group_by_field) })}</AppAlert>}
+              {known && showsBucket(fields, row) && (
+                <AppFieldSelect
+                  label={tf('groupByBucket')}
+                  options={optionsOf('group_by_bucket')}
+                  value={selectValue(optionsOf('group_by_bucket'), row.group_by_bucket)}
+                  onChange={(v) => update(id, { group_by_bucket: v })}
+                  required={row.chart_type === 'line'}
+                />
+              )}
               <AppFieldSelect
                 label={tf('timezone')}
                 options={optionsOf('timezone')}
                 value={selectValue(optionsOf('timezone'), row.timezone)}
                 onChange={(v) => update(id, { timezone: v ?? 'utc' })}
               />
-              <AppFieldInput
-                label={tf('seriesField')}
-                value={String(row.series_field ?? '')}
-                onChange={(v) => update(id, { series_field: v === '' ? null : v })}
-                fullWidth
-              />
+              {known && showsSeries(row) && (
+                <AppFieldSelect
+                  label={tf('seriesField')}
+                  options={seriesOptions}
+                  value={selectValue(seriesOptions, row.series_field)}
+                  onChange={(v) => update(id, { series_field: v || null })}
+                />
+              )}
+              {known && stackModeEnabled(row) && (
+                <AppFieldSelect
+                  label={tf('stackMode')}
+                  options={optionsOf('stack_mode')}
+                  value={selectValue(optionsOf('stack_mode'), row.stack_mode)}
+                  onChange={(v) => update(id, { stack_mode: v || null })}
+                />
+              )}
               <AppFieldInput
                 label={tf('filterField')}
                 value={String(row.filter_field ?? '')}
