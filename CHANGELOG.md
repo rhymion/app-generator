@@ -148,6 +148,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **CI: a docs-only push no longer cancels or hides the E2E run of a preceding code push** (Issue #882). Push runs now use a
+  per-commit concurrency group and are never cancelled; pull_request runs keep the per-branch group with cancel-in-progress.
+  CI workflow change: see the note in `.github/workflows/ci.yml`.
 - **Dashboard aggregate: read permission and row-level scope on both entry points** (Issue #910). The `aggregateForWidget` Server Action now requires the user's `read` permission on the entity, as `POST /api/dashboard/aggregate` already did, and both paths limit every query (single and two-field group-by, bucketed queries, FK label lookups) to the rows the user can list: organization isolation, `x-self-only`, `x-filter-values` and Creator/Assignee-only read. FK labels are resolved through the target entity's permission and scope, and an unreadable label shows as `(unknown)`. `aggregateForWidgetCore` takes the acting user's id as its first argument. See `docs/knowledge/schema-yaml-configuration.md` §10.
 - **`x-version-of`: a rejected version no longer blocks the next one, and the version number cannot be written** (Refs #946). A terminally
   rejected version stays as a closed record and is not counted as an open draft; a version rejected without `terminal`, or

@@ -7,22 +7,27 @@ on:
     branches: [master, main, develop]
 
 concurrency:
-  # Keyed on the branch name (head_ref for pull_request, ref_name for push)
-  # rather than on github.ref, so that a push run and a pull_request run
-  # that both cover the same branch/commit land in the same concurrency
-  # group and cancel each other instead of running twice in parallel.
-  # This matters most right after a release PR merges to develop: the
-  # merge produces both a push run (branch=develop) and, while the PR is
-  # still closing, a pull_request run — under github.ref those get
-  # different group keys (refs/heads/develop vs refs/pull/<N>/merge) and
-  # never cancel each other, so the same tree gets built/tested twice.
+  # pull_request runs: keyed on the PR's head branch, and a newer push to the
+  # same PR cancels the superseded run (the old behaviour, still wanted --
+  # nobody needs the result for a commit the PR has already moved past).
   #
-  # Note for later: if `main` ever gets branch protection with a required
-  # check, a push run that gets cancelled here will show up as "no check"
-  # rather than "passed" on that ref — worth remembering before relying on
-  # required-check gating on `main`, since it is currently unprotected.
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: true
+  # push runs: keyed on the commit SHA and never cancelled. Pushes only
+  # trigger on the integration branches (see `on:` above), and every commit
+  # that lands there must get its own run to completion. With a shared
+  # per-branch group and cancel-in-progress, a docs-only push cancelled the
+  # in-progress run of the code push before it, and the docs-only run then
+  # skipped E2E itself (detect-changes compares against `event.before`, the
+  # code commit), so the code commit never got a completed E2E run (Issue
+  # #882). A per-branch group with cancel-in-progress: false would not close
+  # this either: GitHub keeps one pending run per group and replaces an older
+  # pending run when a newer one queues.
+  #
+  # `github.head_ref` is empty on push events, so `head_ref || sha` selects the
+  # right key for each event. Trade-off: a pull_request run whose head branch
+  # is itself an integration branch (a develop -> main release PR) is no
+  # longer deduplicated against the push run for the same branch; both run.
+  group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   detect-changes:
