@@ -5,6 +5,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Mobile executable guide** (Issue #987). `docs/knowledge/mobile-executable.md` documents building a release `.apk` locally with `expo prebuild` and Gradle (measured), the iOS routes and what each needs, setting `EXPO_PUBLIC_API_BASE_URL` for a real device, and the `app.json` / `eas.json` settings the generator does not emit. Documentation only.
 - **Dashboard guide, and corrected dashboard docs** (Issue #909, part of #904). `docs/knowledge/dashboard-guide.md` explains
   how a schema author opts an entity in and which fields become groupable, what each widget setting does and which
   combinations are valid, what each problem message means, how read permission and row scope apply, and the
