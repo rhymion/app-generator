@@ -299,7 +299,7 @@ echo "-- installing the Expo dependencies --"
 echo "-- API + Expo web bundle + same-origin proxy, then playwright --"
 set +e
 NODE_ENV=test PAYMENT_FAKE_STRIPE=1 \
-EXPO_WEB_URL="http://localhost:$PROXY_PORT" TEST_EMAIL=admin@example.com TEST_PASSWORD=password123 \
+EXPO_WEB_URL="http://localhost:$PROXY_PORT" EXPO_WEB_DIRECT_URL="http://localhost:$WEB_PORT" TEST_EMAIL=admin@example.com TEST_PASSWORD=password123 \
 npx start-server-and-test \
   "npm run test:e2e:start" "http://localhost:$APP_PORT" \
   "cd mobile && EXPO_PUBLIC_API_BASE_URL=http://localhost:$PROXY_PORT WEB_PORT=$WEB_PORT PROXY_PORT=$PROXY_PORT API_PORT=$APP_PORT node scripts/serve-web-with-proxy.js" "http://localhost:$PROXY_PORT" \
