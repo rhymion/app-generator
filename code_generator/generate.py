@@ -1506,6 +1506,8 @@ def generate(schema_path: str, output_dir: str) -> None:
     mobile_ineligible: list[tuple[str, str]] = []
     # Entities with REST routes, hence an options route a mobile relation picker can call.
     api_entities = {e['parent'] for e in entities if (e.get('generate_config') or {}).get('api')}
+    # Entities whose get<Entity>Detail() takes a userId (organization scope or x-self-only).
+    detail_takes_user_id: dict[str, bool] = {}
 
     for entity in entities:
         parent     = entity['parent']
@@ -1615,6 +1617,7 @@ def generate(schema_path: str, output_dir: str) -> None:
 
         # --- getters.ts ---
         getters_ctx = {**ctx, 'named_constants': named_constants}
+        detail_takes_user_id[parent] = bool(ctx.get('should_filter_by_org') or ctx.get('is_self_only'))
         _write(lib_dir / 'getters.ts', _render(env, 'getters.ts.jinja2', getters_ctx))
 
         # --- autocomplete/list custom filter stubs (cmd_377/379 DP-1) ---
@@ -2714,6 +2717,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             out / 'lib' / _vo['version'] / 'version_of_prefill.ts',
             _render(env, 'version_of_prefill.ts.jinja2', {
                 **_vo, 'pascal': to_pascal_case(_vo['version']),
+                'detail_takes_user_id': detail_takes_user_id.get(_vo['version'], False),
                 'plan': version_of_prefill_plan(_vo, schema, _prisma_models),
             }),
         )

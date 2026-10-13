@@ -239,6 +239,19 @@ def test_prefill_module_renders_without_a_created_record(tmp_path):
     assert "reason: 'open_draft'" in out
 
 
+def test_prefill_module_passes_the_session_user_when_the_detail_getter_takes_one(tmp_path):
+    """An organization-scoped version entity's get<Version>Detail(id, userId) needs the caller."""
+    _, plan = _plan(tmp_path)
+    vo = version_of_for('product_version', _schema())
+    ctx = {**vo, 'pascal': 'ProductVersion', 'plan': plan}
+    scoped = _render(_make_env(), 'version_of_prefill.ts.jinja2', {**ctx, 'detail_takes_user_id': True})
+    assert 'getProductVersionDetail(identity.current_version_id, await getSessionUserIdOrThrow())' in scoped
+    assert 'getSessionUserIdOrThrow }' in scoped
+    plain = _render(_make_env(), 'version_of_prefill.ts.jinja2', {**ctx, 'detail_takes_user_id': False})
+    assert 'getProductVersionDetail(identity.current_version_id)' in plain
+    assert 'getSessionUserIdOrThrow' not in plain
+
+
 def test_owned_children_are_read_from_the_view_definition():
     """A child array lives under the bare view's allOf, not on the '__' raw entity."""
     from version_of import version_of_children
