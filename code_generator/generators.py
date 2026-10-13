@@ -3394,7 +3394,10 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
     # transaction as the create (a throw rolls the new row back).
     _version_of = version_of_for(parent, schema) if schema else None
     version_of_create_code = (
-        f"    await assertSingleOpenDraft(tx, created.{_version_of['identity_fk']}, created.id);"
+        f"    await assertSingleOpenDraft(tx, created.{_version_of['identity_fk']}, created.id);\n"
+        f"    // A new row is never numbered: the number is assigned at approval (a form that\n"
+        f"    // submits the field, even empty, must not leave a value behind).\n"
+        f"    await tx.{model}.update({{ where: {{ id: created.id }}, data: {{ {_version_of['number']}: null }} }});"
         if _version_of and can_create else ''
     )
     x_approval_submit_on_field: str | None = None
