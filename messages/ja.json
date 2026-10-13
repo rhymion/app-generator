@@ -371,6 +371,15 @@
     "moveUp": "上へ",
     "moveDown": "下へ",
     "removeWidget": "ウィジェットを削除",
-    "addWidget": "ウィジェットを追加"
+    "addWidget": "ウィジェットを追加",
+    "unknownField": "不明なフィールド「{name}」。選択中のデータソースにはありません。別のフィールドを選んでください。",
+    "lineNeedsDatetime": "折れ線グラフは時系列を描くため、日付・日時のフィールドのみ集計軸にできます。",
+    "fieldKind": {
+      "boolean": "はい/いいえ",
+      "enum": "選択肢",
+      "fk": "参照",
+      "number": "数値",
+      "datetime": "日付/日時"
+    }
   }
 }

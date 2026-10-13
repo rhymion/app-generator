@@ -117,6 +117,16 @@ def test_approval_entity_gets_screens_and_the_shared_approval_module(out):
         assert (out / rel).exists(), rel
 
 
+def test_approvable_id_is_not_offered_to_sort_or_filter_on_either_list(out):
+    client = _read(out, 'mobile/lib/mobile_request/mobile_client.ts')
+    assert 'approvable_id' not in client.split('_SORT_KEYS')[1].split(';')[0]
+    assert 'approvable_id' not in client.split('_FILTER_KEYS')[1].split(';')[0]
+    page = _read(out, 'app/[locale]/mobile_request/page.tsx')
+    assert 'approvable_id' not in page.split('listQuery=')[1].split('searchKey')[0]
+    # The REST list keeps accepting it.
+    assert "'approvable_id'" in _read(out, 'lib/mobile_request/getters.ts')
+
+
 def test_shared_approval_module_and_predicates_are_the_web_ones(out):
     assert _read(out, 'mobile/lib/mobile_request/use_entity_approval_actions.ts') == \
         _read(out, 'lib/mobile_request/use_entity_approval_actions.ts')

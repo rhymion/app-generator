@@ -681,8 +681,11 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
     # target has a single-column labelField sorts and filters by the related record's label, keyed by
     # the relation name (`room_type`, not `room_type_id`). Those columns are list-only entries that
     # the form never draws, and they take the same text control the Web list panel gives them.
-    sort_keys = list(scalar_keys)
-    filter_keys = [f['key'] for f in fields if f['kind'] in _FILTERABLE_KINDS and not f.get('write_only')]
+    # Internal bridge FK columns (`approvable_id`, `attachable_id`, ...) stay out of the panel, as on the Web.
+    panel_excluded = set(ctx.get('sort_filter_panel_excluded') or [])
+    sort_keys = [k for k in scalar_keys if k not in panel_excluded]
+    filter_keys = [f['key'] for f in fields
+                   if f['kind'] in _FILTERABLE_KINDS and not f.get('write_only') and f['key'] not in panel_excluded]
     fk_names = {f['key'] for f in fields if f['kind'] == KIND_RELATION}
     relation_columns = []
     for relation, _label_column in ctx.get('sort_filter_relation_fields') or []:

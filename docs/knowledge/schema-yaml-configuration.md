@@ -1981,6 +1981,20 @@ flagged as unreadable. When no entity opts in, the editor says so and links here
 `components/dashboard/widgets.tsx`, mounted through `x-custom-component` on the `widgets` child array
 (`docs/knowledge/code-generation-custom-extensions.md`).
 
+`group_by_field` and `series_field` are dropdowns of the selected data source's groupable fields (translated label plus
+field kind). Changing the data source clears the fields of the previous one. The editor offers only combinations that
+render, and corrects the row when a change makes a setting inapplicable (rules in `components/dashboard/widget-rules.ts`):
+
+- a line chart can be grouped by a date/time field only, and always has a time bucket;
+- the time bucket (`group_by_bucket`) is offered only when the group-by field is a date/time field;
+- a pie chart has no series and no stack mode;
+- `stack_mode` is offered for bar / column once a series is chosen; picking a series on a bar / column without a bucket
+  sets `grouped`, and clearing the series clears the stack mode;
+- the series cannot be the group-by field itself.
+
+A stored field the data source no longer offers stays visible, flagged, until the user changes it; an unchanged widget is
+saved as it was.
+
 The generator scans every dashboardable entity for **groupable fields** and
 emits a static catalog at `lib/dashboard/catalog.ts`. A field is groupable
 when it is one of:
