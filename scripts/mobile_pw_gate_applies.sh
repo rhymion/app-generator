@@ -22,6 +22,7 @@ PATHS=(
   'scripts/compose_child_datagrid_e2e_fixture.py'           # merges those fixtures
   'scripts/run_mobile_entity_playwright.sh'                 # the runner itself
   'scripts/mobile_pw_gate_applies.sh'                       # this list
+  '.github/workflows/ci.yml'                                # the CI job that runs this suite
 )
 
 if ! git rev-parse --verify --quiet "$BASE^{commit}" >/dev/null; then
