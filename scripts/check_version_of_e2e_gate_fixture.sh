@@ -8,8 +8,9 @@
 # no x-version-of entity, so its own e2e build never generates the version
 # helpers; the specs cover the runtime behaviour a type check cannot: the version
 # number assigned at approval, the (identity, number) uniqueness, at most one open
-# draft per identity, the identity's current_version_id, and the deletion of a
-# terminally rejected or withdrawn draft together with its owned child rows.
+# draft per identity, the identity's current_version_id, a terminally rejected
+# version kept as a closed record (frozen, unnumbered, not blocking the next version) and
+# a version rejected without terminal or withdrawn staying the open draft.
 #
 # Isolation (the repository's own schema, generated output, database and other
 # fixtures are never touched):

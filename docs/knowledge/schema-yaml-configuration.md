@@ -1712,13 +1712,21 @@ Generated, in `lib/<version>/version_of.ts` (always regenerated):
   same transaction as the status write: the number becomes the identity's highest number plus one,
   and the identity's `current_version_id` is set to the version. An abandoned draft takes no number.
 - **One open draft per identity.** `assertSingleOpenDraft` runs in `add<Version>` right after the
-  insert; a second version row whose identity still has a row that is not yet approved is refused
-  (`VALIDATION`, reason `invalid`, message "Another draft of this <identity> is still open") and the insert is rolled back. A row counts as open until
-  its `approvable.approved_at` is set, so a non-terminally rejected row stays the open draft.
-- **Settled non-approved outcomes.** A terminal rejection (`on_rejected.terminal: true`) and a
-  withdrawal (`on_withdrawn`) delete the draft and its owned child rows in the dispatch transaction
-  (`deleteVersionDraft`). A version that holds a number is never deleted. A version entity without
-  `on_withdrawn` keeps a withdrawn row as the open draft.
+  insert; a second version row whose identity still has an open row is refused
+  (`VALIDATION`, reason `invalid`, message "Another draft of this <identity> is still open") and the insert is rolled back.
+  A row is closed once its `approvable.approved_at` is set or one of its approval requests has the status
+  `terminal_rejected` (read from the approval records, not from the values `on_rejected.set_fields` writes). Every other
+  row is open: a row never submitted, a pending one, and one that was rejected without `terminal` or withdrawn.
+- **Rejected and withdrawn versions.** The generator never deletes a version row. A terminally rejected version
+  (`on_rejected.terminal: true`) stays as a closed record: it takes no number, is frozen like any terminally decided
+  row (edit and delete are refused), and does not block the next version, which is created from the new version screen
+  or the API as usual. A version rejected without `terminal`, or withdrawn, stays the open draft: the user fixes it and
+  resubmits it, and no other version can be created for the identity until it is approved or terminally rejected. Setting
+  `on_rejected` without `terminal` therefore keeps the draft editable; with `terminal` the record is final and the next
+  version starts from the current approved version.
+- **The number is not writable.** A version holds a number only after approval. A number sent by a form or an API client is
+  dropped: create stores none, update keeps the stored value. (An empty numeric form field arrives as `0`; stored, it would
+  collide on `(identity, number)` with any other row holding `0`.)
 
 - **New version screen.** `/<version>/new?new_version_of=<identity id>` is the version entity's ordinary create
   form, filled with the identity's `current_version_id` version as initial values (`lib/<version>/version_of_prefill.ts`,
