@@ -144,6 +144,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `resetTestDatabase()` empties both tables with `TRUNCATE`. Consumers add the SQL to their own migrations, create the
   restricted application role and the write-once bucket; see `docs/knowledge/audit-log-append-only.md`.
 ### Changed
+- Completion gate documents (`generate-schema`, `update-code`, `update-generator`) now name `npm run db:generate` as a prerequisite of the vitest step on a fresh checkout (Issue #1006).
 - **List sort / filter panel no longer offers internal bridge foreign keys** (Issue #967). `Approvable Id`, `Attachable Id`,
   `Commentable Id` and the like are dropped from the Web panel and from the Expo list's sort and filter keys, using the
   generator's existing internal-bridge detection (no new schema key). The REST list still accepts them as sort / filter
