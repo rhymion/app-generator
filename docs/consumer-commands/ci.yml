@@ -24,8 +24,27 @@ on:
     branches: [master, main, develop]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # pull_request runs: keyed on the PR's head branch, and a newer push to the
+  # same PR cancels the superseded run (the old behaviour, still wanted --
+  # nobody needs the result for a commit the PR has already moved past).
+  #
+  # push runs: keyed on the commit SHA and never cancelled. Pushes only
+  # trigger on the integration branches (see `on:` above), and every commit
+  # that lands there must get its own run to completion. With a shared
+  # per-branch group and cancel-in-progress, a docs-only push cancelled the
+  # in-progress run of the code push before it, and the docs-only run then
+  # skipped E2E itself (detect-changes compares against `event.before`, the
+  # code commit), so the code commit never got a completed E2E run (Issue
+  # #882). A per-branch group with cancel-in-progress: false would not close
+  # this either: GitHub keeps one pending run per group and replaces an older
+  # pending run when a newer one queues.
+  #
+  # `github.head_ref` is empty on push events, so `head_ref || sha` selects the
+  # right key for each event. Trade-off: a pull_request run whose head branch
+  # is itself an integration branch (a develop -> main release PR) is no
+  # longer deduplicated against the push run for the same branch; both run.
+  group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   verify-canonical-ci:
