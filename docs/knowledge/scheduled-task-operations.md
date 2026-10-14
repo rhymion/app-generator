@@ -657,9 +657,24 @@ Settings (environment or `.env.production.local`): `REGION`
 `TASK_RUNNER_NPM_SCRIPT` (default `task:run-all`), `TASK_RUNNER_IMAGE` with
 `SKIP_BUILD=true` to reuse an image, and `TASK_RUNNER_JOB_NAME` /
 `TASK_RUNNER_SCHEDULER_JOB_NAME` / `TASK_RUNNER_SA_NAME` /
-`TASK_RUNNER_INVOKER_SA_NAME` for resource names. The Dockerfile is a
+`TASK_RUNNER_INVOKER_SA_NAME` for resource names. `TASK_RUNNER_BUCKET_ROLES` grants the
+Job's runtime service account access to Cloud Storage buckets (see below). The Dockerfile is a
 generated file, so run `generate-code` with `x-cloud` enabled first when the
 script builds the image.
+
+**Bucket access.** The runtime service account holds only
+`roles/secretmanager.secretAccessor` on its own secrets. A handler that reads
+or writes a Cloud Storage bucket through Application Default Credentials needs
+a bucket-scoped role as well. Set `TASK_RUNNER_BUCKET_ROLES` to space-separated
+`BUCKET=ROLE` pairs, for example
+`TASK_RUNNER_BUCKET_ROLES="my-archive=roles/storage.objectUser"`; the script
+adds one `gcloud storage buckets add-iam-policy-binding` per pair (idempotent,
+shown under `DRY_RUN`, never project-wide). Choose the role your handler
+needs; the script does not pick one. Unset, nothing changes.
+
+**Non-secret values.** Every key in the secrets file reaches the Job as a
+Secret Manager secret, bucket names and other plain settings included. Put them
+in the same file.
 
 **Collect every production secret, not just the database URL.** The secrets
 in `gcp-setup.sh` (`app-database-url` and the others) belong to a Cloud Run

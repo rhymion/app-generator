@@ -10,6 +10,7 @@
 #   3. Two service accounts: a runtime SA for the Job (reads its own secrets
 #      only) and an invoker SA for Cloud Scheduler (may run this one Job only)
 #   4. Secret Manager secrets, one per KEY in the task-runner env file
+#      (every variable reaches the Job as a secret, bucket names included)
 #   5. The task-runner image (built from the Dockerfile's `builder` stage)
 #   6. The Cloud Run Job, running `npm run task:run-all`
 #   7. The Cloud Scheduler job that POSTs to the Cloud Run Jobs API `:run`
@@ -71,6 +72,10 @@ TASK_RUNNER_ENV_FILE="${TASK_RUNNER_ENV_FILE:-${PROJECT_ROOT}/.env.task-runner.p
 # CRON_SECRET is not required: task:run-all runs the tasks directly and never
 # goes through the HTTP route that checks it.
 TASK_RUNNER_REQUIRED_KEYS="${TASK_RUNNER_REQUIRED_KEYS:-DATABASE_URL}"
+# Optional bucket access for the Job's runtime service account: space-separated
+# BUCKET=ROLE pairs (for example "my-archive=roles/storage.objectUser"). Each
+# pair becomes a bucket-scoped IAM binding; nothing is granted project-wide.
+TASK_RUNNER_BUCKET_ROLES="${TASK_RUNNER_BUCKET_ROLES:-}"
 
 if [[ -z "${PROJECT_ID:-}" ]]; then
   if [[ "$DRY_RUN" == "true" ]]; then
@@ -268,6 +273,22 @@ for _key in "${SECRET_KEYS[@]}"; do
     --role="roles/secretmanager.secretAccessor" \
     --project="$PROJECT_ID"
 done
+
+# ── Step 4b: Bucket access (optional) ────────────────────────────────────────
+if [[ -n "$TASK_RUNNER_BUCKET_ROLES" ]]; then
+  echo ""
+  echo "=== Step 4b: Bucket access for the runtime service account ==="
+  for _pair in $TASK_RUNNER_BUCKET_ROLES; do
+    if [[ ! "$_pair" =~ ^([a-z0-9][a-z0-9._-]*)=(roles/[A-Za-z0-9._]+)$ ]]; then
+      echo "ERROR: TASK_RUNNER_BUCKET_ROLES entry '${_pair}' is not BUCKET=ROLE (for example my-bucket=roles/storage.objectUser)." >&2
+      exit 1
+    fi
+    run_iam_binding gcloud storage buckets add-iam-policy-binding "gs://${BASH_REMATCH[1]}" \
+      --member="serviceAccount:${RUNTIME_SA_EMAIL}" \
+      --role="${BASH_REMATCH[2]}" \
+      --project="$PROJECT_ID"
+  done
+fi
 
 # ── Step 5: Image ────────────────────────────────────────────────────────────
 # The `builder` stage carries the full source tree and node_modules (including

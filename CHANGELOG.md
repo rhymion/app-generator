@@ -5,6 +5,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Bucket access for the task-runner Job** (Issue #1008). `scripts/gcp-task-runner.sh` accepts
+  `TASK_RUNNER_BUCKET_ROLES` (space-separated `BUCKET=ROLE` pairs) and grants the Job's runtime service account a
+  bucket-scoped role on each bucket; unset, nothing changes. `docs/knowledge/scheduled-task-operations.md` also states that
+  every variable reaches the Job as a Secret Manager secret.
 - **Native end-to-end flows for the Expo app** (Issue #994, part of #140). `generate-code` writes one Maestro flow per entity
   that has native screens to `mobile/e2e/generated/maestro/` (git-ignored), from the same decision that emits the screens: sign
   in, open the list from the footer tabs, check the list, open the first row's detail screen, and create one record for an entity
