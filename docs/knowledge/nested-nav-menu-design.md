@@ -190,6 +190,14 @@ key `build_context.py`'s own `_raw_def` uses — a naive
 for the common case of a paired entity whose model equals its own
 parent, dropping its `x-nav` entirely.
 
+An entry that is not a schema entity — the generated scheduled-task admin
+page (`nav_extra_entities()`, `scheduled_task_run`) — has neither key, so
+there is no definition to carry an `x-nav` block. `_entity_nav` returns
+`None` for it and `build_nav_config` is given the same entity list as the
+label and link lists (`entities + nav_extra_entities(schema)`), so the
+entry stays a flat top-level link. Assigning it to an `x-nav-groups` group
+is not supported; that would need a new schema-level declaration.
+
 ## 5. Labels and i18n
 
 ### 5.1 Label derivation

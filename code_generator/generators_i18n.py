@@ -556,7 +556,7 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
     # Nested sidebar navigation groups (x-nav.parent / x-nav-groups). Raises
     # NavValidationError (fail-closed) for a cycle, excess depth, or unknown
     # icon name — propagates to the caller, aborting generation.
-    nav_config = build_nav_config(entities, schema)
+    nav_config = build_nav_config(entities + nav_extra_entities(schema), schema)
 
     # nativeEnum option keys (one section per Prisma enum / x-enum-namespace)
     native_enum_ns = _collect_native_enum_namespaces(schema)

@@ -127,3 +127,30 @@ def test_messages_namespace_is_complete_for_the_page(tmp_path):
     en.write_text('{}')
     _update_json(en, {'ScheduledTaskRun': dict(SCHEDULED_TASK_RUN_MESSAGES)})
     assert json.loads(en.read_text())['ScheduledTaskRun']['title'] == 'Scheduled tasks'
+
+
+def test_nav_extra_entities_do_not_break_nav_group_resolution():
+    """The extra entry has no schema definition to carry an x-nav block, so
+    build_nav_config skips it (no KeyError) and it never joins a group."""
+    from nav_config import build_nav_config
+
+    schema = {'x-scheduled-tasks': [{'task_id': 'a'}], 'definitions': {}}
+    extras = nav_extra_entities(schema)
+    assert extras
+    nav_config = build_nav_config(extras, schema)
+    assert nav_config['entity_group'] == {}
+    assert nav_config['groups'] == []
+
+
+def test_scheduled_task_link_stays_flat_in_generated_site_config(tmp_path):
+    """Same nav_entities / nav_config pair update_i18n_and_config computes."""
+    from nav_config import build_nav_config
+
+    schema = {'x-scheduled-tasks': [{'task_id': 'a'}], 'definitions': {}}
+    extras = nav_extra_entities(schema)
+    site_config = tmp_path / 'site-config.ts'
+    site_config.write_text('navLinks: [\n    { label: "Home", href: "/" },\n  ] satisfies NavLink[]\n')
+    assert _update_site_config(site_config, extras, build_nav_config(extras, schema))
+    row = next(line for line in site_config.read_text().splitlines() if 'href: "/scheduled_task_run"' in line)
+    assert 'group:' not in row
+    assert 'order:' not in row
