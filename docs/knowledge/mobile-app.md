@@ -97,6 +97,12 @@ button in the header cycles through the locales found in `messages/`; the choice
 | Notification bell with unread badge | Header; polls `GET /api/notifications` every minute |
 | Sign out | Header; revokes the device session, then clears the stored tokens |
 
+The header pads its top by the top safe-area inset (`useSafeAreaInsets()`), so it is drawn below the status bar, notch or camera
+cutout instead of under it; the footer pads its bottom by the bottom inset for the same reason. Each header action is at least
+44x44 points with a 4-point `hitSlop`. The notification bell shows the unread count only; it has no press handler. A browser
+reports an inset of 0, so `mobile/e2e/header.spec.ts` measures the sizes only, and `code_generator/tests/test_mobile_header.py`
+asserts the inset is applied.
+
 The desktop-only user-identity link and sign-in link have no mobile counterpart yet.
 
 ## Permissions
@@ -625,6 +631,14 @@ Refresh tokens last 30 days and are stored as a keyed HMAC, never in plaintext (
 Access-token verification is stateless: a token issued just before sign-out or revocation stays valid for
 the rest of its 15 minutes.
 
+The app keeps the refresh token in `expo-secure-store` (`lib/token-storage.ts`). On a device with biometrics or a
+PIN enrolled, a standalone or development build locks it behind that check (`requireAuthentication`), and the
+build's `Info.plist` carries `NSFaceIDUsageDescription` from the `expo-secure-store` config plugin. Expo Go has no
+such text in its own `Info.plist`, so the app stores and reads the token there without the lock
+(`Constants.executionEnvironment` is `storeClient`). The check runs in one function for both save and read, so the
+two always agree, and a locked save that fails outside Expo Go is not retried unlocked. Face ID therefore cannot
+be verified in Expo Go; only a standalone or development build locks the token. Web uses `localStorage`.
+
 Generated REST routes call `authenticate()` (`lib/api-auth.ts`), which accepts either a mobile access JWT
 or an API key (`X-API-Key` / `Authorization: Bearer`); a JWT always has three dot-separated segments and
 an API key never does. `POST /api/upload` and `POST /api/attachment/direct` call `requireCaller()`, which
@@ -651,7 +665,7 @@ schema's tabs and the entity specs need the fixture entities:
 | Mode | Schema of the copy | Specs | Tests |
 |------|--------------------|-------|-------|
 | `fixture` | default plus `code_generator/tests/fixtures/mobile_entity_e2e_gate/` | `entity-crud`, `relation-pickers`, `list-capabilities`, `inline-create-checkout`, `comments`, `approval-actions`, `split-action`, `reservation`, `attachments`, `child-rows`, `entity-select`, `bridge-attachments`, `custom-components` (13 specs) | 103 |
-| `default` | default, unmodified | `audit-log`, `auth`, `drill-down`, `footer-nav` (4 specs) | 15 |
+| `default` | default, unmodified | `audit-log`, `auth`, `drill-down`, `footer-nav`, `header` (5 specs) | 17 |
 | `scheduled` | default plus `code_generator/tests/fixtures/scheduled_task_e2e_gate/`, the test user holds the `ScheduledTaskRunner` role | `scheduled-task` (1 spec) | 6 |
 
 ```bash

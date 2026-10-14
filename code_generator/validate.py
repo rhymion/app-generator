@@ -970,25 +970,43 @@ def mobile_generation_enabled(schema: dict) -> bool:
     return isinstance(mobile, dict) and mobile.get('enabled') is True
 
 
-def validate_generator_config(schema: dict) -> None:
-    """Validate the `x-generator.mobile` block (bool `enabled` only, no unknown keys)."""
+_AUDIT_LOG_STORAGE_GENERATOR_KEYS = frozenset({'enabled'})
+
+
+def audit_log_storage_enabled(schema: dict) -> bool:
+    """True when the schema opts in to generating the audit_log storage factory and jobs.
+
+    Reads `x-generator.audit-log-storage.enabled`; absent means false (opt-in, default off).
+    """
     gen = schema.get('x-generator')
-    if not isinstance(gen, dict) or 'mobile' not in gen:
-        return
-    mobile = gen['mobile']
-    where = "x-generator.mobile"
-    if not isinstance(mobile, dict):
-        raise SchemaValidationError(f"{where} must be a mapping (e.g. `enabled: true`).")
+    block = gen.get('audit-log-storage') if isinstance(gen, dict) else None
+    return isinstance(block, dict) and block.get('enabled') is True
+
+
+def _validate_enabled_only_block(gen: dict, name: str, allowed: frozenset) -> list[str]:
+    """Errors for an `x-generator.<name>` block that accepts a boolean `enabled` and nothing else."""
+    if name not in gen:
+        return []
+    block = gen[name]
+    where = f"x-generator.{name}"
+    if not isinstance(block, dict):
+        return [f"{where} must be a mapping (e.g. `enabled: true`)."]
     errors: list[str] = []
-    unknown = sorted(str(k) for k in mobile if k not in _MOBILE_GENERATOR_KEYS)
+    unknown = sorted(str(k) for k in block if k not in allowed)
     if unknown:
-        errors.append(
-            f"{where} has unknown key(s) {unknown}; supported: {sorted(_MOBILE_GENERATOR_KEYS)}."
-        )
-    if 'enabled' in mobile and not isinstance(mobile['enabled'], bool):
-        errors.append(
-            f"{where}.enabled must be a boolean (true/false), got {mobile['enabled']!r}."
-        )
+        errors.append(f"{where} has unknown key(s) {unknown}; supported: {sorted(allowed)}.")
+    if 'enabled' in block and not isinstance(block['enabled'], bool):
+        errors.append(f"{where}.enabled must be a boolean (true/false), got {block['enabled']!r}.")
+    return errors
+
+
+def validate_generator_config(schema: dict) -> None:
+    """Validate the `x-generator.mobile` and `x-generator.audit-log-storage` blocks (bool `enabled` only, no unknown keys)."""
+    gen = schema.get('x-generator')
+    if not isinstance(gen, dict):
+        return
+    errors = _validate_enabled_only_block(gen, 'mobile', _MOBILE_GENERATOR_KEYS)
+    errors += _validate_enabled_only_block(gen, 'audit-log-storage', _AUDIT_LOG_STORAGE_GENERATOR_KEYS)
     if errors:
         raise SchemaValidationError("\n".join(errors))
 

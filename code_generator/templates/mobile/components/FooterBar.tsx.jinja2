@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { router } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavIcon } from '@/components/NavIcon';
 import { SEARCH_TAB } from '@/lib/nav';
 import type { NavNode, SearchTab } from '@/lib/nav';
@@ -28,11 +29,12 @@ function hrefOf(tab: Tab): string {
 export function FooterBar() {
   const { tabs, failed } = useNav();
   const { labelOf } = useLocale();
+  const insets = useSafeAreaInsets();
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const allTabs: Tab[] = SEARCH_TAB ? [...tabs, SEARCH_TAB] : tabs;
 
   return (
-    <View style={styles.bar} testID="footer-bar">
+    <View style={[styles.bar, { paddingBottom: insets.bottom }]} testID="footer-bar">
       {failed ? (
         <View style={styles.notice}>
           <Text testID="nav-load-failed" style={styles.noticeText}>

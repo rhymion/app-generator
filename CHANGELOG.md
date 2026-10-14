@@ -12,6 +12,17 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   edit, detail and list screens and the mobile chips, list cells and detail text show that word; the stored value stays
   the entity name. Generated Cypress specs find a list row by the dictionary word.
   `docs/knowledge/entity-select-options.md` states the rule.
+- **Bucket access for the task-runner Job** (Issue #1008). `scripts/gcp-task-runner.sh` accepts
+  `TASK_RUNNER_BUCKET_ROLES` (space-separated `BUCKET=ROLE` pairs) and grants the Job's runtime service account a
+  bucket-scoped role on each bucket; unset, nothing changes. `docs/knowledge/scheduled-task-operations.md` also states that
+  every variable reaches the Job as a Secret Manager secret.
+- **GCS and S3 write-once storage for audit_log digests** (Issue #991, part of #945). `lib/audit-log-integrity/storage-gcs.ts`
+  stores digests and archives in a Google Cloud Storage bucket with per-object retention (unlocked or locked) and create-if-absent
+  writes; the S3 Object Lock adapter moves here from the consumer template. Both load their SDK through a dynamic import with a
+  literal module name, only when selected. The new opt-in key `x-generator.audit-log-storage.enabled` generates
+  `lib/audit-log-ops/storage-factory.ts` (picks the storage from `AUDIT_LOG_GCS_*`, `AUDIT_LOG_S3_*` or `AUDIT_LOG_STORAGE_DIR`, and
+  fails when none is set) and `lib/audit-log-ops/jobs.ts`; absent or `false` generates nothing and no generated file refers to an
+  adapter. `AUDIT_LOG_GCS_AUTH=vercel-oidc` authenticates from Vercel without a key. `@aws-sdk/client-s3`, `@vercel/oidc` and `google-auth-library` are added to `dependencies`. See `docs/knowledge/audit-log-append-only.md`.
 - **Native end-to-end flows for the Expo app** (Issue #994, part of #140). `generate-code` writes one Maestro flow per entity
   that has native screens to `mobile/e2e/generated/maestro/` (git-ignored), from the same decision that emits the screens: sign
   in, open the list from the footer tabs, check the list, open the first row's detail screen, and create one record for an entity
@@ -170,12 +181,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **Native app header no longer sits under the system UI and its actions are large enough to press** (Issue #1014). The header and footer now apply the top and bottom safe-area insets, and each header action is at least 44x44 points.
 - **Generated delete examples check the rows exist first for an entity with no unique primary link** (Issue #835). 
   Examples 4.1, 4.2 and 4.3 in the generated UI spec now assert the populated row count before they delete, so an example 
   that finds nothing to delete fails on its own precondition. Entities with a unique primary link are unchanged.
 - **Approve, Reject and Withdraw no longer fire without waiting** (Issue #500). `ApprovalSection` now awaits the Server Action,
   disables every approve/reject/withdraw control (and keeps the confirmation dialog open) until the request settles, and shows an
   error message when the request fails, so two quick clicks can no longer run overlapping approval transactions on the server.
+- **Mobile sign-in no longer fails in Expo Go** (Issue #1010, part of #140). The generated `lib/token-storage.ts` asked `expo-secure-store` for a biometric-locked refresh token, which Expo Go rejects because its `Info.plist` has no `NSFaceIDUsageDescription`. When `Constants.executionEnvironment` is `storeClient` the token is now saved and read without the lock; standalone and development builds lock it exactly as before, the choice is made once for save and read, and a rejected locked save is never retried unlocked. Face ID cannot be checked in Expo Go. See `docs/knowledge/mobile-executable.md`.
 - **Version Of E2E gate fixture: two flaky examples fixed** (Issue #1000). `version_of.cy.ts` looked the Save button up document-wide, so it found two submit buttons while React streamed the new-version screen (the revealed form plus a hidden copy in the streaming buffer, for about 30 ms); it now looks inside `main form`. `version_of_ui.cy.ts` and `version_of.cy.ts` read values with a one-shot `.then`, so the diff assertion could see the previous pair right after "Compare"; they now assert in a retried `.should`. Test fixtures only; generated code is unchanged. See `docs/knowledge/testing-cypress.md`.
 - **CI: a docs-only push no longer cancels or hides the E2E run of a preceding code push** (Issue #882). Push runs now use a
   per-commit concurrency group and are never cancelled; pull_request runs keep the per-branch group with cancel-in-progress.
