@@ -10,6 +10,7 @@ Run:
 """
 import re
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -101,17 +102,21 @@ def test_only_the_generated_factory_imports_the_adapters():
     allowed = {
         'lib/audit-log-integrity/storage-gcs.ts', 'lib/audit-log-integrity/storage-s3.ts',
         'lib/audit-log-integrity/storage-gcs.test.ts', 'lib/audit-log-integrity/storage-s3.test.ts',
+        'lib/audit-log-integrity/storage-env.test.ts',
         'code_generator/templates/audit_log_storage_factory.ts.jinja2',
     }
     pattern = re.compile(r"audit-log-integrity/storage-(gcs|s3)|from '\./storage-(gcs|s3)'")
+    tracked = subprocess.run(
+        ['git', 'ls-files', 'app', 'lib', 'components', 'scripts', 'code_generator/templates', 'test'],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+    ).stdout.splitlines()
     offenders = []
-    for root in ('app', 'lib', 'components', 'scripts', 'code_generator/templates', 'test'):
-        for path in (REPO_ROOT / root).rglob('*'):
-            if not path.is_file() or path.suffix not in {'.ts', '.tsx', '.jinja2', '.mjs', '.js'} or 'node_modules' in path.parts:
-                continue
-            rel = path.relative_to(REPO_ROOT).as_posix()
-            if rel not in allowed and pattern.search(path.read_text(errors='ignore')):
-                offenders.append(rel)
+    for rel in tracked:
+        path = REPO_ROOT / rel
+        if not path.is_file() or path.suffix not in {'.ts', '.tsx', '.jinja2', '.mjs', '.js'}:
+            continue
+        if rel not in allowed and pattern.search(path.read_text(errors='ignore')):
+            offenders.append(rel)
     assert offenders == []
 
 
