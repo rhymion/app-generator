@@ -162,6 +162,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **CI: a docs-only push no longer cancels or hides the E2E run of a preceding code push** (Issue #882). Push runs now use a
+  per-commit concurrency group and are never cancelled; pull_request runs keep the per-branch group with cancel-in-progress.
+  CI workflow change: see the note in `.github/workflows/ci.yml`.
+- **Dashboard aggregate: read permission and row-level scope on both entry points** (Issue #910). The `aggregateForWidget` 
+  Server Action now requires the user's `read` permission on the entity, as `POST /api/dashboard/aggregate` already did, 
+  and both paths limit every query (single and two-field group-by, bucketed queries, FK label lookups) to the rows the user 
+  can list: organization isolation, `x-self-only`, `x-filter-values` and Creator/Assignee-only read. FK labels are resolved 
+  through the target entity's permission and scope, and an unreadable label shows as `(unknown)`. `aggregateForWidgetCore` 
+  takes the acting user's id as its first argument. See `docs/knowledge/schema-yaml-configuration.md` §10.
 - **Mobile Playwright proxy no longer dies on a reset socket** (Issue #897). `mobile/scripts/same-origin-proxy.js` ended the whole process
   when the API or web server reset its socket in the middle of a response, which made every later spec fail with
   `ERR_CONNECTION_REFUSED`. A reset on either side now ends only that one request. Covered by `scripts/same-origin-proxy.test.ts`.

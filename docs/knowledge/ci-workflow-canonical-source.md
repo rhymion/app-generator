@@ -297,6 +297,14 @@ today.
 
 ## Docs-only E2E skip — app-generator's own CI
 
+**Concurrency of this repo's own workflow.** `pull_request` runs share one
+group per head branch and a newer push cancels the superseded run. `push`
+runs (integration branches only) use a per-commit group and are never
+cancelled, so every commit that lands gets a completed run. Reason: the
+docs-only check diffs against `github.event.before`, so a docs-only push that
+cancelled the in-progress run of the preceding code push also skipped E2E for
+itself, and the code commit never got a completed E2E run (Issue #882).
+
 Separate from the consumer-side gate documented above: this repo's own
 `.github/workflows/ci.yml` gained the same `concurrency` +
 `detect-changes`/`needs:`+`if:` shape, gating **only** its own
