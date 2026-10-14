@@ -2,21 +2,31 @@ import { useCallback, useEffect, useState } from 'react';
 import { router } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { apiFetch } from '@/lib/api-base';
 import { APP_TITLE } from '@/lib/nav';
 import { useLocale } from '@/lib/locale';
 import { clearTokens, getRefreshToken } from '@/lib/token-storage';
 
 const POLL_MS = 60_000;
+const BAR_PADDING_X = 12;
+const BAR_PADDING_Y = 10;
+const MIN_TOUCH_TARGET = 44;
+const HIT_SLOP = { top: 4, bottom: 4, left: 4, right: 4 };
 
 /**
  * App bar. Keeps what the desktop header offers that is not primary
  * navigation: the title, the language switcher, the notification bell with
  * its unread badge, and sign-out. The sidebar toggle has no counterpart
  * (navigation is the footer), and search lives in the footer.
+ *
+ * The bar sits below the status bar / notch / camera cutout (top safe-area
+ * inset) and every action is at least 44x44 points, so none of them is hidden
+ * under the system UI or too small to hit.
  */
 export function Header() {
   const { locale, locales, cycleLocale } = useLocale();
+  const insets = useSafeAreaInsets();
   const [unread, setUnread] = useState(0);
 
   useEffect(() => {
@@ -48,12 +58,18 @@ export function Header() {
   }, []);
 
   return (
-    <View style={styles.bar} testID="header-bar">
+    <View
+      style={[
+        styles.bar,
+        { paddingTop: insets.top + BAR_PADDING_Y, paddingLeft: insets.left + BAR_PADDING_X, paddingRight: insets.right + BAR_PADDING_X },
+      ]}
+      testID="header-bar"
+    >
       <Text style={styles.title} numberOfLines={1} testID="header-title">
         {APP_TITLE}
       </Text>
       {locales.length > 1 ? (
-        <Pressable style={styles.action} onPress={cycleLocale} testID="header-locale">
+        <Pressable style={styles.action} onPress={cycleLocale} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Change language" testID="header-locale">
           <Text style={styles.actionText}>{locale.toUpperCase()}</Text>
         </Pressable>
       ) : null}
@@ -67,7 +83,7 @@ export function Header() {
           </View>
         ) : null}
       </View>
-      <Pressable style={styles.action} onPress={signOut} testID="header-signout" accessibilityLabel="Sign out">
+      <Pressable style={styles.action} onPress={signOut} hitSlop={HIT_SLOP} accessibilityRole="button" accessibilityLabel="Sign out" testID="header-signout">
         <MaterialIcons name="logout" size={22} color="#374151" />
       </Pressable>
     </View>
@@ -78,15 +94,15 @@ const styles = StyleSheet.create({
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: BAR_PADDING_X,
+    paddingVertical: BAR_PADDING_Y,
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
     backgroundColor: '#ffffff',
     gap: 8,
   },
   title: { flex: 1, fontSize: 18, fontWeight: '600' },
-  action: { padding: 6, minWidth: 32, alignItems: 'center' },
+  action: { minWidth: MIN_TOUCH_TARGET, minHeight: MIN_TOUCH_TARGET, alignItems: 'center', justifyContent: 'center' },
   actionText: { fontSize: 13, fontWeight: '600', color: '#374151' },
   badge: {
     position: 'absolute',
