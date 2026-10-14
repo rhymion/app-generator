@@ -162,6 +162,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **Generated delete examples check the rows exist first for an entity with no unique primary link** (Issue #835). 
+  Examples 4.1, 4.2 and 4.3 in the generated UI spec now assert the populated row count before they delete, so an example 
+  that finds nothing to delete fails on its own precondition. Entities with a unique primary link are unchanged.
 - **Approve, Reject and Withdraw no longer fire without waiting** (Issue #500). `ApprovalSection` now awaits the Server Action,
   disables every approve/reject/withdraw control (and keeps the confirmation dialog open) until the request settles, and shows an
   error message when the request fails, so two quick clicks can no longer run overlapping approval transactions on the server.

@@ -562,6 +562,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
       // Confirm the row is present before deleting, so the closing
       // `not.exist` assertion below can only pass because of the delete.
       cy.contains(exactRe('{{ list_id_1 }}')).should('be.visible');
+{% else %}
+      // No unique primary link to target: confirm the populated rows are
+      // present before deleting, so the closing row-count check can only
+      // pass because of the delete.
+      getDataGridTotalRowCount().should('eq', 2);
 {% endif %}
       cy.selectDataGridRows([0]);
       cy.get('div').find('button[aria-label="Delete Selected"]').first().click();
@@ -593,6 +598,11 @@ describe('Testing {{ title }} pages and their behavior', () => {
       // Confirm the row is present before deleting, so the closing
       // `not.exist` assertion below can only pass because of the delete.
       cy.contains(exactRe('{{ list_id_1 }}')).should('be.visible');
+{% else %}
+      // No unique primary link to target: confirm the populated rows are
+      // present before deleting, so the closing row-count check can only
+      // pass because of the delete.
+      getDataGridTotalRowCount().should('eq', 3);
 {% endif %}
       cy.selectDataGridRows([0, 1]);
       cy.get('div').find('button[aria-label="Delete Selected"]').first().click();
@@ -632,6 +642,8 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {% if list_id_is_unique %}
       cy.contains(exactRe('{{ list_id_1 }}')).click();
 {% else %}
+      // Confirm the populated row is present before opening and deleting it.
+      getDataGridTotalRowCount().should('eq', {{ seed_count + 1 }});
       cy.contains('.MuiDataGrid-cell', exactRe('{{ list_id_1 }}')).find('a').first().click();
 {% endif %}
       cy.get('a[aria-label="Edit"]').click();
