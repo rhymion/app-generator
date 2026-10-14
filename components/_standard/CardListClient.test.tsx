@@ -19,6 +19,7 @@ type Item = { id: string; name: string; description?: string };
 const item1: Item = { id: '1', name: 'Alpha', description: 'First item' };
 const item2: Item = { id: '2', name: 'Beta', description: 'Second item' };
 const basePath = '/items';
+const noopRemove = vi.fn().mockResolvedValue(undefined);
 const allPerms = { create: true, read: true, update: true, delete: true, import: true };
 
 describe('CardListClient', () => {
@@ -53,7 +54,7 @@ describe('CardListClient', () => {
     });
 
     it('uses entityLabel in the delete confirmation dialog title', () => {
-      render(<CardListClient src={[item1]} basePath={basePath} entityLabel="Book" permissions={allPerms} />);
+      render(<CardListClient src={[item1]} basePath={basePath} entityLabel="Book" permissions={allPerms} removeAction={noopRemove} />);
       fireEvent.click(screen.getByRole('checkbox', { name: 'Select Alpha' }));
       fireEvent.click(screen.getByRole('button', { name: 'Delete Selected' }));
       expect(screen.getByText('Delete Book(s)?')).toBeInTheDocument();
@@ -120,29 +121,35 @@ describe('CardListClient', () => {
 
   describe('Delete', () => {
     it('shows delete button when permissions.delete=true', () => {
-      render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} />);
+      render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} removeAction={noopRemove} />);
       expect(screen.getByRole('button', { name: 'Delete Selected' })).toBeInTheDocument();
     });
 
     it('hides delete button and checkboxes when permissions.delete=false', () => {
-      render(<CardListClient src={[item1]} basePath={basePath} permissions={{ ...allPerms, delete: false }} />);
+      render(<CardListClient src={[item1]} basePath={basePath} permissions={{ ...allPerms, delete: false }} removeAction={noopRemove} />);
+      expect(screen.queryByRole('button', { name: 'Delete Selected' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    });
+
+    it('hides delete button and checkboxes when no removeAction is passed even though permissions.delete=true (x-generate.delete: false means no delete route or action exists)', () => {
+      render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} />);
       expect(screen.queryByRole('button', { name: 'Delete Selected' })).not.toBeInTheDocument();
       expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     });
 
     it('delete button is disabled when no items are selected', () => {
-      render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} />);
+      render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} removeAction={noopRemove} />);
       expect(screen.getByRole('button', { name: 'Delete Selected' })).toBeDisabled();
     });
 
     it('delete button is enabled after selecting an item', () => {
-      render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} />);
+      render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} removeAction={noopRemove} />);
       fireEvent.click(screen.getByRole('checkbox', { name: 'Select Alpha' }));
       expect(screen.getByRole('button', { name: 'Delete Selected' })).not.toBeDisabled();
     });
 
     it('opens confirmation dialog when delete button is clicked', () => {
-      render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} />);
+      render(<CardListClient src={[item1]} basePath={basePath} permissions={allPerms} removeAction={noopRemove} />);
       fireEvent.click(screen.getByRole('checkbox', { name: 'Select Alpha' }));
       fireEvent.click(screen.getByRole('button', { name: 'Delete Selected' }));
       expect(screen.getByText('Delete Item(s)?')).toBeInTheDocument();
