@@ -162,6 +162,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **Generated delete examples check the rows exist first for an entity with no unique primary link** (Issue #835). Examples 4.1, 4.2 and 4.3 in the generated UI spec now assert the populated row count before they delete, so an example that finds nothing to delete fails on its own precondition. Entities with a unique primary link are unchanged.
 - **Version Of E2E gate fixture: two flaky examples fixed** (Issue #1000). `version_of.cy.ts` looked the Save button up document-wide, so it found two submit buttons while React streamed the new-version screen (the revealed form plus a hidden copy in the streaming buffer, for about 30 ms); it now looks inside `main form`. `version_of_ui.cy.ts` and `version_of.cy.ts` read values with a one-shot `.then`, so the diff assertion could see the previous pair right after "Compare"; they now assert in a retried `.should`. Test fixtures only; generated code is unchanged. See `docs/knowledge/testing-cypress.md`.
 - **CI: a docs-only push no longer cancels or hides the E2E run of a preceding code push** (Issue #882). Push runs now use a
   per-commit concurrency group and are never cancelled; pull_request runs keep the per-branch group with cancel-in-progress.
