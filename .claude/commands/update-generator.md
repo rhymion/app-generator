@@ -67,7 +67,7 @@ are `mobile/**`, `code_generator/templates/mobile/**`, `code_generator/mobile_en
 `code_generator/mobile_nav.py`, `code_generator/generate.py`, `code_generator/validate.py`,
 `code_generator/tests/fixtures/mobile_entity_e2e_gate/**`,
 `code_generator/tests/fixtures/scheduled_task_e2e_gate/**`, `scripts/compose_child_datagrid_e2e_fixture.py`,
-`scripts/run_mobile_entity_playwright.sh` and `scripts/mobile_pw_gate_applies.sh`; the script holds the
+`scripts/run_mobile_entity_playwright.sh`, `scripts/mobile_pw_gate_applies.sh` and `.github/workflows/ci.yml`; the script holds the
 authoritative list. `build_context.py` is not on it (it holds no mobile logic).
 Run `npm run test:e2e:mobile:pw` when the answer is `yes`; it runs `scripts/run_mobile_entity_playwright.sh`,
 which starts its own disposable stack per mode (own docker project, derived ports), so it runs locally

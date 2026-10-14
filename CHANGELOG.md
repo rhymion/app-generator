@@ -15,6 +15,8 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **Mobile executable guide** (Issue #987). `docs/knowledge/mobile-executable.md` documents building a release `.apk` locally 
   with `expo prebuild` and Gradle (measured), the iOS routes and what each needs, setting `EXPO_PUBLIC_API_BASE_URL` for a real 
   device, and the `app.json` / `eas.json` settings the generator does not emit. Documentation only.
+- **CI changes now exercise the mobile Playwright job**. `.github/workflows/ci.yml` is on the path list in
+  `scripts/mobile_pw_gate_applies.sh`, so a change to the workflow that defines the `mobile-playwright` job runs the suite instead of skipping it.
 - **Scheduled tasks on GCP, in dependency order**. `docs/knowledge/scheduled-task-operations.md` explains what to
   register on GCP (one `task:run-all` Job versus one Scheduler job per task), that `task:run-all` honors `depends_on` order
   and the UTC business date but not the time of day of an `interval`, how non-daily tasks are recorded as `not_due` and how a
