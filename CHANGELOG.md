@@ -27,6 +27,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `POST /api/dashboard/aggregate` request, response and errors. README, README_ja and the schema reference now describe the
   one schema-wide aggregate endpoint (not a per-entity one), CSV export only (not Excel), and the full groupable-field list
   including number and date/time fields and the always-added creator, updater and timestamp fields. Documentation only.
+- **Mobile: an unreachable server is explained.** The sign-in screen now catches a network failure (server down, device
+  offline, or a request the browser blocked) and shows "Could not reach the server" instead of an error screen; a failed
+  navigation lookup keeps the footer fail-closed but shows a notice that the menu could not be loaded, distinct from
+  missing permissions. `docs/knowledge/mobile-app.md` says to open the same-origin proxy URL, not the Expo dev server's
+  port. No new schema key.
 - **Dashboard widgets say why they cannot be drawn** (Issue #908, part of #904). A widget that cannot render now names
   the wrong setting, why, and how to fix it, in English or Japanese, instead of showing a raw internal message or
   "Failed to load". Distinct messages cover: no data source in the schema, a data source that is not available, no read

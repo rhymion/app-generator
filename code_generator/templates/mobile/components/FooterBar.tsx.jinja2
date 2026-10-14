@@ -26,13 +26,20 @@ function hrefOf(tab: Tab): string {
  * horizontally, so every tab stays reachable however many there are.
  */
 export function FooterBar() {
-  const { tabs } = useNav();
+  const { tabs, failed } = useNav();
   const { labelOf } = useLocale();
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const allTabs: Tab[] = SEARCH_TAB ? [...tabs, SEARCH_TAB] : tabs;
 
   return (
     <View style={styles.bar} testID="footer-bar">
+      {failed ? (
+        <View style={styles.notice}>
+          <Text testID="nav-load-failed" style={styles.noticeText}>
+            Could not load the menu from the server, so it is hidden. This is not a permissions change; check the connection and reload.
+          </Text>
+        </View>
+      ) : null}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.content}>
         {allTabs.map((tab) => {
           const active = activeKey === tab.key;
@@ -62,6 +69,8 @@ export function FooterBar() {
 
 const styles = StyleSheet.create({
   bar: { borderTopWidth: 1, borderTopColor: '#e5e7eb', backgroundColor: '#ffffff' },
+  notice: { paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#fffbeb', gap: 4 },
+  noticeText: { color: '#92400e', fontSize: 13 },
   content: { paddingHorizontal: 4 },
   tab: { width: 76, paddingVertical: 8, alignItems: 'center', gap: 2 },
   tabActive: { borderTopWidth: 2, borderTopColor: '#2563eb' },
