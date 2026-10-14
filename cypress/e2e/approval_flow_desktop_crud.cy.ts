@@ -177,7 +177,7 @@ describe('Testing Approval Flow pages and their behavior (hand-written port, cmd
       seedApprovalFlowRowsFull(1).then((_records) => {
         cy.visit('/en/approval_flow');
         cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-        cy.contains('.MuiDataGrid-row', 'user').find('a').first().click();
+        cy.contains('.MuiDataGrid-row', 'User').find('a').first().click();
         cy.get('a[aria-label="Edit"]').click();
         cy.url().should('include', '/approval_flow/edit');
         cy.clickButton('Save');
@@ -234,7 +234,7 @@ describe('Testing Approval Flow pages and their behavior (hand-written port, cmd
       seedApprovalFlowRows(1);
       cy.visit('/en/approval_flow');
       cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-      cy.contains('.MuiDataGrid-row', 'user').find('a').first().click();
+      cy.contains('.MuiDataGrid-row', 'User').find('a').first().click();
       cy.get('a[aria-label="Edit"]').click();
       cy.url().should('include', '/approval_flow/edit');
       cy.clickButton('Delete Approval Flow');
@@ -262,7 +262,7 @@ describe('Testing Approval Flow pages and their behavior (hand-written port, cmd
       seedApprovalFlowRows(1);
       cy.visit('/en/approval_flow');
       cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-      cy.contains('.MuiDataGrid-row', 'user').find('a').first().click();
+      cy.contains('.MuiDataGrid-row', 'User').find('a').first().click();
       cy.get('a[aria-label="Edit"]').click();
       cy.clearAutocomplete('Entity Name');
       cy.clickButton('Save');

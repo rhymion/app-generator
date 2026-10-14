@@ -45,7 +45,8 @@ Each option is `{value, label, key}`: `value` is the entity name (what is stored
 - The mobile spec carries `optionLabelKeys` beside `optionLabels`; `lib/messages.ts` ships the `EntityLabel` words of the
   offered entities, and the chips, list cells and detail text translate the key (`optionText` / `toDisplayText` /
   `toRecordDisplayText` take the `t` of `useMessages`). The English title is the fallback when a key is missing.
-- Generated specs find a list row by the dictionary word (`EntityLabel` of `messages/en.json`), not by the entity name.
+- Generated specs find a list row by the dictionary word (`EntityLabel` of `messages/en.json`), not by the entity name: the list
+  lookups use the word, and the delete tests translate the stored `name` of a populated record with a `nameLabels` map.
 
 A child DataGrid column that holds an entity name keeps showing the stored name; only the screens above use the dictionary.
 

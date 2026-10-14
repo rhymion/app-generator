@@ -4680,6 +4680,7 @@ def spec_context(
     else:
         seed_count = 0
 
+    _name_meta = next((f for f in fields if f['prop_name'] == 'name'), None)
     return {
         'parent': parent,
         'pascal': pascal,
@@ -4728,6 +4729,11 @@ def spec_context(
         'fail_edit_6_2': fail_edit_6_2,
         # List identifiers
         'list_id_1': list_id_1,
+        # A `name` column that is an x-entity-select shows the entity's dictionary word, so the delete tests
+        # (which find the populated row by its `name`) look the word up from the stored entity name.
+        'name_label_map': json.dumps(
+            {o['value']: o['label'] for o in (_name_meta.get('entity_options') or [])}
+        ) if _name_meta and _name_meta.get('category') == 'entity_select' else '',
         'list_id_is_unique': list_id_is_unique,
         'after_create_id': after_create_id,
         'after_create_id_is_expr': after_create_id_is_expr,

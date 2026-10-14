@@ -46,8 +46,8 @@ describe('List filter/sort on a relation display column (app-generator#753)', ()
             // FILTERABLE_FIELDS, so the request silently returned every row
             // unfiltered (Part 1's "no-op", not a crash).
             cy.get('.MuiDataGrid-row').should('have.length', 1);
-            cy.contains('.MuiDataGrid-row', 'user').should('exist');
-            cy.contains('.MuiDataGrid-row', 'organization').should('not.exist');
+            cy.contains('.MuiDataGrid-row', 'User').should('exist');
+            cy.contains('.MuiDataGrid-row', 'Organization').should('not.exist');
 
             // A value matching neither row's approver_role must return zero
             // rows (proves the filter is real, not a pass-through).
@@ -68,8 +68,8 @@ describe('List filter/sort on a relation display column (app-generator#753)', ()
             cy.get('.MuiDataGrid-row').should('have.length', 2);
 
             cy.get('[data-field="approver_role"] .MuiDataGrid-columnHeaderTitle').click();
-            cy.get('.MuiDataGrid-row').eq(0).should('contain.text', 'organization');
-            cy.get('.MuiDataGrid-row').eq(1).should('contain.text', 'user');
+            cy.get('.MuiDataGrid-row').eq(0).should('contain.text', 'Organization');
+            cy.get('.MuiDataGrid-row').eq(1).should('contain.text', 'User');
           });
         });
       });
