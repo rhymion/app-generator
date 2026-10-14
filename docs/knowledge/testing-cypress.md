@@ -406,6 +406,13 @@ The `cy.login` call uses `cy.session` with `cacheAcrossSpecs: true` so the
 login session is shared across spec files (but cleared explicitly in `beforeEach`
 via `Cypress.session.clearAllSavedSessions()`).
 
+### Look buttons up inside the page, and assert in a retried command
+
+Two flake patterns recur in gate specs for Suspense pages (every generated `new` and `edit` page):
+
+- **A document-wide `cy.get('button[type="submit"]')` can match two elements.** While React streams a Suspense page, the revealed form is in `<main>` and a hidden copy of the same form sits in a detached buffer (`div#S:0[hidden]`) for a few tens of milliseconds. `click()` then fails with "Your subject contained 2 elements". Look the button up inside the revealed form, e.g. `cy.get('main form button[type="submit"]')`. Do not use `{ multiple: true }` or an unexplained `.first()`.
+- **`cy.get(...).then(($els) => expect(...))` reads once.** If an element of the same selector is already on screen (for example the previous diff pair before a "Compare" click re-renders), the assertion sees stale values. Put the assertion in `.should(($els) => { expect(...) })`, which Cypress retries.
+
 ---
 
 ## MUI DataGrid patterns

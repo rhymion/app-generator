@@ -45,7 +45,7 @@ describe('x-version-of: version list and diff', () => {
       // default pair: current version against the open draft
       cy.get('[data-testid="version-diff"]').should('be.visible');
       cy.get('[data-testid="diff-field-title"]').should('have.attr', 'data-changed', 'true');
-      cy.get('[data-testid="diff-field-title"] input').then(($i) => {
+      cy.get('[data-testid="diff-field-title"] input').should(($i) => {
         expect([...$i].map((e) => (e as HTMLInputElement).value)).to.deep.eq(['Second', 'Third']);
       });
     });
@@ -55,7 +55,7 @@ describe('x-version-of: version list and diff', () => {
     seed().then((s) => {
       cy.visit(`/vo_item/view/${s.itemId}`);
       cy.get(`[data-testid="version-row-${s.v1}"]`).contains('button', 'Compare').click();
-      cy.get('[data-testid="diff-field-title"] input').then(($i) => {
+      cy.get('[data-testid="diff-field-title"] input').should(($i) => {
         expect([...$i].map((e) => (e as HTMLInputElement).value)).to.deep.eq(['Second', 'First']);
       });
       cy.get('[data-testid="diff-field-notes"]').should('have.attr', 'data-changed', 'true');
@@ -73,7 +73,7 @@ describe('x-version-of: version list and diff', () => {
       cy.visit(`/vo_item_version/view/${s.draft}`);
       cy.get('[data-testid="compare-with-current"]').click();
       cy.url().should('include', `/vo_item/view/${s.itemId}`).and('include', `compare=${s.draft}`);
-      cy.get('[data-testid="diff-field-title"] input').then(($i) => {
+      cy.get('[data-testid="diff-field-title"] input').should(($i) => {
         expect([...$i].map((e) => (e as HTMLInputElement).value)).to.deep.eq(['Second', 'Third']);
       });
     });
