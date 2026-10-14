@@ -702,6 +702,17 @@ MOBILE_PW_PRECONDITIONS_READY=1 EXPO_WEB_URL=http://localhost:8096 \
 `serve-web-with-proxy.js` runs the Expo web server and the proxy as one process so the runner can stop both;
 `same-origin-proxy.js` is the proxy alone.
 
+**Open the proxy URL (here `http://localhost:8096`), not the Expo dev server's own address (`8095`), which Expo
+opens in the browser automatically.** A page loaded from 8095 is cross-origin to the API (the REST routes send no CORS
+headers), so the browser blocks the sign-in request and the navigation lookup.
+
+When the server cannot be reached (server down, device offline, or a request the browser blocked), the sign-in screen
+shows "Could not reach the server" instead of an error screen. When only the navigation lookup (`GET /api/mobile/nav`)
+fails, the footer shows only the fixed Search tab plus a notice that the menu could not be loaded (`nav-load-failed`).
+The footer stays fail-closed in that case: the notice explains the empty footer, it does not reveal anything. An empty
+footer with that notice is a connection problem, not missing permissions. `mobile/e2e/network-failure.spec.ts` covers
+these screens.
+
 The fixture mode merges `code_generator/tests/fixtures/mobile_entity_e2e_gate/` (`mobile_note` with full
 CRUD, `mobile_log` list-and-view only, `mobile_task` with a required foreign key, a many-to-many and a one-to-one
 selector to `mobile_group` / `mobile_tag` / `mobile_profile`, `mobile_org_item` with a foreign key to `organization`, `mobile_ticket` with an `x-create-inline` foreign key to `mobile_category`, `mobile_order` with `x-payment`, `mobile_request` with `x-approval`, `mobile_shipment` with `x-approval` and `x-splittable`, `mobile_thread` commentable and list-and-view only, `mobile_invoice` with a child collection) into the copy's schema, as `scripts/compose_child_datagrid_e2e_fixture.py`
@@ -783,6 +794,59 @@ The suite runs the web bundle, not native rendering, so native-only behavior (se
 the biometric lock, native icon fonts) is not exercised by it. `npm run test:e2e:mobile:pw` is a path-triggered
 step of the update-generator gate (it applies when the change touches a path the suite exercises) and is not
 part of the unconditional steps.
+
+## Native end-to-end flows (Maestro, Android)
+
+`generate-code` writes one [Maestro](https://maestro.dev) flow for every entity that has native screens, to
+`mobile/e2e/generated/maestro/<entity>.yaml`, plus `subflows/sign_in.yaml`. The directory is git-ignored: a project does not
+track generated output. `code_generator/mobile_e2e.py` builds the flows from the specs `build_mobile_entity_spec` returns, that is
+from the same `mobile_ineligible_reason` decision that emits the screens, so an entity has a flow exactly when it has screens.
+These flows run on a real Android runtime. The Playwright suite above drives the react-native-web build in a browser and cannot
+see native-only behavior (secure storage, native pickers, the keyboard, hardware back); the flows are additional, not a replacement.
+
+Each entity flow does the following, addressing the `testID`s the native templates emit (Maestro's `id:` selector):
+
+1. Signs in with `E2E_EMAIL` / `E2E_PASSWORD` and waits for `footer-bar`.
+2. Opens the entity's list: one `footer-tab-<entity>` tap for a flat tab, or the tap on the group's footer tab followed by one
+   `nav-row-<slug>` tap per sub-group and a final `nav-row-<entity>`. An entity that no footer tab reaches gets no flow.
+3. Checks the list chrome (`list-<entity>`, `list-title`, `list-page`, no `list-error`).
+4. Opens the first row's detail screen (`view-<entity>`) and returns, when a row exists. With `E2E_REQUIRE_SEED_ROWS=1` the flow
+   fails when the list shows no row.
+5. For an entity that can be created and viewed, creates one record. Every required field must be a text, number, decimal,
+   boolean, enum, date, date-time or time field and not read-only: text gets `e2e <E2E_RUN_ID> <key>`, a number gets `1`, a
+   decimal `1.5`, an enum its first option, a date type the "Today"/"Now" shortcut, a boolean stays off. An entity whose
+   required fields need a relation picker, an attachment or child rows gets no create step. The flow ends on `view-<entity>`.
+
+Seed data is the one the Playwright runner uses: `db:seed-baseline` (the `admin@example.com` administrator) and
+`db:grant-all-permissions`. Records beyond that are not seeded, so on a freshly seeded database the detail step is skipped for
+entities with no rows.
+
+### Running the flows
+
+`scripts/run_mobile_native_e2e.sh` is the entry point:
+
+- `bash scripts/run_mobile_native_e2e.sh validate` (the default) runs `maestro check-syntax` on every generated flow. It needs the
+  Maestro CLI only (`MAESTRO_BIN`, default `maestro` on `PATH`), no emulator and no APK, and says in its last line that nothing
+  was executed.
+- `APK=<path> bash scripts/run_mobile_native_e2e.sh run` installs the APK on the attached device or emulator and runs the flows
+  with `maestro test`. The caller prepares the rest: the API (with the seeded database) at the URL the APK was built with
+  (`EXPO_PUBLIC_API_BASE_URL`, baked in at build time; an emulator reaches the host as `10.0.2.2`) and the APK itself
+  (`expo prebuild` plus `gradle assembleDebug`; see `docs/knowledge/mobile-executable.md`). `E2E_APP_ID` defaults to
+  `com.anonymous.<slug>`, the application id `expo prebuild` assigns when `app.json` declares none; set it when the project
+  declares its own.
+
+The script never passes silently: a missing CLI, adb, APK or attached device exits with status 3 and the word `UNAVAILABLE`, and a
+missing or invalid flow exits with status 1. The Android emulator needs hardware acceleration: the user must be able to open
+`/dev/kvm` (on Linux, membership of the `kvm` group). Without it the emulator is unusable, so only `validate` can run.
+
+This step is not part of the update-generator completion gate: it needs an emulator, an APK build of about ten minutes and
+a prepared stack. The flows are validated, not executed, by the pytest suite (`code_generator/tests/test_mobile_e2e.py`).
+
+### Growing the flows
+
+The minimal set above is the base. Later steps add, in this order: list filter/sort/search; relation pickers; child rows,
+inline create and attachments; comments; approval and split actions; reservation, custom components, scheduled tasks, audit log.
+The Playwright specs under `mobile/e2e/` already cover each of these on the web build and are the source for the assertions.
 
 ## Not implemented yet
 

@@ -155,7 +155,7 @@ from build_context import (
     _exclusive_parent_columns, _exclusive_parent_all_columns, _model_has_audit_fields,
 )
 from generate_types import extract_entities
-from generators import resolve_approval_submit_on
+from generators import build_dashboard_catalog, resolve_approval_submit_on
 
 
 def _readonly_field_names(model_def: dict, view_def: dict | None = None) -> set[str]:
@@ -2005,6 +2005,51 @@ def _child_native_enum_singleselect_calls(fields: list, title: str, value_fn) ->
             f"selectDataGridSingleSelect(0, '{field['prop_name']}', '{label}', '{raw}', '{title}');"
         )
     return calls
+
+
+def _dashboard_widget_catalog_values(schema: dict) -> dict | None:
+    """Values for a dashboard widget row that the save-time validation accepts, or None.
+
+    The dashboard validates every new widget against the catalog of entities that opted in with
+    `x-display.dashboard`. With an empty catalog nothing is validated, so the free-text placeholders
+    are fine; with a non-empty catalog the data source and every field must name catalog members,
+    and chart settings must fit the chosen fields (a time bucket or time zone needs a date-time
+    group-by field, a stack mode needs a series field).
+    """
+    catalog = build_dashboard_catalog(schema)
+    if not catalog:
+        return None
+    entity = catalog[0]
+    fields = entity['groupable_fields']
+    datetime_field = next((f for f in fields if f['kind'] == 'datetime' and f.get('datetime_format') == 'date-time'), None)
+    group = datetime_field or fields[0]
+    series = next((f for f in fields if f['name'] != group['name']), None)
+    return {
+        'entity_name': entity['name'],
+        'group_by_field': group['name'],
+        'series_field': series['name'] if series else None,
+        'bucket': datetime_field is not None,
+    }
+
+
+def _apply_dashboard_widget_catalog_values(child_entry: dict, title: str, schema: dict) -> None:
+    """Make the dashboard widget child's generated rows valid for a schema with dashboard data sources."""
+    values = _dashboard_widget_catalog_values(schema)
+    if values is None:
+        return
+    base = f"name: '{'Test ' + title}', entity_name: '{values['entity_name']}', group_by_field: '{values['group_by_field']}'"
+    child_entry['create_obj'] = '{ ' + base + ' }'
+    full = base + (f", series_field: '{values['series_field']}'" if values['series_field'] else '')
+    child_entry['full_create_obj'] = '{ ' + full + ' }'
+    calls = [
+        f"selectDataGridSingleSelect(0, 'chart_type', 'Pie', 'pie', '{title}');",
+    ]
+    if values['series_field']:
+        calls.append(f"selectDataGridSingleSelect(0, 'stack_mode', 'Grouped', 'grouped', '{title}');")
+    if values['bucket']:
+        calls.append(f"selectDataGridSingleSelect(0, 'group_by_bucket', 'Day', 'day', '{title}');")
+        calls.append(f"selectDataGridSingleSelect(0, 'timezone', 'Pago Pago', 'pacific_pago_pago', '{title}');")
+    child_entry['native_enum_full_calls'] = calls
 
 
 def gen_child_datagrid_object(child_meta: dict, action: str) -> str:
@@ -4318,7 +4363,7 @@ def spec_context(
         native_enum_full_calls = _child_native_enum_singleselect_calls(
             child_meta['fields'], child_title, cypress_create_value
         )
-        datagrid_children_data.append({
+        child_entry = {
             'title': child_title,
             'pascal': to_pascal_case(child_name),
             'is_required_in_parent': child_meta['child']['property_name'] in detail_required,
@@ -4328,7 +4373,10 @@ def spec_context(
             'fk_full_fields': fk_full_fields,
             'native_enum_create_calls': native_enum_create_calls,
             'native_enum_full_calls': native_enum_full_calls,
-        })
+        }
+        if child_name == 'dashboard_widget':
+            _apply_dashboard_widget_catalog_values(child_entry, child_title, schema)
+        datagrid_children_data.append(child_entry)
 
     # Read-only independent grid children data (issue #538): only
     # a title is needed -- the generated assertion is a single negative

@@ -3743,10 +3743,10 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
                 )
             _array_relation_create_str = ', '.join(_array_relation_create_parts)
             _create_data_body = (
-                f"{{ {_fk_field}: created.id, {_create_extras_str}creator_id: userId, updater_id: userId, ...{_scalars_var}, {_array_relation_create_str} }}"
+                f"{{ {_fk_field}: created.id, {_create_extras_str}creator_id: actorId, updater_id: actorId, ...{_scalars_var}, {_array_relation_create_str} }}"
             )
             _upsert_create_body = (
-                f"{{ {_fk_field}: id, {_create_extras_str}creator_id: userId, updater_id: userId, ...{_scalars_var}, {_array_relation_create_str} }}"
+                f"{{ {_fk_field}: id, {_create_extras_str}creator_id: actorId, updater_id: actorId, ...{_scalars_var}, {_array_relation_create_str} }}"
             )
             _upsert_update_body = _scalars_var
             # After the upsert, replace the array items (delete-all + create-all).
@@ -3798,7 +3798,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
                 + (f"{chr(10).join(_derivation_decls)}\n" if _derivation_decls else "")
                 + f"      await tx.{_target}.upsert({{\n"
                 f"        where: {{ {_fk_field}: id }},\n"
-                f"        create: {{ {_fk_field}: id, {_create_extras_str}creator_id: userId, updater_id: userId, ...{_var} }},\n"
+                f"        create: {{ {_fk_field}: id, {_create_extras_str}creator_id: actorId, updater_id: actorId, ...{_var} }},\n"
                 f"        update: {_var},\n"
                 f"      }});\n"
                 f"    }} else {{\n"
@@ -3809,7 +3809,7 @@ def service_context(ctx: dict, schema: dict | None = None) -> dict:
                 f"    if ({_var}) {{\n"
                 + (f"{chr(10).join(_derivation_decls)}\n" if _derivation_decls else "")
                 + f"      await tx.{_target}.create({{\n"
-                f"        data: {{ {_fk_field}: created.id, {_create_extras_str}creator_id: userId, updater_id: userId, ...{_var} }},\n"
+                f"        data: {{ {_fk_field}: created.id, {_create_extras_str}creator_id: actorId, updater_id: actorId, ...{_var} }},\n"
                 f"      }});\n"
                 f"    }}"
             )

@@ -575,6 +575,29 @@ def test_generated_service_creates_lifestyle_inline_with_derived_patient_id():
     )
 
 
+def test_flatten_child_writes_use_service_actor_identifier():
+    """Flatten child create/upsert writes must use `actorId`, the acting-user
+    parameter of the enclosing add/update service functions. A stale `userId`
+    is an undefined identifier there and fails the generated type check.
+    """
+    from build_context import build_context  # noqa: WPS433
+    from generators import service_context   # noqa: WPS433
+
+    schema = _fixture_schema()
+    ctx = build_context(_entity('checkup'), schema)
+    svc = service_context(ctx, schema)
+
+    for key in ('flatten_nested_creates', 'flatten_nested_updates'):
+        block = svc[key]
+        assert block, f"{key} must not be empty for the checkup fixture"
+        assert 'userId' not in block, (
+            f"{key} references `userId`, which is not defined in the service "
+            "function scope (the parameter is `actorId`)."
+        )
+    assert 'creator_id: actorId, updater_id: actorId' in svc['flatten_nested_creates']
+    assert 'creator_id: actorId, updater_id: actorId' in svc['flatten_nested_updates']
+
+
 def test_gen_empty_assert_command_emits_empty_check_for_text_and_enum():
     """gen_empty_assert_command must emit `cy.checkField(label, '')` for non-bool fields."""
     import sys

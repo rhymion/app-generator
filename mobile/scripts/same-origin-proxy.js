@@ -23,11 +23,25 @@ function proxy(req, res, target) {
   };
   const proxyReq = http.request(opts, (proxyRes) => {
     res.writeHead(proxyRes.statusCode, proxyRes.headers);
+    // An upstream socket that resets mid-response must not escape as an unhandled 'error' event.
+    proxyRes.on('error', () => res.destroy());
     proxyRes.pipe(res, { end: true });
   });
   proxyReq.on('error', (err) => {
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
     res.writeHead(502, { 'Content-Type': 'text/plain' });
     res.end('Proxy error: ' + err.message);
+  });
+  // A browser that navigates away resets its request or response socket; without handlers the
+  // reset is an unhandled 'error' event that ends the whole proxy process.
+  req.on('error', () => proxyReq.destroy());
+  res.on('error', () => proxyReq.destroy());
+  // Abort the upstream request when the client goes away before the response is complete.
+  res.on('close', () => {
+    if (!res.writableEnded) proxyReq.destroy();
   });
   req.pipe(proxyReq, { end: true });
 }

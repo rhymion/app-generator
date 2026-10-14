@@ -5,9 +5,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Native end-to-end flows for the Expo app** (Issue #994, part of #140). `generate-code` writes one Maestro flow per entity
+  that has native screens to `mobile/e2e/generated/maestro/` (git-ignored), from the same decision that emits the screens: sign
+  in, open the list from the footer tabs, check the list, open the first row's detail screen, and create one record for an entity
+  whose required fields are simple. `scripts/run_mobile_native_e2e.sh` validates the flows with `maestro check-syntax` and, with
+  an APK and an attached Android device or emulator, runs them; it exits with status 3 (`UNAVAILABLE`) rather than passing when
+  the CLI, adb, the APK or a device is missing. `docs/knowledge/mobile-app.md` describes the flows, the entry script and the
+  order in which they grow. The flows are not part of the completion gate.
 - **Mobile executable guide** (Issue #987). `docs/knowledge/mobile-executable.md` documents building a release `.apk` locally 
   with `expo prebuild` and Gradle (measured), the iOS routes and what each needs, setting `EXPO_PUBLIC_API_BASE_URL` for a real 
   device, and the `app.json` / `eas.json` settings the generator does not emit. Documentation only.
+- **CI changes now exercise the mobile Playwright job**. `.github/workflows/ci.yml` is on the path list in
+  `scripts/mobile_pw_gate_applies.sh`, so a change to the workflow that defines the `mobile-playwright` job runs the suite instead of skipping it.
 - **Scheduled tasks on GCP, in dependency order**. `docs/knowledge/scheduled-task-operations.md` explains what to
   register on GCP (one `task:run-all` Job versus one Scheduler job per task), that `task:run-all` honors `depends_on` order
   and the UTC business date but not the time of day of an `interval`, how non-daily tasks are recorded as `not_due` and how a
@@ -27,6 +36,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `POST /api/dashboard/aggregate` request, response and errors. README, README_ja and the schema reference now describe the
   one schema-wide aggregate endpoint (not a per-entity one), CSV export only (not Excel), and the full groupable-field list
   including number and date/time fields and the always-added creator, updater and timestamp fields. Documentation only.
+- **Mobile: an unreachable server is explained.** The sign-in screen now catches a network failure (server down, device
+  offline, or a request the browser blocked) and shows "Could not reach the server" instead of an error screen; a failed
+  navigation lookup keeps the footer fail-closed but shows a notice that the menu could not be loaded, distinct from
+  missing permissions. `docs/knowledge/mobile-app.md` says to open the same-origin proxy URL, not the Expo dev server's
+  port. No new schema key.
 - **Dashboard widgets say why they cannot be drawn** (Issue #908, part of #904). A widget that cannot render now names
   the wrong setting, why, and how to fix it, in English or Japanese, instead of showing a raw internal message or
   "Failed to load". Distinct messages cover: no data source in the schema, a data source that is not available, no read
@@ -151,7 +165,29 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **CI: a docs-only push no longer cancels or hides the E2E run of a preceding code push** (Issue #882). Push runs now use a
   per-commit concurrency group and are never cancelled; pull_request runs keep the per-branch group with cancel-in-progress.
   CI workflow change: see the note in `.github/workflows/ci.yml`.
-- **Dashboard aggregate: read permission and row-level scope on both entry points** (Issue #910). The `aggregateForWidget` Server Action now requires the user's `read` permission on the entity, as `POST /api/dashboard/aggregate` already did, and both paths limit every query (single and two-field group-by, bucketed queries, FK label lookups) to the rows the user can list: organization isolation, `x-self-only`, `x-filter-values` and Creator/Assignee-only read. FK labels are resolved through the target entity's permission and scope, and an unreadable label shows as `(unknown)`. `aggregateForWidgetCore` takes the acting user's id as its first argument. See `docs/knowledge/schema-yaml-configuration.md` §10.
+- **Dashboard aggregate: read permission and row-level scope on both entry points** (Issue #910). The `aggregateForWidget` 
+  Server Action now requires the user's `read` permission on the entity, as `POST /api/dashboard/aggregate` already did, 
+  and both paths limit every query (single and two-field group-by, bucketed queries, FK label lookups) to the rows the user 
+  can list: organization isolation, `x-self-only`, `x-filter-values` and Creator/Assignee-only read. FK labels are resolved 
+  through the target entity's permission and scope, and an unreadable label shows as `(unknown)`. `aggregateForWidgetCore` 
+  takes the acting user's id as its first argument. See `docs/knowledge/schema-yaml-configuration.md` §10.
+- **Mobile Playwright proxy no longer dies on a reset socket** (Issue #897). `mobile/scripts/same-origin-proxy.js` ended the whole process
+  when the API or web server reset its socket in the middle of a response, which made every later spec fail with
+  `ERR_CONNECTION_REFUSED`. A reset on either side now ends only that one request. Covered by `scripts/same-origin-proxy.test.ts`.
+- **Flattened one-to-one children no longer reference an undefined `userId`** (Issue #965). The create and upsert writes that 
+  `add<Entity>` / `update<Entity>` emit for a flattened child (a singular `$ref` with `x-outputType: flatten`, FK on the child) 
+  used `creator_id: userId, updater_id: userId`, but those service functions take the acting user as `actorId`, so the 
+  generated `service.ts` failed `tsc` with TS2304. They now use `actorId`.
+- **Dashboard UI specs no longer assume an empty dashboard catalog** (Issue #997). The generated `dashboard.cy.ts` now uses a 
+  real data source and fitting widget settings when the schema enables entities for the dashboard, and 
+  `dashboard_widget_editor.cy.ts` detects the catalog state and seeds widgets with an unavailable data source through the 
+  database instead of the validating API. Test code only; output for a schema with no dashboard entities is unchanged.
+- **Dashboard aggregate: read permission and row-level scope on both entry points** (Issue #910). The `aggregateForWidget` 
+  Server Action now requires the user's `read` permission on the entity, as `POST /api/dashboard/aggregate` already did, 
+  and both paths limit every query (single and two-field group-by, bucketed queries, FK label lookups) to the rows the user 
+  can list: organization isolation, `x-self-only`, `x-filter-values` and Creator/Assignee-only read. FK labels are resolved 
+  through the target entity's permission and scope, and an unreadable label shows as `(unknown)`. `aggregateForWidgetCore` 
+  takes the acting user's id as its first argument. See `docs/knowledge/schema-yaml-configuration.md` §10.
 - **`x-version-of`: a rejected version no longer blocks the next one, and the version number cannot be written** (Refs #946). A terminally
   rejected version stays as a closed record and is not counted as an open draft; a version rejected without `terminal`, or
   withdrawn, stays the open draft that is fixed and resubmitted. Neither is deleted any more. A number sent by a form or an API
