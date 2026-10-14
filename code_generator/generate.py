@@ -25,6 +25,7 @@ from helpers.bridge_direction import get_new_form_bridge
 from helpers.bridge_prisma import emit_bridge_model, emit_parent_bridge_fk, emit_child_bridge_fk
 from helpers.schema_helpers import get_flatten_rels
 from generate_types import extract_entities, extract_named_constants
+from mobile_e2e import FLOW_DIR as MOBILE_E2E_FLOW_DIR, build_flows as build_mobile_e2e_flows
 from mobile_nav import build_mobile_nav
 from nav_config import schema_declares_scheduled_tasks
 from mobile_entities import (
@@ -1293,6 +1294,22 @@ def _read_messages(output_dir: Path) -> dict:
     return messages
 
 
+def generate_mobile_native_e2e(mobile_specs: list[dict], tabs: list[dict], mobile_dir: Path, env: Environment) -> None:
+    """Render the Maestro flows (mobile/e2e/generated/maestro/): one per entity that has native screens.
+
+    The flows come from the specs `build_mobile_entity_spec` admitted, so an entity has a flow exactly when it has
+    native screens. Nothing is written when no entity has screens.
+    """
+    flows = build_mobile_e2e_flows(mobile_specs, tabs)
+    if not flows:
+        return
+    flow_dir = mobile_dir / MOBILE_E2E_FLOW_DIR
+    _write(flow_dir / 'subflows' / 'sign_in.yaml', _render(env, 'mobile/e2e/sign_in.yaml.jinja2', {}))
+    for name, flow in flows.items():
+        _write(flow_dir / f'{name}.yaml', _render(env, 'mobile/e2e/entity_flow.yaml.jinja2', flow))
+    print(f'  Mobile native E2E: {len(flows)} Maestro flow(s) -> mobile/{MOBILE_E2E_FLOW_DIR}/')
+
+
 def generate_mobile_target(
     entities: list, schema: dict, output_dir: Path, env: Environment, has_search: bool,
     mobile_specs: list | None = None, has_mention: bool = False,
@@ -1370,6 +1387,7 @@ def generate_mobile_target(
                _render(env, 'mobile/components/native/CommentThread.tsx.jinja2', ctx))
     _write(mobile_dir / 'lib' / 'entity-registry.ts', _render(env, 'mobile/lib/entity-registry.ts.jinja2', ctx))
     _write(mobile_dir / 'lib' / 'messages.ts', _render(env, 'mobile/lib/messages.ts.jinja2', ctx))
+    generate_mobile_native_e2e(mobile_specs or [], nav['tabs'], mobile_dir, env)
     print(f'  Mobile: {len(nav["tabs"])} footer tab(s) + search={has_search}'
           f' + {len(ctx["entities"])} entity screen set(s) → mobile/')
 

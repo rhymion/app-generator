@@ -5,6 +5,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Native end-to-end flows for the Expo app** (Issue #994, part of #140). `generate-code` writes one Maestro flow per entity
+  that has native screens to `mobile/e2e/generated/maestro/` (git-ignored), from the same decision that emits the screens: sign
+  in, open the list from the footer tabs, check the list, open the first row's detail screen, and create one record for an entity
+  whose required fields are simple. `scripts/run_mobile_native_e2e.sh` validates the flows with `maestro check-syntax` and, with
+  an APK and an attached Android device or emulator, runs them; it exits with status 3 (`UNAVAILABLE`) rather than passing when
+  the CLI, adb, the APK or a device is missing. `docs/knowledge/mobile-app.md` describes the flows, the entry script and the
+  order in which they grow. The flows are not part of the completion gate.
 - **Mobile executable guide** (Issue #987). `docs/knowledge/mobile-executable.md` documents building a release `.apk` locally 
   with `expo prebuild` and Gradle (measured), the iOS routes and what each needs, setting `EXPO_PUBLIC_API_BASE_URL` for a real 
   device, and the `app.json` / `eas.json` settings the generator does not emit. Documentation only.
