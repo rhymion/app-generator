@@ -72,6 +72,12 @@ Expo Go cannot check an app that needs native modules outside Expo Go's bundled 
 `expo-secure-store`, `expo-local-authentication` and `expo-document-picker`; check the SDK version of the app against
 the Expo Go version before relying on it. A development build covers all of them.
 
+Expo Go does not apply the biometric lock to the refresh token: its own `Info.plist` has no
+`NSFaceIDUsageDescription`, so `lib/token-storage.ts` stores and reads the token unlocked when
+`Constants.executionEnvironment` is `storeClient`. Sign-in works there, but Face ID cannot be checked in Expo Go.
+A standalone or development build locks the token as usual; `expo prebuild --platform ios` writes
+`NSFaceIDUsageDescription` into its `Info.plist` through the `expo-secure-store` plugin in `app.json`.
+
 ## Pointing the app at an API
 
 `EXPO_PUBLIC_API_BASE_URL` is the only API setting (`lib/api-base.ts`). Expo inlines it into the JavaScript
