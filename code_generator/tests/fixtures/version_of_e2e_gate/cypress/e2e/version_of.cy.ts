@@ -21,6 +21,10 @@ function createItem(name = 'Widget') {
 
 let orgId = '';
 
+function saveButton() {
+  return cy.get('main form button[type="submit"]');
+}
+
 function createVersion(itemId: string, status: 'draft' | 'pending', lines = 0, extra: Record<string, unknown> = {}) {
   return cy.request({
     method: 'POST',
@@ -178,7 +182,7 @@ describe('x-version-of (generated runtime behaviour)', () => {
         // (a) the identity is free for a new version draft, by the API and by the new version screen
         cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
         cy.visit(`/en/vo_item_version/new?new_version_of=${itemId}`);
-        cy.get('input').then(($inputs) => {
+        cy.get('input').should(($inputs) => {
           expect([...$inputs].map((i) => (i as HTMLInputElement).value), 'the screen opens filled').to.include('v-pending');
         });
         cy.contains('already has an open draft').should('not.exist');
@@ -291,7 +295,7 @@ describe('x-version-of (generated runtime behaviour)', () => {
           approve(v1);
           cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
           cy.visit(newVersionUrl(itemId));
-          cy.get('input').then(($inputs) => {
+          cy.get('input').should(($inputs) => {
             const values = [...$inputs].map((i) => (i as HTMLInputElement).value);
             expect(values, 'title and summary carried over').to.include.members(['v-pending', 'kept summary']);
             expect(values.some((v) => v.startsWith('ref-')), 'a unique column is not carried').to.eq(false);
@@ -300,14 +304,17 @@ describe('x-version-of (generated runtime behaviour)', () => {
           cy.contains('line 1');
           // nothing is written by opening the screen
           cy.task<State>('db:voState', itemId).then((s) => expect(s.versions).to.have.length(1));
-          // a unique, required child column is left for the user to fill in
-          cy.get('button[type="submit"]').click();
+          // A unique, required child column is left for the user to fill in. The save button is
+          // looked up inside <main>: while React streams the page, a hidden copy of the form sits
+          // in a detached buffer (div#S:0[hidden]) for a few tens of milliseconds next to the
+          // revealed one, so a document-wide lookup can find two submit buttons.
+          saveButton().click();
           cy.task<State>('db:voState', itemId).then((s) => expect(s.versions, 'blocked until the codes are given').to.have.length(1));
           ['new-code-a', 'new-code-b'].forEach((code, i) => {
             cy.get(`[role="row"][data-rowindex="${i}"] [data-field="line_code"]`).dblclick();
             cy.focused().type(`${code}{enter}`);
           });
-          cy.get('button[type="submit"]').click();
+          saveButton().click();
           cy.location('pathname').should('eq', '/vo_item_version');
           cy.task<State>('db:voState', itemId).then((s) => {
             expect(s.versions).to.have.length(2);
