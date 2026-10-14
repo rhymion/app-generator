@@ -163,6 +163,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **Native app header no longer sits under the system UI and its actions are large enough to press** (Issue #1014). The header and footer now apply the top and bottom safe-area insets, and each header action is at least 44x44 points.
 - **Generated delete examples check the rows exist first for an entity with no unique primary link** (Issue #835). 
   Examples 4.1, 4.2 and 4.3 in the generated UI spec now assert the populated row count before they delete, so an example 
   that finds nothing to delete fails on its own precondition. Entities with a unique primary link are unchanged.
