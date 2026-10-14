@@ -1,0 +1,20 @@
+// Chooses the AuditLogStorage from the environment.
+//   AUDIT_LOG_GCS_BUCKET (+ AUDIT_LOG_GCS_RETENTION_DAYS, AUDIT_LOG_GCS_RETENTION_MODE):
+//       GCS bucket with Object Retention, created and configured by ops.
+//   AUDIT_LOG_S3_BUCKET (+ AUDIT_LOG_S3_REGION, AUDIT_LOG_S3_RETENTION_DAYS):
+//       S3 Object Lock (compliance mode) bucket, created and configured by ops.
+//   AUDIT_LOG_STORAGE_DIR: a local directory, for tests and local runs only.
+//
+// When none is set the factory throws: a digest job that cannot reach its
+// write-once store must fail visibly, never skip silently.
+import path from 'node:path';
+import { LocalDirectoryStorage, type AuditLogStorage } from '@/lib/audit-log-integrity/storage';
+import { createGcsObjectRetentionStorageFromEnv } from '@/lib/audit-log-integrity/storage-gcs';
+import { createS3ObjectLockStorageFromEnv } from '@/lib/audit-log-integrity/storage-s3';
+
+export async function createAuditLogStorageFromEnv(env: Record<string, string | undefined> = process.env): Promise<AuditLogStorage> {
+  if (env.AUDIT_LOG_GCS_BUCKET) return createGcsObjectRetentionStorageFromEnv(env);
+  if (env.AUDIT_LOG_S3_BUCKET) return createS3ObjectLockStorageFromEnv(env);
+  if (env.AUDIT_LOG_STORAGE_DIR) return new LocalDirectoryStorage(path.resolve(env.AUDIT_LOG_STORAGE_DIR));
+  throw new Error('Audit log storage is not configured: set AUDIT_LOG_GCS_BUCKET, AUDIT_LOG_S3_BUCKET or AUDIT_LOG_STORAGE_DIR.');
+}

@@ -1,0 +1,53 @@
+// audit_log operations behind the scheduled tasks (x-scheduled-tasks in
+// json_schema.yaml). Same library calls as scripts/audit-log-digest.ts, but
+// imported directly so a failure reaches the scheduled-task run guard.
+// The scheduled tasks run on the application connection (DATABASE_URL, the
+// app_runtime role): close and export need SELECT/INSERT on audit_log and
+// audit_log_digest only, and partition creation goes through the
+// SECURITY DEFINER function audit_log_create_month_partition().
+import type { PrismaClient } from '@/app/generated/prisma/client';
+import { closeAuditLogPeriods, verifyAuditLogDigests } from '@/lib/audit-log-integrity/digest';
+import { archiveRowSource, exportAuditLogMonth } from '@/lib/audit-log-integrity/partition-export';
+import type { AuditLogStorage } from '@/lib/audit-log-integrity/storage';
+import { createAuditLogStorageFromEnv } from '@/lib/audit-log-ops/storage-factory';
+
+type JobClient = Pick<PrismaClient, '$queryRaw'> & Pick<PrismaClient, 'audit_log_digest'>;
+
+async function defaultClient(): Promise<JobClient> {
+  const { default: prisma } = await import('@/lib/prisma');
+  return prisma as unknown as JobClient;
+}
+
+export async function closeDigestPeriods(client?: JobClient, storage?: AuditLogStorage, now?: Date): Promise<number> {
+  const closed = await closeAuditLogPeriods(client ?? (await defaultClient()), storage ?? (await createAuditLogStorageFromEnv()), { now });
+  return closed.length;
+}
+
+export async function verifyDigests(client?: JobClient, storage?: AuditLogStorage): Promise<number> {
+  const store = storage ?? (await createAuditLogStorageFromEnv());
+  const result = await verifyAuditLogDigests(client ?? (await defaultClient()), store, { archiveRowSource: archiveRowSource(store) });
+  if (!result.ok) {
+    const detail = result.problems.map((p) => `${p.period_start} ${p.kind}: ${p.detail}`).join('; ');
+    throw new Error(`audit_log digest verification failed (${result.problems.length} problem(s)): ${detail}`);
+  }
+  return result.periodsChecked;
+}
+
+export async function ensurePartitions(client?: Pick<PrismaClient, '$queryRaw'>): Promise<string[]> {
+  const c = client ?? (await defaultClient());
+  const rows = await c.$queryRaw<{ name: string }[]>`
+    SELECT audit_log_create_month_partition(now()) AS name
+    UNION SELECT audit_log_create_month_partition(now() + interval '1 month')`;
+  return rows.map((r) => r.name);
+}
+
+/** The month (YYYY-MM, UTC) before the one containing `now`. */
+export function previousMonth(now: Date): string {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+/** Stages the previous month's rows and their SHA-256 in storage. Does not detach or drop anything. */
+export async function exportPreviousMonth(client?: JobClient, storage?: AuditLogStorage, now: Date = new Date()) {
+  return exportAuditLogMonth(client ?? (await defaultClient()), storage ?? (await createAuditLogStorageFromEnv()), previousMonth(now));
+}

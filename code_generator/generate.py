@@ -90,7 +90,7 @@ from validate import (
     validate_direct_attachment_prerequisite,
     validate_direct_attachment_reverse_fields,
     validate_write_once_stub_asymmetry,
-    validate_generator_config, mobile_generation_enabled,
+    validate_generator_config, mobile_generation_enabled, audit_log_storage_enabled,
     SchemaValidationError,
 )
 from generators_doc import build_doc_entity_context, build_doc_index_context, convert_md_to_mdx
@@ -2642,6 +2642,18 @@ def generate(schema_path: str, output_dir: str) -> None:
             'x-payment: true is declared on at least one entity.',
             'Set STRIPE_WEBHOOK_SECRET (the payment lifecycle itself is handled in lib/payment/).',
         )
+
+    # --- audit_log storage factory and jobs (x-generator.audit-log-storage.enabled) ---
+    # Opt-in (default off). lib/audit-log-ops/ is the only entry point into the storage
+    # adapters (lib/audit-log-integrity/storage-{gcs,s3}.ts), so an app that leaves the flag
+    # off references neither adapter and neither storage SDK.
+    if audit_log_storage_enabled(schema):
+        for _als_tpl, _als_out in (
+            ('audit_log_storage_factory.ts.jinja2', 'storage-factory.ts'),
+            ('audit_log_jobs.ts.jinja2', 'jobs.ts'),
+        ):
+            _write(out / 'lib' / 'audit-log-ops' / _als_out, _render(env, _als_tpl, {}))
+        print('  audit_log storage factory and jobs → lib/audit-log-ops/')
 
     # --- Comment/reaction service layer (lib/comment/service.ts, lib/reaction/service.ts) ---
     # Emitted whenever x-internal enum entities exist (i.e., reactions are

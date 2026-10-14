@@ -5,6 +5,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **GCS and S3 write-once storage for audit_log digests** (Issue #991, part of #945). `lib/audit-log-integrity/storage-gcs.ts`
+  stores digests and archives in a Google Cloud Storage bucket with per-object retention (unlocked or locked) and create-if-absent
+  writes; the S3 Object Lock adapter moves here from the consumer template. Both load their SDK through a dynamic import with a
+  literal module name, only when selected. The new opt-in key `x-generator.audit-log-storage.enabled` generates
+  `lib/audit-log-ops/storage-factory.ts` (picks the storage from `AUDIT_LOG_GCS_*`, `AUDIT_LOG_S3_*` or `AUDIT_LOG_STORAGE_DIR`, and
+  fails when none is set) and `lib/audit-log-ops/jobs.ts`; absent or `false` generates nothing and no generated file refers to an
+  adapter. `AUDIT_LOG_GCS_AUTH=vercel-oidc` authenticates from Vercel without a key. `@aws-sdk/client-s3`, `@vercel/oidc` and `google-auth-library` are added to `dependencies`. See `docs/knowledge/audit-log-append-only.md`.
 - **Native end-to-end flows for the Expo app** (Issue #994, part of #140). `generate-code` writes one Maestro flow per entity
   that has native screens to `mobile/e2e/generated/maestro/` (git-ignored), from the same decision that emits the screens: sign
   in, open the list from the footer tabs, check the list, open the first row's detail screen, and create one record for an entity
