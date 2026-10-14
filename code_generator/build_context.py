@@ -1677,15 +1677,32 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
 # ---------------------------------------------------------------------------
 
 def _get_entity_options(schema: dict) -> list[dict]:
-    """Returns list of {value, label} for all schema entities that have pages."""
+    """Returns the `x-entity-select` options: {value, label, key} for every entity a Permission row can name.
+
+    One rule decides the set: a name belongs when the authorization layer can be asked about it, i.e.
+    (a) an entity with generated pages or routes (`extract_entities`), (b) an independent entity that
+    owns a permission grant (`seed_entities_context`, which also covers entities without `x-generate`
+    such as `approval_request`, and child-only entities), or (c) `audit_log`, the system table that
+    `getModelPermissions` answers for by name although it is not a schema definition.
+    Excluded: x-bridge junction tables, internal-only entities (every core `x-generate` flag false),
+    `x-self-only` admin-bypass entities that have no page of their own, and the `*_input` helpers.
+
+    Generated entities come first in schema order (generated tests pick the first and second option),
+    then the remaining permission targets alphabetically, then `audit_log`.
+    `label` is the English fallback; `key` is the `EntityLabel` dictionary key to display it with.
+    The stored value is always the entity name.
+    """
     from generate_types import extract_entities
+    from generators import seed_entities_context
+    names = [e['parent'] for e in extract_entities(schema)]
+    names += seed_entities_context(schema)['seed_entity_names']
+    names.append('audit_log')
     options = []
     seen = set()
-    for e in extract_entities(schema):
-        parent = e['parent']
-        if parent not in seen:
-            seen.add(parent)
-            options.append({'value': parent, 'label': to_title_case(parent)})
+    for name in names:
+        if name not in seen:
+            seen.add(name)
+            options.append({'value': name, 'label': to_title_case(name), 'key': to_camel_case(name)})
     return options
 
 

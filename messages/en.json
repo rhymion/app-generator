@@ -66,7 +66,12 @@
     "permission": "Permission",
     "role": "Role",
     "setting": "Setting",
-    "user": "User"
+    "user": "User",
+    "approvalRequest": "Approval Request",
+    "attachment": "Attachment",
+    "comment": "Comment",
+    "dashboardWidget": "Dashboard Widget",
+    "reaction": "Reaction"
   },
   "Fields": {
     "action": "Action",

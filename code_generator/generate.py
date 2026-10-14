@@ -103,6 +103,7 @@ from generators_test import (
     db_helpers_context,
     reservation_helper_context,
     reservation_spec_context,
+    set_entity_labels,
     set_messages_fields,
     set_messages_namespaces,
     set_prisma_uniques,
@@ -1127,22 +1128,20 @@ def _render_timezone_ts(env: Environment) -> str:
     return _render(env, 'timezone.ts.jinja2', {'timezones': TIMEZONES, 'default_member': DEFAULT_MEMBER})
 
 
-def _mobile_messages_json(messages: dict) -> str:
-    picked = {
+def _mobile_messages_json(messages: dict, entity_label_keys: tuple[str, ...] = ()) -> str:
+    """The messages the app ships. `entity_label_keys` adds the EntityLabel words of the entity names an
+    `x-entity-select` field offers, on top of the single keys every app reads."""
+    keys_by_ns = {**_MOBILE_MESSAGE_KEYS, 'EntityLabel': (*_MOBILE_MESSAGE_KEYS['EntityLabel'], *entity_label_keys)}
+    return json.dumps({
         locale: {
             **{ns: bundle[ns] for ns in _MOBILE_MESSAGE_NAMESPACES if isinstance(bundle.get(ns), dict)},
             **{
                 ns: {k: bundle[ns][k] for k in keys if k in bundle[ns]}
-                for ns, keys in _MOBILE_MESSAGE_KEYS.items() if isinstance(bundle.get(ns), dict)
+                for ns, keys in keys_by_ns.items() if isinstance(bundle.get(ns), dict)
             },
         }
         for locale, bundle in messages.items()
-    }
-    for locale, bundle in messages.items():
-        for ns, keys in _MOBILE_MESSAGE_KEYS.items():
-            if isinstance(bundle.get(ns), dict):
-                picked[locale][ns] = {k: bundle[ns][k] for k in keys if k in bundle[ns]}
-    return json.dumps(picked, indent=2, ensure_ascii=False)
+    }, indent=2, ensure_ascii=False)
 
 
 def resolve_mobile_create_forms(mobile_specs: list[dict]) -> None:
@@ -1169,7 +1168,7 @@ def _mobile_field_json(f: dict) -> dict:
     """A field entry of the mobile spec as the `FieldSpec` the app reads."""
     return {
         'key': f['key'], 'label': f['label'], 'kind': f['kind'], 'required': f['required'],
-        'readonly': f['readonly'], 'options': f['options'], 'optionLabels': f.get('option_labels', []), 'numericEnum': f.get('numeric_enum', False),
+        'readonly': f['readonly'], 'options': f['options'], 'optionLabels': f.get('option_labels', []), 'optionLabelKeys': f.get('option_label_keys', []), 'numericEnum': f.get('numeric_enum', False),
         **(
             {
                 'target': f['target'], 'labelField': f['label_field'], 'relationName': f['relation_name'],
@@ -1331,7 +1330,10 @@ def generate_mobile_target(
         'tabs_json': json.dumps(nav['tabs'], indent=2, ensure_ascii=False),
         'search_tab_json': json.dumps(nav['search_tab'], indent=2, ensure_ascii=False) if has_search else 'null',
         'locales_json': json.dumps(locales),
-        'messages_json': _mobile_messages_json(messages),
+        'messages_json': _mobile_messages_json(messages, tuple(sorted({
+            key.removeprefix('EntityLabel.')
+            for spec in mobile_specs or [] for f in spec['fields'] for key in f.get('option_label_keys', [])
+        }))),
         'entities': mobile_specs or [],
         'has_scheduled_tasks': has_scheduled_tasks,
         'has_payment': any(spec.get('is_payment') for spec in mobile_specs or []),
@@ -1462,6 +1464,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     _merged_fields, _merged_ns = _merge_file_wins_messages(_schema_fields, _schema_ns, _file_msgs)
     set_messages_fields(_merged_fields)
     set_messages_namespaces(_merged_ns)
+    set_entity_labels((_file_msgs or {}).get('EntityLabel'))
 
     # --- Bridge Prisma schema emission ---
     bridges = _collect_bridges(schema)

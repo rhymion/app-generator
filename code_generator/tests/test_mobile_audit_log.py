@@ -15,6 +15,7 @@ Run:
     cd code_generator && python3 -m pytest tests/test_mobile_audit_log.py -v
 """
 import json
+import re
 from pathlib import Path
 import shutil
 
@@ -99,7 +100,13 @@ def test_audit_log_strings_are_bundled_for_every_locale(out):
         for key in ('goBack', 'nextPage', 'previousPage'):
             assert bundle[locale]['Common'][key], (locale, key)
     # Only the keys the screens read (audit log, comment thread, approval section, attachment list) are carried from the larger namespaces.
-    assert set(bundle['en']['EntityLabel']) == {'auditLog'}
+    # EntityLabel is carried one key at a time: the audit log screen's, plus the entity-name words an
+    # `x-entity-select` field offers (the fixture's mobile_rule.entity_name).
+    client = _read(out, 'lib/mobile_rule/mobile_client.ts')
+    spec = json.loads(re.search(r'MOBILE_RULE_FIELDS: FieldSpec\[\] = (\[.*?\n\]);', client, re.S).group(1))
+    offered = {key.removeprefix('EntityLabel.') for f in spec for key in f.get('optionLabelKeys', [])}
+    assert offered
+    assert set(bundle['en']['EntityLabel']) == {'auditLog'} | offered
     assert set(bundle['en']['Fields']) == {
         'action', 'actorUser', 'created_at', 'metadata', 'targetId', 'targetTable',
         'comments', 'approvalRequests', 'approve', 'reject', 'withdraw', 'message', 'images', 'attachments',

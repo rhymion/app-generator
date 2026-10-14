@@ -5,6 +5,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Entity-name selects offer every entity a permission can name and show dictionary words** (Issues #1013, #1015).
+  A field declared with `x-entity-select` (`permission.name`, `approval_flow.entity_name`) now lists the generated
+  entities, the independent entities that own a permission grant (`approval_request`, `comment`, `attachment`,
+  child-only entities) and `audit_log`, instead of only the entities `extract_entities` returns. Every option has an
+  `EntityLabel` key in every `messages/<locale>.json`, and the Web edit, detail and list screens and the mobile chips,
+  list cells and detail text show that word; the stored value stays the entity name. Generated Cypress specs find a list
+  row by the dictionary word. `docs/knowledge/entity-select-options.md` states the rule.
 - **Native end-to-end flows for the Expo app** (Issue #994, part of #140). `generate-code` writes one Maestro flow per entity
   that has native screens to `mobile/e2e/generated/maestro/` (git-ignored), from the same decision that emits the screens: sign
   in, open the list from the footer tabs, check the list, open the first row's detail screen, and create one record for an entity

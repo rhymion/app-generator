@@ -131,9 +131,11 @@ the server fills in (the allocated pool reference) is only as required as the sc
 reservation with a `lines` child gets the [row editor](#child-rows), so `RESERVATION_LOCKED` is reachable on mobile for it.
 
 A field declared with `x-entity-select` holds the name of one of the schema's entities (the Web form draws a select
-of every entity). The app draws it as the enum chips: each chip shows the entity's title (`Purchase Order`), the
-request body carries the entity name (`purchase_order`), and the list and detail screens show the title. The field spec
-carries the titles as `optionLabels`, by position beside `options`; the server stores the string as is. In the default
+of every entity a permission can name; see [entity-select-options.md](entity-select-options.md)). The app draws it as the
+enum chips: each chip shows the entity's dictionary word (`EntityLabel.purchaseOrder`: `Purchase Order`, or its translation),
+the request body carries the entity name (`purchase_order`), and the list and detail screens show the same word. The field
+spec carries the English titles as `optionLabels` and the dictionary keys as `optionLabelKeys`, by position beside `options`;
+the server stores the string as is. In the default
 schema `approval_flow` (`entity_name`) and `permission` (`name`) qualify.
 
 An entity is left on the placeholder screen when it has no REST routes or no list screen, declares a
@@ -752,8 +754,9 @@ does for the other end-to-end fixtures, and signs in as the seeded administrator
   with no group and an already-approved record (its text shown), and a completed split sent with the
   quantities and the groups picked, after which the record shows its split status.
 - `mobile/e2e/entity-select.spec.ts` covers the `x-entity-select` field on `mobile_rule`: the chips showing entity
-  titles, the entity name saved on create and on edit, the detail and list screens showing the title, and a missing
-  entity blocking the save before any request.
+  titles (including an entity without pages and the audit log), the chips and detail text following the language, the entity
+  name saved on create and on edit, the detail and list screens showing the title, and a missing entity blocking the save
+  before any request.
 - `mobile/e2e/attachments.spec.ts` covers the direct attachment fields on `mobile_document` (a required and an
   optional one): a picked file uploaded with the access token and its row id saved with the record, a required
   field blocking the save before any request, clearing an optional field, the edit form starting from the

@@ -139,12 +139,12 @@ export function {{ pascal }}FormView({ id }: { id: string }) {
             <AttachmentValue row={record[spec.relationName ?? spec.key] as AttachmentRow | null | undefined} testID={`view-field-${spec.key}`} />
           ) : (
             <Text style={styles.value} testID={`view-field-${spec.key}`}>
-              {toRecordDisplayText(spec, record)}
+              {toRecordDisplayText(spec, record, t)}
             </Text>
           )}
 {% else %}
           <Text style={styles.value} testID={`view-field-${spec.key}`}>
-            {toRecordDisplayText(spec, record)}
+            {toRecordDisplayText(spec, record, t)}
           </Text>
 {% endif %}
         </View>

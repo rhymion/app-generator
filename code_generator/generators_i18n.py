@@ -538,6 +538,11 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
         to_camel_case(e['parent']): to_title_case(e['parent'])
         for e in entities + nav_extra_entities(schema)
     }
+    # Every `x-entity-select` option (an entity a Permission row can name, with or without pages) is
+    # shown through this dictionary on the Web and mobile screens, so each one needs its key.
+    from build_context import _get_entity_options
+    for option in _get_entity_options(schema):
+        entity_label_entries.setdefault(option['key'], option['label'])
 
     # Nav keys (same set as nav_entities)
     nav_entries = {

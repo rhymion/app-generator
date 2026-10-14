@@ -222,7 +222,7 @@ export function {{ pascal }}List() {
           { {{ const_name }}_FILTER_KEYS.map((key) => {
             const spec = fieldOf(key);
             if (!spec) return null;
-            const choices = filterChoices(spec, (value) => toDisplayText(spec, value));
+            const choices = filterChoices(spec, (value) => toDisplayText(spec, value, t));
             return (
               <View key={key} style={styles.filterField}>
                 <Text style={styles.panelText}>{spec.label}</Text>
@@ -319,7 +319,7 @@ export function {{ pascal }}List() {
 {% endif %}
             {keys.map((key, index) => {
               const spec = fieldOf(key);
-              const text = spec ? toDisplayText(spec, item[key]) : String(item[key] ?? '-');
+              const text = spec ? toDisplayText(spec, item[key], t) : String(item[key] ?? '-');
               return (
                 <Text key={key} style={index === 0 ? styles.rowTitle : styles.rowDetail} testID={`list-cell-${item.id}-${key}`}>
                   {index === 0 ? text : `${spec?.label ?? key}: ${text}`}

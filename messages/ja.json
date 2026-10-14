@@ -66,7 +66,12 @@
     "permission": "権限",
     "role": "ロール",
     "setting": "設定",
-    "user": "ユーザ"
+    "user": "ユーザ",
+    "approvalRequest": "承認申請",
+    "attachment": "添付ファイル",
+    "comment": "コメント",
+    "dashboardWidget": "ダッシュボードウィジェット",
+    "reaction": "リアクション"
   },
   "Fields": {
     "action": "アクション",

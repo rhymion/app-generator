@@ -16,6 +16,21 @@ from datetime import datetime
 _messages_fields: dict = {}
 
 
+# The EntityLabel namespace of messages/en.json: the word the screens show for an entity name.
+_entity_labels: dict = {}
+
+
+def set_entity_labels(labels: dict) -> None:
+    """Register the EntityLabel namespace so a generated spec looks an entity-name option up by its shown word."""
+    global _entity_labels
+    _entity_labels = labels or {}
+
+
+def _shown_entity_options(options: list) -> list:
+    """The `x-entity-select` options with `label` set to the dictionary word the screens show (English title if absent)."""
+    return [{**o, 'label': _entity_labels.get(o['key'], o['label'])} if 'key' in o else o for o in options]
+
+
 def set_messages_fields(fields: dict) -> None:
     """Register the Fields namespace from messages/en.json for enum label lookup."""
     global _messages_fields
@@ -1278,7 +1293,7 @@ def get_field_metas(
                 'label': to_title_case(prop_name),
                 'category': 'entity_select',
                 'required': prop_name in required_fields,
-                'entity_options': entity_options,
+                'entity_options': _shown_entity_options(entity_options),
             })
         elif prop_type == 'string' and prop.get('enum'):
             metas.append({
@@ -4142,12 +4157,13 @@ def spec_context(
             safe_excl_first = [o for o in safe if o['value'] != first_val]
             second_val   = safe_excl_first[0]['value'] if safe_excl_first else (opts[1]['value'] if len(opts) > 1 else first_val)
             second_label = safe_excl_first[0]['label'] if safe_excl_first else (opts[1]['label'] if len(opts) > 1 else first_label)
-            list_id_1 = first_val
+            # The list shows the entity's dictionary word, not the stored entity name.
+            list_id_1 = first_label
             list_id_is_unique = False
-            after_create_id = first_val
+            after_create_id = first_label
             after_create_id_is_expr = False
             primary_dep_var_for_list = None
-            list_id_updated = second_val
+            list_id_updated = second_label
             has_edit_primary = True
             edit_field_label = lbl
             edit_update_value = second_label
@@ -4254,12 +4270,13 @@ def spec_context(
             safe_excl_first = [o for o in safe if o['value'] != first_val]
             second_val   = safe_excl_first[0]['value'] if safe_excl_first else (opts[1]['value'] if len(opts) > 1 else first_val)
             second_label = safe_excl_first[0]['label'] if safe_excl_first else (opts[1]['label'] if len(opts) > 1 else first_label)
-            list_id_1 = first_val
+            # The list shows the entity's dictionary word, not the stored entity name.
+            list_id_1 = first_label
             list_id_is_unique = False
-            after_create_id = first_val
+            after_create_id = first_label
             after_create_id_is_expr = False
             primary_dep_var_for_list = None
-            list_id_updated = second_val
+            list_id_updated = second_label
             has_edit_primary = True
             edit_field_label = 'Name'
             edit_update_value = second_label
