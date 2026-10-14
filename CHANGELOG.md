@@ -162,6 +162,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **Mobile Playwright proxy no longer dies on a reset socket** (Issue #897). `mobile/scripts/same-origin-proxy.js` ended the whole process
+  when the API or web server reset its socket in the middle of a response, which made every later spec fail with
+  `ERR_CONNECTION_REFUSED`. A reset on either side now ends only that one request. Covered by `scripts/same-origin-proxy.test.ts`.
 - **Flattened one-to-one children no longer reference an undefined `userId`** (Issue #965). The create and upsert writes that 
   `add<Entity>` / `update<Entity>` emit for a flattened child (a singular `$ref` with `x-outputType: flatten`, FK on the child) 
   used `creator_id: userId, updater_id: userId`, but those service functions take the acting user as `actorId`, so the 
