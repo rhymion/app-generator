@@ -1,8 +1,10 @@
 import { TEST_API_KEY, TEST_CREDENTIALS } from '../support/test-credentials';
 
 // The dashboard edit form draws widgets with components/dashboard/widgets.tsx (x-custom-component on
-// dashboard.widgets). The default schema opts no entity into the dashboard, so the data-source list is empty here;
-// selecting an entity from a populated list is covered by the component test and by consumer projects.
+// dashboard.widgets). The spec runs against any schema: it reads whether the schema opts entities into the dashboard
+// (the data-source list is empty or not) and expects the matching behavior. Widgets whose data source is unavailable
+// are inserted into the database, because the save API rejects them. Selecting an entity from a populated list is
+// covered by the component test.
 describe('Dashboard widget editor', () => {
   beforeEach(() => {
     cy.task('db:reset');
@@ -15,26 +17,31 @@ describe('Dashboard widget editor', () => {
     cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
   });
 
-  function createDashboardWithWidget(entityName: string) {
-    return cy.request({
-      method: 'POST',
-      url: '/api/dashboard',
-      headers: { 'X-API-Key': TEST_API_KEY },
-      body: {
-        name: 'Editor Dashboard',
-        widgets: [{ name: 'Old widget', entity_name: entityName, group_by_field: 'status', chart_type: 'column', order: 0 }],
-      },
-    }).then((res) => {
-      expect(res.status).to.eq(201);
-      return res.body.id as string;
+  // The aggregate endpoint is generated only when at least one entity opts into the dashboard, so its absence means the
+  // data-source list is empty. (The editor's own hint cannot tell: it is shown while the list is still loading.)
+  function withCatalogState(run: (catalogIsEmpty: boolean) => void) {
+    cy.request({ url: '/api/dashboard/aggregate', headers: { 'X-API-Key': TEST_API_KEY }, failOnStatusCode: false }).then((res) => {
+      run(res.status === 404);
     });
   }
 
+  // Stores a dashboard with one widget whose data source is not available, whatever the schema's catalog holds.
+  function createDashboardWithWidget(entityName: string) {
+    return cy.task<string>('db:seedDashboardWithWidget', { entityName, groupByField: 'status', widgetName: 'Old widget' });
+  }
+
   it('says there is no data source to choose when no entity opts into the dashboard', () => {
-    cy.visit('/en/dashboard/new');
-    cy.contains('No entity is enabled for dashboards').should('be.visible');
-    cy.contains('button', 'Add widget').click();
-    cy.get('[data-testid="widget-row-0"]').should('be.visible');
+    withCatalogState((catalogIsEmpty) => {
+      cy.visit('/en/dashboard/new');
+      if (catalogIsEmpty) {
+        cy.contains('No entity is enabled for dashboards').should('be.visible');
+      } else {
+        // Entities are enabled: the hint must go away once the list has loaded.
+        cy.contains('No entity is enabled for dashboards').should('not.exist');
+      }
+      cy.contains('button', 'Add widget').click();
+      cy.get('[data-testid="widget-row-0"]').should('be.visible');
+    });
   });
 
   it('shows an existing widget whose data source is not available and lets the user remove it', () => {
@@ -84,12 +91,21 @@ describe('Dashboard widget editor', () => {
   // The widget is told why it cannot be drawn through the Server Action's return value, so the translated message
   // reaches the browser under `next build && next start` as well (a thrown error would be replaced by a generic one).
   it('tells the viewer why a widget cannot be drawn, in the page language', () => {
-    createDashboardWithWidget('removed_entity').then((id) => {
-      cy.visit(`/en/dashboard/view/${id}`);
-      cy.contains('No entity is enabled for dashboards, so there is nothing to chart').should('be.visible');
-      cy.contains('Minified React error').should('not.exist');
-      cy.visit(`/ja/dashboard/view/${id}`);
-      cy.contains('ダッシュボードに有効なエンティティがないため、表示できるデータがありません').should('be.visible');
+    withCatalogState((catalogIsEmpty) => {
+      // With no data source in the schema the widget cannot be drawn at all; otherwise only its own source is gone.
+      const en = catalogIsEmpty
+        ? 'No entity is enabled for dashboards, so there is nothing to chart'
+        : 'The data source “removed_entity” is not available';
+      const ja = catalogIsEmpty
+        ? 'ダッシュボードに有効なエンティティがないため、表示できるデータがありません'
+        : 'データソース「removed_entity」は利用できません';
+      createDashboardWithWidget('removed_entity').then((id) => {
+        cy.visit(`/en/dashboard/view/${id}`);
+        cy.contains(en).should('be.visible');
+        cy.contains('Minified React error').should('not.exist');
+        cy.visit(`/ja/dashboard/view/${id}`);
+        cy.contains(ja).should('be.visible');
+      });
     });
   });
 });

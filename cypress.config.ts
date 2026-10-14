@@ -52,6 +52,10 @@ export default defineConfig({
           await seedTestDatabase();
           return null;
         },
+        async 'db:seedDashboardWithWidget'(params: { entityName: string; groupByField: string; widgetName: string }) {
+          const { seedDashboardWithWidget } = require('./cypress/support/dashboard-widget-seed');
+          return await seedDashboardWithWidget(params);
+        },
         async 'db:grantAllPermissions'() {
           const { grantAllEntityPermissions } = require('./cypress/support/db-helpers');
           await grantAllEntityPermissions();

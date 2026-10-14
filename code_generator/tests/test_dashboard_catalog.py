@@ -404,3 +404,26 @@ def test_aggregate_route_returns_the_typed_problem_as_400():
     result = _make_env().get_template('dashboard_aggregate_route.ts.jinja2').render()
     assert 'error instanceof WidgetProblemError' in result
     assert '{ error: error.message, code, setting, params }, { status: 400 }' in result
+
+
+# --- Generated dashboard UI spec: widget row values ---------------------------------------------
+
+def test_widget_test_values_are_none_for_an_empty_catalog():
+    from generators_test import _dashboard_widget_catalog_values
+    assert _dashboard_widget_catalog_values(_schema({'__plain': _entity({}, dashboard=False)})) is None
+
+
+def test_widget_test_values_name_a_catalog_entity_and_fit_the_validation_rules():
+    from generators_test import _apply_dashboard_widget_catalog_values, _dashboard_widget_catalog_values
+    schema = _schema({'__order': _entity({'done': {'type': 'boolean'}})})
+    values = _dashboard_widget_catalog_values(schema)
+    assert values['entity_name'] == 'order'
+    # created_at is a date-time field, so a time bucket and time zone are valid on the chosen group-by field.
+    assert values['group_by_field'] == 'created_at' and values['bucket'] is True
+    assert values['series_field'] and values['series_field'] != values['group_by_field']
+    entry = {'create_obj': 'x', 'full_create_obj': 'x', 'native_enum_full_calls': []}
+    _apply_dashboard_widget_catalog_values(entry, 'Widgets', schema)
+    assert "entity_name: 'order'" in entry['create_obj']
+    assert 'Test Entity Name' not in entry['full_create_obj']
+    assert any("'stack_mode'" in c for c in entry['native_enum_full_calls'])
+    assert any("'timezone'" in c for c in entry['native_enum_full_calls'])

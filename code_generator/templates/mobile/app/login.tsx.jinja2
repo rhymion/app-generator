@@ -21,15 +21,22 @@ export default function LoginScreen() {
     setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`${BASE_URL}/api/mobile/auth/token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: email.trim(),
-          password,
-          mfa_code: showMfaField ? mfaCode.trim() : undefined,
-        }),
-      });
+      let res: Response;
+      try {
+        res = await fetch(`${BASE_URL}/api/mobile/auth/token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: email.trim(),
+            password,
+            mfa_code: showMfaField ? mfaCode.trim() : undefined,
+          }),
+        });
+      } catch {
+        // No response at all: the server is down, the device is offline, or (on web) the browser blocked the request.
+        setError('Could not reach the server. Check your connection and try again.');
+        return;
+      }
 
       if (res.status === 403) {
         const body = await res.json().catch(() => null);
