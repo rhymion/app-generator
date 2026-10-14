@@ -42,6 +42,73 @@ digest chain makes a privileged change visible.
 - **Partition export.** `npm run audit-log:digest -- export-month YYYY-MM` writes the month as JSON Lines plus its SHA-256 to
   storage. Rows written after the last digest and before the next are protected by the first three layers only until the next run.
 
+## Write-once storage adapters
+
+`lib/audit-log-integrity/` holds two write-once adapters next to `LocalDirectoryStorage`: `storage-gcs.ts` (Google Cloud
+Storage, per-object retention) and `storage-s3.ts` (S3 Object Lock, compliance mode). Both keep the `AuditLogStorage`
+contract: a new key is written once, writing the same body again is a no-op, writing a different body is refused, and
+`get` of a missing key returns `null`.
+
+### Opting in
+
+The factory that picks the adapter from the environment and the library behind the four digest scheduled tasks are generated
+only when the schema asks for them:
+
+```yaml
+x-generator:
+  audit-log-storage:
+    enabled: true
+```
+
+- Read by `generate.py` (`validate.audit_log_storage_enabled`). Absent or `false` generates nothing under `lib/audit-log-ops/`;
+  no generated file then refers to either adapter or either storage SDK. `validate_generator_config` rejects a non-boolean
+  `enabled`, a non-mapping block and any other sub-key.
+- With `enabled: true`, `lib/audit-log-ops/storage-factory.ts` (`createAuditLogStorageFromEnv`) and
+  `lib/audit-log-ops/jobs.ts` (`closeDigestPeriods`, `verifyDigests`, `ensurePartitions`, `exportPreviousMonth`) are written on every
+  run. The scheduled-task handlers stay yours: declare the tasks under `x-scheduled-tasks` and call these functions.
+- The storage SDKs are loaded by `await import('<literal module name>')` inside `createGcsObjectRetentionStorageFromEnv` and
+  `createS3ObjectLockStorageFromEnv`, so a bundler or file tracer sees them, and they are loaded only when that storage is selected.
+  `@google-cloud/storage` and `@aws-sdk/client-s3` are ordinary `dependencies` of this repository (the generator has no
+  per-schema dependency list), so installing them costs disk space and `npm audit` surface in every app; they are neither
+  imported nor traced by an app that leaves the flag off.
+- This repository's own schema turns the flag on so the build type-checks the generated files.
+
+### Choosing the storage
+
+| Variable | Meaning |
+|---|---|
+| `AUDIT_LOG_GCS_BUCKET` | Select GCS. Required with it: `AUDIT_LOG_GCS_RETENTION_DAYS` (whole days). |
+| `AUDIT_LOG_GCS_RETENTION_MODE` | `unlocked` (default) or `locked`. Always set it explicitly; it is never inferred from `NODE_ENV`. |
+| `AUDIT_LOG_GCS_AUTH` | `adc` (default; Application Default Credentials) or `vercel-oidc` (Vercel OIDC with Workload Identity Federation, needs `GCP_PROJECT_ID`, `GCP_PROJECT_NUMBER`, `GCP_SERVICE_ACCOUNT_EMAIL`, `GCP_WORKLOAD_IDENTITY_POOL_ID`, `GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID`). |
+| `AUDIT_LOG_GCS_ENDPOINT` | Optional API endpoint override, for a local emulator. |
+| `AUDIT_LOG_S3_BUCKET` | Select S3. Required with it: `AUDIT_LOG_S3_REGION`, `AUDIT_LOG_S3_RETENTION_DAYS`. |
+| `AUDIT_LOG_STORAGE_DIR` | A local directory, for tests and local runs only. |
+
+The factory checks them in that order. When none is set it throws `Audit log storage is not configured: ...`; a digest job
+declared without storage fails with that message and is recorded as a failed run, never skipped.
+
+### GCS: retention and permissions
+
+- **Per-object retention.** Each object is created with its own retain-until time (`now + AUDIT_LOG_GCS_RETENTION_DAYS`). `unlocked`
+  retention can still be shortened or removed by a principal with the right permission; use it for trials. `locked` retention can
+  only be extended, never shortened or removed. Bucket Lock, one retention period for every object with an irreversible policy
+  lock, is not used: it has no per-write retain-until time, and locking a trial bucket cannot be undone.
+- **Create-if-absent.** A new object is written with `ifGenerationMatch: 0`, so a live object is never replaced. If another writer
+  creates the object first (HTTP 412), the stored body is read back and compared as for any re-put.
+- **Not found versus no permission.** Only a 404 on read is read as "not found". Any other error, a 403 included, is re-thrown, so a
+  missing read grant surfaces as itself instead of turning every create into a failure.
+- **Permissions the runtime principal needs** (read from the Cloud Storage IAM reference): `storage.objects.get`,
+  `storage.objects.create`, `storage.objects.setRetention` and `storage.objects.update`. Enabling Object Retention on the bucket needs
+  `storage.buckets.enableObjectRetention`, a one-time step by whoever creates the bucket; it cannot be disabled afterwards. Which
+  predefined role is the smallest that carries `setRetention` (`roles/storage.objectAdmin` or `roles/storage.admin`) is not
+  confirmed here; prefer a custom role with the four permissions above and check it against a real bucket.
+- **Credentials.** The client uses Application Default Credentials. On Cloud Run that is the service account attached to the
+  service or Job, with no key file. On Vercel set `AUDIT_LOG_GCS_AUTH=vercel-oidc`: the Vercel OIDC token is exchanged for short-lived Google credentials (the
+  setup follows Vercel's guide "Connect to Google Cloud Platform (GCP)"; the five `GCP_*` values are identifiers, not secrets), so
+  no service account key is stored. `@vercel/oidc` and `google-auth-library` are loaded only in that mode.
+- **The local emulator** (`AUDIT_LOG_GCS_ENDPOINT`) tracks retention settings but does not enforce them, so a green emulator run is
+  not evidence that overwrite and delete are blocked; check that once against a real bucket.
+
 ## What digest verification detects
 
 `verify` (`npm run audit-log:digest -- verify`, or a scheduled task wrapping `verifyAuditLogDigests`) reads **every** row of
@@ -88,8 +155,7 @@ What this means:
    (for example `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public`, plus `USAGE` on sequences) and set
    `ALTER DEFAULT PRIVILEGES` as the owner so tables created by later migrations are covered too.
    Re-run `audit_log_append_only.sql` on an existing database to pick up the `SECURITY DEFINER` function.
-3. Provide write-once storage (for example S3 Object Lock in compliance mode or GCS Bucket Lock) by implementing `AuditLogStorage`,
-   and schedule the digest job against it.
+3. Provide write-once storage (see "Write-once storage adapters" below) and schedule the digest job against it.
 4. Define the retention procedure: when a partition passes the online retention period, export it, copy the file to the write-once
    bucket, then as the owner `ALTER TABLE audit_log DETACH PARTITION audit_log_YYYY_MM; DROP TABLE audit_log_YYYY_MM;` and log the
    run. No row-level `DELETE` is involved.

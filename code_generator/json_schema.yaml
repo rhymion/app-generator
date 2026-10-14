@@ -13,6 +13,8 @@ format-version: 4.0
 x-generator:
   search:
     default_scope: all
+  audit-log-storage:
+    enabled: true
 
 # PII and Privacy Annotations
 x-pii:
