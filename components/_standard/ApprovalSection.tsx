@@ -123,7 +123,11 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
   const tCommon = useTranslations('Common');
   const tErr = useTranslations('Errors');
   const tStatus = useTranslations('ApprovalRequestStatus');
-  const [, startTransition] = useTransition();
+  // Issue #500: the pending flag is kept (it used to be discarded) so the
+  // approve/reject/withdraw controls can be disabled while a request is in
+  // flight, and actionError surfaces a failed request instead of swallowing it.
+  const [isActionPending, startTransition] = useTransition();
+  const [actionError, setActionError] = useState(false);
   // cmd_1011: a dedicated transition/error pair for the submit-for-approval
   // action -- kept separate from the approve/reject/withdraw transition
   // above (unchanged, out of scope here) since submit has no confirmation
@@ -179,23 +183,38 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
     setDialog({ targetId, action });
   };
 
-  const closeDialog = () => setDialog(null);
+  const closeDialog = () => {
+    // The dialog stays open while a request is in flight so the confirm
+    // button cannot be clicked twice and no other row is reachable.
+    if (isActionPending) return;
+    setDialog(null);
+  };
 
   const confirmAction = () => {
-    if (!dialog) return;
+    if (!dialog || isActionPending) return;
     const { targetId, action } = dialog;
     const msg = message.trim() || undefined;
     const reasonText = rejectionReason.trim() || undefined;
     const reasonKind = selectedReasonKind;
-    closeDialog();
-    startTransition(() => {
-      if (action === 'approve') approveApprovalRequest(targetId, msg);
-      else if (action === 'reject') rejectApprovalRequest(targetId, msg, { reason: reasonText, reasonKind });
-      // cmd_844: withdraw's targetId is the approvable id, not a specific
-      // approval_request id -- withdrawal closes every pending row of the
-      // current round in one action (see actions_core.ts's
-      // withdrawApprovalRequest).
-      else withdrawApprovalRequest(targetId, msg);
+    setActionError(false);
+    // Issue #500: await the Server Action inside the transition (React keeps
+    // isActionPending true until the callback's promise settles) instead of
+    // firing and forgetting it, so a second approve/reject/withdraw cannot
+    // start while this one is still running on the server.
+    startTransition(async () => {
+      try {
+        if (action === 'approve') await approveApprovalRequest(targetId, msg);
+        else if (action === 'reject') await rejectApprovalRequest(targetId, msg, { reason: reasonText, reasonKind });
+        // cmd_844: withdraw's targetId is the approvable id, not a specific
+        // approval_request id -- withdrawal closes every pending row of the
+        // current round in one action (see actions_core.ts's
+        // withdrawApprovalRequest).
+        else await withdrawApprovalRequest(targetId, msg);
+        setDialog(null);
+      } catch {
+        setDialog(null);
+        setActionError(true);
+      }
     });
   };
 
@@ -244,12 +263,12 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
             {canAct && (
               <>
                 <Tooltip title={t('approve')}>
-                  <IconButton aria-label="Approve" color="success" size="small" onClick={() => openDialog(ar.id, 'approve')}>
+                  <IconButton aria-label="Approve" color="success" size="small" disabled={isActionPending} onClick={() => openDialog(ar.id, 'approve')}>
                     <CheckIcon fontSize="small" />
                   </IconButton>
                 </Tooltip>
                 <Tooltip title={t('reject')}>
-                  <IconButton aria-label="Reject" color="error" size="small" onClick={() => openDialog(ar.id, 'reject')}>
+                  <IconButton aria-label="Reject" color="error" size="small" disabled={isActionPending} onClick={() => openDialog(ar.id, 'reject')}>
                     <CloseIcon fontSize="small" />
                   </IconButton>
                 </Tooltip>
@@ -321,6 +340,11 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
           {getErrorMessage(submitError, tErr)}
         </Typography>
       )}
+      {actionError && (
+        <Typography color="error" variant="body2" sx={{ mb: 1 }} role="alert">
+          {tErr('unknown')}
+        </Typography>
+      )}
       {currentRoundRequests.length === 0 ? null : (
       <>
       <Table size="small">
@@ -347,6 +371,7 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
             startIcon={<UndoIcon fontSize="small" />}
             aria-label="Withdraw"
             size="small"
+            disabled={isActionPending}
             onClick={() => src.approvable && openDialog(src.approvable.id, 'withdraw')}
             sx={{ mt: 1 }}
           >
@@ -434,8 +459,8 @@ export default function ApprovalSection({ src, currentUserRoleIds, currentUserId
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={closeDialog}>{tCommon('cancel')}</Button>
-          <Button onClick={confirmAction} variant="contained">{dialogTitle}</Button>
+          <Button onClick={closeDialog} disabled={isActionPending}>{tCommon('cancel')}</Button>
+          <Button onClick={confirmAction} variant="contained" disabled={isActionPending}>{dialogTitle}</Button>
         </DialogActions>
       </Dialog>
     </div>

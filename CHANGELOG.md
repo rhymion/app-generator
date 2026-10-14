@@ -151,6 +151,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `resetTestDatabase()` empties both tables with `TRUNCATE`. Consumers add the SQL to their own migrations, create the
   restricted application role and the write-once bucket; see `docs/knowledge/audit-log-append-only.md`.
 ### Changed
+- Completion gate documents (`generate-schema`, `update-code`, `update-generator`) now name `npm run db:generate` as a prerequisite of the vitest step on a fresh checkout (Issue #1006).
 - **List sort / filter panel no longer offers internal bridge foreign keys** (Issue #967). `Approvable Id`, `Attachable Id`,
   `Commentable Id` and the like are dropped from the Web panel and from the Expo list's sort and filter keys, using the
   generator's existing internal-bridge detection (no new schema key). The REST list still accepts them as sort / filter
@@ -169,10 +170,21 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **Generated delete examples check the rows exist first for an entity with no unique primary link** (Issue #835). 
+  Examples 4.1, 4.2 and 4.3 in the generated UI spec now assert the populated row count before they delete, so an example 
+  that finds nothing to delete fails on its own precondition. Entities with a unique primary link are unchanged.
+- **Approve, Reject and Withdraw no longer fire without waiting** (Issue #500). `ApprovalSection` now awaits the Server Action,
+  disables every approve/reject/withdraw control (and keeps the confirmation dialog open) until the request settles, and shows an
+  error message when the request fails, so two quick clicks can no longer run overlapping approval transactions on the server.
+- **Mobile sign-in no longer fails in Expo Go** (Issue #1010, part of #140). The generated `lib/token-storage.ts` asked `expo-secure-store` for a biometric-locked refresh token, which Expo Go rejects because its `Info.plist` has no `NSFaceIDUsageDescription`. When `Constants.executionEnvironment` is `storeClient` the token is now saved and read without the lock; standalone and development builds lock it exactly as before, the choice is made once for save and read, and a rejected locked save is never retried unlocked. Face ID cannot be checked in Expo Go. See `docs/knowledge/mobile-executable.md`.
 - **Version Of E2E gate fixture: two flaky examples fixed** (Issue #1000). `version_of.cy.ts` looked the Save button up document-wide, so it found two submit buttons while React streamed the new-version screen (the revealed form plus a hidden copy in the streaming buffer, for about 30 ms); it now looks inside `main form`. `version_of_ui.cy.ts` and `version_of.cy.ts` read values with a one-shot `.then`, so the diff assertion could see the previous pair right after "Compare"; they now assert in a retried `.should`. Test fixtures only; generated code is unchanged. See `docs/knowledge/testing-cypress.md`.
 - **CI: a docs-only push no longer cancels or hides the E2E run of a preceding code push** (Issue #882). Push runs now use a
   per-commit concurrency group and are never cancelled; pull_request runs keep the per-branch group with cancel-in-progress.
   CI workflow change: see the note in `.github/workflows/ci.yml`.
+- **Consumer `ci.yml` canonical source: same concurrency fix** (Issue #605). `docs/consumer-commands/ci.yml` now carries the
+  concurrency block that `.github/workflows/ci.yml` has (per-commit group for push runs, never cancelled; per-head-branch
+  group for pull_request runs). A consumer's `Verify ci.yml` job fails after a submodule bump past this change until its own
+  `ci.yml` is copied from the canonical file.
 - **Dashboard aggregate: read permission and row-level scope on both entry points** (Issue #910). The `aggregateForWidget` 
   Server Action now requires the user's `read` permission on the entity, as `POST /api/dashboard/aggregate` already did, 
   and both paths limit every query (single and two-field group-by, bucketed queries, FK label lookups) to the rows the user 

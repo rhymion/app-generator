@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 
@@ -27,6 +28,11 @@ const SECURE_STORE_LOCK_OPTIONS: SecureStore.SecureStoreOptions = {
  */
 async function shouldLockRefreshToken(): Promise<boolean> {
   if (Platform.OS === 'web') return false; // localStorage has no such API
+  // Expo Go's own Info.plist has no NSFaceIDUsageDescription, so SecureStore rejects
+  // requireAuthentication there. Expo Go is a development playground: it stores the token
+  // without the lock, and only standalone and development builds lock it. The decision is
+  // made here, once, so save and read always agree.
+  if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) return false;
   try {
     const hasHardware = await LocalAuthentication.hasHardwareAsync();
     const isEnrolled = await LocalAuthentication.isEnrolledAsync();

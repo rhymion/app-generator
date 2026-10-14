@@ -623,6 +623,14 @@ Refresh tokens last 30 days and are stored as a keyed HMAC, never in plaintext (
 Access-token verification is stateless: a token issued just before sign-out or revocation stays valid for
 the rest of its 15 minutes.
 
+The app keeps the refresh token in `expo-secure-store` (`lib/token-storage.ts`). On a device with biometrics or a
+PIN enrolled, a standalone or development build locks it behind that check (`requireAuthentication`), and the
+build's `Info.plist` carries `NSFaceIDUsageDescription` from the `expo-secure-store` config plugin. Expo Go has no
+such text in its own `Info.plist`, so the app stores and reads the token there without the lock
+(`Constants.executionEnvironment` is `storeClient`). The check runs in one function for both save and read, so the
+two always agree, and a locked save that fails outside Expo Go is not retried unlocked. Face ID therefore cannot
+be verified in Expo Go; only a standalone or development build locks the token. Web uses `localStorage`.
+
 Generated REST routes call `authenticate()` (`lib/api-auth.ts`), which accepts either a mobile access JWT
 or an API key (`X-API-Key` / `Authorization: Bearer`); a JWT always has three dot-separated segments and
 an API key never does. `POST /api/upload` and `POST /api/attachment/direct` call `requireCaller()`, which

@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor, act } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
 vi.mock('next-intl', () => ({
@@ -207,5 +207,85 @@ describe('ApprovalSection (cmd_844 round-based rendering)', () => {
 
     fireEvent.click(screen.getByText('pastSubmissions'));
     expect(screen.getByText('withdrawn')).toBeInTheDocument();
+  });
+
+  // Issue #500: approve/reject/withdraw used to be fired without await and
+  // without disabling anything, so a second click could start a second
+  // overlapping request while the first was still running.
+  describe('in-flight protection (Issue #500)', () => {
+    const twoPending: Row[] = [
+      { id: 'r1', approval_flow_id: 'flow-1', round_id: 'round-1', status: 'pending',
+        approval_flow: { id: 'flow-1', entity_name: 'e', approver_role_id: 'role-1' } },
+      { id: 'r2', approval_flow_id: 'flow-2', round_id: 'round-1', status: 'pending',
+        approval_flow: { id: 'flow-2', entity_name: 'e', approver_role_id: 'role-1' } },
+    ];
+
+    function renderTwoPending() {
+      return render(
+        <ApprovalSection src={makeSrc(twoPending)} currentUserRoleIds={['role-1']} currentUserId="approver-1" hasOnWithdrawn />,
+      );
+    }
+
+    it('disables every action control and keeps the dialog open until the request settles', async () => {
+      let resolve!: () => void;
+      approveApprovalRequest.mockReturnValue(new Promise<void>((r) => { resolve = r; }));
+      renderTwoPending();
+
+      fireEvent.click(screen.getAllByLabelText('Approve')[0]);
+      const dialog = screen.getByRole('dialog');
+      const confirm = within(dialog).getByRole('button', { name: 'approve' });
+      fireEvent.click(confirm);
+      fireEvent.click(confirm);
+
+      await waitFor(() => expect(confirm).toBeDisabled());
+      expect(approveApprovalRequest).toHaveBeenCalledTimes(1);
+      expect(within(dialog).getByRole('button', { name: 'cancel' })).toBeDisabled();
+      for (const b of screen.getAllByLabelText('Approve')) expect(b).toBeDisabled();
+      for (const b of screen.getAllByLabelText('Reject')) expect(b).toBeDisabled();
+
+      await act(async () => { resolve(); });
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      for (const b of screen.getAllByLabelText('Approve')) expect(b).toBeEnabled();
+    });
+
+    it('does not start a second request on another row while the first is in flight', async () => {
+      let resolve!: () => void;
+      approveApprovalRequest.mockReturnValue(new Promise<void>((r) => { resolve = r; }));
+      renderTwoPending();
+
+      fireEvent.click(screen.getAllByLabelText('Approve')[0]);
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'approve' }));
+      await waitFor(() => expect(screen.getAllByLabelText('Approve')[1]).toBeDisabled());
+
+      fireEvent.click(screen.getAllByLabelText('Approve')[1]);
+      expect(approveApprovalRequest).toHaveBeenCalledTimes(1);
+      expect(approveApprovalRequest).toHaveBeenCalledWith('r1', undefined);
+
+      await act(async () => { resolve(); });
+    });
+
+    it('shows an error and re-enables the controls when the request fails', async () => {
+      rejectApprovalRequest.mockRejectedValue(new Error('boom'));
+      renderTwoPending();
+
+      fireEvent.click(screen.getAllByLabelText('Reject')[0]);
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'reject' }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('unknown');
+      await waitFor(() => expect(screen.getAllByLabelText('Reject')[0]).toBeEnabled());
+    });
+
+    it('awaits withdraw as well', async () => {
+      let resolve!: () => void;
+      withdrawApprovalRequest.mockReturnValue(new Promise<void>((r) => { resolve = r; }));
+      render(<ApprovalSection src={makeSrc(twoPending)} currentUserId="requestor-1" hasOnWithdrawn />);
+
+      fireEvent.click(screen.getByLabelText('Withdraw'));
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'withdraw' }));
+      await waitFor(() => expect(screen.getByLabelText('Withdraw')).toBeDisabled());
+      expect(withdrawApprovalRequest).toHaveBeenCalledTimes(1);
+
+      await act(async () => { resolve(); });
+    });
   });
 });
