@@ -6,32 +6,18 @@ screen shows an option by its dictionary word while the stored value stays the e
 
 ## Which entities are offered
 
-`_get_entity_options` (`code_generator/build_context.py`) builds the set. One rule decides membership:
-**an entity is offered when the authorization layer can be asked about it by name.** Permission rows are keyed by
-the entity's view name (`requirePermission` / `getModelPermissions` in `lib/authz.ts`), so the set is the union of:
+`_get_entity_options` (`code_generator/build_context.py`) builds the set: every entity `extract_entities` returns
+(the entities with generated pages or routes, each guarded by its own permission), in schema order, followed by
+`audit_log`.
 
-| Source | Why it belongs |
-|---|---|
-| `extract_entities` | The entity has generated pages or routes, each guarded by its own permission. |
-| `seed_entities_context` (`seed_entity_names`) | The entity owns a permission grant: an independent entity with an `id`, including entities without `x-generate` such as `approval_request`, `comment` and `attachment`, and child-only entities. |
-| `audit_log` | The system table `getModelPermissions` answers for by name. It is not a schema definition, so neither source above contains it. |
+`audit_log` is the one system table a Permission row can name although it is not a schema definition:
+`getModelPermissions` (`lib/authz.ts`) answers for it by name. It is not in the schema's definitions, so
+`extract_entities` never returned it, and it could not be chosen.
 
-Not offered:
-
-- x-bridge junction tables (no permission of their own).
-- Internal-only entities whose core `x-generate` flags (`list`, `view`, `new`, `edit`, `delete`, `api`) are all `false`
-  (`approvable`, `attachable`, `commentable`, `notification`): no page, route or grant exists for them.
-- The `*_input` helper definitions.
-
-The order is: generated entities in schema order (generated tests pick the first and second option), then the
-remaining permission targets alphabetically, then `audit_log`.
-
-### What dropped an entity before
-
-`extract_entities` alone decided the set, and it skips an entity when it is `x-internal`, has no `x-generate`
-(a child-only entity or a system table: `approval_request`, `comment`, `attachment`, `dashboard_widget`, and
-child entities such as `receiving_purchase_order_line`), or has every core flag `false`.
-`audit_log` was never in the schema's definitions at all.
+Entities without generated pages (`approval_request`, `comment`, `attachment`, `dashboard_widget`, child-only
+entities) are not offered on purpose: they are not permission or approval targets. Internal-only entities (every core
+`x-generate` flag `false`) and `x-internal` entities are not offered either. A Permission row that names an entity
+the schema does not define (for example a stale row left from another schema) shows its stored name as is.
 
 ## How an option is displayed
 

@@ -59,16 +59,11 @@
   },
   "EntityLabel": {
     "approvalFlow": "承認フロー",
-    "approvalRequest": "承認申請",
     "appSetting": "業務日付設定",
-    "attachment": "添付ファイル",
     "auditLog": "監査ログ",
-    "comment": "コメント",
     "dashboard": "ダッシュボード",
-    "dashboardWidget": "ダッシュボードウィジェット",
     "organization": "組織",
     "permission": "権限",
-    "reaction": "リアクション",
     "role": "ロール",
     "setting": "設定",
     "user": "ユーザ"

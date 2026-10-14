@@ -4,8 +4,7 @@ each one is displayed (docs/knowledge/entity-select-options.md).
 
 Runs the real build_user_schema.py -> generate.py pipeline on this repo's own schema and checks that:
 
-- the option set is every entity the authorization layer can be asked about, including entities
-  without pages (`approval_request`) and the `audit_log` system table, and none of the internal-only ones
+- the option set is every generated entity plus the `audit_log` system table
 - every option has an `EntityLabel` key in every locale file, and the stored value is the entity name
 - the Web view, edit and list screens, and the mobile chips, show the dictionary word
 
@@ -47,19 +46,19 @@ def _values(schema):
     return [o['value'] for o in _get_entity_options(schema)]
 
 
-def test_entities_without_pages_that_a_permission_can_name_are_offered(schema):
+def test_audit_log_is_offered_after_the_generated_entities(schema):
     values = _values(schema)
-    # No `x-generate`, so `extract_entities` alone dropped these.
-    for name in ('approval_request', 'comment', 'attachment'):
-        assert name in values, name
     # The system table `getModelPermissions` answers for by name, though it is not a schema definition.
-    assert 'audit_log' in values
+    assert values[-1] == 'audit_log'
     assert 'audit_log' not in schema['definitions']
 
 
-def test_internal_only_entities_are_not_offered(schema):
+def test_entities_that_are_not_permission_or_approval_targets_are_not_offered(schema):
     values = _values(schema)
-    # Every core `x-generate` flag is false: no page, route or grant exists for these.
+    # No generated pages, no permission or approval of their own: not offered.
+    for name in ('approval_request', 'comment', 'attachment', 'dashboard_widget', 'reaction'):
+        assert name not in values, name
+    # Every core `x-generate` flag is false.
     for name in ('approvable', 'attachable', 'commentable', 'notification'):
         assert name not in values, name
 
@@ -73,8 +72,8 @@ def test_generated_entities_keep_their_order_and_come_first(schema):
 
 
 def test_an_option_is_the_entity_name_with_a_dictionary_key_and_an_english_fallback(schema):
-    option = {o['value']: o for o in _get_entity_options(schema)}['approval_request']
-    assert option == {'value': 'approval_request', 'label': 'Approval Request', 'key': 'approvalRequest'}
+    option = {o['value']: o for o in _get_entity_options(schema)}['audit_log']
+    assert option == {'value': 'audit_log', 'label': 'Audit Log', 'key': 'auditLog'}
 
 
 def test_every_option_has_an_entity_label_key_in_every_locale(out, schema):
@@ -91,18 +90,17 @@ def test_web_view_and_edit_show_the_dictionary_word_and_store_the_name(out):
     form = (out / 'components/permission/FormUpsert.tsx').read_text()
     view = (out / 'components/permission/FormView.tsx').read_text()
     assert edit.exists()
-    assert "{ value: 'approval_request', label: te('approvalRequest') }" in form
     assert "{ value: 'audit_log', label: te('auditLog') }" in form
-    assert "{ value: 'approval_request', label: te('approvalRequest') }" in view
+    assert "{ value: 'audit_log', label: te('auditLog') }" in view
     # The English title is no longer baked into the screens.
-    assert "label: 'Approval Request'" not in form
-    assert "label: 'Approval Request'" not in view
+    assert "label: 'Audit Log'" not in form
+    assert "label: 'Audit Log'" not in view
 
 
 def test_web_list_shows_the_dictionary_word_for_an_entity_name_column(out):
     page = (out / 'app/[locale]/permission/page.tsx').read_text()
     assert "getTranslations('EntityLabel')" in page
-    assert "'approval_request': " in page and "('approvalRequest')" in page
+    assert "'audit_log': nameLabelsT('auditLog')" in page
     assert 'nameLabels[item.name as string] ?? item.name' in page
     flow = (out / 'app/[locale]/approval_flow/page.tsx').read_text()
     assert 'entityNameLabels[item.entity_name as string] ?? item.entity_name' in flow

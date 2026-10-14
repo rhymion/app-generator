@@ -80,12 +80,11 @@ test.describe('Entity select field', () => {
     await expect(page.getByText('Mobile Note').first()).toBeVisible();
   });
 
-  test('every entity a permission can name is a chip, labelled with its dictionary word', async ({ page }) => {
+  test('the audit log is a chip, labelled with its dictionary word', async ({ page }) => {
     await openNew(page);
-    // An entity without pages of its own and the audit log table are offered like any other entity.
-    await expect(page.getByTestId('field-entity_name-approval_request')).toContainText('Approval Request');
+    // The audit log table is offered like any other entity.
     await expect(page.getByTestId('field-entity_name-audit_log')).toContainText('Audit Log');
-    await expect(page.getByTestId('field-entity_name-approval_request')).not.toContainText('approval_request');
+    await expect(page.getByTestId('field-entity_name-audit_log')).not.toContainText('audit_log');
   });
 
   test('the chips and the detail screen follow the language', async ({ page }) => {
@@ -96,7 +95,6 @@ test.describe('Entity select field', () => {
     await page.getByTestId('list-new').click();
     await expect(page.getByTestId('form-new-mobile_rule')).toBeVisible();
     await expect(page.getByTestId('field-entity_name-audit_log')).toContainText('監査ログ');
-    await expect(page.getByTestId('field-entity_name-approval_request')).toContainText('承認申請');
     await page.getByTestId('field-name').fill('Language rule');
     await page.getByTestId('field-entity_name-audit_log').click();
     await page.getByTestId('form-save').click();

@@ -138,10 +138,10 @@ def test_update_i18n_and_config_no_warning_when_nothing_new(tmp_path: Path, caps
     messages_dir.mkdir()
     # Every key update_i18n_and_config will compute for the `widget` entity
     # (EntityLabel/Nav/Fields, and the EntityLabel word of each x-entity-select
-    # option -- widget, its widget_detail proxy view and audit_log) is already present in both files, so this run
+    # option -- widget and audit_log) is already present in both files, so this run
     # should be a true no-op with nothing to flag as newly-untranslated.
-    en_seed = {"EntityLabel": {"widget": "Widget", "widgetDetail": "Widget Detail", "auditLog": "Audit Log"}, "Nav": {"widget": "Widget"}, "Fields": {"name": "Name"}}
-    ja_seed = {"EntityLabel": {"widget": "ウィジェット", "widgetDetail": "ウィジェット詳細", "auditLog": "監査ログ"}, "Nav": {"widget": "ウィジェット"}, "Fields": {"name": "名前"}}
+    en_seed = {"EntityLabel": {"widget": "Widget", "auditLog": "Audit Log"}, "Nav": {"widget": "Widget"}, "Fields": {"name": "Name"}}
+    ja_seed = {"EntityLabel": {"widget": "ウィジェット", "auditLog": "監査ログ"}, "Nav": {"widget": "ウィジェット"}, "Fields": {"name": "名前"}}
     (messages_dir / "en.json").write_text(json.dumps(en_seed), encoding="utf-8")
     (messages_dir / "ja.json").write_text(json.dumps(ja_seed, ensure_ascii=False), encoding="utf-8")
 

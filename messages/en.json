@@ -59,16 +59,11 @@
   },
   "EntityLabel": {
     "approvalFlow": "Approval Flow",
-    "approvalRequest": "Approval Request",
     "appSetting": "App Setting",
-    "attachment": "Attachment",
     "auditLog": "Audit Log",
-    "comment": "Comment",
     "dashboard": "Dashboard",
-    "dashboardWidget": "Dashboard Widget",
     "organization": "Organization",
     "permission": "Permission",
-    "reaction": "Reaction",
     "role": "Role",
     "setting": "Setting",
     "user": "User"

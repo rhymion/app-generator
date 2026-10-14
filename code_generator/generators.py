@@ -7680,9 +7680,7 @@ def seed_entities_context(schema: dict) -> dict:
 
     xbridge_table_names: set[str] = set()
     for defn in defs.values():
-        x_bridge = defn.get('x-bridge')
-        # The old array form of x-bridge names no junction table of its own.
-        bridge_name = x_bridge.get('name') if isinstance(x_bridge, dict) else None
+        bridge_name = (defn.get('x-bridge') or {}).get('name')
         if bridge_name:
             xbridge_table_names.add(bridge_name)
 
