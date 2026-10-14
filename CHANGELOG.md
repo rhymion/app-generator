@@ -5,6 +5,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Bucket access for the task-runner Job** (Issue #1008). `scripts/gcp-task-runner.sh` accepts
+  `TASK_RUNNER_BUCKET_ROLES` (space-separated `BUCKET=ROLE` pairs) and grants the Job's runtime service account a
+  bucket-scoped role on each bucket; unset, nothing changes. `docs/knowledge/scheduled-task-operations.md` also states that
+  every variable reaches the Job as a Secret Manager secret.
 - **GCS and S3 write-once storage for audit_log digests** (Issue #991, part of #945). `lib/audit-log-integrity/storage-gcs.ts`
   stores digests and archives in a Google Cloud Storage bucket with per-object retention (unlocked or locked) and create-if-absent
   writes; the S3 Object Lock adapter moves here from the consumer template. Both load their SDK through a dynamic import with a
