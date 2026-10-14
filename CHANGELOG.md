@@ -169,6 +169,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **CI: a docs-only push no longer cancels or hides the E2E run of a preceding code push** (Issue #882). Push runs now use a
   per-commit concurrency group and are never cancelled; pull_request runs keep the per-branch group with cancel-in-progress.
   CI workflow change: see the note in `.github/workflows/ci.yml`.
+- **Consumer `ci.yml` canonical source: same concurrency fix** (Issue #605). `docs/consumer-commands/ci.yml` now carries the
+  concurrency block that `.github/workflows/ci.yml` has (per-commit group for push runs, never cancelled; per-head-branch
+  group for pull_request runs). A consumer's `Verify ci.yml` job fails after a submodule bump past this change until its own
+  `ci.yml` is copied from the canonical file.
 - **Dashboard aggregate: read permission and row-level scope on both entry points** (Issue #910). The `aggregateForWidget` 
   Server Action now requires the user's `read` permission on the entity, as `POST /api/dashboard/aggregate` already did, 
   and both paths limit every query (single and two-field group-by, bucketed queries, FK label lookups) to the rows the user 
