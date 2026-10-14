@@ -153,8 +153,20 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
-- **Dashboard UI specs no longer assume an empty dashboard catalog** (Issue #997). The generated `dashboard.cy.ts` now uses a real data source and fitting widget settings when the schema enables entities for the dashboard, and `dashboard_widget_editor.cy.ts` detects the catalog state and seeds widgets with an unavailable data source through the database instead of the validating API. Test code only; output for a schema with no dashboard entities is unchanged.
-- **Dashboard aggregate: read permission and row-level scope on both entry points** (Issue #910). The `aggregateForWidget` Server Action now requires the user's `read` permission on the entity, as `POST /api/dashboard/aggregate` already did, and both paths limit every query (single and two-field group-by, bucketed queries, FK label lookups) to the rows the user can list: organization isolation, `x-self-only`, `x-filter-values` and Creator/Assignee-only read. FK labels are resolved through the target entity's permission and scope, and an unreadable label shows as `(unknown)`. `aggregateForWidgetCore` takes the acting user's id as its first argument. See `docs/knowledge/schema-yaml-configuration.md` §10.
+- **Flattened one-to-one children no longer reference an undefined `userId`** (Issue #965). The create and upsert writes that 
+  `add<Entity>` / `update<Entity>` emit for a flattened child (a singular `$ref` with `x-outputType: flatten`, FK on the child) 
+  used `creator_id: userId, updater_id: userId`, but those service functions take the acting user as `actorId`, so the 
+  generated `service.ts` failed `tsc` with TS2304. They now use `actorId`.
+- **Dashboard UI specs no longer assume an empty dashboard catalog** (Issue #997). The generated `dashboard.cy.ts` now uses a 
+  real data source and fitting widget settings when the schema enables entities for the dashboard, and 
+  `dashboard_widget_editor.cy.ts` detects the catalog state and seeds widgets with an unavailable data source through the 
+  database instead of the validating API. Test code only; output for a schema with no dashboard entities is unchanged.
+- **Dashboard aggregate: read permission and row-level scope on both entry points** (Issue #910). The `aggregateForWidget` 
+  Server Action now requires the user's `read` permission on the entity, as `POST /api/dashboard/aggregate` already did, 
+  and both paths limit every query (single and two-field group-by, bucketed queries, FK label lookups) to the rows the user 
+  can list: organization isolation, `x-self-only`, `x-filter-values` and Creator/Assignee-only read. FK labels are resolved 
+  through the target entity's permission and scope, and an unreadable label shows as `(unknown)`. `aggregateForWidgetCore` 
+  takes the acting user's id as its first argument. See `docs/knowledge/schema-yaml-configuration.md` §10.
 - **`x-version-of`: a rejected version no longer blocks the next one, and the version number cannot be written** (Refs #946). A terminally
   rejected version stays as a closed record and is not counted as an open draft; a version rejected without `terminal`, or
   withdrawn, stays the open draft that is fixed and resubmitted. Neither is deleted any more. A number sent by a form or an API
