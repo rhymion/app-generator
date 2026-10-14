@@ -7,8 +7,6 @@ import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import Tooltip from '@mui/material/Tooltip';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import utcPlugin from 'dayjs/plugin/utc';
@@ -223,15 +221,13 @@ export default function GanttChart({ items, periodStart, span, basePath }: Props
         <Button variant="outlined" size="small" startIcon={<ChevronLeftIcon />} onClick={() => navigate(-1)}>
           {tc(backLabel)}
         </Button>
-        <LocalizationProvider dateAdapter={AdapterDayjs}>
-          <DatePicker
-            label={tc(pickerLabel)}
-            value={dayjs(periodStart)}
-            onChange={handleDateChange}
-            views={pickerViews}
-            slotProps={{ textField: { size: 'small' } }}
-          />
-        </LocalizationProvider>
+        <DatePicker
+          label={tc(pickerLabel)}
+          value={dayjs(periodStart)}
+          onChange={handleDateChange}
+          views={pickerViews}
+          slotProps={{ textField: { size: 'small' } }}
+        />
         <Button variant="outlined" size="small" endIcon={<ChevronRightIcon />} onClick={() => navigate(1)}>
           {tc(fwdLabel)}
         </Button>

@@ -311,6 +311,17 @@ pairs with no human-edited content, so re-deriving them is safe).
 
 ---
 
+## MUI Built-in Text and Date Pickers Follow the Locale
+
+MUI components carry their own UI text (DataGrid column menu, filter panel, "Manage columns", picker buttons) that is not part of `messages/*.json`. `app/[locale]/providers.tsx` reads the active locale with `useLocale()` and:
+
+- builds the theme with the locale bundles from `lib/mui-locale.ts` (`jaJP` of `@mui/material/locale`, `@mui/x-data-grid/locales` and `@mui/x-date-pickers/locales`), so every DataGrid and picker receives its `localeText` through the theme — no per-grid prop;
+- wraps the app in one `LocalizationProvider` (`AdapterDayjs`) whose `adapterLocale` is the dayjs locale for the app locale (`dayjs/locale/ja` is imported by `lib/mui-locale.ts`).
+
+English is the library default and needs no bundle. A locale without an entry in `lib/mui-locale.ts` falls back to English. Components must not mount their own `LocalizationProvider` with a `dateAdapter`: a nested provider creates a new adapter without the locale and resets the pickers to English.
+
+DataGrid `type: 'date'` / `type: 'dateTime'` columns edit and filter through the browser's native date inputs, whose popup language is chosen by the browser, not by the app locale.
+
 ## Testing
 
 ### Cypress E2E
