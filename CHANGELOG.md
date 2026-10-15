@@ -32,6 +32,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   and series show the same labels as lists and forms: enum option labels (the dashboard catalog now carries
   `enum_namespace`), Yes / No, and the `(unspecified)` / `(unknown)` / `(unnamed)` placeholders; entity and field
   names in the subtitle use their display labels.
+- **Documentation for Chrome's phishing warning on demo logins** (Issue #724). `docs/knowledge/vercel-demo-login-phishing-warning.md`
+  explains why a login page on a shared `*.vercel.app` subdomain can trigger Chrome's password-reuse warning and what to do about it
+  (custom domain, a distinct `SEED_ADMIN_PASSWORD` per deployment, Safe Browsing lookup and report flow);
+  `docs/knowledge/seed-baseline-credential-hardening.md` states the per-deployment password rule. No behavior change.
 - **Entity-name selects offer `audit_log` and show dictionary words** (Issues #1013, #1015). A field declared with
   `x-entity-select` (`permission.name`, `approval_flow.entity_name`) now also offers `audit_log`, the system table a
   permission can name. `approval_request` and entities without generated pages stay out on purpose: they are not
