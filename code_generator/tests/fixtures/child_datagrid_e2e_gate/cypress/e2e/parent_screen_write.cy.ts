@@ -1,5 +1,5 @@
 import { TEST_CREDENTIALS, TEST_API_KEY } from '../../support/test-credentials';
-import { editDataGridCell, getDataGridCell, selectDataGridSingleSelect } from '../../support/datagrid-helpers';
+import { clearDataGridDateCell, editDataGridCell, getDataGridCell, selectDataGridSingleSelect } from '../../support/datagrid-helpers';
 
 const CHILD = 'Parent Only Probes';
 const headers = { 'X-API-Key': TEST_API_KEY };
@@ -162,7 +162,11 @@ describe('parent screen: create and edit an inline child grid', () => {
       cy.clickButton(`Add ${CHILD}`);
       fillProbeRow(0, undefined, false);
       getDataGridCell(0, field, CHILD).dblclick();
-      getDataGridCell(0, field, CHILD).find('input').clear();
+      if (field === 'date_req' || field === 'dt_req') {
+        clearDataGridDateCell(0, field, CHILD);
+      } else {
+        getDataGridCell(0, field, CHILD).find('input').clear();
+      }
       cy.press(Cypress.Keyboard.Keys.TAB);
       cy.get('p').first().click(); // click outside to commit the row edit
       cy.clickButton('Save');
@@ -203,7 +207,7 @@ describe('parent screen: create and edit an inline child grid', () => {
     fillProbeRow(0, undefined, false);
     ['date_null', 'dt_null'].forEach((field) => {
       getDataGridCell(0, field, CHILD).dblclick();
-      getDataGridCell(0, field, CHILD).find('input').clear();
+      clearDataGridDateCell(0, field, CHILD);
       cy.press(Cypress.Keyboard.Keys.TAB);
     });
     cy.get('p').first().click(); // click outside to commit the row edit

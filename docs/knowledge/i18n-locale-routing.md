@@ -320,7 +320,7 @@ MUI components carry their own UI text (DataGrid column menu, filter panel, "Man
 
 English is the library default and needs no bundle. A locale without an entry in `lib/mui-locale.ts` falls back to English. Components must not mount their own `LocalizationProvider` with a `dateAdapter`: a nested provider creates a new adapter without the locale and resets the pickers to English.
 
-DataGrid `type: 'date'` / `type: 'dateTime'` columns edit and filter through the browser's native date inputs, whose popup language is chosen by the browser, not by the app locale.
+DataGrid `type: 'date'` / `type: 'dateTime'` columns (list-page filter, and the filter and edit cell of an embedded child grid) use MUI `DatePicker` / `DateTimePicker` from `components/_standard/DataGridDatePickers.tsx` (`dateColumnProps(kind)`) instead of the browser's native date inputs, whose popup language is chosen by the browser, not by the app locale. The pickers read the app-wide `LocalizationProvider` above, so the calendar follows the app locale like the form pickers. Only the input widget changed: `lib/_datagrid_date.ts` converts between the picker value and the same values the native inputs produced (a date filter is `new Date('YYYY-MM-DD')`, a dateTime filter is local `new Date('YYYY-MM-DDTHH:mm')`, a date cell saves local midnight, a dateTime cell saves local HH:mm with seconds zeroed). There is no schema key; every date and date-time column gets the pickers. Pro components (range pickers) are not used.
 
 ## Testing
 

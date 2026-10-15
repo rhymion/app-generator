@@ -4104,6 +4104,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
     needs_entity_autocomplete_cell = False
     uses_format_label_value = False
     uses_decimal_format = False
+    uses_date_pickers = False
     column_children = []
 
     for child_raw in non_comment_ch:
@@ -4273,6 +4274,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                 # range; 'time' has no dedicated MUI GridColDef type, so it
                 # keeps 'dateTime' (unchanged from before this fix).
                 uses_format_label_value = True
+                uses_date_pickers = True
                 mui_col_type = 'date' if fmt == 'date' else 'dateTime'
                 columns.append(
                     f"    {{\n"
@@ -4281,6 +4283,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
                     f"      width: 250,\n"
                     f"      editable: {col_editable},\n"
                     f"      type: '{mui_col_type}',\n"
+                    f"      ...dateColumnProps('{mui_col_type}'),\n"
                     f"      valueFormatter: (value) => formatLabelValue(value, '{fmt}'),\n"
                     f"    }},"
                 )
@@ -4334,6 +4337,7 @@ def column_def_context(ctx: dict, schema: dict) -> dict:
         'needs_entity_autocomplete_cell': needs_entity_autocomplete_cell,
         'uses_format_label_value': uses_format_label_value,
         'uses_decimal_format': uses_decimal_format,
+        'uses_date_pickers': uses_date_pickers,
     }
 
 

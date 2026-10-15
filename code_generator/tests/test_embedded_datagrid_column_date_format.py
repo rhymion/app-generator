@@ -170,3 +170,38 @@ def test_mui_col_type_splits_date_from_datetime_across_all_three_formats():
     assert date_types['expiry_date'] == 'date'
     assert date_types['received_at'] == 'dateTime'
     assert date_types['pickup_time'] == 'dateTime'
+
+
+# Issue #764: date / dateTime child columns filter and edit through MUI
+# pickers (so the calendar follows the app locale, not the browser's).
+
+def test_every_date_shaped_column_spreads_the_picker_props_after_its_type():
+    fn_code = _fn_code()
+    for field, mui_type in (('expiry_date', 'date'), ('received_at', 'dateTime'), ('pickup_time', 'dateTime')):
+        block = _column_block(fn_code, field)
+        assert f"...dateColumnProps('{mui_type}')," in block, f"{field} column was: {block}"
+        assert block.index(f"type: '{mui_type}'") < block.index('...dateColumnProps'), block
+
+
+def test_column_def_context_flags_the_picker_import_only_when_needed():
+    entity = _entity('doc', children=[_child_entry('line', 'lines')])
+    schema = _schema()
+    assert column_def_context(build_context(entity, schema), schema)['uses_date_pickers'] is True
+
+    plain = _schema()
+    for name in ('expiry_date', 'received_at', 'pickup_time'):
+        del plain['definitions']['line']['properties'][name]
+    assert column_def_context(build_context(entity, plain), plain)['uses_date_pickers'] is False
+
+
+def test_rendered_column_def_imports_date_column_props_when_used():
+    from jinja2 import Environment, FileSystemLoader
+    env = Environment(loader=FileSystemLoader(str(REPO_ROOT / 'code_generator' / 'templates')))
+    template = env.get_template('column_def.tsx.jinja2')
+    entity = _entity('doc', children=[_child_entry('line', 'lines')])
+    schema = _schema()
+    ctx = column_def_context(build_context(entity, schema), schema)
+    rendered = template.render(**ctx)
+    assert "import { dateColumnProps } from '@/components/_standard/DataGridDatePickers';" in rendered
+    off = template.render(**{**ctx, 'uses_date_pickers': False})
+    assert 'DataGridDatePickers' not in off
