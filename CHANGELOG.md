@@ -162,6 +162,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `resetTestDatabase()` empties both tables with `TRUNCATE`. Consumers add the SQL to their own migrations, create the
   restricted application role and the write-once bucket; see `docs/knowledge/audit-log-append-only.md`.
 ### Changed
+- **The Cypress helper `grantAllEntityPermissions` grants what the real seed grants** (Issue #848). Instead of full CRUD
+  and import on every entity, it reads the generated `SEED_ENTITY_GRANTS` (the source of `npm run db:grant-all-permissions`),
+  so an entity with `x-generate.new: false` no longer gives the test user `create`. Entities outside that list, such as
+  `labelField` targets, keep full CRUD. A spec that needs a further right adds it explicitly. See
+  `docs/knowledge/grant-all-permissions-x-generate-gate.md`.
 - Completion gate documents (`generate-schema`, `update-code`, `update-generator`) now name `npm run db:generate` as a prerequisite of the vitest step on a fresh checkout (Issue #1006).
 - **List sort / filter panel no longer offers internal bridge foreign keys** (Issue #967). `Approvable Id`, `Attachable Id`,
   `Commentable Id` and the like are dropped from the Web panel and from the Expo list's sort and filter keys, using the
