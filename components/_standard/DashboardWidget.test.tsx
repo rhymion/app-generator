@@ -10,7 +10,7 @@ vi.mock('next-intl', async () => {
   const msgs = {
     en: (await import('@/messages/en.json')).default,
     ja: (await import('@/messages/ja.json')).default,
-  } as Record<string, Record<string, Record<string, string>>>;
+  } as unknown as Record<string, Record<string, Record<string, string>>>;
   return {
     useTranslations: (ns: string) => (key: string, params?: Record<string, string>) =>
       ns === 'DashboardView'
