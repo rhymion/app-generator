@@ -181,6 +181,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **Generated test dependencies skip an optional FK that closes a required cycle** (Issue #1025, part of #946). An identity
+  entity's nullable `current_version_id` to its version entity is no longer pre-created as a dependency of the identity:
+  the version requires the identity, so the generated `populate<Entity>Dependencies()` created the version row without its
+  required parent FK and the API Cypress specs failed.
+- **`form_validation.ts` compiles for an entity with no required form field** (Issue #1026, part of #946). `REQUIRED_FIELDS`
+  has an explicit element type instead of `as const`, so an empty list no longer infers the empty tuple type.
 - **The Completion gate's UI Cypress step now runs `cypress/e2e/auth/**`** (Issue #580). `test:e2e:cy:ui` matched only 
   `cypress/e2e/*.cy.ts` and `cypress/e2e/mobile/*.cy.ts`, so the auth specs (`mfa.cy.ts`, `settings_avatar_save.cy.ts`) ran 
   in CI's `e2e-tests` job but in no gate step. The script's `--spec` now includes `cypress/e2e/auth/**`, and a pytest fails 
