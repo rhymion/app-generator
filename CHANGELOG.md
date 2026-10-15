@@ -186,6 +186,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **The generated OpenAPI record schema lists `created_at`, `updated_at` and `creator_id`** (Issue #762). Every response row
+  carries these base fields, but the record schema described only the entity's own declared properties. Each is now present
+  and marked `readOnly: true` (`creator_id` is nullable); an entity's own declaration of `id` is kept. The create-request
+  schema and filter parameters are unchanged. `docs/knowledge/generated-documentation-and-openapi-spec.md` states the rule.
 - **Transient and missing-record Prisma errors no longer return 422** (Issue #747). The generated `add{Entity}` and
   `update{Entity}` catch blocks now map `P2034` (write conflict under Serializable isolation) and `P2037` (too many
   connections) to `CAPACITY` (409), and `P2025` (required record not found) to `NOT_FOUND` (404). Input-shaped codes still
