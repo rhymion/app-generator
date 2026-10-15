@@ -960,7 +960,10 @@ def split_same_target_fk_deps(
     target_to_fk_rels: dict[str, list] = {}
     for r in relationships:
         if (r['target'] not in ('user', model_name)
-                and r['prop_name'] not in ('updater_id', 'assignee_id')):
+                and r['prop_name'] not in ('updater_id', 'assignee_id')
+                # An FK skipped by resolve_dependencies (optional edge closing a required
+                # cycle) has no dep to split or alias.
+                and any(d['target'] == r['target'] for d in deps)):
             target_to_fk_rels.setdefault(r['target'], []).append(r)
     multi_fk_targets = {t: rels for t, rels in target_to_fk_rels.items() if len(rels) > 1}
     for target, fk_rels in multi_fk_targets.items():
@@ -5690,6 +5693,8 @@ def api_spec_context(
         'assert_create': assert_create,
         'assert_update': assert_update,
         'post_body_create': _post_body_impl(None, f'{I}    '),
+        # 5.1 and 8.2 omit one required field; an entity with none has nothing to omit.
+        'has_required_field': field_to_skip_5_1 is not None,
         'post_body_missing_field': _post_body_impl(field_to_skip_5_1, f'{I}    '),
         'date_range_boundary': date_range_boundary,
         'post_body_daterange_boundary': post_body_daterange_boundary,

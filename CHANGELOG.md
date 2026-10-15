@@ -185,6 +185,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   entity's nullable `current_version_id` to its version entity is no longer pre-created as a dependency of the identity:
   the version requires the identity, so the generated `populate<Entity>Dependencies()` created the version row without its
   required parent FK and the API Cypress specs failed.
+- **The generated API spec omits the missing-required-field cases for an entity with no required field** (Issue #1031, part of
+  #946). Examples 5.1 and 8.2 omit one required field and expect a rejection; with nothing required the request is valid, so
+  they failed. The generated test helper also no longer returns an alias for a dependency that was skipped (#1025).
 - **`form_validation.ts` compiles for an entity with no required form field** (Issue #1026, part of #946). `REQUIRED_FIELDS`
   has an explicit element type instead of `as const`, so an empty list no longer infers the empty tuple type.
 - **The Completion gate's UI Cypress step now runs `cypress/e2e/auth/**`** (Issue #580). `test:e2e:cy:ui` matched only 

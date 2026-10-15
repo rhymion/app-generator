@@ -121,6 +121,7 @@ describe('API: {{ title }}', () => {
 {% endif %}
     });
 
+{% if has_required_field %}
     it('5.1 fails when a required field is missing', () => {
 {% if has_deps %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
@@ -142,6 +143,7 @@ describe('API: {{ title }}', () => {
       });
 {% endif %}
     });
+{% endif %}
 {% if date_range_boundary %}
 
     it('5.2 rejects reservation when {{ date_range_boundary.start_field }} equals {{ date_range_boundary.end_field }} (start must be before end)', () => {
@@ -287,6 +289,7 @@ describe('API: {{ title }}', () => {
 {% endif %}
     });
 
+{% if has_required_field %}
     it('8.2 bulk creates — partial failure when a required field is missing', () => {
 {% if reservation_count_pool_pascal %}
       cy.task('db:populate{{ reservation_count_pool_pascal }}', 1);
@@ -323,6 +326,7 @@ describe('API: {{ title }}', () => {
       });
 {% endif %}
     });
+{% endif %}
   });
 {% endif %}
 {% if can_edit %}
