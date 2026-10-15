@@ -66,9 +66,9 @@ def _schema(prop: dict) -> dict:
 @pytest.mark.parametrize(
     "prop, expected_value, expected_expr",
     [
-        ({"type": "integer", "minimum": 1}, 100, "Math.max(1, i * 100)"),
-        ({"type": "integer", "minimum": 500}, 500, "Math.max(500, i * 100)"),
-        ({"type": "integer", "minimum": 1, "maximum": 50}, 50, "Math.min(50, Math.max(1, i * 100))"),
+        ({"type": "integer", "minimum": 1}, 100, "i * 100"),
+        ({"type": "integer", "minimum": 500}, 500, "500 + (i - 1) * 100"),
+        ({"type": "integer", "minimum": 1, "maximum": 50}, 1, "1 + ((i - 1) % 50)"),
         ({"type": "integer"}, 100, "i * 100"),
     ],
 )
@@ -113,13 +113,49 @@ def test_label_is_distinct_per_row_when_bounds_leave_room(prop):
     assert [_numeric_unique_seed(prop, i) for i in rows] == [100, 200, 300, 400, 500]
 
 
-def test_known_limitation_tight_bounds_repeat_the_clamped_value_across_rows():
-    # Known limitation (accepted): a bound tighter than the
-    # row spacing (here minimum 500) clamps several rows to one value. The
-    # populate helper and the expected label still agree row for row, so the
-    # list assertion holds; only the numeric part of the label repeats.
-    prop = {"type": "integer", "minimum": 500}
+@pytest.mark.parametrize(
+    "prop, expected",
+    [
+        ({"type": "integer", "minimum": 500}, [500, 600, 700, 800, 900]),
+        ({"type": "integer", "minimum": 1, "maximum": 50}, [1, 2, 3, 4, 5]),
+        ({"type": "integer", "maximum": 50}, [1, 2, 3, 4, 5]),
+        ({"type": "integer", "minimum": 10, "maximum": 14}, [10, 11, 12, 13, 14]),
+        ({"type": "integer", "minimum": 500, "maximum": 520}, [500, 501, 502, 503, 504]),
+    ],
+)
+def test_tight_bounds_keep_rows_distinct(prop, expected):
     schema = _schema(prop)
-    labels = [_seed_relation_label_value("placement", "slot_no", False, schema, unique_index=i) for i in (1, 2, 3)]
-    assert labels == ["500", "500", "500"]
-    assert [_numeric_unique_seed(prop, i) for i in (1, 2, 3)] == [500, 500, 500]
+    rows = range(1, 6)
+    labels = [_seed_relation_label_value("placement", "slot_no", False, schema, unique_index=i) for i in rows]
+    assert labels == [str(v) for v in expected]
+    assert [_numeric_unique_seed(prop, i) for i in rows] == expected
+    assert all(prop.get("minimum", v) <= v <= prop.get("maximum", v) for v in expected)
+
+
+def test_range_with_fewer_values_than_rows_wraps_but_stays_in_bounds():
+    # Only three values exist, so a fourth row has to repeat one.
+    prop = {"type": "integer", "minimum": 1, "maximum": 3}
+    assert [_numeric_unique_seed(prop, i) for i in range(1, 7)] == [1, 2, 3, 1, 2, 3]
+
+
+def test_single_value_range_and_inverted_bounds_do_not_break():
+    assert _numeric_unique_seed({"type": "integer", "minimum": 7, "maximum": 7}, 3) == 7
+    assert _numeric_unique_seed({"type": "integer", "maximum": 0}, 3) == 0
+
+
+@pytest.mark.parametrize(
+    "prop",
+    [
+        {"type": "integer", "minimum": 500},
+        {"type": "integer", "minimum": 1, "maximum": 50},
+        {"type": "integer", "maximum": 50},
+        {"type": "integer", "minimum": 3, "maximum": 7},
+        {"type": "integer", "minimum": 1, "maximum": 100000},
+    ],
+)
+def test_emitted_typescript_expression_matches_the_python_rule(prop):
+    # Evaluate the emitted expression (JS and Python share these operators for
+    # positive operands) and compare with the Python rule row for row.
+    for i in range(1, 12):
+        expr = _numeric_unique_expr(prop, str(i))
+        assert eval(expr) == _numeric_unique_seed(prop, i), (prop, i, expr)

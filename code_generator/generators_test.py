@@ -8,6 +8,7 @@ Builds Jinja2 template contexts for:
   - cypress/e2e/api/{entity}.cy.ts      (API test spec)
 """
 import json
+import math
 import re
 from datetime import datetime
 
@@ -270,38 +271,61 @@ def _get_base_properties(defn: dict, schema: dict | None = None) -> dict:
     return defn['properties']
 
 
+# Rows a populate helper may seed per entity before the narrow-range rule may
+# repeat a value; a range wide enough for this many rows uses the row spacing.
+_NUMERIC_SEED_ROWS = 10
+_NUMERIC_SEED_SPACING = 100
+
+
+def _numeric_seed_plan(prop: dict) -> tuple[str, int | float, int]:
+    """Shared shape of the per-row numeric seed, derived from the column bounds.
+
+    Returns `(kind, start, span)`:
+    - `spaced`: row `n` is `start + (n - 1) * 100`. `start` is `max(minimum, 100)`
+      (just `100` without a minimum), so a column with `minimum: 500` seeds
+      500, 600, 700, ... and a column with `minimum: 1` or no bound seeds
+      100, 200, 300, ...
+    - `dense`: the declared range is too narrow for the spacing, so row `n` is
+      `start + (n - 1) % span`: consecutive values from the lower bound, distinct
+      for as many rows as the range has values.
+    """
+    mn = prop.get('minimum')
+    mx = prop.get('maximum')
+    start = _NUMERIC_SEED_SPACING if mn is None else max(mn, _NUMERIC_SEED_SPACING)
+    if mx is None or mx - start >= _NUMERIC_SEED_SPACING * (_NUMERIC_SEED_ROWS - 1):
+        return 'spaced', start, 0
+    low = mn if mn is not None else min(1, mx)
+    return 'dense', low, max(1, math.floor(mx - low) + 1)
+
+
 def _numeric_unique_seed(prop: dict, index: int) -> int:
     """Value of the `index`-th (1-based) seeded row's integer/number column.
 
     Single source of truth for the per-row numeric seed: the dependency
     populate helpers emit it as a TypeScript expression (`_numeric_unique_expr`)
     and the generated specs compute the label text a list shows for such a row
-    from this function, so both agree. `index * 100` clamped to the declared
-    `minimum` / `maximum`. This is the per-row rule of an entity's own populate
-    helper (`prisma_value`, 'number' category), except that `prisma_value`
-    applies `maximum` only when `minimum` is declared too. It is not the rule
-    of `cypress_create_value`, which types a fixed 100 (clamped) into forms.
+    from this function, so both agree. Rows are spaced 100 apart from
+    `max(minimum, 100)`; when `maximum` leaves no room for that spacing the rows
+    take consecutive values from the lower bound instead (see
+    `_numeric_seed_plan`), so rows stay distinct while the range has values left.
+    This is not the rule of an entity's own populate helper (`prisma_value`,
+    'number' category), and not of `cypress_create_value`, which types a fixed
+    100 (clamped) into forms.
     """
-    val = index * 100
-    mx = prop.get('maximum')
-    mn = prop.get('minimum')
-    if mn is not None:
-        val = max(mn, val)
-    if mx is not None:
-        val = min(mx, val)
-    return val
+    kind, start, span = _numeric_seed_plan(prop)
+    if kind == 'spaced':
+        return start + (index - 1) * _NUMERIC_SEED_SPACING
+    return start + (index - 1) % span
 
 
 def _numeric_unique_expr(prop: dict, index_expr: str) -> str:
     """TypeScript counterpart of `_numeric_unique_seed` for a loop index variable."""
-    expr = f'{index_expr} * 100'
-    mn = prop.get('minimum')
-    mx = prop.get('maximum')
-    if mn is not None:
-        expr = f'Math.max({mn}, {expr})'
-    if mx is not None:
-        expr = f'Math.min({mx}, {expr})'
-    return expr
+    kind, start, span = _numeric_seed_plan(prop)
+    if kind == 'spaced':
+        if start == _NUMERIC_SEED_SPACING:
+            return f'{index_expr} * {_NUMERIC_SEED_SPACING}'
+        return f'{start} + ({index_expr} - 1) * {_NUMERIC_SEED_SPACING}'
+    return f'{start} + (({index_expr} - 1) % {span})'
 
 
 def _seed_relation_label_value(
