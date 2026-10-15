@@ -395,5 +395,21 @@
     "seriesSameAsGroup": "{where}Series field “{field}” is the same as Group by. Choose a different Series field.",
     "noMatchingData": "No data matches this chart.",
     "loadFailed": "The chart could not be loaded. Reload the page; if it keeps failing, contact an administrator."
+  },
+  "DashboardView": {
+    "subtitle": "{entity} grouped by {field}",
+    "subtitleWithZone": "{entity} grouped by {field} ({zone})",
+    "noWidgets": "No widgets yet. Edit this dashboard to add charts.",
+    "noData": "No data",
+    "exportCsv": "Export CSV",
+    "yes": "Yes",
+    "no": "No",
+    "unspecified": "(unspecified)",
+    "unknown": "(unknown)",
+    "unnamed": "(unnamed)",
+    "count": "Count",
+    "csvLabel": "label",
+    "csvCount": "count",
+    "csvCategory": "category"
   }
 }

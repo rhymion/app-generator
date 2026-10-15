@@ -1,5 +1,6 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
+import { renderWithIntl as render } from '@/vitest/i18n';
 import { vi, describe, it, expect } from 'vitest';
 import DashboardChart from './DashboardChart';
 import type { ChartDatum } from './DashboardChart';

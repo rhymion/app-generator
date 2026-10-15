@@ -5,6 +5,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Dashboard text and chart labels are translated** (Issue #913). Widget subtitles, "No data", "No widgets yet", the
+  CSV button and CSV headings use `messages/<locale>.json` (new `DashboardView` section, en and ja). Chart categories
+  and series show the same labels as lists and forms: enum option labels (the dashboard catalog now carries
+  `enum_namespace`), Yes / No, and the `(unspecified)` / `(unknown)` / `(unnamed)` placeholders; entity and field
+  names in the subtitle use their display labels.
 - **Entity-name selects offer `audit_log` and show dictionary words** (Issues #1013, #1015). A field declared with
   `x-entity-select` (`permission.name`, `approval_flow.entity_name`) now also offers `audit_log`, the system table a
   permission can name. `approval_request` and entities without generated pages stay out on purpose: they are not

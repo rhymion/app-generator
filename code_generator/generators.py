@@ -373,6 +373,8 @@ def build_dashboard_catalog(schema: dict) -> list[dict]:
                     'label': to_title_case(prop_name),
                     'kind': 'enum',
                     'enum_values': [str(v) for v in prop['enum']],
+                    # i18n section holding the translated option labels (same one lists and forms use), if any.
+                    'enum_namespace': _native_enum_ns(prop) or prop.get('x-enum-namespace'),
                 })
             elif actual in ('integer', 'number') and not isinstance(prop.get('enum'), list):
                 groupable.append({

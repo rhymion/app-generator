@@ -5,6 +5,7 @@ import { BarChart } from '@mui/x-charts/BarChart';
 import { LineChart } from '@mui/x-charts/LineChart';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
+import { useTranslations } from 'next-intl';
 
 // column = vertical bar; bar = horizontal bar; line = time series (Phase 4)
 export type ChartType = 'pie' | 'column' | 'bar' | 'line';
@@ -55,13 +56,14 @@ function toPercent(
 }
 
 export default function DashboardChart({ type, data, multiSeries, stackMode, height = 240 }: Props) {
+  const t = useTranslations('DashboardView');
   // Multi-series path
   if (multiSeries) {
     const isEmpty = multiSeries.series.length === 0 || multiSeries.categories.length === 0;
     if (isEmpty) {
       return (
         <Box sx={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Typography variant="caption" color="textSecondary">No data</Typography>
+          <Typography variant="caption" color="textSecondary">{t('noData')}</Typography>
         </Box>
       );
     }
@@ -110,7 +112,7 @@ export default function DashboardChart({ type, data, multiSeries, stackMode, hei
   if (singleData.length === 0) {
     return (
       <Box sx={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Typography variant="caption" color="textSecondary">No data</Typography>
+        <Typography variant="caption" color="textSecondary">{t('noData')}</Typography>
       </Box>
     );
   }
@@ -147,7 +149,7 @@ export default function DashboardChart({ type, data, multiSeries, stackMode, hei
       <LineChart
         height={height}
         xAxis={[{ scaleType: 'point', data: singleData.map((d) => d.label) }]}
-        series={[{ label: 'Count', data: singleData.map((d) => d.count) }]}
+        series={[{ label: t('count'), data: singleData.map((d) => d.count) }]}
       />
     );
   }
