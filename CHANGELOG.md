@@ -17,6 +17,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `scripts/seed-baseline.ts` writes the default row without a date. Existing databases run
   `scripts/migrations/06_app_setting_business_date_optional.sql` once (nullable column, unpinned rows cleared;
   `npm run test:business-date-migration` checks it against the previous schema).
+  A list primary field may now be a column that has a default, since such a column is never empty (`validate.py`).
 - **DataGrid date and date-time columns use MUI pickers** (Issue #764). The list-page filter value and the filter and edit cell of an embedded child grid for every `date` / `date-time` column now use MUI `DatePicker` / `DateTimePicker` instead of the browser's native date inputs, so the calendar follows the app locale (en/ja) rather than the browser's UI language. Filter values, saved values and time zones are unchanged. No new dependency and no schema key. `editDataGridCell()` in `cypress/support/datagrid-helpers.ts` types the same ISO values into the picker. See `docs/knowledge/i18n-locale-routing.md`.
 
 ### Added
