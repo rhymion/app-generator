@@ -166,6 +166,143 @@ def test_prune_orphans_keep_stubs_preserves_stubs(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# prune_orphans scope: routes, API routes, flat Cypress specs, conditional components (#618)
+# ---------------------------------------------------------------------------
+
+def _write_route(path: Path, parent: str, generated: bool = True) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = f"import {{ x }} from '@/lib/{parent}/getters';\n" if generated else "export {};\n"
+    path.write_text(body)
+    return path
+
+
+def test_prune_orphans_deletes_orphan_pages_and_api_routes(tmp_path: Path) -> None:
+    """app/[locale]/<entity>/ and app/api/<entity>/ of a removed entity are swept entirely."""
+    _make_orphan_entity(tmp_path, 'booking')
+    page_dir = tmp_path / 'app' / '[locale]' / 'booking'
+    api_dir = tmp_path / 'app' / 'api' / 'booking'
+    paths = [page_dir / rel for rel in cleanup._ORPHAN_PAGE_FILES]
+    paths += [api_dir / rel for rel in cleanup._ORPHAN_API_FILES]
+    for f in paths:
+        _write_route(f, 'booking')
+
+    cleanup._prune_orphans(tmp_path, [])
+
+    for f in paths:
+        assert not f.exists(), f'{f} must be deleted for an orphan entity'
+    assert not page_dir.exists()
+    assert not api_dir.exists()
+
+
+def test_prune_orphans_sweeps_routes_after_lib_already_gone(tmp_path: Path) -> None:
+    """Routes are still swept when lib/<entity>/ was already removed (manifest pass)."""
+    page = _write_route(tmp_path / 'app' / '[locale]' / 'booking' / 'page.tsx', 'booking')
+    api = _write_route(tmp_path / 'app' / 'api' / 'booking' / 'route.ts', 'booking')
+
+    cleanup._prune_orphans(tmp_path, [])
+
+    assert not page.exists()
+    assert not api.exists()
+
+
+def test_prune_orphans_keeps_routes_of_schema_entity(tmp_path: Path) -> None:
+    page = _write_route(tmp_path / 'app' / '[locale]' / 'project' / 'page.tsx', 'project')
+    entity = {'parent': 'project', 'model': 'project', 'generate_config': {}, 'children': []}
+
+    cleanup._prune_orphans(tmp_path, [entity])
+
+    assert page.exists()
+
+
+def test_prune_orphans_keeps_handwritten_routes(tmp_path: Path) -> None:
+    """Pages/routes that do not import their own lib module, or that live in a
+    directory whose lib/ counterpart is not an orphan entity, are never touched."""
+    plain = _write_route(tmp_path / 'app' / '[locale]' / 'extra' / 'page.tsx', 'extra', generated=False)
+    reserved = _write_route(tmp_path / 'app' / '[locale]' / 'setting' / 'edit' / '[id]' / 'page.tsx', 'setting')
+    # lib/notifications is a hand-written lib dir (no types.ts/getters.ts)
+    (tmp_path / 'lib' / 'notifications').mkdir(parents=True)
+    (tmp_path / 'lib' / 'notifications' / 'service.ts').write_text('export {};\n')
+    notif = _write_route(tmp_path / 'app' / 'api' / 'notifications' / 'route.ts', 'notifications')
+    unrelated = tmp_path / 'app' / 'api' / 'booking' / 'route.test.ts'
+    _write_route(tmp_path / 'app' / 'api' / 'booking' / 'route.ts', 'booking')
+    _write_route(unrelated, 'booking')
+
+    cleanup._prune_orphans(tmp_path, [])
+
+    assert plain.exists() and reserved.exists() and notif.exists()
+    assert unrelated.exists(), 'only the generator route file names are swept'
+    assert not (tmp_path / 'app' / 'api' / 'booking' / 'route.ts').exists()
+
+
+def test_prune_orphans_keeps_builtin_audit_log_routes(tmp_path: Path) -> None:
+    """audit_log is a built-in (not a schema entity); its tracked routes are allowlisted."""
+    _make_orphan_entity(tmp_path, 'audit_log')
+    routes = [
+        _write_route(tmp_path / 'app' / 'api' / 'audit_log' / 'route.ts', 'audit_log'),
+        _write_route(tmp_path / 'app' / 'api' / 'audit_log' / '[id]' / 'route.ts', 'audit_log'),
+        _write_route(tmp_path / 'app' / '[locale]' / 'audit_log' / 'page.tsx', 'audit_log'),
+        _write_route(tmp_path / 'app' / '[locale]' / 'audit_log' / 'view' / '[id]' / 'page.tsx', 'audit_log'),
+    ]
+
+    cleanup._prune_orphans(tmp_path, [])
+
+    for f in routes:
+        assert f.exists(), f'{f} is a built-in route and must be kept'
+
+
+def test_prune_orphans_deletes_orphan_flat_cypress_specs(tmp_path: Path) -> None:
+    e2e = tmp_path / 'cypress' / 'e2e'
+    specs = [
+        e2e / 'booking.cy.ts',
+        e2e / 'mobile' / 'booking.cy.ts',
+        e2e / 'api' / 'booking.cy.ts',
+        e2e / 'api' / 'booking_reservation_gen.cy.ts',
+    ]
+    for f in specs:
+        _make_generated_ts(f)
+    handwritten = e2e / 'auth.cy.ts'
+    handwritten.write_text("describe('auth', () => {});\n")
+    global_gen = e2e / 'api' / '_filter_sort_matrix_gen.cy.ts'
+    _make_generated_ts(global_gen)
+    kept_entity = e2e / 'project.cy.ts'
+    _make_generated_ts(kept_entity)
+    entity = {'parent': 'project', 'model': 'project', 'generate_config': {}, 'children': []}
+
+    cleanup._prune_orphans(tmp_path, [entity])
+
+    for f in specs:
+        assert not f.exists(), f'{f} must be deleted for an orphan entity'
+    assert handwritten.exists(), 'spec without the generated header is hand-written'
+    assert global_gen.exists(), 'schema-global generated spec is not per-entity'
+    assert kept_entity.exists()
+
+
+def test_prune_orphans_deletes_conditionally_generated_components(tmp_path: Path) -> None:
+    """SplitActionSection/ImportModal/InlineCreateDialog/BridgeGrid no longer keep the dir alive."""
+    files = _make_orphan_entity(tmp_path, 'booking')
+    comp_dir = tmp_path / 'components' / 'booking'
+    extra = ['SplitActionSection.tsx', 'ImportModal.tsx', 'InlineCreateDialog.tsx', 'BookingBridgeGrid.tsx']
+    for fname in extra:
+        (comp_dir / fname).write_text("'use client';\n")
+
+    cleanup._prune_orphans(tmp_path, [])
+
+    for fname in extra:
+        assert not (comp_dir / fname).exists()
+    assert not comp_dir.exists(), 'directory must be removed once all generated files are gone'
+
+
+def test_prune_orphans_keeps_component_dir_with_handwritten_file(tmp_path: Path) -> None:
+    _make_orphan_entity(tmp_path, 'booking')
+    custom = tmp_path / 'components' / 'booking' / 'MyWidget.tsx'
+    custom.write_text("export {};\n")
+
+    cleanup._prune_orphans(tmp_path, [])
+
+    assert custom.exists()
+
+
+# ---------------------------------------------------------------------------
 # messages/*.json must never be modified by cleanup (cmd_560)
 #
 # `_clean_appended_files` used to delete every Fields/EntityLabel/Nav key
