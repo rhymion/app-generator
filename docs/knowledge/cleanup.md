@@ -128,20 +128,24 @@ any entity in the current schema, then deletes them.
 | `app/[locale]/docs/<entity>/page.mdx` | Entity dir not in schema | |
 | `docs/generated/<entity>.md` | Stem not in schema | |
 
+Pages, API routes, flat Cypress specs and the conditionally generated component
+files are swept with extra guards, because they sit beside hand-written files:
+
+| Path pattern | Detection signal | Notes |
+|-------------|-----------------|-------|
+| `components/<entity>/SplitActionSection.tsx`, `ImportModal.tsx`, `InlineCreateDialog.tsx`, `<Entity>BridgeGrid.tsx` | Same detection as `FormUpsert.tsx` above | Removed with the other component files so the directory can be removed; any other file keeps the directory. |
+| `app/[locale]/<entity>/page.tsx`, `chart/page.tsx`, `new/page.tsx`, `edit/[id]/page.tsx`, `view/[id]/page.tsx` | Directory not in schema, not a reserved route (`docs`, `dashboard`, `register`, `login`, `setting`, `auth`), and `lib/<entity>/` is either an orphan in the same run or already gone | A file is deleted only if it imports `@/lib/<entity>/`; only the generator's file names are considered. |
+| `app/api/<entity>/route.ts`, `[id]/route.ts`, `bulk/route.ts` | Same as the pages above | Same import check. |
+| `cypress/e2e/<entity>.cy.ts`, `e2e/api/<entity>.cy.ts`, `e2e/api/<entity>_reservation_gen.cy.ts`, `e2e/mobile/<entity>.cy.ts` | Stem not in schema; `AUTO-GENERATED` marker required | Specs without the marker, and schema-wide specs whose name starts with `_`, are kept. |
+
+Built-in routes that are not schema entities (for example `audit_log`) are listed
+in `HANDWRITTEN_ALLOWLIST` and are never deleted.
+
 ### What it does NOT sweep
 
-`--prune-orphans` does not currently remove generated **application pages** or
-**API routes** for orphaned entities:
-
-- `app/[locale]/<entity>/page.tsx` (list page)
-- `app/[locale]/<entity>/new/page.tsx`, `edit/[id]/page.tsx`, `view/[id]/page.tsx`
-- `app/api/<entity>/route.ts`
-- `cypress/e2e/<entity>.cy.ts`
-
-If you remove an entity from the schema and these files remain after running
-`--prune-orphans`, delete them manually. The generator does not auto-detect
-these as orphans because page directories may also contain hand-written content,
-so a safe automated check is non-trivial.
+Any other file in an orphan entity's page or route directory (for example a
+hand-written `route.test.ts`, or a page that does not import its entity's lib
+module). The directory is then left in place; delete those files by hand.
 
 ---
 
@@ -179,7 +183,7 @@ removal with:
 python3 code_generator/cleanup.py code_generator/.generated/json_schema.yaml . --prune-orphans
 ```
 
-This sweeps `lib/<entity>/` and `components/<entity>/` boilerplate for any
-entity that no longer exists in the schema. For app pages
-(`app/[locale]/<entity>/`, `app/api/<entity>/`) that also need removal,
-delete them manually — `--prune-orphans` does not cover those paths.
+This sweeps `lib/<entity>/`, `components/<entity>/`, the generated pages and
+routes (`app/[locale]/<entity>/`, `app/api/<entity>/`) and the flat Cypress specs
+for any entity that no longer exists in the schema. Hand-written files in those
+directories are kept; see "What it sweeps".

@@ -181,6 +181,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **`--prune-orphans` now removes the pages, API routes, flat Cypress specs and conditional component files of a removed entity** (Issue #618).
+  After an entity left the schema, `app/[locale]/<entity>/`, `app/api/<entity>/`, `cypress/e2e/**/<entity>.cy.ts` and
+  `components/<entity>/SplitActionSection.tsx` / `ImportModal.tsx` stayed on disk and broke the next build. Pages and routes are deleted only when they
+  import their own `@/lib/<entity>/` module; specs only with the `AUTO-GENERATED` header; the built-in `audit_log` routes are allowlisted.
+  `docs/knowledge/cleanup.md` lists the sweep.
 - **Mobile card list no longer shows delete controls for an entity with `x-generate.delete: false`** (Issue #578). `CardListClient` now requires `removeAction` in addition to the delete permission before rendering the toolbar delete button and the per-card checkbox, matching `DataGridClient`. The generated mobile list specs count cards through `[data-testid="mobile-card-list"] .MuiCard-root` instead of the delete checkboxes, so they hold for an entity with no delete action.
 - **Native app header no longer sits under the system UI and its actions are large enough to press** (Issue #1014). The header and footer now apply the top and bottom safe-area insets, and each header action is at least 44x44 points.
 - **Generated delete examples check the rows exist first for an entity with no unique primary link** (Issue #835). 
