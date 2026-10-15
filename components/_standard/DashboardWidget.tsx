@@ -1,19 +1,21 @@
 'use client';
 
-import { useEffect, useReducer } from 'react';
+import { useEffect, useMemo, useReducer } from 'react';
 import Card from '@mui/material/Card';
 import CardHeader from '@mui/material/CardHeader';
 import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
 import Skeleton from '@mui/material/Skeleton';
-import { useTranslations } from 'next-intl';
+import { useMessages, useTranslations } from 'next-intl';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import DownloadIcon from '@mui/icons-material/Download';
 import DashboardChart, { ChartDatum, ChartType, StackMode } from './DashboardChart';
 import { aggregateForWidget, AggregateOutput, FilterCondition, BucketGranularity } from '@/lib/dashboard/aggregate';
 import { findChartProblems, type WidgetProblem } from '@/lib/dashboard/widget-problem';
-import { useProblemMessage } from '@/components/dashboard/widget-problem-message';
+import { useProblemMessage, useDashboardNameLabels } from '@/components/dashboard/widget-problem-message';
+import { findDashboardEntity } from '@/components/dashboard/catalog-source';
+import { localizeOutput, type LabelTranslators } from '@/lib/dashboard/localize-output';
 
 export type { FilterCondition };
 
@@ -52,10 +54,10 @@ function normalizeBucketGranularity(raw: BucketGranularity | null | undefined): 
 }
 
 // Download filtered+grouped data as a UTF-8 BOM CSV (Excel-compatible).
-function exportToCSV(output: AggregateOutput, widgetName: string): void {
+function exportToCSV(output: AggregateOutput, widgetName: string, headers: { label: string; count: string; category: string }): void {
   let csvContent: string;
   if (output.kind === 'single') {
-    const header = 'label,count';
+    const header = `${headers.label},${headers.count}`;
     const rows = output.data.map(
       (d) => `"${d.label.replace(/"/g, '""')}",${d.count}`,
     );
@@ -64,7 +66,7 @@ function exportToCSV(output: AggregateOutput, widgetName: string): void {
     const seriesCols = output.series
       .map((s) => `"${s.label.replace(/"/g, '""')}"`)
       .join(',');
-    const header = `category,${seriesCols}`;
+    const header = `${headers.category},${seriesCols}`;
     const rows = output.categories.map((cat, i) => {
       const values = output.series.map((s) => s.data[i] ?? 0).join(',');
       return `"${cat.replace(/"/g, '""')}",${values}`;
@@ -108,6 +110,9 @@ function conditionsKey(conditions: FilterCondition[] | null | undefined): string
 export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
   const tz = useTranslations('Timezone');
   const tp = useTranslations('DashboardWidgetProblem');
+  const tv = useTranslations('DashboardView');
+  const messages = useMessages() as Record<string, Record<string, unknown> | undefined>;
+  const { entityLabel, fieldLabel } = useDashboardNameLabels();
   const problemMessage = useProblemMessage();
   const [{ output, problem, failed, loading }, dispatch] = useReducer(reducer, { output: EMPTY_OUTPUT, problem: null, failed: false, loading: true });
 
@@ -148,27 +153,46 @@ export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
     return () => { cancelled = true; };
   }, [widget.entity_name, widget.group_by_field, widget.filter_field, widget.filter_value, widget.stack_mode, widget.series_field, widget.group_by_bucket, widget.timezone, validationError, condKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Category and series labels arrive as fixed tokens / raw values; show them as the lists and forms do.
+  const localized = useMemo(() => {
+    const fields = findDashboardEntity(widget.entity_name)?.groupable_fields ?? [];
+    const groupField = fields.find((f) => f.name === widget.group_by_field);
+    const seriesField = widget.series_field ? fields.find((f) => f.name === widget.series_field) : undefined;
+    const tr: LabelTranslators = {
+      yes: tv('yes'),
+      no: tv('no'),
+      unspecified: tv('unspecified'),
+      unknown: tv('unknown'),
+      unnamed: tv('unnamed'),
+      enumLabel: (ns, key) => {
+        const label = messages[ns]?.[key];
+        return typeof label === 'string' ? label : undefined;
+      },
+    };
+    return localizeOutput(output, groupField, seriesField, tr);
+  }, [output, widget.entity_name, widget.group_by_field, widget.series_field, tv, messages]);
+
   const chartType = normalizeChartType(widget.chart_type);
   const stackMode = normalizeStackMode(widget.stack_mode);
 
   function renderChart() {
-    if (output.kind === 'multi') {
+    if (localized.kind === 'multi') {
       if (chartType === 'line') {
         // Time series multi-series line chart (group_by_bucket + series_field)
-        return <DashboardChart type="line" multiSeries={output} />;
+        return <DashboardChart type="line" multiSeries={localized} />;
       }
       if (stackMode && (chartType === 'column' || chartType === 'bar')) {
         return (
           <DashboardChart
             type={chartType}
-            multiSeries={output}
+            multiSeries={localized}
             stackMode={stackMode}
           />
         );
       }
     }
     // Single-series fallback (also covers line without series_field)
-    const singleData: ChartDatum[] = output.kind === 'single' ? output.data : [];
+    const singleData: ChartDatum[] = localized.kind === 'single' ? localized.data : [];
     return <DashboardChart type={chartType} data={singleData} />;
   }
 
@@ -181,13 +205,19 @@ export default function DashboardWidget({ widget }: { widget: WidgetConfig }) {
       <CardHeader
         title={widget.name}
         // A non-UTC zone is named in the subheader so the buckets are never ambiguous.
-        subheader={`${widget.entity_name} grouped by ${widget.group_by_field}${!loading && !problem && !failed && output.timezone ? ` (${tz(output.timezone)})` : ''}`}
+        subheader={!loading && !problem && !failed && output.timezone
+          ? tv('subtitleWithZone', { entity: entityLabel(widget.entity_name), field: fieldLabel(widget.group_by_field, widget.entity_name), zone: tz(output.timezone) })
+          : tv('subtitle', { entity: entityLabel(widget.entity_name), field: fieldLabel(widget.group_by_field, widget.entity_name) })}
         titleTypographyProps={{ variant: 'subtitle1' }}
         subheaderTypographyProps={{ variant: 'caption' }}
         action={
           hasData ? (
-            <Tooltip title="Export CSV">
-              <IconButton size="small" onClick={() => exportToCSV(output, widget.name)} aria-label="export CSV">
+            <Tooltip title={tv('exportCsv')}>
+              <IconButton
+                size="small"
+                onClick={() => exportToCSV(localized, widget.name, { label: tv('csvLabel'), count: tv('csvCount'), category: tv('csvCategory') })}
+                aria-label={tv('exportCsv')}
+              >
                 <DownloadIcon fontSize="small" />
               </IconButton>
             </Tooltip>

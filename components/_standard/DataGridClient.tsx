@@ -31,6 +31,7 @@ import type { ActionFailure } from '@/lib/_errors';
 import { errorMessageKey } from '@/lib/_errors';
 import { AppAlert } from '@/components/ui';
 import ListQueryPanel from './ListQueryPanel';
+import { dateColumnProps } from './DataGridDatePickers';
 import { EMPTY_LIST_QUERY, toListQuery, type ListQuerySpec, type ListQueryState, type SortItem } from '@/lib/_list_query';
 
 interface BaseEntity {
@@ -246,6 +247,11 @@ export default function DataGridClient<T extends BaseEntity>({
     // valueGetter/pre-formatting already computed, safe and unchanged.
     const needsIdentityValueFormatter = fieldConfig.type === 'singleSelect' || fieldConfig.type === 'date' || fieldConfig.type === 'dateTime';
     const identityValueFormatter = (value: unknown) => (value ?? '') as string;
+    // Filter through MUI pickers, not the browser's native date input whose
+    // popup language follows the browser rather than the app locale.
+    const dateFilterProps = fieldConfig.type === 'date' || fieldConfig.type === 'dateTime'
+      ? { filterOperators: dateColumnProps(fieldConfig.type).filterOperators }
+      : {};
 
     // Special handling for primary field to include link to view page
     if (fieldConfig.field === primaryField) {
@@ -256,6 +262,7 @@ export default function DataGridClient<T extends BaseEntity>({
         type: fieldConfig.type,
         valueOptions: fieldConfig.valueOptions,
         ...(needsIdentityValueFormatter ? { valueFormatter: identityValueFormatter } : {}),
+        ...dateFilterProps,
         renderCell: (params) => {
           const fieldValue = params.row[fieldConfig.field];
           // The link must stay within the cell's width. Without these styles
@@ -290,6 +297,7 @@ export default function DataGridClient<T extends BaseEntity>({
         type: fieldConfig.type,
         valueOptions: fieldConfig.valueOptions,
         ...(needsIdentityValueFormatter ? { valueFormatter: identityValueFormatter } : {}),
+        ...dateFilterProps,
         renderCell: (params) => {
           const href = params.row[fieldConfig.field] as string | null | undefined;
           if (!href) return null;
@@ -309,6 +317,7 @@ export default function DataGridClient<T extends BaseEntity>({
       type: fieldConfig.type,
       valueOptions: fieldConfig.valueOptions,
       ...(needsIdentityValueFormatter ? { valueFormatter: identityValueFormatter } : {}),
+      ...dateFilterProps,
       valueGetter: (value, row) => {
         const fieldValue = row[fieldConfig.field];
         // 'boolean' must pass the raw boolean through unchanged -- MUI's

@@ -240,3 +240,12 @@ consumer overrides `components/_standard/DataGridClient.tsx` or
 department-role users regardless of what their own grant-all-permissions
 override does — the more load-bearing of the two defenses for exactly
 this reason.
+
+## The Cypress helper follows the same grants
+
+`grantAllEntityPermissions()` in the generated `cypress/support/db-helpers.ts` creates the `Administrator` role the
+Cypress specs sign in with. It reads `SEED_ENTITY_GRANTS` from `scripts/generated/seed-entities.ts` and writes one
+permission row per `ALL_ENTITIES` entity with those flags, so a spec holds no right that the seeded `Administrator`
+lacks. An entity that is in `ALL_ENTITIES` but not in `SEED_ENTITY_GRANTS` (for example a `labelField` target) keeps full
+CRUD. A spec that needs more adds the right explicitly (`createApiUserWithPermission` and
+`createSessionUserWithPermission` take explicit flags).
