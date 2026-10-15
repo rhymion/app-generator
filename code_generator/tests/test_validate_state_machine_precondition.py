@@ -51,12 +51,24 @@ from validate import validate_schema, SchemaValidationError
 # or reading it merely adds a second, harmless error to the same raised
 # exception (unknown model/field cases) alongside the one the test's
 # `match=` already asserts on.
-_VALID_MMD = 'stateDiagram-v2\n[*] --> draft\ndraft --> [*]\n'
+_VALID_MMD = (
+    'stateDiagram-v2\n[*] --> draft\ndraft --> submitted\n'
+    'submitted --> approved\napproved --> [*]\n'
+)
 
 
 @pytest.fixture(autouse=True)
 def _sm_tmp_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+
+
+def _chain_mmd(*states):
+    """A minimal valid diagram visiting every given state once, in order:
+    the first is the sole initial state and the last is terminal."""
+    lines = ['stateDiagram-v2', f'[*] --> {states[0]}']
+    lines += [f'{a} --> {b}' for a, b in zip(states, states[1:])]
+    lines.append(f'{states[-1]} --> [*]')
+    return '\n'.join(lines) + '\n'
 
 
 def _write_mmd(tmp_path, rel_path, content=_VALID_MMD):
@@ -385,7 +397,8 @@ class TestRealSchemaShapes:
         unconverged raw-tx fallback writing `status` without going through
         validateOnAdd/Update) is closed separately at the field level in
         build_context.py, not here."""
-        _write_mmd(tmp_path, 'sm/goods_receipt_status.mmd')
+        _write_mmd(tmp_path, 'sm/goods_receipt_status.mmd',
+                   _chain_mmd('draft', 'confirmed', 'cancelled'))
         schema = {
             'definitions': {
                 '__goods_receipt': {
@@ -440,7 +453,8 @@ class TestRealSchemaShapes:
         has no import/ route at all (confirmed by running generate.py
         against the real schema), reproduced here as a schema-level
         fixture."""
-        _write_mmd(tmp_path, 'sm/goods_receipt_line_status.mmd')
+        _write_mmd(tmp_path, 'sm/goods_receipt_line_status.mmd',
+                   _chain_mmd('pending', 'split', 'rejected'))
         schema = {
             'definitions': {
                 '__goods_receipt': {
@@ -501,7 +515,8 @@ class TestRealSchemaShapes:
         extension, no array property). Exercises the properties-merge fix
         on a real split entity that must still pass -- confirms the fix is
         not overly broad."""
-        _write_mmd(tmp_path, 'sm/shipment_line_status.mmd')
+        _write_mmd(tmp_path, 'sm/shipment_line_status.mmd',
+                   _chain_mmd('picked', 'packed'))
         schema = {
             'definitions': {
                 'item': {
@@ -647,7 +662,8 @@ class TestDiagramContentChecks:
             '[*] --> draft\n'
             'draft --> draft\n'
             'draft --> submitted\n'
-            'submitted --> [*]\n'
+            'submitted --> approved\n'
+            'approved --> [*]\n'
         ))
         schema = {
             'definitions': {'widget': _widget(status_field=_ENUM_STATUS)},
@@ -799,6 +815,37 @@ class TestDefaultMustBeInitialState:
         validate_schema(schema)  # must not raise
 
 
+class TestEnumValuesCoveredByDiagram:
+    """Issue #715: every value of the governed field's enum must appear in
+    the diagram's declared states."""
+
+    def test_enum_value_missing_from_diagram_errors(self, tmp_path):
+        _write_mmd(tmp_path, 'sm/x.mmd', _chain_mmd('draft', 'submitted'))
+        schema = {
+            'definitions': {'widget': _widget(status_field=_ENUM_STATUS)},
+            'x-state-machines': {'widget.status': 'sm/x.mmd'},
+        }
+        with pytest.raises(SchemaValidationError, match=r"enum value\(s\) \['approved'\]"):
+            validate_schema(schema)
+
+    def test_every_enum_value_in_diagram_passes(self, tmp_path):
+        _write_mmd(tmp_path, 'sm/x.mmd', _chain_mmd('draft', 'submitted', 'approved'))
+        schema = {
+            'definitions': {'widget': _widget(status_field=_ENUM_STATUS)},
+            'x-state-machines': {'widget.status': 'sm/x.mmd'},
+        }
+        validate_schema(schema)  # must not raise
+
+    def test_nullable_enum_none_member_is_not_a_missing_state(self, tmp_path):
+        _write_mmd(tmp_path, 'sm/x.mmd', _chain_mmd('draft', 'submitted', 'approved'))
+        status = {'type': ['string', 'null'], 'enum': ['draft', 'submitted', 'approved', None]}
+        schema = {
+            'definitions': {'widget': _widget(status_field=status)},
+            'x-state-machines': {'widget.status': 'sm/x.mmd'},
+        }
+        validate_schema(schema)  # must not raise
+
+
 class TestCaseDNarrowedEdgeDirectionCheck:
     """cmd_1136 (design-review ruling): Case D narrowed from a whole-state
     difference-set check (every edge endpoint must be in x-approval's
@@ -897,6 +944,8 @@ class TestCaseDNarrowedEdgeDirectionCheck:
             'submitted --> approved\n'
             'approved --> declined\n'
             'declined --> [*]\n'
+            'submitted --> withdrawn\n'
+            'withdrawn --> [*]\n'
         ))
         widget = self._approval_flow(on_rejected_terminal=False)
         schema = {

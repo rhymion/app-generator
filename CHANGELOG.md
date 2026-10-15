@@ -181,6 +181,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **Schema validation rejects an `x-state-machines` field whose enum has a value the diagram never mentions** (Issue #715). Previously a new enum value added without a diagram update generated cleanly, appeared as a UI option, and then failed every write with a generic "not a valid initial state" error. `generate-code` now fails and names the missing value(s) and the diagram file. A `null` member of a nullable enum is not a state and is ignored.
 - **Mobile card list no longer shows delete controls for an entity with `x-generate.delete: false`** (Issue #578). `CardListClient` now requires `removeAction` in addition to the delete permission before rendering the toolbar delete button and the per-card checkbox, matching `DataGridClient`. The generated mobile list specs count cards through `[data-testid="mobile-card-list"] .MuiCard-root` instead of the delete checkboxes, so they hold for an entity with no delete action.
 - **Native app header no longer sits under the system UI and its actions are large enough to press** (Issue #1014). The header and footer now apply the top and bottom safe-area insets, and each header action is at least 44x44 points.
 - **Generated delete examples check the rows exist first for an entity with no unique primary link** (Issue #835). 
