@@ -51,6 +51,19 @@ def test_integer_with_enum_produces_enum_kind():
     assert field['enum_values'] == ['0', '1', '2']
 
 
+def test_enum_field_carries_the_namespace_of_its_translated_option_labels():
+    native = {'type': 'string', 'enum': ['InProgress', 'Done'], '_prisma_native_enum_type': 'TaskStatus'}
+    renamed = {'type': 'string', 'enum': ['A'], '_prisma_native_enum_type': 'Prio', 'x-enum-namespace': 'PrioLabels'}
+    legacy = {'type': 'integer', 'enum': [0, 1], 'x-enum-namespace': 'Level'}
+    bare = {'type': 'integer', 'enum': [0, 1]}
+    schema = _schema({'__task': _entity({'status': native, 'prio': renamed, 'level': legacy, 'plain': bare})})
+    fields = {f['name']: f for f in build_dashboard_catalog(schema)[0]['groupable_fields']}
+    assert fields['status']['enum_namespace'] == 'TaskStatus'
+    assert fields['prio']['enum_namespace'] == 'PrioLabels'
+    assert fields['level']['enum_namespace'] == 'Level'
+    assert fields['plain']['enum_namespace'] is None
+
+
 def test_fk_field_produces_fk_kind():
     schema = _schema({
         '__booking': _entity({

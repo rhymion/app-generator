@@ -401,5 +401,21 @@
     "minLength": "Type at least 2 characters.",
     "noResults": "No results.",
     "notAvailable": "Not available in the app"
+  },
+  "DashboardView": {
+    "subtitle": "{entity} grouped by {field}",
+    "subtitleWithZone": "{entity} grouped by {field} ({zone})",
+    "noWidgets": "No widgets yet. Edit this dashboard to add charts.",
+    "noData": "No data",
+    "exportCsv": "Export CSV",
+    "yes": "Yes",
+    "no": "No",
+    "unspecified": "(unspecified)",
+    "unknown": "(unknown)",
+    "unnamed": "(unnamed)",
+    "count": "Count",
+    "csvLabel": "label",
+    "csvCount": "count",
+    "csvCategory": "category"
   }
 }

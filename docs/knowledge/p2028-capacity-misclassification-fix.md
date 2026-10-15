@@ -1,4 +1,4 @@
-# P2028 misclassified as VALIDATION (422) in generated write paths
+# P2028 and other transient Prisma codes misclassified as VALIDATION (422) in generated write paths
 
 ## Behavior
 
@@ -61,13 +61,15 @@ this catch-all:
   input value), `P2011` (null constraint), `P2014` (relation violation),
   `P2017`/`P2018` (nested-connect shape errors), `P2020` (value out of
   range).
-- Also look misclassified, same shape as `P2028`, but deliberately left
-  out of this fix to keep it narrowly scoped — tracked as a follow-up:
-  `P2025` (not-found/race condition, arguably closer to a 404 than a
-  422), `P2034` (`TransactionWriteConflict` — reachable here via
-  `Prisma.TransactionIsolationLevel.Serializable`, used for
-  item-reservation entities), `P2037` (`TooManyConnections` — a direct
-  pool-exhaustion signal, conceptually identical to `P2028`).
+- Transient or missing-record codes, handled by their own branches above
+  the catch-all:
+  - `P2034` (`TransactionWriteConflict`; reachable through
+    `Prisma.TransactionIsolationLevel.Serializable`, used for
+    item-reservation entities) and `P2037` (`TooManyConnections`) →
+    `AppError('CAPACITY', ...)`, HTTP `409`. The caller did nothing wrong
+    and may retry.
+  - `P2025` (a required record was not found, e.g. deleted between read
+    and write) → `AppError('NOT_FOUND', 'Record not found')`, HTTP `404`.
 
 ## Relationship to the list-pagination P2028 fix
 
@@ -80,6 +82,11 @@ does produce `P2028` there, the caller gets an accurate `409 CAPACITY`
 instead of a misleading `422 VALIDATION`.
 
 ## Regression coverage
+
+`code_generator/tests/test_prisma_transient_codes_classification_fix.py`
+asserts the same for `P2034`, `P2037` and `P2025`: each branch is present in
+both catch blocks, sits after `P2002` and before the `VALIDATION`
+catch-all, and the catch-all stays for input-shaped codes.
 
 `code_generator/tests/test_p2028_capacity_misclassification_fix.py`
 renders the fixture schema through the real template pipeline and

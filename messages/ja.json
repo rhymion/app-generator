@@ -401,5 +401,21 @@
     "minLength": "2文字以上入力してください。",
     "noResults": "該当する結果はありません。",
     "notAvailable": "アプリでは開けません"
+  },
+  "DashboardView": {
+    "subtitle": "{entity}を{field}で集計",
+    "subtitleWithZone": "{entity}を{field}で集計（{zone}）",
+    "noWidgets": "ウィジェットがまだありません。このダッシュボードを編集してグラフを追加してください。",
+    "noData": "データなし",
+    "exportCsv": "CSVをエクスポート",
+    "yes": "はい",
+    "no": "いいえ",
+    "unspecified": "（未指定）",
+    "unknown": "（不明）",
+    "unnamed": "（名称なし）",
+    "count": "件数",
+    "csvLabel": "ラベル",
+    "csvCount": "件数",
+    "csvCategory": "カテゴリ"
   }
 }

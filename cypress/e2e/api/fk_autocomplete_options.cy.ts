@@ -207,11 +207,16 @@ describe('API: relation picker options', () => {
   describe('invalidated records', () => {
     it('does not offer a user that was invalidated', () => {
       cy.task<Row[]>('db:populateUser', 2).then((users) => {
-        cy.request({
+        // The seeded Administrator holds no delete right on user, so the invalidate call adds it explicitly.
+        cy.task<string>('db:createApiUserWithPermission', {
+          entityName: 'user',
+          flags: { read: true, delete: true },
+          label: 'invalidate',
+        }).then((deleterKey) => cy.request({
           method: 'POST',
           url: `/api/user/${users[0].id}/actions/invalidate`,
-          headers: { 'X-API-Key': TEST_API_KEY },
-        }).its('status').should('eq', 200);
+          headers: { 'X-API-Key': deleterKey },
+        })).its('status').should('eq', 200);
         const ids = `${users[0].id},${users[1].id}`;
         cy.request({ url: optionsUrl('user', `?ids=${ids}`), headers: { 'X-API-Key': TEST_API_KEY } }).then((res) => {
           expect(res.status).to.eq(200);

@@ -3698,17 +3698,22 @@ def generate(schema_path: str, output_dir: str) -> None:
     )
     print('  Upload route (Vercel Blob) → app/api/upload/route.ts')
 
-    # --- x-cloud opt-in: GCP Cloud Run artifacts ---
-    if cloud_enabled and cloud_provider == 'gcp':
-        print('\nGenerating GCP Cloud Run artifacts (x-cloud:gcp opt-in)...')
-
-        # Dockerfile
+    # --- Dockerfile + .dockerignore ---
+    # Emitted for x-cloud:gcp and for any schema that declares scheduled tasks,
+    # whatever the deployment provider: scripts/gcp-task-runner.sh builds the
+    # task-runner image from them, and an app hosted on Vercel can still run its
+    # nightly trigger there. Vercel ignores both files.
+    is_gcp = cloud_enabled and cloud_provider == 'gcp'
+    if is_gcp or schema_declares_scheduled_tasks(schema):
         _write(out / 'Dockerfile', _render(env, 'Dockerfile.jinja2', {}))
-        print('  Cloud: Dockerfile → Dockerfile')
+        print('  Container: Dockerfile → Dockerfile')
 
-        # .dockerignore
         _write(out / '.dockerignore', _render(env, '.dockerignore.jinja2', {}))
-        print('  Cloud: .dockerignore → .dockerignore')
+        print('  Container: .dockerignore → .dockerignore')
+
+    # --- x-cloud opt-in: GCP Cloud Run artifacts ---
+    if is_gcp:
+        print('\nGenerating GCP Cloud Run artifacts (x-cloud:gcp opt-in)...')
 
         # upload/route.ts — replace Vercel Blob with GCS
         _write(
