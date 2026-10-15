@@ -1950,8 +1950,10 @@ def _child_datetime_iso_value(value: str, fmt: str | None) -> str:
 
     DataGrid-child date/date-time/time columns (generators.py's column_def
     codegen, issue #540) render two different native input types depending
-    on `fmt`: a `date`-format column gets MUI's dedicated `type: 'date'`
-    GridColDef (native `<input type="date">`, `YYYY-MM-DD`); `date-time`
+    on `fmt` (issue #764: both are edited through MUI pickers now, and
+    cypress/support/datagrid-helpers.ts types the ISO value into them): a
+    `date`-format column gets MUI's dedicated `type: 'date'`
+    GridColDef (`YYYY-MM-DD`); `date-time`
     and `time` columns have no dedicated MUI type and keep `type:
     'dateTime'` (native `<input type="datetime-local">`,
     `YYYY-MM-DDThh:mm`) — unlike the top-level form, whose DateTimeWrapper

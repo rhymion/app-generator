@@ -97,8 +97,14 @@ export function getDataGridCell(rowIndex: number, field: string, childTitle?: st
  * @param submit - Whether to press Enter after typing (default: false)
  * @param childTitle - Optional: scope to a specific embedded child DataGrid (see getDataGridRow).
  */
-// MUI DataGrid's built-in `type: 'dateTime'` column (no renderEditCell
-// override — see column_def codegen) edits through a native datetime-local
+// Since issue #764 generated date / dateTime columns carry a picker
+// renderEditCell, and editDataGridCell() types the ISO value into the picker
+// sections (typeIsoIntoPickerSections). The remainder of this note describes
+// the native-input path, which still applies to a cell that renders a native
+// input (the #583 regression fixture).
+//
+// MUI DataGrid's built-in `type: 'dateTime'` column (without renderEditCell
+// override) edits through a native datetime-local
 // input; a `type: 'date'` column (issue #540/#542, `format: date` fields)
 // edits through a native date input. Cypress validates the *entire* string
 // passed to .type() against a strict ISO regex for both of these native
@@ -114,6 +120,30 @@ export function getDataGridCell(rowIndex: number, field: string, childTitle?: st
 const ISO_DATETIME_LOCAL_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/;
 const ISO_DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * Type an ISO date (`YYYY-MM-DD`) or datetime (`YYYY-MM-DDThh:mm`) into a MUI
+ * picker inside a DataGrid cell, one section at a time (see typeDateSections
+ * in commands.ts for why each section is clicked and typed individually).
+ * Sections follow the English locale order the e2e suite runs in:
+ * MM / DD / YYYY [/ hh / mm / AM|PM].
+ */
+function typeIsoIntoPickerSections(rowIndex: number, field: string, iso: string, childTitle?: string) {
+  const [datePart, timePart] = iso.split('T');
+  const [year, month, day] = datePart.split('-');
+  const values = [month, day, year];
+  if (timePart) {
+    const [hour24, minute] = timePart.split(':');
+    const h = Number(hour24);
+    values.push(String(h % 12 === 0 ? 12 : h % 12).padStart(2, '0'), minute, h >= 12 ? 'p' : 'a');
+  }
+  const sections = () =>
+    getDataGridCell(rowIndex, field, childTitle).find('[role="group"] [role="spinbutton"]');
+  values.forEach((v, i) => {
+    sections().eq(i).click();
+    sections().eq(i).type(v);
+  });
+}
+
 export function editDataGridCell(
   rowIndex: number,
   field: string,
@@ -123,6 +153,22 @@ export function editDataGridCell(
 ) {
   getDataGridCell(rowIndex, field, childTitle).scrollIntoView();
   getDataGridCell(rowIndex, field, childTitle).dblclick();
+  const isoValue = String(value);
+  if (ISO_DATETIME_LOCAL_RE.test(isoValue) || ISO_DATE_ONLY_RE.test(isoValue)) {
+    // Date / dateTime columns edit through MUI pickers (issue #764): type the
+    // ISO value into the picker's sections. A native date input (some host
+    // fixtures) still takes the ISO string directly.
+    getDataGridCell(rowIndex, field, childTitle).then(($cell) => {
+      if ($cell.find('[role="group"] [role="spinbutton"]').length > 0) {
+        typeIsoIntoPickerSections(rowIndex, field, isoValue, childTitle);
+        if (submit) clickOutsideToCommit();
+      } else {
+        getDataGridCell(rowIndex, field, childTitle).find('input').should('be.visible').clear().type(isoValue);
+        if (submit) clickOutsideToCommit();
+      }
+    });
+    return;
+  }
   const input = getDataGridCell(rowIndex, field, childTitle).find('input').should('be.visible');
   if (ISO_DATETIME_LOCAL_RE.test(String(value)) || ISO_DATE_ONLY_RE.test(String(value))) {
     input.clear().type(String(value));
