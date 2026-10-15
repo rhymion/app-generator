@@ -1110,7 +1110,7 @@ _MOBILE_SCHEDULED_TASK_TEMPLATES = [
 ]
 
 # Namespaces of messages/<locale>.json the native entity screens read.
-_MOBILE_MESSAGE_NAMESPACES = ('Common', 'Errors', 'ValidationMessages', 'Payment', 'ReactionType', 'ApprovalRequestStatus', 'ScheduledTaskRun')
+_MOBILE_MESSAGE_NAMESPACES = ('Common', 'Errors', 'ValidationMessages', 'Payment', 'ReactionType', 'ApprovalRequestStatus', 'ScheduledTaskRun', 'Search')
 
 # Single keys of the namespaces too large to ship whole (`Fields` holds every field label, `EntityLabel`
 # every entity name): the comment thread, the approval section and the built-in audit log screens read these.
@@ -1311,7 +1311,7 @@ def generate_mobile_native_e2e(mobile_specs: list[dict], tabs: list[dict], mobil
 
 def generate_mobile_target(
     entities: list, schema: dict, output_dir: Path, env: Environment, has_search: bool,
-    mobile_specs: list | None = None, has_mention: bool = False,
+    mobile_specs: list | None = None, has_mention: bool = False, search_entity_types: list | None = None,
 ) -> None:
     """Render the Expo Router mobile/ project (footer tabs + drill-down)."""
     app_name = 'Generated App'
@@ -1320,6 +1320,7 @@ def generate_mobile_target(
     nav = build_mobile_nav(
         entities, schema, messages, include_audit_log=True, include_scheduled_tasks=has_scheduled_tasks,
     )
+    search_label_keys = {t: to_camel_case(t) for t in search_entity_types or []}
     locales = sorted(messages) or ['en']
     if 'en' in locales:
         locales = ['en'] + [loc for loc in locales if loc != 'en']
@@ -1333,7 +1334,9 @@ def generate_mobile_target(
         'messages_json': _mobile_messages_json(messages, tuple(sorted({
             key.removeprefix('EntityLabel.')
             for spec in mobile_specs or [] for f in spec['fields'] for key in f.get('option_label_keys', [])
-        }))),
+        } | set(search_label_keys.values())))),
+        # Search result entity type -> the EntityLabel key naming it on the result row.
+        'search_labels_json': json.dumps(search_label_keys, indent=2),
         'entities': mobile_specs or [],
         'has_scheduled_tasks': has_scheduled_tasks,
         'has_payment': any(spec.get('is_payment') for spec in mobile_specs or []),
@@ -3667,7 +3670,7 @@ def generate(schema_path: str, output_dir: str) -> None:
 
     # --- i18n / config updates ---
     print('\nUpdating i18n and navigation config...')
-    update_i18n_and_config(entities, schema, out)
+    update_i18n_and_config(entities, schema, out, has_search=bool(search_entities))
 
     # --- Expo mobile app (footer tabs + drill-down from the same nav source) ---
     if mobile_enabled:
@@ -3677,7 +3680,8 @@ def generate(schema_path: str, output_dir: str) -> None:
             generate_mobile_entity(mobile_spec, mobile_ctxs[mobile_spec['name']], schema, out / 'mobile', env)
             print(f'  Mobile screens → mobile/ ({mobile_spec["name"]})')
         generate_mobile_target(entities, schema, out, env, has_search=bool(search_entities), mobile_specs=mobile_specs,
-                               has_mention=_has_any_mention)
+                               has_mention=_has_any_mention,
+                               search_entity_types=[e['entity_type'] for e in search_entities])
         for line in ineligible_log_lines(mobile_ineligible):
             print(line)
         _write(out / 'mobile' / 'MOBILE_ENTITIES.md', ineligible_note(mobile_ineligible))

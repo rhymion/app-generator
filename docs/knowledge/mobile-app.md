@@ -58,6 +58,12 @@ reachable however many there are; none is dropped or truncated. A fixed **Search
 the schema-driven tabs when the app generates a search route (`app/api/search`); it is not tied to any
 entity's `x-nav`.
 
+The Search screen calls `GET /api/search`. A result opens the record's detail screen (`/entity/<name>/<id>`)
+when the entity has one, the entity's list when it has screens but no detail screen, and nothing when it has
+no native screens: that row is dimmed and marked "Not available in the app". The entity name on a row is the
+`EntityLabel` word, and the match markers of the snippet are shown in bold. All screen text comes from the
+`Search` namespace and `Common.search` of `messages/<locale>.json`.
+
 An entity opens `/entity/<name>`: its native list when the entity has [entity screens](#entity-screens),
 otherwise a screen saying "This screen is not available in the mobile app yet." The scheduled-task admin
 link of the desktop sidebar has a mobile counterpart when the schema declares a task (see

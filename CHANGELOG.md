@@ -5,6 +5,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Mobile search results open the record and use translated text** (Issue #870, part of #140). A result on the Search
+  screen opens the record's detail screen when the entity has one (the entity list otherwise); a result for an entity with
+  no native screens is marked "Not available in the app" and does not navigate. The screen text comes from the new `Search`
+  namespace of `messages/<locale>.json`, entity names from `EntityLabel`, and snippet match markers render in bold.
 - **Entity-name selects offer `audit_log` and show dictionary words** (Issues #1013, #1015). A field declared with
   `x-entity-select` (`permission.name`, `approval_flow.entity_name`) now also offers `audit_log`, the system table a
   permission can name. `approval_request` and entities without generated pages stay out on purpose: they are not

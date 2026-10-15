@@ -384,6 +384,15 @@ def _update_nav_group_i18n_file(path: Path, groups: list) -> tuple[bool, list[st
 # site-config.ts updater
 # ---------------------------------------------------------------------------
 
+# English defaults for the mobile search screen's own text (the `Search`
+# namespace, written only when the app generates the search route).
+SEARCH_MESSAGES = {
+    'minLength': 'Type at least 2 characters.',
+    'failed': 'Search failed. Please try again.',
+    'noResults': 'No results.',
+    'notAvailable': 'Not available in the app',
+}
+
 # English defaults for the scheduled-task admin page's own text (the
 # `ScheduledTaskRun` namespace, written only when the schema declares a task).
 # Placeholders in braces are filled by the page/component; other locales get
@@ -522,12 +531,13 @@ def _update_sidebar(path: Path, nav_entities: list) -> bool:
 # Main entry point
 # ---------------------------------------------------------------------------
 
-def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> None:
+def update_i18n_and_config(entities: list, schema: dict, output_dir: Path, has_search: bool = False) -> None:
     """
     Update i18n message files and navigation config for all entities.
 
     `entities` — the full list returned by extract_entities().
     `output_dir` — project root (same as passed to generate()).
+    `has_search` — the app generates the global search route, so the mobile search screen's `Search` namespace is written.
     """
     # Entities that appear in the sidebar nav — shared with cleanup.py's
     # own removal pass, see nav_config.nav_list_entities.
@@ -567,6 +577,8 @@ def update_i18n_and_config(entities: list, schema: dict, output_dir: Path) -> No
     # Merge namespace-keyed sections rather than spreading (a spread would let a
     # colliding namespace clobber the other's entries entirely instead of merging).
     namespace_sections: dict[str, dict[str, str]] = {}
+    if has_search:
+        namespace_sections['Search'] = dict(SEARCH_MESSAGES)
     if schema_declares_scheduled_tasks(schema):
         namespace_sections['ScheduledTaskRun'] = dict(SCHEDULED_TASK_RUN_MESSAGES)
     for ns_map in (native_enum_ns, custom_component_ns):
