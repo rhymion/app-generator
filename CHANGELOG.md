@@ -181,8 +181,26 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
-- **The Completion gate's UI Cypress step now runs `cypress/e2e/auth/**`** (Issue #580). `test:e2e:cy:ui` matched only `cypress/e2e/*.cy.ts` and `cypress/e2e/mobile/*.cy.ts`, so the auth specs (`mfa.cy.ts`, `settings_avatar_save.cy.ts`) ran in CI's `e2e-tests` job but in no gate step. The script's `--spec` now includes `cypress/e2e/auth/**`, and a pytest fails when a directory under `cypress/e2e/` holding specs is matched by no `test:e2e:cy:api` / `test:e2e:cy:ui` glob. The gate document notes that the MFA spec needs `MOCK_GOOGLE_OAUTH_TEST=true` in `.env.test.local`.
+- **The Completion gate's UI Cypress step now runs `cypress/e2e/auth/**`** (Issue #580). `test:e2e:cy:ui` matched only 
+  `cypress/e2e/*.cy.ts` and `cypress/e2e/mobile/*.cy.ts`, so the auth specs (`mfa.cy.ts`, `settings_avatar_save.cy.ts`) ran 
+  in CI's `e2e-tests` job but in no gate step. The script's `--spec` now includes `cypress/e2e/auth/**`, and a pytest fails 
+  when a directory under `cypress/e2e/` holding specs is matched by no `test:e2e:cy:api` / `test:e2e:cy:ui` glob. The gate 
+  document notes that the MFA spec needs `MOCK_GOOGLE_OAUTH_TEST=true` in `.env.test.local`.
+- **Schema validation rejects an `x-state-machines` field whose enum has a value the diagram never mentions** (Issue #715). 
+  Previously a new enum value added without a diagram update generated cleanly, appeared as a UI option, and then failed every 
+  write with a generic "not a valid initial state" error. `generate-code` now fails and names the missing value(s) and the 
+  diagram file. A `null` member of a nullable enum is not a state and is ignored.
+- **`--prune-orphans` now removes the pages, API routes, flat Cypress specs and conditional component files of a removed entity** (Issue #618).
+  After an entity left the schema, `app/[locale]/<entity>/`, `app/api/<entity>/`, `cypress/e2e/**/<entity>.cy.ts` and
+  `components/<entity>/SplitActionSection.tsx` / `ImportModal.tsx` stayed on disk and broke the next build. Pages and routes are deleted only when they
+  import their own `@/lib/<entity>/` module; specs only with the `AUTO-GENERATED` header; the built-in `audit_log` routes are allowlisted.
+  `docs/knowledge/cleanup.md` lists the sweep.
 - **Mobile card list no longer shows delete controls for an entity with `x-generate.delete: false`** (Issue #578). `CardListClient` now requires `removeAction` in addition to the delete permission before rendering the toolbar delete button and the per-card checkbox, matching `DataGridClient`. The generated mobile list specs count cards through `[data-testid="mobile-card-list"] .MuiCard-root` instead of the delete checkboxes, so they hold for an entity with no delete action.
+- **Nav group resolution no longer breaks on non-schema nav entries** (Issue #799). `generators_i18n.py` and `cleanup.py` now pass
+  `entities + nav_extra_entities(schema)` to `build_nav_config`, the same list used for the nav labels and links, and `_entity_nav`
+  returns no `x-nav` for an entry without a schema definition instead of raising `KeyError: 'model'`. The scheduled-task admin
+  link stays a flat top-level link; placing it in an `x-nav-groups` group remains unsupported
+  (`docs/knowledge/nested-nav-menu-design.md` §4).
 - **Native app header no longer sits under the system UI and its actions are large enough to press** (Issue #1014). The header and footer now apply the top and bottom safe-area insets, and each header action is at least 44x44 points.
 - **Generated delete examples check the rows exist first for an entity with no unique primary link** (Issue #835). 
   Examples 4.1, 4.2 and 4.3 in the generated UI spec now assert the populated row count before they delete, so an example 

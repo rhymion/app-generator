@@ -74,9 +74,13 @@ def _entity_nav(entity: dict, schema: dict) -> dict | None:
     view — would silently stop resolving.
     """
     def_key = entity.get('definition_key') or entity.get('model')
+    if not def_key:
+        # Not a schema entity (see nav_extra_entities): there is no definition
+        # to carry an x-nav block, so the entry stays a flat top-level link.
+        return None
     x_nav = schema.get('definitions', {}).get(def_key, {}).get('x-nav')
     if not x_nav:
-        x_nav = _raw_def(entity['model'], schema).get('x-nav')
+        x_nav = _raw_def(entity.get('model', def_key), schema).get('x-nav')
     return x_nav if isinstance(x_nav, dict) else None
 
 
