@@ -181,6 +181,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **Transient and missing-record Prisma errors no longer return 422** (Issue #747). The generated `add{Entity}` and
+  `update{Entity}` catch blocks now map `P2034` (write conflict under Serializable isolation) and `P2037` (too many
+  connections) to `CAPACITY` (409), and `P2025` (required record not found) to `NOT_FOUND` (404). Input-shaped codes still
+  return `VALIDATION` (422). See `docs/knowledge/p2028-capacity-misclassification-fix.md`.
 - **The Completion gate's UI Cypress step now runs `cypress/e2e/auth/**`** (Issue #580). `test:e2e:cy:ui` matched only 
   `cypress/e2e/*.cy.ts` and `cypress/e2e/mobile/*.cy.ts`, so the auth specs (`mfa.cy.ts`, `settings_avatar_save.cy.ts`) ran 
   in CI's `e2e-tests` job but in no gate step. The script's `--spec` now includes `cypress/e2e/auth/**`, and a pytest fails 
