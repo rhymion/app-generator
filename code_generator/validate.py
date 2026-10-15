@@ -224,6 +224,30 @@ def derive_ui_exposed_index_columns(schema: dict) -> dict[str, set[str]]:
     return {model: cols for model, cols in out.items() if cols}
 
 
+def _autocomplete_context_field_in_form_state(prop_def: dict) -> bool:
+    """True when the generated FormUpsert keeps this field's current value in
+    React state, so x-autocomplete-context can name it. Text, number, decimal
+    and uri controls are uncontrolled inputs read through a ref; naming one
+    emits a reference to a variable the form never declares. Mirrors the
+    categories in build_context._categorize_form_fields."""
+    rel = prop_def.get('x-relationship')
+    if rel:
+        return rel.get('type') in ('many-to-one', 'one-to-one')
+    xc = prop_def.get('x-custom-component')
+    if isinstance(xc, dict) and isinstance(xc.get('target'), list) and 'upsert' in xc['target']:
+        return True
+    actual = _get_actual_type(prop_def)
+    if actual == 'boolean':
+        return True
+    if actual == 'string' and prop_def.get('format') in ('date', 'date-time', 'time'):
+        return True
+    if actual == 'string' and prop_def.get('format') == 'uri':
+        return False
+    if actual == 'string' and prop_def.get('x-entity-select'):
+        return True
+    return isinstance(prop_def.get('enum'), list)
+
+
 def validate_prisma_indexes(schema_path: str | Path, schema: dict | None = None) -> None:
     """Verify every model has @@index for required hot columns.
 
@@ -1258,6 +1282,14 @@ def validate_schema(schema: dict) -> None:
                         f"x-autocomplete-context must be a list of field name strings."
                     )
                 else:
+                    if rel.get('type') != 'many-to-one':
+                        errors.append(
+                            f"Definition '{def_key}', property '{prop_name}': "
+                            f"x-autocomplete-context only takes effect on a "
+                            f"'many-to-one' x-relationship; on '{rel.get('type')}' "
+                            f"the generated picker would ignore it.  Remove the key "
+                            f"or make the relationship many-to-one."
+                        )
                     for field_name in actx:
                         if field_name not in props:
                             errors.append(
@@ -1266,6 +1298,16 @@ def validate_schema(schema: dict) -> None:
                                 f"which is not a property of '{def_key}'.  "
                                 f"formValues are pulled from this entity's own form state, "
                                 f"not from the relationship target '{target}'."
+                            )
+                        elif not _autocomplete_context_field_in_form_state(props[field_name]):
+                            errors.append(
+                                f"Definition '{def_key}', property '{prop_name}': "
+                                f"x-autocomplete-context references field '{field_name}', "
+                                f"whose generated form control keeps its value in a ref "
+                                f"rather than React state (a plain text, number, decimal "
+                                f"or uri field), so the form has no variable to send.  "
+                                f"Name a many-to-one FK, an enum, a boolean or a date "
+                                f"field instead."
                             )
 
     # -----------------------------------------------------------------------
