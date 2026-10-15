@@ -191,7 +191,7 @@ export default function CardListClient<T extends BaseEntity>({
             </Tooltip>
           </NextLink>
         )}
-        {permissions.delete && (
+        {permissions.delete && removeAction && (
           <Tooltip title="Delete Selected">
             <span>
               <IconButton
@@ -235,7 +235,7 @@ export default function CardListClient<T extends BaseEntity>({
                         {primaryValue || item.id}
                       </Typography>
                     </NextLink>
-                    {permissions.delete && (
+                    {permissions.delete && removeAction && (
                       <Checkbox
                         checked={isSelected}
                         onChange={() => toggleSelection(item.id)}

@@ -181,6 +181,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **Mobile card list no longer shows delete controls for an entity with `x-generate.delete: false`** (Issue #578). `CardListClient` now requires `removeAction` in addition to the delete permission before rendering the toolbar delete button and the per-card checkbox, matching `DataGridClient`. The generated mobile list specs count cards through `[data-testid="mobile-card-list"] .MuiCard-root` instead of the delete checkboxes, so they hold for an entity with no delete action.
 - **Native app header no longer sits under the system UI and its actions are large enough to press** (Issue #1014). The header and footer now apply the top and bottom safe-area insets, and each header action is at least 44x44 points.
 - **Generated delete examples check the rows exist first for an entity with no unique primary link** (Issue #835). 
   Examples 4.1, 4.2 and 4.3 in the generated UI spec now assert the populated row count before they delete, so an example 
