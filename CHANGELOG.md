@@ -12,7 +12,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   organization. The generated run guard (`businessDateOf()`, now async), `task:run-all` and its `not_due` check read
   it instead of the UTC clock, and a task's cron `interval` is evaluated in the same time zone.
   `app_setting.business_date` is now optional (`String?`): required (a real `YYYY-MM-DD` date) while `is_pinned` is
-  true and empty while it is false, enforced by `lib/app_setting/service_validation_custom.ts`. While a date is pinned
+  true and not read while it is false (no empty check), enforced by `lib/app_setting/service_validation_custom.ts`. While a date is pinned
   it does not advance, so a daily task reports `already_succeeded` from the second night until the date is changed.
   `scripts/seed-baseline.ts` writes the default row without a date. Existing databases run
   `scripts/migrations/06_app_setting_business_date_optional.sql` once (nullable column, unpinned rows cleared;

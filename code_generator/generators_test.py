@@ -4072,6 +4072,16 @@ def spec_context(
         if r['is_m2o']
     }
     required_fill_cmds = gen_fill_commands(required_field_metas, title, I, fk_dep_vars, dep_search_info)
+    # A defaulted (non-required) scalar primary column is read back from the list by the create tests, so the
+    # minimal create fills it too.
+    _ui_primary = _get_primary_display_field_name(parent_def)
+    _ui_primary_meta = next(
+        (f for f in optional_field_metas
+         if f['prop_name'] == _ui_primary and f'{_ui_primary}_id' not in (parent_def.get('properties') or {})),
+        None,
+    )
+    if _ui_primary_meta is not None:
+        required_fill_cmds += gen_fill_commands([_ui_primary_meta], title, I, fk_dep_vars, dep_search_info)
     all_fill_cmds = gen_fill_commands(fields, title, I, fk_dep_vars, dep_search_info)
     # cmd_846(c): 7.1/7.2 create a record via the UI form and expect the
     # create-time edge trigger to have fired (approval_request rows to

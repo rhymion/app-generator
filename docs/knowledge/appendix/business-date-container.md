@@ -17,8 +17,8 @@
 - `is_pinned` false: the business date is today's date in `timezone`, and `business_date` is empty.
 - No row at all: today's date in UTC.
 
-`business_date` is nullable. A save is refused unless it is a real date while `is_pinned` is true and empty while
-`is_pinned` is false (`lib/app_setting/service_validation_custom.ts`). The row used is the organization's own row when the
+`business_date` is nullable. A save is refused unless it is a real date while `is_pinned` is true
+(`lib/app_setting/service_validation_custom.ts`); while `is_pinned` is false it is not checked and never read. The row used is the organization's own row when the
 caller passes an organization and it has one, otherwise the tenant-wide default row. Scheduled tasks always use the
 default row. See `docs/knowledge/scheduled-task-operations.md` ("The business date"). An existing database runs
 `scripts/migrations/06_app_setting_business_date_optional.sql` once.

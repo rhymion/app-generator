@@ -85,8 +85,9 @@ describe('validateBusinessDateFields', () => {
     expect(() => validateBusinessDateFields(true, '2026-02-30')).toThrow(/YYYY-MM-DD/);
     expect(() => validateBusinessDateFields(true, '2026-10-14')).not.toThrow();
   });
-  it('requires it empty when not pinned', () => {
-    expect(() => validateBusinessDateFields(false, '2026-10-14')).toThrow(/empty/);
+  it('does not check it when not pinned', () => {
+    expect(() => validateBusinessDateFields(false, '2026-10-14')).not.toThrow();
+    expect(() => validateBusinessDateFields(false, 'not a date')).not.toThrow();
     expect(() => validateBusinessDateFields(false, null)).not.toThrow();
     expect(() => validateBusinessDateFields(false, undefined)).not.toThrow();
     expect(() => validateBusinessDateFields(false, '')).not.toThrow();

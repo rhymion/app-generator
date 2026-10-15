@@ -200,11 +200,12 @@ tenant-wide, so they read the tenant-wide default row (`organization_id` NULL).
 | `app_setting` row | Business date |
 |---|---|
 | `is_pinned` true | the stored `business_date` (`YYYY-MM-DD`), whatever the clock says |
-| `is_pinned` false | today's date in the row's `timezone`; `business_date` is empty and unused |
+| `is_pinned` false | today's date in the row's `timezone`; `business_date` is not read |
 | no row | today's date in UTC |
 
-`business_date` is required while `is_pinned` is true and must be empty while
-it is false; the save is refused otherwise. Callers that work for one
+`business_date` is required while `is_pinned` is true (the save is refused
+otherwise). While `is_pinned` is false it is not checked and never read: today's
+date in the row's `timezone` wins. Callers that work for one
 organization pass its id: the organization's own row is used when it has one,
 otherwise the default row.
 

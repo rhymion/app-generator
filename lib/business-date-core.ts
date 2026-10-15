@@ -93,20 +93,16 @@ export function businessContextOf(row: AppSettingBusinessFields | null, now: Dat
 }
 
 /**
- * Save-time rule for `app_setting`: `business_date` is required (a real date) when `is_pinned` is true and must
- * be empty when it is false. Throws a field-level validation error.
+ * Save-time rule for `app_setting`: `business_date` is required (a real date) when `is_pinned` is true. When it is
+ * false the value is not checked and never read (today in the row's timezone wins). Throws a field-level validation
+ * error.
  */
 export function validateBusinessDateFields(isPinned: boolean, businessDate: unknown): void {
+  if (!isPinned) return;
   const empty = businessDate === null || businessDate === undefined || businessDate === '';
-  if (isPinned) {
-    if (empty) throw new AppError('VALIDATION', 'business_date is required when is_pinned is true', 'business_date', 'missing');
-    if (typeof businessDate !== 'string' || parseBusinessDateString(businessDate) === null) {
-      throw new AppError('VALIDATION', 'business_date must be a date in YYYY-MM-DD form', 'business_date', 'invalid');
-    }
-    return;
-  }
-  if (!empty) {
-    throw new AppError('VALIDATION', 'business_date must be empty when is_pinned is false', 'business_date', 'invalid');
+  if (empty) throw new AppError('VALIDATION', 'business_date is required when is_pinned is true', 'business_date', 'missing');
+  if (typeof businessDate !== 'string' || parseBusinessDateString(businessDate) === null) {
+    throw new AppError('VALIDATION', 'business_date must be a date in YYYY-MM-DD form', 'business_date', 'invalid');
   }
 }
 
