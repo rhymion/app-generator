@@ -766,7 +766,7 @@ def _clean_appended_files(out: Path, entities: list, schema: dict) -> None:
     # gate) — build_nav_config is intentionally re-run here rather than
     # threaded through from generate.py, mirroring how nav_entities itself is
     # recomputed locally rather than passed in.
-    nav_group_slugs = [g['slug'] for g in build_nav_config(entities, schema)['groups']]
+    nav_group_slugs = [g['slug'] for g in build_nav_config(entities + nav_extra_entities(schema), schema)['groups']]
 
     _clean_site_config(out / 'lib' / 'site-config.ts', nav_hrefs, nav_group_slugs)
     _clean_sidebar(out / 'app' / '[locale]' / '@sidebar' / 'page.tsx', nav_hrefs)
