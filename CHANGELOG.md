@@ -195,6 +195,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `components/<entity>/SplitActionSection.tsx` / `ImportModal.tsx` stayed on disk and broke the next build. Pages and routes are deleted only when they
   import their own `@/lib/<entity>/` module; specs only with the `AUTO-GENERATED` header; the built-in `audit_log` routes are allowlisted.
   `docs/knowledge/cleanup.md` lists the sweep.
+- **`x-autocomplete-context` is rejected where it generated broken or ignored output** (Issue #880). Schema validation now fails
+  when the key names a plain text, number, decimal or `format: uri` field (the form holds these in a ref, so the generated
+  `formValues` referred to an undeclared variable) and when it sits on a `one-to-one` or `one-to-one_bridge` FK (the picker
+  ignored it). The message names the entity, the FK and the field. See `docs/knowledge/x-autocomplete-context.md`.
 - **Mobile card list no longer shows delete controls for an entity with `x-generate.delete: false`** (Issue #578). `CardListClient` now requires `removeAction` in addition to the delete permission before rendering the toolbar delete button and the per-card checkbox, matching `DataGridClient`. The generated mobile list specs count cards through `[data-testid="mobile-card-list"] .MuiCard-root` instead of the delete checkboxes, so they hold for an entity with no delete action.
 - **Nav group resolution no longer breaks on non-schema nav entries** (Issue #799). `generators_i18n.py` and `cleanup.py` now pass
   `entities + nav_extra_entities(schema)` to `build_nav_config`, the same list used for the nav labels and links, and `_entity_nav`

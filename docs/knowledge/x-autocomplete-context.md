@@ -28,8 +28,8 @@ ticket:
   entity whose form holds the picker), not of the relationship target.
 - Each name must be a field whose current value the generated form keeps in React state: another FK
   picker, an enum, a boolean, a date and similar. A plain text or number input is held in a ref, not in
-  state, so it cannot be named (see [Not checked](#validation)).
-- It takes effect only on `many-to-one` FKs. On a `one-to-one` FK the key is accepted but ignored.
+  state, so it cannot be named; validation rejects it (see [Validation](#validation)).
+- It takes effect only on `many-to-one` FKs. On a `one-to-one` or `one-to-one_bridge` FK validation rejects the key.
 
 ## What changes in the generated output
 
@@ -93,15 +93,12 @@ problem:
 |----------------|--------|
 | not a list, or a list with a non-string item (`policy_id`, `{a: 1}`, `[1]`) | `Definition 'ticket', property 'assignee_id': x-autocomplete-context must be a list of field name strings.` |
 | a name that is not a property of the declaring entity | `Definition 'ticket', property 'assignee_id': x-autocomplete-context references field 'nope', which is not a property of 'ticket'.  formValues are pulled from this entity's own form state, not from the relationship target 'party'.` One line for each unknown name. |
+| a name that is a plain text, number, decimal or `format: uri` property | `Definition 'ticket', property 'assignee_id': x-autocomplete-context references field 'name', whose generated form control keeps its value in a ref rather than React state (...)  Name a many-to-one FK, an enum, a boolean or a date field instead.` |
+| the key on a `one-to-one` or `one-to-one_bridge` FK | `Definition 'ticket', property 'assignee_id': x-autocomplete-context only takes effect on a 'many-to-one' x-relationship; on 'one-to-one' the generated picker would ignore it.  Remove the key or make the relationship many-to-one.` |
 
 Not checked, and accepted without error:
 
 - the key on a property that has no `x-relationship` (it is ignored);
-- the key on a `one-to-one` or `one-to-one_bridge` FK (validated like any other, then ignored: the
-  generated picker still searches with `query, includeIds` only);
-- a name that is a property of the entity but is a plain text or number input. The form emits
-  `formValues: { name: name }` with no variable of that name in scope, so the generated form refers to
-  an undeclared identifier and is not expected to type-check;
 - an empty list `[]` (same output as no key);
 - the FK field naming itself in its own list.
 
