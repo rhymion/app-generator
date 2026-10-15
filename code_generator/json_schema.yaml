@@ -630,15 +630,16 @@ definitions:
       search: false
     x-display:
       table:
-        - business_date:
+        # business_date is empty on an unpinned row, so it cannot be the (required) list primary field.
+        - timezone:
             primary: true
+            width: 150
+        - business_date:
             width: 150
         - organization:
             width: 200
         - is_pinned:
             width: 100
-        - timezone:
-            width: 150
     fields:
       business_date: {}
       is_pinned:
