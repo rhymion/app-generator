@@ -53,7 +53,7 @@ Run in this order:
 15. `npm run test:e2e:build`   — docker:up:test + generate-code + db:push + db:generate + db:seed-tenant + build
 16. `npm run check:generated`  — generated code matches templates/schema
 17. `npm run test:e2e:cy:api`  — API Cypress specs only
-18. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop + mobile)
+18. `npm run test:e2e:cy:ui`   — non-API Cypress specs (desktop, mobile and `cypress/e2e/auth/**`); the auth MFA spec needs `MOCK_GOOGLE_OAUTH_TEST=true` in `.env.test.local`, as the `e2e-tests` CI job sets it
 19. `npm audit --omit=dev --audit-level=high`
 20. `pip-audit -r requirements.txt`
 21. `npm run check:readme-sync` — fails closed if this branch's diff touches
