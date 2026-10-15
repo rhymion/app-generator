@@ -141,6 +141,20 @@ Each widget counts records; the chart shows how many records have each value.
 
 Records with no value in the grouped field appear under `(unspecified)`.
 
+### Labels and language
+
+Everything a widget shows goes through `messages/<locale>.json` (the `DashboardView` section for widget text), and
+the chart labels match the entity list and forms:
+
+- the card subtitle names the data source and the Group by field by their `EntityLabel` and `Fields` words;
+- enum categories use the option labels of the field's enum section (the catalog field's `enum_namespace`: the
+  Prisma enum name, or `x-enum-namespace` when set); a value without a translation is shown as stored;
+- Yes / No, `(unspecified)`, `(unknown)` and `(unnamed)` use `DashboardView` keys;
+- the CSV export uses the same translated labels and column headings.
+
+The server action keeps returning the fixed English tokens; `lib/dashboard/localize-output.ts` translates them in the browser.
+Date buckets and the names of records are shown as they are.
+
 A series is drawn for a Column or Bar only when a Stack mode is set or a Time bucket is used. The editor sets Grouped when
 you choose a series on a Column or Bar that has neither.
 

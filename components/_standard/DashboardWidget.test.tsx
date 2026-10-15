@@ -4,14 +4,26 @@ import { vi, describe, it, expect, beforeEach } from 'vitest';
 import DashboardWidget from './DashboardWidget';
 import type { WidgetConfig } from './DashboardWidget';
 
-vi.mock('next-intl', () => ({
-  useTranslations: (ns: string) => (key: string) => `${ns}:${key}`,
-}));
+// DashboardView resolves against the real English messages; other namespaces echo their key.
+const intl = vi.hoisted(() => ({ locale: 'en' as 'en' | 'ja' }));
+vi.mock('next-intl', async () => {
+  const msgs = {
+    en: (await import('@/messages/en.json')).default,
+    ja: (await import('@/messages/ja.json')).default,
+  } as Record<string, Record<string, Record<string, string>>>;
+  return {
+    useTranslations: (ns: string) => (key: string, params?: Record<string, string>) =>
+      ns === 'DashboardView'
+        ? Object.entries(params ?? {}).reduce((text, [k, v]) => text.replace(`{${k}}`, v), msgs[intl.locale].DashboardView[key])
+        : `${ns}:${key}`,
+    useMessages: () => ({}),
+  };
+});
 
 // The generated catalog is absent on a clean checkout; the problem messages only need its labels.
 vi.mock('@/components/dashboard/catalog-source', () => ({
   DASHBOARDABLE_ENTITIES: [],
-  findDashboardEntity: () => undefined,
+  findDashboardEntity: vi.fn(() => undefined),
 }));
 
 vi.mock('@/lib/dashboard/aggregate', () => ({
@@ -20,11 +32,12 @@ vi.mock('@/lib/dashboard/aggregate', () => ({
 
 vi.mock('./DashboardChart', () => ({
   default: ({ type, data }: { type: string; data: unknown[] }) => (
-    <div data-testid="dashboard-chart" data-type={type} data-count={data.length} />
+    <div data-testid="dashboard-chart" data-type={type} data-count={data.length} data-labels={data.map((d) => (d as { label: string }).label).join('|')} />
   ),
 }));
 
 import { aggregateForWidget } from '@/lib/dashboard/aggregate';
+import { findDashboardEntity } from '@/components/dashboard/catalog-source';
 const mockAggregate = vi.mocked(aggregateForWidget);
 
 const widget: WidgetConfig = {
@@ -39,6 +52,22 @@ const widget: WidgetConfig = {
 describe('DashboardWidget', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    intl.locale = 'en';
+  });
+
+  it('translates boolean and placeholder category labels before charting them', async () => {
+    vi.mocked(findDashboardEntity).mockReturnValue({
+      name: 'task', label: 'Task', groupable_fields: [{ name: 'status', label: 'Status', kind: 'boolean' }],
+    });
+    mockAggregate.mockResolvedValue({
+      ok: true,
+      output: { kind: 'single', data: [{ label: 'Yes', count: 1 }, { label: '(unspecified)', count: 2 }] },
+    });
+    intl.locale = 'ja';
+    render(<DashboardWidget widget={widget} />);
+    const chart = await screen.findByTestId('dashboard-chart');
+    expect(chart.getAttribute('data-labels')).toBe('はい|（未指定）');
+    vi.mocked(findDashboardEntity).mockReset();
   });
 
   it('shows loading skeleton initially', () => {
