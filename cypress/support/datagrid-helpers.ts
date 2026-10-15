@@ -144,6 +144,23 @@ function typeIsoIntoPickerSections(rowIndex: number, field: string, iso: string,
   });
 }
 
+/**
+ * Clear a date / dateTime cell that is already in edit mode. A MUI picker keeps
+ * its value in section spinbuttons (its `<input>` is hidden), so the sections
+ * are emptied with select-all + backspace; a native input is cleared directly.
+ */
+export function clearDataGridDateCell(rowIndex: number, field: string, childTitle?: string) {
+  getDataGridCell(rowIndex, field, childTitle).then(($cell) => {
+    if ($cell.find('[role="group"] [role="spinbutton"]').length > 0) {
+      getDataGridCell(rowIndex, field, childTitle).find('[role="group"] [role="spinbutton"]').first().click();
+      getDataGridCell(rowIndex, field, childTitle)
+        .find('[role="group"] [role="spinbutton"]').first().type('{selectall}{backspace}');
+    } else {
+      getDataGridCell(rowIndex, field, childTitle).find('input').clear();
+    }
+  });
+}
+
 export function editDataGridCell(
   rowIndex: number,
   field: string,

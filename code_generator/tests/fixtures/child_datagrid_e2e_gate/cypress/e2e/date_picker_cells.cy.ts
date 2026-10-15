@@ -25,6 +25,10 @@ function seed() {
                   parent1_child1s: [], parent1_child2s: [], parent1_lists: [] },
         });
       });
+      cy.request({
+        method: 'POST', url: '/api/parent_only', headers,
+        body: { name: 'Target PO', description: 'po desc', owner_id: p1.id, parent_only_probes: [] },
+      });
     });
   });
 }
@@ -33,7 +37,7 @@ function createParentWithDates(name: string) {
   cy.visit('/en/parent_only/new');
   cy.fillField('Name', name);
   cy.clickButton(`Add ${CHILD}`);
-  selectDataGridSingleSelect(0, 'same_req_id', 'Owner One', undefined, CHILD);
+  selectDataGridSingleSelect(0, 'same_req_id', 'Target PO', undefined, CHILD);
   selectDataGridSingleSelect(0, 'other_req_id', 'Owner One', undefined, CHILD);
   selectDataGridSingleSelect(0, 'enum_req', 'String', 'string', CHILD);
   const text: Record<string, string> = {
@@ -59,9 +63,22 @@ describe('child DataGrid date pickers (issue #764)', () => {
     createParentWithDates('Dates P');
     cy.clickButton('Save');
     cy.url().should('not.include', '/parent_only/new');
-    openEditOf('Dates P', 'en');
-    getDataGridCell(0, 'date_req', CHILD).should('contain.text', '2025-01-16');
-    getDataGridCell(0, 'dt_req', CHILD).should('contain.text', '2025-01-16 09:30');
+    // The stored instants are the browser-local midnight / 09:30 the native
+    // inputs produced before the pickers, so the saved value type and time zone
+    // are unchanged (compared in the same browser time zone, not a fixed one).
+    cy.window().then((win) => {
+      const expectedDate = new win.Date(2025, 0, 16).toISOString();
+      const expectedDateTime = new win.Date(2025, 0, 16, 9, 30).toISOString();
+      cy.request({ url: '/api/parent_only', headers }).then((r) => {
+        const row = r.body.rows.find((x: any) => x.name === 'Dates P');
+        expect(row, 'parent Dates P exists').to.not.be.undefined;
+        cy.request({ url: `/api/parent_only/${row.id}`, headers }).then((cur) => {
+          const probe = cur.body.parent_only_probes[0];
+          expect(new Date(probe.date_req).toISOString()).to.eq(expectedDate);
+          expect(new Date(probe.dt_req).toISOString()).to.eq(expectedDateTime);
+        });
+      });
+    });
   });
 
   it('edit cell is a picker, and its calendar is in English on /en', () => {
