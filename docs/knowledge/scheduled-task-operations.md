@@ -630,8 +630,8 @@ the trigger lives on GCP. It creates:
 Try it on a separate project first:
 
 ```sh
-# 1. Configure the target project and region
-echo 'PROJECT_ID=<your-test-project>' >> .env.production.local
+# 1. Configure the target GCP project (its project ID, not a Vercel project)
+echo 'PROJECT_ID=<your-gcp-test-project-id>' >> .env.production.local
 
 # 2. Fill in the secrets file (see the warning below)
 cp .env.task-runner.production.local.example .env.task-runner.production.local
@@ -649,6 +649,62 @@ and no secret value is printed, only secret names. Where a live run picks
 between `create` and `update` based on what already exists, the preview
 shows `create`. The script never falls back to the ambient `gcloud` project;
 `PROJECT_ID` must be set explicitly (`DRY_RUN` uses a placeholder if not).
+
+**Two env files, two jobs.** The script reads two files that look alike and
+do different things:
+
+| | `.env.production.local` | `.env.task-runner.production.local` |
+|---|---|---|
+| Role | Assembly settings for the script itself | The Job's runtime environment |
+| Typical keys | `PROJECT_ID`, `REGION`, `TASK_RUNNER_*` (including `TASK_RUNNER_BUCKET_ROLES`) | `DATABASE_URL` (unpooled), handler secrets, `AUDIT_LOG_GCS_*` |
+| Read by | The script, which sources it | The script, which parses it line by line and never sources it |
+| Reaches the Job | No | Yes, one Secret Manager secret per key |
+
+`PROJECT_ID` is the **GCP project ID** (the one `gcloud config get-value
+project` prints), not the name of a Vercel project.
+
+**Where the Dockerfile comes from.** The image is built from the generated
+`Dockerfile`. `generate-code` writes it, and `.dockerignore`, whenever the
+schema declares a scheduled task, so a Vercel-hosted app has both without
+`x-cloud`. Run `generate-code` first. Docker must be available on the machine
+that runs the script (unless `SKIP_BUILD=true`), because Step 5 runs
+`docker build` and `docker push` locally. The build installs dependencies and
+compiles the app, so the first one takes a long time; Vercel does not build
+this image. A lighter image that skips the app build is tracked separately in
+Issue #1036.
+
+**Create the bucket before Step 4b; the script does not.** The script only
+grants the runtime service account access to buckets that already exist
+(`TASK_RUNNER_BUCKET_ROLES`, Step 4b). For the audit-log archive, create the
+bucket with Object Retention enabled, which cannot be switched on later:
+
+```sh
+gcloud storage buckets create gs://<bucket> --project=<project> \
+  --location=<region> --enable-per-object-retention
+```
+
+Then grant it with `TASK_RUNNER_BUCKET_ROLES="<bucket>=roles/storage.objectUser"`
+in `.env.production.local`, and put the three values
+`AUDIT_LOG_GCS_BUCKET`, `AUDIT_LOG_GCS_RETENTION_DAYS` and
+`AUDIT_LOG_GCS_RETENTION_MODE` in `.env.task-runner.production.local` so the
+Job receives them (see `audit-log-append-only.md`). A test bucket uses
+`AUDIT_LOG_GCS_RETENTION_MODE=unlocked`; `locked` is permanent for the
+retention period and belongs to production only.
+
+**Two names, two jobs.** `task-runner` is the Cloud Run Job: the worker that
+runs `npm run task:run-all`. `task-runner-nightly` is the Cloud Scheduler job:
+the alarm clock that starts the worker on a schedule. Starting one does not
+change the other.
+
+**Rebuild after code changes.** On both Vercel and GCP hosting, the Job runs
+the image it was created with. After changing a handler, the schema or any
+other code a task uses, rebuild and push the image (run the script again) or
+the Job runs the old code.
+
+**Reusing the app's migrate image on GCP.** When the app itself is deployed
+with `gcp-deploy.sh`, its `<service>-migrate` image is built from the same
+`builder` stage the Job needs. Pass it instead of building a second image:
+`SKIP_BUILD=true TASK_RUNNER_IMAGE=<region>-docker.pkg.dev/<project>/<repo>/<service>-migrate:<tag> ./scripts/gcp-task-runner.sh`.
 
 Settings (environment or `.env.production.local`): `REGION`
 (default `asia-northeast1`), `SERVICE_NAME`, `REPO_NAME`,
@@ -708,6 +764,14 @@ gcloud scheduler jobs run task-runner-nightly --location=<region> --project=<pro
 gcloud run jobs executions list --job=task-runner --region=<region> --project=<project>
 ```
 
+`gcloud scheduler jobs run` only asks Cloud Scheduler to start the Job and
+returns at once; it does not wait for the work. `executions list` only reads
+the current state, so an execution that is still running is listed as running.
+The result (succeeded or failed) shows in the console and in `executions list`
+once the execution finishes. To wait for the result in the terminal, start the
+Job directly instead:
+`gcloud run jobs execute task-runner --region=<region> --project=<project> --wait`.
+
 Cleanup, in a test project: delete the Scheduler job, the Cloud Run Job, the
 two service accounts, the `task-runner-*` secrets, and the
 `<service>-task-runner` images. Or delete the whole test project.
@@ -756,7 +820,10 @@ no ordering by itself. Verified: started at 12:00 UTC, all four tasks of the
 example below ran in one pass regardless of their declared times (01:00,
 01:15, 02:00, 03:00 on the 1st).
 
-The business date is the UTC calendar day of the moment the Job starts. With
+The business date is the UTC calendar day of the moment the Job starts. A
+manual run on a given UTC day therefore uses up that day's business date:
+the scheduled start that follows within the same UTC day reports
+`already_succeeded` for every task that already succeeded. With
 the default `TASK_RUNNER_SCHEDULE="0 2 * * *"` and
 `TASK_RUNNER_TIME_ZONE=Asia/Tokyo`, the Job starts at 17:00 UTC of the
 previous day, so the business date lags the Tokyo date by one day. Verified:
@@ -833,18 +900,22 @@ local database; the observations above use top-level tasks.
 **Run once by hand and check the result.**
 
 ```sh
-# Start the same Job the Scheduler starts, and wait for it (not run)
+# Start the same Job the Scheduler starts, and wait for it (not verified live)
 gcloud run jobs execute task-runner --region=<region> --project=<project> --wait
-# Start it through the Scheduler job instead (not run)
+# Start it through the Scheduler job instead (verified live)
 gcloud scheduler jobs run task-runner-nightly --location=<region> --project=<project>
-# Recent executions and one execution's status (not run)
+# Recent executions (verified live); one execution's status (not verified live)
 gcloud run jobs executions list --job=task-runner --region=<region> --project=<project>
 gcloud run jobs executions describe <execution> --region=<region> --project=<project>
-# Container output of the Job (not run; filter built from the log fields
-# the Cloud Run documentation lists for jobs)
+# Container output of the Job (verified live)
 gcloud logging read 'resource.type=cloud_run_job AND resource.labels.job_name=task-runner' \
   --project=<project> --limit=50
 ```
+
+"Verified live" means run against a real GCP project: starting the Job
+through the Scheduler job, listing its executions and reading its logs
+showed four tasks succeed. "Not verified live" means the command is taken from
+the gcloud documentation and has not been run against a project.
 
 Each task prints one line, `<task_id>: <outcome>`, followed by a summary line
 (see the table above). `task:run-all` exits 1 when any task failed, was
