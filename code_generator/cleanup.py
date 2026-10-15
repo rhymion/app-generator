@@ -92,6 +92,10 @@ HANDWRITTEN_ALLOWLIST: frozenset[str] = frozenset([
     # audit_log built-in feature (not a json_schema.yaml `definitions:` entity,
     # so _prune_orphans' per-entity heuristics mistake it for an orphan)
     "components/audit_log/FormView.tsx",
+    "app/[locale]/audit_log/page.tsx",
+    "app/[locale]/audit_log/view/[id]/page.tsx",
+    "app/api/audit_log/route.ts",
+    "app/api/audit_log/[id]/route.ts",
     "lib/audit_log/getters.ts",
     "lib/audit_log/types.ts",
     # always-generated cypress support files, git-tracked (not gitignored)
@@ -305,6 +309,99 @@ def _clean_sidebar(path: Path, nav_hrefs: list) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+# Per-entity component files deleted when the entity is gone from the schema.
+# Includes the conditionally generated ones (x-splittable, x-generate.import,
+# inline create); leaving any of them behind keeps the directory non-empty so
+# _rmdir_tree() would silently skip it.
+_ORPHAN_COMPONENT_FILES = (
+    'FormUpsert.tsx',
+    'FormView.tsx',
+    'SplitActionSection.tsx',
+    'ImportModal.tsx',
+    'InlineCreateDialog.tsx',
+)
+
+# Entity-shaped route files, relative to app/[locale]/<entity>/ and
+# app/api/<entity>/. Only these are ever swept for an orphan entity.
+_ORPHAN_PAGE_FILES = (
+    'page.tsx',
+    'chart/page.tsx',
+    'new/page.tsx',
+    'edit/[id]/page.tsx',
+    'view/[id]/page.tsx',
+)
+_ORPHAN_API_FILES = (
+    'route.ts',
+    '[id]/route.ts',
+    'bulk/route.ts',
+)
+
+# Top-level route directories that are never entity routes.
+_NON_ENTITY_ROUTE_DIRS = frozenset(['docs', 'dashboard', 'register', 'login', 'setting', 'auth'])
+
+
+def _imports_own_lib(path: Path, parent: str) -> bool:
+    """True when `path` imports `@/lib/<parent>/...`, the signature of a
+    generated entity page/route (the generated pages carry no AUTO-GENERATED
+    header, so content is the only way to tell them from hand-written ones)."""
+    try:
+        return f"@/lib/{parent}/" in path.read_text(encoding='utf-8')
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
+def _prune_orphan_routes(out: Path, entities_by_parent: dict, orphan_lib_dirs: set,
+                         is_protected) -> None:
+    """Sweep app/[locale]/<entity>/ and app/api/<entity>/ for removed entities.
+
+    A directory is only treated as an orphan entity route when it is not in the
+    schema, is not a reserved non-entity route, and either its lib/<entity>/
+    boilerplate was detected as orphaned in this run or lib/<entity>/ is already
+    gone. Each file is then deleted only if it is one of the generator's route
+    file names AND imports its own `@/lib/<entity>/` module, so hand-written
+    pages and routes are left alone.
+    """
+    lib_root = out / 'lib'
+    roots = (
+        (out / 'app' / '[locale]', _ORPHAN_PAGE_FILES),
+        (out / 'app' / 'api', _ORPHAN_API_FILES),
+    )
+    for root, rel_files in roots:
+        if not root.is_dir():
+            continue
+        for entity_dir in sorted(d for d in root.iterdir() if d.is_dir()):
+            parent = entity_dir.name
+            if (entities_by_parent.get(parent) is not None
+                    or parent in _NON_ENTITY_ROUTE_DIRS
+                    or parent.startswith(('@', '(', '['))):
+                continue
+            if parent not in orphan_lib_dirs and (lib_root / parent).exists():
+                continue  # lib dir still present and not an orphan: not ours to judge
+            for rel in rel_files:
+                f = entity_dir / rel
+                if not f.is_file() or is_protected(f) or not _imports_own_lib(f, parent):
+                    continue
+                _delete(f)
+            _rmdir_tree(entity_dir)
+
+
+def _prune_orphan_flat_specs(out: Path, entities_by_parent: dict, is_protected) -> None:
+    """Sweep cypress/e2e/<entity>.cy.ts, e2e/api/ and e2e/mobile/ specs whose
+    entity is gone. Generated specs carry the AUTO-GENERATED header, so
+    hand-written specs (no header) are kept."""
+    e2e = out / 'cypress' / 'e2e'
+    for spec_dir in (e2e, e2e / 'api', e2e / 'mobile'):
+        if not spec_dir.is_dir():
+            continue
+        for spec in sorted(spec_dir.glob('*.cy.ts')):
+            parent = spec.name[:-len('.cy.ts')].removesuffix('_reservation_gen')
+            if parent.startswith('_'):
+                continue  # schema-global generated spec (e.g. _filter_sort_matrix_gen)
+            if entities_by_parent.get(parent) is not None or is_protected(spec):
+                continue
+            _delete_if_generated(spec)
+
+
 def _prune_orphans(out: Path, entities: list, keep_stubs: bool = False) -> None:
     """Sweep generator-shaped files that the current schema no longer expects.
 
@@ -398,6 +495,7 @@ def _prune_orphans(out: Path, entities: list, keep_stubs: bool = False) -> None:
     # getters.ts); system lib dirs (authz, prisma, normalize, etc.) don't carry
     # these names and are therefore skipped.
     lib_root = out / 'lib'
+    orphan_lib_dirs: set[str] = set()
     if lib_root.is_dir():
         for lib_dir in sorted(d for d in lib_root.iterdir() if d.is_dir()):
             parent = lib_dir.name
@@ -405,6 +503,7 @@ def _prune_orphans(out: Path, entities: list, keep_stubs: bool = False) -> None:
                 continue  # entity still in schema
             if not any((lib_dir / f).exists() for f in ('types.ts', 'getters.ts')):
                 continue  # not an entity lib dir
+            orphan_lib_dirs.add(parent)
             for fname in ('types.ts', 'getters.ts', 'actions.ts', 'service.ts', 'chart-getters.ts'):
                 f = lib_dir / fname
                 if not _is_protected(f):
@@ -428,8 +527,12 @@ def _prune_orphans(out: Path, entities: list, keep_stubs: bool = False) -> None:
                 continue  # entity still in schema
             if not any((comp_dir / f).exists() for f in ('FormUpsert.tsx', 'FormView.tsx')):
                 continue  # not an entity component dir
-            for fname in ('FormUpsert.tsx', 'FormView.tsx'):
+            for fname in _ORPHAN_COMPONENT_FILES:
                 f = comp_dir / fname
+                if not _is_protected(f):
+                    _delete(f)
+            # <Parent>BridgeGrid.tsx is named after the entity, so match by suffix.
+            for f in sorted(comp_dir.glob('*BridgeGrid.tsx')):
                 if not _is_protected(f):
                     _delete(f)
             if not keep_stubs:
@@ -437,6 +540,11 @@ def _prune_orphans(out: Path, entities: list, keep_stubs: bool = False) -> None:
                 if not _is_protected(f):
                     _delete(f)
             _rmdir_tree(comp_dir)
+
+    # app/[locale]/<entity>/ pages, app/api/<entity>/ routes and the flat
+    # cypress/e2e specs for entities removed from the schema.
+    _prune_orphan_routes(out, entities_by_parent, orphan_lib_dirs, _is_protected)
+    _prune_orphan_flat_specs(out, entities_by_parent, _is_protected)
 
 
 def cleanup(schema_path: str, output_dir: str, keep_stubs: bool = False, prune_orphans: bool = False) -> None:
