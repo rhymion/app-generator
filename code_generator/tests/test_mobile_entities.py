@@ -127,7 +127,10 @@ def test_field_without_a_native_widget_is_ineligible(category):
 def test_entity_select_field_is_eligible_and_drawn_as_labelled_enum_chips():
     ctx = _ctx(
         field_categories={'text': ['name'], 'entity_select': ['entity_name']},
-        entity_select_options=[{'value': 'purchase_order', 'label': 'Purchase Order'}, {'value': 'user', 'label': 'User'}],
+        entity_select_options=[
+            {'value': 'purchase_order', 'label': 'Purchase Order', 'key': 'purchaseOrder'},
+            {'value': 'user', 'label': 'User', 'key': 'user'},
+        ],
     )
     assert mobile_ineligible_reason(ctx) is None
     ctx.update(
@@ -140,6 +143,7 @@ def test_entity_select_field_is_eligible_and_drawn_as_labelled_enum_chips():
     assert field['required'] is True
     assert field['options'] == ['purchase_order', 'user']
     assert field['option_labels'] == ['Purchase Order', 'User']
+    assert field['option_label_keys'] == ['EntityLabel.purchaseOrder', 'EntityLabel.user']
     assert field['numeric_enum'] is False
     assert 'entity_name' in spec['filter_keys']
 
@@ -152,7 +156,28 @@ def test_entity_select_spec_reaches_the_generated_client(out):
     assert 'mobile_note' in field['options']
     labels = dict(zip(field['options'], field['optionLabels']))
     assert labels['mobile_note'] == 'Mobile Note'
+    keys = dict(zip(field['options'], field['optionLabelKeys']))
+    assert keys['mobile_note'] == 'EntityLabel.mobileNote'
     assert 'mobile_rule: {' in _read(out, 'lib/entity-registry.ts')
+
+
+def test_entity_label_words_of_the_offered_entities_ship_with_the_app():
+    from generate import _mobile_messages_json
+    en = {'EntityLabel': {'auditLog': 'Audit Log', 'purchaseOrder': 'Purchase Order', 'user': 'User', 'other': 'Other'}}
+    ja = {'EntityLabel': {'auditLog': '監査ログ', 'purchaseOrder': '発注', 'user': 'ユーザー', 'other': 'その他'}}
+    shipped = json.loads(_mobile_messages_json({'en': en, 'ja': ja}, ('purchaseOrder', 'user')))
+    assert shipped['en']['EntityLabel'] == {'auditLog': 'Audit Log', 'purchaseOrder': 'Purchase Order', 'user': 'User'}
+    assert shipped['ja']['EntityLabel']['purchaseOrder'] == '発注'
+    # Without an entity-name field only the single built-in key ships, as before.
+    assert json.loads(_mobile_messages_json({'en': en}))['en']['EntityLabel'] == {'auditLog': 'Audit Log'}
+
+
+def test_entity_name_chips_and_texts_read_the_dictionary_not_the_english_title(out):
+    field_input = _read(out, 'components/native/FieldInput.tsx')
+    assert 'spec.optionLabelKeys?.[index]' in field_input
+    assert '{optionText(spec, option, t)}' in field_input
+    assert 'toDisplayText(spec, item[key], t)' in _read(out, 'components/mobile_rule/List.tsx')
+    assert 'toRecordDisplayText(spec, record, t)' in _read(out, 'components/mobile_rule/FormView.tsx')
 
 
 def _m2m_child(**overrides):
@@ -1106,7 +1131,7 @@ def test_the_detail_screen_lists_the_rows(out):
     input_ = _read(out, 'components/native/FieldInput.tsx')
     assert "spec.kind === 'child_rows'" in input_
     view = _read(out, 'components/mobile_invoice/FormView.tsx')
-    assert 'toRecordDisplayText(spec, record)' in view
+    assert 'toRecordDisplayText(spec, record, t)' in view
 
 
 def test_row_editor_strings_exist_in_both_locales():

@@ -811,6 +811,14 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
         list_uses_decimal_format = True
         return f"formatDecimalDisplay(item.{field_name}, {int(scale)})"
 
+    def add_entity_select_labels(field_name: str) -> None:
+        """An `x-entity-select` column holds an entity name; the list shows its EntityLabel dictionary word."""
+        var_name = f'{to_camel_case(field_name)}Labels'
+        entries = [(o['value'], o['key']) for o in ctx.get('entity_select_options') or []]
+        if not any(e['var_name'] == var_name for e in enum_ns_list):
+            enum_ns_list.append({'var_name': var_name, 'ns': 'EntityLabel', 'entries': entries, 'is_native_enum': True})
+        add_formatting(field_name, f"{var_name}[item.{field_name} as string] ?? item.{field_name}")
+
     if xdisplay_table:
         fields_code_parts = []
         for item in xdisplay_table:
@@ -865,6 +873,8 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                         grid_type_attr = ", type: 'singleSelect'"
                         options = ', '.join(f"{{ value: {i}, label: {var_name}[{i}] }}" for i, _k in entries)
                         value_options_attr = f", valueOptions: [{options}]"
+                elif actual == 'string' and prop.get('x-entity-select'):
+                    add_entity_select_labels(field_name)
                 elif actual == 'string' and prop.get('x-decimal-scale') is not None:
                     add_formatting(field_name, _decimal_expr_for(field_name, prop['x-decimal-scale']))
 
@@ -941,6 +951,8 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
                 if not any(e['var_name'] == var_name for e in enum_ns_list):
                     enum_ns_list.append({'var_name': var_name, 'ns': ns_to_use, 'entries': entries, 'is_native_enum': False})
                 add_formatting(field_name, f"{var_name}[item.{field_name} as number] ?? ''")
+            elif actual == 'string' and prop.get('x-entity-select'):
+                add_entity_select_labels(field_name)
             elif actual == 'string' and prop.get('x-decimal-scale') is not None:
                 add_formatting(field_name, _decimal_expr_for(field_name, prop['x-decimal-scale']))
 
@@ -4498,7 +4510,7 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
         if p in entity_select_props_view:
             opts_var = f'{safe_var_name(p)}Options'
             opts_items = ', '.join(
-                f"{{ value: '{o['value']}', label: '{o['label']}' }}"
+                f"{{ value: '{o['value']}', label: te('{o['key']}') }}"
                 for o in entity_select_options
             )
             jsx_by_field[p] = (
@@ -5810,7 +5822,7 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
         req     = p in (model_def.get('required') or [])
         opts_var = f'{sn}Options'
         opts_items = ', '.join(
-            f"{{ value: '{o['value']}', label: '{o['label']}' }}"
+            f"{{ value: '{o['value']}', label: te('{o['key']}') }}"
             for o in entity_select_options
         )
         entity_select_opt_setups.append(f"  const {opts_var} = [{opts_items}];")

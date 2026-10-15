@@ -9,6 +9,9 @@ import { AttachmentInput } from '@/components/native/AttachmentInput';
 import type { AttachmentRow } from '@/lib/attachment-http';
 {% endif %}
 
+/** Looks a dictionary key up in the shipped messages (the `t` of `useMessages`). */
+export type Translate = (key: string) => string;
+
 // A relation field holds the selected id (many-to-one, one-to-one) or ids (many-to-many); a child_rows field holds its rows.
 export type FieldValueState = string | boolean | string[] | ChildRowState[];
 
@@ -107,23 +110,30 @@ export function emptyRow(spec: FieldSpec): ChildRowState {
 }
 
 /** Text an enum option is shown as: its label when the field has labels, else the option itself. */
-export function optionText(spec: FieldSpec, option: string): string {
+export function optionText(spec: FieldSpec, option: string, translate?: Translate): string {
   const index = spec.options.indexOf(option);
-  return index >= 0 && spec.optionLabels[index] ? spec.optionLabels[index]! : option;
+  if (index < 0) return option;
+  // An option with a dictionary key (an entity name) is shown as that word; the stored value stays the option.
+  const key = spec.optionLabelKeys?.[index];
+  if (key && translate) {
+    const word = translate(key);
+    if (word !== key) return word;
+  }
+  return spec.optionLabels[index] ? spec.optionLabels[index]! : option;
 }
 
 /** Text a record's value is displayed as on a read-only screen. */
-export function toDisplayText(spec: FieldSpec, value: unknown): string {
+export function toDisplayText(spec: FieldSpec, value: unknown, translate?: Translate): string {
   if (spec.kind === 'boolean') return value === true ? 'Yes' : 'No';
   if (value === null || value === undefined || value === '') return '-';
-  if (spec.kind === 'enum') return optionText(spec, String(value));
+  if (spec.kind === 'enum') return optionText(spec, String(value), translate);
   if (spec.kind === 'date') return String(value).slice(0, 10);
   if (spec.kind === 'time') return instantToTimeOfDay(String(value));
   return String(value);
 }
 
 /** Text a record's field is displayed as on a read-only screen; a relation shows the related record's label. */
-export function toRecordDisplayText(spec: FieldSpec, record: Record<string, unknown>): string {
+export function toRecordDisplayText(spec: FieldSpec, record: Record<string, unknown>, translate?: Translate): string {
   const labelField = spec.labelField ?? 'name';
   // A direct attachment shows the attached file's name, from the row the REST detail embeds.
   if (spec.kind === 'attachment') {
@@ -144,10 +154,10 @@ export function toRecordDisplayText(spec: FieldSpec, record: Record<string, unkn
     const rows = record[spec.relationName ?? spec.key];
     if (!Array.isArray(rows) || rows.length === 0) return '-';
     return rows
-      .map((row) => (spec.rowFields ?? []).map((field) => `${field.label}: ${toRecordDisplayText(field, row as Record<string, unknown>)}`).join(', '))
+      .map((row) => (spec.rowFields ?? []).map((field) => `${field.label}: ${toRecordDisplayText(field, row as Record<string, unknown>, translate)}`).join(', '))
       .join('\n');
   }
-  return toDisplayText(spec, record[spec.key]);
+  return toDisplayText(spec, record[spec.key], translate);
 }
 
 type Props = {
@@ -228,6 +238,7 @@ function ChildRowsInput({ spec, value, onChange, locked }: {
 
 /** Native control for one field. Holds no validation or submit logic. */
 export function FieldInput({ spec, value, onChange, disabled, caller, formValues, createForm{% if has_attachment %}, attachment, onAttachmentChange{% endif %} }: Props) {
+  const { t } = useMessages();
   const locked = disabled || spec.readonly;
 {% if has_attachment %}
   if (spec.kind === 'attachment') {
@@ -286,7 +297,7 @@ export function FieldInput({ spec, value, onChange, disabled, caller, formValues
                 testID={`field-${spec.key}-${option}`}
                 accessibilityState={ { selected } }
               >
-                <Text style={selected ? styles.chipTextSelected : styles.chipText}>{optionText(spec, option)}</Text>
+                <Text style={selected ? styles.chipTextSelected : styles.chipText}>{optionText(spec, option, t)}</Text>
               </Pressable>
             );
           })}

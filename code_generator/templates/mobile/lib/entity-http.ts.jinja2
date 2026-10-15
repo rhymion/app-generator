@@ -123,6 +123,8 @@ export type FieldSpec = {
   options: string[];
   /** Text shown for each option, by position; empty when the option is its own text. */
   optionLabels: string[];
+  /** Dictionary key (`EntityLabel.<name>`) of each option's word, by position; set on an entity-name field only. */
+  optionLabelKeys?: string[];
   numericEnum: boolean;
   // The fields below are set on a relation field only (`relationName` and `bodyKey` also on an attachment field).
   /** Entity whose records are offered. */

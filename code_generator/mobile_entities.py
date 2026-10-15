@@ -435,6 +435,7 @@ def _field_entry(name: str, defn: dict, kind: str, ctx: dict, required: set[str]
         entities = ctx.get('entity_select_options') or []
         entry['options'] = [str(o['value']) for o in entities]
         entry['option_labels'] = [str(o['label']) for o in entities]
+        entry['option_label_keys'] = [f"EntityLabel.{o['key']}" for o in entities]
         entry['numeric_enum'] = False
     elif kind == KIND_ENUM:
         # A value only the approval workflow may write is not offered, as the Web form disables it.

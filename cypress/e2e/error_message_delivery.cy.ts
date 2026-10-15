@@ -108,7 +108,7 @@ describe('Error message delivery (cmd_695 — Server Action ActionFailure conver
           cy.login(email, TEST_CREDENTIALS.password);
           cy.visit('/en/approval_flow');
           cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-          cy.contains('user').scrollIntoView().should('be.visible');
+          cy.contains('.MuiDataGrid-cell', 'User').scrollIntoView().should('be.visible');
 
           // Revoke delete permission after the grid (and its Delete button)
           // already rendered with delete:true — the only reliable way to
@@ -153,7 +153,7 @@ describe('Error message delivery (cmd_695 — Server Action ActionFailure conver
           // catches it (cmd_695) and DataGridClient shows it via AppAlert
           // instead of crashing, and rolls back the optimistic removal.
           cy.contains('do not have permission').should('be.visible');
-          cy.contains('user').should('be.visible');
+          cy.contains('.MuiDataGrid-cell', 'User').should('be.visible');
           cy.screenshot('cmd695-3-permission-denied-fixed', { capture: 'fullPage' });
         });
       });

@@ -1677,15 +1677,22 @@ def _categorize_form_fields(filtered_props: dict, parent_rels_raw: list[dict],
 # ---------------------------------------------------------------------------
 
 def _get_entity_options(schema: dict) -> list[dict]:
-    """Returns list of {value, label} for all schema entities that have pages."""
+    """Returns the `x-entity-select` options: {value, label, key} for every generated entity, plus `audit_log`.
+
+    `audit_log` is the one system table a Permission row can name although it is not a schema definition
+    (`getModelPermissions` answers for it by name), so it is appended after the generated entities. Entities
+    without generated pages (`approval_request`, `comment`, ...) are not offered: they are not permission or
+    approval targets. `label` is the English fallback; `key` is the `EntityLabel` dictionary key the screens
+    display it with. The stored value is always the entity name.
+    """
     from generate_types import extract_entities
+    names = [e['parent'] for e in extract_entities(schema)] + ['audit_log']
     options = []
     seen = set()
-    for e in extract_entities(schema):
-        parent = e['parent']
-        if parent not in seen:
-            seen.add(parent)
-            options.append({'value': parent, 'label': to_title_case(parent)})
+    for name in names:
+        if name not in seen:
+            seen.add(name)
+            options.append({'value': name, 'label': to_title_case(name), 'key': to_camel_case(name)})
     return options
 
 

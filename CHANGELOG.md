@@ -5,6 +5,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Entity-name selects offer `audit_log` and show dictionary words** (Issues #1013, #1015). A field declared with
+  `x-entity-select` (`permission.name`, `approval_flow.entity_name`) now also offers `audit_log`, the system table a
+  permission can name. `approval_request` and entities without generated pages stay out on purpose: they are not
+  permission or approval targets. Every option has an `EntityLabel` key in every `messages/<locale>.json`, and the Web
+  edit, detail and list screens and the mobile chips, list cells and detail text show that word; the stored value stays
+  the entity name. Generated Cypress specs find a list row by the dictionary word.
+  `docs/knowledge/entity-select-options.md` states the rule.
 - **Bucket access for the task-runner Job** (Issue #1008). `scripts/gcp-task-runner.sh` accepts
   `TASK_RUNNER_BUCKET_ROLES` (space-separated `BUCKET=ROLE` pairs) and grants the Job's runtime service account a
   bucket-scoped role on each bucket; unset, nothing changes. `docs/knowledge/scheduled-task-operations.md` also states that

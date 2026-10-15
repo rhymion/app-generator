@@ -160,7 +160,10 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
       // avoiding seed items (e.g. the logged-in admin) that cannot be self-deleted.
       cy.task<any[]>('db:populate{{ pascal }}', 2).then((records) => {
         cy.visit('/en/{{ parent }}');
-        const name = records[0].name as string;
+{% if name_label_map %}
+        const nameLabels: Record<string, string> = {{ name_label_map }};
+{% endif %}
+        const name = {% if name_label_map %}nameLabels[records[0].name as string] ?? {% endif %}(records[0].name as string);
         cy.get(`input[type="checkbox"][aria-label="Select ${name}"]`).first().check();
         // Toolbar delete only enables once at least one card is selected.
         cy.get('button[aria-label="Delete Selected"]').should('not.be.disabled').click();
@@ -189,8 +192,11 @@ describe('Testing {{ title }} pages and their behavior [mobile]', () => {
       // avoiding seed items that may have FK restrictions preventing deletion.
       cy.task<any[]>('db:populate{{ pascal }}', 3).then((records) => {
         cy.visit('/en/{{ parent }}');
-        const firstName = records[0].name as string;
-        const secondName = records[1].name as string;
+{% if name_label_map %}
+        const nameLabels: Record<string, string> = {{ name_label_map }};
+{% endif %}
+        const firstName = {% if name_label_map %}nameLabels[records[0].name as string] ?? {% endif %}(records[0].name as string);
+        const secondName = {% if name_label_map %}nameLabels[records[1].name as string] ?? {% endif %}(records[1].name as string);
         if (firstName !== secondName) {
           cy.get(`input[type="checkbox"][aria-label="Select ${firstName}"]`).first().check();
           cy.get(`input[type="checkbox"][aria-label="Select ${secondName}"]`).first().check();
