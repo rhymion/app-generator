@@ -42,6 +42,19 @@ OPENAPI_VERSION = '3.1.0'
 
 _READONLY_FIELDS = {'id', 'created_at', 'updated_at', 'creator_id'}
 
+# Base fields every row carries (Prisma-level, not json_schema.yaml
+# properties for most entities) and that list/get responses return:
+# `lib/<entity>/types.ts` declares them and the getters select them.
+# Used as the record schema's default for any of these an entity does not
+# declare itself. `creator_id` is nullable (the bootstrap tenant row has
+# no creator).
+_SYSTEM_FIELD_SCHEMAS = {
+    'id': {'type': 'string'},
+    'created_at': {'type': 'string', 'format': 'date-time'},
+    'updated_at': {'type': 'string', 'format': 'date-time'},
+    'creator_id': {'type': ['string', 'null']},
+}
+
 # Mirrors lib/_pagination.ts's own DEFAULT_PAGE_SIZE/MAX_PAGE_SIZE constants
 # (cmd_1198) -- documented here, not imported, same "mirror the runtime
 # constant" precedent _READONLY_FIELDS above already set.
@@ -123,6 +136,11 @@ def _record_properties(ctx: dict, all_props: dict) -> dict:
         if name in readonly_names:
             cleaned = {**cleaned, 'readOnly': True}
         properties[name] = cleaned
+    # Base fields the entity does not declare itself still appear on every
+    # response row, so the record schema must describe them (#762 gap 2).
+    for name, schema in _SYSTEM_FIELD_SCHEMAS.items():
+        if name not in properties:
+            properties[name] = {**schema, 'readOnly': True}
     return properties
 
 
@@ -164,7 +182,11 @@ def _param_schema_for_field(field: str, record_properties: dict) -> dict:
     if field in record_properties:
         # readOnly (gap 2) is a response/record-schema concept -- stripped
         # here since it has no meaning on a request query parameter.
-        return {k: v for k, v in record_properties[field].items() if k != 'readOnly'}
+        schema = {k: v for k, v in record_properties[field].items() if k != 'readOnly'}
+        if schema.get('type') == ['string', 'null']:
+            # A query value is never null; only the response row can be.
+            schema['type'] = 'string'
+        return schema
     if field in ('created_at', 'updated_at'):
         return {'type': 'string', 'format': 'date-time'}
     return {'type': 'string'}  # id / creator_id / assignee_id: opaque id strings

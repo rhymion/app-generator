@@ -181,6 +181,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **The generated OpenAPI record schema lists `created_at`, `updated_at` and `creator_id`** (Issue #762). Every response row
+  carries these base fields, but the record schema described only the entity's own declared properties. Each is now present
+  and marked `readOnly: true` (`creator_id` is nullable); an entity's own declaration of `id` is kept. The create-request
+  schema and filter parameters are unchanged. `docs/knowledge/generated-documentation-and-openapi-spec.md` states the rule.
 - **The Completion gate's UI Cypress step now runs `cypress/e2e/auth/**`** (Issue #580). `test:e2e:cy:ui` matched only 
   `cypress/e2e/*.cy.ts` and `cypress/e2e/mobile/*.cy.ts`, so the auth specs (`mfa.cy.ts`, `settings_avatar_save.cy.ts`) ran 
   in CI's `e2e-tests` job but in no gate step. The script's `--spec` now includes `cypress/e2e/auth/**`, and a pytest fails 
