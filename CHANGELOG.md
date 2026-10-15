@@ -4,7 +4,19 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
+### Changed
+- **DataGrid date and date-time columns use MUI pickers** (Issue #764). The list-page filter value and the filter and edit cell of an embedded child grid for every `date` / `date-time` column now use MUI `DatePicker` / `DateTimePicker` instead of the browser's native date inputs, so the calendar follows the app locale (en/ja) rather than the browser's UI language. Filter values, saved values and time zones are unchanged. No new dependency and no schema key. `editDataGridCell()` in `cypress/support/datagrid-helpers.ts` types the same ISO values into the picker. See `docs/knowledge/i18n-locale-routing.md`.
+
 ### Added
+- **Dockerfile and `.dockerignore` for scheduled tasks on any provider** (Issue #1029). `generate-code` writes both files
+  whenever the schema declares `x-scheduled-task` or `x-scheduled-tasks`, independent of `x-cloud.provider`, so
+  `scripts/gcp-task-runner.sh` Step 5 works for an app deployed on Vercel. `x-cloud:gcp` keeps its other behavior
+  (GCS upload route, `output: 'standalone'`, no `vercel.json` crons). No new schema key.
+- **Dashboard text and chart labels are translated** (Issue #913). Widget subtitles, "No data", "No widgets yet", the
+  CSV button and CSV headings use `messages/<locale>.json` (new `DashboardView` section, en and ja). Chart categories
+  and series show the same labels as lists and forms: enum option labels (the dashboard catalog now carries
+  `enum_namespace`), Yes / No, and the `(unspecified)` / `(unknown)` / `(unnamed)` placeholders; entity and field
+  names in the subtitle use their display labels.
 - **Entity-name selects offer `audit_log` and show dictionary words** (Issues #1013, #1015). A field declared with
   `x-entity-select` (`permission.name`, `approval_flow.entity_name`) now also offers `audit_log`, the system table a
   permission can name. `approval_request` and entities without generated pages stay out on purpose: they are not
@@ -162,6 +174,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `resetTestDatabase()` empties both tables with `TRUNCATE`. Consumers add the SQL to their own migrations, create the
   restricted application role and the write-once bucket; see `docs/knowledge/audit-log-append-only.md`.
 ### Changed
+- **The Cypress helper `grantAllEntityPermissions` grants what the real seed grants** (Issue #848). Instead of full CRUD
+  and import on every entity, it reads the generated `SEED_ENTITY_GRANTS` (the source of `npm run db:grant-all-permissions`),
+  so an entity with `x-generate.new: false` no longer gives the test user `create`. Entities outside that list, such as
+  `labelField` targets, keep full CRUD. A spec that needs a further right adds it explicitly. See
+  `docs/knowledge/grant-all-permissions-x-generate-gate.md`.
 - Completion gate documents (`generate-schema`, `update-code`, `update-generator`) now name `npm run db:generate` as a prerequisite of the vitest step on a fresh checkout (Issue #1006).
 - **List sort / filter panel no longer offers internal bridge foreign keys** (Issue #967). `Approvable Id`, `Attachable Id`,
   `Commentable Id` and the like are dropped from the Web panel and from the Expo list's sort and filter keys, using the
@@ -190,6 +207,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   they failed. The generated test helper also no longer returns an alias for a dependency that was skipped (#1025).
 - **`form_validation.ts` compiles for an entity with no required form field** (Issue #1026, part of #946). `REQUIRED_FIELDS`
   has an explicit element type instead of `as const`, so an empty list no longer infers the empty tuple type.
+- **The generated OpenAPI record schema lists `created_at`, `updated_at` and `creator_id`** (Issue #762). Every response row
+  carries these base fields, but the record schema described only the entity's own declared properties. Each is now present
+  and marked `readOnly: true` (`creator_id` is nullable); an entity's own declaration of `id` is kept. The create-request
+  schema and filter parameters are unchanged. `docs/knowledge/generated-documentation-and-openapi-spec.md` states the rule.
+- **Transient and missing-record Prisma errors no longer return 422** (Issue #747). The generated `add{Entity}` and
+  `update{Entity}` catch blocks now map `P2034` (write conflict under Serializable isolation) and `P2037` (too many
+  connections) to `CAPACITY` (409), and `P2025` (required record not found) to `NOT_FOUND` (404). Input-shaped codes still
+  return `VALIDATION` (422). See `docs/knowledge/p2028-capacity-misclassification-fix.md`.
 - **The Completion gate's UI Cypress step now runs `cypress/e2e/auth/**`** (Issue #580). `test:e2e:cy:ui` matched only 
   `cypress/e2e/*.cy.ts` and `cypress/e2e/mobile/*.cy.ts`, so the auth specs (`mfa.cy.ts`, `settings_avatar_save.cy.ts`) ran 
   in CI's `e2e-tests` job but in no gate step. The script's `--spec` now includes `cypress/e2e/auth/**`, and a pytest fails 
@@ -204,13 +229,28 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `components/<entity>/SplitActionSection.tsx` / `ImportModal.tsx` stayed on disk and broke the next build. Pages and routes are deleted only when they
   import their own `@/lib/<entity>/` module; specs only with the `AUTO-GENERATED` header; the built-in `audit_log` routes are allowlisted.
   `docs/knowledge/cleanup.md` lists the sweep.
-- **Mobile card list no longer shows delete controls for an entity with `x-generate.delete: false`** (Issue #578). `CardListClient` now requires `removeAction` in addition to the delete permission before rendering the toolbar delete button and the per-card checkbox, matching `DataGridClient`. The generated mobile list specs count cards through `[data-testid="mobile-card-list"] .MuiCard-root` instead of the delete checkboxes, so they hold for an entity with no delete action.
+- **`x-autocomplete-context` is rejected where it generated broken or ignored output** (Issue #880). Schema validation now fails
+  when the key names a plain text, number, decimal or `format: uri` field (the form holds these in a ref, so the generated
+  `formValues` referred to an undeclared variable) and when it sits on a `one-to-one` or `one-to-one_bridge` FK (the picker
+  ignored it). The message names the entity, the FK and the field. See `docs/knowledge/x-autocomplete-context.md`.
+- **Generated populate helpers seed distinct numeric values when a column's `minimum` / `maximum` is tighter than the row spacing** 
+  (Issue #841). Indexed rows were clamped to the same value (`minimum: 500` seeded 500 for every row), so a row-specific label 
+  assertion could match several rows. Rows are now spaced 100 apart from `max(minimum, 100)`, and when `maximum` leaves no 
+  room for that spacing they take consecutive values from the lower bound (`minimum: 1, maximum: 50` seeds 1, 2, 3, ...). 
+  A column with no bound, or a wide range, seeds 100, 200, 300, ... as before. The populate helper and the expected label 
+  still derive from one rule.
+- **Mobile card list no longer shows delete controls for an entity with `x-generate.delete: false`** (Issue #578). 
+  `CardListClient` now requires `removeAction` in addition to the delete permission before rendering the toolbar delete 
+  button and the per-card checkbox, matching `DataGridClient`. The generated mobile list specs count cards through 
+  `[data-testid="mobile-card-list"] .MuiCard-root` instead of the delete checkboxes, so they hold for an entity with no 
+  delete action.
 - **Nav group resolution no longer breaks on non-schema nav entries** (Issue #799). `generators_i18n.py` and `cleanup.py` now pass
   `entities + nav_extra_entities(schema)` to `build_nav_config`, the same list used for the nav labels and links, and `_entity_nav`
   returns no `x-nav` for an entry without a schema definition instead of raising `KeyError: 'model'`. The scheduled-task admin
   link stays a flat top-level link; placing it in an `x-nav-groups` group remains unsupported
   (`docs/knowledge/nested-nav-menu-design.md` §4).
-- **Native app header no longer sits under the system UI and its actions are large enough to press** (Issue #1014). The header and footer now apply the top and bottom safe-area insets, and each header action is at least 44x44 points.
+- **Native app header no longer sits under the system UI and its actions are large enough to press** (Issue #1014). The 
+  header and footer now apply the top and bottom safe-area insets, and each header action is at least 44x44 points.
 - **Generated delete examples check the rows exist first for an entity with no unique primary link** (Issue #835). 
   Examples 4.1, 4.2 and 4.3 in the generated UI spec now assert the populated row count before they delete, so an example 
   that finds nothing to delete fails on its own precondition. Entities with a unique primary link are unchanged.

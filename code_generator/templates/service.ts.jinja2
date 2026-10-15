@@ -147,6 +147,24 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2028') {
       throw new AppError('CAPACITY', 'Unable to start a transaction in the given time');
     }
+    // P2034 (write conflict / deadlock under Serializable isolation, which
+    // item-reservation entities use) and P2037 (too many database
+    // connections) are likewise transient server-side conditions the client
+    // did not cause -- the same CAPACITY (409) treatment as P2028 applies,
+    // so the caller can retry instead of "fixing" a valid request body.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2034') {
+      throw new AppError('CAPACITY', 'Transaction write conflict, please retry');
+    }
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2037') {
+      throw new AppError('CAPACITY', 'Too many database connections');
+    }
+    // P2025 ("an operation failed because it depends on one or more records
+    // that were required but not found") means a row the write targeted was
+    // gone, e.g. deleted between the caller's read and this write. That is
+    // a missing record (404), not a bad field value (422).
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') {
+      throw new AppError('NOT_FOUND', 'Record not found');
+    }
     // Child-row (DataGrid nested create/update) fields carry no
     // validateOnAdd/validateOnUpdate coverage of their own --
     // an invalid or missing required value there (e.g. a cleared required
@@ -155,7 +173,7 @@ export async function add{{ parent_pascal }}(actorId: string{% if parent_params_
     // this is an uncaught exception, not a graceful "<field> is required"
     // rejection. Same treatment for the parent-field edge this generator
     // cannot fully prevent client-side either (a malformed value slipping
-    // past the browser). P2002 and P2028 are handled above; every other
+    // past the browser). P2002, P2028, P2034, P2037 and P2025 are handled above; every other
     // PrismaClientKnownRequestError code below is likewise a bad-input
     // shape (FK/type/constraint), not a server bug.
     if (e instanceof Prisma.PrismaClientValidationError || e instanceof Prisma.PrismaClientKnownRequestError) {
@@ -389,6 +407,24 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2028') {
       throw new AppError('CAPACITY', 'Unable to start a transaction in the given time');
     }
+    // P2034 (write conflict / deadlock under Serializable isolation, which
+    // item-reservation entities use) and P2037 (too many database
+    // connections) are likewise transient server-side conditions the client
+    // did not cause -- the same CAPACITY (409) treatment as P2028 applies,
+    // so the caller can retry instead of "fixing" a valid request body.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2034') {
+      throw new AppError('CAPACITY', 'Transaction write conflict, please retry');
+    }
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2037') {
+      throw new AppError('CAPACITY', 'Too many database connections');
+    }
+    // P2025 ("an operation failed because it depends on one or more records
+    // that were required but not found") means a row the write targeted was
+    // gone, e.g. deleted between the caller's read and this write. That is
+    // a missing record (404), not a bad field value (422).
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') {
+      throw new AppError('NOT_FOUND', 'Record not found');
+    }
     // Child-row (DataGrid nested create/update) fields carry no
     // validateOnAdd/validateOnUpdate coverage of their own --
     // an invalid or missing required value there (e.g. a cleared required
@@ -397,7 +433,7 @@ export async function update{{ parent_pascal }}(actorId: string, id: string{% if
     // this is an uncaught exception, not a graceful "<field> is required"
     // rejection. Same treatment for the parent-field edge this generator
     // cannot fully prevent client-side either (a malformed value slipping
-    // past the browser). P2002 and P2028 are handled above; every other
+    // past the browser). P2002, P2028, P2034, P2037 and P2025 are handled above; every other
     // PrismaClientKnownRequestError code below is likewise a bad-input
     // shape (FK/type/constraint), not a server bug.
     if (e instanceof Prisma.PrismaClientValidationError || e instanceof Prisma.PrismaClientKnownRequestError) {

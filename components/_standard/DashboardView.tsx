@@ -2,6 +2,7 @@
 
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
+import { useTranslations } from 'next-intl';
 import DashboardWidget, { WidgetConfig } from './DashboardWidget';
 import type { ChartType, StackMode } from './DashboardChart';
 import type { BucketGranularity } from '@/lib/dashboard/aggregate-core';
@@ -36,13 +37,14 @@ type Props = {
 };
 
 export default function DashboardView({ src }: Props) {
+  const t = useTranslations('DashboardView');
   const widgets = (src.widgets ?? []).slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
   if (widgets.length === 0) {
     return (
       <Box sx={{ mt: 2 }}>
         <Typography variant="caption" color="textSecondary">
-          No widgets yet. Edit this dashboard to add charts.
+          {t('noWidgets')}
         </Typography>
       </Box>
     );

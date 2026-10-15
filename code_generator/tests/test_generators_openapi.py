@@ -76,6 +76,35 @@ def test_readonly_marks_custom_readonly_fields_ctx_key():
     assert record['properties']['name']['readOnly'] is True
 
 
+def test_record_schema_describes_undeclared_system_fields():
+    # #762 gap 2: created_at / updated_at / creator_id are on every
+    # response row but are not entity-declared properties.
+    spec = build_entity_openapi(_base_ctx())
+    props = spec['schemas']['Widget']['properties']
+    for name in ('created_at', 'updated_at', 'creator_id'):
+        assert props[name]['readOnly'] is True
+    assert props['created_at']['format'] == 'date-time'
+    assert props['updated_at']['format'] == 'date-time'
+    assert props['creator_id']['type'] == ['string', 'null']
+    # Declared `id` keeps its own pattern; the default does not override it.
+    assert props['id']['pattern'] == '^c[a-z0-9]{24,}$'
+
+
+def test_system_fields_stay_out_of_create_request_and_required():
+    spec = build_entity_openapi(_base_ctx())
+    create = spec['schemas']['WidgetCreateRequest']
+    for name in ('created_at', 'updated_at', 'creator_id'):
+        assert name not in create['properties']
+    assert 'creator_id' not in spec['schemas']['Widget'].get('required', [])
+
+
+def test_creator_id_filter_param_is_not_nullable():
+    spec = build_entity_openapi(_base_ctx())
+    params = spec['paths']['/api/widget']['get']['parameters']
+    f = next(p for p in params if p['name'] == 'f.creator_id')
+    assert f['schema'] == {'type': 'string'}
+
+
 def test_readonly_not_leaked_into_create_request_schema():
     spec = build_entity_openapi(_base_ctx())
     create = spec['schemas']['WidgetCreateRequest']

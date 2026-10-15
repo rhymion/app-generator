@@ -13,11 +13,16 @@ describe('API: User Invalidate (cmd_243)', () => {
   it('Delete permission holder can invalidate user', () => {
     cy.task<any[]>('db:populateUser', 1).then((records) => {
       const userId = records[0].id;
-      cy.request({
+      // The seeded Administrator holds no delete right on user, so this spec adds it explicitly.
+      cy.task<string>('db:createApiUserWithPermission', {
+        entityName: 'user',
+        flags: { read: true, delete: true },
+        label: 'invalidate',
+      }).then((deleterKey) => cy.request({
         method: 'POST',
         url: INVALIDATE_PATH(userId),
-        headers: { 'X-API-Key': TEST_API_KEY },
-      }).then((res) => {
+        headers: { 'X-API-Key': deleterKey },
+      })).then((res) => {
         expect(res.status).to.eq(200);
         expect(res.body.success).to.eq(true);
         // Verify PII scrubbed: fetch user via API and confirm anonymization.
