@@ -395,5 +395,21 @@
     "seriesSameAsGroup": "{where}系列フィールド「{field}」が集計軸と同じです。別の系列フィールドを選んでください。",
     "noMatchingData": "このグラフに該当するデータはありません。",
     "loadFailed": "グラフを読み込めませんでした。ページを再読み込みし、改善しない場合は管理者に連絡してください。"
+  },
+  "DashboardView": {
+    "subtitle": "{entity}を{field}で集計",
+    "subtitleWithZone": "{entity}を{field}で集計（{zone}）",
+    "noWidgets": "ウィジェットがまだありません。このダッシュボードを編集してグラフを追加してください。",
+    "noData": "データなし",
+    "exportCsv": "CSVをエクスポート",
+    "yes": "はい",
+    "no": "いいえ",
+    "unspecified": "（未指定）",
+    "unknown": "（不明）",
+    "unnamed": "（名称なし）",
+    "count": "件数",
+    "csvLabel": "ラベル",
+    "csvCount": "件数",
+    "csvCategory": "カテゴリ"
   }
 }

@@ -461,8 +461,15 @@ needed 2+ DataGrid children on one form to surface.
 
 ### DataGrid-child date/date-time/time edit cells need ISO input, not the top-level format
 
-**This is a separate input mechanism from the `MUI DateTimePicker patterns` section below** — a
-DataGrid-child date/date-time/time column has no `renderEditCell` override, so editing it goes
+**Current behaviour (issue #764)**: a generated DataGrid-child date/date-time column edits through an
+MUI `DatePicker` / `DateTimePicker` (`dateColumnProps` in `components/_standard/DataGridDatePickers.tsx`).
+`editDataGridCell()` in `cypress/support/datagrid-helpers.ts` still takes the ISO value
+(`YYYY-MM-DD` / `YYYY-MM-DDThh:mm`) and types it into the picker's sections (English order
+MM/DD/YYYY hh:mm AM|PM); generated specs are unchanged. The rest of this section describes the native
+input path, which `editDataGridCell()` still takes when the cell holds a native input.
+
+**This is a separate input mechanism from the `MUI DateTimePicker patterns` section below** — before
+#764 a DataGrid-child date/date-time/time column had no `renderEditCell` override, so editing it went
 through the browser's **native `datetime-local` input**, not the `DateTimeWrapper`/MUI
 `DateTimePicker` widget the top-level form uses.
 

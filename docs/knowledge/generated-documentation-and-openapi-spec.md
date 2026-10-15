@@ -111,6 +111,13 @@ cross-referencing the separate create-request schema) still gets the
 signal. Never leaked into a query-parameter schema (`readOnly` is a
 response-body concept; stripped there it would be meaningless).
 
+The record schema also lists the base fields an entity does not declare
+itself — `id`, `created_at`/`updated_at` (`date-time`) and `creator_id`
+(nullable string) — each `readOnly: true`, because every response row
+carries them. An entity's own declaration of one (such as `id` with a
+pattern) wins. They stay out of the create-request schema and out of
+`required`.
+
 Bulk `PUT`/`DELETE` at `/api/{parent}/bulk` now declare a `requestBody`:
 `PUT`'s items are the create-request shape plus a required `id`
 (`{Parent}BulkUpdateItem`, mirroring `api_bulk_route.ts.jinja2`'s
