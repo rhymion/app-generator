@@ -8,6 +8,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **DataGrid date and date-time columns use MUI pickers** (Issue #764). The list-page filter value and the filter and edit cell of an embedded child grid for every `date` / `date-time` column now use MUI `DatePicker` / `DateTimePicker` instead of the browser's native date inputs, so the calendar follows the app locale (en/ja) rather than the browser's UI language. Filter values, saved values and time zones are unchanged. No new dependency and no schema key. `editDataGridCell()` in `cypress/support/datagrid-helpers.ts` types the same ISO values into the picker. See `docs/knowledge/i18n-locale-routing.md`.
 
 ### Added
+- **Dockerfile and `.dockerignore` for scheduled tasks on any provider** (Issue #1029). `generate-code` writes both files
+  whenever the schema declares `x-scheduled-task` or `x-scheduled-tasks`, independent of `x-cloud.provider`, so
+  `scripts/gcp-task-runner.sh` Step 5 works for an app deployed on Vercel. `x-cloud:gcp` keeps its other behavior
+  (GCS upload route, `output: 'standalone'`, no `vercel.json` crons). No new schema key.
 - **Dashboard text and chart labels are translated** (Issue #913). Widget subtitles, "No data", "No widgets yet", the
   CSV button and CSV headings use `messages/<locale>.json` (new `DashboardView` section, en and ja). Chart categories
   and series show the same labels as lists and forms: enum option labels (the dashboard catalog now carries
