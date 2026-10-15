@@ -813,6 +813,26 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
     return result
 
 
+def _closes_required_cycle(rel: dict, model: str, schema: dict) -> bool:
+    """True for an optional FK of `model` whose target has a required FK back to `model`.
+
+    Such an edge (e.g. an identity's nullable `current_version_id` to its version
+    entity, where the version requires the identity) cannot be satisfied as a
+    pre-created dependency: the target would be created before `model` exists, so
+    its required parent FK would be missing. The row of `model` is created first
+    with the optional column empty instead.
+    """
+    if rel['required']:
+        return False
+    target_def = _raw_def(rel['target'], schema)
+    if not target_def or not target_def.get('properties'):
+        return False
+    return any(
+        back['target'] == model and back['required']
+        for back in get_parent_relationships(target_def)
+    )
+
+
 def resolve_dependencies(model_name: str, schema: dict) -> list[dict]:
     """Port of resolveDependencies().
 
@@ -838,6 +858,7 @@ def resolve_dependencies(model_name: str, schema: dict) -> list[dict]:
             and r['target'] != model
             and r['prop_name'] != 'updater_id'
             and r['prop_name'] != 'assignee_id'
+            and not _closes_required_cycle(r, model, schema)
         ]
 
         for rel in relevant:
