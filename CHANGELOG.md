@@ -181,7 +181,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
-- **Schema validation rejects an `x-state-machines` field whose enum has a value the diagram never mentions** (Issue #715). Previously a new enum value added without a diagram update generated cleanly, appeared as a UI option, and then failed every write with a generic "not a valid initial state" error. `generate-code` now fails and names the missing value(s) and the diagram file. A `null` member of a nullable enum is not a state and is ignored.
+- **The Completion gate's UI Cypress step now runs `cypress/e2e/auth/**`** (Issue #580). `test:e2e:cy:ui` matched only 
+  `cypress/e2e/*.cy.ts` and `cypress/e2e/mobile/*.cy.ts`, so the auth specs (`mfa.cy.ts`, `settings_avatar_save.cy.ts`) ran 
+  in CI's `e2e-tests` job but in no gate step. The script's `--spec` now includes `cypress/e2e/auth/**`, and a pytest fails 
+  when a directory under `cypress/e2e/` holding specs is matched by no `test:e2e:cy:api` / `test:e2e:cy:ui` glob. The gate 
+  document notes that the MFA spec needs `MOCK_GOOGLE_OAUTH_TEST=true` in `.env.test.local`.
+- **Schema validation rejects an `x-state-machines` field whose enum has a value the diagram never mentions** (Issue #715). 
+  Previously a new enum value added without a diagram update generated cleanly, appeared as a UI option, and then failed every 
+  write with a generic "not a valid initial state" error. `generate-code` now fails and names the missing value(s) and the 
+  diagram file. A `null` member of a nullable enum is not a state and is ignored.
 - **`--prune-orphans` now removes the pages, API routes, flat Cypress specs and conditional component files of a removed entity** (Issue #618).
   After an entity left the schema, `app/[locale]/<entity>/`, `app/api/<entity>/`, `cypress/e2e/**/<entity>.cy.ts` and
   `components/<entity>/SplitActionSection.tsx` / `ImportModal.tsx` stayed on disk and broke the next build. Pages and routes are deleted only when they

@@ -74,7 +74,7 @@
     "pretest:e2e:cy:api": "cross-env NODE_ENV=test run-s write-mock-oauth-sentinel docker:up:test:wait db:push db:apply-audit-log-sql db:generate db:seed-baseline",
     "test:e2e:cy:api": "cross-env NODE_ENV=test PAYMENT_FAKE_STRIPE=1 node scripts/run-e2e.js test:e2e:start 'cypress run --browser chromium --spec \"cypress/e2e/api/**\"'",
     "pretest:e2e:cy:ui": "cross-env NODE_ENV=test run-s write-mock-oauth-sentinel",
-    "test:e2e:cy:ui": "cross-env NODE_ENV=test PAYMENT_FAKE_STRIPE=1 node scripts/run-e2e.js test:e2e:start 'cypress run --browser chromium --spec \"cypress/e2e/*.cy.ts,cypress/e2e/mobile/*.cy.ts\"'",
+    "test:e2e:cy:ui": "cross-env NODE_ENV=test PAYMENT_FAKE_STRIPE=1 node scripts/run-e2e.js test:e2e:start 'cypress run --browser chromium --spec \"cypress/e2e/*.cy.ts,cypress/e2e/mobile/*.cy.ts,cypress/e2e/auth/**\"'",
     "test:e2e:mobile:pw": "bash scripts/run_mobile_entity_playwright.sh",
     "test:e2e:mobile:pw:raw": "node mobile/scripts/require-preconditions.js && mobile/node_modules/.bin/playwright test --config mobile/playwright.config.ts",
     "pretest:e2e:cy:start": "cross-env NODE_ENV=test run-s write-mock-oauth-sentinel",
