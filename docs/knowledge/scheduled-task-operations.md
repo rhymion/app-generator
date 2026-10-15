@@ -658,9 +658,14 @@ Settings (environment or `.env.production.local`): `REGION`
 `SKIP_BUILD=true` to reuse an image, and `TASK_RUNNER_JOB_NAME` /
 `TASK_RUNNER_SCHEDULER_JOB_NAME` / `TASK_RUNNER_SA_NAME` /
 `TASK_RUNNER_INVOKER_SA_NAME` for resource names. `TASK_RUNNER_BUCKET_ROLES` grants the
-Job's runtime service account access to Cloud Storage buckets (see below). The Dockerfile is a
-generated file, so run `generate-code` with `x-cloud` enabled first when the
-script builds the image.
+Job's runtime service account access to Cloud Storage buckets (see below). The Dockerfile and
+`.dockerignore` are generated files: `generate-code` writes both whenever the
+schema declares a scheduled task (`x-scheduled-task` or `x-scheduled-tasks`),
+whatever the deployment provider, so a Vercel-hosted app has them without
+enabling `x-cloud`. Run `generate-code` before the script builds the image.
+`.dockerignore` excludes `.env*` (except `.env.example`) and `node_modules`
+from the build context, so secrets files never reach the image pushed to
+Artifact Registry. Vercel ignores both files.
 
 **Bucket access.** The runtime service account holds only
 `roles/secretmanager.secretAccessor` on its own secrets. A handler that reads

@@ -5,6 +5,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **Dockerfile and `.dockerignore` for scheduled tasks on any provider** (Issue #1029). `generate-code` writes both files
+  whenever the schema declares `x-scheduled-task` or `x-scheduled-tasks`, independent of `x-cloud.provider`, so
+  `scripts/gcp-task-runner.sh` Step 5 works for an app deployed on Vercel. `x-cloud:gcp` keeps its other behavior
+  (GCS upload route, `output: 'standalone'`, no `vercel.json` crons). No new schema key.
 - **Entity-name selects offer `audit_log` and show dictionary words** (Issues #1013, #1015). A field declared with
   `x-entity-select` (`permission.name`, `approval_flow.entity_name`) now also offers `audit_log`, the system table a
   permission can name. `approval_request` and entities without generated pages stay out on purpose: they are not
