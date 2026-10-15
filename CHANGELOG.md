@@ -181,6 +181,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **Schema validation rejects an `x-state-machines` field whose enum has a value the diagram never mentions** (Issue #715). Previously a new enum value added without a diagram update generated cleanly, appeared as a UI option, and then failed every write with a generic "not a valid initial state" error. `generate-code` now fails and names the missing value(s) and the diagram file. A `null` member of a nullable enum is not a state and is ignored.
 - **`--prune-orphans` now removes the pages, API routes, flat Cypress specs and conditional component files of a removed entity** (Issue #618).
   After an entity left the schema, `app/[locale]/<entity>/`, `app/api/<entity>/`, `cypress/e2e/**/<entity>.cy.ts` and
   `components/<entity>/SplitActionSection.tsx` / `ImportModal.tsx` stayed on disk and broke the next build. Pages and routes are deleted only when they

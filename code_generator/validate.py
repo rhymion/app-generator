@@ -3108,6 +3108,31 @@ def validate_schema(schema: dict) -> None:
                     f"reference undeclared state(s) {_sm_stale_refs!r}."
                 )
 
+            # Issue #715: every value in the governed field's own enum must
+            # be a state the diagram declares. Without this, adding an enum
+            # value and forgetting the diagram generates cleanly, the value
+            # still shows up as a selectable UI option (i18n scaffolding
+            # follows the enum), and every write path then rejects it with
+            # a generic "not a valid initial state"/"no such transition"
+            # error that looks like any other invalid value.
+            if _sm_field_def is not None:
+                _sm_enum_values = _sm_field_def.get('enum')
+                if isinstance(_sm_enum_values, list):
+                    _sm_enum_missing = [
+                        str(v) for v in _sm_enum_values
+                        if v is not None and str(v) not in _sm_diagram.states
+                    ]
+                    if _sm_enum_missing:
+                        errors.append(
+                            f"x-state-machines['{_sm_key}']: model "
+                            f"'{_sm_model}' field '{_sm_field}' declares "
+                            f"enum value(s) {_sm_enum_missing!r} that "
+                            f"diagram '{_sm_path}' never mentions — add "
+                            f"them to the diagram (every write of a value "
+                            f"the diagram lacks is rejected at runtime), "
+                            f"or remove them from the enum."
+                        )
+
             # Default-value fail-closed check (Issue #710 corollary): a
             # governed field's own JSON Schema `default`, when declared,
             # must itself be one of this diagram's declared initial
