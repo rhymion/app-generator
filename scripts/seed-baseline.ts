@@ -270,7 +270,6 @@ async function main() {
     await prisma.app_setting.create({
       data: {
         organization_id: null,
-        business_date: new Date().toISOString().slice(0, 10),
         is_pinned: false,
         timezone: 'utc',
         creator_id: admin.id,

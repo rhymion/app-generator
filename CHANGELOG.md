@@ -5,6 +5,18 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Changed
+- **The business date comes from `app_setting`** (Issue #1037). `is_pinned: true` uses the stored `business_date`;
+  `is_pinned: false` uses today's date in the row's `timezone`; with no row the date is today in UTC. One resolver
+  (`lib/business-date.ts`, `getBusinessContext()`) serves every caller: the tenant-wide default row for scheduled tasks
+  and the scheduled-task admin page and REST route, an organization's own row first for callers that pass an
+  organization. The generated run guard (`businessDateOf()`, now async), `task:run-all` and its `not_due` check read
+  it instead of the UTC clock, and a task's cron `interval` is evaluated in the same time zone.
+  `app_setting.business_date` is now optional (`String?`): required (a real `YYYY-MM-DD` date) while `is_pinned` is
+  true and empty while it is false, enforced by `lib/app_setting/service_validation_custom.ts`. While a date is pinned
+  it does not advance, so a daily task reports `already_succeeded` from the second night until the date is changed.
+  `scripts/seed-baseline.ts` writes the default row without a date. Existing databases run
+  `scripts/migrations/06_app_setting_business_date_optional.sql` once (nullable column, unpinned rows cleared;
+  `npm run test:business-date-migration` checks it against the previous schema).
 - **DataGrid date and date-time columns use MUI pickers** (Issue #764). The list-page filter value and the filter and edit cell of an embedded child grid for every `date` / `date-time` column now use MUI `DatePicker` / `DateTimePicker` instead of the browser's native date inputs, so the calendar follows the app locale (en/ja) rather than the browser's UI language. Filter values, saved values and time zones are unchanged. No new dependency and no schema key. `editDataGridCell()` in `cypress/support/datagrid-helpers.ts` types the same ISO values into the picker. See `docs/knowledge/i18n-locale-routing.md`.
 
 ### Added

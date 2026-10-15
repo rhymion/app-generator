@@ -189,12 +189,46 @@ silently inert.** Before relying on an interval-less task, confirm that
 something (Cloud Scheduler, an operator cron, a CI schedule) starts
 `task:run-all` nightly.
 
+## The business date
+
+Every scheduled-task path (the run guard, `task:run-all` and its `not_due`
+check, the admin page's default date, `GET /api/scheduled-task-runs` without
+`date`) reads the business date from `app_setting` through one function,
+`getBusinessContext()` in `lib/business-date.ts`. Scheduled tasks are
+tenant-wide, so they read the tenant-wide default row (`organization_id` NULL).
+
+| `app_setting` row | Business date |
+|---|---|
+| `is_pinned` true | the stored `business_date` (`YYYY-MM-DD`), whatever the clock says |
+| `is_pinned` false | today's date in the row's `timezone`; `business_date` is empty and unused |
+| no row | today's date in UTC |
+
+`business_date` is required while `is_pinned` is true and must be empty while
+it is false; the save is refused otherwise. Callers that work for one
+organization pass its id: the organization's own row is used when it has one,
+otherwise the default row.
+
+The same time zone decides where a day starts for a task's `interval`: the
+cron expression is evaluated in the row's zone, not in UTC.
+
+**A pinned date does not advance.** While `is_pinned` is true every night has
+the same business date, so a daily task reports `already_succeeded` from the
+second night on, until the date is changed (or the row is unpinned). That is
+what pinning means.
+
+**Two different knobs.** `TASK_RUNNER_TIME_ZONE` only decides *when* the
+Cloud Scheduler job starts the Job. `app_setting.timezone` decides *which date*
+that start counts as. With the default `TASK_RUNNER_SCHEDULE="0 2 * * *"`,
+`TASK_RUNNER_TIME_ZONE=Asia/Tokyo` and `app_setting.timezone` set to Asia/Tokyo,
+the 02:00 JST start gets the Tokyo date; with `app_setting.timezone` left at
+`utc` it gets the UTC date, which is the previous day's.
+
 ## Completion records and the run guard
 
 Every run of a task, from any of the three entry points, goes through
 `runScheduledTask` in `lib/scheduled-tasks/run-guard.ts`. It reads and writes
 one `scheduled_task_run` row per `(task_id, business_date)`; the business
-date is the UTC calendar day of the run.
+date is the one the App Setting row resolves to (see "The business date").
 
 | Column | Meaning |
 |---|---|
@@ -265,7 +299,7 @@ page at `/scheduled_task_run` (sidebar entry "Scheduled Task Run") over the
 Without a declared task none of these exist, like the table itself.
 
 **What it shows.** One row per declared task for a chosen business date
-(default: today, UTC; pick another with the date field or `?date=YYYY-MM-DD`),
+(default: the current business date; pick another with the date field or `?date=YYYY-MM-DD`),
 including tasks that have no record yet: status, started/finished time, the
 recorded message, and a "Why" column.
 
@@ -309,7 +343,7 @@ the `audit_log` row are the same code. Web behavior is unchanged.
 
 | Route | Purpose |
 |---|---|
-| `GET /api/scheduled-task-runs[?date=YYYY-MM-DD]` | The overview for a business date (default: today, UTC) |
+| `GET /api/scheduled-task-runs[?date=YYYY-MM-DD]` | The overview for a business date (default: the current business date) |
 | `POST /api/scheduled-task-runs/{task}/rerun` | Rerun, body `{ "business_date": "YYYY-MM-DD" }` |
 | `POST /api/scheduled-task-runs/{task}/resolve` | Mark resolved, body `{ "business_date": "...", "reason": "..." }` (reason optional) |
 | `POST /api/scheduled-task-runs/{task}/skip` | Skip, body `{ "business_date": "...", "reason": "..." }` (reason required) |
@@ -358,6 +392,18 @@ the guard does not wait: a task behind an unmet predecessor is reported
 `prisma/schema.prisma`; a consumer writes that migration when it deploys, like
 any other schema change. Test databases pick them up through `db:push`.
 
+**Consumer migration for the business date.** `app_setting.business_date` is
+nullable. A database created before this change runs
+`scripts/migrations/06_app_setting_business_date_optional.sql` once (makes the
+column nullable and clears the date of every unpinned row; safe to repeat)
+before regenerating against this version. Test databases pick the change up
+through `db:push`. `npm run test:business-date-migration` runs the script on a
+scratch database built from the previous schema and checks that no difference
+from `prisma/schema.prisma` remains. A consumer that kept a copy of
+`scripts/seed-baseline.ts` stops writing `business_date` on the default row, and
+a consumer that has its own `lib/app_setting/service_validation_custom.ts` merges
+`validateBusinessDateFields` (from `lib/business-date-core.ts`) into it.
+
 **Not covered.** The page has no pagination beyond the 100-row attention list
 and does not change the ordering rules or the completion-record model.
 
@@ -403,9 +449,10 @@ order, so the order is the same on every run). For each task:
 - a due task goes through the guard, so one that already succeeded tonight
   reports `already_succeeded` and does not run again.
 
-The comparison is by UTC calendar day and the cron expression is evaluated in
-UTC. A weekly task is picked up on the night its schedule falls; after a long
-stop it runs once to catch up rather than once per missed occurrence.
+The comparison is by calendar day of the business date, and the cron
+expression is evaluated in the business date's time zone (`app_setting.timezone`;
+UTC when there is no row). A weekly task is picked up on the night its schedule
+falls; after a long stop it runs once to catch up rather than once per missed occurrence.
 
 A failed task does not stop the pass. Independent branches still run, and a
 task downstream of the failure is reported `blocked` by the guard's
@@ -742,7 +789,7 @@ is not recommended.
 **Is the order of the declared times honored?** No. `task:run-all` does not
 read the time of day of an `interval`. It starts once, at the time the
 Scheduler job fires, and for each task decides only whether it is *due* for
-the current UTC calendar day (see "Which tasks run tonight"). The order in
+the current business date (see "The business date" and "Which tasks run tonight"). The order in
 which the tasks run is the `depends_on` order; tasks with no edge between them
 run in declaration order, entity-level `x-scheduled-task` entries before
 top-level `x-scheduled-tasks` entries. Declare `depends_on` for every order
@@ -751,13 +798,12 @@ no ordering by itself. Verified: started at 12:00 UTC, all four tasks of the
 example below ran in one pass regardless of their declared times (01:00,
 01:15, 02:00, 03:00 on the 1st).
 
-The business date is the UTC calendar day of the moment the Job starts. With
-the default `TASK_RUNNER_SCHEDULE="0 2 * * *"` and
-`TASK_RUNNER_TIME_ZONE=Asia/Tokyo`, the Job starts at 17:00 UTC of the
-previous day, so the business date lags the Tokyo date by one day. Verified:
-the start at 02:00 JST on the 1st of a month (31st 17:00 UTC) reports
-`not_due` for a task scheduled `0 3 1 * *`; the start at 02:00 JST on the 2nd
-runs it.
+The business date is the one `app_setting` resolves to at the moment the Job
+starts (see "The business date"). With the default `TASK_RUNNER_SCHEDULE="0 2 * * *"`
+and `TASK_RUNNER_TIME_ZONE=Asia/Tokyo`, the Job starts at 17:00 UTC of the
+previous day: with `app_setting.timezone` `utc` (the default) the business date
+lags the Tokyo date by one day, and with `app_setting.timezone` `asia_tokyo` it
+is the Tokyo date. Set `app_setting.timezone` to the zone the business runs in.
 
 **Tasks that are not daily.** Example task: `audit_log_export_for_retirement`
 with `interval: "0 3 1 * *"`. Under `task:run-all`:
