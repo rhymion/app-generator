@@ -5,6 +5,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Changed
+- **Autocomplete search for an `x-version-of` identity also matches the row id** (Issue #1042). The generated `search<Identity>Options` matched only the identity's current-version columns, so an identity without a current version (and a version form's parent picker that shows the identity id) could never be found. The id is now one more `OR` alternative per search token; existing matches and entities that are not identities are unchanged. No new schema key.
 - **DataGrid date and date-time columns use MUI pickers** (Issue #764). The list-page filter value and the filter and edit cell of an embedded child grid for every `date` / `date-time` column now use MUI `DatePicker` / `DateTimePicker` instead of the browser's native date inputs, so the calendar follows the app locale (en/ja) rather than the browser's UI language. Filter values, saved values and time zones are unchanged. No new dependency and no schema key. `editDataGridCell()` in `cypress/support/datagrid-helpers.ts` types the same ISO values into the picker. See `docs/knowledge/i18n-locale-routing.md`.
 
 ### Added
