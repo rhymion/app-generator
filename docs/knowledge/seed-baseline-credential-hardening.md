@@ -67,6 +67,15 @@ the environment they run in — set them the same way other provisioning secrets
 (`DATABASE_URL`, `AUTH_SECRET`) are set for that target. `api_key` is never
 supplied by the operator; it is always generated.
 
+Choose `SEED_ADMIN_PASSWORD` **per deployment**. A value that is merely not the
+default is not enough: reusing the same real password across several generated
+apps the same operator runs makes the browser see a duplicate of a saved
+password on each login page, which is one of the two conditions for Chrome's
+password-reuse warning (see `vercel-demo-login-phishing-warning.md`). Bcrypt
+hashes cannot be compared to find out whether two deployments share a password:
+`bcrypt.hash(password, 10)` uses a new random salt on every call (`10` is the
+cost factor), so identical passwords still produce different hash strings.
+
 ### Wiring per provisioning target
 
 - **GCP** (`scripts/gcp-setup.sh` / `gcp-deploy.sh` / `gcp-seed.sh`):

@@ -67,6 +67,34 @@ describe('isDue', () => {
   });
 });
 
+describe('isDue in a non-UTC zone', () => {
+  // Business dates are calendar dates in the zone, and the cron is read in that same zone, so the verdicts
+  // are the zone-local calendar's. (For a fixed-offset or daylight-saving zone they coincide with the UTC
+  // calendar's verdicts on the same labels; the zone is passed through so the two never disagree about where
+  // a day starts.)
+  it('a Tuesday 01:00 cron in Tokyo is due on the Tokyo Tuesday, not before', () => {
+    // Last success on Tokyo Monday 2026-09-28; the next occurrence is Tue 2026-09-29 01:00 Tokyo.
+    expect(isDue('0 1 * * 2', d('2026-09-28'), d('2026-09-28'), 'asia_tokyo')).toBe(false);
+    expect(isDue('0 1 * * 2', d('2026-09-28'), d('2026-09-29'), 'asia_tokyo')).toBe(true);
+  });
+
+  it('a monthly (1st) task becomes due on the 1st of the zone\'s calendar', () => {
+    expect(isDue('45 21 1 * *', d('2026-09-01'), d('2026-09-30'), 'asia_tokyo')).toBe(false);
+    expect(isDue('45 21 1 * *', d('2026-09-01'), d('2026-10-01'), 'asia_tokyo')).toBe(true);
+  });
+
+  it('a weekly task in New York is due on its own Monday across the daylight-saving change', () => {
+    // 2026-11-01 is the fall-back day in New York; Mondays are 2026-10-26 and 2026-11-02.
+    expect(isDue('30 23 * * 1', d('2026-10-26'), d('2026-11-01'), 'america_new_york')).toBe(false);
+    expect(isDue('30 23 * * 1', d('2026-10-26'), d('2026-11-02'), 'america_new_york')).toBe(true);
+  });
+
+  it('defaults to UTC', () => {
+    expect(isDue('30 21 * * 1', d('2026-09-28'), d('2026-10-05'))).toBe(true);
+    expect(isDue('30 21 * * 1', d('2026-09-28'), d('2026-10-04'))).toBe(false);
+  });
+});
+
 function fixture(over: Partial<RunAllDeps> & { outcomes?: Record<string, ScheduledTaskResult['outcome']> } = {}) {
   const outcomes = over.outcomes ?? {};
   const ran: string[] = [];
@@ -154,5 +182,20 @@ describe('exit codes', () => {
     expect(runOneExitCode('failed')).toBe(1);
     expect(runOneExitCode('blocked')).toBe(2);
     expect(runOneExitCode('already_running')).toBe(2);
+  });
+});
+
+describe('runAll with a time zone', () => {
+  it('evaluates not_due in the given zone', async () => {
+    const dayZone = fixture({
+      dependencies: { weekly: [] },
+      intervals: { weekly: '0 1 * * 2' },
+      businessDate: d('2026-09-28'),
+      lastSucceededBusinessDate: async () => d('2026-09-27'),
+      timeZone: 'asia_tokyo',
+    });
+    // Mon 2026-09-28 in Tokyo; last success Sun 2026-09-27; Tuesday 01:00 has not come yet -> not due.
+    const entries = await runAll(dayZone.deps);
+    expect(entries.map((e) => e.outcome)).toEqual(['not_due']);
   });
 });

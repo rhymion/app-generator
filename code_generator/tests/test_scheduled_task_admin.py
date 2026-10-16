@@ -89,7 +89,37 @@ def test_guard_accepts_a_business_date_override(tmp_path):
     out = _run(FIXTURE_DIR, tmp_path)
     guard = (out / 'lib/scheduled-tasks/run-guard.ts').read_text()
     assert 'businessDate?: Date;' in guard
-    assert 'options.businessDate ?? businessDateOf(now)' in guard
+    assert 'options.businessDate ?? (await businessDateOf(now))' in guard
+
+
+def test_guard_reads_the_business_date_from_app_setting_in_both_branches(tmp_path):
+    """Neither the real guard nor the no-task stub computes the date from the UTC clock."""
+    with_tasks = (_run(FIXTURE_DIR, tmp_path / 'with') / 'lib/scheduled-tasks/run-guard.ts').read_text()
+    stub = (_run(NO_TASK_FIXTURE_DIR, tmp_path / 'stub') / 'lib/scheduled-tasks/run-guard.ts').read_text()
+    for guard in (with_tasks, stub):
+        assert "import { getBusinessDate } from '@/lib/business-date';" in guard
+        assert 'export async function businessDateOf(now: Date = new Date()): Promise<Date> {' in guard
+        assert 'return getBusinessDate({ now });' in guard
+        assert 'Date.UTC(now.getUTCFullYear()' not in guard
+    # The not_due record and the run both claim the same resolved date unless the caller passes one in.
+    assert with_tasks.count('options.businessDate ?? (await businessDateOf(now))') == 2
+
+
+def test_callers_await_the_business_date(tmp_path):
+    out = _run(FIXTURE_DIR, tmp_path)
+    page = (out / 'app/[locale]/scheduled_task_run/page.tsx').read_text()
+    route = (out / 'app/api/scheduled-task-runs/route.ts').read_text()
+    assert '(await businessDateOf())' in page
+    assert 'await businessDateOf()' in route
+
+
+def test_app_setting_business_date_is_optional_and_validated():
+    prisma = (REPO_ROOT / 'prisma' / 'schema.prisma').read_text()
+    model = prisma[prisma.index('model app_setting {'):]
+    model = model[: model.index('\n}\n')]
+    assert 'business_date String?' in model
+    hook = (REPO_ROOT / 'lib' / 'app_setting' / 'service_validation_custom.ts').read_text()
+    assert 'validateBusinessDateFields' in hook
 
 
 def test_schema_declares_scheduled_tasks_detection():

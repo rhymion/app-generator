@@ -5,6 +5,21 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Changed
+- **The business date comes from `app_setting`** (Issue #1037). `is_pinned: true` uses the stored `business_date`;
+  `is_pinned: false` uses today's date in the row's `timezone`; with no row the date is today in UTC. One resolver
+  (`lib/business-date.ts`, `getBusinessContext()`) serves every caller: the tenant-wide default row for scheduled tasks
+  and the scheduled-task admin page and REST route, an organization's own row first for callers that pass an
+  organization. The generated run guard (`businessDateOf()`, now async), `task:run-all` and its `not_due` check read
+  it instead of the UTC clock, and a task's cron `interval` is evaluated in the same time zone.
+  `app_setting.business_date` is now optional (`String?`): required (a real `YYYY-MM-DD` date) while `is_pinned` is
+  true and not read while it is false (no empty check), enforced by `lib/app_setting/service_validation_custom.ts`. While a date is pinned
+  it does not advance, so a daily task reports `already_succeeded` from the second night until the date is changed.
+  `scripts/seed-baseline.ts` writes the default row without a date. Existing databases run
+  `scripts/migrations/06_app_setting_business_date_optional.sql` once (nullable column, unpinned rows cleared;
+  `npm run test:business-date-migration` checks it against the previous schema).
+  A list primary field may now be a column that has a default, since such a column is never empty (`validate.py`).
+  The generated API/UI specs follow: a defaulted primary column is populated and sent like a required one, and a `*_date` text column
+  gets real `YYYY-MM-DD` sample values.
 - **`prj:sync` removes the old copy of a file renamed or deleted in `prj/`** (Issue #619). The script now records the files it copies verbatim in a gitignored `.prj-sync-manifest.json` and, on the next run, removes a recorded destination whose `prj/` source is gone, so a renamed route no longer leaves a stale twin that breaks the type check. A destination changed since the sync is kept with a warning; files the sync never copied, `messages/*.json` and everything when `../prj` is absent are never removed. No new schema key. See `docs/knowledge/prj-sync-stale-file-removal.md`.
 - **`vercel-setup.sh` reconciles the project Function Region** (Issue #589). Step 1.5 already set the Root Directory; it now also reads `serverlessFunctionRegion` through the Vercel Projects API and PATCHes it to the first `regions` entry of the committed `app-generator/vercel.json` when it differs (a new project starts on `iad1`). A project already on that region is left untouched, `DRY_RUN=true` only echoes the calls, and a missing `regions` entry skips the step. The token is passed to `curl` on stdin, not in argv. No `vercel.json` change and no schema key.
 - **Generated resubmit API examples omit read-only fields from the PUT body** (Issue #1046). The `14.3` and `14.5` examples sent a read-only field (for example a version number assigned on approval) with the value read before approval, so the route answered `400` instead of the expected lockdown `403`. The body now leaves read-only fields out, as the read-only preservation example already does; other examples and entities without read-only fields are unchanged. No new schema key.
@@ -26,6 +41,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   and series show the same labels as lists and forms: enum option labels (the dashboard catalog now carries
   `enum_namespace`), Yes / No, and the `(unspecified)` / `(unknown)` / `(unnamed)` placeholders; entity and field
   names in the subtitle use their display labels.
+- **Documentation for Chrome's phishing warning on demo logins** (Issue #724). `docs/knowledge/vercel-demo-login-phishing-warning.md`
+  explains why a login page on a shared `*.vercel.app` subdomain can trigger Chrome's password-reuse warning and what to do about it
+  (custom domain, a distinct `SEED_ADMIN_PASSWORD` per deployment, Safe Browsing lookup and report flow);
+  `docs/knowledge/seed-baseline-credential-hardening.md` states the per-deployment password rule. No behavior change.
 - **Entity-name selects offer `audit_log` and show dictionary words** (Issues #1013, #1015). A field declared with
   `x-entity-select` (`permission.name`, `approval_flow.entity_name`) now also offers `audit_log`, the system table a
   permission can name. `approval_request` and entities without generated pages stay out on purpose: they are not

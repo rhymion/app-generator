@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
     await requireScheduledTaskOperator(request);
 
     const rawDate = request.nextUrl.searchParams.get('date');
-    const businessDate = rawDate === null ? businessDateOf() : parseBusinessDate(rawDate);
+    const businessDate = rawDate === null ? await businessDateOf() : parseBusinessDate(rawDate);
     if (!businessDate) {
       return NextResponse.json({ error: "Query parameter 'date' must be a YYYY-MM-DD date." }, { status: 400 });
     }
