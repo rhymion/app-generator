@@ -5351,10 +5351,16 @@ def api_spec_context(
             out.append(f"{indent}{c['child']['property_name']}: [],")
         return out
 
-    def _put_body_impl(indent: str, skip_field: str | None = None, record_var: str = 'records[0]') -> list[str]:
+    def _put_body_impl(indent: str, skip_field: str | None = None, record_var: str = 'records[0]',
+                       skip_readonly: bool = False) -> list[str]:
+        # skip_readonly (#1046): the resubmit examples PUT a record read before
+        # approval; a read-only field the server assigns on approval (for
+        # example a version number) would be sent with its stale value, and
+        # the route answers 400 before the lockdown can answer 403.
         out = []
+        _ro_skip = set(readonly_fields) if skip_readonly else set()
         for prop in put_body_props:
-            if prop == skip_field:
+            if prop == skip_field or prop in _ro_skip:
                 continue
             if primary_is_fk and not primary_fk_is_ua and prop == f'{primary_field_name}_id':
                 if record_var == 'records[0]':
@@ -5772,7 +5778,7 @@ def api_spec_context(
         'has_on_withdrawn': has_on_withdrawn,
         'lockdown_write_locked_sample_value_literal': lockdown_write_locked_sample_value_literal,
         'put_body_resubmit': (
-            _put_body_impl('              ', skip_field=resubmit_target_field, record_var='data.record')
+            _put_body_impl('              ', skip_field=resubmit_target_field, record_var='data.record', skip_readonly=True)
             if resubmit_target_field else None
         ),
         # cmd_867: 14.5 alone has no `data` in scope -- it POSTs the record
@@ -5788,7 +5794,7 @@ def api_spec_context(
         # 14.5 nests its PUT inside two .then() blocks, the other resubmit
         # tests inside one).
         'put_body_resubmit_created': (
-            _put_body_impl('                  ', skip_field=resubmit_target_field, record_var='getRes1.body')
+            _put_body_impl('                  ', skip_field=resubmit_target_field, record_var='getRes1.body', skip_readonly=True)
             if resubmit_target_field else None
         ),
         'reservation_count_pool_pascal': _reservation_count_pool_pascal,
