@@ -171,7 +171,7 @@ from build_context import (
     _exclusive_parent_columns, _exclusive_parent_all_columns, _model_has_audit_fields,
 )
 from generate_types import extract_entities
-from generators import build_dashboard_catalog, resolve_approval_submit_on
+from generators import build_dashboard_catalog, resolve_approval_submit_on, _seed_entity_grant_flags
 
 
 def _readonly_field_names(model_def: dict, view_def: dict | None = None) -> set[str]:
@@ -4967,6 +4967,13 @@ def api_spec_context(
             # never surface in that user's search results regardless of the
             # search feature working correctly — N10 would fail by
             # construction rather than signal a real coverage gap.
+            is_searchable = False
+        elif not _seed_entity_grant_flags(parent, schema['definitions'], True)['read']:
+            # The test API user follows SEED_ENTITY_GRANTS (see
+            # seed_entities_context), and /api/search applies the normal read
+            # authorization. An entity whose seed read grant is false (neither
+            # x-generate.list nor x-generate.view) can therefore never surface
+            # rows for that user — N10 would fail by construction here too.
             is_searchable = False
         else:
             search_sample_field = _api_text_fields[0]
