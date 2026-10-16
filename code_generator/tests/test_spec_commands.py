@@ -84,6 +84,13 @@ class TestGenAssertCommandsNormalFK:
         cmds = gen_assert_commands(fields, 'Procedure', '  ')
         assert cmds == ["  cy.checkField('Name', 'Test Procedure');"]
 
+    def test_fk_labelled_by_row_id_expects_the_dependency_value(self):
+        # A database-generated id cannot match a fixed title, so the assertion
+        # uses the same value the autocomplete was filled with.
+        field = {**_fk_field('step_id', 'step', 'Step'), 'dep_label_field': 'id'}
+        cmds = gen_assert_commands([field], 'Step Version', '  ', {'step_id': 'step'})
+        assert cmds == ["  cy.checkField('Step', deps.step.name);"]
+
 
 # ---------------------------------------------------------------------------
 # fill/assert symmetry for self-ref FK

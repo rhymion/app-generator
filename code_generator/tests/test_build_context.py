@@ -2813,3 +2813,46 @@ class TestSearchableIntegerLabelSegment:
         schema = self._schema(["name", "ratio"], {"ratio": {"type": "number"}})
         ctx = build_context(_entity("placement"), schema)
         assert ctx["searchable_integer_fields"] == []
+
+
+# ---------------------------------------------------------------------------
+# x-version-of identity: the generated search also matches the row id, so an
+# identity with no current version yet (and a version's parent FK, which shows
+# the identity id) can be found. Other entities and existing matches unchanged.
+# ---------------------------------------------------------------------------
+
+class TestIdentitySearchMatchesId:
+
+    @staticmethod
+    def _schema(declare_version_of: bool) -> dict:
+        version = {
+            "type": "object",
+            "required": ["id", "title", "item_id"],
+            "properties": _base_props({"title": {"type": "string"}, "item_id": _fk_field("item", label="id")}),
+        }
+        if declare_version_of:
+            version["x-version-of"] = {"identity": "item", "number": "version_no"}
+        return {"definitions": {
+            "item": {"type": "object", "required": ["id", "name"], "properties": _base_props({})},
+            "item_version": version,
+        }}
+
+    @staticmethod
+    def _render(schema: dict) -> str:
+        from generate import _make_env
+        from generators import service_context
+        ctx = build_context(_entity("item"), schema)
+        full_ctx = {**ctx, **service_context(ctx, schema)}
+        return _make_env().get_template('getters.ts.jinja2').render(**full_ctx)
+
+    def test_identity_search_adds_id_clause_and_keeps_name(self):
+        schema = self._schema(True)
+        assert build_context(_entity("item"), schema)["searchable_id"] is True
+        rendered = self._render(schema)
+        assert "orClauses.push({ id: { contains: token, mode: 'insensitive' } });" in rendered
+        assert "orClauses.push({ name: { contains: token, mode: 'insensitive' } });" in rendered
+
+    def test_non_identity_search_is_unchanged(self):
+        schema = self._schema(False)
+        assert build_context(_entity("item"), schema)["searchable_id"] is False
+        assert "{ id: { contains: token" not in self._render(schema)

@@ -3084,9 +3084,13 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     searchable_integer_fields = [
         f for f in derive_searchable_integer_fields(model, schema) if f in filtered_props
     ]
+    # x-version-of identity: its display columns live on the current version, which a
+    # brand-new identity does not have yet, and a version's parent FK shows the identity
+    # id. Match the row id too (an extra OR alternative; existing matches are unchanged).
+    searchable_id = any(v['identity'] == model for v in version_of_entities(schema))
     searchable_fields_display = searchable_text_fields + [
         f"{rf['relation']}.{rf['field']}" for rf in searchable_relation_fields
-    ] + searchable_integer_fields
+    ] + searchable_integer_fields + (['id'] if searchable_id else [])
     # Default ordering for the search action — newest entities are the most
     # likely autocomplete picks. Falls back to id when no audit column exists.
     default_search_order_field = (
@@ -4729,6 +4733,7 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
         searchable_text_fields=searchable_text_fields,
         searchable_relation_fields=searchable_relation_fields,
         searchable_integer_fields=searchable_integer_fields,
+        searchable_id=searchable_id,
         searchable_fields_display=searchable_fields_display,
         default_search_order_field=default_search_order_field,
         default_search_order_dir=default_search_order_dir,

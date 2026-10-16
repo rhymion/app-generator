@@ -396,6 +396,12 @@
     "noMatchingData": "No data matches this chart.",
     "loadFailed": "The chart could not be loaded. Reload the page; if it keeps failing, contact an administrator."
   },
+  "Search": {
+    "failed": "Search failed. Please try again.",
+    "minLength": "Type at least 2 characters.",
+    "noResults": "No results.",
+    "notAvailable": "Not available in the app"
+  },
   "DashboardView": {
     "subtitle": "{entity} grouped by {field}",
     "subtitleWithZone": "{entity} grouped by {field} ({zone})",

@@ -18,11 +18,16 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `scripts/migrations/06_app_setting_business_date_optional.sql` once (nullable column, unpinned rows cleared;
   `npm run test:business-date-migration` checks it against the previous schema).
   A list primary field may now be a column that has a default, since such a column is never empty (`validate.py`).
-  The generated API/UI specs follow: a defaulted primary column is populated and sent like a required one, a `*_date` text column
-  gets real `YYYY-MM-DD` sample values, and an entity with no required column gets no "missing required field" API cases.
+  The generated API/UI specs follow: a defaulted primary column is populated and sent like a required one, and a `*_date` text column
+  gets real `YYYY-MM-DD` sample values.
+- **Autocomplete search for an `x-version-of` identity also matches the row id** (Issue #1042). The generated `search<Identity>Options` matched only the identity's current-version columns, so an identity without a current version (and a version form's parent picker that shows the identity id) could never be found. The id is now one more `OR` alternative per search token; existing matches and entities that are not identities are unchanged. No new schema key. The generated view-page assertion for a foreign key labelled by `id` now expects the value the autocomplete was filled with instead of a fixed title.
 - **DataGrid date and date-time columns use MUI pickers** (Issue #764). The list-page filter value and the filter and edit cell of an embedded child grid for every `date` / `date-time` column now use MUI `DatePicker` / `DateTimePicker` instead of the browser's native date inputs, so the calendar follows the app locale (en/ja) rather than the browser's UI language. Filter values, saved values and time zones are unchanged. No new dependency and no schema key. `editDataGridCell()` in `cypress/support/datagrid-helpers.ts` types the same ISO values into the picker. See `docs/knowledge/i18n-locale-routing.md`.
 
 ### Added
+- **Mobile search results open the record and use translated text** (Issue #870, part of #140). A result on the Search
+  screen opens the record's detail screen when the entity has one (the entity list otherwise); a result for an entity with
+  no native screens is marked "Not available in the app" and does not navigate. The screen text comes from the new `Search`
+  namespace of `messages/<locale>.json`, entity names from `EntityLabel`, and snippet match markers render in bold.
 - **Dockerfile and `.dockerignore` for scheduled tasks on any provider** (Issue #1029). `generate-code` writes both files
   whenever the schema declares `x-scheduled-task` or `x-scheduled-tasks`, independent of `x-cloud.provider`, so
   `scripts/gcp-task-runner.sh` Step 5 works for an app deployed on Vercel. `x-cloud:gcp` keeps its other behavior
@@ -217,10 +222,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **Generated API spec no longer expects a validation failure for an entity with no required field** (Issue #1031). The `5.1 fails when a required field is missing` and `8.2 bulk creates — partial failure when a required field is missing` examples are generated only when the entity has a required field to omit; otherwise the request is valid and the API correctly answers `201`.
 - **The generated OpenAPI record schema lists `created_at`, `updated_at` and `creator_id`** (Issue #762). Every response row
   carries these base fields, but the record schema described only the entity's own declared properties. Each is now present
   and marked `readOnly: true` (`creator_id` is nullable); an entity's own declaration of `id` is kept. The create-request
   schema and filter parameters are unchanged. `docs/knowledge/generated-documentation-and-openapi-spec.md` states the rule.
+- **Dev-tooling dependency advisories cleared where a fix exists** (Issue #582). `npm audit fix` updates the lockfile, and `overrides` raise `@xmldom/xmldom` (pinned by `speech-rule-engine`), `basic-ftp`, `katex` and `postcss-selector-parser` (pinned by `@tailwindcss/typography`) to patched releases. `npm audit --omit=dev` now reports 0 vulnerabilities. `extract-zip` and `braces` still have no patched release; they are reachable only through dev tooling (`@marp-team/marp-cli`, `eslint-config-next`).
 - **Transient and missing-record Prisma errors no longer return 422** (Issue #747). The generated `add{Entity}` and
   `update{Entity}` catch blocks now map `P2034` (write conflict under Serializable isolation) and `P2037` (too many
   connections) to `CAPACITY` (409), and `P2025` (required record not found) to `NOT_FOUND` (404). Input-shaped codes still

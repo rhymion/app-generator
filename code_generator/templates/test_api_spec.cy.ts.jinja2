@@ -121,7 +121,7 @@ describe('API: {{ title }}', () => {
 {% endif %}
     });
 
-{% if has_missing_field_case %}
+{% if has_required_field_to_omit %}
     it('5.1 fails when a required field is missing', () => {
 {% if has_deps %}
       cy.task<any>('db:populate{{ pascal }}Dependencies').then((deps) => {
@@ -289,7 +289,7 @@ describe('API: {{ title }}', () => {
 {% endif %}
     });
 
-{% if has_missing_field_case %}
+{% if has_required_field_to_omit %}
     it('8.2 bulk creates — partial failure when a required field is missing', () => {
 {% if reservation_count_pool_pascal %}
       cy.task('db:populate{{ reservation_count_pool_pascal }}', 1);
