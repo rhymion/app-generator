@@ -171,7 +171,7 @@ from build_context import (
     _exclusive_parent_columns, _exclusive_parent_all_columns, _model_has_audit_fields,
 )
 from generate_types import extract_entities
-from generators import build_dashboard_catalog, resolve_approval_submit_on
+from generators import build_dashboard_catalog, resolve_approval_submit_on, _seed_entity_grant_flags
 
 
 def _readonly_field_names(model_def: dict, view_def: dict | None = None) -> set[str]:
@@ -837,6 +837,26 @@ def _get_dep_extra_required_fields(dep_target: str, schema: dict) -> list[dict]:
     return result
 
 
+def _closes_required_cycle(rel: dict, model: str, schema: dict) -> bool:
+    """True for an optional FK of `model` whose target has a required FK back to `model`.
+
+    Such an edge (e.g. an identity's nullable `current_version_id` to its version
+    entity, where the version requires the identity) cannot be satisfied as a
+    pre-created dependency: the target would be created before `model` exists, so
+    its required parent FK would be missing. The row of `model` is created first
+    with the optional column empty instead.
+    """
+    if rel['required']:
+        return False
+    target_def = _raw_def(rel['target'], schema)
+    if not target_def or not target_def.get('properties'):
+        return False
+    return any(
+        back['target'] == model and back['required']
+        for back in get_parent_relationships(target_def)
+    )
+
+
 def resolve_dependencies(model_name: str, schema: dict) -> list[dict]:
     """Port of resolveDependencies().
 
@@ -862,6 +882,7 @@ def resolve_dependencies(model_name: str, schema: dict) -> list[dict]:
             and r['target'] != model
             and r['prop_name'] != 'updater_id'
             and r['prop_name'] != 'assignee_id'
+            and not _closes_required_cycle(r, model, schema)
         ]
 
         for rel in relevant:
@@ -963,7 +984,10 @@ def split_same_target_fk_deps(
     target_to_fk_rels: dict[str, list] = {}
     for r in relationships:
         if (r['target'] not in ('user', model_name)
-                and r['prop_name'] not in ('updater_id', 'assignee_id')):
+                and r['prop_name'] not in ('updater_id', 'assignee_id')
+                # An FK skipped by resolve_dependencies (optional edge closing a required
+                # cycle) has no dep to split or alias.
+                and any(d['target'] == r['target'] for d in deps)):
             target_to_fk_rels.setdefault(r['target'], []).append(r)
     multi_fk_targets = {t: rels for t, rels in target_to_fk_rels.items() if len(rels) > 1}
     for target, fk_rels in multi_fk_targets.items():
@@ -4974,6 +4998,13 @@ def api_spec_context(
             # never surface in that user's search results regardless of the
             # search feature working correctly — N10 would fail by
             # construction rather than signal a real coverage gap.
+            is_searchable = False
+        elif not _seed_entity_grant_flags(parent, schema['definitions'], True)['read']:
+            # The test API user follows SEED_ENTITY_GRANTS (see
+            # seed_entities_context), and /api/search applies the normal read
+            # authorization. An entity whose seed read grant is false (neither
+            # x-generate.list nor x-generate.view) can therefore never surface
+            # rows for that user — N10 would fail by construction here too.
             is_searchable = False
         else:
             search_sample_field = _api_text_fields[0]

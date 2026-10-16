@@ -20,6 +20,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   A list primary field may now be a column that has a default, since such a column is never empty (`validate.py`).
   The generated API/UI specs follow: a defaulted primary column is populated and sent like a required one, and a `*_date` text column
   gets real `YYYY-MM-DD` sample values.
+- **Generated API specs skip the per-entity search example when the seed grant denies read** (Issue #1044). An entity whose `SEED_ENTITY_GRANTS` read grant is false (neither `x-generate.list` nor `x-generate.view`) can never surface rows for the test API user, so the `N10` example is no longer emitted for it. Entities with either page keep it. No new schema key.
 - **Autocomplete search for an `x-version-of` identity also matches the row id** (Issue #1042). The generated `search<Identity>Options` matched only the identity's current-version columns, so an identity without a current version (and a version form's parent picker that shows the identity id) could never be found. The id is now one more `OR` alternative per search token; existing matches and entities that are not identities are unchanged. No new schema key. The generated view-page assertion for a foreign key labelled by `id` now expects the value the autocomplete was filled with instead of a fixed title.
 - **DataGrid date and date-time columns use MUI pickers** (Issue #764). The list-page filter value and the filter and edit cell of an embedded child grid for every `date` / `date-time` column now use MUI `DatePicker` / `DateTimePicker` instead of the browser's native date inputs, so the calendar follows the app locale (en/ja) rather than the browser's UI language. Filter values, saved values and time zones are unchanged. No new dependency and no schema key. `editDataGridCell()` in `cypress/support/datagrid-helpers.ts` types the same ISO values into the picker. See `docs/knowledge/i18n-locale-routing.md`.
 
@@ -222,6 +223,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **Generated test dependencies skip an optional FK that closes a required cycle** (Issue #1025, part of #946). An identity
+  entity's nullable `current_version_id` to its version entity is no longer pre-created as a dependency of the identity:
+  the version requires the identity, so the generated `populate<Entity>Dependencies()` created the version row without its
+  required parent FK and the API Cypress specs failed. The generated test helper also no longer returns an alias for a dependency that was skipped.
+- **`form_validation.ts` compiles for an entity with no required form field** (Issue #1026, part of #946). `REQUIRED_FIELDS`
+  has an explicit element type instead of `as const`, so an empty list no longer infers the empty tuple type.
 - **Generated API spec no longer expects a validation failure for an entity with no required field** (Issue #1031). The `5.1 fails when a required field is missing` and `8.2 bulk creates — partial failure when a required field is missing` examples are generated only when the entity has a required field to omit; otherwise the request is valid and the API correctly answers `201`.
 - **The generated OpenAPI record schema lists `created_at`, `updated_at` and `creator_id`** (Issue #762). Every response row
   carries these base fields, but the record schema described only the entity's own declared properties. Each is now present
