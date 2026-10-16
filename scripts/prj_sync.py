@@ -8,6 +8,16 @@ loss (see `_diff_prisma_schema_drop` below -- Issue #646). All other
 files are copied verbatim (`cp -a` equivalent), preserving prior
 behavior exactly.
 
+Renames and deletions inside `prj/` are followed (Issue #619): every verbatim
+copy is recorded in `.prj-sync-manifest.json` (path -> sha256 of the copied
+file). On the next run, a recorded destination whose source is gone from
+`prj/` is removed, but only while its content still hashes to the recorded
+value. A file that generate-code or a person changed since the sync is left in
+place with a warning, and a file this sync never copied is never touched.
+`messages/*.json` are merged into generator defaults, so they are never
+removed. A destination copied before the manifest existed is not tracked until
+the next sync rewrites it.
+
 Path resolution is anchored on this file's own location
 (`Path(__file__).resolve().parent.parent`), not on the invoking cwd.
 This project is typically consumed as a git submodule with a sibling
@@ -27,6 +37,7 @@ schema that just silently lost generator-side content.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -35,6 +46,11 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PRJ_DIR = PROJECT_ROOT.parent / "prj"
+
+# Records which destination files a previous run copied verbatim from prj/
+# (path -> sha256), so a later run can remove the ones whose source is gone
+# (Issue #619). Gitignored: it describes this checkout's own sync history.
+MANIFEST_NAME = ".prj-sync-manifest.json"
 
 # Matches `model Name {` ... `}` blocks where the closing brace is alone on
 # its own line at column 0 -- the convention this repo's own
@@ -160,12 +176,72 @@ def _sync_messages_json(src_file: Path, dst_file: Path, rel: Path) -> None:
     print(f"prj:sync: merged {rel}")
 
 
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _load_manifest(dst_dir: Path) -> dict[str, str]:
+    try:
+        data = json.loads((dst_dir / MANIFEST_NAME).read_text(encoding="utf-8"))
+        files = data["files"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+    if not isinstance(files, dict):
+        return {}
+    return {k: v for k, v in files.items() if isinstance(k, str) and isinstance(v, str)}
+
+
+def _write_manifest(dst_dir: Path, files: dict[str, str]) -> None:
+    payload = {"version": 1, "files": dict(sorted(files.items()))}
+    tmp = dst_dir / (MANIFEST_NAME + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(dst_dir / MANIFEST_NAME)
+
+
+def _remove_stale(prj_dir: Path, dst_dir: Path, previous: dict[str, str]) -> None:
+    """Remove destinations a previous run copied whose prj/ source no longer exists.
+
+    A file left in place because it changed since the sync is dropped from the
+    manifest by the caller's rewrite, so a later run never deletes it.
+    """
+    root = dst_dir.resolve()
+    for rel_str, recorded in sorted(previous.items()):
+        rel = Path(rel_str)
+        if rel.is_absolute() or ".." in rel.parts or rel_str == MANIFEST_NAME:
+            continue
+        if (prj_dir / rel).exists():
+            continue
+        dst_file = dst_dir / rel
+        if not dst_file.is_file() or dst_file.is_symlink():
+            continue
+        if not dst_file.resolve().is_relative_to(root):
+            continue
+        if _sha256(dst_file) != recorded:
+            print(
+                f"prj:sync: WARNING kept {rel} (removed from prj/, but it changed "
+                "since the last sync; delete it by hand if it is stale)",
+                file=sys.stderr,
+            )
+            continue
+        dst_file.unlink()
+        print(f"prj:sync: removed {rel} (no longer in prj/)")
+        parent = dst_file.parent
+        while parent != root and parent.is_relative_to(root):
+            try:
+                parent.rmdir()
+            except OSError:
+                break
+            parent = parent.parent
+
+
 def prj_sync(prj_dir: Path, dst_dir: Path) -> int:
     """Run the sync. Returns 0 normally, 1 if any drop guard fired."""
     if not prj_dir.is_dir():
         print("prj:sync: no ../prj, skipping")
         return 0
 
+    _remove_stale(prj_dir, dst_dir, _load_manifest(dst_dir))
+    copied: dict[str, str] = {}
     had_drop = False
     for src_file in sorted(prj_dir.rglob("*")):
         if not src_file.is_file():
@@ -203,11 +279,14 @@ def prj_sync(prj_dir: Path, dst_dir: Path) -> int:
                 # diff" for this file, not a silent loss.
             else:
                 shutil.copy2(src_file, dst_file)
+                copied[rel.as_posix()] = _sha256(dst_file)
                 print(f"prj:sync: copied {rel}")
         else:
             shutil.copy2(src_file, dst_file)
+            copied[rel.as_posix()] = _sha256(dst_file)
             print(f"prj:sync: copied {rel}")
 
+    _write_manifest(dst_dir, copied)
     return 1 if had_drop else 0
 
 
