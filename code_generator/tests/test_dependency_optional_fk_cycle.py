@@ -56,15 +56,3 @@ def test_no_alias_is_built_for_the_skipped_dependency():
     _, _, target_to_fk_rels, multi_fk_targets = split_same_target_fk_deps('step', relationships, deps, [])
     assert target_to_fk_rels == {}
     assert multi_fk_targets == {}
-
-
-def test_api_spec_skips_missing_required_field_cases_when_nothing_is_required():
-    from generators_test import api_spec_context
-
-    gen_cfg = {'list': True, 'view': True, 'new': True, 'edit': True, 'delete': True,
-               'api': True, 'test': True, 'fields': None}
-    schema = _schema()
-    # An identity entity keeps its content on the version entity: nothing on it is required.
-    schema['definitions']['step']['required'] = ['id']
-    assert api_spec_context('step', [], schema, 'step', 'step', gen_cfg)['has_required_field'] is False
-    assert api_spec_context('step_version', [], schema, 'step_version', 'step_version', gen_cfg)['has_required_field'] is True

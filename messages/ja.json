@@ -396,6 +396,12 @@
     "noMatchingData": "このグラフに該当するデータはありません。",
     "loadFailed": "グラフを読み込めませんでした。ページを再読み込みし、改善しない場合は管理者に連絡してください。"
   },
+  "Search": {
+    "failed": "検索に失敗しました。もう一度お試しください。",
+    "minLength": "2文字以上入力してください。",
+    "noResults": "該当する結果はありません。",
+    "notAvailable": "アプリでは開けません"
+  },
   "DashboardView": {
     "subtitle": "{entity}を{field}で集計",
     "subtitleWithZone": "{entity}を{field}で集計（{zone}）",
