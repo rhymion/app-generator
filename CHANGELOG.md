@@ -204,6 +204,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   carries these base fields, but the record schema described only the entity's own declared properties. Each is now present
   and marked `readOnly: true` (`creator_id` is nullable); an entity's own declaration of `id` is kept. The create-request
   schema and filter parameters are unchanged. `docs/knowledge/generated-documentation-and-openapi-spec.md` states the rule.
+- **Dev-tooling dependency advisories cleared where a fix exists** (Issue #582). `npm audit fix` updates the lockfile, and `overrides` raise `@xmldom/xmldom` (pinned by `speech-rule-engine`), `basic-ftp`, `katex` and `postcss-selector-parser` (pinned by `@tailwindcss/typography`) to patched releases. `npm audit --omit=dev` now reports 0 vulnerabilities. `extract-zip` and `braces` still have no patched release; they are reachable only through dev tooling (`@marp-team/marp-cli`, `eslint-config-next`).
 - **Transient and missing-record Prisma errors no longer return 422** (Issue #747). The generated `add{Entity}` and
   `update{Entity}` catch blocks now map `P2034` (write conflict under Serializable isolation) and `P2037` (too many
   connections) to `CAPACITY` (409), and `P2025` (required record not found) to `NOT_FOUND` (404). Input-shaped codes still
