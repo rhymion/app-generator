@@ -81,12 +81,25 @@ time):
 | Europe (Frankfurt)         | `fra1`              |
 | Asia Pacific (Singapore)   | `sin1`              |
 
+## Dashboard setting is reconciled by `vercel-setup.sh`
+
+A project created by `vercel project add` starts on the platform default
+(`iad1`). The committed `vercel.json` only applies once Root Directory points
+at the app-generator submodule, so a build that runs before that leaves the
+project on `iad1` with nothing to flag it. Step 1.5 of `scripts/vercel-setup.sh`
+therefore reads the project's `serverlessFunctionRegion` through the Vercel
+Projects API and PATCHes it to the first `regions` entry of
+`app-generator/vercel.json` when it differs. It is idempotent, skips when the
+file has no `regions` entry, and is only echoed under `DRY_RUN=true`. Do not
+add a `regions` key to the consumer's top-level `vercel.json` stub; it is not
+the file read when Root Directory points at the submodule. The logic lives in
+`scripts/vercel-region.sh` and is covered by `scripts/vercel-region.test.ts`
+(fake `curl`, no live API).
+
 ## Scope note
 
 This repo (`app-generator`) is the generator source of truth for the
 `vercel.json` that ships to consuming projects (e.g. `app-template`) via
-submodule. Automating region selection *at provisioning time* (e.g. having
-a Neon-provisioning script write this field automatically) is tracked
-separately as part of the Vercel/Neon deploy automation work
-(`vercel-setup.sh` in the consuming project's `scripts/`) — out of scope
-here. Until that lands, the manual step above is the supported path.
+submodule. Choosing the region value is still manual (see the steps above);
+`vercel-setup.sh` only copies the committed value onto the project's dashboard
+setting.
