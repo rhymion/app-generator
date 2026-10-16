@@ -5695,6 +5695,9 @@ def api_spec_context(
         'assert_create': assert_create,
         'assert_update': assert_update,
         'post_body_create': _post_body_impl(None, f'{I}    '),
+        # #1031: 5.1 and 8.2 omit one required field; with none to omit the
+        # request is valid and the API correctly answers 201.
+        'has_required_field_to_omit': field_to_skip_5_1 is not None,
         'post_body_missing_field': _post_body_impl(field_to_skip_5_1, f'{I}    '),
         'date_range_boundary': date_range_boundary,
         'post_body_daterange_boundary': post_body_daterange_boundary,

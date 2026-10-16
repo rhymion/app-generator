@@ -198,6 +198,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **Generated API spec no longer expects a validation failure for an entity with no required field** (Issue #1031). The `5.1 fails when a required field is missing` and `8.2 bulk creates — partial failure when a required field is missing` examples are generated only when the entity has a required field to omit; otherwise the request is valid and the API correctly answers `201`.
 - **The generated OpenAPI record schema lists `created_at`, `updated_at` and `creator_id`** (Issue #762). Every response row
   carries these base fields, but the record schema described only the entity's own declared properties. Each is now present
   and marked `readOnly: true` (`creator_id` is nullable); an entity's own declaration of `id` is kept. The create-request
