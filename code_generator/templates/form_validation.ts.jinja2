@@ -1,12 +1,15 @@
 import { isValidDateValue, type DateValueFormat } from '@/lib/_date_value';
 
-const REQUIRED_FIELDS = [
+// Explicit element type for the same reason as DECIMAL_FIELDS below: an entity with no required form
+// field (for example an identity entity whose content lives on its versions) would otherwise infer the empty
+// tuple type and fail to compile on `field.key`.
+const REQUIRED_FIELDS: { key: string; label: string }[] = [
 {% for field in client_required_fields %}
   { key: '{{ field.key }}', label: '{{ field.label }}' },
 {% endfor %}
-] as const;
+];
 
-// Explicit element type (not `as const`, unlike REQUIRED_FIELDS above): most
+// Explicit element type (not `as const`): most
 // entities have zero Decimal fields, so this array is empty far more often
 // than not -- `[] as const` infers as the empty tuple type `readonly []`,
 // which makes `for (const field of DECIMAL_FIELDS)` narrow `field` to

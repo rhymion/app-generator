@@ -203,6 +203,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **Generated test dependencies skip an optional FK that closes a required cycle** (Issue #1025, part of #946). An identity
+  entity's nullable `current_version_id` to its version entity is no longer pre-created as a dependency of the identity:
+  the version requires the identity, so the generated `populate<Entity>Dependencies()` created the version row without its
+  required parent FK and the API Cypress specs failed. The generated test helper also no longer returns an alias for a dependency that was skipped.
+- **`form_validation.ts` compiles for an entity with no required form field** (Issue #1026, part of #946). `REQUIRED_FIELDS`
+  has an explicit element type instead of `as const`, so an empty list no longer infers the empty tuple type.
 - **Generated API spec no longer expects a validation failure for an entity with no required field** (Issue #1031). The `5.1 fails when a required field is missing` and `8.2 bulk creates — partial failure when a required field is missing` examples are generated only when the entity has a required field to omit; otherwise the request is valid and the API correctly answers `201`.
 - **The generated OpenAPI record schema lists `created_at`, `updated_at` and `creator_id`** (Issue #762). Every response row
   carries these base fields, but the record schema described only the entity's own declared properties. Each is now present
