@@ -2,12 +2,39 @@ import { useState } from 'react';
 import { router } from 'expo-router';
 import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { apiFetch } from '@/lib/api-base';
+import { ENTITY_SCREENS } from '@/lib/entity-registry';
+import { useMessages } from '@/lib/messages';
+
+/** Search result entity type -> the EntityLabel key that names it. */
+const LABEL_KEYS: Record<string, string> = {{ search_labels_json }};
 
 type SearchResult = { entity_type: string; id: string; snippet: string; rank: number };
 type SearchPage = { results: SearchResult[]; total: number };
 
-/** Cross-entity search (GET /api/search), reached from the fixed footer tab. */
+/** The snippet with the server's match markers (<<< >>>) turned into bold runs. */
+function Snippet({ text }: { text: string }) {
+  const parts = text.split(/(<<<|>>>)/);
+  let marked = false;
+  const runs: { text: string; marked: boolean }[] = [];
+  for (const part of parts) {
+    if (part === '<<<') marked = true;
+    else if (part === '>>>') marked = false;
+    else if (part) runs.push({ text: part, marked });
+  }
+  return (
+    <Text style={styles.rowSnippet} numberOfLines={2}>
+      {runs.map((run, i) => (run.marked ? <Text key={i} style={styles.match}>{run.text}</Text> : run.text))}
+    </Text>
+  );
+}
+
+/**
+ * Cross-entity search (GET /api/search), reached from the fixed footer tab. A result opens the record's
+ * detail screen, or the entity list when the entity has no detail screen; an entity without native
+ * screens is marked and does not navigate.
+ */
 export default function SearchScreen() {
+  const { t, tmsg } = useMessages();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -15,7 +42,7 @@ export default function SearchScreen() {
   async function run() {
     const q = query.trim();
     if (q.length < 2) {
-      setError('Type at least 2 characters.');
+      setError(t('Search.minLength'));
       return;
     }
     setError(null);
@@ -23,7 +50,7 @@ export default function SearchScreen() {
       const page = await apiFetch<SearchPage>(`/api/search?q=${encodeURIComponent(q)}`);
       setResults(page.results);
     } catch {
-      setError('Search failed. Please try again.');
+      setError(t('Search.failed'));
     }
   }
 
@@ -34,7 +61,7 @@ export default function SearchScreen() {
         value={query}
         onChangeText={setQuery}
         onSubmitEditing={run}
-        placeholder="Search"
+        placeholder={t('Common.search')}
         returnKeyType="search"
         autoCapitalize="none"
         autoCorrect={false}
@@ -45,18 +72,34 @@ export default function SearchScreen() {
         data={results ?? []}
         keyExtractor={(item) => `${item.entity_type}:${item.id}`}
         ListEmptyComponent={
-          results ? <Text style={styles.empty} testID="search-empty">No results.</Text> : null
+          results ? <Text style={styles.empty} testID="search-empty">{t('Search.noResults')}</Text> : null
         }
-        renderItem={({ item }) => (
-          <Pressable
-            style={styles.row}
-            onPress={() => router.push(`/entity/${item.entity_type}` as never)}
-            testID={`search-result-${item.entity_type}`}
-          >
-            <Text style={styles.rowType}>{item.entity_type}</Text>
-            <Text style={styles.rowSnippet} numberOfLines={2}>{item.snippet}</Text>
-          </Pressable>
-        )}
+        renderItem={({ item }) => {
+          const screens = ENTITY_SCREENS[item.entity_type];
+          const labelKey = `EntityLabel.${LABEL_KEYS[item.entity_type] ?? item.entity_type}`;
+          const label = tmsg.has(labelKey) ? tmsg(labelKey) : screens?.title ?? item.entity_type;
+          const href = screens
+            ? screens.View
+              ? `/entity/${item.entity_type}/${item.id}`
+              : `/entity/${item.entity_type}`
+            : null;
+          return (
+            <Pressable
+              style={[styles.row, !href && styles.rowDisabled]}
+              disabled={!href}
+              onPress={() => href && router.push(href as never)}
+              testID={`search-result-${item.entity_type}`}
+            >
+              <Text style={styles.rowType}>{label}</Text>
+              <Snippet text={item.snippet} />
+              {!href ? (
+                <Text style={styles.unavailable} testID={`search-result-unavailable-${item.entity_type}`}>
+                  {t('Search.notAvailable')}
+                </Text>
+              ) : null}
+            </Pressable>
+          );
+        }}
       />
     </View>
   );
@@ -69,5 +112,8 @@ const styles = StyleSheet.create({
   empty: { textAlign: 'center', color: '#666', marginTop: 24 },
   row: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee' },
   rowType: { fontSize: 12, color: '#6b7280' },
+  rowDisabled: { opacity: 0.6 },
   rowSnippet: { fontSize: 15 },
+  match: { fontWeight: '700' },
+  unavailable: { fontSize: 12, color: '#b45309', marginTop: 2 },
 });

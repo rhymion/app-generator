@@ -9,6 +9,10 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **DataGrid date and date-time columns use MUI pickers** (Issue #764). The list-page filter value and the filter and edit cell of an embedded child grid for every `date` / `date-time` column now use MUI `DatePicker` / `DateTimePicker` instead of the browser's native date inputs, so the calendar follows the app locale (en/ja) rather than the browser's UI language. Filter values, saved values and time zones are unchanged. No new dependency and no schema key. `editDataGridCell()` in `cypress/support/datagrid-helpers.ts` types the same ISO values into the picker. See `docs/knowledge/i18n-locale-routing.md`.
 
 ### Added
+- **Mobile search results open the record and use translated text** (Issue #870, part of #140). A result on the Search
+  screen opens the record's detail screen when the entity has one (the entity list otherwise); a result for an entity with
+  no native screens is marked "Not available in the app" and does not navigate. The screen text comes from the new `Search`
+  namespace of `messages/<locale>.json`, entity names from `EntityLabel`, and snippet match markers render in bold.
 - **Dockerfile and `.dockerignore` for scheduled tasks on any provider** (Issue #1029). `generate-code` writes both files
   whenever the schema declares `x-scheduled-task` or `x-scheduled-tasks`, independent of `x-cloud.provider`, so
   `scripts/gcp-task-runner.sh` Step 5 works for an app deployed on Vercel. `x-cloud:gcp` keeps its other behavior
