@@ -385,3 +385,5 @@ docs/generated/
 # ==========================================
 # END GENERATED FILES
 # ==========================================
+# prj:sync record of the files it copied from ../prj (scripts/prj_sync.py, Issue #619)
+.prj-sync-manifest.json
