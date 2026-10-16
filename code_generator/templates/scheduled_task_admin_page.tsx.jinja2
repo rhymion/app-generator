@@ -43,7 +43,7 @@ export default async function ScheduledTaskRunPage({
 
   const sp = await searchParams;
   const rawDate = Array.isArray(sp.date) ? sp.date[0] : sp.date;
-  const businessDate = parseBusinessDate(rawDate) ?? businessDateOf();
+  const businessDate = parseBusinessDate(rawDate) ?? (await businessDateOf());
   const overview = await loadAdminOverview(businessDate);
   const dateValue = formatBusinessDate(businessDate);
 

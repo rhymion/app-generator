@@ -306,7 +306,8 @@ model app_setting {
   id            String        @id @default(cuid())
   organization_id String?
   organization  organization? @relation(fields: [organization_id], references: [id])
-  business_date String
+  // "YYYY-MM-DD"; required while is_pinned is true, empty otherwise (lib/app_setting/service_validation_custom.ts).
+  business_date String?
   is_pinned     Boolean       @default(false)
   timezone      Timezone      @default(utc)
   // Scheduled-task operations (NULL = built-in default; see lib/scheduled-tasks/admin-view.ts):

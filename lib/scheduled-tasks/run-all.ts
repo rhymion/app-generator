@@ -6,9 +6,9 @@
 // Hand-authored (schema-independent), unlike the generated sibling files
 // registry.ts / dependencies.ts / run-guard.ts.
 import { CronExpressionParser } from 'cron-parser';
+import { DEFAULT_TIMEZONE, TIMEZONE_IANA_NAME, type Timezone } from '@/lib/_timezone';
+import { startOfNextDayInZone } from '@/lib/business-date-core';
 import type { ScheduledTaskOutcome, ScheduledTaskResult } from './run-guard';
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Topological order over `dependencies` (task_id -> predecessor task_ids):
@@ -39,7 +39,7 @@ export function topologicalOrder(dependencies: Record<string, string[]>): string
 }
 
 /**
- * Is a task due on `businessDate` (UTC midnight)? `interval` is read as
+ * Is a task due on `businessDate` (UTC midnight of that calendar date)? `interval` is read as
  * "when this task is due", not "when to invoke it": the task is due once a
  * scheduled occurrence has passed since its last success.
  *
@@ -48,20 +48,27 @@ export function topologicalOrder(dependencies: Record<string, string[]>): string
  *  - otherwise                     -> due iff the first cron occurrence on a
  *    calendar day after `lastSucceeded`'s day falls on or before `businessDate`.
  *
- * The comparison is by UTC calendar day (business_date is date-granular), so a
+ * The comparison is by calendar day (business_date is date-granular), so a
  * daily cron is due every night whatever its minute/hour, and a long stop folds
  * into one catch-up run — only the last success is consulted, not each missed
- * occurrence. `interval` is a 5-field cron expression evaluated in UTC.
+ * occurrence. `interval` is a 5-field cron expression evaluated in `timeZone`,
+ * the zone the business date itself is read in (UTC unless the caller passes the
+ * `app_setting` zone), so a day boundary means the same instant to both.
  */
-export function isDue(interval: string | null, lastSucceeded: Date | null, businessDate: Date): boolean {
+export function isDue(
+  interval: string | null,
+  lastSucceeded: Date | null,
+  businessDate: Date,
+  timeZone: Timezone = DEFAULT_TIMEZONE,
+): boolean {
   if (!interval || !lastSucceeded) return true;
-  // Start the search just before the next day's UTC midnight so an occurrence
-  // at exactly 00:00 of the following day still counts.
-  const searchFrom = new Date(lastSucceeded.getTime() + DAY_MS - 1);
-  const next = CronExpressionParser.parse(interval, { currentDate: searchFrom, tz: 'UTC' })
+  // Start the search just before the start of the next calendar day so an
+  // occurrence at exactly 00:00 of that day still counts.
+  const searchFrom = new Date(startOfNextDayInZone(lastSucceeded, timeZone).getTime() - 1);
+  const next = CronExpressionParser.parse(interval, { currentDate: searchFrom, tz: TIMEZONE_IANA_NAME[timeZone] })
     .next()
     .toDate();
-  return next.getTime() < businessDate.getTime() + DAY_MS;
+  return next.getTime() < startOfNextDayInZone(businessDate, timeZone).getTime();
 }
 
 export type RunAllOutcome = ScheduledTaskOutcome | 'not_due';
@@ -77,6 +84,8 @@ export interface RunAllDeps {
   dependencies: Record<string, string[]>;
   intervals: Record<string, string | null>;
   businessDate: Date;
+  /** The zone the business date is read in; cron intervals are evaluated in it. Defaults to UTC. */
+  timeZone?: Timezone;
   lastSucceededBusinessDate: (taskId: string) => Promise<Date | null>;
   recordNotDue: (taskId: string) => Promise<void>;
   runTask: (taskId: string) => Promise<ScheduledTaskResult>;
@@ -96,7 +105,7 @@ export async function runAll(deps: RunAllDeps): Promise<RunAllEntry[]> {
       const last = await deps.lastSucceededBusinessDate(taskId);
       if (last && last.getTime() >= deps.businessDate.getTime()) {
         // Already succeeded for this business date: the guard reports it.
-      } else if (!isDue(interval, last, deps.businessDate)) {
+      } else if (!isDue(interval, last, deps.businessDate, deps.timeZone)) {
         await deps.recordNotDue(taskId);
         entries.push({ taskId, outcome: 'not_due' });
         continue;

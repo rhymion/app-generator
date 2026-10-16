@@ -1591,6 +1591,12 @@ def _ts_literal_for_python_value(value) -> str:
     return "'" + str(value).replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
+def _is_iso_date_text(field: dict) -> bool:
+    """A plain text column named `*_date` holds a `YYYY-MM-DD` string (e.g. app_setting.business_date), so its
+    sample values must be real dates: a custom validation rule may parse them."""
+    return field.get('category') == 'text' and not field.get('format') and field['prop_name'].endswith('_date')
+
+
 def prisma_value(field: dict, index: str, entity_title: str) -> str:
     """Generate a TypeScript expression for Prisma test data."""
     cat = field['category']
@@ -1611,6 +1617,8 @@ def prisma_value(field: dict, index: str, entity_title: str) -> str:
             # `Date.now()` covers cross-run uniqueness; `${index}` covers
             # in-loop uniqueness.
             return f'`test-${{{index}}}-${{Date.now()}}@example.com`'
+        if _is_iso_date_text(field):
+            return "'2026-01-15'"
         if field.get('enum_values'):
             return f"'{field['enum_values'][0]}'"
         return f'`Test {field["label"]} ${{{index}}}`'
@@ -1677,6 +1685,8 @@ def cypress_create_value(field: dict, entity_title: str) -> str:
             return f'https://example.com/test-{prop_name}-1'
         if prop_name == 'name':
             val = f'Test {entity_title}'
+        elif _is_iso_date_text(field):
+            val = '2026-01-15'
         elif field.get('enum_values'):
             val = field['enum_values'][0]
         else:
@@ -1751,7 +1761,9 @@ def cypress_edit_value(field: dict, entity_title: str, write_locked_values: dict
             val = f'Updated {entity_title}'
         else:
             enum_values = [v for v in (field.get('enum_values') or []) if v not in _locked]
-            if enum_values:
+            if _is_iso_date_text(field):
+                val = '2026-01-16'
+            elif enum_values:
                 val = enum_values[1] if len(enum_values) > 1 else enum_values[0]
             else:
                 val = f'Updated {field["label"]}'
@@ -1819,6 +1831,8 @@ def api_value(field: dict, entity_title: str) -> str:
             return f"'https://example.com/test-{prop_name}'"
         if prop_name == 'name':
             return f"'Test {entity_title}'"
+        if _is_iso_date_text(field):
+            return "'2026-01-15'"
         if field.get('enum_values'):
             return f"'{field['enum_values'][0]}'"
         return f"'Test {field['label']}'"
@@ -2715,11 +2729,18 @@ def helper_context(
 
     # Note: read-only fields stay in these lists so seed/prisma create data includes
     # their required values; the fill/clear/assert command builders skip them.
+    # The list's primary column may be a defaulted (hence non-required) scalar: the specs read it back from the
+    # list, so populate and the minimal create must set it like a required column.
+    _primary_scalar_name = _get_primary_display_field_name(parent_def)
+    if _primary_scalar_name and f'{_primary_scalar_name}_id' in (parent_def.get('properties') or {}):
+        _primary_scalar_name = None
     required_field_metas = [
-        f for f in fields if f['required'] or f['prop_name'] in _filter_values_for_populate
+        f for f in fields
+        if f['required'] or f['prop_name'] in _filter_values_for_populate or f['prop_name'] == _primary_scalar_name
     ]
     optional_field_metas = [
-        f for f in fields if not f['required'] and f['prop_name'] not in _filter_values_for_populate
+        f for f in fields
+        if not f['required'] and f['prop_name'] not in _filter_values_for_populate and f['prop_name'] != _primary_scalar_name
     ]
 
     child_metas = analyze_children(children, schema, model_name)
@@ -4123,6 +4144,16 @@ def spec_context(
         if r['is_m2o']
     }
     required_fill_cmds = gen_fill_commands(required_field_metas, title, I, fk_dep_vars, dep_search_info)
+    # A defaulted (non-required) scalar primary column is read back from the list by the create tests, so the
+    # minimal create fills it too.
+    _ui_primary = _get_primary_display_field_name(parent_def)
+    _ui_primary_meta = next(
+        (f for f in optional_field_metas
+         if f['prop_name'] == _ui_primary and f'{_ui_primary}_id' not in (parent_def.get('properties') or {})),
+        None,
+    )
+    if _ui_primary_meta is not None:
+        required_fill_cmds += gen_fill_commands([_ui_primary_meta], title, I, fk_dep_vars, dep_search_info)
     all_fill_cmds = gen_fill_commands(fields, title, I, fk_dep_vars, dep_search_info)
     # cmd_846(c): 7.1/7.2 create a record via the UI form and expect the
     # create-time edge trigger to have fired (approval_request rows to
@@ -5408,6 +5439,12 @@ def api_spec_context(
                 _pfk_dep = next((d for d in entity_fk_deps if d['prop_name'] == _pfk_prop), None)
                 if _pfk_dep:
                     out.append(f"{indent}{_pfk_prop}: deps.{primary_dep_var}.id,")
+        # A scalar primary column that has a default is not required, but assert_create reads it back,
+        # so the create body must send it.
+        if primary_field_name and not primary_is_fk and skip_field != primary_field_name:
+            _ppm = next((f for f in all_field_metas if f['prop_name'] == primary_field_name), None)
+            if _ppm and not _ppm['required'] and not any(ln.strip().startswith(f'{primary_field_name}:') for ln in out):
+                out.append(f"{indent}{primary_field_name}: {api_value(_ppm, title)},")
         for ua in ua_fk_fields_for_api:
             if ua['prop_name'] != skip_field:
                 out.append(f"{indent}{ua['prop_name']}: deps.{ua['var_name']}.id,")

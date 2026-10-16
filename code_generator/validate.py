@@ -1761,7 +1761,11 @@ def validate_schema(schema: dict) -> None:
 
         elif primary_field in props:
             # Primary field is a plain scalar (e.g. primary='name')
-            if _is_optional_field(primary_field, props, req_set):
+            # A column with a default is non-nullable but not listed as
+            # required, so either one satisfies "always has a value".
+            _pf = props.get(primary_field, {})
+            _pf_nullable = isinstance(_pf.get('type'), list) and 'null' in _pf['type']
+            if _is_optional_field(primary_field, props, req_set) and not ('default' in _pf and not _pf_nullable):
                 errors.append(
                     f"Entity '{model}': list primary field '{primary_field}' must be "
                     f"required (non-nullable)."

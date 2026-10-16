@@ -48,6 +48,32 @@ class TestRequiredPrimaryFieldPasses:
         )
         validate_schema(schema)  # must not raise
 
+    def test_defaulted_non_nullable_scalar_primary_passes(self):
+        """A column with a default is non-nullable although it is not listed as required."""
+        schema = _entity_schema(
+            model='product',
+            props={
+                'id': {'type': 'string'},
+                'name': {'type': 'string', 'default': 'x'},
+            },
+            required=['id'],
+            xdisplay={'table': [{'name': {'primary': True}}]},
+        )
+        validate_schema(schema)  # must not raise
+
+    def test_defaulted_nullable_scalar_primary_rejected(self):
+        schema = _entity_schema(
+            model='product',
+            props={
+                'id': {'type': 'string'},
+                'name': {'type': ['string', 'null'], 'default': 'x'},
+            },
+            required=['id'],
+            xdisplay={'table': [{'name': {'primary': True}}]},
+        )
+        with pytest.raises(SchemaValidationError, match="list primary field 'name'"):
+            validate_schema(schema)
+
     def test_required_fk_primary_with_required_label_passes(self):
         schema = _entity_schema(
             model='order',

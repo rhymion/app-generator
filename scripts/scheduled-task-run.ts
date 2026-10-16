@@ -42,6 +42,7 @@ async function main(): Promise<number> {
   const { TASK_REGISTRY } = await import('../lib/scheduled-tasks/registry');
   const { TASK_DEPENDENCIES, TASK_INTERVALS } = await import('../lib/scheduled-tasks/dependencies');
   const guard = await import('../lib/scheduled-tasks/run-guard');
+  const { getBusinessContext } = await import('../lib/business-date');
   const { SCHEDULED_TASK_ACTOR_EMAIL } = await import('../lib/scheduled-tasks/system-actor');
   const { runAll, runAllExitCode, runOneExitCode } = await import('../lib/scheduled-tasks/run-all');
 
@@ -67,14 +68,17 @@ async function main(): Promise<number> {
       return runOneExitCode(result.outcome);
     }
 
-    const businessDate = guard.businessDateOf();
+    // One read for the whole pass: every task, and every not_due record, uses this business date and zone
+    // even if the pass runs across midnight.
+    const { businessDate, timeZone } = await getBusinessContext();
     const entries = await runAll({
       dependencies: TASK_DEPENDENCIES,
       intervals: TASK_INTERVALS,
       businessDate,
+      timeZone,
       lastSucceededBusinessDate: guard.lastSucceededBusinessDate,
-      recordNotDue: (id) => guard.recordNotDue(id),
-      runTask: (id) => guard.runScheduledTask(id, actor.id),
+      recordNotDue: (id) => guard.recordNotDue(id, { businessDate }),
+      runTask: (id) => guard.runScheduledTask(id, actor.id, { businessDate }),
     });
     console.log(`task:run-all business_date=${businessDate.toISOString().slice(0, 10)}`);
     for (const e of entries) report(e.taskId, e.outcome, e.blockedBy, e.error);

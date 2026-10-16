@@ -14,6 +14,7 @@
 {% if has_tasks %}
 
 import prisma from '@/lib/prisma';
+import { getBusinessDate } from '@/lib/business-date';
 import { TASK_REGISTRY } from './registry';
 import { TASK_DEPENDENCIES } from './dependencies';
 
@@ -48,14 +49,18 @@ export interface RunScheduledTaskOptions {
   /**
    * Run for this business date instead of today's. The admin page's rerun uses
    * it so a recovery days later still operates on the date that failed. Must be
-   * UTC midnight, like `businessDateOf`'s result.
+   * UTC midnight of the calendar date, like `businessDateOf`'s result.
    */
   businessDate?: Date;
 }
 
-/** The business date for a run: the UTC calendar day of `now`, as UTC midnight. */
-export function businessDateOf(now: Date = new Date()): Date {
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+/**
+ * The business date for a run, as UTC midnight of that calendar date: the tenant-wide `app_setting` row's pinned
+ * `business_date`, or today in its `timezone`, or today in UTC when there is no row (lib/business-date.ts).
+ * Scheduled tasks are tenant-wide, so no organization row is consulted.
+ */
+export async function businessDateOf(now: Date = new Date()): Promise<Date> {
+  return getBusinessDate({ now });
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -78,7 +83,7 @@ export async function lastSucceededBusinessDate(taskId: string): Promise<Date | 
  */
 export async function recordNotDue(taskId: string, options: RunScheduledTaskOptions = {}): Promise<void> {
   const now = options.now ?? new Date();
-  const businessDate = businessDateOf(now);
+  const businessDate = options.businessDate ?? (await businessDateOf(now));
   try {
     await prisma.scheduled_task_run.create({
       data: { task_id: taskId, business_date: businessDate, status: 'not_due', started_at: now, finished_at: now },
@@ -113,7 +118,7 @@ export async function runScheduledTask(
     throw new Error(`Unknown scheduled task: ${taskId}`);
   }
   const now = options.now ?? new Date();
-  const businessDate = options.businessDate ?? businessDateOf(now);
+  const businessDate = options.businessDate ?? (await businessDateOf(now));
   const result = (outcome: ScheduledTaskOutcome, extra: Partial<ScheduledTaskResult> = {}): ScheduledTaskResult => ({
     taskId,
     businessDate,
@@ -187,6 +192,8 @@ export async function runScheduledTask(
 // compiling; declaring a task (x-scheduled-task / x-scheduled-tasks) and
 // re-running `generate-code` replaces this file with the real guard.
 
+import { getBusinessDate } from '@/lib/business-date';
+
 export type ScheduledTaskOutcome =
   | 'succeeded'
   | 'already_succeeded'
@@ -208,8 +215,8 @@ export interface RunScheduledTaskOptions {
   businessDate?: Date;
 }
 
-export function businessDateOf(now: Date = new Date()): Date {
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+export async function businessDateOf(now: Date = new Date()): Promise<Date> {
+  return getBusinessDate({ now });
 }
 
 export async function lastSucceededBusinessDate(_taskId: string): Promise<Date | null> {
