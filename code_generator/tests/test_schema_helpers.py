@@ -881,10 +881,38 @@ class TestDeriveSearchableRelationFields:
         }
         assert derive_searchable_relation_fields(properties, schema) == []
 
+    def test_two_hop_dotted_labelfield_resolved_through_target_fk(self):
+        """`labelField: test_case_version.title` on a FK to test_plan_case
+        resolves through test_plan_case's own FK to test_case_version."""
+        schema = self._schema({
+            "test_plan_case": {
+                "properties": {
+                    "test_case_version_id": {
+                        "type": "string",
+                        "x-relationship": {"type": "many-to-one", "target": "test_case_version"},
+                    },
+                }
+            },
+            "test_case_version": {"properties": {"title": {"type": "string"}, "state": {"type": "string", "enum": ["a"]}}},
+        })
+        properties = {
+            "test_plan_case_id": {
+                "type": "string",
+                "x-relationship": {"type": "many-to-one", "target": "test_plan_case", "labelField": "test_case_version.title"},
+            },
+        }
+        assert derive_searchable_relation_fields(properties, schema) == [
+            {"relation": "test_plan_case", "via": "test_case_version", "field": "title"},
+        ]
+        properties["test_plan_case_id"]["x-relationship"]["labelField"] = "test_case_version.state"
+        assert derive_searchable_relation_fields(properties, schema) == []
+        properties["test_plan_case_id"]["x-relationship"]["labelField"] = "test_case_version.x.title"
+        assert derive_searchable_relation_fields(properties, schema) == []
+
     def test_dotted_labelfield_path_excluded(self):
-        """One-hop only: getters.ts.jinja2 renders a single nested `where`
-        level. A dotted labelField would need a second hop the template
-        doesn't emit, so it's excluded rather than silently mis-rendered."""
+        """A dotted labelField whose first segment is not an FK of the
+        target cannot be resolved to a nested `where`, so it is excluded
+        rather than silently mis-rendered."""
         schema = self._schema()
         properties = {
             "supplier_id": {

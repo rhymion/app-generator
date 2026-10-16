@@ -710,7 +710,36 @@ export async function populate{{ pascal }}Data(length: number) {
         updater_id: testUser.id,
       },
     });
+{% if identity_version %}
+    // x-version-of identity: its list shows the paired version's {{ identity_version.prim }}, so
+    // give every row a version named like the generic "<Title> <n>" and make it current.
+{% for fk in identity_version.internal_fk_deps %}
+    const {{ fk.var_name }}VersionItem = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
+    const versionRecord = await prisma.{{ identity_version.version }}.create({
+      data: {
+{% for fk in identity_version.internal_fk_deps %}
+        {{ fk.prop_name }}: {{ fk.var_name }}VersionItem.id,
+{% endfor %}
+        {{ identity_version.identity_fk }}: record.id,
+        {{ identity_version.prim }}: `{{ title }} ${i}`,
+{% for ef in identity_version.extra_required_fields %}
+        {{ ef.prop_name }}: {{ ef.prisma_val }},
+{% endfor %}
+        creator_id: testUser.id,
+{% if identity_version.has_updater_id %}
+        updater_id: testUser.id,
+{% endif %}
+      },
+    });
+    const currentRecord = await prisma.{{ model_name }}.update({
+      where: { id: record.id },
+      data: { current_version_id: versionRecord.id },
+    });
+    records.push(currentRecord);
+{% else %}
     records.push(record);
+{% endif %}
   }
   // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results
   return JSON.parse(JSON.stringify(records));
@@ -896,7 +925,36 @@ export async function populate{{ pascal }}FullData(length: number) {
         updater_id: testUser.id,
       },
     });
+{% if identity_version %}
+    // x-version-of identity: its list shows the paired version's {{ identity_version.prim }}, so
+    // give every row a version named like the generic "<Title> <n>" and make it current.
+{% for fk in identity_version.internal_fk_deps %}
+    const {{ fk.var_name }}VersionItem = await prisma.{{ fk.target }}.create({ data: {{ fk.create_data }} });
+{% endfor %}
+    const versionRecord = await prisma.{{ identity_version.version }}.create({
+      data: {
+{% for fk in identity_version.internal_fk_deps %}
+        {{ fk.prop_name }}: {{ fk.var_name }}VersionItem.id,
+{% endfor %}
+        {{ identity_version.identity_fk }}: record.id,
+        {{ identity_version.prim }}: `{{ title }} ${i}`,
+{% for ef in identity_version.extra_required_fields %}
+        {{ ef.prop_name }}: {{ ef.prisma_val }},
+{% endfor %}
+        creator_id: testUser.id,
+{% if identity_version.has_updater_id %}
+        updater_id: testUser.id,
+{% endif %}
+      },
+    });
+    const currentRecord = await prisma.{{ model_name }}.update({
+      where: { id: record.id },
+      data: { current_version_id: versionRecord.id },
+    });
+    records.push(currentRecord);
+{% else %}
     records.push(record);
+{% endif %}
   }
   // Serialize Dates to ISO strings so Cypress cy.task can JSON-transfer results
   return JSON.parse(JSON.stringify(records));

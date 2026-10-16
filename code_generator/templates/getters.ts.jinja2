@@ -556,7 +556,11 @@ export async function search{{ parent_pascal }}Options(
       orClauses.push({ {{ f }}: { contains: token, mode: 'insensitive' } });
 {% endfor %}
 {% for rf in searchable_relation_fields %}
+{% if rf.via %}
+      orClauses.push({ {{ rf.relation }}: { {{ rf.via }}: { {{ rf.field }}: { contains: token, mode: 'insensitive' } } } });
+{% else %}
       orClauses.push({ {{ rf.relation }}: { {{ rf.field }}: { contains: token, mode: 'insensitive' } } });
+{% endif %}
 {% endfor %}
 {% if searchable_id %}
       orClauses.push({ id: { contains: token, mode: 'insensitive' } });

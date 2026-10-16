@@ -171,6 +171,7 @@ from build_context import (
     _exclusive_parent_columns, _exclusive_parent_all_columns, _model_has_audit_fields,
 )
 from generate_types import extract_entities
+from version_of import version_of_identity_for
 from generators import build_dashboard_catalog, resolve_approval_submit_on, _seed_entity_grant_flags
 
 
@@ -855,6 +856,38 @@ def _closes_required_cycle(rel: dict, model: str, schema: dict) -> bool:
         back['target'] == model and back['required']
         for back in get_parent_relationships(target_def)
     )
+
+
+def _identity_version_for_virtual_primary(model_name: str, prim: str | None, schema: dict) -> dict | None:
+    """Pairing data for an `x-version-of` identity whose primary column is virtual.
+
+    The identity row carries no content: its list shows the same-named column of the
+    version its `current_version_id` points to. Returns None unless `model_name` is such
+    an identity and `prim` is a string column of its version entity. The populate helper
+    then creates one version per identity row and points `current_version_id` at it.
+    """
+    vo = version_of_identity_for(model_name, schema)
+    if not vo or not prim:
+        return None
+    identity_props = (_raw_def(model_name, schema) or {}).get('properties') or {}
+    if prim in identity_props or f'{prim}_id' in identity_props or 'current_version_id' not in identity_props:
+        return None
+    version_def = _raw_def(vo['version'], schema) or {}
+    prim_prop = (version_def.get('properties') or {}).get(prim)
+    if not isinstance(prim_prop, dict) or prim_prop.get('type') != 'string':
+        return None
+    extra_required = [
+        f for f in _get_dep_populate_fields(vo['version'], 'version', to_title_case(vo['version']), schema)
+        if f['prop_name'] not in (prim, vo['identity_fk'])
+    ]
+    return {
+        'version': vo['version'],
+        'identity_fk': vo['identity_fk'],
+        'prim': prim,
+        'internal_fk_deps': get_all_internal_fk_deps(vo['version'], schema),
+        'extra_required_fields': extra_required,
+        'has_updater_id': _entity_has_updater_id(vo['version'], schema),
+    }
 
 
 def resolve_dependencies(model_name: str, schema: dict) -> list[dict]:
@@ -3804,6 +3837,9 @@ def helper_context(
         'all_fields_prisma': all_fields_prisma,
         'extra_prisma_fields': extra_prisma_fields,
         'has_optional': bool(optional_field_metas),
+        'identity_version': _identity_version_for_virtual_primary(
+            model_name, _get_primary_display_field_name(parent_def), schema,
+        ),
         'datagrid_children': enriched_datagrid_children,
         'comment_children': enriched_comment_children,
         'primary_fk_dep': primary_fk_dep,
@@ -3870,6 +3906,14 @@ def spec_context(
     # direct_attachment_and_uri_kind_file.cy.ts spec.
     _direct_attachment_prop_names = {d['prop_name'] for d in get_direct_attachment_fk_props(parent_def)}
     fields = [f for f in fields if f['prop_name'] not in _direct_attachment_prop_names]
+    # Exclude an optional FK that closes a required cycle (an identity's
+    # nullable current_version_id): resolve_dependencies() leaves its target out
+    # of the pre-created set, so there is no `deps` entry to pick and the spec
+    # must not reference one.
+    _cycle_prop_names = {
+        r['prop_name'] for r in relationships if _closes_required_cycle(r, model_name, schema)
+    }
+    fields = [f for f in fields if f['prop_name'] not in _cycle_prop_names]
     # Exclude fields left off x-display.form the same way (cmd_897/subtask_886a
     # scope-expansion). generators.py's FormUpsert/FormView builders treat a
     # declared x-display.form as a strict allowlist -- a field with a real jsx
@@ -4133,6 +4177,7 @@ def spec_context(
     check_field_use_accordion = False
     check_field_inner_label = None
     check_field_skip = False
+    after_create_blank = False
 
     if prim_is_fk:
         primary_rel = next((r for r in relationships if r['prop_name'] == f'{prim}_id'), None)
@@ -4356,7 +4401,28 @@ def spec_context(
         _prim_is_virtual = (prim and prim_meta is None and not prim_is_fk
                             and prim not in _props_vc and f'{prim}_id' not in _props_vc)
         _is_creator_virtual = prim == 'created_by' or 'creator_id' in _props_vc
-        if _prim_is_virtual and _is_creator_virtual:
+        _identity_version = _identity_version_for_virtual_primary(model_name, prim, schema) if _prim_is_virtual else None
+        if _identity_version:
+            # Virtual primary of an x-version-of identity: the list shows the
+            # paired version's column. populate<Entity>Data() creates that
+            # version as "<Title> <n>", but a row created through the form has
+            # no version yet, so its name cell stays blank and the identity form
+            # carries no field for the name.
+            list_id_1 = f'{title} 1'
+            list_id_is_unique = False
+            after_create_id = None
+            after_create_id_is_expr = False
+            after_create_blank = True
+            primary_dep_var_for_list = None
+            list_id_updated = f'{title} 1'
+            has_edit_primary = False
+            edit_field_label = None
+            edit_update_value = None
+            check_field_label = None
+            check_field_value_1 = None
+            check_field_updated = None
+            check_field_skip = True
+        elif _prim_is_virtual and _is_creator_virtual:
             # Virtual column resolved from creator (testUser.name = 'Test User')
             list_id_1 = 'Test User'
             list_id_is_unique = False
@@ -4791,6 +4857,7 @@ def spec_context(
         'list_id_is_unique': list_id_is_unique,
         'after_create_id': after_create_id,
         'after_create_id_is_expr': after_create_id_is_expr,
+        'after_create_blank': after_create_blank,
         'primary_dep_var_for_list': primary_dep_var_for_list,
         'list_id_updated': list_id_updated,
         'has_edit_primary': has_edit_primary,
