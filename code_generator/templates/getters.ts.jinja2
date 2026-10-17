@@ -827,7 +827,13 @@ export async function get{{ parent_pascal }}VersionHistory(identityId: string) {
     select: { current_version_id: true },
   });
   const currentVersionId = rows.some((r) => r.id === current?.current_version_id) ? current?.current_version_id ?? null : null;
-  return { rows: toPlain(rows) as unknown as Array<Record<string, unknown>>, currentVersionId };
+  // Whether the caller may create a {{ parent }}: the "New version" link on the identity's detail screen is shown only then.
+  const { permissions } = await getModelPermissions('{{ parent }}');
+  return {
+    rows: toPlain(rows) as unknown as Array<Record<string, unknown>>,
+    currentVersionId,
+    canCreateVersion: permissions.general.create,
+  };
 }
 
 /** Two versions of the same {{ version_of.identity }} in full. Throws NOT_FOUND unless both are visible to the caller. */
