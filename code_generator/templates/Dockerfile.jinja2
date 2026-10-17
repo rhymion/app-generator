@@ -13,9 +13,14 @@ COPY package*.json ./
 RUN npm install --no-audit --no-fund
 
 # =====================
-# Stage 2: builder
+# Stage 2: task-runner
 # =====================
-FROM node:{{ node_version | default('22') }}-alpine AS builder
+# Everything `npm run task:run-all` needs and nothing more: the full node_modules
+# (tsx and the Prisma CLI are devDependencies, so they are not pruned), the source
+# tree, the generated code and the Prisma client. It stops before `next build`
+# because the scheduled-task runner executes through tsx and never reads `.next`.
+# `scripts/gcp-task-runner.sh` builds this stage (`--target task-runner`).
+FROM node:{{ node_version | default('22') }}-alpine AS task-runner
 WORKDIR /app
 RUN apk add --no-cache python3 py3-pip
 COPY --from=deps /app/node_modules ./node_modules
@@ -24,10 +29,17 @@ RUN pip3 install -r requirements.txt --break-system-packages
 RUN npm run generate-code
 RUN npx prisma generate
 ENV NODE_ENV=production
+
+# =====================
+# Stage 3: builder
+# =====================
+# Adds the Next.js production build on top of the task-runner stage. This stage is
+# also the image `scripts/gcp-deploy.sh` runs `prisma migrate deploy` from.
+FROM task-runner AS builder
 RUN npm run build
 
 # =====================
-# Stage 3: runner
+# Stage 4: runner
 # =====================
 FROM node:{{ node_version | default('22') }}-alpine AS runner
 WORKDIR /app

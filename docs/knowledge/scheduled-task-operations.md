@@ -666,14 +666,31 @@ For a nightly run of every task, use the task-runner Job below instead.
 `npm run task:run-all` every night. The app itself can stay on Vercel; only
 the trigger lives on GCP. It creates:
 
-- a Cloud Run Job `task-runner` (image built from the Dockerfile's `builder`
-  stage; command `npm run task:run-all`; one task, no retries)
+- a Cloud Run Job `task-runner` (image built from the Dockerfile's
+  `task-runner` stage; command `npm run task:run-all`; one task, no retries)
 - a Cloud Scheduler job `task-runner-nightly` that POSTs to the Cloud Run
   Jobs API (`.../jobs/task-runner:run`) with an OAuth token
 - two service accounts: `task-runner-sa` (the Job's runtime identity, with
   access to its own secrets only) and `task-runner-invoker-sa` (may run this
   one Job, via `roles/run.invoker` on the Job)
 - one Secret Manager secret per key in the secrets file (below)
+
+The `task-runner` stage installs dependencies, runs `generate-code` and
+`prisma generate`, and stops there: `next build` never runs, because the Job
+executes `scripts/scheduled-task-run.ts` through `tsx` and never reads `.next`.
+DevDependencies stay in the image because `tsx` and the Prisma CLI are among
+them. The Dockerfile's `builder` stage extends `task-runner` with `npm run
+build`, so the migrate image that `gcp-deploy.sh` builds (`--target builder`) is
+unchanged. Set `TASK_RUNNER_DOCKER_TARGET=builder` to build the heavier image.
+
+Measured on the dogfood schema (`docker build --no-cache`, one machine, two
+runs under shared load): the `next build` step took about 51 s and the image is
+535 MB for `task-runner` against 749 MB for `builder` (29% smaller). Total wall
+time was 419 s and 380 s respectively, so run-to-run variance in `npm install`
+(137-166 s) was larger than the saved step on this schema; the saving grows with
+the number of generated entities, since `next build` scales with them while the
+other stages do not. With a warm layer cache, a handler-only change rebuilds
+from `COPY . .` and no longer pays for `next build`.
 
 Try it on a separate project first:
 
