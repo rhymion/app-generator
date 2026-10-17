@@ -465,11 +465,13 @@ def derive_searchable_relation_fields(properties: dict, schema: dict) -> list[di
 
     A composite `labelField` ([f1, f2]) is evaluated element by element —
     each qualifying element contributes its own `{relation, field}` entry.
-    Two kinds of element are excluded:
-      - dotted paths (`approver_role.name`): resolving the FK's *own*
-        FK to another entity would need a second nested `where` hop, which
-        getters.ts.jinja2 does not render (one-hop only; no schema case
-        needs it today — see docs/knowledge/label-field-search-semantics.md).
+    A dotted element (`test_case_version.title`) resolves one more hop
+    through one of the target's own FKs and yields `{relation, via, field}`,
+    rendered as a two-level nested `where`. Two kinds of element are excluded:
+      - dotted paths with more than one extra hop, or whose first segment is
+        not an FK of the target (`approver_role.name` on a target without
+        that FK): getters.ts.jinja2 renders at most two nested levels — see
+        docs/knowledge/label-field-search-semantics.md.
       - non-string-searchable fields: same filter as `derive_text_fields`
         (string type, no `enum`, not a date/uri `format`, not a CUID-pattern
         id) — `contains` is a string-only Prisma operator, and an enum's
@@ -488,9 +490,21 @@ def derive_searchable_relation_fields(properties: dict, schema: dict) -> list[di
         relation_name = field_name.removesuffix('_id') if field_name.endswith('_id') else field_name
         target_props = get_entity_properties(target, schema)
         for path in _label_field_paths(label_field):
+            via = None
+            lookup_props = target_props
+            lookup_name = path
             if '.' in path:
-                continue
-            final_prop = target_props.get(path)
+                # Exactly one more hop through one of the target's own FKs
+                # (`<fk>.<column>`); longer paths stay excluded.
+                via, _, lookup_name = path.partition('.')
+                if '.' in lookup_name:
+                    continue
+                via_prop = target_props.get(f'{via}_id')
+                via_target = ((via_prop or {}).get('x-relationship') or {}).get('target') if isinstance(via_prop, dict) else None
+                if not via_target:
+                    continue
+                lookup_props = get_entity_properties(via_target, schema)
+            final_prop = lookup_props.get(lookup_name)
             if not isinstance(final_prop, dict):
                 continue
             if not is_string_prop(final_prop):
@@ -502,7 +516,10 @@ def derive_searchable_relation_fields(properties: dict, schema: dict) -> list[di
             pattern = final_prop.get('pattern', '')
             if pattern and re.search(r'\^c\[a-z0-9\]', pattern):
                 continue
-            result.append({'relation': relation_name, 'field': path})
+            entry = {'relation': relation_name, 'field': lookup_name}
+            if via:
+                entry['via'] = via
+            result.append(entry)
     return result
 
 
