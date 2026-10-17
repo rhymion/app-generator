@@ -1791,6 +1791,10 @@ marked) and shows the changes between any two of them, by default the current ve
   the diff then lists additions and removals only and says so. Child values are shown as plain text.
 - **From a version.** On a draft version's own screen the approval section shows **Compare with current version**,
   which opens the identity's detail screen with that draft preselected (`?compare=<version id>`).
+- **New version link.** The section header shows a **New version** button that opens
+  `/<version>/new?new_version_of=<identity id>` (the new version screen below). It appears only when the caller may
+  create the version entity (`get<Version>VersionHistory` returns `canCreateVersion`) and the identity has a current
+  version; without one the screen would only show an alert. An open draft is not hidden here: the screen reports it.
 - **Messages.** The text lives in the `VersionHistory` section of `messages/*.json`.
 
 The key is opt-in; a schema without it generates the same output as before.

@@ -5,6 +5,7 @@
 // reads and the per-field renderer (the detail screen's own markup).
 import { useTranslations } from 'next-intl';
 import { useSearchParams } from 'next/navigation';
+import { Link as NextLink } from '@/i18n/navigation';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -29,10 +30,12 @@ export type { ChildSpec };
 
 export type VersionHistoryPanelProps = {
   identityId: string;
+  /** Create screen of the version entity, prefilled from this identity's current version. */
+  newVersionHref: string;
   numberField: string;
   fields: string[];
   childSpecs: ChildSpec[];
-  getHistory: (identityId: string) => Promise<{ rows: Row[]; currentVersionId: string | null }>;
+  getHistory: (identityId: string) => Promise<{ rows: Row[]; currentVersionId: string | null; canCreateVersion: boolean }>;
   getDiff: (identityId: string, leftId: string, rightId: string) => Promise<{ left: Row; right: Row }>;
   renderField: (row: Row, field: string) => ReactNode;
 };
@@ -43,13 +46,14 @@ function show(value: unknown): string {
 }
 
 export default function VersionHistoryPanel({
-  identityId, numberField, fields, childSpecs, getHistory, getDiff, renderField,
+  identityId, newVersionHref, numberField, fields, childSpecs, getHistory, getDiff, renderField,
 }: VersionHistoryPanelProps) {
   const t = useTranslations('VersionHistory');
   const tf = useTranslations('Fields');
   const compareParam = useSearchParams().get('compare');
   const [rows, setRows] = useState<Row[] | null>(null);
   const [currentId, setCurrentId] = useState<string | null>(null);
+  const [canCreate, setCanCreate] = useState(false);
   const [leftId, setLeftId] = useState('');
   const [rightId, setRightId] = useState('');
   const [diff, setDiff] = useState<{ left: Row; right: Row } | null>(null);
@@ -62,6 +66,7 @@ export default function VersionHistoryPanel({
         if (cancelled) return;
         setRows(res.rows);
         setCurrentId(res.currentVersionId);
+        setCanCreate(res.canCreateVersion);
         const draft = res.rows.find((r) => r[numberField] == null);
         const target = res.rows.find((r) => r.id === compareParam) ?? draft ?? res.rows[0];
         const base = res.rows.find((r) => r.id === res.currentVersionId && r.id !== target?.id)
@@ -109,7 +114,14 @@ export default function VersionHistoryPanel({
 
   return (
     <Box sx={{ mt: 3 }} data-testid="version-history">
-      <Typography variant="h6">{t('title')}</Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
+        <Typography variant="h6">{t('title')}</Typography>
+        {canCreate && currentId && (
+          <Button component={NextLink} href={newVersionHref} variant="outlined" size="small" data-testid="new-version-link">
+            {t('newVersion')}
+          </Button>
+        )}
+      </Box>
       {error && <Typography color="error" role="alert">{error}</Typography>}
       <Table size="small" data-testid="version-history-list">
         <TableHead>

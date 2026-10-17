@@ -197,6 +197,26 @@ describe('x-version-of (generated runtime behaviour)', () => {
     });
   });
 
+  it('offers a New version link on the identity detail screen once a version is current, and it opens the prefilled screen', () => {
+    createItem().then((itemId) => {
+      cy.login(TEST_CREDENTIALS.email, TEST_CREDENTIALS.password);
+      cy.visit(`/en/vo_item/view/${itemId}`);
+      cy.get("main").should("exist");
+      cy.get('[data-testid="new-version-link"]').should('not.exist');
+      createVersion(itemId, 'pending').then((res) => {
+        approve((res.body as { id: string }).id);
+        cy.visit(`/en/vo_item/view/${itemId}`);
+        cy.get('[data-testid="new-version-link"]').should('have.attr', 'href').and('include', `/vo_item_version/new?new_version_of=${itemId}`);
+        cy.get('[data-testid="new-version-link"]').click();
+        cy.location('pathname').should('match', /\/vo_item_version\/new$/);
+        cy.location('search').should('eq', `?new_version_of=${itemId}`);
+        cy.get('input').should(($inputs) => {
+          expect([...$inputs].map((i) => (i as HTMLInputElement).value), 'the screen opens filled').to.include('v-pending');
+        });
+      });
+    });
+  });
+
   it('ignores a version number sent by the client: create stores none, update keeps the stored value', () => {
     createItem().then((itemId) => {
       // a form submits an empty numeric field as 0; two such rows must not collide on (identity, number)

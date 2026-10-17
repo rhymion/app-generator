@@ -121,6 +121,7 @@ _CUSTOM_COMPONENT_SECTIONS: dict[str, dict[str, dict[str, str]]] = {
             'status': 'Status',
             'created': 'Created',
             'compare': 'Compare',
+            'newVersion': 'New version',
             'compareFrom': 'From',
             'compareTo': 'To',
             'diffTitle': 'Changes between versions',
