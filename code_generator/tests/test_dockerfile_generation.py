@@ -82,3 +82,31 @@ def test_both_files_are_tracked_by_the_manifest_and_cleaned_up(tmp_path, monkeyp
     assert cleanup._clean_from_manifest(out) is True
     assert not (out / 'Dockerfile').exists()
     assert not (out / '.dockerignore').exists()
+
+
+def _stage_body(dockerfile: str, name: str) -> str:
+    """Return the text of one Dockerfile stage, from its FROM line up to the next FROM."""
+    parts = dockerfile.split('\nFROM ')
+    for part in parts:
+        header = part.split('\n', 1)[0]
+        if header.endswith(f' AS {name}'):
+            return part
+    raise AssertionError(f'stage {name!r} not found')
+
+
+def test_task_runner_stage_skips_next_build_but_generates_code_and_prisma_client(tmp_path):
+    dockerfile = (_build(tmp_path, True) / 'Dockerfile').read_text()
+    stage = _stage_body(dockerfile, 'task-runner')
+    assert 'npm run generate-code' in stage
+    assert 'npx prisma generate' in stage
+    assert 'npm run build' not in stage
+    assert 'COPY --from=deps /app/node_modules' in stage  # keeps tsx and the Prisma CLI
+
+
+def test_builder_stage_extends_task_runner_and_adds_the_next_build(tmp_path):
+    dockerfile = (_build(tmp_path, True) / 'Dockerfile').read_text()
+    assert '\nFROM task-runner AS builder' in dockerfile
+    assert 'npm run build' in _stage_body(dockerfile, 'builder')
+    # The runner stage still takes the standalone output from builder.
+    assert 'COPY --from=builder' in _stage_body(dockerfile, 'runner')
+    assert dockerfile.rstrip().endswith('CMD ["node", "server.js"]')

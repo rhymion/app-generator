@@ -11,7 +11,7 @@
 #      only) and an invoker SA for Cloud Scheduler (may run this one Job only)
 #   4. Secret Manager secrets, one per KEY in the task-runner env file
 #      (every variable reaches the Job as a secret, bucket names included)
-#   5. The task-runner image (built from the Dockerfile's `builder` stage)
+#   5. The task-runner image (built from the Dockerfile's `task-runner` stage, which skips `next build`)
 #   6. The Cloud Run Job, running `npm run task:run-all`
 #   7. The Cloud Scheduler job that POSTs to the Cloud Run Jobs API `:run`
 #
@@ -64,6 +64,8 @@ TASK_RUNNER_NPM_SCRIPT="${TASK_RUNNER_NPM_SCRIPT:-task:run-all}"
 # Cron expression + IANA time zone for the nightly trigger.
 TASK_RUNNER_SCHEDULE="${TASK_RUNNER_SCHEDULE:-0 2 * * *}"
 TASK_RUNNER_TIME_ZONE="${TASK_RUNNER_TIME_ZONE:-Asia/Tokyo}"
+# Dockerfile stage the image is built from. `task-runner` skips the Next.js build.
+TASK_RUNNER_DOCKER_TARGET="${TASK_RUNNER_DOCKER_TARGET:-task-runner}"
 TASK_RUNNER_TASK_TIMEOUT="${TASK_RUNNER_TASK_TIMEOUT:-3600s}"
 TASK_RUNNER_ENV_FILE="${TASK_RUNNER_ENV_FILE:-${PROJECT_ROOT}/.env.task-runner.production.local}"
 # Keys that must be present and non-empty in the env file. DATABASE_URL should
@@ -291,15 +293,18 @@ if [[ -n "$TASK_RUNNER_BUCKET_ROLES" ]]; then
 fi
 
 # ── Step 5: Image ────────────────────────────────────────────────────────────
-# The `builder` stage carries the full source tree and node_modules (including
-# tsx), which is what `npm run task:run-all` needs. The slim runner stage does not.
+# The `task-runner` stage carries the full source tree, node_modules (including
+# tsx), the generated code and the Prisma client, which is what `npm run
+# task:run-all` needs, and skips `next build`. The slim runner stage does not carry
+# the source tree. Set TASK_RUNNER_DOCKER_TARGET=builder to build the previous,
+# heavier image.
 echo ""
 echo "=== Step 5: Image ==="
 if [[ "$SKIP_BUILD" == "true" ]]; then
   echo "[SKIP] SKIP_BUILD=true; using image ${TASK_RUNNER_IMAGE}"
 else
   run gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
-  run docker build -f "${PROJECT_ROOT}/Dockerfile" --target builder \
+  run docker build -f "${PROJECT_ROOT}/Dockerfile" --target "$TASK_RUNNER_DOCKER_TARGET" \
     -t "$TASK_RUNNER_IMAGE" "$PROJECT_ROOT"
   run docker push "$TASK_RUNNER_IMAGE"
 fi
