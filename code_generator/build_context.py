@@ -3089,7 +3089,8 @@ def build_context(entity: dict, schema: dict, has_reactions: bool = False) -> di
     # id. Match the row id too (an extra OR alternative; existing matches are unchanged).
     searchable_id = any(v['identity'] == model for v in version_of_entities(schema))
     searchable_fields_display = searchable_text_fields + [
-        f"{rf['relation']}.{rf['field']}" for rf in searchable_relation_fields
+        '.'.join(p for p in (rf['relation'], rf.get('via'), rf['field']) if p)
+        for rf in searchable_relation_fields
     ] + searchable_integer_fields + (['id'] if searchable_id else [])
     # Default ordering for the search action — newest entities are the most
     # likely autocomplete picks. Falls back to id when no audit column exists.

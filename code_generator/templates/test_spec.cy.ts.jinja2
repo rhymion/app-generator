@@ -115,7 +115,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}cy.url().should('not.include', '/{{ parent }}/');
 {% if can_list %}
 {{ I }}cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-{% if after_create_id_is_expr %}
+{% if after_create_blank %}
+{{ I }}// The new identity has no version yet, so its name cell is blank: assert the row itself.
+{{ I }}getDataGridTotalRowCount().should('eq', 1);
+{% elif after_create_id_is_expr %}
 {{ I }}cy.contains('.MuiDataGrid-cell', exactRe(deps.{{ primary_dep_var_for_list }}.name)).scrollIntoView().should('be.visible');
 {% else %}
 {{ I }}cy.contains(exactRe('{{ after_create_id }}')).scrollIntoView().should('be.visible');
@@ -214,7 +217,10 @@ describe('Testing {{ title }} pages and their behavior', () => {
 {{ I }}cy.url().should('not.include', '/{{ parent }}/');
 {% if can_list %}
 {{ I }}cy.get('.MuiDataGrid-virtualScroller').scrollTo('bottom', { ensureScrollable: false });
-{% if after_create_id_is_expr %}
+{% if after_create_blank %}
+{{ I }}// The new identity has no version yet, so its name cell is blank: assert the row itself.
+{{ I }}getDataGridTotalRowCount().should('eq', 1);
+{% elif after_create_id_is_expr %}
 {{ I }}cy.contains('.MuiDataGrid-cell', exactRe(deps.{{ primary_dep_var_for_list }}.name)).scrollIntoView().should('be.visible');
 {% else %}
 {{ I }}cy.contains(exactRe('{{ after_create_id }}')).scrollIntoView().should('be.visible');
