@@ -386,3 +386,23 @@ def test_version_diff_children_match_by_key_then_order_then_not_at_all():
         vo.version_of_children, bc._raw_def = orig_children, orig_raw
     assert [(c['match'], c['key_fields']) for c in out] == [('key', ['sku']), ('order', []), ('none', [])]
     assert out[0]['fields'] == ['sku', 'qty']
+
+
+def test_version_history_component_links_to_the_new_version_screen():
+    comp = _render(_make_env(), 'version_history.tsx.jinja2', {
+        'parent': 'product_version', 'parent_pascal': 'ProductVersion', 'identity': 'product',
+        'number': 'version_no', 'children': [],
+    })
+    assert 'newVersionHref={`/product_version/new?new_version_of=${encodeURIComponent(src.id)}`}' in comp
+
+
+def test_version_history_read_reports_whether_the_caller_may_create_a_version():
+    src = (pathlib.Path(__file__).parent.parent / 'templates' / 'getters.ts.jinja2').read_text()
+    assert "canCreateVersion: permissions.general.create" in src
+    assert "getModelPermissions('{{ parent }}')" in src
+
+
+def test_version_history_messages_include_the_new_version_label():
+    from generators_i18n import _collect_custom_component_sections
+    sections = _collect_custom_component_sections([{'definition_key': 'product'}], _schema())
+    assert sections['VersionHistory']['newVersion'] == 'New version'
