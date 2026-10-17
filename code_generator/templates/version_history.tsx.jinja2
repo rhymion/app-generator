@@ -17,6 +17,7 @@ export default function VersionHistory({ src }: { src: { id: string }; permissio
   return (
     <VersionHistoryPanel
       identityId={src.id}
+      newVersionHref={`/{{ parent }}/new?new_version_of=${encodeURIComponent(src.id)}`}
       numberField="{{ number }}"
       fields={VERSION_FIELDS}
       childSpecs={CHILDREN}

@@ -5,6 +5,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Changed
+- **An `x-version-of` identity's detail screen links to the new version screen** (Issue #968). The Version history section now has a **New version** button that opens `/<version>/new?new_version_of=<id>`. It is shown only when the caller may create the version entity and the identity has a current version. `get<Version>VersionHistory` also returns `canCreateVersion`, and the `VersionHistory` messages gain `newVersion`. No new schema key.
 - **The task-runner image skips the Next.js build** (Issue #1036). The generated `Dockerfile` has a new `task-runner` stage (dependencies, `generate-code`, `prisma generate`) and the `builder` stage now extends it with `npm run build`, so the migrate image used by `gcp-deploy.sh` is unchanged. `scripts/gcp-task-runner.sh` builds `--target task-runner` by default (`TASK_RUNNER_DOCKER_TARGET=builder` restores the previous image). No new schema key. Build time and image size are in `docs/knowledge/scheduled-task-operations.md`.
 - **The business date comes from `app_setting`** (Issue #1037). `is_pinned: true` uses the stored `business_date`;
   `is_pinned: false` uses today's date in the row's `timezone`; with no row the date is today in UTC. One resolver
