@@ -269,6 +269,10 @@ _VIEW_LEVEL_CONFIG_KEYS = (
 )
 
 
+# Marks an entity that is not itself a Prisma model as another view of one.
+_VIEW_OF_KEY = "x-view-of"
+
+
 def _make_yaml() -> YAML:
     yaml = YAML()
     yaml.preserve_quotes = True
@@ -310,6 +314,41 @@ def _validate_entity_names(user_definitions: dict, prisma_models: dict) -> None:
                 "from Prisma models. Rename your entity to avoid the '__' "
                 "prefix."
             )
+        if "fields" in entry:
+            raise UserSchemaError(
+                f"ERROR: Entity '{entity_key}' has a top-level 'fields:' key, "
+                "which is no longer supported: list its columns and relations "
+                "together under 'properties:'. Run "
+                "'python code_generator/migrate_fields_into_properties.py' "
+                "to rewrite the schema."
+            )
+        if entity_key in prisma_models and _VIEW_OF_KEY in entry:
+            raise UserSchemaError(
+                f"ERROR: Entity '{entity_key}' is a Prisma model and cannot "
+                f"carry '{_VIEW_OF_KEY}': that key marks an entity that is "
+                "not a model as another view of one."
+            )
+        if entity_key not in prisma_models:
+            if "allOf" in entry:
+                raise UserSchemaError(
+                    f"ERROR: Entity '{entity_key}' uses 'allOf', which is no "
+                    "longer supported in the user schema: name the model it "
+                    f"is a view of with '{_VIEW_OF_KEY}: <model>' instead."
+                )
+            view_of = entry.get(_VIEW_OF_KEY)
+            if view_of is None:
+                raise UserSchemaError(
+                    f"ERROR: Entity '{entity_key}' is not a Prisma model and "
+                    f"has no '{_VIEW_OF_KEY}'. Rename it to a Prisma model "
+                    f"name, or add '{_VIEW_OF_KEY}: <model>' to make it a "
+                    "view of one."
+                )
+            if view_of not in prisma_models or view_of not in user_definitions:
+                raise UserSchemaError(
+                    f"ERROR: Entity '{entity_key}' declares "
+                    f"'{_VIEW_OF_KEY}: {view_of}', but '{view_of}' is not "
+                    "both a Prisma model and an entity of this schema."
+                )
         if entity_key in prisma_models and "allOf" in entry:
             raise UserSchemaError(
                 f"ERROR: Entity '{entity_key}' in user schema is "
@@ -317,6 +356,147 @@ def _validate_entity_names(user_definitions: dict, prisma_models: dict) -> None:
                 f"'{entity_key}'. If you intend a different entity, rename "
                 "it or the Prisma model."
             )
+
+
+def _is_relation_field(pf, prisma_models: dict) -> bool:
+    """Whether Prisma field `pf` is a relation (object or back-relation list)
+    rather than a scalar/enum column. A back-relation list has
+    `is_relation_object=False` but its type is a model name, so the type is
+    what decides -- never the shape of the user's entry.
+    """
+    return pf.is_relation_object or pf.prisma_type in prisma_models
+
+
+def _ref_target(entry) -> str | None:
+    """Entity name a relation entry embeds, via `$ref` or `items.$ref`."""
+    if not isinstance(entry, dict):
+        return None
+    ref = entry.get("$ref") or (entry.get("items") or {}).get("$ref")
+    if isinstance(ref, str) and ref.startswith("#/definitions/"):
+        return ref[len("#/definitions/"):]
+    return None
+
+
+def _check_relation_entry(
+    entity_key: str,
+    prop_name: str,
+    prop,
+    pf,
+    user_definitions: dict,
+) -> None:
+    """Early checks on a relation entry: it must not carry `x-relationship`
+    (that annotation belongs on the `<name>_id` column), and the entity its
+    `$ref` embeds must be the model Prisma relates it to.
+    """
+    if isinstance(prop, dict) and "x-relationship" in prop:
+        raise UserSchemaError(
+            f"ERROR: '{entity_key}.{prop_name}' is a relation, so it cannot "
+            "carry 'x-relationship': put that annotation on the foreign-key "
+            "column ('<relation>_id') instead."
+        )
+    target = _ref_target(prop)
+    if target is None:
+        return
+    if target not in user_definitions:
+        raise UserSchemaError(
+            f"ERROR: '{entity_key}.{prop_name}' references unknown entity "
+            f"'{target}'."
+        )
+    resolved = (user_definitions[target] or {}).get(_VIEW_OF_KEY, target)
+    if resolved != pf.prisma_type:
+        raise UserSchemaError(
+            f"ERROR: '{entity_key}.{prop_name}' embeds '{target}', but "
+            f"Prisma relates it to '{pf.prisma_type}'."
+        )
+
+
+def _split_properties(
+    entity_key: str,
+    entry: dict,
+    model: "PrismaModel",
+    prisma_models: dict,
+    user_definitions: dict,
+) -> dict:
+    """Split the unified `properties:` of `entry` into the two inputs the rest
+    of the builder consumes: column specs (`fields`) for Prisma scalar/enum
+    columns and relation embeds (`properties`) for relations.
+
+    Each entry is classified by asking Prisma what the field is, never by the
+    entry's own shape (a scalar may carry `type:`, a relation may omit
+    `$ref`). Order within each group is the written order. A name Prisma does
+    not know is an error.
+    """
+    props = entry.get("properties")
+    if not props:
+        return entry
+    columns: dict = {}
+    relations: dict = {}
+    for prop_name, prop in props.items():
+        pf = model.fields.get(prop_name)
+        if pf is None:
+            raise UserSchemaError(
+                f"ERROR: '{entity_key}.{prop_name}' is not a field of Prisma "
+                f"model '{model.name}'."
+            )
+        if _is_relation_field(pf, prisma_models):
+            _check_relation_entry(entity_key, prop_name, prop, pf, user_definitions)
+            relations[prop_name] = prop
+        else:
+            columns[prop_name] = prop if prop is not None else {}
+    rebuilt: dict = {}
+    for key, value in entry.items():
+        if key == "properties":
+            if columns:
+                rebuilt["fields"] = columns
+            if relations:
+                rebuilt["properties"] = relations
+        else:
+            rebuilt[key] = value
+    return rebuilt
+
+
+def _build_view_of(
+    entity_key: str,
+    entry: dict,
+    prisma_models: dict,
+    user_definitions: dict,
+) -> dict:
+    """Rebuild the `allOf` wrapper of an entity that declares `x-view-of: K`.
+
+    The `$ref` points at `K` (the canonical view), never at `__K`: a proxy that
+    referenced the raw entity would be taken for the model's own canonical
+    screen. The intermediate shape is unchanged, so downstream `allOf` walkers
+    need no change.
+    """
+    model_key = entry[_VIEW_OF_KEY]
+    model = prisma_models[model_key]
+    props = entry.get("properties") or {}
+    for prop_name, prop in props.items():
+        pf = model.fields.get(prop_name)
+        if pf is None:
+            raise UserSchemaError(
+                f"ERROR: '{entity_key}.{prop_name}' is not a field of Prisma "
+                f"model '{model_key}'."
+            )
+        if not _is_relation_field(pf, prisma_models):
+            raise UserSchemaError(
+                f"ERROR: '{entity_key}.{prop_name}' is a column of "
+                f"'{model_key}'. A view of a model declares relation embeds "
+                "only; columns cannot be overridden per view."
+            )
+        _check_relation_entry(entity_key, prop_name, prop, pf, user_definitions)
+    second: dict = {"type": "object"}
+    if "required" in entry:
+        second["required"] = entry["required"]
+    if "properties" in entry:
+        second["properties"] = entry["properties"]
+    out: dict = {}
+    for key, value in entry.items():
+        if key == _VIEW_OF_KEY:
+            out["allOf"] = [{"$ref": f"#/definitions/{model_key}"}, second]
+        elif key not in ("required", "properties"):
+            out[key] = value
+    return out
 
 
 def _auto_infer_fk_fields(entry: dict, model: "PrismaModel") -> dict:
@@ -493,7 +673,12 @@ def build_intermediate_schema(
     _validate_entity_names(user_definitions, prisma_models)
 
     for entity_key, raw_entry in user_definitions.items():
-        entry = _annotate_parent_fks(raw_entry or {}, entity_key, prisma_models)
+        entry = raw_entry or {}
+        if entity_key in prisma_models:
+            entry = _split_properties(
+                entity_key, entry, prisma_models[entity_key], prisma_models, user_definitions
+            )
+        entry = _annotate_parent_fks(entry, entity_key, prisma_models)
         try:
             if entity_key in prisma_models and _has_view_level_config(entry):
                 raw, view = _build_raw_and_view(entity_key, entry, prisma_models, prisma_enums)
@@ -504,9 +689,11 @@ def build_intermediate_schema(
                     entity_key, entry, prisma_models, prisma_enums
                 )
             else:
-                # Pass-through: e.g. `setting`, a second view of `user`
-                # that has no raw entity of its own to eliminate.
-                out["definitions"][entity_key] = entry
+                # Another view of a model (e.g. `setting`, a second view of
+                # `user`): no raw entity of its own.
+                out["definitions"][entity_key] = _build_view_of(
+                    entity_key, entry, prisma_models, user_definitions
+                )
         except SchemaDivergenceError as exc:
             raise SchemaDivergenceError(f"entity '{entity_key}': {exc}") from exc
 
