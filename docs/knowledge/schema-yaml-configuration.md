@@ -1801,7 +1801,9 @@ The key is opt-in; a schema without it generates the same output as before.
 
 Verification: pytest `code_generator/tests/test_x_version_of.py` covers validation, context building and registration;
 `npm run test:version-of-e2e-gate` (CI job `version-of-e2e-gate-fixture`) generates and runs a fixture app with an
-identity and a version entity, because the default schema declares no `x-version-of`. The default schema's generated
+identity and a version entity, because the default schema declares no `x-version-of`. It also builds and runs the generated
+UI and API specs of an identity whose primary column is virtual (read from its current version) with `x-generate.test: true`,
+using a hand-written `virtual_resolvers.ts` the way a real app does. The default schema's generated
 output is unchanged (`npm run check:generated`).
 
 ---
