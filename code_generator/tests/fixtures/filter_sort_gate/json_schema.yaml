@@ -30,7 +30,7 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       name: {}
       email: {}
 
@@ -50,7 +50,7 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name: {}
       status:
         enum: ["open", "closed"]

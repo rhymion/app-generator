@@ -22,7 +22,7 @@
 #                                        link (parent list is read-only)
 definitions:
   lc_plain_child:
-    fields:
+    properties:
       name:
         minLength: 1
       lc_plain_parent_id:
@@ -42,9 +42,15 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name:
         minLength: 1
+      kids:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/lc_plain_child"
+
     required:
       - kids
     x-relationships:
@@ -52,13 +58,6 @@ definitions:
         type: one-to-many
         target: lc_plain_child
         labelField: name
-    properties:
-      kids:
-        type: array
-        x-outputType: list
-        items:
-          $ref: "#/definitions/lc_plain_child"
-
   lc_edit_child:
     x-generate:
       list: true
@@ -73,7 +72,7 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name:
         minLength: 1
       lc_edit_parent_id:
@@ -83,7 +82,7 @@ definitions:
         x-relationship: {}
 
   lc_edit_sibling:
-    fields:
+    properties:
       name:
         minLength: 1
       lc_edit_parent_id:
@@ -106,18 +105,9 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name:
         minLength: 1
-    required:
-      - kids
-      - sibs
-    x-relationships:
-      kids:
-        type: one-to-many
-        target: lc_edit_child
-        labelField: [name, rel_par.name]
-    properties:
       kids:
         type: array
         x-outputType: list
@@ -129,6 +119,14 @@ definitions:
         items:
           $ref: "#/definitions/lc_edit_sibling"
 
+    required:
+      - kids
+      - sibs
+    x-relationships:
+      kids:
+        type: one-to-many
+        target: lc_edit_child
+        labelField: [name, rel_par.name]
   lc_m2m_child:
     x-generate:
       list: true
@@ -143,7 +141,7 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name:
         minLength: 1
 
@@ -161,9 +159,15 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name:
         minLength: 1
+      kids:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/lc_m2m_child"
+
     required:
       - kids
     x-relationships:
@@ -171,13 +175,6 @@ definitions:
         type: many-to-many
         target: lc_m2m_child
         labelField: name
-    properties:
-      kids:
-        type: array
-        x-outputType: list
-        items:
-          $ref: "#/definitions/lc_m2m_child"
-
   lc_node:
     x-generate:
       list: true
@@ -192,11 +189,17 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name:
         minLength: 1
       lc_node_id:
         pattern: "^c[a-z0-9]{24,}$"
+      kids:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/lc_node"
+
     required:
       - kids
     x-relationships:
@@ -204,13 +207,6 @@ definitions:
         type: one-to-many
         target: lc_node
         labelField: name
-    properties:
-      kids:
-        type: array
-        x-outputType: list
-        items:
-          $ref: "#/definitions/lc_node"
-
   lc_ro_child:
     x-generate:
       list: true
@@ -225,7 +221,7 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name:
         minLength: 1
       lc_ro_parent_id:
@@ -245,9 +241,15 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name:
         minLength: 1
+      kids:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/lc_ro_child"
+
     required:
       - kids
     x-relationships:
@@ -255,13 +257,6 @@ definitions:
         type: one-to-many
         target: lc_ro_child
         labelField: name
-    properties:
-      kids:
-        type: array
-        x-outputType: list
-        items:
-          $ref: "#/definitions/lc_ro_child"
-
   lc_req_child:
     x-generate:
       list: true
@@ -276,7 +271,7 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name:
         minLength: 1
       lc_req_parent_id:
@@ -296,9 +291,14 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name:
         minLength: 1
+      kids:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/lc_req_child"
     required:
       - kids
     x-relationships:
@@ -306,9 +306,3 @@ definitions:
         type: one-to-many
         target: lc_req_child
         labelField: name
-    properties:
-      kids:
-        type: array
-        x-outputType: list
-        items:
-          $ref: "#/definitions/lc_req_child"

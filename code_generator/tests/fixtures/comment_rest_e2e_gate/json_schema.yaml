@@ -27,7 +27,7 @@ definitions:
       table:
         - title:
             primary: true
-    fields:
+    properties:
       title: {}
       organization_id:
         x-relationship:
@@ -37,13 +37,12 @@ definitions:
           type: one-to-one_bridge
           target: commentable
           labelField: id
-    required:
-      - title
-      - organization_id
-    properties:
       commentable:
         $ref: "#/definitions/commentable"
 
+    required:
+      - title
+      - organization_id
   cr_asset:
     x-generate:
       list: true
@@ -64,7 +63,7 @@ definitions:
         target:
           - view
           - edit
-    fields:
+    properties:
       title: {}
       organization_id:
         x-relationship:
@@ -74,9 +73,8 @@ definitions:
           type: one-to-one_bridge
           target: attachable
           labelField: id
+      attachable:
+        $ref: "#/definitions/attachable"
     required:
       - title
       - organization_id
-    properties:
-      attachable:
-        $ref: "#/definitions/attachable"

@@ -35,7 +35,7 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       name: {}
       email: {}
 
@@ -52,7 +52,7 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name: {}
       amount: {}
 
@@ -72,13 +72,12 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       name: {}
       oto_decimal_gate_target_id:
         x-relationship:
           type: one-to-one
           target: oto_decimal_gate_target
           labelField: name
-    properties:
       oto_decimal_gate_target:
         $ref: "#/definitions/oto_decimal_gate_target"

@@ -33,7 +33,7 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name: {}
     required:
       - name
@@ -50,7 +50,7 @@ definitions:
       test: false
     required:
       - line_code
-    fields:
+    properties:
       vo_item_version_id: {}
       line_code: {}
       note: {}
@@ -90,7 +90,7 @@ definitions:
     x-version-of:
       identity: vo_item
       number: version_no
-    fields:
+    properties:
       vo_item_id:
         x-relationship:
           labelField: name
@@ -118,11 +118,6 @@ definitions:
         x-relationship:
           type: one-to-one_bridge
           labelField: id
-    required:
-      - vo_item_id
-      - organization_id
-      - title
-    properties:
       approvable:
         $ref: "#/definitions/approvable"
       attachable:
@@ -132,6 +127,10 @@ definitions:
         items:
           $ref: "#/definitions/vo_item_version_line"
 
+    required:
+      - vo_item_id
+      - organization_id
+      - title
   vo_doc:
     x-generate:
       list: true
@@ -146,7 +145,7 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name: {}
     required:
       - name
@@ -180,7 +179,7 @@ definitions:
     x-version-of:
       identity: vo_doc
       number: version_no
-    fields:
+    properties:
       vo_doc_id:
         x-relationship:
           labelField: name
@@ -202,15 +201,14 @@ definitions:
         x-relationship:
           type: one-to-one_bridge
           labelField: id
-    required:
-      - vo_doc_id
-      - title
-    properties:
       approvable:
         $ref: "#/definitions/approvable"
       attachable:
         $ref: "#/definitions/attachable"
 
+    required:
+      - vo_doc_id
+      - title
   vo_page:
     x-generate:
       list: true
@@ -226,7 +224,7 @@ definitions:
         - title:
             primary: true
         - code: {}
-    fields:
+    properties:
       code: {}
     required:
       - code
@@ -260,7 +258,7 @@ definitions:
     x-version-of:
       identity: vo_page
       number: version_no
-    fields:
+    properties:
       vo_page_id:
         x-relationship:
           labelField: id
@@ -282,11 +280,10 @@ definitions:
         x-relationship:
           type: one-to-one_bridge
           labelField: id
-    required:
-      - vo_page_id
-      - title
-    properties:
       approvable:
         $ref: "#/definitions/approvable"
       attachable:
         $ref: "#/definitions/attachable"
+    required:
+      - vo_page_id
+      - title

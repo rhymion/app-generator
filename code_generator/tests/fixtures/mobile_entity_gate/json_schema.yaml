@@ -36,7 +36,7 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       name: {}
       email: {}
       image_id:
@@ -60,7 +60,7 @@ definitions:
             primary: true
         - status: {}
         - priority: {}
-    fields:
+    properties:
       title:
         x-trigram-filter: true
       details: {}
@@ -109,7 +109,7 @@ definitions:
       - name: WidgetEditNote
         target:
           - edit
-    fields:
+    properties:
       title: {}
       secret:
         x-custom-component:
@@ -141,7 +141,7 @@ definitions:
       table:
         - message:
             primary: true
-    fields:
+    properties:
       message: {}
     required:
       - message
@@ -160,7 +160,7 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name: {}
     required:
       - name
@@ -179,7 +179,7 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name: {}
     required:
       - name
@@ -198,7 +198,7 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name: {}
     required:
       - name
@@ -223,7 +223,7 @@ definitions:
         type: many-to-many
         target: mobile_tag
         labelField: name
-    fields:
+    properties:
       title: {}
       mobile_group_id:
         x-relationship:
@@ -238,7 +238,6 @@ definitions:
           labelField: name
         # The picker forwards the group chosen in the same form to the target's autocomplete filter.
         x-autocomplete-context: [mobile_group_id]
-    properties:
       mobile_profile:
         $ref: "#/definitions/mobile_profile"
       tags:
@@ -269,11 +268,10 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name: {}
       parent_id:
         x-relationship: {}
-    properties:
       parent:
         $ref: "#/definitions/mobile_step"
       children:
@@ -299,7 +297,7 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name: {}
     required:
       - name
@@ -321,7 +319,7 @@ definitions:
         - name:
             primary: true
         - entity_name: {}
-    fields:
+    properties:
       name: {}
       entity_name:
         x-entity-select: true
@@ -343,7 +341,7 @@ definitions:
       table:
         - title:
             primary: true
-    fields:
+    properties:
       title: {}
       mobile_category_id:
         x-relationship:
@@ -371,7 +369,7 @@ definitions:
       table:
         - title:
             primary: true
-    fields:
+    properties:
       title: {}
       file_id:
         x-relationship:
@@ -402,7 +400,7 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name: {}
       stripe_price_id: {}
     required:
@@ -425,9 +423,8 @@ definitions:
       table:
         - invoice_no:
             primary: true
-    fields:
-      invoice_no: {}
     properties:
+      invoice_no: {}
       lines:
         type: array
         items:
@@ -436,7 +433,7 @@ definitions:
       - invoice_no
 
   mobile_invoice_line:
-    fields:
+    properties:
       description: {}
       quantity:
         minimum: 1
@@ -463,7 +460,7 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       type:
         enum:
           - image
@@ -509,7 +506,7 @@ definitions:
         items:
           $ref: "#/definitions/comment"
   comment:
-    fields:
+    properties:
       message: {}
       commentable_id: {}
   reaction:
@@ -517,7 +514,7 @@ definitions:
       page: false
       embed: false
       api: custom
-    fields:
+    properties:
       type:
         enum:
           - like
@@ -552,14 +549,13 @@ definitions:
         target:
           - view
           - edit
-    fields:
+    properties:
       title: {}
       attachable_id:
         x-relationship:
           type: one-to-one_bridge
           target: attachable
           labelField: id
-    properties:
       attachable:
         $ref: "#/definitions/attachable"
     required:
@@ -579,14 +575,13 @@ definitions:
       table:
         - title:
             primary: true
-    fields:
+    properties:
       title: {}
       commentable_id:
         x-relationship:
           type: one-to-one_bridge
           target: commentable
           labelField: id
-    properties:
       commentable:
         $ref: "#/definitions/commentable"
     required:

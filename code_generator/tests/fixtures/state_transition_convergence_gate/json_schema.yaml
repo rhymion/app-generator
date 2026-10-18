@@ -27,7 +27,7 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       name: {}
       email: {}
 
@@ -57,7 +57,7 @@ definitions:
       table:
         - code:
             primary: true
-    fields:
+    properties:
       code: {}
       status:
         enum:
@@ -81,7 +81,7 @@ definitions:
       table:
         - code:
             primary: true
-    fields:
+    properties:
       code: {}
       stage:
         enum:

@@ -114,7 +114,7 @@ def test_declared_standard_offsets_match_the_real_zone_and_cover_every_offset():
 def test_prisma_enum_json_schema_and_mapping_list_the_same_members_in_the_same_order():
     prisma = _prisma_enum_members((REPO / 'prisma' / 'schema.prisma').read_text(), 'Timezone')
     schema = yaml.safe_load((REPO / 'code_generator' / 'json_schema.yaml').read_text())
-    declared = schema['definitions']['app_setting']['fields']['timezone']
+    declared = schema['definitions']['app_setting']['properties']['timezone']
     assert prisma == timezone_members()
     assert declared['enum'] == timezone_members()
     assert declared['default'] == DEFAULT_MEMBER
@@ -183,7 +183,7 @@ def test_the_dashboard_widget_column_is_typed_as_the_enum_with_the_utc_default()
 
 def test_the_dashboard_widget_schema_lists_the_same_members_as_the_enum():
     schema = yaml.safe_load((REPO / 'code_generator' / 'json_schema.yaml').read_text())
-    prop = schema['definitions']['dashboard_widget']['fields']['timezone']
+    prop = schema['definitions']['dashboard_widget']['properties']['timezone']
     assert prop['enum'] == timezone_members()
     assert prop['default'] == DEFAULT_MEMBER
 

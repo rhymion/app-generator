@@ -33,7 +33,7 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       name: {}
       email: {}
 
@@ -78,7 +78,7 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name: {}
       status:
         enum:
@@ -113,7 +113,7 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name: {}
       status:
         enum:
@@ -144,5 +144,4 @@ definitions:
     x-write-locked-values:
       status:
         - submitted
-    allOf:
-      - $ref: "#/definitions/write_lockdown_gate_item"
+    x-view-of: write_lockdown_gate_item

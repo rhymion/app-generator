@@ -191,18 +191,18 @@ def test_missing_prisma_schema_raises():
 
 
 def test_unknown_field_name_raises_divergence(tmp_path):
-    """R5: a `fields:` entry naming a column that doesn't exist in Prisma
-    is a divergence, not a silently-empty property."""
+    """A `properties:` entry naming a field that doesn't exist in Prisma
+    is an error, not a silently-empty property."""
     user_schema_path = tmp_path / "user_schema.yaml"
     user_schema_path.write_text(
         "definitions:\n"
         "  role:\n"
         "    x-generate: {list: true}\n"
-        "    fields:\n"
+        "    properties:\n"
         "      not_a_real_column: {}\n",
         encoding="utf-8",
     )
-    with pytest.raises(SchemaDivergenceError):
+    with pytest.raises(UserSchemaError, match="not_a_real_column"):
         build_user_schema(user_schema_path, PRISMA_SCHEMA_PATH, tmp_path / "out.yaml")
 
 
@@ -216,7 +216,7 @@ def test_reserved_dunder_prefix_entity_name_raises():
     prisma_models = parse_prisma_schema(PRISMA_SCHEMA_PATH)
     user_schema = {
         "definitions": {
-            "__role": {"x-generate": {"list": True}, "fields": {}},
+            "__role": {"x-generate": {"list": True}, "properties": {}},
         }
     }
     with pytest.raises(UserSchemaError, match="reserved"):
@@ -226,7 +226,7 @@ def test_reserved_dunder_prefix_entity_name_raises():
 def test_ordinary_entity_name_does_not_raise_reserved_prefix_error():
     """GREEN: an ordinary (non-`__`) entity name is unaffected."""
     prisma_models = parse_prisma_schema(PRISMA_SCHEMA_PATH)
-    user_schema = {"definitions": {"comment": {"fields": {}}}}
+    user_schema = {"definitions": {"comment": {"properties": {}}}}
     build_intermediate_schema(user_schema, prisma_models)  # must not raise
 
 
@@ -249,19 +249,15 @@ def test_prisma_model_named_pass_through_entity_raises():
         build_intermediate_schema(user_schema, prisma_models)
 
 
-def test_non_model_named_pass_through_entity_does_not_raise():
-    """GREEN: `setting` -- a pass-through entity whose name is NOT a
-    Prisma model -- is unaffected (this is the legitimate, existing
-    pattern the collision check must not break)."""
+def test_non_model_named_view_entity_does_not_raise():
+    """GREEN: `setting` -- an entity whose name is NOT a Prisma model but
+    which names the model it is a view of -- is unaffected (this is the
+    legitimate pattern the collision check must not break)."""
     prisma_models = parse_prisma_schema(PRISMA_SCHEMA_PATH)
     user_schema = {
         "definitions": {
-            "setting": {
-                "allOf": [
-                    {"$ref": "#/definitions/user"},
-                    {"type": "object"},
-                ],
-            },
+            "user": {"properties": {}},
+            "setting": {"x-view-of": "user"},
         }
     }
     build_intermediate_schema(user_schema, prisma_models)  # must not raise
@@ -275,9 +271,9 @@ def test_standalone_entity_properties_key_does_not_clobber_derived_scalars():
     """RED (pre-fix): `_build_standalone_raw()` used to do a plain
     `raw[key] = value` for every key in the user schema entry, including
     `properties`. For a standalone entity (no view-level config key) that
-    declares BOTH `fields:` (scalars) and `properties:` (a relation embed,
+    declares BOTH columns (scalars) and a relation embed (
     e.g. a polymorphic FK's owner side), that overwrote the scalar
-    `properties` dict `derive_raw_entity` had just built from `fields:`
+    `properties` dict `derive_raw_entity` had just built from the columns
     wholesale with only the relation embed -- every derived scalar
     (id/type/name/... ) silently vanished, and any TS-generation code that
     reads a scalar off `_raw_def(entity, schema)['properties']` (e.g.
@@ -292,13 +288,11 @@ def test_standalone_entity_properties_key_does_not_clobber_derived_scalars():
     user_schema = {
         "definitions": {
             "attachment": {
-                "fields": {
+                "properties": {
                     "type": {"enum": ["image", "file", "video", "audio"], "_required": True},
                     "name": {},
                     "path": {"format": "uri"},
                     "attachable_id": {},
-                },
-                "properties": {
                     "attachable": {"$ref": "#/definitions/attachable"},
                 },
             },
@@ -309,7 +303,7 @@ def test_standalone_entity_properties_key_does_not_clobber_derived_scalars():
 
     # The user-declared relation embed survives...
     assert raw_properties["attachable"] == {"$ref": "#/definitions/attachable"}
-    # ...alongside every scalar derive_raw_entity built from fields:, not
+    # ...alongside every scalar derive_raw_entity built from the columns, not
     # instead of them.
     assert raw_properties["type"]["enum"] == ["image", "file", "video", "audio"]
     assert raw_properties["name"] == {"type": "string"}
@@ -385,12 +379,12 @@ def test_merge_internal_definitions_fills_missing_entity(tmp_path):
         encoding="utf-8",
     )
     user_schema_path = tmp_path / "json_schema.yaml"  # need not exist on disk
-    user_schema = {"definitions": {"role": {"fields": {}}}}
+    user_schema = {"definitions": {"role": {"properties": {}}}}
 
     _merge_internal_definitions(user_schema, user_schema_path, _make_yaml())
 
     assert user_schema["definitions"]["attachable"] == {"x-generate": {"list": False}}
-    assert user_schema["definitions"]["role"] == {"fields": {}}
+    assert user_schema["definitions"]["role"] == {"properties": {}}
 
 
 def test_merge_internal_definitions_user_definition_wins(tmp_path):
@@ -414,11 +408,11 @@ def test_merge_internal_definitions_missing_file_is_noop(tmp_path):
     """No json_schema_internal.yaml next to the user schema (e.g. an
     existing, pre-cmd_438i project) leaves the user schema untouched."""
     user_schema_path = tmp_path / "json_schema.yaml"
-    user_schema = {"definitions": {"role": {"fields": {}}}}
+    user_schema = {"definitions": {"role": {"properties": {}}}}
 
     _merge_internal_definitions(user_schema, user_schema_path, _make_yaml())
 
-    assert user_schema["definitions"] == {"role": {"fields": {}}}
+    assert user_schema["definitions"] == {"role": {"properties": {}}}
 
 
 def test_default_schema_bridge_entities_are_unaffected_by_internal_file(tmp_path):

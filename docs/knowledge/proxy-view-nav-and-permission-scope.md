@@ -2,9 +2,9 @@
 
 A proxy view is an entity whose `parent` (its own view/route name, e.g.
 `setting1`) differs from its `model` (the underlying Prisma model it
-proxies, e.g. `xxxxx_xxxxx`) -- declared as a pass-through `allOf` wrapper
-in the user schema (see `build_user_schema.py`'s module docstring,
-"Anything else ... is a pass-through"). `setting` (proxies `user`) is the
+proxies, e.g. `xxxxx_xxxxx`) -- declared in the user schema with
+`x-view-of: <model>` (see `build_user_schema.py`'s module docstring); the
+builder expands it into the `allOf` wrapper the generator reads. `setting` (proxies `user`) is the
 framework's own example; a consumer schema can declare more (a demo
 fixture like `setting1`/`setting2` sharing one model is the motivating
 case here).
@@ -70,7 +70,7 @@ raw `__`-prefixed entity, never the view.
 ## 3. `grant-all-permissions` seed scope (`generators.py`'s `seed_entities_context()`)
 
 Used to require a definitions entry to carry a direct `id` property --
-which structurally excludes every proxy view (they're an `allOf`
+which structurally excludes every proxy view (in the built schema they're an `allOf`
 wrapper, never own `id` directly), `setting` included. That's the wrong
 axis: `requirePermission()` (`lib/authz.ts`, called from
 `actions.ts.jinja2`) is keyed to each entity's own `parent`/route name,
@@ -78,7 +78,7 @@ not the underlying Prisma model, so a proxy view needs its **own**
 grant-all-permissions entry -- granting only the shared model leaves
 every proxy view's own route ungranted.
 
-Fixed: a proxy view (`allOf`-wrapper, no direct `id`) is now included
+Fixed: a proxy view (`x-view-of`, no direct `id`) is now included
 too, UNLESS it declares `x-self-only: {admin_bypass: true}` -- the
 actual, schema-driven reason `setting` alone should stay excluded (an
 Administrator already reaches it via `trySelfOnlyAdminBypass()`, so a

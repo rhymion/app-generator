@@ -2,7 +2,7 @@
 
 An entity that is a cross-entity search target (x-generator.search.default_scope / x-generate.search)
 gets a list search box over its search trigram columns by default, and shares their COALESCE `_v2`
-GIN indexes. A column annotated `x-trigram-filter: true` under `fields:` adds itself (also on an entity
+GIN indexes. A column annotated `x-trigram-filter: true` in the entity's `properties:` adds itself (also on an entity
 that is not a search target) and its own index; `false` removes it from the box. An entity that is not
 a search target and declares nothing has no box and no index.
 """
@@ -132,13 +132,13 @@ def test_fields_annotation_reaches_the_internal_schema_and_survives_reverse_conv
     intermediate = build_intermediate_schema(user, prisma_models, parse_prisma_enums(prisma_path))
     prop = intermediate['definitions']['__mobile_note']['properties']['title']
     assert prop['x-trigram-filter'] is True
-    # Reverse conversion keeps the annotation under the entity's fields:.
+    # Reverse conversion keeps the annotation under the entity's properties:.
     legacy = {'definitions': {
         'mobile_note': {'type': 'object', 'properties': {'title': {'type': 'string', 'x-trigram-filter': True}}},
         'mobile_note_detail': {'allOf': [{'$ref': '#/definitions/mobile_note'}, {'type': 'object'}]},
     }}
     back = convert_to_user_schema(legacy, prisma_models)
-    assert back['definitions']['mobile_note']['fields']['title']['x-trigram-filter'] is True
+    assert back['definitions']['mobile_note']['properties']['title']['x-trigram-filter'] is True
 
 
 def test_getter_falls_back_to_contains_beyond_the_id_limit(linked):
