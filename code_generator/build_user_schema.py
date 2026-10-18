@@ -75,6 +75,7 @@ import sys
 from pathlib import Path
 
 from ruamel.yaml import YAML
+from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 
 from schema_deriver import (
     SchemaDivergenceError,
@@ -397,12 +398,7 @@ def _check_relation_entry(
     target = _ref_target(prop)
     if target is None:
         return
-    if target not in user_definitions:
-        raise UserSchemaError(
-            f"ERROR: '{entity_key}.{prop_name}' references unknown entity "
-            f"'{target}'."
-        )
-    resolved = (user_definitions[target] or {}).get(_VIEW_OF_KEY, target)
+    resolved = (user_definitions.get(target) or {}).get(_VIEW_OF_KEY, target)
     if resolved != pf.prisma_type:
         raise UserSchemaError(
             f"ERROR: '{entity_key}.{prop_name}' embeds '{target}', but "
@@ -485,15 +481,18 @@ def _build_view_of(
                 "only; columns cannot be overridden per view."
             )
         _check_relation_entry(entity_key, prop_name, prop, pf, user_definitions)
-    second: dict = {"type": "object"}
-    if "required" in entry:
-        second["required"] = entry["required"]
-    if "properties" in entry:
-        second["properties"] = entry["properties"]
+    allof: list = [{"$ref": DoubleQuotedScalarString(f"#/definitions/{model_key}")}]
+    if "required" in entry or "properties" in entry:
+        second: dict = {"type": "object"}
+        if "required" in entry:
+            second["required"] = entry["required"]
+        if "properties" in entry:
+            second["properties"] = entry["properties"]
+        allof.append(second)
     out: dict = {}
     for key, value in entry.items():
         if key == _VIEW_OF_KEY:
-            out["allOf"] = [{"$ref": f"#/definitions/{model_key}"}, second]
+            out["allOf"] = allof
         elif key not in ("required", "properties"):
             out[key] = value
     return out
