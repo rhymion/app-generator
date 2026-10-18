@@ -36,5 +36,9 @@ based on `internal` or `consumer`.
 
 ## `x-retention`
 
-`x-retention` is documented beside `x-pii` and `x-gdpr-mode` at the top of `code_generator/json_schema.yaml`, but
-`validate.py` does not check it and nothing reads it. A value has no effect on generated code.
+| | |
+|---|---|
+| Place | A top-level documentation block in `code_generator/json_schema.yaml` (repeated in the test fixtures and in a consumer's `prj/` copy); no field or model in the default schema uses it |
+| Type | Free text, for example `account_lifetime` or `30_days_after_deletion` |
+| Validation | None: `validate.py` does not mention it |
+| Effect | None: no generator code and no template reads it, so a value changes no generated file |
