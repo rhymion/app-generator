@@ -61,12 +61,12 @@ test.describe('Native list: sort, filter and search', () => {
     await expect(titles(page)).toHaveCount(3);
   });
 
-  test('the search box matches the title column through the filter parameter', async ({ page }) => {
+  test('the search box matches the title column through the search parameter', async ({ page }) => {
     await openList(page);
     await seed(page, 'Search');
     let param = '';
     page.on('request', (request) => {
-      if (request.url().includes('/api/mobile_note?')) param = new URL(request.url()).searchParams.get('f.title') ?? param;
+      if (request.url().includes('/api/mobile_note?')) param = new URL(request.url()).searchParams.get('search') ?? param;
     });
     await page.getByTestId('list-search').fill('Search charl');
     await expect(titles(page)).toHaveCount(1);

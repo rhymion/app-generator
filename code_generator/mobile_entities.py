@@ -698,9 +698,10 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
         })
         sort_keys.append(relation)
         filter_keys.append(relation)
-    # The search box matches the first text column of the list row (else the first text field).
-    text_keys = [f['key'] for f in fields if f['kind'] == KIND_TEXT and not f.get('write_only')]
-    search_key = next((k for k in list_keys if k in text_keys), text_keys[0] if text_keys else None)
+    # The search box matches the columns declared `x-trigram-filter: true`; an entity that
+    # declares none has no search box.
+    field_keys = {f['key'] for f in fields}
+    search_keys = [k for k in (ctx.get('trigram_search_fields') or []) if k in field_keys]
     slots = custom_component_slots(ctx)
     return {
         'name': ctx['parent'],
@@ -711,7 +712,7 @@ def build_mobile_entity_spec(ctx: dict, validation_ctx: dict, title, api_entitie
         'relation_columns': relation_columns,
         'sort_keys': sort_keys,
         'filter_keys': filter_keys,
-        'search_key': search_key,
+        'search_keys': search_keys,
         'can_new': bool(ctx.get('can_create')),
         'can_edit': bool(ctx.get('can_update')),
         'can_view': bool(ctx.get('can_view')),

@@ -48,10 +48,10 @@ export const {{ const_name }}_QUERY_FIELDS: FieldSpec[] = [...{{ const_name }}_F
 /** Keys of the columns shown on a list row; the first is the row's title. */
 export const {{ const_name }}_LIST_KEYS: string[] = {{ list_keys_json }};
 
-/** Keys the REST list can sort on, filter on, and the one the search box matches. */
+/** Keys the REST list can sort on, filter on, and the `x-trigram-filter` columns the search box matches. */
 export const {{ const_name }}_SORT_KEYS: string[] = {{ sort_keys_json }};
 export const {{ const_name }}_FILTER_KEYS: string[] = {{ filter_keys_json }};
-export const {{ const_name }}_SEARCH_KEY: string | null = {{ search_key_json }};
+export const {{ const_name }}_SEARCH_KEYS: string[] = {{ search_keys_json }};
 
 export async function fetch{{ pascal }}Page(opts: PageOpts = {}): Promise<PageResult<{{ pascal }}>> {
   return apiFetch<PageResult<{{ pascal }}>>(`/api/{{ name }}${buildQuery(opts)}`);

@@ -5,7 +5,7 @@
 Every generated entity list (`/{entity}`) has a panel above the grid (Desktop Web) or the cards
 (Mobile Web) with:
 
-- **Search.** A search box that matches the list's title column.
+- **Search.** A search box that matches the entity's trigram search columns ([list-panel-trigram-filter.md](list-panel-trigram-filter.md)). An entity with no such column has no search box.
 - **Sort.** A sort panel with every sortable column. A tap on a column cycles ascending, descending
   and off. Several columns can be sorted at once; the order they were chosen in is their priority
   (the chip shows `↑ 1`, `↓ 2`, …).
@@ -39,11 +39,11 @@ agree on:
 
 | Export | Meaning |
 |---|---|
-| `ListQuerySpec` | What one entity's panel offers: `fields` (`key`, `label`, `kind`, enum `options` and `optionLabels`), `sortKeys`, `filterKeys`, `searchKey` |
+| `ListQuerySpec` | What one entity's panel offers: `fields` (`key`, `label`, `kind`, enum `options` and `optionLabels`), `sortKeys`, `filterKeys`, `searchKeys` |
 | `ListQueryState` | What the user entered: `search`, `sort` (priority order), `filters` (text per field key) |
 | `cycleSort(sort, key, multi)` | Ascending, then descending, then off. With `multi` the column joins the other sort columns; without it, it replaces them (the native list sorts one column at a time) |
 | `setFilterValue`, `countActiveFilters` | Set or clear one field's filter, count the filtered fields |
-| `toListQuery(state, spec)` | The REST list request: `{ sort, filter }`. Sort columns and filters the spec does not offer are dropped. The search text goes through `filter[searchKey]`; when that column also has a filter, the search text wins |
+| `toListQuery(state, spec)` | The REST list request: `{ sort, filter }`. Sort columns and filters the spec does not offer are dropped. The search text is sent as `search` and matches any of `searchKeys`; it applies together with the filters |
 | `filterChoices(field, booleanLabel)` | The fixed choices of an enum or boolean field, or `null` for free text |
 
 `lib/_list_query.test.ts` covers the module. `code_generator/tests/test_list_query_panel.py` checks
@@ -68,8 +68,13 @@ list accepts:
 - `label` is `Fields.<camelCase key>` when the translation exists and the title-cased column name
   otherwise.
 - An enum column also carries `optionLabels` when the list translates its members for display.
-- `searchKey` is the primary column when it is text, else the first displayed text column, else the
-  first text column; an entity with no text column has no search box.
+- `searchKeys` are the entity's trigram search columns ([list-panel-trigram-filter.md](list-panel-trigram-filter.md));
+  an entity with none has no search box.
+
+## Search columns and trigram indexes
+
+Which columns the search box matches, the `x-trigram-filter` override and how the indexes are created are in
+[list-panel-trigram-filter.md](list-panel-trigram-filter.md).
 
 ## How the Web lists use it
 
@@ -93,6 +98,8 @@ server-paged (`fetchPage`); a list without it behaves as before.
   several filtered fields, enum labels, clearing, debounced typing.
 - `components/_standard/ResponsiveListClient.listQuery.test.tsx` — the request each layout sends
   (desktop and phone-sized viewport), and a header click replacing the panel sort.
+- `code_generator/tests/test_trigram_filter.py` — the search columns (search target default,
+  `true` / `false` overrides), the shared `_v2` indexes, validation and the `fields:` round trip.
 - `code_generator/tests/test_list_query_panel.py` — the generated spec, the clients' wiring and the
   Expo copy.
 - `cypress/e2e/list_query_panel.cy.ts` (desktop) and `cypress/e2e/mobile/list_query_panel.cy.ts`

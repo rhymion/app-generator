@@ -71,6 +71,8 @@ export type PageOpts = {
   pageSize?: number;
   sort?: SortItem[];
   filter?: FilterMap;
+  /** Text matched against the entity's `x-trigram-filter` columns; ignored by an entity with none. */
+  search?: string;
 };
 
 export type PageResult<T> = {
@@ -305,5 +307,7 @@ export function parsePageOpts(searchParams: URLSearchParams): PageOpts {
     if (k.startsWith('f.')) filter[k.slice(2)] = v;
   }
 
-  return { page, pageSize, sort, filter };
+  const search = searchParams.get('search')?.trim();
+
+  return { page, pageSize, sort, filter, ...(search ? { search } : {}) };
 }

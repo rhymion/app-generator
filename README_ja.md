@@ -351,6 +351,7 @@ client に差し替えます。本番相当の環境では決して有効にな�
 - **クエリタイムアウト**（`lib/prisma.ts`）: 直結接続（PrismaPg）パスにはデフォルト30秒の `statement_timeout` が適用されます。`STATEMENT_TIMEOUT_MS` で設定変更可能（`0` で無効化）。この直結パスが全環境のデフォルトです — Accelerate（`PRISMA_DATABASE_URL`）はオプトインでデフォルト無効、有効化した場合は `statement_timeout` を転送しないため対象外です。
 - **FK インデックス網羅**: `scripts/add_required_indexes.py` が `@relation` の FK カラムを自動検出し `@@index` を追加します（ジェネレーターのデモスキーマは18本から36本へ増加）。
 - **検索用 pg_trgm + tsvector GIN インデックス**: `generate-code` が `instrumentation.ts` を生成し、サーバーのcold start毎（Vercel・GCP/Cloud Run いずれも）に `lib/db-init.ts` の `ensureSearchIndexes()` を呼んで自動作成します。`scripts/create-gin-indexes.sql` は手動/migration時のfallbackです — `gin_trgm_ops` による `prisma migrate dev` のドリフトループを避けるため `prisma/schema.prisma` の外に置いています。
+- **一覧の検索ボックス**: 横断検索の対象エンティティは、一覧にtrigram検索列を対象とする検索ボックスを持ち、検索と同じGINインデックスを共有します。列単位の `x-trigram-filter: true` / `false`（`fields:` の下）で列を追加・除外できます — [`docs/knowledge/list-panel-trigram-filter.md`](docs/knowledge/list-panel-trigram-filter.md) を参照。
 - **検索の `COUNT(*)` オプトアウト**: `SearchOpts.count: false` でエンティティ横断検索の2本の `COUNT(*)` クエリをスキップできます（`total: -1` を返却）。
 
 [docs/knowledge/performance-improvements.md](docs/knowledge/performance-improvements.md) を参照してください。

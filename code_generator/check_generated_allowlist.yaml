@@ -59,3 +59,13 @@ exemptions:
       builder; every user-supplied value is bound via Prisma.sql/${}
       parameters (issue #737). See
       code_generator/templates/search_helpers.ts.jinja2 header comment.
+  # List panel trigram search: lib/_trigram_query.ts selects the ids that match the search box
+  # text. The query is a tagged Prisma.sql built by the generated getter -- table and column
+  # names are literals fixed at generate-code time, the user's text is a bound parameter. Prisma's
+  # query builder renders the bare column, which the COALESCE trigram index does not serve.
+  - path: lib/_trigram_query.ts
+    pattern: raw:queryRaw
+    substring: "prisma.$queryRaw<"
+    reason: >-
+      Id lookup on the COALESCE expression the trigram GIN index is built on; the SQL is a
+      generation-time literal and the search text is bound via Prisma.sql.

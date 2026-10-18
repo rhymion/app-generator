@@ -47,7 +47,8 @@ definitions:
         - status: {}
         - priority: {}
     fields:
-      title: {}
+      title:
+        x-trigram-filter: true
       details: {}
       status:
         enum: ["open", "closed"]
@@ -187,7 +188,8 @@ definitions:
         target: mobile_tag
         labelField: name
     fields:
-      title: {}
+      title:
+        x-trigram-filter: true
       mobile_group_id:
         x-relationship:
           labelField: name

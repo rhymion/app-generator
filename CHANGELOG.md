@@ -4,6 +4,15 @@ The format is based on Keep a Changelog (https://keepachangelog.com/),
 and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
+### Added
+- **List search box over trigram columns, `x-trigram-filter`** (Issue #1051). An entity that is a cross-entity search
+  target now has a search box on its list that matches its search trigram columns (the union of `text_fields` and
+  `bigm_fields`) as a case-insensitive substring, served by the existing `_v2` COALESCE trigram indexes. The new
+  column-level boolean `x-trigram-filter`, set under `fields:`, overrides it: `true` adds a column (also on an entity that
+  is not a search target) and indexes it, `false` removes it from the box. An entity that is not a search target and declares
+  nothing is unchanged. The list's `search` parameter and the `listQuery.searchKeys` spec replace the title-column
+  `searchKey`. See `docs/knowledge/list-panel-trigram-filter.md`.
+
 ### Changed
 - **`x-pii`, `x-retention` and `x-gdpr-mode` are documented against the generator's actual behavior.** Only `x-pii` on the
   `user` entity changes generated code (the field set `anonymizeUser()` scrubs); `x-gdpr-mode` is validated and `x-retention`

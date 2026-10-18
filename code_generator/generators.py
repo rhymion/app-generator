@@ -680,7 +680,7 @@ _LIST_QUERY_FILTER_KINDS = ('text', 'number', 'decimal', 'boolean', 'enum')
 _LIST_QUERY_ID_COLUMNS = frozenset({'id', 'creator_id', 'assignee_id'})
 
 
-def _list_query_code(ctx: dict, primary_field: str, enum_ns_list: list[dict]) -> str:
+def _list_query_code(ctx: dict, enum_ns_list: list[dict]) -> str:
     """The object literal of the list's `listQuery` prop (lib/_list_query.ts `ListQuerySpec`).
 
     Built from the same allow-list the REST list reads (`sort_filter_fields`, the per-column kinds
@@ -710,14 +710,9 @@ def _list_query_code(ctx: dict, primary_field: str, enum_ns_list: list[dict]) ->
     enum_label_vars = {
         e['var_name']: e for e in enum_ns_list if e.get('is_native_enum')
     }
-    displayed = [list(item.keys())[0] for item in (ctx.get('xdisplay_table') or [])]
-    text_keys = [key for key, kind in panel_fields if kind == 'text']
-    # The search box matches the list's title column: the primary column, else the first displayed
-    # text column, else the first text column.
-    search_key = next(
-        (k for k in [primary_field, *displayed] if k and k in text_keys),
-        text_keys[0] if text_keys else None,
-    )
+    # The search box matches the columns declared `x-trigram-filter: true`; an entity that declares
+    # none has no search box.
+    search_keys = list(ctx.get('trigram_search_fields') or [])
 
     def fields_code() -> str:
         lines = []
@@ -744,7 +739,7 @@ def _list_query_code(ctx: dict, primary_field: str, enum_ns_list: list[dict]) ->
         f"          fields: [\n{fields_code()},\n          ],\n"
         f"          sortKeys: {keys_code(sort_keys)},\n"
         f"          filterKeys: {keys_code(filter_keys)},\n"
-        f"          searchKey: {repr(search_key) if search_key else 'null'},\n"
+        f"          searchKeys: {keys_code(search_keys)},\n"
         "        }"
     )
 
@@ -958,7 +953,7 @@ def page_list_context(ctx: dict, schema: dict | None = None) -> dict:
             elif actual == 'string' and prop.get('x-decimal-scale') is not None:
                 add_formatting(field_name, _decimal_expr_for(field_name, prop['x-decimal-scale']))
 
-    list_query_code = _list_query_code(ctx, primary_field, enum_ns_list)
+    list_query_code = _list_query_code(ctx, enum_ns_list)
 
     needs_formatting = bool(formatting_entries)
     formatted_var    = f'formatted{parent_pascal}s'

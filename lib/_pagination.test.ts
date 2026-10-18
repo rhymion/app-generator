@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildFilter, buildOrderBy } from './_pagination';
+import { buildFilter, buildOrderBy, parsePageOpts } from './_pagination';
 
 /**
  * Per-kind × operator coverage for buildFilter/buildOrderBy's clause-shape
@@ -302,5 +302,22 @@ describe('buildOrderBy', () => {
         relations,
       ),
     ).toEqual([{ name: 'desc' }, { assignee: { name: 'asc' } }]);
+  });
+});
+
+describe('parsePageOpts search', () => {
+  it('reads the trimmed search text', () => {
+    expect(parsePageOpts(new URLSearchParams('search=%20nut%20')).search).toBe('nut');
+  });
+
+  it('leaves search unset when absent or blank', () => {
+    expect('search' in parsePageOpts(new URLSearchParams(''))).toBe(false);
+    expect('search' in parsePageOpts(new URLSearchParams('search=%20%20'))).toBe(false);
+  });
+
+  it('keeps the search apart from the f.<field> filters', () => {
+    const opts = parsePageOpts(new URLSearchParams('search=a&f.name=b'));
+    expect(opts.search).toBe('a');
+    expect(opts.filter).toEqual({ name: 'b' });
   });
 });

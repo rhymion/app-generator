@@ -25,7 +25,7 @@ const spec: ListQuerySpec = {
   ],
   sortKeys: ['name', 'qty', 'status'],
   filterKeys: ['name', 'qty', 'status'],
-  searchKey: 'name',
+  searchKeys: ['name'],
 };
 
 const rows: Row[] = [
@@ -142,7 +142,7 @@ describe.each([
     await waitFor(() => expect(lastOpts(fetchPage).filter).toEqual({ name: 'bo', qty: '5', status: 'open' }));
   });
 
-  it('searches the title column and keeps the sort and the other filters', async () => {
+  it('sends the search text as `search` and keeps the sort and the other filters', async () => {
     renderList(fetchPage);
     await userEvent.click(screen.getByTestId('list-sort-toggle'));
     await userEvent.click(screen.getByTestId('list-sort-name'));
@@ -152,7 +152,8 @@ describe.each([
     await waitFor(() =>
       expect(lastOpts(fetchPage)).toMatchObject({
         sort: [{ field: 'name', dir: 'asc' }],
-        filter: { status: 'closed', name: 'nu' },
+        filter: { status: 'closed' },
+        search: 'nu',
       }),
     );
   });

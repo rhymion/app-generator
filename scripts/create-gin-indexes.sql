@@ -13,20 +13,20 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_role_name_gin_trgm"
   ON "role" USING GIN ("name" gin_trgm_ops);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_role_description_gin_trgm"
   ON "role" USING GIN ("description" gin_trgm_ops);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_role_name_gin_trgm_v2"
-  ON "role" USING GIN ((COALESCE("name", '')) gin_trgm_ops);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_role_description_gin_trgm_v2"
-  ON "role" USING GIN ((COALESCE("description", '')) gin_trgm_ops);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_organization_name_gin_trgm"
   ON "organization" USING GIN ("name" gin_trgm_ops);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_organization_description_gin_trgm"
   ON "organization" USING GIN ("description" gin_trgm_ops);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_dashboard_name_gin_trgm"
+  ON "dashboard" USING GIN ("name" gin_trgm_ops);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_role_name_gin_trgm_v2"
+  ON "role" USING GIN ((COALESCE("name", '')) gin_trgm_ops);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_role_description_gin_trgm_v2"
+  ON "role" USING GIN ((COALESCE("description", '')) gin_trgm_ops);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_organization_name_gin_trgm_v2"
   ON "organization" USING GIN ((COALESCE("name", '')) gin_trgm_ops);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_organization_description_gin_trgm_v2"
   ON "organization" USING GIN ((COALESCE("description", '')) gin_trgm_ops);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_dashboard_name_gin_trgm"
-  ON "dashboard" USING GIN ("name" gin_trgm_ops);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_dashboard_name_gin_trgm_v2"
   ON "dashboard" USING GIN ((COALESCE("name", '')) gin_trgm_ops);
 

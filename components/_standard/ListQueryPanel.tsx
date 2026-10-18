@@ -82,7 +82,7 @@ export default function ListQueryPanel({ spec, value, onChange }: ListQueryPanel
   return (
     <Box data-testid="list-query-panel" sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
       <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-        {spec.searchKey ? (
+        {spec.searchKeys.length > 0 ? (
           <TextField
             size="small"
             value={search}
