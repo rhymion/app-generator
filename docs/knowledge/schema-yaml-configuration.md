@@ -418,6 +418,22 @@ mistaken for the model's own screen. The following are build errors:
 - A scalar column in a proxy's `properties:`; only relation/array entries are accepted there. A
   proxy's own `x-display` has no effect (the view resolves the model's), so put it on the model.
 
+### Migrating a schema that still has `fields:`
+
+`code_generator/migrate_fields_into_properties.py` rewrites a user schema in place: each entity's
+`fields:` entries move to the front of its `properties:` (original order kept), and an `allOf`
+proxy becomes `x-view-of`. Only entity-level keys are touched; `x-generate.fields` and similar
+keys are left alone. Run it without `--in-place` first: the dry run lists what the old format
+silently ignored (a `properties:` name Prisma does not have, an entity that is neither a model nor
+a proxy) and refuses to write while any entity is blocked.
+
+```bash
+python3 code_generator/migrate_fields_into_properties.py prj/code_generator/json_schema.yaml \
+  --prisma prisma/schema.prisma            # dry run
+python3 code_generator/migrate_fields_into_properties.py prj/code_generator/json_schema.yaml \
+  --prisma prisma/schema.prisma --in-place
+```
+
 ---
 
 ## 3. `x-generate` — Generation Flags
