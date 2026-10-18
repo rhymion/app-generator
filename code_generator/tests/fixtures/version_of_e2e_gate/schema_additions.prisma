@@ -127,3 +127,55 @@ model vo_doc_version {
   @@index([creator_id])
   @@index([updater_id])
 }
+
+enum VoPageVersionStatus {
+  draft
+  revise
+  pending
+  approved
+}
+
+// The identity has no content column of its own: its primary column (title) is virtual
+// and is read from the current version.
+model vo_page {
+  id                 String           @id @default(cuid())
+  code               String           @unique
+  current_version_id  String?          @unique
+  current_version    vo_page_version? @relation("VoPageCurrent", fields: [current_version_id], references: [id], onDelete: SetNull)
+  versions           vo_page_version[] @relation("VoPageVersions")
+  created_at         DateTime         @default(now()) @db.Timestamptz(0)
+  updated_at         DateTime         @updatedAt @db.Timestamptz(0)
+  creator_id         String
+  creator            user             @relation("VoPageCreator", fields: [creator_id], references: [id])
+  updater_id         String
+  updater            user             @relation("VoPageUpdater", fields: [updater_id], references: [id])
+
+  @@index([creator_id])
+  @@index([updater_id])
+}
+
+model vo_page_version {
+  id            String              @id @default(cuid())
+  vo_page_id    String
+  vo_page       vo_page             @relation("VoPageVersions", fields: [vo_page_id], references: [id], onDelete: Cascade)
+  current_of    vo_page?            @relation("VoPageCurrent")
+  title         String
+  version_no    Int?
+  status        VoPageVersionStatus @default(draft)
+  approvable_id String              @unique
+  approvable    approvable          @relation(fields: [approvable_id], references: [id], onDelete: Cascade)
+  attachable_id String              @unique
+  attachable    attachable          @relation(fields: [attachable_id], references: [id])
+  created_at    DateTime            @default(now()) @db.Timestamptz(0)
+  updated_at    DateTime            @updatedAt @db.Timestamptz(0)
+  creator_id    String
+  creator       user                @relation("VoPageVersionCreator", fields: [creator_id], references: [id])
+  updater_id    String
+  updater       user                @relation("VoPageVersionUpdater", fields: [updater_id], references: [id])
+
+  @@unique([vo_page_id, version_no])
+  @@index([vo_page_id])
+  @@index([title])
+  @@index([creator_id])
+  @@index([updater_id])
+}

@@ -13,6 +13,11 @@
 #   vo_item_version_line  one level of owned children of a version.
 #   vo_doc, vo_doc_version  a second identity/version pair whose rejection is NOT terminal:
 #                         a rejected or withdrawn version stays the open draft.
+#   vo_page, vo_page_version  a third pair whose identity has a VIRTUAL primary column: the identity
+#                         declares no title of its own (only a code), its list shows the title of the current
+#                         version. Its identity enables x-generate.test, so the generated UI spec
+#                         (populate helper creating the paired version, list/create/edit/delete)
+#                         is built and run by the real gate.
 definitions:
   vo_item:
     x-generate:
@@ -199,6 +204,86 @@ definitions:
           labelField: id
     required:
       - vo_doc_id
+      - title
+    properties:
+      approvable:
+        $ref: "#/definitions/approvable"
+      attachable:
+        $ref: "#/definitions/attachable"
+
+  vo_page:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-display:
+      table:
+        - title:
+            primary: true
+        - code: {}
+    fields:
+      code: {}
+    required:
+      - code
+
+  vo_page_version:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: false
+    x-display:
+      table:
+        - title:
+            primary: true
+    x-approval:
+      submit_on:
+        status: pending
+      on_approved:
+        set_fields:
+          status: approved
+      on_rejected:
+        set_fields:
+          status: revise
+      on_withdrawn:
+        set_fields:
+          status: draft
+    x-version-of:
+      identity: vo_page
+      number: version_no
+    fields:
+      vo_page_id:
+        x-relationship:
+          labelField: id
+      title: {}
+      version_no: {}
+      status:
+        enum:
+          - draft
+          - revise
+          - pending
+          - approved
+        default: draft
+      approvable_id:
+        x-relationship:
+          type: one-to-one_bridge
+          target: approvable
+          labelField: id
+      attachable_id:
+        x-relationship:
+          type: one-to-one_bridge
+          labelField: id
+    required:
+      - vo_page_id
       - title
     properties:
       approvable:

@@ -5,6 +5,11 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Changed
+- **The `version_of_e2e_gate` fixture covers an `x-version-of` identity with a virtual primary column and `x-generate.test: true`** (Issue #1049). 
+  The new `vo_page` / `vo_page_version` pair is built and run by `npm run test:version-of-e2e-gate`, including its generated UI and 
+  API specs. This exposed that the paired version was never created for such an identity in a real generated schema: the 
+  pairing required the identity to list `current_version_id` among its properties, which x-version-of does not add. The 
+  requirement is removed, so `populate<Identity>Data()` now creates the version and makes it current. No new schema key.
 - **Generated autocomplete search resolves a two-hop `labelField`** (Issue #1050). `labelField: test_case_version.title` 
   on a foreign key to an entity that points at a version used to be skipped, so the picker returned no option for any text. 
   One extra hop through the target's own foreign key is now rendered as a two-level nested `where`; longer paths and paths 

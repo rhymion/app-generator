@@ -26,7 +26,7 @@ def _env() -> Environment:
     return env
 
 
-def _schema(virtual_primary: bool = True) -> dict:
+def _schema(virtual_primary: bool = True, declare_current_version: bool = True) -> dict:
     identity = {
         'type': 'object',
         'required': ['id'],
@@ -40,6 +40,10 @@ def _schema(virtual_primary: bool = True) -> dict:
             },
         },
     }
+    if not declare_current_version:
+        # The shape a real generated schema has: the identity declares no current_version_id
+        # property (x-version-of reads the Prisma column), so the pairing must not depend on it.
+        del identity['properties']['current_version_id']
     if not virtual_primary:
         identity['properties']['code'] = {'type': 'string'}
         identity['required'].append('code')
@@ -75,6 +79,12 @@ def test_pairing_data_for_a_virtual_primary_identity():
     assert pairing['identity_fk'] == 'widget_id'
     assert pairing['prim'] == 'name'
     assert pairing['extra_required_fields'] == []
+
+
+def test_pairing_does_not_need_current_version_id_among_the_identity_properties():
+    pairing = _identity_version_for_virtual_primary('widget', 'name', _schema(declare_current_version=False))
+    assert pairing is not None
+    assert pairing['version'] == 'widget_version'
 
 
 def test_no_pairing_when_the_primary_column_is_the_identitys_own():

@@ -14,6 +14,8 @@ copy it is pointed at and never on the repository's own schema files:
     before generate-code so the write-once stub is not written over it, and
   * cypress/support/<entity>/helper_custom.ts <- custom_helper/<entity>.ts, placed
     before generate-code so the write-once test-helper hook stub is not written over it, and
+  * lib/<entity>/virtual_resolvers.ts <- custom_virtual_resolvers/<entity>.ts, placed
+    before generate-code so the write-once virtual-column resolver stub is not written over it, and
   * lib/scheduled-tasks/<task_id>/service_scheduled_handler.ts <- scheduled_task_handlers/<task_id>.ts,
     placed before generate-code so the write-once handler stub is not written over it, and
     a top-level x-scheduled-tasks list (added to the default schema when it declares none), and
@@ -105,6 +107,14 @@ def compose_custom_helper(fixture_dir: Path, app_dir: Path) -> None:
         target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
 
 
+def compose_custom_virtual_resolvers(fixture_dir: Path, app_dir: Path) -> None:
+    # Optional, like compose_custom_validation.
+    for source in sorted((fixture_dir / "custom_virtual_resolvers").glob("*.ts")):
+        target = app_dir / "lib" / source.stem / "virtual_resolvers.ts"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+
+
 def compose_scheduled_task_handlers(fixture_dir: Path, app_dir: Path) -> None:
     # Optional: scheduled_task_handlers/<task_id>.ts replaces the write-once handler stub of that
     # task, placed before generate-code so the stub is not written over it.
@@ -123,6 +133,7 @@ def main(argv: list[str]) -> int:
     compose_prisma(fixture_dir, app_dir)
     compose_custom_validation(fixture_dir, app_dir)
     compose_custom_helper(fixture_dir, app_dir)
+    compose_custom_virtual_resolvers(fixture_dir, app_dir)
     compose_scheduled_task_handlers(fixture_dir, app_dir)
     return 0
 

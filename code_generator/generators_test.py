@@ -870,7 +870,7 @@ def _identity_version_for_virtual_primary(model_name: str, prim: str | None, sch
     if not vo or not prim:
         return None
     identity_props = (_raw_def(model_name, schema) or {}).get('properties') or {}
-    if prim in identity_props or f'{prim}_id' in identity_props or 'current_version_id' not in identity_props:
+    if prim in identity_props or f'{prim}_id' in identity_props:
         return None
     version_def = _raw_def(vo['version'], schema) or {}
     prim_prop = (version_def.get('properties') or {}).get(prim)

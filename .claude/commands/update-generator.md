@@ -448,7 +448,7 @@ docs-only diff exactly like `e2e-tests`; locally it always runs. See
 `scripts/check_version_of_e2e_gate_fixture.sh` copies the working tree into a
 disposable `.generated-version-of-e2e-gate/`, merges
 `code_generator/tests/fixtures/version_of_e2e_gate/` into the copy, builds it and
-runs only that fixture's Cypress API specs, with its own docker compose project,
+runs that fixture's Cypress API specs plus the generated UI and API specs of `vo_page` (an identity with a virtual primary column and `x-generate.test: true`), with its own docker compose project,
 ports and `AUTH_SECRET`. The default schema declares no `x-version-of` entity, so
 step 15 never generates `lib/<version>/version_of.ts`; the specs cover the number
 assigned at approval, the (identity, number) uniqueness, at most one open draft

@@ -135,10 +135,14 @@ cd "$BUILD_DIR"
 echo "-- npm run test:e2e:build (docker up, generate-code, db:push, seed, next build) --"
 NODE_ENV=test npm run test:e2e:build
 
+# The fixture's own specs plus the specs generated for vo_page, the identity with a virtual
+# primary column and x-generate.test: true (generated UI spec and generated API spec).
+DEFAULT_SPEC="cypress/e2e/version_of_e2e_gate/**/*.cy.ts,cypress/e2e/vo_page.cy.ts,cypress/e2e/api/vo_page.cy.ts"
+
 echo "-- cypress: fixture specs --"
 set +e
 NODE_ENV=test PAYMENT_FAKE_STRIPE=1 node scripts/run-e2e.js test:e2e:start \
-  "cypress run --browser chromium --spec \"${GATE_SPEC:-cypress/e2e/version_of_e2e_gate/**/*.cy.ts}\""
+  "cypress run --browser chromium --spec \"${GATE_SPEC:-$DEFAULT_SPEC}\""
 status=$?
 set -e
 
