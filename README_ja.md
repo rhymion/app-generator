@@ -94,7 +94,7 @@ YAML スキーマ定義から本番対応の Web アプリケーションを生�
 ### 監査・コンプライアンス
 
 - **監査ログ** — 全エンティティの作成・更新・削除操作を横断表示する、スキーマ非依存の read-only ビューア（`app/[locale]/audit_log/page.tsx`）
-- **GDPR / データ保護** — `x-pii` フィールド分類（`direct`/`sensitive`/`indirect`）、`anonymizeUser()` 消去関数、`x-gdpr-mode` によるデータ主体区分の分類（`internal`/`consumer`/`both`。スキーマ検証のみで生成コードへの反映は未実装）、添付ファイル名の AES-256-GCM at-rest 暗号化、コメント内の `x-mention` ユーザーメンション解析
+- **GDPR / データ保護** — `x-pii` フィールド分類（`direct`/`sensitive`/`indirect`）、`anonymizeUser()` 消去関数、`x-gdpr-mode` によるデータ主体区分の分類（`internal`/`consumer`/`both`。スキーマ検証のみで生成コードへの影響なし）、添付ファイル名の AES-256-GCM at-rest 暗号化、コメント内の `x-mention` ユーザーメンション解析
 - **利用規約 / プライバシーポリシー**（`/[locale]/legal/terms`、`/[locale]/legal/privacy`）— 登録画面から導線を張ったMarkdown雛形文書。文書の言語追加は `content/legal/<doc>.<locale>.md` ファイルを追加するのみで、サイトUIの言語一覧とは独立（詳細は `docs/knowledge/legal-documents.md`）
 
 ### その他
@@ -303,8 +303,8 @@ npm run docker:down:dev  # 作業終了時にデータベースを停止
 **監査ログ** — `audit_log` モデル上に構築された、スキーマ非依存の read-only ビューア（`app/[locale]/audit_log/page.tsx`）で、全生成エンティティの作成・更新・削除操作を横断表示します。`lib/audit_log/getters.ts` が FK JOIN でアクター（実行ユーザー）を解決し、`CardListPagination` でページネーションします。生JSONの `metadata` は admin 専用の詳細ページでのみ表示されます。`audit_log` モデルのカラム自体は2.0.0以前から存在しますが、JOIN先である `actor_user` リレーション（`onDelete: Restrict` の外部キー制約含む）は3.0の新規追加です — 詳細は [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md) を参照。 テーブルは追記専用（クライアントガード・行トリガー・権限を絞ったアプリ用ロール）で、改ざん検知用にダイジェストを連鎖させます — [docs/knowledge/audit-log-append-only.md](docs/knowledge/audit-log-append-only.md) を参照（アプリケーションを制限付きデータベースロールへ切り替える手順を含む）。利用側の配備手順書は `docs/knowledge/audit-log-operations.md` に置く。
 
 **GDPR / データ保護**:
-- `x-pii` フィールド分類（`direct`/`sensitive`/`indirect`）が、消去（GDPR第17条・忘れられる権利）時に `anonymizeUser()` がスクラブするフィールドを決定します。このスクラブはトランザクション内で不可逆的に実行され、参照整合性を保つためユーザー行自体は削除せず、`user` モデルに `anonymized_at` を記録します。
-- `x-gdpr-mode`（`internal`/`consumer`/`both`）はモデル/フィールド単位のデータ主体区分（対象が従業員データか一般消費者データか）を分類する注釈です。`code_generator/validate.py` でスキーマ検証はされますが、コード生成テンプレート側では未参照のため、3.0時点で生成コードへの影響はありません。
+- `x-pii` フィールド分類（`direct`/`sensitive`/`indirect`）が、消去（GDPR第17条・忘れられる権利）時に `anonymizeUser()` がスクラブするフィールドを決定します（対象は `user` エンティティのフィールドのみ）。このスクラブはトランザクション内で不可逆的に実行され、参照整合性を保つためユーザー行自体は削除せず、`user` モデルに `anonymized_at` を記録します。実行契機は可逆な無効化ではなく `user` の `invalidate` アクションです。詳細は [docs/knowledge/pii-and-gdpr-mode-annotations.md](docs/knowledge/pii-and-gdpr-mode-annotations.md) を参照。
+- `x-gdpr-mode`（`internal`/`consumer`/`both`）はモデル/フィールド単位のデータ主体区分（対象が従業員データか一般消費者データか）を分類するラベルです。`code_generator/validate.py` でスキーマ検証はされますが、コード生成テンプレートは参照しないため、生成コードへの影響はありません。`x-retention` も参照されません。
 - 添付ファイル名は AES-256-GCM で at-rest 暗号化されます（`lib/compliance/attachment_name_crypto.ts`）。
 - `x-mention` によりコメント内で `@[user_id:uuid]` メンション構文が有効になり、メンションパーサーが生成されます。
 
@@ -612,7 +612,8 @@ app-generator/
 | スキーマ駆動テキストエリア行数（x-ui.rows） | ✅ 実装済み |
 | GCP Cloud Run デプロイ（x-cloud） | ✅ 実装済み |
 | 監査ログビューア | ✅ 実装済み |
-| GDPR / データ保護（x-pii, anonymizeUser, x-gdpr-mode） | ✅ 実装済み |
+| GDPR / データ保護（x-pii, anonymizeUser） | ✅ 実装済み |
+| `x-gdpr-mode`・`x-retention` 注釈 | スキーマ検証のみのラベル。生成物への効果なし |
 | 添付ファイル表示オプトアウト（showImages/showFiles） | ✅ 実装済み |
 | 性能ハードニング（statement_timeout, FK インデックス, GIN インデックス, COUNT オプトアウト） | ✅ 実装済み |
 | 宣言的な書き込みロック値（x-write-locked-values） | ✅ 実装済み |

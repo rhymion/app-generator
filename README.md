@@ -90,7 +90,7 @@ Built with [Next.js](https://nextjs.org/), [Prisma](https://www.prisma.io/), and
 ### Audit & Compliance
 
 - **Audit log** — schema-agnostic, read-only viewer (`app/[locale]/audit_log/page.tsx`) over all generated entities' create/update/delete actions
-- **GDPR / data protection** — `x-pii` field classification (`direct`/`sensitive`/`indirect`), an `anonymizeUser()` erasure function, `x-gdpr-mode` data-subject-scope classification (`internal`/`consumer`/`both`; schema-validated, not yet consumed by codegen), AES-256-GCM at-rest attachment filename encryption, and `x-mention` user-mention parsing in comments
+- **GDPR / data protection** — `x-pii` field classification (`direct`/`sensitive`/`indirect`), an `anonymizeUser()` erasure function, `x-gdpr-mode` data-subject-scope label (`internal`/`consumer`/`both`; schema-validated, no generated effect), AES-256-GCM at-rest attachment filename encryption, and `x-mention` user-mention parsing in comments
 - **Terms of Service / Privacy Policy** (`/[locale]/legal/terms`, `/[locale]/legal/privacy`) — Markdown template documents linked from the registration page; adding a document language is dropping a `content/legal/<doc>.<locale>.md` file, independent of the site's UI locale list (see `docs/knowledge/legal-documents.md`)
 
 ### Other
@@ -323,8 +323,8 @@ See [docs/knowledge/multi-tenancy-and-permissions.md](docs/knowledge/multi-tenan
 **Audit log** — a schema-agnostic, read-only viewer (`app/[locale]/audit_log/page.tsx`) over the `audit_log` model, showing create/update/delete actions across all generated entities. `lib/audit_log/getters.ts` resolves the actor user via FK join and paginates via `CardListPagination`; the raw `metadata` JSON is shown only on the admin-only detail page. The `audit_log` model's columns predate 2.0.0, but the `actor_user` relation it joins through (and its `onDelete: Restrict` foreign key) is new in 3.0 — see [docs/UPGRADE-3.0.md](docs/UPGRADE-3.0.md). The table is append-only (client guard, row trigger, restricted application role) with a chained digest for tamper detection — see [docs/knowledge/audit-log-append-only.md](docs/knowledge/audit-log-append-only.md), including the steps for switching the application to the restricted database role. A consumer keeps its own deployment runbook at `docs/knowledge/audit-log-operations.md`.
 
 **GDPR / data protection**:
-- `x-pii` field classification (`direct` / `sensitive` / `indirect`) drives which fields `anonymizeUser()` scrubs on erasure (GDPR Art. 17 right to erasure). The scrub is transactional and irreversible; it does not delete the user row, to preserve referential integrity, and records `anonymized_at` on the `user` model.
-- `x-gdpr-mode` (`internal` / `consumer` / `both`) classifies a model/field's data-subject scope for compliance bookkeeping. It is schema-validated (`code_generator/validate.py`) but not yet read by any codegen template — no effect on generated code as of 3.0.
+- `x-pii` field classification (`direct` / `sensitive` / `indirect`) drives which `user` fields `anonymizeUser()` scrubs on erasure (GDPR Art. 17 right to erasure). The scrub is transactional and irreversible; it does not delete the user row, to preserve referential integrity, and records `anonymized_at` on the `user` model. It runs from the user's `invalidate` action, not from a reversible deactivation. See [docs/knowledge/pii-and-gdpr-mode-annotations.md](docs/knowledge/pii-and-gdpr-mode-annotations.md).
+- `x-gdpr-mode` (`internal` / `consumer` / `both`) classifies a model/field's data-subject scope for compliance bookkeeping. It is schema-validated (`code_generator/validate.py`) but no codegen template reads it, so it has no effect on generated code. `x-retention` is not read either.
 - Attachment filenames are encrypted at rest with AES-256-GCM (`lib/compliance/attachment_name_crypto.ts`).
 - `x-mention` enables `@[user_id:uuid]` mention syntax in comments, with generated mention-parser utilities.
 
@@ -632,7 +632,8 @@ All architectural documentation lives in `docs/knowledge/`:
 | Schema-driven textarea rows (x-ui.rows) | ✅ Implemented |
 | GCP Cloud Run deployment (x-cloud) | ✅ Implemented |
 | Audit log viewer | ✅ Implemented |
-| GDPR / data protection (x-pii, anonymizeUser, x-gdpr-mode) | ✅ Implemented |
+| GDPR / data protection (x-pii, anonymizeUser) | ✅ Implemented |
+| `x-gdpr-mode`, `x-retention` annotations | Schema-validated labels only; no generated effect |
 | Attachment display opt-out (showImages/showFiles) | ✅ Implemented |
 | Performance hardening (statement_timeout, FK indexes, GIN indexes, COUNT opt-out) | ✅ Implemented |
 | Declarative write-locked values (x-write-locked-values) | ✅ Implemented |
