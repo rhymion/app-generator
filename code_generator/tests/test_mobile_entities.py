@@ -597,7 +597,8 @@ def test_list_sort_filter_and_search_use_the_rest_list_parameters(out):
     assert 'f.${encodeURIComponent(field)}' in http
     client = _read(out, 'lib/mobile_note/mobile_client.ts')
     assert "MOBILE_NOTE_SORT_KEYS: string[] = " in client
-    assert 'MOBILE_NOTE_SEARCH_KEY: string | null = "title"' in client
+    assert 'MOBILE_NOTE_SEARCH_KEYS: string[] = ["title"]' in client
+    assert 'search=${encodeURIComponent(opts.search)}' in http
     keys = json.loads(re.search(r'MOBILE_NOTE_FILTER_KEYS: string\[\] = (\[.*?\]);', client, re.S).group(1))
     assert 'status' in keys and 'is_done' in keys and 'due_on' not in keys
     lst = _read(out, 'components/mobile_note/List.tsx')

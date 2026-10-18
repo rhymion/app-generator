@@ -16,7 +16,7 @@ const spec: ListQuerySpec = {
   ],
   sortKeys: ['name', 'qty', 'status', 'created_at'],
   filterKeys: ['name', 'qty', 'status', 'active'],
-  searchKey: 'name',
+  searchKeys: ['name'],
 };
 
 /** Holds the state like a list does, and reports every change it receives. */
@@ -130,7 +130,7 @@ describe('ListQueryPanel', () => {
   });
 
   it('omits the controls the entity does not offer', () => {
-    renderWithIntl(<Harness onChange={vi.fn()} panelSpec={{ fields: [], sortKeys: [], filterKeys: [], searchKey: null }} />);
+    renderWithIntl(<Harness onChange={vi.fn()} panelSpec={{ fields: [], sortKeys: [], filterKeys: [], searchKeys: [] }} />);
     expect(screen.queryByTestId('list-search')).toBeNull();
     expect(screen.queryByTestId('list-sort-toggle')).toBeNull();
     expect(screen.queryByTestId('list-filter-toggle')).toBeNull();

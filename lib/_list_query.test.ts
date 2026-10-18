@@ -19,7 +19,7 @@ const spec: ListQuerySpec = {
   ],
   sortKeys: ['name', 'qty', 'status', 'created_at'],
   filterKeys: ['name', 'qty', 'status', 'active'],
-  searchKey: 'name',
+  searchKeys: ['name'],
 };
 
 describe('cycleSort', () => {
@@ -85,19 +85,26 @@ describe('toListQuery', () => {
     expect(query.filter).toEqual({ name: 'bolt', qty: '5', status: 'open', active: 'true' });
   });
 
-  it('sends the search text through the search column', () => {
-    expect(toListQuery({ search: '  nut ', sort: [], filters: { qty: '5' } }, spec).filter).toEqual({
-      qty: '5',
-      name: 'nut',
-    });
+  it('sends the trimmed search text as its own parameter, next to the filters', () => {
+    const query = toListQuery({ search: '  nut ', sort: [], filters: { qty: '5' } }, spec);
+    expect(query.filter).toEqual({ qty: '5' });
+    expect(query.search).toBe('nut');
   });
 
-  it('lets the search text win over a filter on the search column', () => {
-    expect(toListQuery({ search: 'nut', sort: [], filters: { name: 'bolt' } }, spec).filter).toEqual({ name: 'nut' });
+  it('keeps a filter on a search column apart from the search text', () => {
+    const query = toListQuery({ search: 'nut', sort: [], filters: { name: 'bolt' } }, spec);
+    expect(query.filter).toEqual({ name: 'bolt' });
+    expect(query.search).toBe('nut');
   });
 
-  it('has no search when the entity has no search column', () => {
-    expect(toListQuery({ search: 'nut', sort: [], filters: {} }, { ...spec, searchKey: null }).filter).toEqual({});
+  it('has no search when the entity declares no search column', () => {
+    const query = toListQuery({ search: 'nut', sort: [], filters: {} }, { ...spec, searchKeys: [] });
+    expect(query).toEqual({ sort: [], filter: {} });
+    expect('search' in query).toBe(false);
+  });
+
+  it('sends no search for blank text', () => {
+    expect('search' in toListQuery({ search: '   ', sort: [], filters: {} }, spec)).toBe(false);
   });
 
   it('drops blank filters and fields the entity does not offer', () => {

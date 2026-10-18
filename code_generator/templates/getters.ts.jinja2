@@ -26,6 +26,11 @@ import { decryptFileName } from '@/lib/compliance/attachment_name_crypto';
 {% if comment_has_mention %}
 import { extractMentionedUserIds, type UserContext } from '@/lib/mention/parser';
 {% endif %}
+{% if trigram_search_fields %}
+import { Prisma } from '@/app/generated/prisma/client';
+import { trigramPattern, TRIGRAM_ID_LIMIT } from '@/lib/_trigram_match';
+import { selectTrigramIds } from '@/lib/_trigram_query';
+{% endif %}
 import { filterAutocompleteOptions, type AutocompleteFilterContext } from '@/lib/{{ parent }}/autocomplete_filter';
 import { filterListQuery } from '@/lib/{{ parent }}/list_filter';
 {% if export_uses_format_label_value %}
@@ -374,6 +379,40 @@ export async function get{{ parent_pascal }}NewPageAccessCheck() {
   return richPermissions.general;
 }
 
+{% if trigram_search_fields %}
+/**
+ * Columns declared `x-trigram-filter: true`. A text filter on one of them and the search box
+ * (which matches any of them) select matching ids with the COALESCE expression the
+ * `idx_{{ model }}_<column>_gin_trgm_v2` index is built on; Prisma's own `contains` renders the bare
+ * column, which that index does not serve. The SQL is literal text fixed at generation time and
+ * the user's text is bound as a parameter.
+ */
+const TRIGRAM_PREDICATES: Record<string, (pattern: string) => Prisma.Sql> = {
+{% for f in trigram_search_fields %}
+  '{{ f }}': (pattern) => Prisma.sql`COALESCE("{{ f }}", '') ILIKE ${pattern}`,
+{% endfor %}
+};
+const TRIGRAM_FIELDS: readonly string[] = Object.keys(TRIGRAM_PREDICATES);
+
+/**
+ * The rows where any of `columns` contains `term`, as a where clause. A selective term selects the
+ * matching ids with the indexed COALESCE expression and narrows the Prisma query by `id IN (...)`.
+ * A term matching more than TRIGRAM_ID_LIMIT rows (a 1-2 character term, a very common word) is not
+ * served by the index either, and a longer id list exceeds the bind-parameter limit, so it is
+ * matched with Prisma's own case-insensitive `contains` instead. The caller applies its own access
+ * scope to the rows this clause selects.
+ */
+async function trigramWhere(columns: readonly string[], term: string) {
+  const pattern = trigramPattern(term);
+  const predicate = Prisma.join(columns.map((column) => TRIGRAM_PREDICATES[column](pattern)), ' OR ');
+  const ids = await selectTrigramIds(
+    Prisma.sql`SELECT "id" FROM "{{ model }}" WHERE ${predicate} LIMIT ${TRIGRAM_ID_LIMIT + 1}`,
+  );
+  if (ids.length <= TRIGRAM_ID_LIMIT) return { id: { in: ids } };
+  return { OR: columns.map((column) => ({ [column]: { contains: term, mode: 'insensitive' as const } })) };
+}
+
+{% endif %}
 /**
  * Paginated query for {{ parent }} — pushes Creator/Assignee/org filters into the
  * where clause so the DB never has to scan the full table for restricted users.
@@ -391,12 +430,31 @@ export async function get{{ parent_pascal }}Page(
   const associatedOrganizationIds = associatedOrganizations.map((organization) => organization.id);
 {% endif %}
   const accessAnd = await build{{ parent_pascal }}AccessWhere(perms, userId{% if should_filter_by_org %}, associatedOrganizationIds{% endif %});
+{% if trigram_search_fields %}
+  const plainFilter: NonNullable<PageOpts['filter']> = {};
+  const trigramAnd: object[] = [];
+  for (const [field, value] of Object.entries(opts.filter ?? {})) {
+    if (TRIGRAM_FIELDS.includes(field) && typeof value === 'string' && value !== '') {
+      trigramAnd.push(await trigramWhere([field], value));
+    } else {
+      plainFilter[field] = value;
+    }
+  }
+  if (opts.search) {
+    trigramAnd.push(await trigramWhere(TRIGRAM_FIELDS, opts.search));
+  }
+  const filterAnd = buildFilter(plainFilter, FILTERABLE_FIELDS, FIELD_KINDS, RELATION_FILTER_FIELDS, ENUM_MEMBERS, DECIMAL_SCALES);
+{% else %}
   const filterAnd = buildFilter(opts.filter, FILTERABLE_FIELDS, FIELD_KINDS, RELATION_FILTER_FIELDS, ENUM_MEMBERS, DECIMAL_SCALES);
+{% endif %}
   const customWhere = filterListQuery(opts.filter ?? {});
   const where = {
     AND: [
       ...accessAnd,
       ...filterAnd,
+{% if trigram_search_fields %}
+      ...trigramAnd,
+{% endif %}
       ...(customWhere && Object.keys(customWhere).length > 0 ? [customWhere] : []),
     ],
   };

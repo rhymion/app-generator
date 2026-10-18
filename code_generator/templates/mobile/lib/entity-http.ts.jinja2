@@ -7,8 +7,8 @@ import { timeOfDayToInstant } from './_date_value';
 export type { SortItem };
 
 // `page` is zero-based, like the REST list routes.
-// `sort` and `filter` use the REST list's own parameters: `sort=<field>:<dir>,...` and `f.<field>=<value>`.
-export type PageOpts = { page?: number; pageSize?: number; sort?: SortItem[]; filter?: Record<string, string> };
+// `sort`, `filter` and `search` use the REST list's own parameters: `sort=<field>:<dir>,...`, `f.<field>=<value>` and `search=<text>`.
+export type PageOpts = { page?: number; pageSize?: number; sort?: SortItem[]; filter?: Record<string, string>; search?: string };
 
 export type PageResult<T> = { rows: T[]; total: number; page: number; pageSize: number };
 
@@ -64,6 +64,7 @@ export function buildQuery(opts: PageOpts = {}): string {
   for (const [field, value] of Object.entries(opts.filter ?? {})) {
     if (value !== '') params.push(`f.${encodeURIComponent(field)}=${encodeURIComponent(value)}`);
   }
+  if (opts.search) params.push(`search=${encodeURIComponent(opts.search)}`);
   return params.length ? `?${params.join('&')}` : '';
 }
 

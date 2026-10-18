@@ -154,7 +154,7 @@ pg_trgm/ILIKE-based, not pg_bigm.
 ### How it works
 
 - Two index-provisioning mechanisms exist, generated together whenever any entity has
-  `search: true`:
+  `search: true` or a column declared `x-trigram-filter: true`:
   - `instrumentation.ts` (`code_generator/templates/instrumentation.ts.jinja2`) — Next.js's own
     `register()` hook, called once per server instance bootstrap on both Vercel and GCP/Cloud
     Run (one wiring point reaches both deployment targets). It imports and awaits
@@ -169,7 +169,7 @@ pg_trgm/ILIKE-based, not pg_bigm.
   - Each searchable entity gets three kinds of index, all via `CREATE INDEX CONCURRENTLY IF NOT
     EXISTS` (non-blocking, and once an index already exists a fast existence check rather than a
     rebuild, so `ensureSearchIndexes()` running on every cold start is cheap after the first
-    successful run):
+    successful run). The list search box shares the `_v2` indexes ([list-panel-trigram-filter.md](list-panel-trigram-filter.md)):
     - `idx_<model>_<field>_gin_trgm`: a bare-column `GIN ... USING GIN (<field> gin_trgm_ops)`
       trigram index per searchable text field. **Dead weight** — no query ever matches this
       expression verbatim (see the Issue #725 fix (d) entry below) — kept only because dropping

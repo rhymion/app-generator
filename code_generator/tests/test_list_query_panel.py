@@ -4,7 +4,7 @@ The entity list's shared sort / filter / search panel (lib/_list_query.ts, ListQ
 Runs the real build_user_schema.py -> generate.py pipeline on tests/fixtures/mobile_entity_gate and checks that:
 
 - every generated Web list page hands the list clients a `listQuery` spec built from the REST list's own
-  allow-list (columns, kinds, enum members), with the search box on the list's title column
+  allow-list (columns, kinds, enum members), with the search box on the `x-trigram-filter` columns (none: no search box)
 - the Web list clients mount the panel only when that spec is given, so a list without it is unchanged
 - the Expo app gets the Web's list-query module byte for byte, and its list screen builds its request
   through that module instead of keeping a second copy of the logic
@@ -77,9 +77,13 @@ def test_enum_members_show_their_translated_labels_when_the_list_has_them(out):
     assert 'const statusLabels' in _page(out, 'mobile_note')
 
 
-def test_search_box_matches_the_title_column(out):
-    assert "searchKey: 'title'" in _spec_literal(_page(out, 'mobile_note'))
-    assert "searchKey: 'message'" in _spec_literal(_page(out, 'mobile_log'))
+def test_search_box_matches_the_x_trigram_filter_columns(out):
+    assert "searchKeys: ['title']" in _spec_literal(_page(out, 'mobile_note'))
+
+
+def test_entity_declaring_no_x_trigram_filter_column_has_no_search_box(out):
+    for entity in ('mobile_log', 'mobile_group', 'mobile_task'):
+        assert "searchKeys: []" in _spec_literal(_page(out, entity)), entity
 
 
 def test_foreign_key_id_columns_are_left_out_of_the_panel(out):
@@ -123,11 +127,14 @@ def test_relation_display_column_is_offered_as_text(out):
         'sort_filter_fields': ['name', 'epic_id', 'id'],
         'sort_filter_field_kinds': {'name': 'string', 'epic_id': 'string', 'id': 'string'},
         'sort_filter_relation_fields': [('epic', 'title')],
+        'trigram_search_fields': ['name'],
     }
     literal = page_list_context(ctx)['list_query_code']
     assert _keys(literal, 'sortKeys') == ['name', 'epic']
     assert _keys(literal, 'filterKeys') == ['name', 'epic']
-    assert "searchKey: 'name'" in literal
+    assert "searchKeys: ['name']" in literal
+    ctx['trigram_search_fields'] = []
+    assert "searchKeys: []" in page_list_context(ctx)['list_query_code']
 
 
 def test_list_clients_mount_the_panel_only_with_a_spec():

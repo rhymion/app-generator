@@ -6,7 +6,7 @@
 // copies this file into `mobile/lib/` unchanged.
 //
 // The query a panel produces is the REST list's own: `sort=<field>:<dir>,...` and one
-// `f.<field>=<value>` per filtered field, which `parsePageOpts` (lib/_pagination.ts) reads.
+// `f.<field>=<value>` per filtered field and `search=<text>`, which `parsePageOpts` (lib/_pagination.ts) reads.
 
 export type SortItem = { field: string; dir: 'asc' | 'desc' };
 
@@ -29,8 +29,8 @@ export interface ListQuerySpec {
   sortKeys: string[];
   /** Keys the REST list can filter on with a control (text, number, decimal, boolean, enum). */
   filterKeys: string[];
-  /** The column the search box matches (the list's title column), or null for no search box. */
-  searchKey: string | null;
+  /** The `x-trigram-filter` columns the search box matches; empty for no search box. */
+  searchKeys: string[];
 }
 
 /** What the user has entered in the panel. */
@@ -46,6 +46,8 @@ export interface ListQueryState {
 export interface ListQuery {
   sort: SortItem[];
   filter: Record<string, string>;
+  /** The search text; set only when the entity has a search box and the text is not blank. */
+  search?: string;
 }
 
 export const EMPTY_LIST_QUERY: ListQueryState = { search: '', sort: [], filters: {} };
@@ -80,8 +82,8 @@ export function countActiveFilters(filters: Record<string, string>): number {
 
 /**
  * The REST list request for a panel state. Sort columns and filters the entity does not offer are
- * dropped. The search text narrows by the spec's search column through the same `f.<field>`
- * parameter a filter uses; when that column also has a filter, the search text wins.
+ * dropped. The search text is sent as `search` and matches any of the spec's search columns; it
+ * applies together with the filters.
  */
 export function toListQuery(state: ListQueryState, spec: ListQuerySpec): ListQuery {
   const filter: Record<string, string> = {};
@@ -89,8 +91,8 @@ export function toListQuery(state: ListQueryState, spec: ListQuerySpec): ListQue
     if (value !== '' && spec.filterKeys.includes(key)) filter[key] = value;
   }
   const search = state.search.trim();
-  if (spec.searchKey && search !== '') filter[spec.searchKey] = search;
-  return { sort: state.sort.filter((item) => spec.sortKeys.includes(item.field)), filter };
+  const sort = state.sort.filter((item) => spec.sortKeys.includes(item.field));
+  return spec.searchKeys.length > 0 && search !== '' ? { sort, filter, search } : { sort, filter };
 }
 
 /** A choice of a filter control: the filter text sent to the REST list, and what the user sees. */

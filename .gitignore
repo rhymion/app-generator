@@ -335,6 +335,7 @@ cypress/e2e/*.cy.ts
 !cypress/e2e/datagrid_native_date_input_typing.cy.ts
 !cypress/e2e/list_filter_sort_relation_column.cy.ts
 !cypress/e2e/list_query_panel.cy.ts
+!cypress/e2e/list_search_box_toggle.cy.ts
 !cypress/e2e/dashboard_widget_editor.cy.ts
 !cypress/e2e/save_and_continue_editing.cy.ts
 cypress/e2e/mobile/*.cy.ts
@@ -356,6 +357,7 @@ cypress/e2e/api/*.cy.ts
 !cypress/e2e/api/mobile_permissions.cy.ts
 !cypress/e2e/api/mobile_token_dual_auth.cy.ts
 !cypress/e2e/api/fk_autocomplete_options.cy.ts
+!cypress/e2e/api/list_trigram_search.cy.ts
 !cypress/e2e/api/fk_read_permission_graceful_degradation.cy.ts
 !cypress/e2e/api/approval_flow_crud.cy.ts
 !cypress/e2e/api/notification_approval.cy.ts

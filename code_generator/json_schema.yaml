@@ -45,6 +45,16 @@ x-mention:
     On render: @[user_id:xxx] is resolved to user.name (or '[deleted]' after anonymization).
     On save: @username patterns are converted to @[user_id:xxx] format.
 
+x-trigram-filter:
+  type: boolean
+  description: |
+    Declared on a text column under an entity's `fields:`. The list panel's search box
+    (case-insensitive substring match) matches the entity's search columns by default: the
+    trigram index columns of an entity that is a cross-entity search target. `true` adds the
+    column (also on an entity that is not a search target) and gives it a COALESCE trigram GIN
+    index; `false` removes it from the search box. An entity that is not a search target and
+    declares nothing has no search box. A column-level annotation: the entity itself does not take it.
+
 x-gdpr-mode:
   type: string
   enum:

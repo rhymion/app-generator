@@ -30,7 +30,7 @@ import {
 {% endif %}
   {{ const_name }}_QUERY_FIELDS,
   {{ const_name }}_FILTER_KEYS,
-  {{ const_name }}_SEARCH_KEY,
+  {{ const_name }}_SEARCH_KEYS,
   {{ const_name }}_SORT_KEYS,
   {{ const_name }}_LIST_KEYS,
   type {{ pascal }},
@@ -47,7 +47,7 @@ const LIST_QUERY_SPEC: ListQuerySpec = {
   fields: {{ const_name }}_QUERY_FIELDS,
   sortKeys: {{ const_name }}_SORT_KEYS,
   filterKeys: {{ const_name }}_FILTER_KEYS,
-  searchKey: {{ const_name }}_SEARCH_KEY,
+  searchKeys: {{ const_name }}_SEARCH_KEYS,
 };
 
 export function {{ pascal }}List() {
@@ -73,8 +73,8 @@ export function {{ pascal }}List() {
   const [bulkError, setBulkError] = useState<string | null>(null);
 {% endif %}
 
-  // The search box narrows by the list's title column, through the same `f.<field>` parameter a filter uses.
-  const queryOf = useCallback((): Pick<PageOpts, 'sort' | 'filter'> => toListQuery({ search, sort, filters }, LIST_QUERY_SPEC), [filters, search, sort]);
+  // The search box matches the `x-trigram-filter` columns, through the `search` parameter.
+  const queryOf = useCallback((): Pick<PageOpts, 'sort' | 'filter' | 'search'> => toListQuery({ search, sort, filters }, LIST_QUERY_SPEC), [filters, search, sort]);
 
   const load = useCallback(async (target: number) => {
     // A slower, older response must not replace a newer one.
@@ -178,7 +178,7 @@ export function {{ pascal }}List() {
         ) : null}
 {% endif %}
       </View>
-{% if search_key %}
+{% if search_keys %}
       <TextInput
         style={styles.search}
         value={search}

@@ -23,6 +23,7 @@ from helpers.schema_helpers import (
     get_entity_properties, get_entity_required, get_self_only_flags,
     get_direct_attachment_fk_props, schema_has_direct_attachment_fk,
     is_write_only_prop, _get_actual_type, resolve_set_fields, resolve_parent_fk_props,
+    is_text_column_prop,
 )
 from helpers.state_machine_parser import ParseError, parse_state_machine_diagram
 from keys import x_approval as approval_key
@@ -1971,6 +1972,36 @@ def validate_schema(schema: dict) -> None:
                     f"Definition '{def_key}', property '{prop_name}': "
                     f"x-pii value '{pii_val}' is not valid.  "
                     f"Allowed values: {sorted(_VALID_PII_VALUES)}."
+                )
+
+    # -----------------------------------------------------------------------
+    # 8b. x-trigram-filter column annotation validation
+    #     (opt-in trigram GIN index + list panel search box)
+    # -----------------------------------------------------------------------
+    # A column-level boolean declared under `fields:` of the user schema. It
+    # drives index DDL, so a declaration that cannot take effect (wrong type,
+    # a non-text column) is an error rather than a
+    # silent no-op. Like the other column annotations, it is read from the
+    # column wherever the merged schema carries it; no location check.
+    for def_key, defn in defs.items():
+        if not isinstance(defn, dict):
+            continue
+        for prop_name, prop_def in _own_properties(defn).items():
+            if not isinstance(prop_def, dict) or 'x-trigram-filter' not in prop_def:
+                continue
+            trigram_val = prop_def['x-trigram-filter']
+            if not isinstance(trigram_val, bool):
+                errors.append(
+                    f"Definition '{def_key}', property '{prop_name}': "
+                    f"x-trigram-filter must be a boolean; got "
+                    f"{type(trigram_val).__name__}."
+                )
+            elif trigram_val and not is_text_column_prop(prop_name, prop_def):
+                errors.append(
+                    f"Definition '{def_key}', property '{prop_name}': "
+                    f"x-trigram-filter: true requires a text column "
+                    f"(a string column that is not an id, foreign key, enum, "
+                    f"date/time/uri, Decimal or write-only column)."
                 )
 
     # -----------------------------------------------------------------------

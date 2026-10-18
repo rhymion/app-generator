@@ -61,7 +61,8 @@ definitions:
         - status: {}
         - priority: {}
     fields:
-      title: {}
+      title:
+        x-trigram-filter: true
       details: {}
       status:
         enum: ["open", "closed"]

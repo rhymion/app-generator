@@ -39,6 +39,8 @@ from build_context import (
 )
 from helpers.label_field import build_label_expression
 from helpers.schema_helpers import derive_text_fields as _derive_text_fields
+from helpers.schema_helpers import resolve_trigram_search_fields as _resolve_trigram_search_fields
+from helpers.schema_helpers import trigram_filter_true_fields as _trigram_filter_true_fields
 from helpers.schema_helpers import get_splittable_bridge_field
 from helpers.schema_helpers import resolve_ledger_domain
 from helpers.timezones import TIMEZONES, DEFAULT_MEMBER
@@ -1218,7 +1220,7 @@ def generate_mobile_entity(spec: dict, ctx: dict, schema: dict, mobile_dir: Path
         'relation_columns_json': json.dumps([_mobile_field_json(f) for f in spec['relation_columns']], indent=2),
         'sort_keys_json': json.dumps(spec['sort_keys']),
         'filter_keys_json': json.dumps(spec['filter_keys']),
-        'search_key_json': json.dumps(spec['search_key']),
+        'search_keys_json': json.dumps(spec['search_keys']),
         'reaction_types_json': json.dumps((spec.get('comments') or {}).get('reaction_types', [])),
         'has_form_hook': has_form_hook,
         # Fields whose picker offers "Create new" (x-create-inline), each with its target's create form.
@@ -1401,6 +1403,84 @@ def generate_mobile_target(
 # Main orchestrator
 # ---------------------------------------------------------------------------
 
+def _raw_properties(entity: dict, schema: dict) -> dict:
+    """The raw entity's own properties (column annotations live here)."""
+    model = entity['model']
+    raw_def = schema['definitions'].get(f'__{model}', {}) or schema['definitions'].get(model, {}) or {}
+    return raw_def.get('properties', {}) if isinstance(raw_def, dict) else {}
+
+
+def _resolve_search_columns(entity: dict, schema: dict, search_default_scope: str,
+                            report: bool = False) -> dict | None:
+    """The cross-entity search target determination of one entity, or None.
+
+    An entity is a search target per `x-generator.search.default_scope` and
+    `x-generate.search` (an `x-audit: true` entity is excluded unless it opts in
+    explicitly). Its `text_fields` are the explicit `x-search.text_fields` or the
+    auto-derived text columns; `trgm_index_fields` is the union of `text_fields`
+    and `bigm_fields`, the columns carrying a `_v2` COALESCE trigram GIN index.
+    The list panel search box matches `trgm_index_fields` of the same entity.
+    """
+    model      = entity['model']
+    parent     = entity['parent']
+    def_key    = entity['definition_key']
+    detail_def = schema['definitions'].get(def_key, {}) or {}
+    # base_def: the raw entity backing `model` (properties/x-display/x-audit live here).
+    base_def   = schema['definitions'].get(f'__{model}', {}) or schema['definitions'].get(model, {}) or {}
+
+    x_generate_raw = detail_def.get('x-generate') or base_def.get('x-generate') or {}
+    explicit_search = x_generate_raw.get('search')  # True, False, or None
+    # DP-b: x-audit:true entities default to search=false; requires explicit search:true to opt in
+    is_audited = bool(
+        detail_def.get('x-audit') is True
+        or base_def.get('x-audit') is True
+    )
+    if search_default_scope == 'all':
+        if is_audited and explicit_search is None:
+            is_search = False
+        else:
+            is_search = explicit_search is not False
+    else:  # opt_in
+        is_search = explicit_search is True
+    if not is_search:
+        return None
+
+    xsearch = detail_def.get('x-search') or {}
+    if 'text_fields' in xsearch:
+        # Explicit curated list takes priority
+        text_fields = xsearch['text_fields']
+    else:
+        # DP-1: auto-derive from base entity string properties (noise + sensitive excluded)
+        base_props = (base_def if isinstance(base_def, dict) else {}).get('properties', {})
+        text_fields = _derive_text_fields(base_props)
+        if not text_fields:
+            if report:
+                print(f'  Search: {parent!r} has no suitable text_fields after exclusion — skipping from UNION')
+            return None
+
+    # bigm_fields: fields for Japanese 2-gram search (default: same as text_fields)
+    bigm_fields   = xsearch.get('bigm_fields', text_fields)
+
+    # trgm_index_fields: Issue #725 fix (d) — single shared derivation for
+    # BOTH GIN-index-provisioning templates (create_gin_indexes.sql.jinja2
+    # and db_init.ts.jinja2), which previously indexed two independently
+    # named/scoped field sets (text_fields vs. bigm_fields respectively —
+    # a drift unrelated to the COALESCE bug those templates share, found
+    # while designing this fix). The union of text_fields and bigm_fields
+    # guarantees every field either predicate (`%` over text_fields,
+    # `ILIKE` over bigm_fields) can reference is covered by an index,
+    # regardless of whether an entity overrides `x-search.bigm_fields`
+    # narrower OR wider than its `text_fields`. dict.fromkeys(...) dedupes
+    # while preserving first-seen order (bigm_fields defaults to the same
+    # list object as text_fields, so the common case adds nothing).
+    trgm_index_fields = list(dict.fromkeys(text_fields + bigm_fields))
+
+    return {
+        'xsearch': xsearch, 'text_fields': text_fields,
+        'bigm_fields': bigm_fields, 'trgm_index_fields': trgm_index_fields,
+    }
+
+
 def generate(schema_path: str, output_dir: str) -> None:
     with open(schema_path) as f:
         schema = yaml.safe_load(f)
@@ -1570,6 +1650,14 @@ def generate(schema_path: str, output_dir: str) -> None:
 
         # Base context for all other generators
         ctx = build_context(entity, schema, has_reactions=bool(named_constants))
+        # List panel search box: the entity's search trigram columns (a search target)
+        # adjusted by per-column `x-trigram-filter: true/false`; none -> no search box.
+        _search_cols = _resolve_search_columns(
+            entity, schema, schema.get('x-generator', {}).get('search', {}).get('default_scope', 'opt_in'),
+        )
+        ctx['trigram_search_fields'] = _resolve_trigram_search_fields(
+            _raw_properties(entity, schema), _search_cols['trgm_index_fields'] if _search_cols else [],
+        )
         # cmd_846(c): post-approval edit/delete/invalidate lockdown --
         # merged into ctx (not just svc_ctx) so it's available regardless
         # of which downstream block (service.ts vs. the invalidate-only
@@ -3217,60 +3305,19 @@ def generate(schema_path: str, output_dir: str) -> None:
         # proxies the 'user' view instead of having its own raw twin).
         base_def   = schema['definitions'].get(f'__{model}', {}) or schema['definitions'].get(model, {}) or {}
 
-        # Determine if this entity is search-enabled per DP-3 logic
-        # generate_config only contains the standard keys; read 'search' from raw x-generate
-        x_generate_raw = detail_def.get('x-generate') or base_def.get('x-generate') or {}
-        explicit_search = x_generate_raw.get('search')  # True, False, or None
-        # DP-b: x-audit:true entities default to search=false; requires explicit search:true to opt in
-        is_audited = bool(
-            detail_def.get('x-audit') is True
-            or base_def.get('x-audit') is True
-        )
-        if search_default_scope == 'all':
-            if is_audited and explicit_search is None:
-                is_search = False
-            else:
-                is_search = explicit_search is not False
-        else:  # opt_in
-            is_search = explicit_search is True
-
-        if not is_search:
+        resolved = _resolve_search_columns(entity, schema, search_default_scope, report=True)
+        if resolved is None:
             continue
-
-        xsearch = detail_def.get('x-search') or {}
-        if 'text_fields' in xsearch:
-            # Explicit curated list takes priority
-            text_fields = xsearch['text_fields']
-        else:
-            # DP-1: auto-derive from base entity string properties (noise + sensitive excluded)
-            base_props = (base_def if isinstance(base_def, dict) else {}).get('properties', {})
-            text_fields = _derive_text_fields(base_props)
-            if not text_fields:
-                print(f'  Search: {parent!r} has no suitable text_fields after exclusion — skipping from UNION')
-                continue
+        xsearch           = resolved['xsearch']
+        text_fields       = resolved['text_fields']
+        bigm_fields       = resolved['bigm_fields']
+        trgm_index_fields = resolved['trgm_index_fields']
 
         snippet_field = xsearch.get('snippet_field')
         if snippet_field is None:
             # Priority: x-display primary → first text_field
             primary = _get_primary_display_field([detail_def, base_def])
             snippet_field = primary if (primary and primary in text_fields) else text_fields[0]
-
-        # bigm_fields: fields for Japanese 2-gram search (default: same as text_fields)
-        bigm_fields   = xsearch.get('bigm_fields', text_fields)
-
-        # trgm_index_fields: Issue #725 fix (d) — single shared derivation for
-        # BOTH GIN-index-provisioning templates (create_gin_indexes.sql.jinja2
-        # and db_init.ts.jinja2), which previously indexed two independently
-        # named/scoped field sets (text_fields vs. bigm_fields respectively —
-        # a drift unrelated to the COALESCE bug those templates share, found
-        # while designing this fix). The union of text_fields and bigm_fields
-        # guarantees every field either predicate (`%` over text_fields,
-        # `ILIKE` over bigm_fields) can reference is covered by an index,
-        # regardless of whether an entity overrides `x-search.bigm_fields`
-        # narrower OR wider than its `text_fields`. dict.fromkeys(...) dedupes
-        # while preserving first-seen order (bigm_fields defaults to the same
-        # list object as text_fields, so the common case adds nothing).
-        trgm_index_fields = list(dict.fromkeys(text_fields + bigm_fields))
 
         # Build SQL fragments used inside the Jinja2 template
         # ts_vector_fields_sql: concat of all text fields, COALESCE-wrapped
@@ -3444,6 +3491,32 @@ def generate(schema_path: str, output_dir: str) -> None:
             'trgm_index_fields':         trgm_index_fields,
         })
 
+    # --- Trigram GIN index plan (one entry per Prisma model) ---
+    # A column gets one `idx_<model>_<field>_gin_trgm_v2` COALESCE index however many features
+    # name it: the cross-entity search (`trgm_index_fields` of a search entity) and the list
+    # panel's `x-trigram-filter: true` columns share it. An entity that is not a search target
+    # is indexed only for its `x-trigram-filter: true` columns. The legacy bare-column indexes
+    # are left as they are.
+    declared_trigram: dict[str, list[str]] = {}
+    for entity in entities:
+        extra = _trigram_filter_true_fields(_raw_properties(entity, schema))
+        if extra:
+            declared_trigram[entity['model']] = list(dict.fromkeys(declared_trigram.get(entity['model'], []) + extra))
+
+    gin_index_entities: list[dict] = []
+    for se in search_entities:
+        gin_index_entities.append({
+            'model':             se['model'],
+            'trgm_index_fields': list(dict.fromkeys(se['trgm_index_fields'] + declared_trigram.get(se['model'], []))),
+        })
+    searched_models = {se['model'] for se in search_entities}
+    for model, declared in declared_trigram.items():
+        if model not in searched_models:
+            gin_index_entities.append({'model': model, 'trgm_index_fields': declared})
+    index_ctx_base = {
+        'search_entities': search_entities, 'gin_index_entities': gin_index_entities,
+    }
+
     if search_entities:
         # getAssociatedOrganizations/associatedOrgIds are only referenced
         # inside {% if entity.should_filter_by_org %} branches of
@@ -3474,33 +3547,9 @@ def generate(schema_path: str, output_dir: str) -> None:
             out / 'app' / '[locale]' / 'search' / 'actions.ts',
             _render(env, 'search_actions.ts.jinja2', search_ctx),
         )
-        _write(
-            out / 'scripts' / 'create-gin-indexes.sql',
-            _render(env, 'create_gin_indexes.sql.jinja2', search_ctx),
-        )
         entity_names = ', '.join(e['entity_type'] for e in search_entities)
         print(f'  Search routes → lib/search/helpers.ts + app/api/search/route.ts ({entity_names})')
         print(f'  Search UI page → app/[locale]/search/page.tsx + actions.ts')
-        print(f'  Search GIN index script → scripts/create-gin-indexes.sql (apply with psql before test:e2e:cy:api)')
-        _write(
-            out / 'lib' / 'db-init.ts',
-            _render(env, 'db_init.ts.jinja2', search_ctx),
-        )
-        print(f'  DB init → lib/db-init.ts (GIN indexes for gin_trgm_ops)')
-        # Issue #725 fix (a): wire ensureSearchIndexes() into Next.js's own
-        # instrumentation hook. Vercel and GCP/Cloud Run both bootstrap
-        # through this same Next.js mechanism, so one template reaches both
-        # deployment targets (unlike a provisioning-script hook, which GCP's
-        # gcp-seed.sh would need duplicating for Vercel). CREATE INDEX
-        # CONCURRENTLY IF NOT EXISTS makes ensureSearchIndexes() non-blocking
-        # and a fast no-op after the first successful cold start.
-        # scripts/create-gin-indexes.sql remains as a manual/migration-time
-        # fallback.
-        _write(
-            out / 'instrumentation.ts',
-            _render(env, 'instrumentation.ts.jinja2', search_ctx),
-        )
-        print(f'  Instrumentation hook → instrumentation.ts (calls ensureSearchIndexes() on cold start)')
     else:
         # DP-2: no searchable entities — delete stale search files to prevent broken imports
         print('  Search: no searchable entities — skipping search route generation')
@@ -3509,10 +3558,38 @@ def generate(schema_path: str, output_dir: str) -> None:
             out / 'app' / 'api' / 'search' / 'route.ts',
             out / 'app' / '[locale]' / 'search' / 'page.tsx',
             out / 'app' / '[locale]' / 'search' / 'actions.ts',
-            out / 'scripts' / 'create-gin-indexes.sql',
-            out / 'instrumentation.ts',
         ]
         for _stale in _stale_search_files:
+            if _stale.exists():
+                _stale.unlink()
+                print(f'  Search: deleted stale {_stale.relative_to(out)}')
+
+    # --- Trigram GIN index provisioning (cross-entity search and list panel search) ---
+    # Issue #725 fix (a): wire ensureSearchIndexes() into Next.js's own instrumentation hook.
+    # Vercel and GCP/Cloud Run both bootstrap through this same Next.js mechanism, so one
+    # template reaches both deployment targets (unlike a provisioning-script hook, which GCP's
+    # gcp-seed.sh would need duplicating for Vercel). CREATE INDEX CONCURRENTLY IF NOT EXISTS
+    # makes ensureSearchIndexes() non-blocking and a fast no-op after the first successful
+    # cold start. scripts/create-gin-indexes.sql remains as a manual/migration-time fallback.
+    # Written whenever a search entity or an `x-trigram-filter` column exists.
+    if gin_index_entities:
+        _write(
+            out / 'scripts' / 'create-gin-indexes.sql',
+            _render(env, 'create_gin_indexes.sql.jinja2', index_ctx_base),
+        )
+        print(f'  Search GIN index script → scripts/create-gin-indexes.sql (apply with psql before test:e2e:cy:api)')
+        _write(
+            out / 'lib' / 'db-init.ts',
+            _render(env, 'db_init.ts.jinja2', index_ctx_base),
+        )
+        print(f'  DB init → lib/db-init.ts (GIN indexes for gin_trgm_ops)')
+        _write(
+            out / 'instrumentation.ts',
+            _render(env, 'instrumentation.ts.jinja2', index_ctx_base),
+        )
+        print(f'  Instrumentation hook → instrumentation.ts (calls ensureSearchIndexes() on cold start)')
+    else:
+        for _stale in (out / 'scripts' / 'create-gin-indexes.sql', out / 'instrumentation.ts'):
             if _stale.exists():
                 _stale.unlink()
                 print(f'  Search: deleted stale {_stale.relative_to(out)}')

@@ -160,6 +160,7 @@ export default function DataGridClient<T extends BaseEntity>({
         sort: panelQuery
           ? panelQuery.sort
           : s.map((x): SortItem => ({ field: x.field, dir: x.sort === 'desc' ? 'desc' : 'asc' })),
+        ...(panelQuery?.search ? { search: panelQuery.search } : {}),
         filter: {
           ...(panelQuery?.filter ?? {}),
           ...Object.fromEntries(

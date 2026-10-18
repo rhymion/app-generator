@@ -26,6 +26,12 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_{{ entity.model }}_{{ field }}_gin_trgm"
   ON "{{ entity.model }}" USING GIN ("{{ field }}" gin_trgm_ops);
 {% endfor %}
+{% endfor %}
+{# `_v2` indexes: one per column however many features name it. The list panel
+   search box shares them with the cross-entity search (gin_index_entities,
+   generate.py), and a non-search entity gets one only for a column declared
+   `x-trigram-filter: true`. #}
+{% for entity in gin_index_entities %}
 {% for field in entity.trgm_index_fields %}
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "idx_{{ entity.model }}_{{ field }}_gin_trgm_v2"
   ON "{{ entity.model }}" USING GIN ((COALESCE("{{ field }}", '')) gin_trgm_ops);

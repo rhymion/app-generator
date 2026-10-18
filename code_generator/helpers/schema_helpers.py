@@ -390,6 +390,47 @@ def get_write_only_field_names(properties: dict) -> list[str]:
     ]
 
 
+def is_text_column_prop(field_name: str, prop: dict) -> bool:
+    """True for a human-readable string column: not an id, FK, enum, CUID,
+    date/uri-formatted, Decimal-backed or write-only column.
+
+    The shared base rule of `derive_text_fields` (cross-entity search) and
+    `x-trigram-filter` (list panel search), which add their own opt-outs.
+    """
+    if not isinstance(prop, dict):
+        return False
+    if not is_string_prop(prop):
+        return False
+    # id and explicit primary key
+    if field_name == 'id' or prop.get('x-primary'):
+        return False
+    # FK fields: x-relationship annotation or *_id naming convention
+    if prop.get('x-relationship') or field_name.endswith('_id'):
+        return False
+    # enum values (integer or string)
+    if isinstance(prop.get('enum'), list):
+        return False
+    # CUID/ID pattern strings
+    pattern = prop.get('pattern', '')
+    if pattern and re.search(r'\^c\[a-z0-9\]', pattern):
+        return False
+    # Non-text formats
+    if prop.get('format') in ('date', 'date-time', 'time', 'uri'):
+        return False
+    # Decimal-backed fields: exposed as JSON type "string" (precision-
+    # preserving), but Prisma's Decimal column does not support the
+    # `contains` filter this list feeds into (search_helpers.ts.jinja2 /
+    # autocomplete_filter.ts.jinja2) -- a string-shape check alone can't
+    # tell a Decimal column from an ordinary text column.
+    if prop.get('_prisma_decimal_type'):
+        return False
+    # Write-only fields (e.g. password, api_key)
+    xc = prop.get('x-custom-component', {})
+    if isinstance(xc, dict) and 'upsert' in (xc.get('target') or []):
+        return False
+    return True
+
+
 def derive_text_fields(properties: dict) -> list[str]:
     """Auto-derive searchable text fields from entity properties.
 
@@ -399,44 +440,39 @@ def derive_text_fields(properties: dict) -> list[str]:
     searchXxxOptions autocomplete filter (build_context.py) so both derive
     the same set of human-readable text columns from a single rule.
     """
-    result = []
+    return [
+        field_name
+        for field_name, prop in properties.items()
+        if is_text_column_prop(field_name, prop) and prop.get('x-search') is not False
+    ]
+
+
+def resolve_trigram_search_fields(properties: dict, search_fields: list[str]) -> list[str]:
+    """Columns the list panel search box matches (and indexes), in order.
+
+    `search_fields` are the entity's cross-entity search trigram columns (empty
+    for an entity that is not a search target). A column annotated
+    `x-trigram-filter: true` is added; `x-trigram-filter: false` removes it.
+    """
+    result = list(search_fields)
     for field_name, prop in properties.items():
         if not isinstance(prop, dict):
             continue
-        if not is_string_prop(prop):
-            continue
-        # id and explicit primary key
-        if field_name == 'id' or prop.get('x-primary'):
-            continue
-        # FK fields: x-relationship annotation or *_id naming convention
-        if prop.get('x-relationship') or field_name.endswith('_id'):
-            continue
-        # enum values (integer or string)
-        if isinstance(prop.get('enum'), list):
-            continue
-        # CUID/ID pattern strings
-        pattern = prop.get('pattern', '')
-        if pattern and re.search(r'\^c\[a-z0-9\]', pattern):
-            continue
-        # Non-text formats
-        if prop.get('format') in ('date', 'date-time', 'time', 'uri'):
-            continue
-        # Decimal-backed fields: exposed as JSON type "string" (precision-
-        # preserving), but Prisma's Decimal column does not support the
-        # `contains` filter this list feeds into (search_helpers.ts.jinja2 /
-        # autocomplete_filter.ts.jinja2) -- a string-shape check alone can't
-        # tell a Decimal column from an ordinary text column.
-        if prop.get('_prisma_decimal_type'):
-            continue
-        # Write-only fields (e.g. password, api_key)
-        xc = prop.get('x-custom-component', {})
-        if isinstance(xc, dict) and 'upsert' in (xc.get('target') or []):
-            continue
-        # Per-field opt-out
-        if prop.get('x-search') is False:
-            continue
-        result.append(field_name)
+        flag = prop.get('x-trigram-filter')
+        if flag is True and field_name not in result:
+            result.append(field_name)
+        elif flag is False and field_name in result:
+            result.remove(field_name)
     return result
+
+
+def trigram_filter_true_fields(properties: dict) -> list[str]:
+    """Columns annotated `x-trigram-filter: true`, in declaration order."""
+    return [
+        field_name
+        for field_name, prop in properties.items()
+        if isinstance(prop, dict) and prop.get('x-trigram-filter') is True
+    ]
 
 
 def _label_field_paths(label_field) -> list[str]:
