@@ -8,7 +8,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **`x-pii`, `x-retention` and `x-gdpr-mode` are documented against the generator's actual behavior.** Only `x-pii` on the
   `user` entity changes generated code (the field set `anonymizeUser()` scrubs); `x-gdpr-mode` is validated and `x-retention`
   is unchecked, and neither affects any generated file. The README entries and support table say so. See
-  `docs/knowledge/x-gdpr-mode.md`.
+  `docs/knowledge/x-pii.md` and `docs/knowledge/x-gdpr-mode.md`.
 - **Generated autocomplete search resolves a two-hop `labelField`** (Issue #1050). `labelField: test_case_version.title` 
   on a foreign key to an entity that points at a version used to be skipped, so the picker returned no option for any text. 
   One extra hop through the target's own foreign key is now rendered as a two-level nested `where`; longer paths and paths 

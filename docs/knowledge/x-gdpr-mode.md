@@ -2,7 +2,7 @@
 
 `x-gdpr-mode` labels a model or a field as concerning employee data (`internal`), general consumer data (`consumer`) or
 both (`both`, the default). It is validated and carried into the template context, and **no generated file depends on it**.
-For the annotation that does change generated code, see [X_PII_DOC](X_PII_DOC).
+For the annotation that does change generated code, see [x-pii.md](x-pii.md).
 
 ## Where it is accepted
 
