@@ -20,6 +20,14 @@ This is a **generate-schema** task. Read CLAUDE.md before starting.
   with extra force in fast-track mode, where no confirmation
   step catches a missed key.
 
+- Write each entity's columns and relations together in one
+  `properties:` map: scalar/enum columns (an entry per column to
+  expose, `{}` when there is no override), then relation objects and
+  arrays. There is no entity-level `fields:` key; a proxy view over a
+  Prisma model is written `x-view-of: <model>`, never `allOf`.
+  `code_generator/migrate_fields_into_properties.py` rewrites an old
+  schema.
+
 Traps that actually cost time in a real fast-track run (measured from
 a full ER-diagram-only session, not guessed):
 
@@ -72,7 +80,7 @@ Resolve an FK autocomplete/column label from a related field (or a
 composite of fields) instead of the target's raw id:
 
 ```yaml
-fields:
+properties:
   approval_flow_id:
     x-relationship:
       labelField: [entity_name, approver_role.name]
@@ -104,7 +112,7 @@ Or lock a single field directly on the property, without an entity-level list:
 
 ```yaml
 inventory:
-  fields:
+  properties:
     reserved_quantity:
       x-readonly: true
 ```
@@ -130,7 +138,7 @@ on edit). They differ in **scope**, not effect:
 
 | | `x-readonly` | `x-readonly-fields` |
 |---|---|---|
-| Where declared | on the property itself, under `fields:` | entity-level list, alongside `x-generate` |
+| Where declared | on the column's entry in `properties:` | entity-level list, alongside `x-generate` |
 | Scope | the Prisma model — every view built on it | the one view entity it's declared on |
 | Use when | the field must never be editable through *any* view of this model (e.g. a computed/system column) | only *this* view should lock the field down; other views of the same model may still let it be edited |
 
@@ -143,7 +151,7 @@ Restrict a view to only the rows matching a fixed set of field values:
 
 ```yaml
 active_setting:
-  allOf: [{ $ref: '#/definitions/setting' }]
+  x-view-of: user
   x-generate: { ... }
   x-filter-values:
     status: [active, pending]
