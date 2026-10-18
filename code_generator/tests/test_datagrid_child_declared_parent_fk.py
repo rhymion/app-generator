@@ -62,13 +62,13 @@ def _intermediate(tmp_path, **prisma_args):
     user_schema = {
         'definitions': {
             'widget': {
-                'fields': {'name': {}},
                 'properties': {
+                    'name': {},
                     'lines': {'type': 'array', 'items': {'$ref': '#/definitions/line'}},
                 },
             },
             'line': {
-                'fields': {
+                'properties': {
                     'name': {},
                     'owner_ref_id': {'x-relationship': {}},
                     'related_widget_id': {'x-relationship': {}},

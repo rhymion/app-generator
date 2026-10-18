@@ -88,13 +88,13 @@ model plain {{
 
 def _user_schema() -> dict:
     def entity(*fks):
-        return {'fields': {'value': {}, **{f: {'x-relationship': {}} for f in fks}}}
+        return {'properties': {'value': {}, **{f: {'x-relationship': {}} for f in fks}}}
 
     return {
         'definitions': {
-            'alpha': {'fields': {'name': {}}},
-            'beta': {'fields': {'name': {}}},
-            'gamma': {'fields': {'name': {}}},
+            'alpha': {'properties': {'name': {}}},
+            'beta': {'properties': {'name': {}}},
+            'gamma': {'properties': {'name': {}}},
             'pairing': entity('alpha_id', 'beta_id'),
             'triple': entity('alpha_id', 'beta_id', 'gamma_id'),
             'plain': entity('alpha_id', 'beta_id'),

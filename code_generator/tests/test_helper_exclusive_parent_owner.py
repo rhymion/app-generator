@@ -40,7 +40,7 @@ def models_with_optional(tmp_path_factory):
 
 def _schema_with_note(models, exclusive=('alpha', 'beta')) -> dict:
     user = _user_schema(exclusive)
-    user['definitions']['placement']['fields']['note'] = {}
+    user['definitions']['placement']['properties']['note'] = {}
     return build_intermediate_schema(user, models)
 
 

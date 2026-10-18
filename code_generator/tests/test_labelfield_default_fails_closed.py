@@ -111,8 +111,8 @@ def _build(tmp_path, label_col: str, declare_labelfield: str | None):
 
     user_schema = {
         "definitions": {
-            "foo": {"fields": {label_col: {}}},
-            "bar": {"fields": {"foo_id": {"x-relationship": rel}}},
+            "foo": {"properties": {label_col: {}}},
+            "bar": {"properties": {"foo_id": {"x-relationship": rel}}},
         },
     }
     return build_intermediate_schema(user_schema, prisma_models)

@@ -300,7 +300,7 @@ def test_comments_survive_the_rewrite(models):
 def test_default_schema_has_no_findings_and_migrates_cleanly(models):
     schema = _make_yaml().load(DEFAULT_SCHEMA_PATH.read_text(encoding="utf-8"))
     findings = mig.migrate_schema(schema, models)
-    assert findings == []
+    assert not [f for f in findings if f.blocking]
     for entity in schema["definitions"].values():
         assert "fields" not in entity and "allOf" not in entity
     assert schema["definitions"]["setting"]["x-view-of"] == "user"

@@ -56,7 +56,7 @@ def _schema(models, exclusive=('alpha', 'beta')) -> dict:
     user = _user_schema(exclusive)
     user['definitions']['reading'] = {
         'x-display': {'table': [{'name': {'primary': True}}]},
-        'fields': {'name': {}, 'placement_id': {'x-relationship': {}}},
+        'properties': {'name': {}, 'placement_id': {'x-relationship': {}}},
     }
     return build_intermediate_schema(user, models)
 
