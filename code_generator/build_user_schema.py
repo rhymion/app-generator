@@ -75,6 +75,7 @@ import sys
 from pathlib import Path
 
 from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedMap
 from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 
 from schema_deriver import (
@@ -481,7 +482,12 @@ def _build_view_of(
                 "only; columns cannot be overridden per view."
             )
         _check_relation_entry(entity_key, prop_name, prop, pf, user_definitions)
-    allof: list = [{"$ref": DoubleQuotedScalarString(f"#/definitions/{model_key}")}]
+    first = CommentedMap({"$ref": DoubleQuotedScalarString(f"#/definitions/{model_key}")})
+    # Blank lines and comments after a one-branch view hang off its `$ref` key.
+    trailing = getattr(entry, "ca", None) and entry.ca.items.get(_VIEW_OF_KEY)
+    if trailing and trailing[2] is not None and "required" not in entry and "properties" not in entry:
+        first.ca.items["$ref"] = [None, None, trailing[2], None]
+    allof: list = [first]
     if "required" in entry or "properties" in entry:
         second: dict = {"type": "object"}
         if "required" in entry:

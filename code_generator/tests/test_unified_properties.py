@@ -256,3 +256,30 @@ def test_a_view_may_be_embedded_where_the_model_is_expected(prisma):
         "node": {"x-generate": {"list": True}, "properties": {"name": {}, "owner": REF("owner_view")}},
     })
     assert "owner" in out["node"]["allOf"][1]["properties"]
+
+
+def test_comment_after_a_one_branch_view_survives_migration_and_build(prisma, tmp_path):
+    import io
+    from build_user_schema import _make_yaml
+    from migrate_fields_into_properties import migrate_schema
+
+    old = (
+        "definitions:\n"
+        "  node:\n"
+        "    properties:\n"
+        "      name: {}\n"
+        "  stub:\n"
+        "    allOf:\n"
+        '      - $ref: "#/definitions/node"\n'
+        "\n"
+        "  # next section\n"
+        "  other:\n"
+        "    x-generate: {list: true}\n"
+    )
+    yaml = _make_yaml()
+    schema = yaml.load(old)
+    migrate_schema(schema, prisma[0])
+    buf = io.StringIO()
+    yaml.dump(schema, buf)
+    assert "x-view-of: node" in buf.getvalue()
+    assert "# next section" in buf.getvalue()

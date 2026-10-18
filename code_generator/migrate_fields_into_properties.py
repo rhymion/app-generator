@@ -273,12 +273,16 @@ def _rewrite_allof(entity: CommentedMap) -> None:
     target = _allof_target(entity)
     second = allof[1] if len(allof) == 2 else {}
     position = list(entity.keys()).index("allOf")
+    # Blank lines and comments that follow a one-branch `allOf` hang off the `$ref` key.
+    trailing = allof[0].ca.items.get("$ref") if len(allof) == 1 and hasattr(allof[0], "ca") else None
     del entity["allOf"]
     items: list[tuple[str, object]] = [("x-view-of", target)]
     for key in ("required", "properties"):
         if key in second:
             items.append((key, second[key]))
     _insert_at(entity, position, items)
+    if trailing and trailing[2] is not None:
+        entity.ca.items["x-view-of"] = [None, None, trailing[2], None]
 
 
 def _rewrite_fields(entity: CommentedMap) -> None:
