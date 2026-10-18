@@ -155,7 +155,7 @@ definitions:
         - name:
             primary: true
             width: 150
-    fields:
+    properties:
       name:
         x-pii: direct
       email:
@@ -182,15 +182,14 @@ definitions:
           target:
             - upsert
 
-    required:
-      - roles
-    properties:
       roles:
         type: array
         x-outputType: list
         items:
           $ref: "#/definitions/role"
 
+    required:
+      - roles
   setting:
     x-generate:
       list: false
@@ -226,17 +225,15 @@ definitions:
     # visible).
     x-self-only:
       admin_bypass: true
-    allOf:
-      - $ref: "#/definitions/user"
-      - type: object
-        required:
-          - roles
-        properties:
-          roles:
-            type: array
-            x-outputType: list
-            items:
-              $ref: "#/definitions/role"
+    x-view-of: user
+    required:
+      - roles
+    properties:
+      roles:
+        type: array
+        x-outputType: list
+        items:
+          $ref: "#/definitions/role"
 
   role:
     x-nav:
@@ -267,18 +264,17 @@ definitions:
             width: 200
         - description:
             width: 400
-    fields:
+    properties:
       name: {}
       description: {}
-    required:
-      - users
-    properties:
       users:
         type: array
         x-outputType: list
         items:
           $ref: "#/definitions/user"
 
+    required:
+      - users
   organization:
     x-nav:
       parent: administration
@@ -307,21 +303,20 @@ definitions:
             width: 200
         - description:
             width: 400
-    fields:
+    properties:
       name: {}
       description:
         x-ui:
           width: 8
 
-    required:
-      - users
-    properties:
       users:
         type: array
         x-outputType: list
         items:
           $ref: "#/definitions/user"
 
+    required:
+      - users
   permission:
     x-nav:
       parent: administration
@@ -347,7 +342,7 @@ definitions:
             width: 200
         - role:
             width: 200
-    fields:
+    properties:
       name:
         x-entity-select: true
       create: {}
@@ -356,7 +351,6 @@ definitions:
       delete: {}
       import:
         default: false
-    properties:
       role:
         $ref: "#/definitions/role"
 
@@ -393,13 +387,9 @@ definitions:
             width: 150
         - approver_role:
             width: 150
-    fields:
+    properties:
       entity_name:
         x-entity-select: true
-    required:
-      - approver_role
-      - preceding_transitions
-    properties:
       requestor_role:
         $ref: "#/definitions/role"
       approver_role:
@@ -415,6 +405,9 @@ definitions:
         items:
           $ref: "#/definitions/approval_flow"
 
+    required:
+      - approver_role
+      - preceding_transitions
   approval_request:
     x-display:
       table:
@@ -422,7 +415,7 @@ definitions:
             width: 200
         - status:
             width: 100
-    fields:
+    properties:
       approvable_id:
         x-relationship:
           labelField: id
@@ -445,7 +438,7 @@ definitions:
       round_id: {}
 
   comment:
-    fields:
+    properties:
       message:
         x-mention: true
       commentable_id: {}
@@ -454,7 +447,7 @@ definitions:
       page: false
       embed: false
       api: custom
-    fields:
+    properties:
       type:
         enum:
           - like
@@ -470,7 +463,7 @@ definitions:
           constantParent: true
 
   attachment:
-    fields:
+    properties:
       type:
         enum:
           - image
@@ -485,7 +478,7 @@ definitions:
         format: uri
       attachable_id: {}
   dashboard_widget:
-    fields:
+    properties:
       dashboard_id:
         x-relationship: {}
       name: {}
@@ -603,11 +596,8 @@ definitions:
         - name:
             primary: true
             width: 200
-    fields:
-      name: {}
-    required:
-      - widgets
     properties:
+      name: {}
       widgets:
         type: array
         items:
@@ -618,6 +608,8 @@ definitions:
           target:
             - upsert
 
+    required:
+      - widgets
   app_setting:
     x-nav:
       parent: administration
@@ -650,7 +642,7 @@ definitions:
             width: 200
         - is_pinned:
             width: 100
-    fields:
+    properties:
       business_date: {}
       is_pinned:
         default: false
@@ -733,7 +725,6 @@ definitions:
         x-relationship:
           type: one-to-one
           target: organization
-    properties:
       organization:
         $ref: "#/definitions/organization"
 

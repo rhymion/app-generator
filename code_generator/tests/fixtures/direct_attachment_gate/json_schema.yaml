@@ -35,7 +35,7 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       name: {}
       email: {}
       image: {}
@@ -54,7 +54,7 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       type:
         enum:
           - image
@@ -84,7 +84,7 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       name: {}
       profile_picture_id:
         x-relationship:

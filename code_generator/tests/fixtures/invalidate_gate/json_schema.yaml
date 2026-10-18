@@ -12,7 +12,7 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       name: {}
       email: {}
 
@@ -36,7 +36,7 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name: {}
 
   # Negative control: no invalidate config at all -- must NOT gain the
@@ -55,7 +55,7 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name: {}
 
   # cmd_583: invalidate enabled via bare bool shorthand (no handler/module) --
@@ -79,7 +79,7 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name: {}
 
   # cmd_587: same no-handler/module shorthand as sprocket, but this Prisma
@@ -100,5 +100,5 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name: {}

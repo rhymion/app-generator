@@ -29,7 +29,7 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       name: {}
       email: {}
       image: {}
@@ -50,7 +50,7 @@ definitions:
       table:
         - name:
             primary: true
-    fields:
+    properties:
       name: {}
 
   # The entity this fixture exists to exercise: a can_new entity with a
@@ -74,13 +74,12 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       name: {}
       oto_gate_target_id:
         x-relationship:
           type: one-to-one
           target: oto_gate_target
           labelField: name
-    properties:
       oto_gate_target:
         $ref: "#/definitions/oto_gate_target"

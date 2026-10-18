@@ -45,18 +45,17 @@ definitions:
       invalidate: false
       api: false
       test: false
-    fields:
+    properties:
       approved_at:
         _legacy_nullable_style: true
-    required:
-      - approval_requests
-    properties:
       approval_requests:
         type: array
         x-outputType: list
         items:
           $ref: "#/definitions/approval_request"
 
+    required:
+      - approval_requests
   commentable:
     x-generate:
       list: false
