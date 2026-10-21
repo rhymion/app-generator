@@ -23,7 +23,7 @@ import {
 {% if has_form_hook %}
 import { getEntityFormErrorMessage } from '@/lib/{{ name }}/use_entity_form';
 {% endif %}
-import { toRecordDisplayText } from '@/components/native/FieldInput';
+import { RelationValue } from '@/components/native/FieldInput';
 {% if attachment_fields %}
 import { AttachmentValue } from '@/components/native/AttachmentInput';
 import type { AttachmentRow } from '@/lib/attachment-http';
@@ -72,6 +72,8 @@ export function {{ pascal }}FormView({ id }: { id: string }) {
   const [state, setState] = useState<'loading' | 'ready' | 'missing'>('loading');
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A related record opens on its own detail screen (the target screen answers for a record the reader may not see).
+  const openRelated = (target: string, relatedId: string) => router.push(`/entity/${target}/${relatedId}` as never);
 {% if is_payment %}
   const { payment } = useLocalSearchParams<{ payment?: string }>();
 {% endif %}
@@ -138,14 +140,10 @@ export function {{ pascal }}FormView({ id }: { id: string }) {
           {spec.kind === 'attachment' ? (
             <AttachmentValue row={record[spec.relationName ?? spec.key] as AttachmentRow | null | undefined} testID={`view-field-${spec.key}`} />
           ) : (
-            <Text style={styles.value} testID={`view-field-${spec.key}`}>
-              {toRecordDisplayText(spec, record, t)}
-            </Text>
+            <RelationValue spec={spec} record={record} translate={t} onOpen={openRelated} testID={`view-field-${spec.key}`} />
           )}
 {% else %}
-          <Text style={styles.value} testID={`view-field-${spec.key}`}>
-            {toRecordDisplayText(spec, record, t)}
-          </Text>
+          <RelationValue spec={spec} record={record} translate={t} onOpen={openRelated} testID={`view-field-${spec.key}`} />
 {% endif %}
         </View>
       ))}

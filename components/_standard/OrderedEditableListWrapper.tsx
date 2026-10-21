@@ -378,7 +378,7 @@ const OrderedEditableListWrapper = forwardRef<OrderedEditableListWrapperHandle, 
       }
       return (
         <ListItemText
-          primary={item.label || item.value}
+          primary={item.href ? <Link href={item.href}>{item.label || item.value}</Link> : (item.label || item.value)}
           secondary={item.type === 'file' ? `File: ${item.value?.name || 'N/A'}` : undefined}
         />
       );

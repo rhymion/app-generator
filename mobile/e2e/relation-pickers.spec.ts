@@ -328,3 +328,39 @@ test.describe('Relation pickers: one-to-many list of the entity\'s own kind', ()
     await expect(page.getByTestId('picker-option-step-mid')).toHaveCount(0);
   });
 });
+
+test.describe('Detail screen: related records link to their own screens', () => {
+  test('a many-to-one reference and a many-to-many list each open the related record', async ({ page }) => {
+    await openNew(page, 'mobile_task');
+    await page.getByTestId('field-title').fill('Link to related records');
+    await pick(page, 'mobile_group_id', 'group-seed-2');
+    await page.getByTestId('picker-open-tags').click();
+    await page.getByTestId('picker-option-tag-seed-1').click();
+    await page.getByTestId('picker-option-tag-seed-3').click();
+    await page.getByTestId('picker-done').click();
+    await page.getByTestId('form-save').click();
+    await expect(page.getByTestId('view-mobile_task')).toBeVisible();
+
+    await expect(page.getByTestId('view-field-mobile_group_id-link-group-seed-2')).toHaveText('Beta Group');
+    await expect(page.getByTestId('view-field-tags-link-tag-seed-1')).toHaveText('Red');
+    await expect(page.getByTestId('view-field-tags-link-tag-seed-3')).toHaveText('Blue');
+
+    await page.getByTestId('view-field-mobile_group_id-link-group-seed-2').click();
+    await expect(page.getByTestId('view-mobile_group')).toBeVisible();
+    await expect(page.getByTestId('view-field-name')).toHaveText('Beta Group');
+    await page.goBack();
+    await expect(page.getByTestId('view-mobile_task')).toBeVisible();
+
+    await page.getByTestId('view-field-tags-link-tag-seed-3').click();
+    await expect(page.getByTestId('view-mobile_tag')).toBeVisible();
+  });
+
+  test('an empty relation reads as a dash and has no link', async ({ page }) => {
+    await openNew(page, 'mobile_task');
+    await page.getByTestId('field-title').fill('No related records');
+    await pick(page, 'mobile_group_id', 'group-seed-1');
+    await page.getByTestId('form-save').click();
+    await expect(page.getByTestId('view-field-tags')).toHaveText('-');
+    await expect(page.getByTestId('view-field-tags').locator('[role=link]')).toHaveCount(0);
+  });
+});

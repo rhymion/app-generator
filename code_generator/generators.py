@@ -56,6 +56,43 @@ from helpers.label_field import (
 )
 
 
+def target_has_view_page(target: str, schema: dict) -> bool:
+    """True when `target` is generated with a detail (view) page of its own.
+
+    Mirrors how generate_types.extract_entities() decides an entity exists: not
+    `x-internal`, an `x-generate` block (on the view, or on the raw twin), and at
+    least one core flag that is not False. The page itself is gated by
+    `x-generate.view`. A record without such a page (an embedded child, bridge
+    internals, an attachment) gets no link from a related list.
+    """
+    defs = schema.get('definitions', {})
+    view = defs.get(target, {}) or {}
+    raw = defs.get(f'__{target}', {}) or {}
+    if view.get('x-internal') or raw.get('x-internal'):
+        return False
+    gen = view.get('x-generate') or raw.get('x-generate')
+    if not isinstance(gen, dict) or not gen:
+        return False
+    if all(gen.get(flag) is False for flag in ('list', 'view', 'new', 'edit', 'delete', 'api')):
+        return False
+    return gen.get('view', True) is not False
+
+
+def record_href_line(target: str, schema: dict | None, row_var: str, indent: str, guard_id: bool = False) -> str:
+    """The `href:` property line of a related-list item, or '' when `target` has no view page.
+
+    The link is unconditional, exactly like the single-FK reference field
+    (AppFieldRelation): a reader without permission to view the record lands on
+    the target page's own 403.
+    """
+    if not target or not target_has_view_page(target, schema or {}):
+        return ''
+    link = f"`/{target}/view/${{{row_var}.id}}`"
+    if guard_id:
+        link = f"{row_var}.id ? {link} : undefined"
+    return f"{indent}href: {link},\n"
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -4664,7 +4701,8 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                     f"              id: f.id,\n"
                     f"              value: (f.{_item_label} ?? ''),\n"
                     f"              label: (f.{_item_label} ?? ''),\n"
-                    f"            }}))}}\n"
+                    + record_href_line(_item_target, schema, 'f', '              ')
+                    + f"            }}))}}\n"
                     f"            itemType=\"text\"\n"
                     f"            showTitle={{true}}\n"
                     f"            title={{tf('{_fcamel}')}}\n"
@@ -4816,7 +4854,8 @@ def form_view_context(ctx: dict, schema: dict | None = None) -> dict:
                     f"            id: f.id,\n"
                     f"            value: {_view_val},\n"
                     f"            label: {_view_val},\n"
-                    f"          }}))}}\n"
+                    + record_href_line(_target, schema, 'f', '            ')
+                    + f"          }}))}}\n"
                     f"          itemType=\"text\"\n"
                     f"          showTitle={{true}}\n"
                     f"          title={{tf('{child_camel}')}}\n"
@@ -6200,7 +6239,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
                 f"    value: f.id,\n"
                 f"    label: {_label_expr},\n"
-                f"    originalId: f.id,\n"
+                + record_href_line(_uc_target, schema, 'f', '    ')
+                + f"    originalId: f.id,\n"
                 f"  }})));"
             )
             continue
@@ -6231,7 +6271,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                     f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
                     f"    value: {_list_expr},\n"
                     f"    label: {_list_expr},\n"
-                    f"    originalId: f.id,{order_line}\n"
+                    + record_href_line(_list_target, schema, 'f', '    ')
+                    + f"    originalId: f.id,{order_line}\n"
                     f"  }})));"
                 )
             continue
@@ -6786,7 +6827,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                 f"            id: f.id,\n"
                 f"            value: {_view_val},\n"
                 f"            label: {_view_val},\n"
-                f"          }}))}}\n"
+                + record_href_line(_target, schema, 'f', '            ')
+                + f"          }}))}}\n"
                 f"          itemType=\"text\"\n"
                 f"          showTitle={{true}}\n"
                 f"          title={{tf('{child_camel}')}}\n"
@@ -7140,7 +7182,8 @@ def form_upsert_context(ctx: dict, schema: dict) -> dict:
                     f"    id: f.id || `temp-${{Date.now()}}-${{Math.random()}}`,\n"
                     f"    value: f.{_item_label},\n"
                     f"    label: f.{_item_label},\n"
-                    f"    originalId: f.id,\n"
+                    + record_href_line(_item_target, schema, 'f', '    ', guard_id=True)
+                    + f"    originalId: f.id,\n"
                     f"  }})));"
                 )
                 _accordion_fields_jsx.append(

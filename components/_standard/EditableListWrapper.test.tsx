@@ -413,4 +413,20 @@ describe('EditableListWrapper', () => {
       expect(screen.getByRole('dialog', { name: /add items/i })).toBeInTheDocument();
     });
   });
+
+  it('links a row that carries an href to its record, and leaves the others as text', () => {
+    render(
+      <EditableListWrapper
+        itemType="text"
+        initialItems={[
+          { id: '1', value: 'One', label: 'Item One', href: '/thing/view/1' },
+          { id: '2', value: 'Two', label: 'Item Two' },
+        ]}
+      />
+    );
+
+    expect(screen.getByRole('link', { name: 'Item One' })).toHaveAttribute('href', '/thing/view/1');
+    expect(screen.queryByRole('link', { name: 'Item Two' })).not.toBeInTheDocument();
+    expect(screen.getByText('Item Two')).toBeInTheDocument();
+  });
 });

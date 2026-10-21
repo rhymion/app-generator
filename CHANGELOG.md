@@ -13,6 +13,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   nothing is unchanged. The list's `search` parameter and the `listQuery.searchKeys` spec replace the title-column
   `searchKey`. See `docs/knowledge/list-panel-trigram-filter.md`.
 
+- **Related-list rows link to their record** (Issue #1075). Each row of a related list on a detail or edit screen (one-to-many
+  independent children, many-to-many lists, flattened item arrays) links to the related record's page on the Web screens, and the
+  native detail screen links both its references and its lists to the related record's screen. Only a target with a view page of its
+  own is linked; a reader without permission lands on the target's own 403, as with a single reference. No new schema key. See
+  `docs/knowledge/schema-yaml-configuration.md` (7.5) and `docs/knowledge/mobile-app.md`.
+
 ### Changed
 - **An entity's columns and relations share one `properties:` map, and a proxy view names its model with `x-view-of`** (Issue #1065).
   The entity-level `fields:` key is removed. Scalar and enum columns, relation objects and relation arrays are all entries

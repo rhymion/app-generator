@@ -384,6 +384,16 @@ and need a signed-in Web session; the webhook is the dependable confirmation.
 The detail screen names a relation by the label column (`labelField` of the relationship) of the record the
 REST detail embeds. A list row shows scalar columns only: the REST list does not embed related labels.
 
+### Related records
+
+On the detail screen, a many-to-one or one-to-one reference and each record of a many-to-many or one-to-many list
+open the related record's own detail screen (`/entity/<target>/<id>`), as the Web screens do (Issue #1075). The
+field carries `viewLink: true` in the generated client when the target has a native detail screen
+(`resolve_mobile_view_links()` in `code_generator/generate.py`); a target without one stays plain text, and so does an
+empty relation. The link is not withheld from a reader who may not see the record: the target screen answers for
+itself. The form screens (the pickers) keep their selection controls and do not link. The same Expo bundle serves the
+web build, so the mobile web screens behave identically.
+
 A required foreign key is checked by the same `form_validation.ts` the Web form runs (`Mobile Group is
 required`), before any request. Form state, submit and error mapping stay in `use_entity_form.ts`; the picker
 is presentation plus the options request.
@@ -749,7 +759,7 @@ does for the other end-to-end fixtures, and signs in as the seeded administrator
 - `mobile/e2e/list-capabilities.spec.ts` covers sorting (the request parameter and the row order), a filter and
   its clearing, the search box, the selection mode with its confirmation, the bulk route call, a refused record and
   the missing `delete` permission.
-- `mobile/e2e/relation-pickers.spec.ts` covers the pickers: select, search with the current selection kept,
+- `mobile/e2e/relation-pickers.spec.ts` covers the pickers and the detail screen's links to related records: select, search with the current selection kept,
   the hosting entity and form values sent with the search, the shared required-field check, edit, a
   disabled field without read on the target, clear, a one-to-one already linked elsewhere, adding and
   removing many-to-many records, an emptied set sent as an empty list, a self-referencing one-to-many list
