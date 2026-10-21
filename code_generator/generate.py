@@ -2635,6 +2635,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     # Emitted when the user entity has at least one x-pii annotated field.
     # Generates GDPR Art.17 right-to-erasure scrub function from x-pii annotations.
     anon_ctx = build_anonymize_user_context(schema)
+    anon_ctx['storage'] = 'gcs' if cloud_enabled and cloud_provider == 'gcp' else 'vercel'
     if anon_ctx['has_pii_user']:
         _write(
             out / 'lib' / 'compliance' / 'anonymize_user.ts',
