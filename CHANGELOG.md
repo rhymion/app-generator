@@ -17,6 +17,12 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 - **The generated Expo app moves to SDK 58** (Issue #1073). `mobile/package.json` now pins the SDK 58 set (Expo 58, React 19.3,
   React Native 0.88, `expo-router` 58). `expo-router` 58 no longer depends on `query-string`, so the vulnerable
   `decode-uri-component` is no longer part of the app bundle. See `docs/knowledge/mobile-app.md`.
+- **`anonymizeUser()` erases the related records of the erased person and keeps the first erasure time** (Issue #1062). In the
+  same transaction it now deletes the avatar `attachment` row (when `image_id` is an `x-pii` column), sets
+  `mobile_session.device_name` to `null`, and deletes the person's `notification` and `idempotency_key` rows; after the
+  commit it removes the stored avatar file (local disk, Vercel Blob or GCS), reporting a failure in `errors` without undoing
+  the erasure. A repeated call keeps the first `anonymized_at` / `invalidated_at` and cleans up what an earlier call left.
+  No new schema key and no migration. Output of `lib/compliance/anonymize_user.ts` changes. See `docs/knowledge/x-pii.md`.
 - **An entity's columns and relations share one `properties:` map, and a proxy view names its model with `x-view-of`** (Issue #1065).
   The entity-level `fields:` key is removed. Scalar and enum columns, relation objects and relation arrays are all entries
   of `properties:`; the builder classifies each by the Prisma field kind of its name, so a column keeps its written order

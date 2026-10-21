@@ -51,7 +51,21 @@ otherwise the file is not generated. The function takes a user id and, in one da
 1. deletes the user's `Account` rows (OAuth tokens), `Session` rows and `mfa_recovery_code` rows;
 2. updates the `user` row: every `x-pii` column as in the table above, plus `emailVerified` and `mfa_secret` set to
    `null`, and `anonymized_at` and `invalidated_at` set to the current time;
-3. checks that no `Account` row is left, and rolls the whole transaction back if one is.
+3. erases the records that belong to the erased person: `mobile_session.device_name` is set to `null` (the session rows
+   stay), the person's `notification` rows and `idempotency_key` rows (cached responses of their requests) are deleted,
+   and, when `image_id` is an `x-pii` column, the avatar `attachment` row is deleted;
+4. checks that no `Account` row is left, and rolls the whole transaction back if one is.
+
+After the commit the function removes the stored avatar file (local `public/uploads`, Vercel Blob, or the Google Cloud
+Storage bucket when `x-cloud` is `gcp`). A failure there does not undo the erasure: the result has `success: true` and
+the message in `errors`.
+
+A repeated call is allowed. It keeps the first `anonymized_at` and `invalidated_at` (and returns the first time as
+`anonymizedAt`), and it still removes related records an earlier call left behind. A call for a user id that does not
+exist fails with `success: false`.
+
+The function does not delete other content the person wrote or uploaded, such as comments, reactions or attachments on
+other records; those rows are not personal data of the `user` row and stay with their creator id.
 
 The user row itself is kept so that foreign keys (creator, updater, audit log actor) stay valid. The scrub cannot be
 undone. The function returns `{ success, userId, anonymizedAt, errors? }`; on any database error the transaction is
@@ -88,6 +102,7 @@ Checked on a generated and started application with the default schema:
 | Export (`GET /api/user/export`) | The same columns as before (`name`, `image_id` in the default schema); the name shows `[deleted]`. |
 | Sign-in with email and password, web or mobile | Rejected: `password` is `null`. |
 | Sign-in with the old API key | Rejected: `api_key` is `null`. |
+| Avatar, mobile device names, notifications | The avatar `attachment` row and file are gone, `device_name` is `null`, the notifications are deleted. |
 | `audit_log` | No row is written by the erasure and no existing row is changed. Sign-in events carry the provider only. |
 | Mentions in comments (`x-mention`) | A mention is stored as `@[user_id:<id>]` and decoded to the user's current `name` when shown, so it shows `[deleted]` after erasure. Only the id-to-name decoding is covered by unit tests; the end-to-end display is not exercised in the default schema, which has no commentable entity. |
 | `x-retention` | No effect. The annotation is documented in the top-level schema block, is not validated and is not read by any generator code or generated file. |
@@ -97,5 +112,3 @@ Checked on a generated and started application with the default schema:
 - Sessions and tokens issued before the erasure keep working: #1061.
 - `x-pii: none` is scrubbed like the other values, a scrub value that does not fit the column type or nullability makes
   the whole erasure roll back, and `invalidateUser` does not report that failure: #1060.
-- Related records are left in place: the avatar `attachment` row and file, `mobile_session.device_name`, and the
-  erasure timestamp is overwritten when the function is called twice: #1062.
