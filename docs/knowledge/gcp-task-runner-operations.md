@@ -105,9 +105,13 @@ select a store from the environment (`audit-log-append-only.md`, "Choosing the s
 - **Nothing runs the tasks** after the Job and Scheduler job are gone: no new run records appear, which is the
   intended state for staging. The database keeps what was already recorded.
 - **When a run does happen without a store** (for example a manual `task:run-all` on a database whose
-  environment has no `AUDIT_LOG_*` value), the factory throws `Audit log storage is not configured` and those
-  digest tasks are recorded as failed; `audit_log_ensure_partitions` needs no store and succeeds. They fail the
-  same way whichever way the tasks are started.
+  environment has no `AUDIT_LOG_*` value), the factory throws `Audit log storage is not configured` before
+  any work. `audit_log_digest_close` and `audit_log_export_for_retirement` are recorded as failed (exit code 1,
+  with that message), `audit_log_digest_verify` is blocked behind `audit_log_digest_close` (exit code 2, no
+  run record), and `audit_log_ensure_partitions` needs no store and succeeds. No digest path succeeds
+  silently. The admin screen offers `Rerun`, `Mark resolved` and `Skip` on the failed tasks; the last two
+  are explicit, audit-logged operator actions, and skipping `audit_log_digest_close` lets `audit_log_digest_verify`
+  run, which then fails on the same missing store. The app starts and every other screen and API keeps working.
 - **When the environment still names a deleted bucket**, the factory selects the GCS adapter again. This
   document does not state how that run ends; remove the value together with the bucket rather than relying on it.
 
