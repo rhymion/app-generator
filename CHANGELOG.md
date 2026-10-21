@@ -23,6 +23,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `searchKey`. See `docs/knowledge/list-panel-trigram-filter.md`.
 
 ### Changed
+- **The generated Expo app moves to SDK 58** (Issue #1073). `mobile/package.json` now pins the SDK 58 set (Expo 58, React 19.3,
+  React Native 0.88, `expo-router` 58). `expo-router` 58 no longer depends on `query-string`, so the vulnerable
+  `decode-uri-component` is no longer part of the app bundle. See `docs/knowledge/mobile-app.md`.
 - **`anonymizeUser()` erases the related records of the erased person and keeps the first erasure time** (Issue #1062). In the
   same transaction it now deletes the avatar `attachment` row (when `image_id` is an `x-pii` column), sets
   `mobile_session.device_name` to `null`, and deletes the person's `notification` and `idempotency_key` rows; after the
