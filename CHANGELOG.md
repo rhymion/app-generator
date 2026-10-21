@@ -14,6 +14,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `searchKey`. See `docs/knowledge/list-panel-trigram-filter.md`.
 
 ### Changed
+- **The generated Expo app moves to SDK 58** (Issue #1073). `mobile/package.json` now pins the SDK 58 set (Expo 58, React 19.3,
+  React Native 0.88, `expo-router` 58). `expo-router` 58 no longer depends on `query-string`, so the vulnerable
+  `decode-uri-component` is no longer part of the app bundle. See `docs/knowledge/mobile-app.md`.
 - **An entity's columns and relations share one `properties:` map, and a proxy view names its model with `x-view-of`** (Issue #1065).
   The entity-level `fields:` key is removed. Scalar and enum columns, relation objects and relation arrays are all entries
   of `properties:`; the builder classifies each by the Prisma field kind of its name, so a column keeps its written order

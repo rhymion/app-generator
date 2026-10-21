@@ -504,8 +504,8 @@ contexts into `mobile/`, so each copy is identical to its Web counterpart:
 `lib/_errors.ts` and `lib/authz.ts` in `mobile/` hold only the types those modules import.
 
 The hooks need React 19: `use_entity_form.ts` passes an async function to `startTransition`, which the React
-18 typings reject. The app therefore runs one Expo SDK's bundled set (Expo SDK 57: React 19.2,
-React Native 0.86, `expo-router` 57, `@expo/vector-icons` 15). The versions are pinned together in
+18 typings reject. The app therefore runs one Expo SDK's bundled set (Expo SDK 58: React 19.3,
+React Native 0.88, `expo-router` 58, `@expo/vector-icons` 15). The versions are pinned together in
 `templates/mobile/package.json.jinja2`; bump the whole set with `npx expo install --fix`, not one package.
 `@playwright/test` is not part of the SDK and is pinned separately. The screens' own saving flag wraps the
 transport call, so a save in flight is visible even where a transition does not track async work.
