@@ -90,8 +90,3 @@ definitions:
       logged_date:
         format: date
       is_flagged: {}
-    required:
-      - item_count
-      - logged_at
-      - logged_date
-      - is_flagged

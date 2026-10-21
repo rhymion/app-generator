@@ -63,11 +63,3 @@ definitions:
         format: date-time
       daily_time:
         format: time
-    required:
-      - status
-      - is_active
-      - priority
-      - amount
-      - valid_on
-      - started_at
-      - daily_time

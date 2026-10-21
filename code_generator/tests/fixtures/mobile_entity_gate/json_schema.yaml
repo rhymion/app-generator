@@ -71,10 +71,6 @@ definitions:
       is_done: {}
       due_on:
         format: date
-    required:
-      - title
-      - status
-      - is_done
 
   # Hand-written components: entity level (list, view, edit; one on both view and edit) and field level
   # (`secret` upsert only, `badge` view only, `mood` both).
@@ -124,8 +120,6 @@ definitions:
           target:
             - upsert
             - view
-    required:
-      - title
 
   mobile_log:
     x-generate:
@@ -143,8 +137,6 @@ definitions:
             primary: true
     properties:
       message: {}
-    required:
-      - message
 
   mobile_group:
     x-generate:
@@ -162,8 +154,6 @@ definitions:
             primary: true
     properties:
       name: {}
-    required:
-      - name
 
   mobile_tag:
     x-generate:
@@ -181,8 +171,6 @@ definitions:
             primary: true
     properties:
       name: {}
-    required:
-      - name
 
   mobile_profile:
     x-generate:
@@ -200,8 +188,6 @@ definitions:
             primary: true
     properties:
       name: {}
-    required:
-      - name
 
   mobile_task:
     x-generate:
@@ -245,9 +231,6 @@ definitions:
         x-outputType: list
         items:
           $ref: "#/definitions/mobile_tag"
-    required:
-      - title
-      - mobile_group_id
 
   # x-create-inline: mobile_ticket's category field offers "Create new", which opens
   # mobile_category's native create form over the ticket form. mobile_category declares no
@@ -280,7 +263,6 @@ definitions:
           $ref: "#/definitions/mobile_step"
         x-outputType: list
     required:
-      - name
       - children
 
   mobile_category:
@@ -299,8 +281,6 @@ definitions:
             primary: true
     properties:
       name: {}
-    required:
-      - name
 
   # x-entity-select: entity_name holds the name of one of the schema's entities; the native form draws
   # it as chips labelled with the entity titles and saves the entity name.
@@ -323,9 +303,6 @@ definitions:
       name: {}
       entity_name:
         x-entity-select: true
-    required:
-      - name
-      - entity_name
 
   mobile_ticket:
     x-generate:
@@ -349,9 +326,6 @@ definitions:
           target: mobile_category
           labelField: name
         x-create-inline: true
-    required:
-      - title
-      - mobile_category_id
 
   # Direct attachment fields (x-relationship type: direct): the form uploads a file, creates the
   # attachment row and submits its id. `file` may stay empty, `contract` is required.
@@ -379,9 +353,6 @@ definitions:
         x-relationship:
           target: attachment
           type: direct
-    required:
-      - title
-      - contract_id
 
   # x-payment: creating a record answers with a hosted checkout URL, which the native form opens
   # in the in-app browser. The Price is the entity's own stripe_price_id (a column default).
@@ -403,8 +374,6 @@ definitions:
     properties:
       name: {}
       stripe_price_id: {}
-    required:
-      - name
 
   # A one-to-many child collection (the Web form's editable grid): drawn on mobile as a row editor.
   # The line carries a required integer, an enum with a default, an optional date, a decimal-free text and a
@@ -429,8 +398,6 @@ definitions:
         type: array
         items:
           $ref: "#/definitions/mobile_invoice_line"
-    required:
-      - invoice_no
 
   mobile_invoice_line:
     properties:
@@ -445,10 +412,6 @@ definitions:
       mobile_group_id:
         x-relationship:
           labelField: name
-    required:
-      - description
-      - quantity
-      - mobile_group_id
 
   attachment:
     x-generate:
@@ -558,8 +521,6 @@ definitions:
           labelField: id
       attachable:
         $ref: "#/definitions/attachable"
-    required:
-      - title
 
   mobile_thread:
     x-generate:
@@ -584,5 +545,3 @@ definitions:
           labelField: id
       commentable:
         $ref: "#/definitions/commentable"
-    required:
-      - title

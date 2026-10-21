@@ -602,12 +602,49 @@ def _annotate_parent_fks(entry: dict, entity_key: str, prisma_models: dict) -> d
     return {**entry, "properties": new_props} if changed else entry
 
 
+def _check_required_names(
+    entity_key: str,
+    entry: dict,
+    model: "PrismaModel",
+    prisma_models: dict,
+) -> None:
+    """Reject entity-level `required:` names that are not relation embeds.
+
+    `required:` lists relation embeds only. A column's required-ness always
+    comes from Prisma (non-nullable with no default) or from
+    `fields.<name>._required`, so naming a column here is a second, silent
+    route to the same result. Call this on an entry whose `properties:` has
+    already been split, so `properties:` holds the relation embeds only.
+    """
+    names = entry.get("required")
+    if not names:
+        return
+    embeds = entry.get("properties") or {}
+    for name in names:
+        if name in embeds:
+            continue
+        pf = model.fields.get(name)
+        if pf is not None and not _is_relation_field(pf, prisma_models):
+            raise UserSchemaError(
+                f"ERROR: '{entity_key}.required' names '{name}', which is a "
+                f"column of Prisma model '{model.name}'. 'required:' lists "
+                "relation embeds only; a column is required when Prisma makes "
+                "it non-nullable without a default, or when it sets "
+                f"'_required: true' under 'properties.{name}'."
+            )
+        raise UserSchemaError(
+            f"ERROR: '{entity_key}.required' names '{name}', which is not a "
+            f"relation embed declared under '{entity_key}.properties'."
+        )
+
+
 def _build_raw_and_view(
     entity_key: str,
     entry: dict,
     prisma_models: dict,
     prisma_enums: dict | None = None,
 ):
+    _check_required_names(entity_key, entry, prisma_models[entity_key], prisma_models)
     fields_spec = _auto_infer_fk_fields(entry, prisma_models[entity_key])
     raw = derive_raw_entity(prisma_models[entity_key], fields_spec, prisma_enums)
 
@@ -639,10 +676,19 @@ def _build_standalone_raw(
     prisma_models: dict,
     prisma_enums: dict | None = None,
 ) -> dict:
+    _check_required_names(entity_key, entry, prisma_models[entity_key], prisma_models)
     fields_spec = _auto_infer_fk_fields(entry, prisma_models[entity_key])
     raw = derive_raw_entity(prisma_models[entity_key], fields_spec, prisma_enums)
     for key, value in entry.items():
         if key == "fields":
+            continue
+        if key == "required":
+            # Union with the derived list, as a paired entity does: a bare
+            # `raw[key] = value` dropped the derived `id` (and every
+            # column Prisma makes required) from a standalone entity.
+            raw["required"] = list(raw.get("required") or []) + [
+                n for n in value if n not in (raw.get("required") or [])
+            ]
             continue
         if key == "properties":
             # Merge, don't replace (cmd_883/subtask_883h): a standalone

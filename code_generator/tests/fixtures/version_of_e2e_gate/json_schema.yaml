@@ -35,8 +35,6 @@ definitions:
             primary: true
     properties:
       name: {}
-    required:
-      - name
 
   vo_item_version_line:
     x-generate:
@@ -48,8 +46,6 @@ definitions:
       invalidate: false
       api: false
       test: false
-    required:
-      - line_code
     properties:
       vo_item_version_id: {}
       line_code: {}
@@ -127,10 +123,6 @@ definitions:
         items:
           $ref: "#/definitions/vo_item_version_line"
 
-    required:
-      - vo_item_id
-      - organization_id
-      - title
   vo_doc:
     x-generate:
       list: true
@@ -147,8 +139,6 @@ definitions:
             primary: true
     properties:
       name: {}
-    required:
-      - name
 
   vo_doc_version:
     x-generate:
@@ -206,9 +196,6 @@ definitions:
       attachable:
         $ref: "#/definitions/attachable"
 
-    required:
-      - vo_doc_id
-      - title
   vo_page:
     x-generate:
       list: true
@@ -226,8 +213,6 @@ definitions:
         - code: {}
     properties:
       code: {}
-    required:
-      - code
 
   vo_page_version:
     x-generate:
@@ -284,6 +269,3 @@ definitions:
         $ref: "#/definitions/approvable"
       attachable:
         $ref: "#/definitions/attachable"
-    required:
-      - vo_page_id
-      - title

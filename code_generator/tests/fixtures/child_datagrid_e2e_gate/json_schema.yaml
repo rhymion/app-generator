@@ -373,8 +373,6 @@ definitions:
       second_unit_id:
         pattern: "^c[a-z0-9]{24,}$"
         x-relationship: {}
-    required:
-      - unit_id
 
   inline_topic:
     x-generate:
@@ -396,8 +394,6 @@ definitions:
       organization_id:
         pattern: "^c[a-z0-9]{24,}$"
         x-relationship: {}
-    required:
-      - organization_id
 
   inline_note:
     x-generate:
@@ -421,5 +417,3 @@ definitions:
         x-relationship:
           labelField: name
         x-create-inline: true
-    required:
-      - inline_topic_id

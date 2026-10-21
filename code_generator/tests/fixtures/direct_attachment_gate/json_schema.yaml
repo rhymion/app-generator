@@ -94,6 +94,3 @@ definitions:
         x-relationship:
           target: attachment
           type: direct
-    required:
-      - name
-      - contract_file_id

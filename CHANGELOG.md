@@ -14,6 +14,13 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `searchKey`. See `docs/knowledge/list-panel-trigram-filter.md`.
 
 ### Changed
+- **Entity-level `required:` lists relation embeds only, and means the same on every entity** (Issue #1066). A name in
+  `required:` that is a Prisma column, or that Prisma does not know, is now a build error; a column is required when
+  Prisma makes it non-nullable without a default, or when its entry under `properties:` sets `_required: true`.
+  A standalone entity (one with no view-level key such as `x-generate`) used to have its derived required list replaced by
+  `required:`, which dropped `id`; it is now merged with the derived list, as for any other entity. The default schema's
+  stale `approval_flow` entry `preceding_transitions` is removed. Schemas that name a column in `required:` must drop it
+  (the column stays required through Prisma). See `docs/knowledge/schema-yaml-configuration.md`.
 - **An entity's columns and relations share one `properties:` map, and a proxy view names its model with `x-view-of`** (Issue #1065).
   The entity-level `fields:` key is removed. Scalar and enum columns, relation objects and relation arrays are all entries
   of `properties:`; the builder classifies each by the Prisma field kind of its name, so a column keeps its written order

@@ -40,9 +40,6 @@ definitions:
       commentable:
         $ref: "#/definitions/commentable"
 
-    required:
-      - title
-      - organization_id
   cr_asset:
     x-generate:
       list: true
@@ -75,6 +72,3 @@ definitions:
           labelField: id
       attachable:
         $ref: "#/definitions/attachable"
-    required:
-      - title
-      - organization_id
