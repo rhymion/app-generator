@@ -489,6 +489,7 @@ order — `x-cloud` enable → `generate-code` → `gcp-setup.sh` → `gcp-deplo
 | `gcp-seed.sh` | Seed the database |
 | `gcp-teardown.sh` | Tear down GCP resources (two-step confirmation) |
 | `gcp-task-runner.sh` | Provision a nightly Cloud Run Job + Cloud Scheduler job that runs `task:run-all` (`DRY_RUN=true` previews) |
+| `gcp-task-runner-teardown.sh` | Delete exactly what `gcp-task-runner.sh` created, never the project; the audit-log bucket only with `DELETE_AUDIT_LOG_BUCKET=true` (`DRY_RUN=true` previews). See `docs/knowledge/gcp-task-runner-operations.md` |
 
 `gcp-deploy.sh` needs the `Dockerfile` that `generate-code` emits — run
 `generate-code` after enabling `x-cloud`, before `gcp-deploy.sh`.
