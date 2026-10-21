@@ -384,6 +384,12 @@ and need a signed-in Web session; the webhook is the dependable confirmation.
 The detail screen names a relation by the label column (`labelField` of the relationship) of the record the
 REST detail embeds. A list row shows scalar columns only: the REST list does not embed related labels.
 
+A composite `labelField` (a list of columns or dotted paths such as `approver_role.name`) is joined with a single
+space, as on the Web; a path runs through the relations the row embeds, and a label whose paths are all empty shows
+the record's id. A date segment shows its stored text, not the Web's formatted date. The rule is `relationLabel` in
+`lib/label-spec.ts`, which also converts a form field to the list panel's field type (`toListFieldSpec`: the form lists
+enum labels by position, the panel looks them up by member).
+
 A required foreign key is checked by the same `form_validation.ts` the Web form runs (`Mobile Group is
 required`), before any request. Form state, submit and error mapping stay in `use_entity_form.ts`; the picker
 is presentation plus the options request.
@@ -688,6 +694,9 @@ The environment variables the script honours are `MODE`, `PW_ARGS` (one mode onl
 stack, it starts its own and signs in as the seeded administrator (`admin@example.com` / `password123`). The
 checkout's `node_modules` must be a real directory (a plain `npm ci`); the script refuses a symlinked one,
 because `next build` (Turbopack) cannot resolve it in the copy.
+
+Each mode also runs `npm run typecheck` in the generated `mobile/` before the specs and stops on any error, because the
+Playwright specs run the web export, which does not type-check.
 
 The specs are bound to this repository's own default and fixture schemas. They are not run in app-template or
 another consumer repository: its schema has different footer tabs and none of the `mobile_*` fixture entities.

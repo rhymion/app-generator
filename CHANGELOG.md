@@ -287,6 +287,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **The generated Expo app type-checks, enum filter choices show their labels, and a composite `labelField` names a related record** (Issue #1077). `npm run typecheck` of the generated `mobile/` failed on every schema: each entity list passed a `FieldSpec` list where the list panel wants a `ListFieldSpec` list, and a composite `labelField` (a list of paths) was typed as a single column. Besides the type errors, the panel looked enum labels up by member in a positional array, so the filter showed the raw member, and a relation picker or read-only screen fell back to the record id for a composite label. The new `lib/label-spec.ts` converts a form field to the panel's field type and joins a composite label's paths with a space, following dotted paths, as the Web does (a date segment shows its stored text). `scripts/run_mobile_entity_playwright.sh` now runs `npm run typecheck` on the generated app in every mode. No schema key changes.
 - **Generated test dependencies skip an optional FK that closes a required cycle** (Issue #1025, part of #946). An identity
   entity's nullable `current_version_id` to its version entity is no longer pre-created as a dependency of the identity:
   the version requires the identity, so the generated `populate<Entity>Dependencies()` created the version row without its

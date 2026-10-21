@@ -1072,6 +1072,7 @@ _MOBILE_STATIC_TEMPLATES = [
     ('lib/_errors.ts.jinja2', 'lib/_errors.ts'),
     ('lib/authz.ts.jinja2', 'lib/authz.ts'),
     ('lib/entity-http.ts.jinja2', 'lib/entity-http.ts'),
+    ('lib/label-spec.ts.jinja2', 'lib/label-spec.ts'),
     ('components/native/FieldInput.tsx.jinja2', 'components/native/FieldInput.tsx'),
     ('components/native/RelationPicker.tsx.jinja2', 'components/native/RelationPicker.tsx'),
     ('components/native/ApprovalSection.tsx.jinja2', 'components/native/ApprovalSection.tsx'),
