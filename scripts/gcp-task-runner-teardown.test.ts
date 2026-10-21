@@ -46,7 +46,7 @@ function run(env: Record<string, string> = {}, stdin = '') {
       HOME: root,
       TASK_RUNNER_ENV_FILE: path.join(root, 'task-runner.env'),
       ...env,
-    },
+    } as unknown as NodeJS.ProcessEnv,
     input: stdin,
     encoding: 'utf8',
   });
@@ -257,7 +257,7 @@ describe('gcp-task-runner-teardown.sh', () => {
     };
     const teardown = run(cfg);
     const create = spawnSync('bash', [path.join(root, 'scripts', 'gcp-task-runner.sh')], {
-      env: { PATH: process.env.PATH ?? '', HOME: root, TASK_RUNNER_ENV_FILE: path.join(root, 'task-runner.env'), SKIP_BUILD: 'true', TASK_RUNNER_IMAGE: 'img:1', ...cfg },
+      env: { PATH: process.env.PATH ?? '', HOME: root, TASK_RUNNER_ENV_FILE: path.join(root, 'task-runner.env'), SKIP_BUILD: 'true', TASK_RUNNER_IMAGE: 'img:1', ...cfg } as unknown as NodeJS.ProcessEnv,
       encoding: 'utf8',
     });
     expect(create.status).toBe(0);
