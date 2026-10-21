@@ -5,6 +5,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **`scripts/gcp-task-runner-teardown.sh` deletes what `gcp-task-runner.sh` created.** It removes, by name and in order, the
+  Cloud Scheduler job, the Cloud Run Job, the runtime service account's bucket bindings, the task-runner secrets, the two
+  service accounts and the task-runner images (`DELETE_IMAGES=all|none|keep:N`). It never deletes the project or the
+  Artifact Registry repository, skips resources that are already gone, asks for confirmation, and `DRY_RUN=true` calls
+  nothing. The audit-log bucket is deleted only with `DELETE_AUDIT_LOG_BUCKET=true`, after a check that stops, deleting
+  nothing, when an object is under Object Retention or a bucket retention period (locked or not) and prints the expiry.
+  Configuration loading and name derivation move to `scripts/gcp-task-runner-config.sh`, which both scripts source; the
+  create script's behavior and `DRY_RUN` output are unchanged. `docs/knowledge/gcp-task-runner-operations.md` describes
+  create, image replacement, staging versus production and deletion. No new schema key.
 - **List search box over trigram columns, `x-trigram-filter`** (Issue #1051). An entity that is a cross-entity search
   target now has a search box on its list that matches its search trigram columns (the union of `text_fields` and
   `bigm_fields`) as a case-insensitive substring, served by the existing `_v2` COALESCE trigram indexes. The new
