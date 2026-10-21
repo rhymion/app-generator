@@ -5,6 +5,13 @@
 // Does NOT physically delete the user row to preserve referential integrity.
 
 import prisma from '@/lib/prisma';
+{% if scrubs_avatar and storage == 'gcs' %}
+import { Storage } from '@google-cloud/storage';
+{% elif scrubs_avatar %}
+import { unlink, rmdir } from 'fs/promises';
+import path from 'path';
+import { del } from '@vercel/blob';
+{% endif %}
 
 export interface AnonymizeUserResult {
   success: boolean;
@@ -13,15 +20,57 @@ export interface AnonymizeUserResult {
   errors?: string[];
 }
 
+{% if scrubs_avatar %}
+// Removes the stored bytes behind an attachment path after the database
+// transaction has committed. The path forms are the ones the upload route of
+// this application writes.
+async function removeStoredFile(storedPath: string): Promise<void> {
+{% if storage == 'gcs' %}
+  const prefix = '/api/gcs/';
+  if (!storedPath.startsWith(prefix)) return;
+  const bucket = new Storage().bucket(process.env.GCS_BUCKET_NAME!);
+  await bucket.file(storedPath.slice(prefix.length)).delete({ ignoreNotFound: true });
+{% else %}
+  if (/^https?:\/\//.test(storedPath)) {
+    await del(storedPath);
+    return;
+  }
+  const uploadRoot = path.resolve(process.cwd(), 'public', 'uploads');
+  const target = path.resolve(uploadRoot, storedPath.replace(/^\/uploads\//, ''));
+  if (!target.startsWith(uploadRoot + path.sep)) return;
+  try {
+    await unlink(target);
+    await rmdir(path.dirname(target));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err;
+  }
+{% endif %}
+}
+{% endif %}
+
 export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult> {
   const errors: string[] = [];
-  const anonymizedAt = new Date();
+  let anonymizedAt = new Date();
+{% if scrubs_avatar %}
+  // An object, so that TypeScript keeps the assignment made inside the transaction callback.
+  const avatar = { path: null as string | null };
+{% endif %}
 
   // Unique placeholder email to satisfy @unique constraint after scrub
   const placeholderEmail = `${userId}@deleted.invalid`;
 
   try {
     await prisma.$transaction(async (tx) => {
+      // 0. A repeated call keeps the first erasure time and still removes
+      // whatever related records an earlier call left behind.
+      const current = await tx.user.findUnique({
+        where: { id: userId },
+        select: { anonymized_at: true, invalidated_at: true{% if scrubs_avatar %}, image_id: true{% endif %} },
+      });
+      if (!current) throw new Error(`User ${userId} not found`);
+      if (current.anonymized_at) anonymizedAt = current.anonymized_at;
+      const invalidatedAt = current.invalidated_at ?? anonymizedAt;
+
       // 1. Delete linked OAuth accounts (contain access/refresh tokens — sensitive PII)
       await tx.account.deleteMany({ where: { userId } });
 
@@ -39,7 +88,23 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
         },
       });
 
-      // 5. audit_log is append-only and its metadata never holds personal data,
+      // 5. Records that belong to the erased person:
+      // the avatar attachment row, the device names of mobile sessions
+      // (the rows stay so token revocation keeps working), the person's
+      // notifications and the cached responses of their idempotent requests.
+      await tx.mobile_session.updateMany({ where: { user_id: userId }, data: { device_name: null } });
+      await tx.notification.deleteMany({ where: { user_id: userId } });
+      await tx.idempotency_key.deleteMany({ where: { actor_user_id: userId } });
+{% if scrubs_avatar %}
+      if (current.image_id) {
+        const row = await tx.attachment.findUnique({ where: { id: current.image_id }, select: { path: true } });
+        avatar.path = row?.path ?? null;
+        // The user row no longer references the attachment (image_id is null above).
+        await tx.attachment.deleteMany({ where: { id: current.image_id } });
+      }
+{% endif %}
+
+      // 5b. audit_log is append-only and its metadata never holds personal data,
       // so nothing in it is redacted here. actor_user_id stays as the
       // pseudonymous key (GDPR Art.17(3)(b)(e)); the person is erased on the
       // user row above.
@@ -56,5 +121,17 @@ export async function anonymizeUser(userId: string): Promise<AnonymizeUserResult
     return { success: false, userId, anonymizedAt, errors };
   }
 
-  return { success: true, userId, anonymizedAt };
+  // The stored file goes after the commit: a failure here leaves the erasure
+  // in place and is reported instead of rolling it back.
+{% if scrubs_avatar %}
+  if (avatar.path) {
+    try {
+      await removeStoredFile(avatar.path);
+    } catch (err) {
+      errors.push(`Stored avatar file was not removed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+{% endif %}
+
+  return errors.length > 0 ? { success: true, userId, anonymizedAt, errors } : { success: true, userId, anonymizedAt };
 }

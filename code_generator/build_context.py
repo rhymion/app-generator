@@ -1756,6 +1756,7 @@ def build_anonymize_user_context(schema: dict) -> dict:
     Returns:
         has_pii_user: bool — True when the user entity has at least one x-pii field.
         pii_data_block: str — pre-formatted TypeScript lines for the data block.
+        scrubs_avatar: bool — True when image_id (the avatar attachment FK) is scrubbed.
         pii_fields: list — [{name, pii_type, field_type, scrub_value}] for each x-pii field.
     """
     user_def = _raw_def('user', schema)
@@ -1817,10 +1818,11 @@ def build_anonymize_user_context(schema: dict) -> dict:
         lines.append(f"{INDENT}mfa_secret: null,")
 
     lines.append(f"{INDENT}anonymized_at: anonymizedAt,")
-    lines.append(f"{INDENT}invalidated_at: anonymizedAt,")
+    lines.append(f"{INDENT}invalidated_at: invalidatedAt,")
 
     return {
         'has_pii_user': True,
+        'scrubs_avatar': any(f['name'] == 'image_id' for f in pii_fields),
         'pii_data_block': '\n'.join(lines),
         'pii_fields': pii_fields,
     }
