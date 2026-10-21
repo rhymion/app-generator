@@ -177,7 +177,7 @@ def test_entity_name_chips_and_texts_read_the_dictionary_not_the_english_title(o
     assert 'spec.optionLabelKeys?.[index]' in field_input
     assert '{optionText(spec, option, t)}' in field_input
     assert 'toDisplayText(spec, item[key], t)' in _read(out, 'components/mobile_rule/List.tsx')
-    assert 'toRecordDisplayText(spec, record, t)' in _read(out, 'components/mobile_rule/FormView.tsx')
+    assert '<RelationValue spec={spec} record={record} translate={t}' in _read(out, 'components/mobile_rule/FormView.tsx')
 
 
 def _m2m_child(**overrides):
@@ -1132,7 +1132,8 @@ def test_the_detail_screen_lists_the_rows(out):
     input_ = _read(out, 'components/native/FieldInput.tsx')
     assert "spec.kind === 'child_rows'" in input_
     view = _read(out, 'components/mobile_invoice/FormView.tsx')
-    assert 'toRecordDisplayText(spec, record, t)' in view
+    assert '<RelationValue spec={spec} record={record} translate={t}' in view
+    assert 'toRecordDisplayText(spec, record, translate)' in input_
 
 
 def test_row_editor_strings_exist_in_both_locales():
