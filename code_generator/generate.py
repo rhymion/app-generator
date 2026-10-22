@@ -2424,6 +2424,20 @@ def generate(schema_path: str, output_dir: str) -> None:
             if _split_has_approvable else ''
         )
 
+        # Same read/write scope facts the entity's own routes use (organization
+        # isolation, x-self-only): the split route must not be a way around them.
+        _split_scope = dashboard_access_scopes.get(_def_key)
+        if _split_scope is None:
+            raise ValueError(
+                f"x-splittable for {_def_key!r}: no access scope was built for this entity "
+                f"(it was not generated); refusing to emit an unscoped split route"
+            )
+        _split_access_scope = {
+            'should_filter_by_org': _split_scope['should_filter_by_org'],
+            'org_relationship_optional': _split_scope['org_relationship_optional'],
+            'is_self_only': _split_scope['is_self_only'],
+        }
+
         _split_ctx = {
             'entity_name': _def_key,
             'pascal_name': to_pascal_case(_def_key),
@@ -2442,6 +2456,7 @@ def generate(schema_path: str, output_dir: str) -> None:
             'split_reserves_inventory': _split_reserves_inventory,
             'split_item_field': _split_item_f,
             'per_part_required_mandatory': _per_part_req_mandatory,
+            **_split_access_scope,
             **_ledger_domain_vars,
         }
         _split_api_dir = out / 'app' / 'api' / _def_key / '[id]' / 'actions' / 'split'
