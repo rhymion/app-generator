@@ -132,6 +132,36 @@ export function toDisplayText(spec: FieldSpec, value: unknown, translate?: Trans
   return String(value);
 }
 
+/**
+ * A relation field's value on a read-only screen, each related record a link to its own detail screen
+ * (many-to-one and many-to-many alike). `onOpen` navigates; a field without `viewLink`, or an empty
+ * relation, reads as the plain text of toRecordDisplayText.
+ */
+export function RelationValue({ spec, record, translate, onOpen, testID }: {
+  spec: FieldSpec;
+  record: Record<string, unknown>;
+  translate?: Translate;
+  onOpen: (target: string, id: string) => void;
+  testID?: string;
+}) {
+  const labelField = spec.labelField ?? 'name';
+  const raw = record[spec.relationName ?? spec.key];
+  const rows = (Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? [raw] : []) as RelationRow[];
+  if (!spec.viewLink || !spec.target || rows.length === 0) {
+    return <Text style={styles.value} testID={testID}>{toRecordDisplayText(spec, record, translate)}</Text>;
+  }
+  const target = spec.target;
+  return (
+    <View style={styles.links} testID={testID}>
+      {rows.map((row) => (
+        <Pressable key={row.id} onPress={() => onOpen(target, row.id)} accessibilityRole="link" testID={`${testID ?? `view-field-${spec.key}`}-link-${row.id}`}>
+          <Text style={styles.linkText}>{relationLabel(row, labelField)}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 /** Text a record's field is displayed as on a read-only screen; a relation shows the related record's label. */
 export function toRecordDisplayText(spec: FieldSpec, record: Record<string, unknown>, translate?: Translate): string {
   const labelField = spec.labelField ?? 'name';
@@ -320,6 +350,9 @@ export function FieldInput({ spec, value, onChange, disabled, caller, formValues
 }
 
 const styles = StyleSheet.create({
+  value: { fontSize: 16 },
+  links: { gap: 4 },
+  linkText: { fontSize: 16, color: '#2563eb', textDecorationLine: 'underline' },
   field: { gap: 6, marginBottom: 14 },
   row: { gap: 6, borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 10, marginBottom: 8 },
   label: { fontSize: 13, fontWeight: '600', color: '#374151' },

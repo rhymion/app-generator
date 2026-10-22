@@ -1167,6 +1167,21 @@ def resolve_mobile_create_forms(mobile_specs: list[dict]) -> None:
                       f"{field['target']} has no native create form; the picker offers no \"Create new\"")
 
 
+def resolve_mobile_view_links(mobile_specs: list[dict]) -> None:
+    """Mark every relation field whose target has a native detail screen, so its value links to the record.
+
+    A related record is reached at `/entity/<target>/<id>`, which exists only when the target is a mobile
+    entity with a view screen; a target that is not (embedded children, bridge internals, entities kept on
+    the placeholder screen) stays plain text. Like the Web reference field, the link is not hidden from a
+    reader who may not see the record: the target screen answers for itself.
+    """
+    viewable = {spec['name'] for spec in mobile_specs if spec['can_view']}
+    for spec in mobile_specs:
+        for field in spec['fields']:
+            if field['kind'] in ('relation', 'relation_many') and field.get('target') in viewable:
+                field['view_link'] = True
+
+
 def _mobile_field_json(f: dict) -> dict:
     """A field entry of the mobile spec as the `FieldSpec` the app reads."""
     return {
@@ -1182,6 +1197,7 @@ def _mobile_field_json(f: dict) -> dict:
         # A direct attachment field names where the REST detail embeds the row and what the write body carries.
         **({'relationName': f['relation_name'], 'bodyKey': f['body_key']} if f['kind'] == 'attachment' else {}),
         **({'createInline': True} if f.get('create_form') else {}),
+        **({'viewLink': True} if f.get('view_link') else {}),
         # A hand-written component draws the field (upsert: the input, view: the detail display).
         **({'custom': f['custom']} if f.get('custom') else {}),
         **({'writeOnly': True} if f.get('write_only') else {}),
@@ -3755,6 +3771,7 @@ def generate(schema_path: str, output_dir: str) -> None:
     if mobile_enabled:
         print('\nGenerating mobile app...')
         resolve_mobile_create_forms(mobile_specs)
+        resolve_mobile_view_links(mobile_specs)
         for mobile_spec in mobile_specs:
             generate_mobile_entity(mobile_spec, mobile_ctxs[mobile_spec['name']], schema, out / 'mobile', env)
             print(f'  Mobile screens → mobile/ ({mobile_spec["name"]})')

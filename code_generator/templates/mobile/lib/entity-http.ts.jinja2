@@ -140,6 +140,8 @@ export type FieldSpec = {
   contextFields?: string[];
   /** The field declares x-create-inline and its target has a native create form. */
   createInline?: boolean;
+  /** The target has a detail screen of its own: the detail screen links each related record to it. */
+  viewLink?: boolean;
   /** A row field only: the schema default, which starts a new row and which the server applies when the field is left blank. */
   defaultValue?: string;
   /** A `child_rows` field only: the fields each row draws (`bodyKey` and `relationName` name the property array). */

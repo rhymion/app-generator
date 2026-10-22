@@ -1505,6 +1505,26 @@ with `x-generate` must disable new/edit/delete entirely to use it) — the comme
 rendering path is not `FieldsViewGrid`, so an independently write-capable child there is
 unverified-safe and stays a configuration error (`generate_types.py`'s `extract_entities()`).
 
+### 7.5 Row links in related lists (Issue #1075)
+
+Each row of a related list on a Web detail or edit screen links to the related record's detail page
+(`/{target}/view/{id}`), the same way a many-to-one reference field does (`AppFieldRelation`). This covers the
+lists of §7.3 (one-to-many independent children with a mandatory or an optional FK), many-to-many lists, the read-only
+list of a mandatory-FK child on the edit screen, and the item arrays of a flattened relation.
+
+- **Which rows are linked.** Only a target with a view page of its own: not `x-internal`, an `x-generate` block
+  whose core flags (`list`, `view`, `new`, `edit`, `delete`, `api`) are not all `false`, and `x-generate.view` not
+  `false`. An embedded child without `x-generate`, bridge internals and attachments get no link; no new `x-*` key is
+  involved (`target_has_view_page()` in `code_generator/generators.py`).
+- **Permission.** The link is not withheld from a reader who may not view the record: the target page answers with
+  its own 403, exactly as the single-FK reference does (`fk-read-permission-graceful-degradation.md`).
+- **How.** The generated item carries `href`, and `ListWrapper`, `EditableListWrapper` and `OrderedEditableListWrapper`
+  render the label as a link when it is set. An item added on the edit screen has no link until it is saved.
+- **Not covered.** Rows of an embedded child DataGrid (`FieldsViewGrid`, `FieldsDataGrid`) and attachment lists (images
+  and files) are unchanged.
+
+The native screens do the same on the detail screen; see `mobile-app.md` ("Related records").
+
 ## 7.6 Polymorphic Bridge Children (`x-bridge`)
 
 Use `x-bridge` (the **generalized bridge pattern**) when a child entity can belong to
