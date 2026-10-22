@@ -329,7 +329,7 @@ export function {{ pascal }}List() {
             })}
           </Pressable>
         )}
-        ListEmptyComponent={!loading && !failed ? <Text style={styles.empty} testID="list-empty">-</Text> : null}
+        ListEmptyComponent={!loading && !failed ? <Text style={styles.empty} testID="list-empty">-</Text> : undefined}
       />
       <View style={styles.pager}>
         <Pressable disabled={page <= 0} onPress={() => load(page - 1)} testID="list-prev">

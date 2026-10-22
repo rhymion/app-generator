@@ -72,7 +72,7 @@ export default function SearchScreen() {
         data={results ?? []}
         keyExtractor={(item) => `${item.entity_type}:${item.id}`}
         ListEmptyComponent={
-          results ? <Text style={styles.empty} testID="search-empty">{t('Search.noResults')}</Text> : null
+          results ? <Text style={styles.empty} testID="search-empty">{t('Search.noResults')}</Text> : undefined
         }
         renderItem={({ item }) => {
           const screens = ENTITY_SCREENS[item.entity_type];
