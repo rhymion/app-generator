@@ -12,6 +12,9 @@
 #   cr_asset    an entity that owns attachments through the `attachable` bridge (one-to-one_bridge to
 #               `attachable` plus the AttachmentSection view / edit component), scoped by organization the
 #               same way. `api: true` generates PUT /api/cr_asset/{id}/attachments.
+#   cr_split    an `x-splittable` entity scoped by organization (no approval, no quantity: the API-only
+#               form), for POST /api/cr_split/{id}/actions/split: the update-permission check and the
+#               organization scoping of the split route.
 definitions:
   cr_ticket:
     x-generate:
@@ -72,3 +75,28 @@ definitions:
           labelField: id
       attachable:
         $ref: "#/definitions/attachable"
+
+  cr_split:
+    x-generate:
+      list: true
+      view: true
+      new: true
+      edit: true
+      delete: true
+      invalidate: false
+      api: true
+      test: true
+    x-splittable: true
+    x-display:
+      table:
+        - title:
+            primary: true
+        - status: {}
+    properties:
+      title: {}
+      status:
+        enum: ["pending", "split", "rejected"]
+        _required: true
+      organization_id:
+        x-relationship:
+          labelField: name

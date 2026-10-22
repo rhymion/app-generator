@@ -39,3 +39,27 @@ model cr_asset {
   @@index([creator_id])
   @@index([updater_id])
 }
+
+enum CrSplitStatus {
+  pending
+  split
+  rejected
+}
+
+model cr_split {
+  id              String        @id @default(cuid())
+  title           String
+  status          CrSplitStatus @default(pending)
+  organization_id String
+  organization    organization  @relation(fields: [organization_id], references: [id])
+  created_at      DateTime      @default(now()) @db.Timestamptz(0)
+  updated_at      DateTime      @updatedAt @db.Timestamptz(0)
+  creator_id      String
+  creator         user          @relation("CrSplitCreator", fields: [creator_id], references: [id])
+  updater_id      String
+  updater         user          @relation("CrSplitUpdater", fields: [updater_id], references: [id])
+  @@index([title])
+  @@index([organization_id])
+  @@index([creator_id])
+  @@index([updater_id])
+}
