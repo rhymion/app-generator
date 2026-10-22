@@ -1513,6 +1513,14 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
   See `docs/knowledge/search.md`.
 
+### Security
+Five authorization and input-validation gaps in generated code are fixed. Versions 3.0.0 and later are affected; a fix release is pending.
+- **Bulk update and delete routes** now enforce organization scoping and the entity's record-level permission, as the single-record routes do.
+- **Split action routes** now enforce organization scoping and the entity's record-level permission, as the single-record routes do.
+- **The invalidate action** (`POST /api/{entity}/{id}/actions/invalidate` and the `invalidate<Entity>` Server Action) now resolves the `delete` permission against the record and restricts organization-scoped entities to the caller's organizations, matching `DELETE /api/{entity}/{id}`. A caller must hold the right grant; a record outside the caller's organizations returns 404.
+- **The upload route** (`POST /api/upload`) no longer uses the client-supplied filename as a path; the stored name is the last path segment and the final path must resolve inside `public/uploads/`. The GCS variant sanitises the name the same way.
+- **Approve and reject** now require the approver to belong to the organization of the target record, in the REST routes and the Server Actions. Role-based permission is unchanged.
+
 ## [4.1.0] - 2026-09-19
 ### Added
 - **Added a business-date container (`app_setting`) with list/view/new/edit
