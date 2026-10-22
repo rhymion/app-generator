@@ -5,6 +5,15 @@ and this project adheres to Semantic Versioning (https://semver.org/).
 
 ## [Unreleased]
 ### Added
+- **`scripts/gcp-task-runner-teardown.sh` deletes what `gcp-task-runner.sh` created.** It removes, by name and in order, the
+  Cloud Scheduler job, the Cloud Run Job, the runtime service account's bucket bindings, the task-runner secrets, the two
+  service accounts and the task-runner images (`DELETE_IMAGES=all|none|keep:N`). It never deletes the project or the
+  Artifact Registry repository, skips resources that are already gone, asks for confirmation, and `DRY_RUN=true` calls
+  nothing. The audit-log bucket is deleted only with `DELETE_AUDIT_LOG_BUCKET=true`, after a check that stops, deleting
+  nothing, when an object is under Object Retention or a bucket retention period (locked or not) and prints the expiry.
+  Configuration loading and name derivation move to `scripts/gcp-task-runner-config.sh`, which both scripts source; the
+  create script's behavior and `DRY_RUN` output are unchanged. `docs/knowledge/gcp-task-runner-operations.md` describes
+  create, image replacement, staging versus production and deletion. No new schema key.
 - **List search box over trigram columns, `x-trigram-filter`** (Issue #1051). An entity that is a cross-entity search
   target now has a search box on its list that matches its search trigram columns (the union of `text_fields` and
   `bigm_fields`) as a case-insensitive substring, served by the existing `_v2` COALESCE trigram indexes. The new
@@ -21,6 +30,9 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `required:`, which dropped `id`; it is now merged with the derived list, as for any other entity. The default schema's
   stale `approval_flow` entry `preceding_transitions` is removed. Schemas that name a column in `required:` must drop it
   (the column stays required through Prisma). See `docs/knowledge/schema-yaml-configuration.md`.
+- **The generated Expo app moves to SDK 58** (Issue #1073). `mobile/package.json` now pins the SDK 58 set (Expo 58, React 19.3,
+  React Native 0.88, `expo-router` 58). `expo-router` 58 no longer depends on `query-string`, so the vulnerable
+  `decode-uri-component` is no longer part of the app bundle. See `docs/knowledge/mobile-app.md`.
 - **`anonymizeUser()` erases the related records of the erased person and keeps the first erasure time** (Issue #1062). In the
   same transaction it now deletes the avatar `attachment` row (when `image_id` is an `x-pii` column), sets
   `mobile_session.device_name` to `null`, and deletes the person's `notification` and `idempotency_key` rows; after the
@@ -285,6 +297,7 @@ and this project adheres to Semantic Versioning (https://semver.org/).
   `anonymizeUser()` is unchanged. Rows already stored keep their `metadata.email` until a consumer cleans them up.
   See `docs/knowledge/authentication.md`.
 ### Fixed
+- **The generated Expo app type-checks, enum filter choices show their labels, and a composite `labelField` names a related record** (Issue #1077). `npm run typecheck` of the generated `mobile/` failed on every schema: each entity list passed a `FieldSpec` list where the list panel wants a `ListFieldSpec` list, and a composite `labelField` (a list of paths) was typed as a single column. Besides the type errors, the panel looked enum labels up by member in a positional array, so the filter showed the raw member, and a relation picker or read-only screen fell back to the record id for a composite label. The new `lib/label-spec.ts` converts a form field to the panel's field type and joins a composite label's paths with a space, following dotted paths, as the Web does (a date segment shows its stored text). `scripts/run_mobile_entity_playwright.sh` now runs `npm run typecheck` on the generated app in every mode. No schema key changes.
 - **Generated test dependencies skip an optional FK that closes a required cycle** (Issue #1025, part of #946). An identity
   entity's nullable `current_version_id` to its version entity is no longer pre-created as a dependency of the identity:
   the version requires the identity, so the generated `populate<Entity>Dependencies()` created the version row without its

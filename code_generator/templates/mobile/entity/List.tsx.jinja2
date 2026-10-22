@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useMessages } from '@/lib/messages';
 import type { PageOpts, SortItem } from '@/lib/entity-http';
+import { toListFieldSpec } from '@/lib/label-spec';
 import {
   countActiveFilters,
   cycleSort,
@@ -44,7 +45,7 @@ const PAGE_SIZE = 20;
 
 // What the panel offers; the sort, filter and search logic is lib/_list_query.ts, shared with the Web list.
 const LIST_QUERY_SPEC: ListQuerySpec = {
-  fields: {{ const_name }}_QUERY_FIELDS,
+  fields: {{ const_name }}_QUERY_FIELDS.map(toListFieldSpec),
   sortKeys: {{ const_name }}_SORT_KEYS,
   filterKeys: {{ const_name }}_FILTER_KEYS,
   searchKeys: {{ const_name }}_SEARCH_KEYS,
@@ -222,7 +223,7 @@ export function {{ pascal }}List() {
           { {{ const_name }}_FILTER_KEYS.map((key) => {
             const spec = fieldOf(key);
             if (!spec) return null;
-            const choices = filterChoices(spec, (value) => toDisplayText(spec, value, t));
+            const choices = filterChoices(toListFieldSpec(spec), (value) => toDisplayText(spec, value, t));
             return (
               <View key={key} style={styles.filterField}>
                 <Text style={styles.panelText}>{spec.label}</Text>

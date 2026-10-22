@@ -430,7 +430,8 @@ SEED_COMMAND=task:run-all ./scripts/vercel-seed.sh [--prod]
 ```
 
 For a nightly trigger on GCP, see "Nightly trigger: Cloud Scheduler + a
-minimal Cloud Run Job".
+minimal Cloud Run Job". Replacing its image, running staging by hand and
+deleting the resources are in `gcp-task-runner-operations.md`.
 
 A handler may call anything the deployed app can call (payment gateways,
 email, third-party APIs). Run outside the deployed app, **every env var those

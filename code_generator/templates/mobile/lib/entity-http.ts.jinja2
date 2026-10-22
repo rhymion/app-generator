@@ -130,8 +130,8 @@ export type FieldSpec = {
   // The fields below are set on a relation field only (`relationName` and `bodyKey` also on an attachment field).
   /** Entity whose records are offered. */
   target?: string;
-  /** Column of the target that names a record. */
-  labelField?: string;
+  /** Column of the target that names a record; a list of columns (or dotted paths) joins them with a space. */
+  labelField?: string | string[];
   /** Key under which the REST detail embeds the related record(s). */
   relationName?: string;
   /** Key the REST write routes read the selection from (an id, or a list of ids). */
