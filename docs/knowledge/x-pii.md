@@ -84,7 +84,9 @@ Nothing runs it automatically. There is no schedule and no retention job. It run
 
 - `POST /api/user/{id}/actions/invalidate`, generated because the default `user` entity declares
   `x-generate.invalidate` with handler `anonymizeUser` from `lib/compliance/anonymize_user`. The caller needs the `delete`
-  permission on `user`.
+  permission on `user`, resolved against the record being invalidated: a `Creator` or `Assignee` grant applies only to
+  records the caller created or is assigned to, and an organization-scoped entity is limited to the caller's organizations
+  (the same rule as `DELETE /api/user/{id}`).
 - The `invalidateUser` server action behind the invalidate button of the user list page, which needs the same permission.
 - Any code that imports and calls `anonymizeUser(userId)` directly.
 

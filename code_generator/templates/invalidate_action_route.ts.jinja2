@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticate, requireApiPermission, handleApiError } from '@/lib/api-auth';
-{% if has_invalidate_guard %}
+import { authenticate, requireApiPermission, handleApiError{% if not is_self_only %}, ApiError{% endif %} } from '@/lib/api-auth';
+{% if not is_self_only %}
+import { resolvePermissions } from '@/lib/authz';
+{% endif %}
 import prisma from '@/lib/prisma';
+{% if should_filter_by_org %}
+import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
+{% endif %}
+{% if has_invalidate_guard %}
 import { assertInvalidateAllowed } from '@/lib/{{ parent }}/invalidate_guard';
 {% endif %}
 {% if invalidate_module %}
@@ -21,7 +27,41 @@ export async function POST(
     const { id } = await params;
     const { userId } = await authenticate(request);
 
+    // Coarse, item-independent gate first (a caller with no possible access
+    // path is rejected before the record is looked up), then the same
+    // record-level resolution the DELETE route uses: Creator/Assignee grants
+    // only apply to records the caller created / is assigned to, and the
+    // record must be inside the caller's organizations.
+{% if is_self_only %}
     await requireApiPermission(userId, '{{ parent }}', 'delete');
+{% else %}
+    const basePerms = await requireApiPermission(userId, '{{ parent }}', 'delete');
+{% endif %}
+{% if should_filter_by_org %}
+    const _assocOrgs = await getAssociatedOrganizations(userId);
+    const _assocOrgIds = _assocOrgs.map((o) => o.id);
+{% if org_relationship_optional %}
+    const existing = await prisma.{{ model }}.findFirst({ where: { id, OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }] }, select: {{ item_context_select }} });
+{% else %}
+    const existing = await prisma.{{ model }}.findFirst({ where: { id, organization_id: { in: _assocOrgIds } }, select: {{ item_context_select }} });
+{% endif %}
+{% else %}
+    const existing = await prisma.{{ model }}.findUnique({ where: { id }, select: {{ item_context_select }} });
+{% endif %}
+    if (!existing) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+{% if is_self_only %}
+    // x-self-only: ownership is the sole gate, with no general.delete override.
+    if (existing.creator_id !== userId) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+{% else %}
+    const resolved = await resolvePermissions(basePerms, existing, userId);
+    if (!resolved.delete) {
+      throw new ApiError(403, `Access denied: {{ parent }}.delete`);
+    }
+{% endif %}
 
     {% if has_invalidate_guard %}
     const _invalidateGuardRow = await prisma.{{ model }}.findUnique({ where: { id }, select: { {{ lockdown_field }}: true } });

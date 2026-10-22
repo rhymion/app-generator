@@ -2,10 +2,10 @@
 
 import { redirect } from 'next/navigation';
 {% if comment_actions_code or (can_list and can_delete) or can_invalidate %}import { revalidatePath } from 'next/cache';
-{% endif %}{% if can_create or can_update or can_invalidate or has_commentable or can_delete or comment_actions_code %}import { {% if can_create or can_update or can_invalidate or has_commentable or comment_actions_code %}getSessionUserIdOrThrow, requirePermission{% if has_commentable %}, resolvePermissions{% endif %}{% if can_delete %}, {% endif %}{% endif %}{% if can_delete %}getModelPermissions{% endif %} } from '@/lib/authz';
+{% endif %}{% if can_create or can_update or can_invalidate or has_commentable or can_delete or comment_actions_code %}import { {% if can_create or can_update or can_invalidate or has_commentable or comment_actions_code %}getSessionUserIdOrThrow, requirePermission{% if has_commentable or (can_invalidate and not is_self_only) %}, resolvePermissions{% endif %}{% if can_delete %}, {% endif %}{% endif %}{% if can_delete %}getModelPermissions{% endif %} } from '@/lib/authz';
 {% endif %}
 {% if can_create or can_update or can_delete %}import { AppError, type ActionFailure } from '@/lib/_errors';
-{% elif has_commentable or comment_actions_code %}import { AppError } from '@/lib/_errors';
+{% elif has_commentable or comment_actions_code or can_invalidate %}import { AppError } from '@/lib/_errors';
 {% endif %}
 {% if can_invalidate %}
 {% if invalidate_module %}
@@ -31,7 +31,7 @@ import { createReaction, deleteReaction } from '@/lib/reaction/service';
 {% if service_imports %}
 import { {{ service_imports }} } from './service';
 {% endif %}
-{% if should_filter_by_org and (can_update or can_delete or comment_actions_code) %}
+{% if should_filter_by_org and (can_update or can_delete or comment_actions_code or can_invalidate) %}
 import { getAssociatedOrganizations } from '@/lib/organization/getters_associated';
 {% endif %}
 {% if can_create or can_update %}
@@ -149,7 +149,35 @@ export async function remove{{ parent_pascal }}(ids: string[]) {
 export async function invalidate{{ parent_pascal }}(id: string): Promise<void> {
   const userId = await getSessionUserIdOrThrow();
   // TODO: separate 'invalidate' permission from 'delete' in future
+  // Coarse gate first, then the record-level resolution the delete path uses:
+  // Creator/Assignee grants only apply to records the caller created / is
+  // assigned to, and the record must be inside the caller's organizations.
+  {% if is_self_only %}
   await requirePermission('{{ parent }}', 'delete', undefined, userId);
+  {% else %}
+  const _invalidateBasePerms = await requirePermission('{{ parent }}', 'delete', undefined, userId);
+  {% endif %}
+  {% if should_filter_by_org %}
+  const _assocOrgs = await getAssociatedOrganizations(userId);
+  const _assocOrgIds = _assocOrgs.map((o) => o.id);
+  {% if org_relationship_optional %}
+  const _invalidateItem = await prisma.{{ model }}.findFirst({ where: { id, OR: [{ organization_id: { in: _assocOrgIds } }, { organization_id: null }] }, select: {{ item_context_select }} });
+  {% else %}
+  const _invalidateItem = await prisma.{{ model }}.findFirst({ where: { id, organization_id: { in: _assocOrgIds } }, select: {{ item_context_select }} });
+  {% endif %}
+  {% else %}
+  const _invalidateItem = await prisma.{{ model }}.findUnique({ where: { id }, select: {{ item_context_select }} });
+  {% endif %}
+  if (!_invalidateItem) throw new AppError('NOT_FOUND', 'Not found');
+  {% if is_self_only %}
+  // x-self-only: ownership is the sole gate, with no general.delete override.
+  if (_invalidateItem.creator_id !== userId) throw new AppError('NOT_FOUND', 'Not found');
+  {% else %}
+  const _invalidateResolved = await resolvePermissions(_invalidateBasePerms, _invalidateItem, userId);
+  if (!_invalidateResolved.delete) {
+    throw new AppError('PERMISSION_DENIED', 'Access denied: {{ parent }}.delete');
+  }
+  {% endif %}
   {% if has_invalidate_guard %}
   const _invalidateGuardRow = await prisma.{{ model }}.findUnique({ where: { id }, select: { {{ lockdown_field }}: true } });
   assertInvalidateAllowed(_invalidateGuardRow);

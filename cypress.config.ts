@@ -61,6 +61,29 @@ export default defineConfig({
           await grantAllEntityPermissions();
           return null;
         },
+        // Creator-role grant for one entity (the role is created when the seed has not
+        // already). Item-level specs use it to prove a Creator/Assignee grant applies only
+        // to the caller's own records, not to every record of the model.
+        async 'db:grantCreatorRolePermission'(params: {
+          entityName: string;
+          flags: { create?: boolean; read?: boolean; update?: boolean; delete?: boolean; import?: boolean };
+        }) {
+          const { prisma } = require('./cypress/support/db-helpers');
+          const { TEST_CREDENTIALS } = require('./cypress/support/test-credentials');
+          const admin = await prisma.user.findUnique({ where: { email: TEST_CREDENTIALS.email } });
+          if (!admin) throw new Error('Test user not found. Run db:seed first.');
+          let role = await prisma.role.findFirst({ where: { name: 'Creator' } });
+          if (!role) {
+            role = await prisma.role.create({ data: { name: 'Creator', creator_id: admin.id, updater_id: admin.id } });
+          }
+          const flags = { create: false, read: false, update: false, delete: false, import: false, ...params.flags };
+          await prisma.permission.upsert({
+            where: { name_role_id: { name: params.entityName, role_id: role.id } },
+            update: flags,
+            create: { name: params.entityName, role_id: role.id, creator_id: admin.id, updater_id: admin.id, ...flags },
+          });
+          return null;
+        },
         async 'db:createLimitedApiUser'(modelName: string) {
           const { createLimitedApiUser } = require('./cypress/support/db-helpers');
           return await createLimitedApiUser(modelName);
